@@ -146,6 +146,10 @@ workspace.
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
   `pczt::roles::verifier::OrchardError`, and `pczt::roles::prover::OrchardError`.
+- `pczt::compact_migration`, a compact transport encoding for migration child
+  PCZTs and batches, plus `Pczt::fill_missing_spend_fvks_for_zip32_path` and
+  `pczt::orchard::Bundle::fill_missing_spend_fvks_for_zip32_path` for restoring
+  omitted spend FVKs from wallet-known ZIP 32 account keys before signing.
 
 ## [0.7.0] - 2026-06-02
 

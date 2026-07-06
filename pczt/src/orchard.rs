@@ -91,6 +91,12 @@ pub(crate) const ORCHARD_SPENDS_AND_OUTPUTS_ENABLED: u8 = 0b0000_0011;
 /// and the flag value of an empty bundle for serialization purposes.
 pub(crate) const IRONWOOD_SPENDS_OUTPUTS_AND_CROSS_ADDRESS_ENABLED: u8 = 0b0000_0111;
 
+/// The byte encoding of `orchard::Anchor::empty_tree()` at `MERKLE_DEPTH_ORCHARD`.
+const EMPTY_TREE_ANCHOR: [u8; 32] = [
+    0xae, 0x29, 0x35, 0xf1, 0xdf, 0xd8, 0xa2, 0x4a, 0xed, 0x7c, 0x70, 0xdf, 0x7d, 0xe3, 0xa6, 0x68,
+    0xeb, 0x7a, 0x49, 0xb1, 0x31, 0x98, 0x80, 0xdd, 0xe2, 0xbb, 0xd9, 0x03, 0x1a, 0xe5, 0xd8, 0x2f,
+];
+
 /// The canonical empty Orchard-pool bundle: the form the Orchard slot of a PCZT takes
 /// when it carries no Orchard-protocol data. The Creator, the v1 decoder, and the v2
 /// decoder all produce exactly this value for an absent bundle, so that copies of a
@@ -356,6 +362,153 @@ pub struct Output {
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
 }
 
+impl Bundle {
+    pub(crate) fn raw_note_version(&self) -> NoteVersion {
+        self.note_version
+    }
+
+    pub(crate) fn from_raw_parts(
+        actions: Vec<Action>,
+        flags: u8,
+        value_sum: (u64, bool),
+        anchor: Option<[u8; 32]>,
+        note_version: NoteVersion,
+        zkproof: Option<Vec<u8>>,
+        bsk: Option<[u8; 32]>,
+    ) -> Self {
+        Self {
+            actions,
+            flags,
+            value_sum,
+            anchor,
+            note_version,
+            zkproof,
+            bsk,
+        }
+    }
+}
+
+impl Action {
+    pub(crate) fn from_raw_parts(
+        cv_net: Option<[u8; 32]>,
+        spend: Spend,
+        output: Output,
+        rcv: Option<[u8; 32]>,
+    ) -> Self {
+        Self {
+            cv_net,
+            spend,
+            output,
+            rcv,
+        }
+    }
+
+    pub(crate) fn raw_rcv(&self) -> Option<[u8; 32]> {
+        self.rcv
+    }
+}
+
+impl Spend {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_raw_parts(
+        nullifier: Option<[u8; 32]>,
+        rk: Option<[u8; 32]>,
+        spend_auth_sig: Option<[u8; 64]>,
+        recipient: Option<[u8; 43]>,
+        value: Option<u64>,
+        rho: Option<[u8; 32]>,
+        rseed: Option<[u8; 32]>,
+        fvk: Option<[u8; 96]>,
+        witness: Option<(u32, [[u8; 32]; 32])>,
+        alpha: Option<[u8; 32]>,
+        zip32_derivation: Option<Zip32Derivation>,
+        dummy_sk: Option<[u8; 32]>,
+        proprietary: BTreeMap<String, Vec<u8>>,
+    ) -> Self {
+        Self {
+            nullifier,
+            rk,
+            spend_auth_sig,
+            recipient,
+            value,
+            rho,
+            rseed,
+            fvk,
+            witness,
+            alpha,
+            zip32_derivation,
+            dummy_sk,
+            proprietary,
+        }
+    }
+
+    pub(crate) fn raw_recipient(&self) -> Option<[u8; 43]> {
+        self.recipient
+    }
+
+    pub(crate) fn raw_rho(&self) -> Option<[u8; 32]> {
+        self.rho
+    }
+
+    pub(crate) fn raw_rseed(&self) -> Option<[u8; 32]> {
+        self.rseed
+    }
+
+    pub(crate) fn raw_alpha(&self) -> Option<[u8; 32]> {
+        self.alpha
+    }
+
+    pub(crate) fn raw_zip32_derivation(&self) -> Option<Zip32Derivation> {
+        self.zip32_derivation.clone()
+    }
+
+    /// Returns whether this spend can identify its spending key from a ZIP 32 derivation.
+    pub fn has_zip32_derivation(&self) -> bool {
+        self.zip32_derivation.is_some()
+    }
+}
+
+impl Output {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_raw_parts(
+        cmx: Option<[u8; 32]>,
+        ephemeral_key: Option<[u8; 32]>,
+        enc_ciphertext: Option<Vec<u8>>,
+        memo_kind: Option<MemoKind>,
+        out_ciphertext: Vec<u8>,
+        recipient: Option<[u8; 43]>,
+        value: Option<u64>,
+        rseed: Option<[u8; 32]>,
+        ock: Option<[u8; 32]>,
+        zip32_derivation: Option<Zip32Derivation>,
+        user_address: Option<String>,
+        proprietary: BTreeMap<String, Vec<u8>>,
+    ) -> Self {
+        Self {
+            cmx,
+            ephemeral_key,
+            enc_ciphertext,
+            memo_kind,
+            out_ciphertext,
+            recipient,
+            value,
+            rseed,
+            ock,
+            zip32_derivation,
+            user_address,
+            proprietary,
+        }
+    }
+
+    pub(crate) fn raw_recipient(&self) -> Option<[u8; 43]> {
+        self.recipient
+    }
+
+    pub(crate) fn raw_rseed(&self) -> Option<[u8; 32]> {
+        self.rseed
+    }
+}
+
 /// Types for the v1 Orchard PCZT encoding.
 pub mod v1 {
     use alloc::collections::BTreeMap;
@@ -596,8 +749,8 @@ pub mod v1 {
 /// `Spend.rk`, `Output.cmx`, `Output.ephemeral_key`, `Output.enc_ciphertext`) and the
 /// bundle `anchor` are optional, and each output carries an optional [`MemoKind`] tag.
 /// `out_ciphertext` stays required because it is RNG-derived and can never be
-/// recomputed. The live representation is itself optional for all of these, so the
-/// conversions here are 1:1 and infallible.
+/// recomputed. The live representation is itself optional for the derived fields,
+/// so the conversions here are 1:1 and infallible.
 pub(crate) mod v2 {
     use alloc::collections::BTreeMap;
     use alloc::string::String;
@@ -898,7 +1051,16 @@ impl Bundle {
             },
         }
 
-        if !merge_optional(&mut self.anchor, anchor) {
+        let self_zkproof_present = self.zkproof.is_some();
+        let other_zkproof_present = zkproof.is_some();
+        if !merge_anchor(
+            &mut self.anchor,
+            anchor,
+            self_global,
+            other_global,
+            self_zkproof_present,
+            other_zkproof_present,
+        ) {
             return None;
         }
 
@@ -990,6 +1152,130 @@ impl Bundle {
     }
 }
 
+fn merge_anchor(
+    lhs: &mut Option<[u8; 32]>,
+    rhs: Option<[u8; 32]>,
+    self_global: &Global,
+    other_global: &Global,
+    lhs_has_zkproof: bool,
+    rhs_has_zkproof: bool,
+) -> bool {
+    let Some(rhs) = rhs else {
+        return true;
+    };
+
+    let Some(lhs_anchor) = lhs.as_mut() else {
+        *lhs = Some(rhs);
+        return true;
+    };
+
+    if lhs_anchor == &rhs {
+        return true;
+    }
+
+    let v6_anchor_placeholder_merge = self_global.tx_version
+        == zcash_protocol::constants::V6_TX_VERSION
+        && other_global.tx_version == zcash_protocol::constants::V6_TX_VERSION
+        && ((*lhs_anchor == EMPTY_TREE_ANCHOR && !lhs_has_zkproof)
+            || (rhs == EMPTY_TREE_ANCHOR && !rhs_has_zkproof));
+
+    if v6_anchor_placeholder_merge {
+        if *lhs_anchor == EMPTY_TREE_ANCHOR && !lhs_has_zkproof {
+            *lhs_anchor = rhs;
+        }
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(all(test, feature = "orchard"))]
+mod tests {
+    use alloc::{collections::BTreeMap, vec::Vec};
+
+    use crate::common::Zip32Derivation;
+
+    use super::{Action, Bundle, NoteVersion, Output, Spend};
+
+    #[test]
+    fn fill_missing_spend_fvks_for_zip32_path_only_fills_matching_missing_fvks() {
+        let seed_fingerprint = [7u8; 32];
+        let matching_path = vec![0x8000_0020, 0x8000_0085, 0x8000_0000];
+        let other_path = vec![0x8000_0020, 0x8000_0085, 0x8000_0001];
+        let fvk = [42u8; 96];
+        let existing_fvk = [99u8; 96];
+
+        let mut bundle = Bundle {
+            actions: vec![
+                action_with_fvk_and_path(None, seed_fingerprint, matching_path.clone()),
+                action_with_fvk_and_path(
+                    Some(existing_fvk),
+                    seed_fingerprint,
+                    matching_path.clone(),
+                ),
+                action_with_fvk_and_path(None, seed_fingerprint, other_path),
+            ],
+            flags: 0,
+            value_sum: (0, false),
+            anchor: Some([0; 32]),
+            note_version: NoteVersion::V2,
+            zkproof: None,
+            bsk: None,
+        };
+
+        assert_eq!(
+            bundle.fill_missing_spend_fvks_for_zip32_path(&seed_fingerprint, &matching_path, fvk,),
+            1,
+        );
+        assert_eq!(bundle.actions[0].spend.fvk, Some(fvk));
+        assert_eq!(bundle.actions[1].spend.fvk, Some(existing_fvk));
+        assert_eq!(bundle.actions[2].spend.fvk, None);
+    }
+
+    fn action_with_fvk_and_path(
+        fvk: Option<[u8; 96]>,
+        seed_fingerprint: [u8; 32],
+        derivation_path: Vec<u32>,
+    ) -> Action {
+        Action {
+            cv_net: Some([0; 32]),
+            spend: Spend {
+                nullifier: Some([1; 32]),
+                rk: Some([2; 32]),
+                spend_auth_sig: None,
+                recipient: None,
+                value: None,
+                rho: None,
+                rseed: None,
+                fvk,
+                witness: None,
+                alpha: None,
+                zip32_derivation: Some(Zip32Derivation {
+                    seed_fingerprint,
+                    derivation_path,
+                }),
+                dummy_sk: None,
+                proprietary: BTreeMap::new(),
+            },
+            output: Output {
+                cmx: Some([3; 32]),
+                ephemeral_key: Some([4; 32]),
+                enc_ciphertext: Some(vec![]),
+                memo_kind: None,
+                out_ciphertext: vec![],
+                recipient: None,
+                value: None,
+                rseed: None,
+                ock: None,
+                zip32_derivation: None,
+                user_address: None,
+                proprietary: BTreeMap::new(),
+            },
+            rcv: None,
+        }
+    }
+}
+
 /// Returns the [`BundleVersion`] in effect for the given Orchard-protocol value pool
 /// under the given Orchard protocol revision, or `None` if the pool is not supported
 /// under that revision (the Ironwood pool exists only from revision V3).
@@ -1063,6 +1349,33 @@ impl FillError {
 
 #[cfg(feature = "orchard")]
 impl Bundle {
+    /// Fills missing spend FVK bytes for actions whose ZIP 32 derivation matches
+    /// the supplied seed fingerprint and account path.
+    ///
+    /// This is intended for constrained signers that can derive the selected
+    /// account's Orchard FVK locally and therefore do not need it supplied on
+    /// the PCZT wire. Existing `fvk` fields are left unchanged.
+    pub fn fill_missing_spend_fvks_for_zip32_path(
+        &mut self,
+        seed_fingerprint: &[u8; 32],
+        derivation_path: &[u32],
+        fvk: [u8; 96],
+    ) -> usize {
+        let mut filled = 0;
+        for action in &mut self.actions {
+            if action.spend.fvk.is_none()
+                && action.spend.zip32_derivation.as_ref().is_some_and(|z| {
+                    &z.seed_fingerprint == seed_fingerprint
+                        && z.derivation_path.as_slice() == derivation_path
+                })
+            {
+                action.spend.fvk = Some(fvk);
+                filled += 1;
+            }
+        }
+        filled
+    }
+
     /// Recomputes and fills, in place, every elided derived field across this bundle,
     /// so that afterwards each action's `cv_net`, `nullifier`, `rk`, `cmx`,
     /// `ephemeral_key`, and `enc_ciphertext`, and the bundle `anchor`, are all present.
@@ -1097,7 +1410,7 @@ impl Bundle {
         use orchard::pczt::{VerifyError, recompute};
 
         if self.anchor.is_none() {
-            self.anchor = Some(orchard::Anchor::empty_tree().to_bytes());
+            self.anchor = Some(EMPTY_TREE_ANCHOR);
         }
 
         let note_version = self.note_version;

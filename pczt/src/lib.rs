@@ -56,6 +56,8 @@ use {
 pub mod roles;
 
 pub mod common;
+#[cfg(feature = "orchard")]
+pub mod compact_migration;
 pub mod orchard;
 pub mod sapling;
 pub mod transparent;
@@ -396,6 +398,28 @@ impl Pczt {
     pub fn fill_derived_fields(&mut self) -> Result<(), crate::orchard::FillError> {
         self.orchard.fill_derived_fields()?;
         self.ironwood.fill_derived_fields()
+    }
+
+    /// Fills missing Orchard and Ironwood spend FVK bytes for actions whose ZIP 32
+    /// derivation matches the supplied seed fingerprint and account path.
+    ///
+    /// This prepares a PCZT whose wire encoding omitted account FVKs for
+    /// [`Self::fill_derived_fields`], allowing `nullifier` and `rk` to be
+    /// recomputed from a locally derived FVK.
+    #[cfg(feature = "orchard")]
+    pub fn fill_missing_spend_fvks_for_zip32_path(
+        &mut self,
+        seed_fingerprint: &[u8; 32],
+        derivation_path: &[u32],
+        fvk: [u8; 96],
+    ) -> usize {
+        self.orchard
+            .fill_missing_spend_fvks_for_zip32_path(seed_fingerprint, derivation_path, fvk)
+            + self.ironwood.fill_missing_spend_fvks_for_zip32_path(
+                seed_fingerprint,
+                derivation_path,
+                fvk,
+            )
     }
 
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
