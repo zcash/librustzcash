@@ -20,7 +20,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData},
 };
 use zcash_protocol::{
-    PoolType, ShieldedPool, TxId,
+    ShieldedPool, TxId,
     consensus::{BlockHeight, TxIndex},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -637,17 +637,20 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
 
 /// This trait provides a generalization over output representations.
 pub trait ReceivedShieldedOutput {
-    const POOL_TYPE: PoolType;
     type AccountId;
-    type Note: Into<crate::wallet::Note>;
+    type Note;
     type Nullifier;
 
     /// Returns the index of the output within its corresponding bundle.
     fn index(&self) -> usize;
     /// Returns the account ID for the account that received this output.
     fn account_id(&self) -> Self::AccountId;
-    /// Returns the received note.
+    /// Returns the note.
     fn note(&self) -> &Self::Note;
+    /// Returns the received note, as a [`Note`].
+    ///
+    /// [`Note`]: crate::wallet::Note
+    fn to_wallet_note(&self) -> crate::wallet::Note;
     /// Returns any memo associated with the output.
     fn memo(&self) -> Option<&MemoBytes>;
     /// Returns a [`TransferType`] value that is determined based upon what type of key was used to
@@ -677,7 +680,6 @@ impl<T: ReceivedShieldedOutput<Note = ::sapling::Note, Nullifier = ::sapling::Nu
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> {
-    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -688,8 +690,11 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
     fn account_id(&self) -> Self::AccountId {
         *WalletSaplingOutput::account_id(self)
     }
-    fn note(&self) -> &::sapling::Note {
+    fn note(&self) -> &Self::Note {
         WalletSaplingOutput::note(self)
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        crate::wallet::Note::Sapling(self.note().clone())
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
@@ -716,7 +721,6 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note, AccountId> {
-    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -727,8 +731,11 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note
     fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
-    fn note(&self) -> &::sapling::Note {
-        self.note()
+    fn note(&self) -> &Self::Note {
+        DecryptedOutput::note(self)
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        crate::wallet::Note::Sapling(self.note().clone())
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())
@@ -768,7 +775,6 @@ impl<T: ReceivedShieldedOutput<Note = ::orchard::Note, Nullifier = ::orchard::no
 
 #[cfg(feature = "orchard")]
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> {
-    const POOL_TYPE: PoolType = PoolType::ORCHARD;
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -779,8 +785,15 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
     fn account_id(&self) -> Self::AccountId {
         *WalletOrchardOutput::account_id(self)
     }
-    fn note(&self) -> &::orchard::note::Note {
-        WalletOrchardOutput::note(self)
+    fn note(&self) -> &Self::Note {
+        &self.note().0
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        let (note, pool) = self.note();
+        crate::wallet::Note::Orchard {
+            note: *note,
+            pool: *pool,
+        }
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
@@ -807,8 +820,9 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note, AccountId> {
-    const POOL_TYPE: PoolType = PoolType::ORCHARD;
+impl<AccountId: Copy> ReceivedShieldedOutput
+    for DecryptedOutput<(::orchard::Note, ::orchard::ValuePool), AccountId>
+{
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -819,8 +833,15 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note
     fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
-    fn note(&self) -> &orchard::note::Note {
-        self.note()
+    fn note(&self) -> &Self::Note {
+        &self.note().0
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        let (note, pool) = self.note();
+        crate::wallet::Note::Orchard {
+            note: *note,
+            pool: *pool,
+        }
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())

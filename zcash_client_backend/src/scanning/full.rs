@@ -611,6 +611,7 @@ where
                     Some(move |_| sapling_decrypted),
                     batch::try_note_decryption,
                     |output| sapling::Node::from_cmu(output.cmu()),
+                    |note| note,
                 )
             })
             .unwrap_or_default();
@@ -636,6 +637,7 @@ where
                     Some(move |_| orchard_decrypted),
                     batch::try_note_decryption,
                     |action| MerkleHashOrchard::from_cmx(action.cmx()),
+                    |note| (note, orchard::ValuePool::Orchard),
                 )
             })
             .unwrap_or_default();
@@ -661,6 +663,7 @@ where
                     Some(move |_| ironwood_decrypted),
                     batch::try_note_decryption,
                     |action| MerkleHashOrchard::from_cmx(action.cmx()),
+                    |note| (note, orchard::ValuePool::Ironwood),
                 )
             })
             .unwrap_or_default();

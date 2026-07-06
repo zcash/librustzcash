@@ -976,12 +976,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // built. We reuse the builder's own routing predicate so the proposal
             // and build paths cannot drift.
             #[cfg(feature = "orchard")]
-            let orchard_outputs_are_ironwood = super::orchard_outputs_to_ironwood(
-                params,
-                target_height,
-                #[cfg(feature = "unstable")]
-                proposed_version,
-            );
+            let orchard_outputs_are_ironwood = super::ironwood_active_at(params, target_height);
 
             // The Orchard bundle keeps the Orchard spends; its outputs move to the
             // Ironwood bundle when routing is active. Ironwood has no spends yet
@@ -1056,6 +1051,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             sapling: use_sapling,
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
+                            #[cfg(feature = "orchard")]
+                            ironwood: false,
                         }))
                         .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
 
@@ -1412,6 +1409,8 @@ where
         sapling: use_sapling,
         #[cfg(feature = "orchard")]
         orchard: use_orchard,
+        #[cfg(feature = "orchard")]
+        ironwood: false,
     }))
     .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
 

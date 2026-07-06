@@ -651,7 +651,7 @@ impl proposal::Proposal {
                         s_in.notes().iter().map(|rec_note| proposal::ProposedInput {
                             value: Some(proposed_input::Value::ReceivedOutput(ReceivedOutput {
                                 txid: rec_note.txid().as_ref().to_vec(),
-                                value_pool: proposal::ValuePool::from(rec_note.note().protocol())
+                                value_pool: proposal::ValuePool::from(rec_note.note().pool())
                                     .into(),
                                 index: rec_note.output_index().into(),
                                 value: rec_note.note().value().into(),

@@ -3399,6 +3399,18 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         #[cfg(not(feature = "orchard"))]
         panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
     }
+    if let Some(_bundle) = sent_tx.tx().ironwood_bundle() {
+        #[cfg(feature = "orchard")]
+        {
+            detectable_via_scanning = true;
+            for action in _bundle.actions() {
+                orchard::mark_ironwood_note_spent(conn, tx_ref, action.nullifier())?;
+            }
+        }
+
+        #[cfg(not(feature = "orchard"))]
+        panic!("Sent a transaction with Ironwood Actions without `orchard` enabled?");
+    }
 
     #[cfg(feature = "transparent-inputs")]
     for utxo_outpoint in sent_tx.utxos_spent() {
@@ -3467,6 +3479,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         &DecryptedOutput::new(
                             output.output_index(),
                             note.clone(),
+                            ShieldedPool::Sapling,
                             *receiving_account,
                             output
                                 .memo()
@@ -3479,13 +3492,10 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     )?;
                 }
                 #[cfg(feature = "orchard")]
-                Note::Orchard(note) => {
-                    // The decrypted-transaction path handles a single Orchard-domain output
-                    // stream, so the target pool table is selected from the note's plaintext
-                    // version: version 2 notes belong to Orchard, version 3 notes to Ironwood.
-                    let shielded_pool = match note.version() {
-                        ::orchard::note::NoteVersion::V2 => ShieldedPool::Orchard,
-                        ::orchard::note::NoteVersion::V3 => ShieldedPool::Ironwood,
+                Note::Orchard { note, pool } => {
+                    let shielded_pool = match pool {
+                        ::orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+                        ::orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
                     };
                     orchard::put_received_note(
                         conn,
@@ -3493,7 +3503,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         shielded_pool,
                         &DecryptedOutput::new(
                             output.output_index(),
-                            *note,
+                            (*note, *pool),
+                            shielded_pool,
                             *receiving_account,
                             output
                                 .memo()
@@ -4787,7 +4798,7 @@ fn recipient_params<P: consensus::Parameters>(
                 from_account_id,
                 external_address.as_ref().map(|a| a.encode()),
                 Some(to_account),
-                PoolType::Shielded(note.protocol()),
+                PoolType::Shielded(note.pool()),
             ))
         }
     }

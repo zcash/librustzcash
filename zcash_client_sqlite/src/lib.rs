@@ -492,12 +492,39 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     index,
                     target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Orchard,
+                        })
+                    })
+                });
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
             }
-            ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
+            ShieldedPool::Ironwood => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_ironwood_note(
+                    self.conn.borrow(),
+                    &self.params,
+                    txid,
+                    index,
+                    target_height,
+                )
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Ironwood,
+                        })
+                    })
+                });
+
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::IRONWOOD));
+            }
         }
     }
 
@@ -527,6 +554,20 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             #[cfg(feature = "orchard")]
             if sources.contains(&ShieldedPool::Orchard) {
                 wallet::orchard::select_spendable_orchard_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::orchard::select_spendable_ironwood_notes(
                     self.conn.borrow(),
                     &self.params,
                     account,
@@ -574,6 +615,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ConfirmationsPolicy::MIN,
                     exclude,
                     ShieldedPool::Orchard,
+                    wallet::orchard::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedPool::Ironwood,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
                 )?

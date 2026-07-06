@@ -403,6 +403,7 @@ where
                     .collect()
             },
             |output| sapling::Node::from_cmu(&output.cmu),
+            |note| note,
         );
         sapling_note_commitments.append(&mut sapling_nc);
         let has_sapling = !(sapling_spends.is_empty() && sapling_outputs.is_empty());
@@ -440,6 +441,7 @@ where
                     .collect()
             },
             |output| MerkleHashOrchard::from_cmx(&output.cmx()),
+            |note| (note, orchard::ValuePool::Orchard),
         );
         #[cfg(feature = "orchard")]
         orchard_note_commitments.append(&mut orchard_nc);
@@ -477,6 +479,7 @@ where
                     .collect()
             },
             |output| MerkleHashOrchard::from_cmx(&output.cmx()),
+            |note| (note, orchard::ValuePool::Ironwood),
         );
         #[cfg(feature = "orchard")]
         ironwood_note_commitments.append(&mut ironwood_nc);
@@ -1006,7 +1009,7 @@ mod tests {
             prop_assert_eq!(tx.orchard_outputs().len(), 0);
             prop_assert_eq!(tx.ironwood_outputs().len(), 1);
             prop_assert_eq!(tx.ironwood_outputs()[0].account_id(), &account);
-            prop_assert_eq!(tx.ironwood_outputs()[0].note().value().inner(), value);
+            prop_assert_eq!(tx.ironwood_outputs()[0].note().0.value().inner(), value);
             prop_assert_eq!(
                 tx.ironwood_outputs()[0].note_commitment_tree_position(),
                 Position::from(0)
