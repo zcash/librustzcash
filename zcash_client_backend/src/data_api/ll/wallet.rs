@@ -305,6 +305,8 @@ where
                 tx.sapling_spends().iter().map(|spend| spend.nf()),
                 #[cfg(feature = "orchard")]
                 tx.orchard_spends().iter().map(|spend| spend.nf()),
+                #[cfg(feature = "orchard")]
+                tx.ironwood_spends().iter().map(|spend| spend.nf()),
             )
             .map_err(PutBlocksError::Storage)?;
 
@@ -365,6 +367,34 @@ where
                 |_account_id| (),
             )
             .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "orchard")]
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.ironwood_outputs(),
+                // Check whether this note was spent in a later block range that
+                // we previously scanned.
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_ironwood_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_ironwood_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
         }
 
         // Insert the new nullifiers from this block into the nullifier map.
@@ -375,6 +405,11 @@ where
         #[cfg(feature = "orchard")]
         wallet_db
             .track_block_orchard_nullifiers(block.height(), block.orchard().nullifier_map())
+            .map_err(PutBlocksError::Storage)?;
+
+        #[cfg(feature = "orchard")]
+        wallet_db
+            .track_block_ironwood_nullifiers(block.height(), block.ironwood().nullifier_map())
             .map_err(PutBlocksError::Storage)?;
 
         note_positions.extend(block.transactions().iter().flat_map(|wtx| {
@@ -684,6 +719,12 @@ where
             .iter()
             .flat_map(|b| b.actions().iter())
             .map(|action| action.nullifier()),
+        #[cfg(feature = "orchard")]
+        d_tx.tx()
+            .ironwood_bundle()
+            .iter()
+            .flat_map(|b| b.actions().iter())
+            .map(|action| action.nullifier()),
     )?;
 
     // A flag used to determine whether it is necessary to query for transactions that
@@ -926,6 +967,7 @@ fn mark_notes_spent<'a, DbT>(
     >,
     sapling_nfs: impl Iterator<Item = &'a sapling::Nullifier>,
     #[cfg(feature = "orchard")] orchard_nfs: impl Iterator<Item = &'a orchard::note::Nullifier>,
+    #[cfg(feature = "orchard")] ironwood_nfs: impl Iterator<Item = &'a orchard::note::Nullifier>,
 ) -> Result<(), <DbT as LowLevelWalletRead>::Error>
 where
     DbT: LowLevelWalletWrite,
@@ -945,6 +987,12 @@ where
     #[cfg(feature = "orchard")]
     for nf in orchard_nfs {
         wallet_db.mark_orchard_note_spent(nf, tx_ref)?;
+    }
+
+    // Mark Ironwood notes as spent when we observe their nullifiers.
+    #[cfg(feature = "orchard")]
+    for nf in ironwood_nfs {
+        wallet_db.mark_ironwood_note_spent(nf, tx_ref)?;
     }
 
     Ok(())

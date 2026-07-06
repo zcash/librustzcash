@@ -3448,9 +3448,17 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 }
                 #[cfg(feature = "orchard")]
                 Note::Orchard(note) => {
+                    // The decrypted-transaction path handles a single Orchard-domain output
+                    // stream, so the target pool table is selected from the note's plaintext
+                    // version: version 2 notes belong to Orchard, version 3 notes to Ironwood.
+                    let shielded_pool = match note.version() {
+                        ::orchard::note::NoteVersion::V2 => ShieldedPool::Orchard,
+                        ::orchard::note::NoteVersion::V3 => ShieldedPool::Ironwood,
+                    };
                     orchard::put_received_note(
                         conn,
                         params,
+                        shielded_pool,
                         &DecryptedOutput::new(
                             output.output_index(),
                             *note,

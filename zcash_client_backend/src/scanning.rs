@@ -433,10 +433,8 @@ impl<AccountId> Nullifiers<AccountId> {
             db_data.get_sapling_nullifiers(NullifierQuery::Unspent)?,
             #[cfg(feature = "orchard")]
             db_data.get_orchard_nullifiers(NullifierQuery::Unspent)?,
-            // TODO: persist and query Ironwood nullifiers once the Ironwood note write path
-            // exists; until then the wallet tracks no Ironwood nullifiers.
             #[cfg(feature = "orchard")]
-            vec![],
+            db_data.get_ironwood_nullifiers(NullifierQuery::Unspent)?,
         ))
     }
 

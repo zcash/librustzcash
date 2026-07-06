@@ -925,6 +925,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::orchard::get_orchard_nullifiers(self.conn.borrow(), query)
     }
 
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
+        wallet::orchard::get_ironwood_nullifiers(self.conn.borrow(), query)
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
@@ -1983,6 +1991,14 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Orchard, &nf.to_bytes())
     }
 
+    #[cfg(feature = "orchard")]
+    fn detect_ironwood_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error> {
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Ironwood, &nf.to_bytes())
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn get_account_ref(
         &self,
@@ -2114,6 +2130,28 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::orchard::put_received_note(
             self.conn.borrow(),
             &self.params,
+            ShieldedPool::Orchard,
+            output,
+            tx_ref,
+            target_or_mined_height,
+            spent_in,
+        )?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_received_ironwood_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error> {
+        wallet::orchard::put_received_note(
+            self.conn.borrow(),
+            &self.params,
+            ShieldedPool::Ironwood,
             output,
             tx_ref,
             target_or_mined_height,
@@ -2133,6 +2171,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 
     #[cfg(feature = "orchard")]
+    fn mark_ironwood_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error> {
+        wallet::orchard::mark_ironwood_note_spent(self.conn.borrow(), tx_ref, nf)
+    }
+
+    #[cfg(feature = "orchard")]
     fn track_block_orchard_nullifiers(
         &mut self,
         block_height: BlockHeight,
@@ -2142,6 +2189,22 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             self.conn.borrow(),
             block_height,
             ShieldedPool::Orchard,
+            &nfs.iter()
+                .map(|(idx, txid, nfs)| (*idx, *txid, nfs.iter().map(|n| n.to_bytes()).collect()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn track_block_ironwood_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_nullifier_map(
+            self.conn.borrow(),
+            block_height,
+            ShieldedPool::Ironwood,
             &nfs.iter()
                 .map(|(idx, txid, nfs)| (*idx, *txid, nfs.iter().map(|n| n.to_bytes()).collect()))
                 .collect::<Vec<_>>(),

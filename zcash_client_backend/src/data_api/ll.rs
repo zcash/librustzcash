@@ -268,6 +268,15 @@ pub trait LowLevelWalletRead {
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error>;
 
+    /// Finds the reference to the transaction that reveals the given Ironwood nullifier in the
+    /// backing data store, if known. Ironwood nullifiers are Orchard-shaped but are tracked as a
+    /// separate pool.
+    #[cfg(feature = "orchard")]
+    fn detect_ironwood_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error>;
+
     /// Returns the wallet-internal account reference for the given external account identifier.
     ///
     /// This is used to translate between the stable external [`AccountId`](Self::AccountId)
@@ -398,6 +407,18 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
 
+    /// Adds information about a received Ironwood note to the wallet, or updates any existing
+    /// record for that output. Ironwood notes are Orchard-shaped but are stored as a separate
+    /// pool.
+    #[cfg(feature = "orchard")]
+    fn put_received_ironwood_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error>;
+
     /// Updates the backing store to indicate that the Orchard output having the given nullifier is
     /// spent in the transaction referenced by `spent_in_tx`. This may result in multiple distinct
     /// transactions being recorded as having spent the note; only one of these transactions will
@@ -408,6 +429,16 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     /// Returns `Ok(true)` if a a new record was added to the data store.
     #[cfg(feature = "orchard")]
     fn mark_orchard_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error>;
+
+    /// Updates the backing store to indicate that the Ironwood output having the given nullifier is
+    /// spent in the transaction referenced by `spent_in_tx`. Behaves like
+    /// [`mark_orchard_note_spent`](Self::mark_orchard_note_spent) but for the Ironwood pool.
+    #[cfg(feature = "orchard")]
+    fn mark_ironwood_note_spent(
         &mut self,
         nf: &::orchard::note::Nullifier,
         tx_ref: Self::TxRef,
@@ -432,6 +463,16 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     ///   - The vector of nullifiers revealed by the actions in that transaction.
     #[cfg(feature = "orchard")]
     fn track_block_orchard_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error>;
+
+    /// Causes the given Ironwood output nullifiers to be tracked by the wallet. Behaves like
+    /// [`track_block_orchard_nullifiers`](Self::track_block_orchard_nullifiers) but for the
+    /// Ironwood pool.
+    #[cfg(feature = "orchard")]
+    fn track_block_ironwood_nullifiers(
         &mut self,
         block_height: BlockHeight,
         nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],

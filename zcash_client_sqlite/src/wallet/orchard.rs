@@ -18,14 +18,15 @@ use zcash_client_backend::{
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
-    ShieldedPool,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
 };
 use zip32::Scope;
 
 use crate::{
-    AccountRef, AccountUuid, AddressRef, IRONWOOD_TABLES_PREFIX, ORCHARD_TABLES_PREFIX,
-    ReceivedNoteId, TxRef, error::SqliteClientError,
+    AccountRef, AccountUuid, AddressRef, ReceivedNoteId, TxRef,
+    error::SqliteClientError,
+    wallet::common::{TableConstants, table_constants},
 };
 
 use super::{
@@ -332,24 +333,28 @@ pub(crate) fn parse_note_version(code: i64) -> Option<NoteVersion> {
 /// - A note value will never exceed 2^63 zatoshis.
 ///
 /// Returns the internal account identifier of the account that received the output.
+///
+/// The caller selects the target pool's table (`orchard` or `ironwood`); the note's own plaintext
+/// version is recorded in the `note_version` column but does not influence table selection. This
+/// lets the scanner route its separate Orchard and Ironwood output streams to their respective
+/// tables while the decrypted-transaction path selects the table from the note version.
 pub(crate) fn put_received_note<
     T: ReceivedOrchardOutput<AccountId = AccountUuid>,
     P: consensus::Parameters,
 >(
     conn: &rusqlite::Transaction,
     params: &P,
+    shielded_pool: ShieldedPool,
     output: &T,
     tx_ref: TxRef,
     target_or_mined_height: Option<BlockHeight>,
     spent_in: Option<TxRef>,
 ) -> Result<AccountRef, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(shielded_pool)?;
+
     let account_id = get_account_ref(conn, output.account_id())?;
     let address_id = ensure_address(conn, params, output, target_or_mined_height)?;
     let note_version = output.note().version();
-    let table_prefix = match note_version {
-        NoteVersion::V2 => ORCHARD_TABLES_PREFIX,
-        NoteVersion::V3 => IRONWOOD_TABLES_PREFIX,
-    };
     let mut stmt_upsert_received_note = conn.prepare_cached(&format!(
         "INSERT INTO {table_prefix}_received_notes (
             transaction_id, action_index, account_id, address_id,
@@ -445,6 +450,26 @@ pub(crate) fn get_orchard_nullifiers(
     })
 }
 
+/// Retrieves the set of nullifiers for "potentially spendable" Ironwood notes that the wallet is
+/// tracking. Ironwood nullifiers are Orchard-shaped; see [`get_orchard_nullifiers`] for the
+/// meaning of "potentially spendable".
+pub(crate) fn get_ironwood_nullifiers(
+    conn: &Connection,
+    query: NullifierQuery,
+) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
+    super::common::get_nullifiers(conn, ShieldedPool::Ironwood, query, |nf_bytes| {
+        Nullifier::from_bytes(<&[u8; 32]>::try_from(nf_bytes).map_err(|_| {
+            SqliteClientError::CorruptedData(
+                "unable to parse Ironwood nullifier: expected 32 bytes".to_string(),
+            )
+        })?)
+        .into_option()
+        .ok_or(SqliteClientError::CorruptedData(
+            "unable to parse Ironwood nullifier".to_string(),
+        ))
+    })
+}
+
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
     nfs: impl Iterator<Item = &'a Nullifier>,
@@ -477,45 +502,73 @@ pub(crate) fn mark_orchard_note_spent(
     tx_ref: TxRef,
     nf: &Nullifier,
 ) -> Result<bool, SqliteClientError> {
+    mark_note_spent(conn, ShieldedPool::Orchard, tx_ref, nf)
+}
+
+/// Marks a given Ironwood nullifier as having been revealed in the construction of the specified
+/// transaction. Ironwood nullifiers are Orchard-shaped; see [`mark_orchard_note_spent`].
+pub(crate) fn mark_ironwood_note_spent(
+    conn: &Connection,
+    tx_ref: TxRef,
+    nf: &Nullifier,
+) -> Result<bool, SqliteClientError> {
+    mark_note_spent(conn, ShieldedPool::Ironwood, tx_ref, nf)
+}
+
+/// Marks the received note in the given shielded pool's received-notes table with the given
+/// nullifier as spent in the referenced transaction.
+fn mark_note_spent(
+    conn: &Connection,
+    shielded_pool: ShieldedPool,
+    tx_ref: TxRef,
+    nf: &Nullifier,
+) -> Result<bool, SqliteClientError> {
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(shielded_pool)?;
+    let pool_name = PoolType::Shielded(shielded_pool);
+
     let sql_params = named_params![
        ":nf": nf.to_bytes(),
        ":transaction_id": tx_ref.0
     ];
     let has_collision = conn.query_row(
-        "WITH possible_conflicts AS (
-            SELECT s.transaction_id
-            FROM orchard_received_notes n
-            JOIN orchard_received_note_spends s ON s.orchard_received_note_id = n.id
-            JOIN transactions t ON t.id_tx = s.transaction_id
-            WHERE n.nf = :nf
-            AND t.id_tx != :transaction_id
-            AND t.mined_height IS NOT NULL
+        &format!(
+            "WITH possible_conflicts AS (
+                SELECT s.transaction_id
+                FROM {table_prefix}_received_notes n
+                JOIN {table_prefix}_received_note_spends s
+                    ON s.{table_prefix}_received_note_id = n.id
+                JOIN transactions t ON t.id_tx = s.transaction_id
+                WHERE n.nf = :nf
+                AND t.id_tx != :transaction_id
+                AND t.mined_height IS NOT NULL
+            ),
+            mined_tx AS (
+                SELECT t.id_tx AS transaction_id
+                FROM transactions t
+                WHERE t.id_tx = :transaction_id
+                AND t.mined_height IS NOT NULL
+            )
+            SELECT EXISTS(SELECT 1 FROM possible_conflicts) AND EXISTS(SELECT 1 FROM mined_tx)"
         ),
-        mined_tx AS (
-            SELECT t.id_tx AS transaction_id
-            FROM transactions t
-            WHERE t.id_tx = :transaction_id
-            AND t.mined_height IS NOT NULL
-        )
-        SELECT EXISTS(SELECT 1 FROM possible_conflicts) AND EXISTS(SELECT 1 FROM mined_tx)",
         sql_params,
         |row| row.get::<_, bool>(0),
     )?;
 
     if has_collision {
         return Err(SqliteClientError::CorruptedData(format!(
-            "A different mined transaction revealing Orchard nullifier {} already exists",
+            "A different mined transaction revealing {pool_name} nullifier {} already exists",
             hex::encode(nf.to_bytes())
         )));
     }
 
-    let mut stmt_mark_orchard_note_spent = conn.prepare_cached(
-        "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
-         SELECT id, :transaction_id FROM orchard_received_notes WHERE nf = :nf
-         ON CONFLICT (orchard_received_note_id, transaction_id) DO NOTHING",
-    )?;
+    let mut stmt_mark_note_spent = conn.prepare_cached(&format!(
+        "INSERT INTO {table_prefix}_received_note_spends
+            ({table_prefix}_received_note_id, transaction_id)
+         SELECT id, :transaction_id FROM {table_prefix}_received_notes WHERE nf = :nf
+         ON CONFLICT ({table_prefix}_received_note_id, transaction_id) DO NOTHING"
+    ))?;
 
-    match stmt_mark_orchard_note_spent.execute(sql_params)? {
+    match stmt_mark_note_spent.execute(sql_params)? {
         0 => Ok(false),
         1 => Ok(true),
         _ => unreachable!("nf column is marked as UNIQUE"),
@@ -811,11 +864,12 @@ pub(crate) mod tests {
         testing::pool::propose_and_build_shielding_coinbase_succeeds::<OrchardPoolTester>();
     }
 
-    /// `put_received_note` must record a note in the received-notes table for the pool implied
-    /// by the note's plaintext version: version 2 notes belong to the Orchard pool and version 3
-    /// notes to the Ironwood pool.
+    /// `put_received_note` records a note in the received-notes table chosen by the caller,
+    /// preserving the note's plaintext version in the `note_version` column. An Orchard-pool note
+    /// and an Ironwood-pool note sharing an action index may both be recorded in their respective
+    /// tables.
     #[test]
-    fn put_received_note_routes_by_note_plaintext_version() {
+    fn put_received_note_records_to_caller_selected_table() {
         use orchard::{
             keys::{FullViewingKey, SpendingKey},
             note::{Note, NoteVersion, RandomSeed, Rho},
@@ -827,7 +881,7 @@ pub(crate) mod tests {
             data_api::{Account as _, testing::TestBuilder},
         };
         use zcash_primitives::block::BlockHash;
-        use zcash_protocol::memo::MemoBytes;
+        use zcash_protocol::{ShieldedPool, memo::MemoBytes};
 
         use crate::{TxRef, testing::db::TestDbFactory};
 
@@ -881,6 +935,7 @@ pub(crate) mod tests {
         super::put_received_note(
             &tx,
             &network,
+            ShieldedPool::Orchard,
             &output(0, note(10_000, NoteVersion::V2)),
             tx_ref,
             None,
@@ -890,6 +945,7 @@ pub(crate) mod tests {
         super::put_received_note(
             &tx,
             &network,
+            ShieldedPool::Ironwood,
             &output(0, note(20_000, NoteVersion::V3)),
             tx_ref,
             None,
