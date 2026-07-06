@@ -21,6 +21,11 @@
 //!    corresponding spending material was delivered to the sink and as view-only
 //!    accounts otherwise. Account birthdays are constructed from the tree-state
 //!    frontiers carried by the document where present.
+//! 4. Stores the document's transactions: each transaction carrying raw data is
+//!    parsed and trial-decrypted against the imported accounts' viewing keys, and
+//!    stored if it involves the wallet. Transactions that cannot be shown to
+//!    involve the wallet are not stored (the post-import rescan recovers them if
+//!    they do), and are counted in the report.
 //!
 //! The database must already have been initialized with
 //! [`crate::wallet::init::WalletMigrator`] before calling [`import_wallet`].
@@ -48,11 +53,14 @@ use bech32::primitives::decode::CheckedHrpstring;
 use bip0039::{English, Mnemonic};
 use rand::RngCore;
 use secrecy::SecretVec;
+use zcash_client_backend::data_api::wallet::decrypt_and_store_transaction;
 use zcash_client_backend::data_api::{
     Account as _, AccountBirthday, AccountPurpose, WalletWrite, Zip32Derivation, chain::ChainState,
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::block::BlockHash;
+use zcash_primitives::transaction::Transaction;
+use zcash_protocol::consensus::BranchId;
 use zcash_protocol::consensus::{
     self, BlockHeight, NetworkConstants as _, NetworkType, NetworkUpgrade, Parameters,
 };
@@ -240,6 +248,22 @@ pub enum ZewifImportError<S> {
         /// The underlying structural error.
         source: incrementalmerkletree::frontier::FrontierError,
     },
+    /// The raw bytes of a transaction in the document could not be parsed as a
+    /// Zcash transaction.
+    TransactionParse {
+        /// The id of the unparseable transaction, as recorded in the document.
+        txid: zcash_protocol::TxId,
+        /// The underlying parse error.
+        source: std::io::Error,
+    },
+    /// The raw bytes of a transaction in the document parse to a transaction
+    /// with a different id than the one under which they were recorded.
+    TxidMismatch {
+        /// The id under which the transaction was recorded.
+        recorded: zcash_protocol::TxId,
+        /// The id of the transaction the recorded bytes parse to.
+        parsed: zcash_protocol::TxId,
+    },
     /// An error occurred writing to the wallet database.
     Wallet(SqliteClientError),
     /// The [`SecretSink`] failed to persist an entry.
@@ -317,6 +341,14 @@ impl<S: fmt::Display> fmt::Display for ZewifImportError<S> {
                 f,
                 "The {pool} tree frontier in the birthday of account \"{account_name}\" is invalid: {source:?}"
             ),
+            ZewifImportError::TransactionParse { txid, source } => write!(
+                f,
+                "Unable to parse the raw data of transaction {txid}: {source}"
+            ),
+            ZewifImportError::TxidMismatch { recorded, parsed } => write!(
+                f,
+                "The raw data recorded for transaction {recorded} parses to a transaction with id {parsed}."
+            ),
             ZewifImportError::Wallet(e) => write!(f, "Wallet database error: {e}"),
             ZewifImportError::Sink(e) => write!(f, "Secret sink error: {e}"),
         }
@@ -327,6 +359,7 @@ impl<S: std::error::Error + 'static> std::error::Error for ZewifImportError<S> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ZewifImportError::InvalidMnemonic { source, .. } => Some(source),
+            ZewifImportError::TransactionParse { source, .. } => Some(source),
             ZewifImportError::Wallet(e) => Some(e),
             ZewifImportError::Sink(e) => Some(e),
             _ => None,
@@ -393,6 +426,17 @@ pub struct ZewifImportReport {
     pub imported_accounts: Vec<ImportedAccount>,
     /// The accounts that could not be imported.
     pub skipped_accounts: Vec<SkippedAccount>,
+    /// The number of transactions from the document that were stored because
+    /// they involve the imported accounts.
+    pub transactions_stored: usize,
+    /// The number of transactions from the document that were not stored
+    /// because trial decryption found no involvement with any imported
+    /// account. Such transactions are expected to be recovered by the
+    /// post-import rescan if they do in fact involve the wallet.
+    pub transactions_without_wallet_relevance: usize,
+    /// The number of transactions in the document that carried no raw
+    /// transaction data and therefore could not be stored.
+    pub transactions_without_raw_data: usize,
     /// The number of address book entries present in the document. Address
     /// books have no backing store in this crate; the caller retains the
     /// document and may preserve these entries elsewhere.
@@ -746,7 +790,107 @@ where
         }
     }
 
+    import_transactions(wdb, &params, document, &mut report)?;
+
     Ok(report)
+}
+
+/// Stores the document's transactions in the wallet database.
+///
+/// Transactions are processed in ascending order of mined height (unmined
+/// transactions last) so that funding transactions generally precede the
+/// transactions that spend them. Each transaction carrying raw data is parsed
+/// under the consensus branch in force at its mined height (or, for unmined
+/// transactions, at its expiry height when known, and otherwise at a height
+/// just past the highest mined height in the document, falling back to the
+/// document's export height), verified against its recorded transaction id,
+/// and trial-decrypted against the wallet's tracked viewing keys.
+///
+/// [`decrypt_and_store_transaction`] stores a transaction only when trial
+/// decryption or transparent-output matching shows wallet involvement, so the
+/// count of stored transactions is determined by querying for each transaction
+/// id after the attempt.
+fn import_transactions<C, P, CL, R, S>(
+    wdb: &mut WalletDb<C, P, CL, R>,
+    params: &P,
+    document: &::zewif::Zewif,
+    report: &mut ZewifImportReport,
+) -> Result<(), ZewifImportError<S>>
+where
+    C: std::borrow::BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters,
+    CL: Clock,
+    R: RngCore,
+    S: std::error::Error,
+{
+    let mut txs: Vec<&::zewif::Transaction> = document.transactions().values().collect();
+    txs.sort_by_key(|tx| {
+        (
+            tx.mined_height().map_or(u32::MAX, u32::from),
+            *tx.txid().as_bytes(),
+        )
+    });
+
+    // The height at which a transaction of unknown mined height is assumed to
+    // have entered the mempool, for consensus branch id selection.
+    let assumed_mempool_height = txs
+        .iter()
+        .filter_map(|tx| tx.mined_height())
+        .max()
+        .map_or(document.export_height(), |h| h + 1);
+
+    for tx in txs {
+        let raw = match tx.tx_data() {
+            Some(::zewif::TransactionData::Raw(raw)) => raw.data(),
+            // Compact transaction data does not contain the full transaction,
+            // so it cannot be stored; the post-import rescan will recover the
+            // transaction if it involves the wallet.
+            Some(::zewif::TransactionData::Compact(_)) | None => {
+                report.transactions_without_raw_data += 1;
+                continue;
+            }
+        };
+        let recorded_txid = zcash_protocol::TxId::from_bytes(*tx.txid().as_bytes());
+        let mined_height = tx.mined_height().map(|h| BlockHeight::from(u32::from(h)));
+        let branch_height = mined_height.unwrap_or_else(|| {
+            BlockHeight::from(u32::from(
+                tx.expiry_height()
+                    .filter(|h| u32::from(*h) != 0)
+                    .unwrap_or(assumed_mempool_height),
+            ))
+        });
+        let parsed = Transaction::read(raw.as_slice(), BranchId::for_height(params, branch_height))
+            .map_err(|source| ZewifImportError::TransactionParse {
+                txid: recorded_txid,
+                source,
+            })?;
+        if parsed.txid() != recorded_txid {
+            return Err(ZewifImportError::TxidMismatch {
+                recorded: recorded_txid,
+                parsed: parsed.txid(),
+            });
+        }
+
+        decrypt_and_store_transaction(params, wdb, &parsed, mined_height)
+            .map_err(ZewifImportError::Wallet)?;
+
+        let stored = wdb
+            .conn
+            .borrow()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM transactions WHERE txid = :txid)",
+                rusqlite::named_params![":txid": recorded_txid.as_ref()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|e| ZewifImportError::Wallet(SqliteClientError::from(e)))?;
+        if stored {
+            report.transactions_stored += 1;
+        } else {
+            report.transactions_without_wallet_relevance += 1;
+        }
+    }
+
+    Ok(())
 }
 
 /// Imports a single account, choosing the import path appropriate to its
