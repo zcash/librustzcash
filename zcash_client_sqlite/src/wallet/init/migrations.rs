@@ -397,7 +397,6 @@ pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
-    ironwood_shardtree::MIGRATION_ID,
     v_tx_outputs_key_scopes::MIGRATION_ID,
     ivk_item_cache::MIGRATION_ID,
     add_transparent_receiver_address_index::MIGRATION_ID,
@@ -469,6 +468,26 @@ pub(crate) mod tests {
         testing::db::{test_clock, test_rng},
         wallet::init::WalletMigrator,
     };
+
+    /// `CURRENT_LEAF_MIGRATIONS` must list exactly the leaves of the migration dependency graph
+    /// (the migrations that no other migration depends on), so that migrating to the current
+    /// state reaches every migration. This recomputes the leaves from the graph and checks them
+    /// against the constant, so a newly added migration that supersedes an existing leaf cannot
+    /// silently leave a stale entry behind.
+    #[test]
+    fn current_leaf_migrations_are_the_dag_leaves() {
+        use schemerz::Migration;
+
+        let migrations =
+            super::all_migrations(&Network::TestNetwork, test_clock(), test_rng(), None);
+
+        let all_ids: HashSet<Uuid> = migrations.iter().map(|m| m.id()).collect();
+        let depended: HashSet<Uuid> = migrations.iter().flat_map(|m| m.dependencies()).collect();
+        let computed_leaves: HashSet<Uuid> = all_ids.difference(&depended).copied().collect();
+
+        let listed_leaves: HashSet<Uuid> = super::CURRENT_LEAF_MIGRATIONS.iter().copied().collect();
+        assert_eq!(computed_leaves, listed_leaves);
+    }
 
     /// A synthetic set of Orchard note payload values, for exercising migrations that touch the
     /// `orchard_received_notes` table.
