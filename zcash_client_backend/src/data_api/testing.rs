@@ -1590,6 +1590,9 @@ pub struct InitialChainState {
     /// Roots of the completed Orchard subtrees as of this chain state.
     #[cfg(feature = "orchard")]
     pub prior_orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>>,
+    /// Roots of the completed Ironwood subtrees as of this chain state.
+    #[cfg(feature = "orchard")]
+    pub prior_ironwood_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>>,
 }
 
 /// Trait representing the ability to construct a new data store for use in a test.
@@ -1819,6 +1822,8 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     ///             prior_sapling_roots,
     ///             #[cfg(feature = "orchard")]
     ///             prior_orchard_roots,
+    ///             #[cfg(feature = "orchard")]
+    ///             prior_ironwood_roots: vec![],
     ///         }
     ///     });
     /// ```
@@ -1929,6 +1934,21 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
                     .with_orchard_tree_mut(|t| {
                         t.insert_frontier(
                             initial_state.chain_state.final_orchard_tree().clone(),
+                            Retention::Checkpoint {
+                                id: initial_state.chain_state.block_height(),
+                                marking: Marking::Reference,
+                            },
+                        )
+                    })
+                    .unwrap();
+
+                wallet_data
+                    .put_ironwood_subtree_roots(0, &initial_state.prior_ironwood_roots)
+                    .unwrap();
+                wallet_data
+                    .with_ironwood_tree_mut(|t| {
+                        t.insert_frontier(
+                            initial_state.chain_state.final_ironwood_tree().clone(),
                             Retention::Checkpoint {
                                 id: initial_state.chain_state.block_height(),
                                 marking: Marking::Reference,
@@ -2903,6 +2923,8 @@ pub struct NoteCommitments {
     sapling: Vec<::sapling::Node>,
     #[cfg(feature = "orchard")]
     orchard: Vec<MerkleHashOrchard>,
+    #[cfg(feature = "orchard")]
+    ironwood: Vec<MerkleHashOrchard>,
 }
 
 impl NoteCommitments {
@@ -2928,6 +2950,16 @@ impl NoteCommitments {
                         .map(|act| MerkleHashOrchard::from_cmx(&act.cmx().unwrap()))
                 })
                 .collect(),
+            #[cfg(feature = "orchard")]
+            ironwood: cb
+                .vtx
+                .iter()
+                .flat_map(|tx| {
+                    tx.ironwood_actions
+                        .iter()
+                        .map(|act| MerkleHashOrchard::from_cmx(&act.cmx().unwrap()))
+                })
+                .collect(),
         }
     }
 
@@ -2941,6 +2973,12 @@ impl NoteCommitments {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &[MerkleHashOrchard] {
         self.orchard.as_ref()
+    }
+
+    /// Returns the Ironwood note commitments.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(&self) -> &[MerkleHashOrchard] {
+        self.ironwood.as_ref()
     }
 }
 

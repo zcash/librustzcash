@@ -3802,6 +3802,8 @@ pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
                 prior_orchard_roots,
+                #[cfg(feature = "orchard")]
+                prior_ironwood_roots: vec![],
             }
         })
         .with_account_having_current_birthday()
@@ -4726,6 +4728,8 @@ pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
                 prior_orchard_roots,
+                #[cfg(feature = "orchard")]
+                prior_ironwood_roots: vec![],
             }
         })
         .with_account_having_current_birthday()
@@ -5320,6 +5324,8 @@ where
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
                 prior_orchard_roots,
+                #[cfg(feature = "orchard")]
+                prior_ironwood_roots: vec![],
             }
         })
         .with_account_having_current_birthday()
@@ -5588,6 +5594,8 @@ where
                 prior_sapling_roots,
                 #[cfg(feature = "orchard")]
                 prior_orchard_roots,
+                #[cfg(feature = "orchard")]
+                prior_ironwood_roots: vec![],
             }
         })
         .with_account_having_current_birthday()
@@ -6174,6 +6182,8 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
                 prior_sapling_roots: vec![],
                 #[cfg(feature = "orchard")]
                 prior_orchard_roots: vec![],
+                #[cfg(feature = "orchard")]
+                prior_ironwood_roots: vec![],
             }
         })
         .with_account_having_current_birthday()

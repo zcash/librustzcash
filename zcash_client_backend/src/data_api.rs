@@ -3834,6 +3834,23 @@ pub trait WalletCommitmentTrees {
 
         Ok(())
     }
+
+    /// Adds a sequence of Ironwood note commitment tree subtree roots to the data store, if this
+    /// backend maintains a separate Ironwood tree.
+    ///
+    /// Each such value should be the Merkle root of a subtree of the Ironwood note commitment
+    /// tree containing 2^[`IRONWOOD_SHARD_HEIGHT`] note commitments.
+    ///
+    /// The default implementation is a no-op, for backends that report no Ironwood tree via
+    /// [`Self::with_ironwood_tree_mut`].
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        _start_index: u64,
+        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
