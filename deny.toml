@@ -39,6 +39,8 @@ exceptions = [
     { name = "foldhash", allow = ["Zlib"] },
     { name = "inotify", allow = ["ISC"] },
     { name = "inotify-sys", allow = ["ISC"] },
+    { name = "minicbor", allow = ["BlueOak-1.0.0"] },
+    { name = "minicbor-derive", allow = ["BlueOak-1.0.0"] },
     { name = "minreq", allow = ["ISC"] },
     { name = "nanorand", allow = ["Zlib"] },
     { name = "notify", allow = ["CC0-1.0"] },

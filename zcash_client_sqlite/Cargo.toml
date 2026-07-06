@@ -42,6 +42,11 @@ transparent.workspace = true
 bip32 = { workspace = true, optional = true }
 bs58.workspace = true
 
+# - ZeWIF wallet interchange
+zewif = { workspace = true, optional = true }
+bech32 = { workspace = true, optional = true }
+bip0039 = { workspace = true, optional = true, features = ["all-languages"] }
+
 # - Logging and metrics
 tracing.workspace = true
 
@@ -160,6 +165,21 @@ transparent-key-import = [
 zcashd-compat = [
   "zcash_keys/zcashd-compat",
   "zcash_client_backend/zcashd-compat"
+]
+
+## Enables importing wallets from ZeWIF (Zcash Wallet Interchange Format)
+## documents. Spending key material carried by a document is diverted to a
+## caller-provided `SecretSink` and is never stored in the wallet
+## database.
+zewif = [
+  "dep:zewif",
+  "dep:bech32",
+  "dep:bip0039",
+  "orchard",
+  "transparent-inputs",
+  "transparent-key-import",
+  "zcashd-compat",
+  "zcash_keys/unstable",
 ]
 
 ## Enables `serde` derives for certain types.

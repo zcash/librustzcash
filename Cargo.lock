@@ -2679,6 +2679,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicbor"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "734daad4ff3b880f23dc2a675dd74553fa8e583367aa7523f96a16e96a516b62"
+dependencies = [
+ "minicbor-derive",
+]
+
+[[package]]
+name = "minicbor-derive"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "512ce2c37128698ea15c99b3518936c78a8b112b92468e7b95b9fa045666ebd8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7132,6 +7152,8 @@ version = "0.21.1"
 dependencies = [
  "ambassador",
  "assert_matches",
+ "bech32",
+ "bip0039",
  "bip32",
  "bitflags 2.9.0",
  "bls12_381",
@@ -7178,6 +7200,7 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_transparent",
+ "zewif",
  "zip32",
  "zip321",
 ]
@@ -7432,6 +7455,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94e62113720e311984f461c56b00457ae9981c0bc7859d22306cc2ae2f95571c"
 dependencies = [
  "zerofrom",
+]
+
+[[package]]
+name = "zewif"
+version = "0.1.0"
+source = "git+https://github.com/zcash/zewif.git?branch=main#74f1a1694131386515e1733dfb9f414a6284555f"
+dependencies = [
+ "hex",
+ "minicbor",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
