@@ -197,6 +197,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         vec![],
                         #[cfg(feature = "orchard")]
                         vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
                     );
 
                     queue_transparent_input_retrieval(conn, tx_ref, &d_tx)?;
