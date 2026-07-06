@@ -496,7 +496,7 @@ fn sapling_to_orchard() {
         .add_sapling_output::<zip317::FeeRule>(
             Some(sapling_dfvk.to_ovk(zip32::Scope::Internal)),
             sapling_internal_dfvk.find_address(0u32.into()).unwrap().1,
-            Zatoshis::const_from_u64(880_000),
+            Zatoshis::const_from_u64(885_000),
             MemoBytes::empty(),
         )
         .unwrap();
