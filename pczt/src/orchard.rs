@@ -795,22 +795,78 @@ pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<B
 
 #[cfg(feature = "orchard")]
 impl Bundle {
+    /// Parses this bundle as an Ironwood-pool bundle, deriving each spend's
+    /// `FullViewingKey` from its wire `fvk` bytes.
     pub(crate) fn into_ironwood_parsed(
         self,
     ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
         self.into_parsed_with_version(BundleVersion::ironwood_v3())
     }
 
+    /// Parses this bundle as an Ironwood-pool bundle for a preverified signing pass,
+    /// skipping each spend's `FullViewingKey` derivation. See
+    /// [`Bundle::into_parsed_with_version_preverified_for_signing`] for the invariant
+    /// callers must uphold.
+    pub(crate) fn into_ironwood_parsed_preverified_for_signing(
+        self,
+    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+        self.into_parsed_with_version_preverified_for_signing(BundleVersion::ironwood_v3())
+    }
+
+    /// Parses this bundle with the given bundle version, deriving each spend's
+    /// `FullViewingKey` from its wire `fvk` bytes.
     pub(crate) fn into_parsed_with_version(
         self,
         bundle_version: BundleVersion,
     ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        let note_version = self.note_version;
-        let actions = self
-            .actions
-            .into_iter()
-            .map(|action| {
-                let spend = orchard::pczt::Spend::parse(
+        self.into_parsed_inner(bundle_version, false)
+    }
+
+    /// Parses this bundle with the given bundle version for a preverified signing
+    /// pass, skipping each spend's `FullViewingKey` derivation (an expensive step the
+    /// spend authorization signature does not depend on).
+    ///
+    /// Callers MUST have already run the full Verifier checks over the identical PCZT
+    /// bytes: the wire `fvk` bytes are neither validated nor retained here (each spend
+    /// has `fvk: None`), so the result must not go to the Verifier check path or the
+    /// Prover, and re-serializing it drops the wire `fvk`s (the low-level Signer
+    /// restores them from a pre-parse snapshot).
+    pub(crate) fn into_parsed_with_version_preverified_for_signing(
+        self,
+        bundle_version: BundleVersion,
+    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+        self.into_parsed_inner(bundle_version, true)
+    }
+
+    /// The shared body of [`Bundle::into_parsed_with_version`] and
+    /// [`Bundle::into_parsed_with_version_preverified_for_signing`]: `preverified`
+    /// selects between the full parse and the preverified signing parse.
+    fn into_parsed_inner(
+        self,
+        bundle_version: BundleVersion,
+        preverified: bool,
+    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+        // We parse actions through a helper that is specifically `#[inline(never)]`.
+        // This is because if this gets inlined in a loop (e.g. `.map(..).collect()`),
+        // it could compile into a stack frame that is tens of KB deep.
+        // This can overflow stacks of embedded signers for high action count
+        // transactions.
+        #[inline(never)]
+        fn parse_action_inner(
+            action: Action,
+            note_version: NoteVersion,
+            preverified: bool,
+        ) -> Result<orchard::pczt::Action, orchard::pczt::ParseError> {
+            let spend_zip32_derivation = action
+                .spend
+                .zip32_derivation
+                .map(|z| {
+                    orchard::pczt::Zip32Derivation::parse(z.seed_fingerprint, z.derivation_path)
+                })
+                .transpose()?;
+
+            let spend = if preverified {
+                orchard::pczt::Spend::parse_preverified_for_signing(
                     action.spend.nullifier,
                     action.spend.rk,
                     action.spend.spend_auth_sig,
@@ -821,49 +877,60 @@ impl Bundle {
                     action.spend.fvk,
                     action.spend.witness,
                     action.spend.alpha,
-                    action
-                        .spend
-                        .zip32_derivation
-                        .map(|z| {
-                            orchard::pczt::Zip32Derivation::parse(
-                                z.seed_fingerprint,
-                                z.derivation_path,
-                            )
-                        })
-                        .transpose()?,
+                    spend_zip32_derivation,
                     action.spend.dummy_sk,
                     note_version,
                     action.spend.proprietary,
-                )?;
-
-                let output = orchard::pczt::Output::parse(
-                    *spend.nullifier(),
-                    action.output.cmx,
-                    action.output.ephemeral_key,
-                    action.output.enc_ciphertext,
-                    action.output.out_ciphertext,
-                    action.output.recipient,
-                    action.output.value,
-                    action.output.rseed,
-                    action.output.ock,
-                    action
-                        .output
-                        .zip32_derivation
-                        .map(|z| {
-                            orchard::pczt::Zip32Derivation::parse(
-                                z.seed_fingerprint,
-                                z.derivation_path,
-                            )
-                        })
-                        .transpose()?,
-                    action.output.user_address,
+                )
+            } else {
+                orchard::pczt::Spend::parse(
+                    action.spend.nullifier,
+                    action.spend.rk,
+                    action.spend.spend_auth_sig,
+                    action.spend.recipient,
+                    action.spend.value,
+                    action.spend.rho,
+                    action.spend.rseed,
+                    action.spend.fvk,
+                    action.spend.witness,
+                    action.spend.alpha,
+                    spend_zip32_derivation,
+                    action.spend.dummy_sk,
                     note_version,
-                    action.output.proprietary,
-                )?;
+                    action.spend.proprietary,
+                )
+            }?;
 
-                orchard::pczt::Action::parse(action.cv_net, spend, output, action.rcv)
-            })
-            .collect::<Result<_, _>>()?;
+            let output = orchard::pczt::Output::parse(
+                *spend.nullifier(),
+                action.output.cmx,
+                action.output.ephemeral_key,
+                action.output.enc_ciphertext,
+                action.output.out_ciphertext,
+                action.output.recipient,
+                action.output.value,
+                action.output.rseed,
+                action.output.ock,
+                action
+                    .output
+                    .zip32_derivation
+                    .map(|z| {
+                        orchard::pczt::Zip32Derivation::parse(z.seed_fingerprint, z.derivation_path)
+                    })
+                    .transpose()?,
+                action.output.user_address,
+                note_version,
+                action.output.proprietary,
+            )?;
+
+            orchard::pczt::Action::parse(action.cv_net, spend, output, action.rcv)
+        }
+
+        let note_version = self.note_version;
+        let mut actions = Vec::with_capacity(self.actions.len());
+        for action in self.actions {
+            actions.push(parse_action_inner(action, note_version, preverified)?);
+        }
 
         orchard::pczt::Bundle::parse(
             actions,

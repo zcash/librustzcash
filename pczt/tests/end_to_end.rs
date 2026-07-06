@@ -11,13 +11,14 @@ use orchard::tree::MerkleHashOrchard;
 use pczt::{
     Pczt,
     roles::{
-        combiner::Combiner, creator::Creator, io_finalizer::IoFinalizer, prover::Prover,
-        signer::Signer, spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor,
-        updater::Updater,
+        combiner::Combiner, creator::Creator, io_finalizer::IoFinalizer, low_level_signer,
+        prover::Prover, signer::Signer, spend_finalizer::SpendFinalizer,
+        tx_extractor::TransactionExtractor, updater::Updater, verifier::Verifier,
     },
     v1, v2,
 };
-use rand_core::OsRng;
+use rand_chacha::ChaCha20Rng;
+use rand_core::{OsRng, SeedableRng};
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
@@ -697,4 +698,438 @@ fn orchard_to_orchard() {
     let tx = TransactionExtractor::new(pczt).extract().unwrap();
 
     assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+}
+
+/// Extracts each action's wire `fvk` bytes from the Orchard or Ironwood pool of the
+/// PCZT, via the Verifier role's full (FVK-deriving) parse.
+fn wire_spend_fvks(pczt: &Pczt, ironwood: bool) -> Vec<Option<[u8; 96]>> {
+    use std::convert::Infallible;
+
+    fn collect(bundle: &orchard::pczt::Bundle) -> Vec<Option<[u8; 96]>> {
+        bundle
+            .actions()
+            .iter()
+            .map(|action| action.spend().fvk().as_ref().map(|fvk| fvk.to_bytes()))
+            .collect()
+    }
+
+    let mut fvks = None;
+    let verifier = Verifier::new(pczt.clone());
+    if ironwood {
+        verifier
+            .with_ironwood::<Infallible, _>(|bundle| {
+                fvks = Some(collect(bundle));
+                Ok(())
+            })
+            .expect("Ironwood bundle parses fully");
+    } else {
+        verifier
+            .with_orchard::<Infallible, _>(|bundle| {
+                fvks = Some(collect(bundle));
+                Ok(())
+            })
+            .expect("Orchard bundle parses fully");
+    }
+    fvks.expect("closure ran")
+}
+
+/// Computes the spend authorization signature for the action at `index` of the
+/// Orchard or Ironwood pool, over the Verifier role's full (FVK-deriving) parse of
+/// the PCZT, using a [`ChaCha20Rng`] seeded with `seed`.
+///
+/// This is the reference value for asserting that the low-level Signer's preverified
+/// signing parse produces a byte-identical signature.
+fn expected_spend_auth_sig(
+    pczt: &Pczt,
+    ironwood: bool,
+    index: usize,
+    ask: &orchard::keys::SpendAuthorizingKey,
+    sighash: [u8; 32],
+    seed: [u8; 32],
+) -> [u8; 64] {
+    use std::convert::Infallible;
+
+    let mut sig = None;
+    let mut compute = |bundle: &orchard::pczt::Bundle| {
+        let spend = bundle.actions()[index].spend();
+        // The full parse derives the FVK (in contrast to the preverified parse).
+        assert!(spend.fvk().is_some());
+        let alpha = spend
+            .alpha()
+            .as_ref()
+            .expect("alpha is set after IO finalization");
+        let rsk = ask.randomize(alpha);
+        sig = Some(<[u8; 64]>::from(
+            &rsk.sign(ChaCha20Rng::from_seed(seed), &sighash),
+        ));
+        Ok::<(), pczt::roles::verifier::OrchardError<Infallible>>(())
+    };
+
+    let verifier = Verifier::new(pczt.clone());
+    if ironwood {
+        verifier
+            .with_ironwood(&mut compute)
+            .expect("Ironwood bundle parses fully");
+    } else {
+        verifier
+            .with_orchard(&mut compute)
+            .expect("Orchard bundle parses fully");
+    }
+    sig.expect("closure ran")
+}
+
+/// Asserts that `sig` is a valid RedPallas spend authorization signature for the
+/// randomized verification key `rk`, over `sighash`.
+///
+/// This proves the signature the preverified path produced actually authorizes the
+/// spend (matching what [`orchard::pczt::Action::apply_signature`] checks), not just
+/// that it is byte-equal to the reference.
+fn assert_valid_spend_auth_sig(rk: &[u8; 32], sighash: [u8; 32], sig: [u8; 64]) {
+    use orchard::primitives::redpallas::{self, SpendAuth};
+
+    let rk = redpallas::VerificationKey::<SpendAuth>::try_from(*rk).expect("`rk` is a valid key");
+    let sig = redpallas::Signature::<SpendAuth>::from(sig);
+    rk.verify(&sighash, &sig)
+        .expect("spend authorization signature verifies against `rk`");
+}
+
+#[test]
+fn orchard_low_level_signer_uses_preverified_signing_parse() {
+    let mut rng = OsRng;
+
+    // Create an Orchard account to send funds from.
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    // Pretend we already received a note.
+    let value = orchard::value::NoteValue::from_raw(1_000_000);
+    let note = {
+        let mut orchard_builder = orchard::builder::Builder::new(
+            orchard::builder::BundleType::DEFAULT,
+            orchard::bundle::BundleVersion::orchard_v2(),
+            orchard::bundle::BundleVersion::orchard_v2().default_flags(),
+            orchard::Anchor::empty_tree(),
+        )
+        .unwrap();
+        orchard_builder
+            .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
+            .unwrap();
+        let (bundle, meta) = orchard_builder.build::<i64>(&mut rng).unwrap().unwrap();
+        let action = bundle
+            .actions()
+            .get(meta.output_action_index(0).unwrap())
+            .unwrap();
+        let domain = orchard::note_encryption::OrchardDomain::for_action(action);
+        let (note, _, _) = try_note_decryption(&domain, &orchard_ivk.prepare(), action).unwrap();
+        note
+    };
+
+    // Use the tree with a single leaf.
+    let (anchor, merkle_path) = {
+        let cmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
+        let leaf = MerkleHashOrchard::from_cmx(&cmx);
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+        tree.append(leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+        tree.checkpoint(9_999_999).unwrap();
+        let position = 0.into();
+        let merkle_path = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path.root(leaf);
+        (anchor.into(), merkle_path.into())
+    };
+
+    // Build the Orchard bundle we'll be using.
+    let mut builder = Builder::new(
+        MainNetwork,
+        10_000_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(anchor),
+            ironwood_anchor: None,
+        },
+    );
+    builder
+        .add_orchard_spend::<zip317::FeeRule>(orchard_fvk.clone(), note, merkle_path)
+        .unwrap();
+    builder
+        .add_orchard_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            Zatoshis::const_from_u64(100_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_orchard_output::<zip317::FeeRule>(
+            Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
+            orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
+            Zatoshis::const_from_u64(890_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        orchard_meta,
+        ..
+    } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    // Create the base PCZT, and finalize the I/O.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+
+    // Create the proof before signing, so that the byte-losslessness check below
+    // covers a maximal bundle (witnesses, proof, and FVKs all present).
+    let pczt = Prover::new(pczt)
+        .create_orchard_proof(orchard_proving_key())
+        .unwrap()
+        .finish();
+    check_round_trip(&pczt);
+
+    // A no-op signing pass must be byte-lossless: the preverified parse drops the
+    // wire `fvk` bytes, but the Signer restores them after serialization.
+    let noop = low_level_signer::Signer::new(pczt.clone())
+        .sign_orchard_with::<low_level_signer::OrchardParseError, _>(|_, _, _| Ok(()))
+        .unwrap()
+        .finish();
+    assert_eq!(
+        noop.serialize().unwrap(),
+        pczt.clone().serialize().unwrap(),
+        "no-op low-level Orchard signing pass must preserve every wire byte",
+    );
+
+    let index = orchard_meta.spend_action_index(0).unwrap();
+    let sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
+    let seed = [42; 32];
+
+    // Compute the reference signature over the Verifier's full parse, and snapshot
+    // the wire `fvk` bytes it observes.
+    let expected_sig = expected_spend_auth_sig(&pczt, false, index, &orchard_ask, sighash, seed);
+    let fvks_before = wire_spend_fvks(&pczt, false);
+    assert_eq!(fvks_before[index], Some(orchard_fvk.to_bytes()));
+
+    // Sign through the low-level Signer's preverified path with the same seed.
+    let signed = low_level_signer::Signer::new(pczt.clone())
+        .sign_orchard_with::<low_level_signer::OrchardParseError, _>(|_, bundle, _| {
+            // The preverified signing parse skips FVK derivation entirely.
+            assert!(bundle.actions()[index].spend().fvk().is_none());
+            bundle.actions_mut()[index]
+                .sign(sighash, &orchard_ask, ChaCha20Rng::from_seed(seed))
+                .expect("signing succeeds");
+            Ok(())
+        })
+        .unwrap()
+        .finish();
+    check_round_trip(&signed);
+
+    // The preverified signing parse must yield a byte-identical signature to the
+    // full-parse path.
+    let produced_sig = signed.orchard().actions()[index]
+        .spend()
+        .spend_auth_sig()
+        .expect("action was signed");
+    assert_eq!(produced_sig, expected_sig);
+
+    // ...and that signature must actually verify against the spend's `rk`.
+    assert_valid_spend_auth_sig(
+        signed.orchard().actions()[index].spend().rk(),
+        sighash,
+        produced_sig,
+    );
+
+    // The wire `fvk` bytes must be preserved (unchanged) after signing.
+    assert_eq!(wire_spend_fvks(&signed, false), fvks_before);
+
+    // The signed PCZT remains fully usable: we should be able to extract the fully
+    // authorized transaction.
+    let tx = TransactionExtractor::new(signed).extract().unwrap();
+
+    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+}
+
+/// Checks that the PCZT round-trips through the default (v2) encoding.
+///
+/// This is [`check_round_trip`] minus the v1 encoding check: v6 PCZTs (which carry
+/// an Ironwood bundle) are not representable in the legacy v1 encoding.
+fn check_v2_round_trip(pczt: &Pczt) {
+    let encoded = pczt.clone().serialize().expect("serialization succeeds");
+    let reencoded = Pczt::parse(&encoded)
+        .expect("can parse encoded PCZT")
+        .serialize()
+        .expect("serialization succeeds");
+    assert_eq!(encoded, reencoded);
+}
+
+/// A regtest network with NU6.3 activated, for exercising the Ironwood pool.
+fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+    use zcash_protocol::consensus::BlockHeight;
+
+    zcash_protocol::local_consensus::LocalNetwork {
+        overwinter: Some(BlockHeight::from_u32(1)),
+        sapling: Some(BlockHeight::from_u32(2)),
+        blossom: Some(BlockHeight::from_u32(3)),
+        heartwood: Some(BlockHeight::from_u32(4)),
+        canopy: Some(BlockHeight::from_u32(5)),
+        nu5: Some(BlockHeight::from_u32(6)),
+        nu6: Some(BlockHeight::from_u32(7)),
+        nu6_1: Some(BlockHeight::from_u32(8)),
+        nu6_2: Some(BlockHeight::from_u32(9)),
+        nu6_3: Some(BlockHeight::from_u32(10)),
+        #[cfg(zcash_unstable = "nu7")]
+        nu7: None,
+    }
+}
+
+#[test]
+fn ironwood_low_level_signer_uses_preverified_signing_parse() {
+    let mut rng = OsRng;
+
+    // Create an Orchard account to send funds from.
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    // Pretend we already received an Ironwood note.
+    let value = orchard::value::NoteValue::from_raw(1_000_000);
+    let note = {
+        let ironwood_bundle_version = orchard::bundle::BundleVersion::ironwood_v3();
+        let mut orchard_builder = orchard::builder::Builder::new(
+            orchard::builder::BundleType::DEFAULT,
+            ironwood_bundle_version,
+            ironwood_bundle_version.default_flags(),
+            orchard::Anchor::empty_tree(),
+        )
+        .unwrap();
+        orchard_builder
+            .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
+            .unwrap();
+        let (bundle, meta) = orchard_builder.build::<i64>(&mut rng).unwrap().unwrap();
+        let action = bundle
+            .actions()
+            .get(meta.output_action_index(0).unwrap())
+            .unwrap();
+        let domain = orchard::note_encryption::IronwoodDomain::for_action(action);
+        let (note, _, _) = try_note_decryption(&domain, &orchard_ivk.prepare(), action).unwrap();
+        assert_eq!(note.version(), orchard::note::NoteVersion::V3);
+        note
+    };
+
+    // Use the Ironwood tree with a single leaf.
+    let (anchor, merkle_path) = {
+        let cmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
+        let leaf = MerkleHashOrchard::from_cmx(&cmx);
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+        tree.append(leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+        tree.checkpoint(9_999_999).unwrap();
+        let position = 0.into();
+        let merkle_path = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path.root(leaf);
+        (anchor.into(), merkle_path.into())
+    };
+
+    // Build the Ironwood bundle we'll be using.
+    let mut builder = Builder::new(
+        nu6_3_test_network(),
+        10_000_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: None,
+            ironwood_anchor: Some(anchor),
+        },
+    );
+    builder
+        .add_ironwood_spend::<zip317::FeeRule>(orchard_fvk.clone(), note, merkle_path)
+        .unwrap();
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            Zatoshis::const_from_u64(990_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        ironwood_meta,
+        ..
+    } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    // Create the base PCZT, and finalize the I/O.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_v2_round_trip(&pczt);
+    let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    check_v2_round_trip(&pczt);
+
+    // A no-op signing pass must be byte-lossless: the preverified parse drops the
+    // wire `fvk` bytes, but the Signer restores them after serialization.
+    let noop = low_level_signer::Signer::new(pczt.clone())
+        .sign_ironwood_with::<low_level_signer::OrchardParseError, _>(|_, _, _| Ok(()))
+        .unwrap()
+        .finish();
+    assert_eq!(
+        noop.serialize().unwrap(),
+        pczt.clone().serialize().unwrap(),
+        "no-op low-level Ironwood signing pass must preserve every wire byte",
+    );
+
+    let index = ironwood_meta.spend_action_index(0).unwrap();
+    let sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
+    let seed = [7; 32];
+
+    // Compute the reference signature over the Verifier's full parse, and snapshot
+    // the wire `fvk` bytes it observes.
+    let expected_sig = expected_spend_auth_sig(&pczt, true, index, &orchard_ask, sighash, seed);
+    let fvks_before = wire_spend_fvks(&pczt, true);
+    assert_eq!(fvks_before[index], Some(orchard_fvk.to_bytes()));
+
+    // Sign through the low-level Signer's preverified path with the same seed.
+    let signed = low_level_signer::Signer::new(pczt.clone())
+        .sign_ironwood_with::<low_level_signer::OrchardParseError, _>(|_, bundle, _| {
+            // The preverified signing parse skips FVK derivation entirely.
+            assert!(bundle.actions()[index].spend().fvk().is_none());
+            bundle.actions_mut()[index]
+                .sign(sighash, &orchard_ask, ChaCha20Rng::from_seed(seed))
+                .expect("signing succeeds");
+            Ok(())
+        })
+        .unwrap()
+        .finish();
+    check_v2_round_trip(&signed);
+
+    // The preverified signing parse must yield a byte-identical signature to the
+    // full-parse path.
+    let produced_sig = signed.ironwood().actions()[index]
+        .spend()
+        .spend_auth_sig()
+        .expect("action was signed");
+    assert_eq!(produced_sig, expected_sig);
+
+    // ...and that signature must actually verify against the spend's `rk`.
+    assert_valid_spend_auth_sig(
+        signed.ironwood().actions()[index].spend().rk(),
+        sighash,
+        produced_sig,
+    );
+
+    // The wire `fvk` bytes must be preserved (unchanged) after signing.
+    assert_eq!(wire_spend_fvks(&signed, true), fvks_before);
 }

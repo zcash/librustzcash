@@ -55,6 +55,7 @@ document-features = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
+rand_chacha.workspace = true
 ripemd.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 sha2.workspace = true
@@ -64,6 +65,7 @@ zcash_primitives = { workspace = true, features = [
     "transparent-inputs",
 ] }
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zip32.workspace = true
 
 [features]
