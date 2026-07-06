@@ -194,6 +194,25 @@ where
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             );
+
+            #[cfg(feature = "orchard")]
+            self.ironwood.add_outputs(
+                block_hash,
+                txid,
+                OrchardDomain::for_compact_action,
+                tx.ironwood_actions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, action)| {
+                        CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
+                            at_height: block_height,
+                            txid,
+                            pool_type: ShieldedPool::Ironwood,
+                            index: i,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
         }
 
         Ok(())
@@ -266,6 +285,11 @@ where
     #[cfg(feature = "orchard")]
     let mut orchard_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
+    #[cfg(feature = "orchard")]
+    let mut ironwood_nullifier_map = Vec::with_capacity(block.vtx.len());
+    #[cfg(feature = "orchard")]
+    let mut ironwood_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
+
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
         let tx_index =
@@ -300,11 +324,30 @@ where
             orchard_spends
         };
 
+        #[cfg(feature = "orchard")]
+        let ironwood_spends = {
+            let (ironwood_spends, ironwood_unlinked_nullifiers) = find_spent(
+                &tx.ironwood_actions,
+                &nullifiers.ironwood,
+                |spend| {
+                    spend.nf().expect(
+                        "Could not deserialize nullifier for spend from protobuf representation.",
+                    )
+                },
+                WalletSpend::from_parts,
+            );
+            ironwood_nullifier_map.push((tx_index, txid, ironwood_unlinked_nullifiers));
+            ironwood_spends
+        };
+
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account_id());
         #[cfg(feature = "orchard")]
         let spent_from_accounts =
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
+        #[cfg(feature = "orchard")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(ironwood_spends.iter().map(|spend| spend.account_id()));
         let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
 
         let (sapling_outputs, mut sapling_nc) = find_received(
@@ -383,11 +426,53 @@ where
         orchard_note_commitments.append(&mut orchard_nc);
 
         #[cfg(feature = "orchard")]
+        let (ironwood_outputs, mut ironwood_nc) = find_received(
+            cur_height,
+            pos_tracker.compact_tx_contains_last_ironwood_actions_in_block(&tx),
+            txid,
+            |output_idx| pos_tracker.ironwood_note_position(output_idx),
+            &scanning_keys.ironwood,
+            &spent_from_accounts,
+            &tx.ironwood_actions
+                .iter()
+                .enumerate()
+                .map(|(i, action)| {
+                    let action = CompactAction::try_from(action).map_err(|_| {
+                        ScanError::EncodingInvalid {
+                            at_height: cur_height,
+                            txid,
+                            pool_type: ShieldedPool::Ironwood,
+                            index: i,
+                        }
+                    })?;
+                    Ok((OrchardDomain::for_compact_action(&action), action))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            batch_runners
+                .as_mut()
+                .map(|runners| |txid| runners.ironwood.collect_results(cur_hash, txid)),
+            |ivks, outputs| {
+                batch::try_compact_note_decryption(ivks, outputs)
+                    .into_iter()
+                    .map(|opt| opt.map(|((note, recipient), i)| ((note, recipient, ()), i)))
+                    .collect()
+            },
+            |output| MerkleHashOrchard::from_cmx(&output.cmx()),
+        );
+        #[cfg(feature = "orchard")]
+        ironwood_note_commitments.append(&mut ironwood_nc);
+
+        #[cfg(feature = "orchard")]
         let has_orchard = !(orchard_spends.is_empty() && orchard_outputs.is_empty());
         #[cfg(not(feature = "orchard"))]
         let has_orchard = false;
 
-        if has_sapling || has_orchard {
+        #[cfg(feature = "orchard")]
+        let has_ironwood = !(ironwood_spends.is_empty() && ironwood_outputs.is_empty());
+        #[cfg(not(feature = "orchard"))]
+        let has_ironwood = false;
+
+        if has_sapling || has_orchard || has_ironwood {
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
@@ -400,6 +485,10 @@ where
                 orchard_spends,
                 #[cfg(feature = "orchard")]
                 orchard_outputs,
+                #[cfg(feature = "orchard")]
+                ironwood_spends,
+                #[cfg(feature = "orchard")]
+                ironwood_outputs,
             ));
         }
 
@@ -423,6 +512,12 @@ where
             pos_tracker.orchard_final_tree_size,
             orchard_note_commitments,
             orchard_nullifier_map,
+        ),
+        #[cfg(feature = "orchard")]
+        ScannedBundles::new(
+            pos_tracker.ironwood_final_tree_size,
+            ironwood_note_commitments,
+            ironwood_nullifier_map,
         ),
     ))
 }
@@ -536,6 +631,18 @@ impl PositionTracker {
             |m| m.orchard_commitment_tree_size,
         )?;
 
+        #[cfg(feature = "orchard")]
+        let (ironwood_prior_tree_size, ironwood_final_tree_size) = tree_sizes_around(
+            params,
+            block,
+            prior_block_metadata,
+            ShieldedPool::Ironwood,
+            NetworkUpgrade::Nu6_3,
+            |m| m.ironwood_tree_size(),
+            |tx| tx.ironwood_actions.len(),
+            |m| m.ironwood_commitment_tree_size,
+        )?;
+
         Ok(Self {
             sapling_tree_position: sapling_prior_tree_size,
             sapling_final_tree_size,
@@ -543,6 +650,10 @@ impl PositionTracker {
             orchard_tree_position: orchard_prior_tree_size,
             #[cfg(feature = "orchard")]
             orchard_final_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_position: ironwood_prior_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_final_tree_size,
         })
     }
 
@@ -559,6 +670,14 @@ impl PositionTracker {
             == self.orchard_final_tree_size
     }
 
+    #[cfg(feature = "orchard")]
+    fn compact_tx_contains_last_ironwood_actions_in_block(&self, tx: &CompactTx) -> bool {
+        self.ironwood_tree_position
+            + u32::try_from(tx.ironwood_actions.len())
+                .expect("Ironwood action count cannot exceed a u32")
+            == self.ironwood_final_tree_size
+    }
+
     fn increment_over_compact_tx(&mut self, tx: &CompactTx) {
         self.sapling_tree_position +=
             u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32");
@@ -566,6 +685,8 @@ impl PositionTracker {
         {
             self.orchard_tree_position +=
                 u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
+            self.ironwood_tree_position += u32::try_from(tx.ironwood_actions.len())
+                .expect("Ironwood action count cannot exceed a u32");
         }
     }
 
@@ -580,6 +701,8 @@ impl PositionTracker {
         assert_eq!(self.sapling_tree_position, self.sapling_final_tree_size);
         #[cfg(feature = "orchard")]
         assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
+        #[cfg(feature = "orchard")]
+        assert_eq!(self.ironwood_tree_position, self.ironwood_final_tree_size);
 
         if let Some(chain_meta) = chain_metadata {
             if chain_meta.sapling_commitment_tree_size != self.sapling_tree_position {
@@ -598,6 +721,16 @@ impl PositionTracker {
                     at_height,
                     given: chain_meta.orchard_commitment_tree_size,
                     computed: self.orchard_tree_position,
+                });
+            }
+
+            #[cfg(feature = "orchard")]
+            if chain_meta.ironwood_commitment_tree_size != self.ironwood_tree_position {
+                return Err(ScanError::TreeSizeMismatch {
+                    protocol: ShieldedPool::Ironwood,
+                    at_height,
+                    given: chain_meta.ironwood_commitment_tree_size,
+                    computed: self.ironwood_tree_position,
                 });
             }
         }
@@ -669,6 +802,8 @@ mod tests {
                 Some(&BlockMetadata::from_parts(
                     BlockHeight::from(0),
                     BlockHash([0u8; 32]),
+                    Some(0),
+                    #[cfg(feature = "orchard")]
                     Some(0),
                     #[cfg(feature = "orchard")]
                     Some(0),
@@ -800,6 +935,8 @@ mod tests {
         let nf = Nullifier([7; 32]);
         let nullifiers = Nullifiers::new(
             vec![(account, nf)],
+            #[cfg(feature = "orchard")]
+            vec![],
             #[cfg(feature = "orchard")]
             vec![],
         );

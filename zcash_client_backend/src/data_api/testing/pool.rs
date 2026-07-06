@@ -450,6 +450,8 @@ pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
         Some(0),
         #[cfg(feature = "orchard")]
         Some(0),
+        #[cfg(feature = "orchard")]
+        Some(0),
     );
 
     // Phase 1: decrypt the block's shielded outputs.

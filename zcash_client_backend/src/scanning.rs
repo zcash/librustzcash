@@ -409,6 +409,8 @@ pub struct Nullifiers<AccountId> {
     sapling: Vec<(AccountId, sapling::Nullifier)>,
     #[cfg(feature = "orchard")]
     orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+    #[cfg(feature = "orchard")]
+    ironwood: Vec<(AccountId, IronwoodNullifier)>,
 }
 
 impl<AccountId> Nullifiers<AccountId> {
@@ -418,6 +420,8 @@ impl<AccountId> Nullifiers<AccountId> {
             sapling: vec![],
             #[cfg(feature = "orchard")]
             orchard: vec![],
+            #[cfg(feature = "orchard")]
+            ironwood: vec![],
         }
     }
 
@@ -429,6 +433,10 @@ impl<AccountId> Nullifiers<AccountId> {
             db_data.get_sapling_nullifiers(NullifierQuery::Unspent)?,
             #[cfg(feature = "orchard")]
             db_data.get_orchard_nullifiers(NullifierQuery::Unspent)?,
+            // TODO: persist and query Ironwood nullifiers once the Ironwood note write path
+            // exists; until then the wallet tracks no Ironwood nullifiers.
+            #[cfg(feature = "orchard")]
+            vec![],
         ))
     }
 
@@ -436,11 +444,14 @@ impl<AccountId> Nullifiers<AccountId> {
     pub(crate) fn new(
         sapling: Vec<(AccountId, sapling::Nullifier)>,
         #[cfg(feature = "orchard")] orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+        #[cfg(feature = "orchard")] ironwood: Vec<(AccountId, IronwoodNullifier)>,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -453,6 +464,12 @@ impl<AccountId> Nullifiers<AccountId> {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &[(AccountId, orchard::note::Nullifier)] {
         self.orchard.as_ref()
+    }
+
+    /// Returns the Ironwood nullifiers for notes that the wallet is tracking.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(&self) -> &[(AccountId, IronwoodNullifier)] {
+        self.ironwood.as_ref()
     }
 
     /// Discards Sapling nullifiers from the tracked nullifier set, retaining only those that
@@ -483,6 +500,19 @@ impl<AccountId> Nullifiers<AccountId> {
         nfs: impl IntoIterator<Item = (AccountId, orchard::note::Nullifier)>,
     ) {
         self.orchard.extend(nfs);
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn retain_ironwood(&mut self, f: impl Fn(&(AccountId, IronwoodNullifier)) -> bool) {
+        self.ironwood.retain(f);
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn extend_ironwood(
+        &mut self,
+        nfs: impl IntoIterator<Item = (AccountId, IronwoodNullifier)>,
+    ) {
+        self.ironwood.extend(nfs);
     }
 }
 
@@ -522,6 +552,19 @@ impl<AccountId: Copy> Nullifiers<AccountId> {
             self.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
             self.extend_orchard(scanned_block.transactions().iter().flat_map(|tx| {
                 tx.orchard_outputs()
+                    .iter()
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+            }));
+
+            let ironwood_spent_nf: Vec<&IronwoodNullifier> = scanned_block
+                .transactions()
+                .iter()
+                .flat_map(|tx| tx.ironwood_spends().iter().map(|spend| spend.nf()))
+                .collect();
+
+            self.retain_ironwood(|(_, nf)| !ironwood_spent_nf.contains(&nf));
+            self.extend_ironwood(scanned_block.transactions().iter().flat_map(|tx| {
+                tx.ironwood_outputs()
                     .iter()
                     .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
             }));
@@ -725,6 +768,10 @@ struct PositionTracker {
     orchard_tree_position: u32,
     #[cfg(feature = "orchard")]
     orchard_final_tree_size: u32,
+    #[cfg(feature = "orchard")]
+    ironwood_tree_position: u32,
+    #[cfg(feature = "orchard")]
+    ironwood_final_tree_size: u32,
 }
 
 impl PositionTracker {
@@ -738,6 +785,13 @@ impl PositionTracker {
     fn orchard_note_position(&self, output_idx: usize) -> Position {
         Position::from(u64::from(
             self.orchard_tree_position + u32::try_from(output_idx).unwrap(),
+        ))
+    }
+
+    #[cfg(feature = "orchard")]
+    fn ironwood_note_position(&self, output_idx: usize) -> Position {
+        Position::from(u64::from(
+            self.ironwood_tree_position + u32::try_from(output_idx).unwrap(),
         ))
     }
 }

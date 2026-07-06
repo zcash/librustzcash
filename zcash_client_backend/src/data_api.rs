@@ -2318,6 +2318,8 @@ pub struct BlockMetadata {
     sapling_tree_size: Option<u32>,
     #[cfg(feature = "orchard")]
     orchard_tree_size: Option<u32>,
+    #[cfg(feature = "orchard")]
+    ironwood_tree_size: Option<u32>,
 }
 
 impl BlockMetadata {
@@ -2327,6 +2329,7 @@ impl BlockMetadata {
         block_hash: BlockHash,
         sapling_tree_size: Option<u32>,
         #[cfg(feature = "orchard")] orchard_tree_size: Option<u32>,
+        #[cfg(feature = "orchard")] ironwood_tree_size: Option<u32>,
     ) -> Self {
         Self {
             block_height,
@@ -2334,6 +2337,8 @@ impl BlockMetadata {
             sapling_tree_size,
             #[cfg(feature = "orchard")]
             orchard_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_size,
         }
     }
 
@@ -2358,6 +2363,13 @@ impl BlockMetadata {
     #[cfg(feature = "orchard")]
     pub fn orchard_tree_size(&self) -> Option<u32> {
         self.orchard_tree_size
+    }
+
+    /// Returns the size of the Ironwood note commitment tree for the final treestate of the block
+    /// that this [`BlockMetadata`] describes, if available.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_tree_size(&self) -> Option<u32> {
+        self.ironwood_tree_size
     }
 }
 
@@ -2416,6 +2428,10 @@ pub struct ScannedBlockCommitments {
     /// Present only when the `orchard` feature is enabled.
     #[cfg(feature = "orchard")]
     pub orchard: Vec<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>,
+    /// The ordered vector of note commitments for Ironwood outputs of the block.
+    /// Present only when the `orchard` feature is enabled.
+    #[cfg(feature = "orchard")]
+    pub ironwood: Vec<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>,
 }
 
 /// The subset of information that is relevant to this wallet that has been
@@ -2430,6 +2446,8 @@ pub struct ScannedBlock<AccountId> {
     sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
     #[cfg(feature = "orchard")]
     orchard: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
+    #[cfg(feature = "orchard")]
+    ironwood: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
 }
 
 impl<AccountId> ScannedBlock<AccountId> {
@@ -2444,6 +2462,10 @@ impl<AccountId> ScannedBlock<AccountId> {
             orchard::tree::MerkleHashOrchard,
             orchard::note::Nullifier,
         >,
+        #[cfg(feature = "orchard")] ironwood: ScannedBundles<
+            orchard::tree::MerkleHashOrchard,
+            orchard::note::Nullifier,
+        >,
     ) -> Self {
         Self {
             block_height,
@@ -2453,6 +2475,8 @@ impl<AccountId> ScannedBlock<AccountId> {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -2489,13 +2513,23 @@ impl<AccountId> ScannedBlock<AccountId> {
         &self.orchard
     }
 
-    /// Consumes `self` and returns the lists of Sapling and Orchard note commitments associated
-    /// with the scanned block as an owned value.
+    /// Returns the Ironwood note commitment tree and nullifier data for the block.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(
+        &self,
+    ) -> &ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier> {
+        &self.ironwood
+    }
+
+    /// Consumes `self` and returns the lists of Sapling, Orchard, and Ironwood note commitments
+    /// associated with the scanned block as an owned value.
     pub fn into_commitments(self) -> ScannedBlockCommitments {
         ScannedBlockCommitments {
             sapling: self.sapling.commitments,
             #[cfg(feature = "orchard")]
             orchard: self.orchard.commitments,
+            #[cfg(feature = "orchard")]
+            ironwood: self.ironwood.commitments,
         }
     }
 
@@ -2507,6 +2541,8 @@ impl<AccountId> ScannedBlock<AccountId> {
             sapling_tree_size: Some(self.sapling.final_tree_size),
             #[cfg(feature = "orchard")]
             orchard_tree_size: Some(self.orchard.final_tree_size),
+            #[cfg(feature = "orchard")]
+            ironwood_tree_size: Some(self.ironwood.final_tree_size),
         }
     }
 }

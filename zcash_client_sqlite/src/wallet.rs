@@ -3086,10 +3086,23 @@ pub(crate) fn get_target_and_anchor_heights(
 
 fn parse_block_metadata<P: consensus::Parameters>(
     _params: &P,
-    row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>, Option<u32>),
+    row: (
+        BlockHeight,
+        Vec<u8>,
+        Option<u32>,
+        Vec<u8>,
+        Option<u32>,
+        Option<u32>,
+    ),
 ) -> Result<BlockMetadata, SqliteClientError> {
-    let (block_height, hash_data, sapling_tree_size_opt, sapling_tree, _orchard_tree_size_opt) =
-        row;
+    let (
+        block_height,
+        hash_data,
+        sapling_tree_size_opt,
+        sapling_tree,
+        _orchard_tree_size_opt,
+        _ironwood_tree_size_opt,
+    ) = row;
     let sapling_tree_size = sapling_tree_size_opt.map_or_else(|| {
         if sapling_tree == BLOCK_SAPLING_FRONTIER_ABSENT {
             Err(SqliteClientError::CorruptedData("One of either the Sapling tree size or the legacy Sapling commitment tree must be present.".to_owned()))
@@ -3125,6 +3138,15 @@ fn parse_block_metadata<P: consensus::Parameters>(
         } else {
             Some(0)
         },
+        #[cfg(feature = "orchard")]
+        if _params
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .is_some_and(|nu6_3_activation| block_height >= nu6_3_activation)
+        {
+            _ironwood_tree_size_opt
+        } else {
+            Some(0)
+        },
     ))
 }
 
@@ -3135,7 +3157,7 @@ pub(crate) fn block_metadata<P: consensus::Parameters>(
     block_height: BlockHeight,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
-        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size, ironwood_commitment_tree_size
         FROM blocks
         WHERE height = :block_height",
         named_params![":block_height": u32::from(block_height)],
@@ -3145,12 +3167,14 @@ pub(crate) fn block_metadata<P: consensus::Parameters>(
             let sapling_tree_size: Option<u32> = row.get(2)?;
             let sapling_tree: Vec<u8> = row.get(3)?;
             let orchard_tree_size: Option<u32> = row.get(4)?;
+            let ironwood_tree_size: Option<u32> = row.get(5)?;
             Ok((
                 BlockHeight::from(height),
                 block_hash,
                 sapling_tree_size,
                 sapling_tree,
                 orchard_tree_size,
+                ironwood_tree_size,
             ))
         },
     )
@@ -3221,7 +3245,7 @@ pub(crate) fn block_max_scanned<P: consensus::Parameters>(
     params: &P,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
-        "SELECT blocks.height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
+        "SELECT blocks.height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size, ironwood_commitment_tree_size
          FROM blocks
          JOIN (SELECT MAX(height) AS height FROM blocks) blocks_max
          ON blocks.height = blocks_max.height",
@@ -3232,12 +3256,14 @@ pub(crate) fn block_max_scanned<P: consensus::Parameters>(
             let sapling_tree_size: Option<u32> = row.get(2)?;
             let sapling_tree: Vec<u8> = row.get(3)?;
             let orchard_tree_size: Option<u32> = row.get(4)?;
+            let ironwood_tree_size: Option<u32> = row.get(5)?;
             Ok((
                 BlockHeight::from(height),
                 block_hash,
                 sapling_tree_size,
                 sapling_tree,
-                orchard_tree_size
+                orchard_tree_size,
+                ironwood_tree_size,
             ))
         },
     )
@@ -4974,6 +5000,10 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
             index,
             vec![],
             vec![],
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
             vec![],
             #[cfg(feature = "orchard")]
             vec![],
