@@ -1373,6 +1373,165 @@ pub(crate) mod tests {
         );
     }
 
+    /// A transaction that routes a payment through the Ironwood bundle without spending any
+    /// Ironwood note must still anchor that bundle to the wallet's real Ironwood tree root, not
+    /// to the empty-tree anchor. Anchoring to the empty tree whenever the wallet has no Ironwood
+    /// spends of its own would let an observer distinguish such transactions from ones that spend
+    /// real Ironwood notes, by comparing the bundle's anchor against the tree's actual state.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn ironwood_output_only_transaction_anchors_to_real_tree() {
+        use std::convert::Infallible;
+
+        use zcash_client_backend::{
+            data_api::{
+                Account, WalletCommitmentTrees, WalletRead,
+                testing::{
+                    AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
+                    pool::ShieldedPoolTester,
+                },
+                wallet::ConfirmationsPolicy,
+                wallet::input_selection::GreedyInputSelector,
+            },
+            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            wallet::OvkPolicy,
+        };
+        use zcash_keys::address::Address;
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::{
+            ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+        };
+        use zip321::{Payment, TransactionRequest};
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        // A network on which Ironwood (NU6.3) is active from the same height as Sapling.
+        let activation = BlockHeight::from_u32(100_000);
+        let network = LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let account_id = account.id();
+
+        // A note for a third party, not any account this wallet tracks. Its commitment still
+        // lands in the wallet's Ironwood tree, which is populated from every scanned block
+        // regardless of note ownership, so the tree becomes non-empty even though the account
+        // never receives an Ironwood note of its own.
+        let foreign = IronwoodFvk(OrchardPoolTester::random_fvk(st.rng_mut()));
+        let (h, _, _) = st.generate_next_block(
+            &foreign,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(50_000),
+        );
+        st.scan_cached_blocks(h, 1);
+
+        // Fund the account from the Orchard pool, comfortably larger than the payment and fee.
+        // The account never receives an Ironwood note, so input selection has none to spend.
+        let received = OrchardPoolTester::test_account_fvk(&st);
+        let note_value = Zatoshis::const_from_u64(100_000);
+        let (h, _, _) = st.generate_next_block(&received, AddressType::DefaultExternal, note_value);
+        st.scan_cached_blocks(h, 1);
+        assert_eq!(st.get_total_balance(account_id), note_value);
+
+        // Advance the chain so both notes' shards are fully scanned and an anchor is available.
+        for _ in 0..5 {
+            let (h, _) = st.generate_empty_block();
+            st.scan_cached_blocks(h, 1);
+        }
+
+        // Propose a payment to an Orchard receiver, funded entirely from the account's Orchard
+        // note.
+        let to_sk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to: Address = OrchardPoolTester::sk_default_address(&to_sk);
+        let payment_value = Zatoshis::const_from_u64(10_000);
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            payment_value,
+        )])
+        .unwrap();
+
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            StandardFeeRule::Zip317,
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+        let input_selector = GreedyInputSelector::new();
+
+        let proposal = st
+            .propose_transfer(
+                account_id,
+                &input_selector,
+                &change_strategy,
+                request,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let step = proposal.steps().last();
+        assert_eq!(
+            step.input_count_in_pool(zcash_protocol::PoolType::IRONWOOD),
+            0,
+            "the account has no Ironwood note to spend"
+        );
+        assert!(
+            step.payment_pools()
+                .values()
+                .all(|p| *p == zcash_protocol::PoolType::IRONWOOD),
+            "the Orchard-receiver payment must be represented as an Ironwood output"
+        );
+
+        let anchor_height = step.anchor_height();
+        let ironwood_root = st
+            .wallet_mut()
+            .with_ironwood_tree_mut(|tree| tree.root_at_checkpoint_id(&anchor_height))
+            .unwrap()
+            .expect("the wallet backend tracks an Ironwood tree")
+            .expect("the Ironwood tree has a checkpoint at the anchor height");
+        let expected_anchor: orchard::Anchor = ironwood_root.into();
+        assert_ne!(
+            expected_anchor,
+            orchard::Anchor::empty_tree(),
+            "the wallet's Ironwood tree must be non-empty"
+        );
+
+        let created = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            )
+            .unwrap();
+        let sent_txid = created[0];
+
+        let tx = st
+            .wallet()
+            .get_transaction(sent_txid)
+            .unwrap()
+            .expect("The sent transaction was stored.");
+        let ironwood_bundle = tx
+            .ironwood_bundle()
+            .expect("the transaction must contain an Ironwood bundle");
+
+        assert_eq!(
+            *ironwood_bundle.anchor(),
+            expected_anchor,
+            "an outputs-only Ironwood bundle must anchor to the real wallet tree root"
+        );
+    }
+
     /// `decrypt_transaction` must decrypt a transaction's Ironwood bundle under the Ironwood
     /// note-encryption domain, detecting a wallet-owned Ironwood output as an Ironwood note (and
     /// not as Orchard). Decrypting under the Orchard domain would silently detect nothing.
