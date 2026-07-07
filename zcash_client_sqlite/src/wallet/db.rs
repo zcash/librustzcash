@@ -996,6 +996,17 @@ CREATE TABLE ironwood_tree_checkpoint_marks_removed (
     CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
 )";
 
+/// Stores the ids of explicitly-retained checkpoints in the Ironwood [`ShardTree`].
+///
+/// This is identical to [`TABLE_ORCHARD_TREE_RETAINED_CHECKPOINTS`]; see its documentation
+/// for details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE ironwood_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
+)";
+
 //
 // Scanning
 //

@@ -42,6 +42,9 @@ impl RusqliteMigration for Migration {
             );
             CREATE TABLE orchard_tree_retained_checkpoints (
                 checkpoint_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE ironwood_tree_retained_checkpoints (
+                checkpoint_id INTEGER PRIMARY KEY
             );",
         )?;
         Ok(())
@@ -54,10 +57,48 @@ impl RusqliteMigration for Migration {
 
 #[cfg(test)]
 mod tests {
-    use crate::wallet::init::migrations::tests::test_migrate;
+    use secrecy::Secret;
+    use tempfile::NamedTempFile;
+    use zcash_protocol::consensus::{BlockHeight, Network};
+
+    use crate::{
+        testing::db::{test_clock, test_rng},
+        wallet::{
+            commitment_tree::add_retained_checkpoint, init::migrations::tests::test_migrate,
+            init::WalletMigrator,
+        },
+        WalletDb,
+    };
 
     #[test]
     fn migrate() {
         test_migrate(&[super::MIGRATION_ID]);
+    }
+
+    /// This migration must create a retained-checkpoints table for *every* shielded pool that
+    /// has a shardtree, Ironwood included. The shardtree stores persist a retained checkpoint
+    /// via [`add_retained_checkpoint`] with the pool's table prefix, so a missing
+    /// `ironwood_tree_retained_checkpoints` makes an Ironwood scan fail with
+    /// `PutBlocksCommitmentTree { pool: Ironwood, .. no such table }` as soon as a checkpoint is
+    /// retained. Exercise that exact write for all three pools.
+    #[test]
+    fn retained_checkpoint_tables_exist_for_all_pools() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data =
+            WalletDb::for_path(data_file.path(), Network::TestNetwork, test_clock(), test_rng())
+                .unwrap();
+        WalletMigrator::new()
+            .with_seed(Secret::new(vec![0xab; 32]))
+            .ignore_seed_relevance()
+            .init_or_migrate_to(&mut db_data, &[super::MIGRATION_ID])
+            .unwrap();
+
+        let mut conn = rusqlite::Connection::open(data_file.path()).unwrap();
+        let tx = conn.transaction().unwrap();
+        for prefix in ["sapling", "orchard", "ironwood"] {
+            add_retained_checkpoint(&tx, prefix, BlockHeight::from_u32(1))
+                .unwrap_or_else(|e| panic!("add_retained_checkpoint({prefix}) failed: {e:?}"));
+        }
+        tx.commit().unwrap();
     }
 }
