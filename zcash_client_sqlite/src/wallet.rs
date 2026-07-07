@@ -5557,6 +5557,8 @@ mod tests {
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
                     prior_orchard_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_having_current_birthday()
@@ -5714,6 +5716,8 @@ mod tests {
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
                     prior_orchard_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_having_current_birthday()
@@ -5888,6 +5892,8 @@ mod tests {
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
                     prior_orchard_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_having_current_birthday()

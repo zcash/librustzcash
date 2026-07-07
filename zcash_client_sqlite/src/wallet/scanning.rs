@@ -522,20 +522,20 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from each of the shards tables. The minimum of the two
-    // gives the start of a height range that covers the last incomplete shard of both the
-    // Sapling and Orchard pools.
+    // Read the maximum height from each of the shards tables. The minimum of these
+    // gives the start of a height range that covers the last incomplete shard of every
+    // shielded pool.
     let sapling_shard_tip = tip_shard_end_height(conn, ShieldedPool::Sapling)?;
     #[cfg(feature = "orchard")]
     let orchard_shard_tip = tip_shard_end_height(conn, ShieldedPool::Orchard)?;
+    #[cfg(feature = "orchard")]
+    let ironwood_shard_tip = tip_shard_end_height(conn, ShieldedPool::Ironwood)?;
 
     #[cfg(feature = "orchard")]
-    let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {
-        (None, None) => None,
-        (None, Some(o)) => Some(o),
-        (Some(s), None) => Some(s),
-        (Some(s), Some(o)) => Some(std::cmp::min(s, o)),
-    };
+    let min_shard_tip = [sapling_shard_tip, orchard_shard_tip, ironwood_shard_tip]
+        .into_iter()
+        .flatten()
+        .min();
     #[cfg(not(feature = "orchard"))]
     let min_shard_tip = sapling_shard_tip;
 
@@ -742,7 +742,8 @@ pub(crate) mod tests {
         std::convert::Infallible,
         zcash_client_backend::{
             data_api::{
-                WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
+                WalletCommitmentTrees,
+                testing::{IronwoodFvk, orchard::OrchardPoolTester},
                 wallet::input_selection::GreedyInputSelector,
             },
             fees::{DustOutputPolicy, StandardFeeRule, standard},
@@ -830,6 +831,8 @@ pub(crate) mod tests {
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
                     prior_orchard_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_from_sapling_activation(BlockHash([3; 32]))
@@ -1010,6 +1013,8 @@ pub(crate) mod tests {
                     } else {
                         vec![]
                     },
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_having_current_birthday()
@@ -1262,6 +1267,8 @@ pub(crate) mod tests {
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
                     prior_orchard_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_having_current_birthday()
@@ -1464,6 +1471,8 @@ pub(crate) mod tests {
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
                     prior_orchard_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_having_current_birthday()
@@ -1798,6 +1807,8 @@ pub(crate) mod tests {
                     ),
                     prior_sapling_roots: vec![],
                     prior_orchard_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_ironwood_roots: vec![],
                 }
             })
             .with_account_having_current_birthday()
@@ -2057,6 +2068,349 @@ pub(crate) mod tests {
             fee_rule,
             Some(change_memo.into()),
             OrchardPoolTester::SHIELDED_PROTOCOL,
+            DustOutputPolicy::default(),
+        );
+        let input_selector = GreedyInputSelector::new();
+
+        let proposal = st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request.clone(),
+            ConfirmationsPolicy::default(),
+        );
+
+        assert_matches!(proposal, Err(_));
+
+        // Scan the missing block
+        st.scan_cached_blocks(birthday.height() + 12, 1);
+
+        // Verify that it's now possible to create the proposal
+        let proposal = st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::default(),
+        );
+
+        assert_matches!(proposal, Ok(_));
+    }
+
+    #[cfg(feature = "orchard")]
+    fn prepare_ironwood_block_spanning_test(
+        with_birthday_subtree_root: bool,
+    ) -> TestState<BlockCache, TestDb, LocalNetwork> {
+        let birthday_nu5_offset = 5000;
+        let birthday_prior_block_hash = BlockHash([0; 32]);
+        // We set the Ironwood frontier at the birthday block initial state to 50 notes back from
+        // the end of the second shard.
+        let birthday_tree_size: u32 = (0x1 << 17) - 50;
+
+        // Ironwood (NU6.3) is active from Sapling/NU5 activation, so it is active throughout
+        // the birthday period established below.
+        let ironwood_activation = BlockHeight::from_u32(100_000);
+        let network = LocalNetwork {
+            nu6: Some(ironwood_activation),
+            nu6_1: Some(ironwood_activation),
+            nu6_2: Some(ironwood_activation),
+            nu6_3: Some(ironwood_activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_initial_chain_state(|rng, network| {
+                let birthday_height =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_nu5_offset;
+
+                let (prior_ironwood_roots, ironwood_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        birthday_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+
+                // There will only be one prior root. The completion height of the first shard
+                // will be 10 blocks prior to the wallet birthday height.
+                let prior_ironwood_roots = prior_ironwood_roots
+                    .into_iter()
+                    .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        birthday_prior_block_hash,
+                        Frontier::empty(), // the Sapling tree is unused in this test
+                        Frontier::empty(), // the Orchard tree is unused in this test
+                        ironwood_initial_tree,
+                    ),
+                    prior_sapling_roots: vec![],
+                    prior_orchard_roots: vec![],
+                    prior_ironwood_roots,
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        let ifvk = IronwoodFvk(OrchardPoolTester::random_fvk(st.rng_mut()));
+        let dfvk = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+
+        // Create the cache by adding:
+        // * 11 blocks each containing 4 Ironwood notes that are not for this wallet
+        // * 1 block containing 4 Ironwood notes, the last of which belongs to this wallet
+        // * 1 block containing 4 Ironwood notes not for this wallet, this will cross the shard
+        //   boundary
+        // * another 110 blocks each containing a single note not for this wallet
+        {
+            let fake_output = |for_this_wallet| {
+                FakeCompactOutput::new(
+                    if for_this_wallet {
+                        dfvk.clone()
+                    } else {
+                        ifvk.clone()
+                    },
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(100000),
+                )
+            };
+
+            let mut final_ironwood_tree =
+                birthday.prior_chain_state().final_ironwood_tree().clone();
+            // Generate the birthday block plus 10 more
+            for _ in 0..11 {
+                let (_, res, _) = st.generate_next_block_multi(&vec![fake_output(false); 4]);
+                for c in res.note_commitments().ironwood() {
+                    final_ironwood_tree.append(*c);
+                }
+            }
+
+            // Generate a block with the last note in the block belonging to the wallet
+            let (_, res, _) = st.generate_next_block_multi(&[
+                // 3 Ironwood notes not for this wallet
+                fake_output(false),
+                fake_output(false),
+                fake_output(false),
+                // One Ironwood note for this wallet
+                fake_output(true),
+            ]);
+            for c in res.note_commitments().ironwood() {
+                final_ironwood_tree.append(*c);
+            }
+
+            // Generate one block spanning the shard boundary
+            let (spanning_block_height, res, _) =
+                st.generate_next_block_multi(&vec![fake_output(false); 4]);
+
+            // Add two note commitments to the Ironwood frontier to complete the 2^16 subtree. We
+            // can then add that subtree root to the Ironwood frontier, so that we can compute the
+            // root of the completed subtree.
+            for c in res.note_commitments().ironwood().iter().take(2) {
+                final_ironwood_tree.append(*c);
+            }
+
+            assert_eq!(final_ironwood_tree.tree_size(), 0x1 << 17);
+            assert_eq!(spanning_block_height, birthday.height() + 12);
+
+            // Insert the root of the completed subtree if `with_birthday_subtree_root` is set.
+            // This simulates the situation where the subtree roots have all been inserted prior
+            // to scanning.
+            if with_birthday_subtree_root {
+                st.wallet_mut()
+                    .put_ironwood_subtree_roots(
+                        1,
+                        &[CommitmentTreeRoot::from_parts(
+                            spanning_block_height,
+                            final_ironwood_tree
+                                .value()
+                                .unwrap()
+                                .root(Some(Level::from(16))),
+                        )],
+                    )
+                    .unwrap();
+            }
+
+            // Add blocks up to the chain tip.
+            let mut chain_tip_height = spanning_block_height;
+            for _ in 0..110 {
+                let (h, res, _) = st.generate_next_block_multi(&[fake_output(false)]);
+                for c in res.note_commitments().ironwood() {
+                    final_ironwood_tree.append(*c);
+                }
+                chain_tip_height = h;
+            }
+
+            assert_eq!(chain_tip_height, birthday.height() + 122);
+        }
+
+        st
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn ironwood_block_spanning_tip_boundary_complete() {
+        use zcash_client_backend::data_api::{Account as _, wallet::ConfirmationsPolicy};
+
+        let mut st = prepare_ironwood_block_spanning_test(true);
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        // set the chain tip to the final block height we expect
+        let new_tip = birthday.height() + 122;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+
+        // Verify that the suggested scan ranges include only the chain-tip range with ChainTip
+        // priority, and that the range from the wallet birthday to the end of the birthday shard
+        // has Historic priority.
+        let birthday_height = birthday.height().into();
+        let expected = vec![
+            scan_range(
+                (birthday_height + 12)..(new_tip + 1).into(),
+                ScanPriority::ChainTip,
+            ),
+            scan_range(
+                birthday_height..(birthday_height + 12),
+                ScanPriority::Historic,
+            ),
+            scan_range(
+                st.sapling_activation_height().into()..birthday.height().into(),
+                ScanPriority::Ignored,
+            ),
+        ];
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), ScanPriority::Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Scan the chain-tip range.
+        st.scan_cached_blocks(birthday.height() + 12, 112);
+
+        // We haven't yet discovered our note, so balances should still be zero
+        assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+
+        // Now scan the historic range; this should discover our note, which should now be
+        // spendable.
+        st.scan_cached_blocks(birthday.height(), 12);
+        assert_eq!(
+            st.get_total_balance(account.id()),
+            Zatoshis::const_from_u64(100000)
+        );
+        assert_eq!(
+            st.get_spendable_balance(account.id(), ConfirmationsPolicy::default()),
+            Zatoshis::const_from_u64(100000)
+        );
+
+        // Spend the note.
+        let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to = OrchardPoolTester::sk_default_address(&to_extsk);
+        let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            Zatoshis::const_from_u64(10000),
+        )])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.into()),
+            zcash_protocol::ShieldedPool::Ironwood,
+            DustOutputPolicy::default(),
+        );
+        let input_selector = GreedyInputSelector::new();
+
+        let proposal = st
+            .propose_transfer(
+                account.id(),
+                &input_selector,
+                &change_strategy,
+                request,
+                ConfirmationsPolicy::default(),
+            )
+            .unwrap();
+
+        let create_proposed_result = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            );
+        assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    }
+
+    /// This test verifies that missing a single block that is required for computing a witness is
+    /// sufficient to prevent witness construction.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn ironwood_block_spanning_tip_boundary_incomplete() {
+        use zcash_client_backend::data_api::{Account as _, wallet::ConfirmationsPolicy};
+
+        let mut st = prepare_ironwood_block_spanning_test(false);
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        // set the chain tip to the final position we expect
+        let new_tip = birthday.height() + 122;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+
+        // Verify that the suggested scan ranges include only the chain-tip range with ChainTip
+        // priority, and that the range from the wallet birthday to the end of the birthday shard
+        // has Historic priority.
+        let birthday_height = birthday.height().into();
+        let expected = vec![
+            scan_range(
+                birthday_height..(new_tip + 1).into(),
+                ScanPriority::ChainTip,
+            ),
+            scan_range(
+                st.sapling_activation_height().into()..birthday_height,
+                ScanPriority::Ignored,
+            ),
+        ];
+
+        let actual = suggest_scan_ranges(st.wallet().conn(), ScanPriority::Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Scan the chain-tip range, but omitting the spanning block.
+        st.scan_cached_blocks(birthday.height() + 13, 112);
+
+        // We haven't yet discovered our note, so balances should still be zero
+        assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+
+        // Now scan the historic range; this should discover our note but not
+        // complete the tree. The note should not be considered spendable.
+        st.scan_cached_blocks(birthday.height(), 12);
+        assert_eq!(
+            st.get_total_balance(account.id()),
+            Zatoshis::const_from_u64(100000)
+        );
+        assert_eq!(
+            st.get_spendable_balance(account.id(), ConfirmationsPolicy::default()),
+            Zatoshis::ZERO
+        );
+
+        // Attempting to spend the note should fail to generate a proposal
+        let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to = OrchardPoolTester::sk_default_address(&to_extsk);
+        let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            Zatoshis::const_from_u64(10000),
+        )])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.into()),
+            zcash_protocol::ShieldedPool::Ironwood,
             DustOutputPolicy::default(),
         );
         let input_selector = GreedyInputSelector::new();

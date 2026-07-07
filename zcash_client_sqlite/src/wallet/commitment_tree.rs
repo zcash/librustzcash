@@ -1566,6 +1566,68 @@ mod tests {
         }
     }
 
+    /// `WalletCommitmentTrees::put_ironwood_subtree_roots` persists roots into the Ironwood
+    /// shard tables (not the Orchard ones), and the persisted root round-trips through
+    /// `with_ironwood_tree_mut`.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn ironwood_put_subtree_roots_round_trip() {
+        use ::orchard::tree::MerkleHashOrchard;
+        use incrementalmerkletree::{Address, Hashable, Level};
+        use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, WalletCommitmentTrees};
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+        data_file.keep().unwrap();
+
+        WalletMigrator::new().init_or_migrate(&mut db_data).unwrap();
+
+        // Two distinct completed-subtree roots: the empty root at the shard height, and its
+        // combination with itself one level up.
+        let leaf_root = MerkleHashOrchard::empty_root(Level::from(IRONWOOD_SHARD_HEIGHT));
+        let combined_root =
+            MerkleHashOrchard::combine(Level::from(IRONWOOD_SHARD_HEIGHT), &leaf_root, &leaf_root);
+        let roots = vec![
+            CommitmentTreeRoot::from_parts(BlockHeight::from(10), leaf_root),
+            CommitmentTreeRoot::from_parts(BlockHeight::from(20), combined_root),
+        ];
+
+        db_data.put_ironwood_subtree_roots(0, &roots).unwrap();
+
+        let ironwood_shards: i64 = db_data
+            .conn
+            .query_row("SELECT COUNT(*) FROM ironwood_tree_shards", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(ironwood_shards, 2);
+
+        // The roots were not written into the Orchard tables.
+        let orchard_shards: i64 = db_data
+            .conn
+            .query_row("SELECT COUNT(*) FROM orchard_tree_shards", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(orchard_shards, 0);
+
+        let stored_root = db_data
+            .with_ironwood_tree_mut(|t| {
+                t.root(
+                    Address::from_parts(Level::from(IRONWOOD_SHARD_HEIGHT), 1),
+                    Position::from(2u64 << IRONWOOD_SHARD_HEIGHT),
+                )
+            })
+            .unwrap();
+        assert_eq!(stored_root, Some(*roots[1].root_hash()));
+    }
+
     #[test]
     fn sapling_append() {
         check_append(new_tree::<SaplingPoolTester>);
