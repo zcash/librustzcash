@@ -2025,8 +2025,21 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
     ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
-        wallet::orchard::detect_spending_accounts(self.conn.borrow(), spends)
+        wallet::orchard::detect_spending_accounts(self.conn.borrow(), ORCHARD_TABLES_PREFIX, spends)
             .map_err(SqliteClientError::from)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn detect_accounts_ironwood<'t>(
+        &self,
+        spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
+    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+        wallet::orchard::detect_spending_accounts(
+            self.conn.borrow(),
+            IRONWOOD_TABLES_PREFIX,
+            spends,
+        )
+        .map_err(SqliteClientError::from)
     }
 
     #[cfg(feature = "transparent-inputs")]

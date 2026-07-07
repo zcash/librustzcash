@@ -518,14 +518,17 @@ pub(crate) fn get_ironwood_nullifiers(
 
 pub(crate) fn detect_spending_accounts<'a>(
     conn: &Connection,
+    table_prefix: &str,
     nfs: impl Iterator<Item = &'a Nullifier>,
 ) -> Result<HashSet<AccountUuid>, rusqlite::Error> {
-    let mut account_q = conn.prepare_cached(
+    // Orchard and Ironwood notes share the Orchard nullifier type but live in separate tables;
+    // the caller selects which via `table_prefix`.
+    let mut account_q = conn.prepare_cached(&format!(
         "SELECT a.uuid
-         FROM orchard_received_notes rn
+         FROM {table_prefix}_received_notes rn
          JOIN accounts a ON a.id = rn.account_id
          WHERE rn.nf IN rarray(:nf_ptr)",
-    )?;
+    ))?;
 
     let nf_values: Vec<Value> = nfs.map(|nf| Value::Blob(nf.to_bytes().to_vec())).collect();
     let nf_ptr = Rc::new(nf_values);
@@ -1799,6 +1802,161 @@ pub(crate) mod tests {
             assert_eq!(
                 stale_checkpoints, 0,
                 "truncation must remove Ironwood tree checkpoints above the truncation height",
+            );
+        }
+
+        /// A transaction may be connected to the wallet solely by spending one of its Ironwood
+        /// notes: it produces an Ironwood bundle revealing that note's nullifier, but has no
+        /// wallet-owned outputs. `get_funding_accounts` must recognize such a spend, otherwise
+        /// storing the decrypted transaction sees no wallet involvement, drops it, and never
+        /// records the note as spent — leaving the spent note counted as spendable.
+        #[test]
+        fn get_funding_accounts_detects_ironwood_only_spends() {
+            use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey};
+            use rand_core::OsRng;
+            use transparent::builder::TransparentSigningSet;
+            use zcash_client_backend::data_api::{
+                TargetValue, WalletCommitmentTrees,
+                wallet::{TargetHeight, decrypt_and_store_transaction},
+            };
+            use zcash_primitives::transaction::{
+                builder::{BuildConfig, Builder},
+                fees::zip317,
+            };
+            use zcash_protocol::memo::MemoBytes;
+
+            use crate::error::SqliteClientError;
+            use crate::wallet::orchard::select_spendable_ironwood_notes;
+
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let account_id = account.id();
+            let network = st.network().clone();
+
+            // Receive a single Ironwood note, scan it, then add confirmations.
+            let fvk = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let (received_height, _, _) = st.generate_next_block(
+                &fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(100_000),
+            );
+            st.scan_cached_blocks(received_height, 1);
+            for _ in 0..5 {
+                let (h, _) = st.generate_empty_block();
+                st.scan_cached_blocks(h, 1);
+            }
+
+            // The anchor is the Ironwood tree state as of the height at which the note was
+            // received, and the spend targets the next block.
+            let anchor_height = received_height;
+            let target_height = TargetHeight::from(anchor_height + 1);
+
+            // Retrieve the received note (and its commitment tree position) from the wallet.
+            let received = select_spendable_ironwood_notes(
+                st.wallet().conn(),
+                &network,
+                account_id,
+                TargetValue::AtLeast(Zatoshis::const_from_u64(1)),
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+            )
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("the received Ironwood note is spendable");
+            let note = *received.note();
+            let position = received.note_commitment_tree_position();
+
+            // Build the anchor and Merkle path from the wallet's Ironwood tree at the note's
+            // receipt height.
+            let (anchor, merkle_path) = st
+                .wallet_mut()
+                .with_ironwood_tree_mut::<_, _, SqliteClientError>(|tree| {
+                    let anchor: orchard::Anchor = tree
+                        .root_at_checkpoint_id(&anchor_height)?
+                        .expect("a checkpoint exists at the note's receipt height")
+                        .into();
+                    let merkle_path: orchard::tree::MerklePath = tree
+                        .witness_at_checkpoint_id_caching(position, &anchor_height)?
+                        .expect("the received note can be witnessed at its receipt height")
+                        .into();
+                    Ok((anchor, merkle_path))
+                })
+                .unwrap()
+                .expect("the wallet tracks an Ironwood tree");
+
+            // Spend the note, sending its whole balance less the fee to an external Ironwood
+            // recipient. The transaction thus has no wallet-owned outputs: its only connection to
+            // the wallet is the Ironwood spend.
+            let usk = account.usk();
+            let spend_fvk = FullViewingKey::from(usk.orchard());
+            let orchard_sak = SpendAuthorizingKey::from(usk.orchard());
+
+            let external_sk = OrchardPoolTester::sk(&[0xf5; 32]);
+            let external_recipient =
+                FullViewingKey::from(&external_sk).address_at(0u32, Scope::External);
+
+            let mut builder = Builder::new(
+                network.clone(),
+                BlockHeight::from(target_height),
+                BuildConfig::Standard {
+                    sapling_anchor: None,
+                    orchard_anchor: None,
+                    ironwood_anchor: Some(anchor),
+                },
+            );
+            builder
+                .add_ironwood_spend::<zip317::FeeRule>(spend_fvk, note, merkle_path)
+                .unwrap();
+            builder
+                .add_ironwood_output::<zip317::FeeRule>(
+                    None,
+                    external_recipient,
+                    Zatoshis::const_from_u64(90_000),
+                    MemoBytes::empty(),
+                )
+                .unwrap();
+            let tx = builder
+                .mock_build(&TransparentSigningSet::new(), &[], &[orchard_sak], OsRng)
+                .unwrap()
+                .transaction()
+                .clone();
+
+            let spends_before: i64 = st
+                .wallet()
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM ironwood_received_note_spends",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(spends_before, 0, "the note has not yet been spent");
+
+            // Storing the decrypted (unmined) transaction must detect the Ironwood spend as
+            // wallet-funded and record the note as spent.
+            decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, None).unwrap();
+
+            let spends_after: i64 = st
+                .wallet()
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM ironwood_received_note_spends",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                spends_after, 1,
+                "storing a transaction that spends an Ironwood note must record the note as \
+                 spent, which requires get_funding_accounts to detect the Ironwood spend",
             );
         }
 
