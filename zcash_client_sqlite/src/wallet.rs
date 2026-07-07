@@ -3676,28 +3676,26 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
 }
 
 /// Returns the minimum checkpoint height that exists in all note commitment trees that contain
-/// data. When both trees have checkpoints, returns the minimum of their intersection. When only
-/// one tree has checkpoints, returns that tree's minimum. Returns `None` when both are empty.
+/// data. A height qualifies when every tree that has any checkpoints has a checkpoint at that
+/// height. Returns `None` when all trees are empty.
 fn min_shared_checkpoint_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     Ok(conn
         .query_row(
             "SELECT MIN(checkpoint_id) FROM (
-                -- When both trees have checkpoints, returns the minimum of their intersection.
-                SELECT MIN(sc.checkpoint_id) AS checkpoint_id
-                    FROM sapling_tree_checkpoints sc
-                    JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = sc.checkpoint_id
-                -- When only one tree has checkpoints, returns that tree's minimum.
-                UNION ALL
-                    SELECT MIN(sc.checkpoint_id) AS checkpoint_id
-                    FROM sapling_tree_checkpoints sc
-                    WHERE NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints)
-                UNION ALL
-                    SELECT MIN(oc.checkpoint_id) AS checkpoint_id
-                    FROM orchard_tree_checkpoints oc
-                    WHERE NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints)
-             )",
+                SELECT checkpoint_id FROM sapling_tree_checkpoints
+                UNION
+                SELECT checkpoint_id FROM orchard_tree_checkpoints
+                UNION
+                SELECT checkpoint_id FROM ironwood_tree_checkpoints
+             )
+             WHERE (checkpoint_id IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
+                    OR NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints))
+             AND (checkpoint_id IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
+                  OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+             AND (checkpoint_id IN (SELECT checkpoint_id FROM ironwood_tree_checkpoints)
+                  OR NOT EXISTS (SELECT 1 FROM ironwood_tree_checkpoints))",
             [],
             |row| row.get::<_, Option<u32>>(0),
         )
@@ -3713,7 +3711,7 @@ fn min_shared_checkpoint_height(
 /// "active" is defined according to the features enabled on this crate.
 ///
 /// This will return the height that has a checkpoint in every tree that contains data. The orchard
-/// table exists unconditionally but is empty when the orchard feature is not active.
+/// and ironwood tables exist unconditionally but are empty when the orchard feature is not active.
 fn select_truncation_height(
     conn: &rusqlite::Transaction,
     requested_height: BlockHeight,
@@ -3725,6 +3723,8 @@ fn select_truncation_height(
             AND height IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
             AND (height IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
                  OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+            AND (height IN (SELECT checkpoint_id FROM ironwood_tree_checkpoints)
+                 OR NOT EXISTS (SELECT 1 FROM ironwood_tree_checkpoints))
             "#,
         named_params! {":requested_height": u32::from(requested_height)},
         |row| row.get::<_, Option<u32>>(0),
@@ -3760,8 +3760,8 @@ fn select_truncation_height(
 ///   checkpoint at or below `max_height` to truncate to. The error payload reports the
 ///   safe rewind height, if one could be determined.
 /// - [`SqliteClientError::TruncateCommitmentTree`] if truncating one of the wallet's
-///   Sapling or Orchard note commitment trees to the resolved checkpoint fails. The error
-///   payload identifies the affected shielded pool and the target height.
+///   Sapling, Orchard, or Ironwood note commitment trees to the resolved checkpoint fails.
+///   The error payload identifies the affected shielded pool and the target height.
 /// - [`SqliteClientError::DbError`] if an underlying SQLite operation fails.
 pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
@@ -3862,6 +3862,16 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
                 })?;
             Ok::<_, SqliteClientError>(())
         })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_ironwood_tree_mut(|tree| {
+            tree.truncate_to_checkpoint(&truncation_height)
+                .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                    pool: ShieldedPool::Ironwood,
+                    height: truncation_height,
+                    error,
+                })?;
+            Ok::<_, SqliteClientError>(())
+        })?;
 
         // Do not delete sent notes; this can contain data that is not recoverable
         // from the chain. Wallets must continue to operate correctly in the
@@ -3903,11 +3913,12 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
 ///
 /// # Errors
 ///
-/// - [`SqliteClientError::TruncateCommitmentTree`] if inserting the chain-state frontier as a
-///   checkpoint, or truncating one of the wallet's Sapling or Orchard note commitment trees to a
-///   checkpoint, fails. The error payload identifies the affected shielded pool and the target
-///   height. Unlike [`truncate_to_height`], a missing checkpoint at the target height is not an
-///   error here: it is recovered from by inserting the provided frontier as a new checkpoint.
+/// - [`SqliteClientError::TruncateCommitmentTree`] if inserting a chain-state frontier as a
+///   checkpoint, or truncating one of the wallet's Sapling, Orchard, or Ironwood note commitment
+///   trees to a checkpoint, fails. The error payload identifies the affected shielded pool and the
+///   target height. Unlike [`truncate_to_height`], a missing checkpoint at the target height is
+///   not an error here: it is recovered from by inserting the provided frontier as a new
+///   checkpoint.
 /// - [`SqliteClientError::DbError`] if an underlying SQLite operation fails.
 pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
     wdb: &mut WalletDb<SqlTransaction<'_>, P, CL, R>,
@@ -4002,6 +4013,23 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
             )
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
                 pool: ShieldedPool::Orchard,
+                height: target_height,
+                error,
+            })?;
+            Ok::<_, SqliteClientError>(())
+        })?;
+
+        #[cfg(feature = "orchard")]
+        wdb.with_ironwood_tree_mut(|tree| {
+            tree.insert_frontier(
+                chain_state.final_ironwood_tree().clone(),
+                Retention::Checkpoint {
+                    id: target_height,
+                    marking: Marking::None,
+                },
+            )
+            .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                pool: ShieldedPool::Ironwood,
                 height: target_height,
                 error,
             })?;
@@ -4142,8 +4170,8 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
 
             #[cfg(feature = "orchard")]
             {
-                // Check that Orchard checkpoint matches the Sapling checkpoint. These should
-                // always match unless the database is corrupted.
+                // Check that the Orchard and Ironwood checkpoints match the Sapling checkpoint.
+                // These should always match unless the database is corrupted.
                 let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
                     conn,
                     crate::ORCHARD_TABLES_PREFIX,
@@ -4155,6 +4183,20 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
                 if orchard_window_floor != sapling_window_floor {
                     return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
                         "Sapling and Orchard should have the same checkpoints".into(),
+                    )));
+                }
+
+                let ironwood_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+                    conn,
+                    crate::IRONWOOD_TABLES_PREFIX,
+                    truncation_target,
+                )
+                .map_err(ShardTreeError::Storage)
+                .map_err(SqliteClientError::from)
+                .map_err(RewindError::DataSource)?;
+                if ironwood_window_floor != sapling_window_floor {
+                    return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
+                        "Sapling and Ironwood should have the same checkpoints".into(),
                     )));
                 }
             }
