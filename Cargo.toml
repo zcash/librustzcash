@@ -229,4 +229,4 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard", rev = "3340c3cf58dd8dab8bb26ab575c00dfcbeaa9fc9" }
+orchard = { git = "https://github.com/zcash/orchard", rev = "7e8aa3d2dd174b6db2f0997190eab87d330d2314" }
