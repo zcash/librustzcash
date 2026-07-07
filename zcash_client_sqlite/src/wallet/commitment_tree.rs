@@ -35,7 +35,7 @@ use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 #[cfg(feature = "orchard")]
-use crate::{ORCHARD_TABLES_PREFIX, orchard_tree};
+use crate::{ORCHARD_TABLES_PREFIX, ironwood_tree, orchard_tree};
 
 use super::common::{TableConstants, table_constants};
 
@@ -1274,6 +1274,31 @@ pub(crate) fn check_witnesses(
 
         for addr in orchard_incomplete {
             let range = super::get_block_range(conn, ShieldedPool::Orchard, addr)?;
+            scan_ranges.extend(range);
+        }
+
+        let unspent_ironwood_note_meta = super::common::select_unspent_note_meta(
+            conn,
+            ShieldedPool::Ironwood,
+            wallet_birthday,
+            anchor_height,
+        )?;
+        let mut ironwood_incomplete = vec![];
+        let ironwood_tree = ironwood_tree(conn)?;
+        for m in unspent_ironwood_note_meta.iter() {
+            match ironwood_tree.witness_at_checkpoint_depth(m.commitment_tree_position(), 0) {
+                Ok(_) => {}
+                Err(ShardTreeError::Query(QueryError::TreeIncomplete(mut addrs))) => {
+                    ironwood_incomplete.append(&mut addrs);
+                }
+                Err(other) => {
+                    return Err(SqliteClientError::CommitmentTree(other));
+                }
+            }
+        }
+
+        for addr in ironwood_incomplete {
+            let range = super::get_block_range(conn, ShieldedPool::Ironwood, addr)?;
             scan_ranges.extend(range);
         }
     }
