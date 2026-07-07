@@ -522,20 +522,21 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from each of the shards tables. The minimum of the two
-    // gives the start of a height range that covers the last incomplete shard of both the
-    // Sapling and Orchard pools.
+    // Read the maximum height from each of the shards tables. The minimum across the pools gives
+    // the start of a height range that covers the last incomplete shard of every pool, so that
+    // none is left behind. The Ironwood pool is included: post-NU6.3 it is sparse, so its last
+    // shard can end well below the Sapling and Orchard tips.
     let sapling_shard_tip = tip_shard_end_height(conn, ShieldedPool::Sapling)?;
     #[cfg(feature = "orchard")]
     let orchard_shard_tip = tip_shard_end_height(conn, ShieldedPool::Orchard)?;
+    #[cfg(feature = "orchard")]
+    let ironwood_shard_tip = tip_shard_end_height(conn, ShieldedPool::Ironwood)?;
 
     #[cfg(feature = "orchard")]
-    let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {
-        (None, None) => None,
-        (None, Some(o)) => Some(o),
-        (Some(s), None) => Some(s),
-        (Some(s), Some(o)) => Some(std::cmp::min(s, o)),
-    };
+    let min_shard_tip = [sapling_shard_tip, orchard_shard_tip, ironwood_shard_tip]
+        .into_iter()
+        .flatten()
+        .min();
     #[cfg(not(feature = "orchard"))]
     let min_shard_tip = sapling_shard_tip;
 
@@ -2122,6 +2123,65 @@ pub(crate) mod tests {
             stored,
             Some(u32::from(shard_end)),
             "put_ironwood_subtree_roots must record the subtree end height in ironwood_tree_shards",
+        );
+    }
+
+    /// `update_chain_tip` must fold the Ironwood shard tip into the ChainTip-priority scan range,
+    /// alongside the Sapling and Orchard shard tips. Post-NU6.3 the Ironwood pool is sparse, so
+    /// its last shard can end well below the others; if it is omitted from the minimum, the
+    /// ChainTip range starts at the higher Sapling/Orchard tip and the incomplete Ironwood shard
+    /// is not scheduled for scanning at ChainTip priority.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn update_chain_tip_covers_the_ironwood_shard_tip() {
+        use ScanPriority::*;
+
+        let (mut st, _, birthday, _sap_active) =
+            test_with_nu5_birthday_offset::<OrchardPoolTester>(76, 1000, BlockHash([0; 32]), true);
+        let b = birthday.height();
+
+        // Sapling and Orchard complete a shard high above the birthday; the Ironwood shard ends
+        // at a lower height (the sparse-pool reality).
+        let high = b + 1000;
+        let low = b + 400;
+        st.put_subtree_roots(
+            1,
+            &[CommitmentTreeRoot::from_parts(
+                high,
+                ::sapling::Node::empty_leaf(),
+            )],
+            1,
+            &[CommitmentTreeRoot::from_parts(
+                high,
+                MerkleHashOrchard::empty_leaf(),
+            )],
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_ironwood_subtree_roots(
+                1,
+                &[CommitmentTreeRoot::from_parts(
+                    low,
+                    MerkleHashOrchard::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        st.wallet_mut().update_chain_tip(high + 20).unwrap();
+
+        // The lowest-starting ChainTip range must reach down to the Ironwood shard tip, not stop
+        // at the higher Sapling/Orchard tip.
+        let ranges = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        let chain_tip_start = ranges
+            .iter()
+            .filter(|r| r.priority() == ChainTip)
+            .map(|r| r.block_range().start)
+            .min()
+            .expect("there must be a ChainTip scan range");
+        assert!(
+            chain_tip_start <= low,
+            "the ChainTip range must cover the Ironwood shard tip {low:?}, but started at \
+             {chain_tip_start:?}",
         );
     }
 }
