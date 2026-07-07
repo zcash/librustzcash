@@ -2122,6 +2122,23 @@ pub(crate) mod tests {
                     1,
                     "the change must be retained as an Orchard note of the expected value"
                 );
+
+                // The payment output is carried by the Ironwood bundle, so its sent-note record
+                // must be attributed to the Ironwood pool. Post-NU6.3 an Orchard-pool payment
+                // output is forbidden when spending Orchard (only change may return to Orchard),
+                // so a payment tagged Orchard here is both a mis-file and a protocol violation.
+                let payment_pool: i64 = conn
+                    .query_row(
+                        "SELECT output_pool FROM sent_notes WHERE value = ?1",
+                        [i64::try_from(payment_zats).unwrap()],
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                prop_assert_eq!(
+                    payment_pool,
+                    crate::wallet::encoding::pool_code(PoolType::IRONWOOD),
+                    "the Ironwood-bundle payment must be recorded as an Ironwood-pool sent output",
+                );
             }
         }
     }

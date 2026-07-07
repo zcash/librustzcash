@@ -1714,7 +1714,10 @@ where
                 ironwood_output_meta.push((
                     BuildRecipient::External {
                         recipient_address: recipient_address.clone(),
-                        output_pool: PoolType::ORCHARD,
+                        // The payment is built into the Ironwood bundle, so its sent-note record
+                        // belongs to the Ironwood pool. (Post-NU6.3 an Orchard-pool payment output
+                        // is forbidden when spending Orchard; only change may return to Orchard.)
+                        output_pool: PoolType::IRONWOOD,
                     },
                     payment_amount,
                     Some(memo),
