@@ -3862,6 +3862,16 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
                 })?;
             Ok::<_, SqliteClientError>(())
         })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_ironwood_tree_mut(|tree| {
+            tree.truncate_to_checkpoint(&truncation_height)
+                .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                    pool: ShieldedPool::Ironwood,
+                    height: truncation_height,
+                    error,
+                })?;
+            Ok::<_, SqliteClientError>(())
+        })?;
 
         // Do not delete sent notes; this can contain data that is not recoverable
         // from the chain. Wallets must continue to operate correctly in the
@@ -4002,6 +4012,22 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
             )
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
                 pool: ShieldedPool::Orchard,
+                height: target_height,
+                error,
+            })?;
+            Ok::<_, SqliteClientError>(())
+        })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_ironwood_tree_mut(|tree| {
+            tree.insert_frontier(
+                chain_state.final_ironwood_tree().clone(),
+                Retention::Checkpoint {
+                    id: target_height,
+                    marking: Marking::None,
+                },
+            )
+            .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                pool: ShieldedPool::Ironwood,
                 height: target_height,
                 error,
             })?;
