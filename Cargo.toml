@@ -235,3 +235,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
 incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
+# TEMPORARY: orchard revision that keeps `BundleType::DEFAULT` padded and adds the
+# opt-in `BundleType::DEFAULT_UNPADDED` + `Builder::bundle_type()`; replace with a
+# published orchard release once one carries these.
+orchard = { git = "https://github.com/zcash/orchard", rev = "3340c3cf58dd8dab8bb26ab575c00dfcbeaa9fc9" }
