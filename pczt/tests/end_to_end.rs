@@ -30,13 +30,15 @@ use zcash_primitives::transaction::{
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
-    consensus::MainNetwork,
+    consensus::{MainNetwork, TEST_NETWORK},
+    constants::V6_TX_VERSION,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
 };
 use zcash_script::script::{self, Evaluable};
 
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
+static IRONWOOD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
 fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
     ORCHARD_PROVING_KEY.get_or_init(|| {
@@ -44,11 +46,24 @@ fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
     })
 }
 
+fn ironwood_proving_key() -> &'static orchard::circuit::ProvingKey {
+    IRONWOOD_PROVING_KEY.get_or_init(|| {
+        orchard::circuit::ProvingKey::build(orchard::circuit::OrchardCircuitVersion::PostNu6_3)
+    })
+}
+
 fn check_round_trip(pczt: &Pczt) {
-    // The v1 encoding remains available explicitly.
-    v1::Pczt::try_from(pczt.clone())
-        .expect("v1 encoding succeeds")
-        .serialize();
+    if *pczt.global().tx_version() == V6_TX_VERSION {
+        assert!(matches!(
+            v1::Pczt::try_from(pczt.clone()),
+            Err(pczt::EncodingError::UnsupportedTxVersion)
+        ));
+    } else {
+        // The v1 encoding remains available explicitly.
+        v1::Pczt::try_from(pczt.clone())
+            .expect("v1 encoding succeeds")
+            .serialize();
+    }
 
     // The default encoding is the latest (v2) encoding.
     let v2_encoded = v2::Pczt::try_from(pczt.clone())
@@ -1132,4 +1147,124 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
 
     // The wire `fvk` bytes must be preserved (unchanged) after signing.
     assert_eq!(wire_spend_fvks(&signed, true), fvks_before);
+}
+
+#[test]
+fn ironwood_to_ironwood() {
+    let mut rng = OsRng;
+
+    // Create an Orchard account to receive funds.
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    // Pretend we already received an Ironwood note.
+    let value = orchard::value::NoteValue::from_raw(1_000_000);
+    let note = {
+        let mut ironwood_builder = orchard::builder::Builder::new(
+            orchard::builder::BundleType::DEFAULT,
+            orchard::bundle::BundleVersion::ironwood_v3(),
+            orchard::bundle::BundleVersion::ironwood_v3().default_flags(),
+            orchard::Anchor::empty_tree(),
+        )
+        .unwrap();
+        ironwood_builder
+            .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
+            .unwrap();
+        let (bundle, meta) = ironwood_builder.build::<i64>(&mut rng).unwrap().unwrap();
+        let action = bundle
+            .actions()
+            .get(meta.output_action_index(0).unwrap())
+            .unwrap();
+        let domain = orchard::note_encryption::IronwoodDomain::for_action(action);
+        let (note, _, _) = try_note_decryption(&domain, &orchard_ivk.prepare(), action).unwrap();
+        note
+    };
+
+    // Use the Ironwood tree with a single leaf.
+    let (anchor, merkle_path) = {
+        let cmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
+        let leaf = MerkleHashOrchard::from_cmx(&cmx);
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+        tree.append(leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+        tree.checkpoint(4_133_999).unwrap();
+        let position = 0.into();
+        let merkle_path = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path.root(leaf);
+        (anchor.into(), merkle_path.into())
+    };
+
+    // Build the Ironwood bundle we'll be using.
+    let mut builder = Builder::new(
+        TEST_NETWORK,
+        4_134_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: None,
+            ironwood_anchor: Some(anchor),
+        },
+    );
+    builder
+        .add_ironwood_spend::<zip317::FeeRule>(orchard_fvk.clone(), note, merkle_path)
+        .unwrap();
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            Zatoshis::const_from_u64(100_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            Some(orchard_fvk.to_ovk(zip32::Scope::Internal)),
+            orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
+            Zatoshis::const_from_u64(890_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        ironwood_meta,
+        ..
+    } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    // Create the base PCZT.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    check_round_trip(&pczt);
+
+    // Finalize the I/O.
+    let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    check_round_trip(&pczt);
+
+    // Create proofs.
+    let pczt = Prover::new(pczt)
+        .create_ironwood_proof(ironwood_proving_key())
+        .unwrap()
+        .finish();
+    check_round_trip(&pczt);
+
+    // Apply signatures.
+    let index = ironwood_meta.spend_action_index(0).unwrap();
+    let mut signer = Signer::new(pczt).unwrap();
+    signer.sign_ironwood(index, &orchard_ask).unwrap();
+    let pczt = signer.finish();
+    check_round_trip(&pczt);
+
+    // We should now be able to extract the fully authorized transaction.
+    let tx = TransactionExtractor::new(pczt).extract().unwrap();
+
+    assert!(tx.orchard_bundle().is_none());
+    assert_eq!(tx.ironwood_bundle().map(|b| b.actions().len()), Some(2));
+    assert_eq!(u32::from(tx.expiry_height()), 4_134_040);
 }

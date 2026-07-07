@@ -1265,6 +1265,114 @@ pub(crate) mod tests {
         );
     }
 
+    /// `create_pczt_from_proposal` builds a V6 PCZT carrying an Ironwood bundle for a proposal
+    /// that spends a received Ironwood note, instead of rejecting it.
+    #[test]
+    #[cfg(feature = "pczt-tests")]
+    fn pczt_from_proposal_spends_ironwood() {
+        use std::convert::Infallible;
+
+        use zcash_client_backend::{
+            data_api::{
+                Account,
+                testing::{
+                    AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
+                    pool::ShieldedPoolTester,
+                },
+                wallet::ConfirmationsPolicy,
+                wallet::input_selection::GreedyInputSelector,
+            },
+            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            wallet::OvkPolicy,
+        };
+        use zcash_keys::address::Address;
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::{
+            ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+        };
+        use zip321::{Payment, TransactionRequest};
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        // A network on which Ironwood (NU6.3) is active from the same height as Sapling.
+        let activation = BlockHeight::from_u32(100_000);
+        let network = LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let account_id = account.id();
+
+        // Receive an Ironwood note, comfortably larger than the payment and fee.
+        let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+        let note_value = Zatoshis::const_from_u64(100_000);
+        let (h, _, _) = st.generate_next_block(&received, AddressType::DefaultExternal, note_value);
+        st.scan_cached_blocks(h, 1);
+
+        // Advance the chain so the note's shard is fully scanned and an anchor is available.
+        for _ in 0..5 {
+            let (h, _) = st.generate_empty_block();
+            st.scan_cached_blocks(h, 1);
+        }
+
+        // Propose a transfer that must spend the Ironwood note.
+        let to_sk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to: Address = OrchardPoolTester::sk_default_address(&to_sk);
+        let payment_value = Zatoshis::const_from_u64(10_000);
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            payment_value,
+        )])
+        .unwrap();
+
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            StandardFeeRule::Zip317,
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+        let input_selector = GreedyInputSelector::new();
+
+        let proposal = st
+            .propose_transfer(
+                account_id,
+                &input_selector,
+                &change_strategy,
+                request,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+
+        let pczt = st
+            .create_pczt_from_proposal::<Infallible, _, Infallible>(
+                account_id,
+                OvkPolicy::Sender,
+                &proposal,
+                None,
+            )
+            .expect("a PCZT can be built from a proposal that routes value through Ironwood");
+
+        assert!(
+            pczt.orchard().actions().is_empty(),
+            "an Ironwood-only proposal must not produce an Orchard bundle"
+        );
+        assert!(
+            !pczt.ironwood().actions().is_empty(),
+            "the PCZT must carry an Ironwood bundle with actions"
+        );
+    }
+
     /// `decrypt_transaction` must decrypt a transaction's Ironwood bundle under the Ironwood
     /// note-encryption domain, detecting a wallet-owned Ironwood output as an Ironwood note (and
     /// not as Orchard). Decrypting under the Orchard domain would silently detect nothing.

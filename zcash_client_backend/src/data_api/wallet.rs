@@ -228,6 +228,57 @@ impl<AccountId: Copy> PcztRecipient<AccountId> {
     }
 }
 
+/// Adds per-action key paths and recipient metadata to a PCZT bundle of the Orchard
+/// protocol (the Orchard and Ironwood pools share this bundle shape).
+#[cfg(all(feature = "pczt", feature = "orchard"))]
+fn update_orchard_protocol_actions<ParamsT: consensus::Parameters, AccountId: serde::Serialize>(
+    mut updater: orchard::pczt::Updater<'_>,
+    params: &ParamsT,
+    account_derivation: Option<&super::Zip32Derivation>,
+    spends: &std::collections::HashSet<usize>,
+    outputs: &std::collections::HashMap<usize, (PcztRecipient<AccountId>, Option<ZcashAddress>)>,
+) -> Result<(), orchard::pczt::UpdaterError> {
+    for index in 0..updater.bundle().actions().len() {
+        updater.update_action_with(index, |mut action_updater| {
+            // If the account has a known derivation, add the key path to the PCZT.
+            if let Some(derivation) = account_derivation {
+                // `spends` only contains action indices for the real spends, and not the
+                // dummy inputs
+                if spends.contains(&index) {
+                    // All spent notes are from the same account.
+                    action_updater.set_spend_zip32_derivation(
+                        orchard::pczt::Zip32Derivation::parse(
+                            derivation.seed_fingerprint().to_bytes(),
+                            vec![
+                                zip32::ChildIndex::hardened(32).index(),
+                                zip32::ChildIndex::hardened(params.network_type().coin_type())
+                                    .index(),
+                                zip32::ChildIndex::hardened(u32::from(derivation.account_index()))
+                                    .index(),
+                            ],
+                        )
+                        .expect("valid"),
+                    );
+                }
+            }
+
+            if let Some((pczt_recipient, external_address)) = outputs.get(&index) {
+                if let Some(user_address) = external_address {
+                    action_updater.set_output_user_address(user_address.encode());
+                }
+                action_updater.set_output_proprietary(
+                    PROPRIETARY_OUTPUT_INFO.into(),
+                    postcard::to_allocvec(pczt_recipient)
+                        .expect("postcard encoding of PCZT recipient metadata should not fail"),
+                );
+            }
+
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
 pub fn decrypt_and_store_transaction<ParamsT, DbT>(
@@ -2305,8 +2356,6 @@ where
     let prior_step_results = &[];
     let proposal_step = proposal.steps().first();
     let unused_transparent_outputs = &mut HashMap::new();
-    #[cfg(feature = "unstable")]
-    let proposed_version = Some(TxVersion::V5);
 
     let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
         wallet_db,
@@ -2320,7 +2369,7 @@ where
         #[cfg(feature = "transparent-inputs")]
         unused_transparent_outputs,
         #[cfg(feature = "unstable")]
-        proposed_version,
+        None,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -2328,10 +2377,6 @@ where
 
     if let Some(target) = target_expiry_height {
         build_result.pczt_parts.expiry_height = target;
-    }
-
-    if build_result.pczt_parts.ironwood.is_some() {
-        return Err(Error::ProposalNotSupported);
     }
 
     let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;
@@ -2356,6 +2401,28 @@ where
     #[cfg(feature = "orchard")]
     let orchard_spends = (0..)
         .map(|i| build_result.orchard_meta.spend_action_index(i))
+        .take_while(|item| item.is_some())
+        .flatten()
+        .collect::<HashSet<_>>();
+
+    #[cfg(feature = "orchard")]
+    let ironwood_outputs = build_state
+        .ironwood_output_meta
+        .into_iter()
+        .enumerate()
+        .map(|(i, (recipient, _, _))| {
+            let output_index = build_result
+                .ironwood_meta
+                .output_action_index(i)
+                .expect("An action should exist in the transaction for each Ironwood output.");
+
+            (output_index, PcztRecipient::from_recipient(recipient))
+        })
+        .collect::<HashMap<_, _>>();
+
+    #[cfg(feature = "orchard")]
+    let ironwood_spends = (0..)
+        .map(|i| build_result.ironwood_meta.spend_action_index(i))
         .take_while(|item| item.is_some())
         .flatten()
         .collect::<HashSet<_>>();
@@ -2385,51 +2452,23 @@ where
                 .expect("postcard encoding of PCZT proposal metadata should not fail"),
             )
         })
-        .update_orchard_with(|mut updater| {
-            for index in 0..updater.bundle().actions().len() {
-                updater.update_action_with(index, |mut action_updater| {
-                    // If the account has a known derivation, add the Orchard key path to the PCZT.
-                    if let Some(derivation) = account_derivation {
-                        // orchard_spends will only contain action indices for the real spends, and
-                        // not the dummy inputs
-                        if orchard_spends.contains(&index) {
-                            // All spent notes are from the same account.
-                            action_updater.set_spend_zip32_derivation(
-                                orchard::pczt::Zip32Derivation::parse(
-                                    derivation.seed_fingerprint().to_bytes(),
-                                    vec![
-                                        zip32::ChildIndex::hardened(32).index(),
-                                        zip32::ChildIndex::hardened(
-                                            params.network_type().coin_type(),
-                                        )
-                                        .index(),
-                                        zip32::ChildIndex::hardened(u32::from(
-                                            derivation.account_index(),
-                                        ))
-                                        .index(),
-                                    ],
-                                )
-                                .expect("valid"),
-                            );
-                        }
-                    }
-
-                    if let Some((pczt_recipient, external_address)) = orchard_outputs.get(&index) {
-                        if let Some(user_address) = external_address {
-                            action_updater.set_output_user_address(user_address.encode());
-                        }
-                        action_updater.set_output_proprietary(
-                            PROPRIETARY_OUTPUT_INFO.into(),
-                            postcard::to_allocvec(pczt_recipient).expect(
-                                "postcard encoding of PCZT recipient metadata should not fail",
-                            ),
-                        );
-                    }
-
-                    Ok(())
-                })?;
-            }
-            Ok(())
+        .update_orchard_with(|updater| {
+            update_orchard_protocol_actions(
+                updater,
+                params,
+                account_derivation,
+                &orchard_spends,
+                &orchard_outputs,
+            )
+        })?
+        .update_ironwood_with(|updater| {
+            update_orchard_protocol_actions(
+                updater,
+                params,
+                account_derivation,
+                &ironwood_spends,
+                &ironwood_outputs,
+            )
         })?
         .update_sapling_with(|mut updater| {
             // If the account has a known derivation, add the Sapling key path to the PCZT.
