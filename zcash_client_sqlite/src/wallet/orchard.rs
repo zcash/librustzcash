@@ -1748,6 +1748,60 @@ pub(crate) mod tests {
             );
         }
 
+        /// A reorg truncation must roll back the Ironwood note commitment tree along with the
+        /// Sapling and Orchard trees. If it does not, checkpoints (and commitments) for the
+        /// rolled-back blocks remain, and a later re-scan appends onto a stale frontier,
+        /// corrupting the Ironwood anchors.
+        #[test]
+        fn truncate_rolls_back_the_ironwood_tree() {
+            use zcash_client_backend::data_api::WalletWrite;
+
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            // Receive Ironwood notes in three consecutive blocks and scan them, so the Ironwood
+            // tree gains a checkpoint at each height.
+            let fvk = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let (h0, _, _) = st.generate_next_block(
+                &fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(100_000),
+            );
+            st.generate_next_block(
+                &fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(100_000),
+            );
+            st.generate_next_block(
+                &fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(100_000),
+            );
+            st.scan_cached_blocks(h0, 3);
+
+            // A reorg truncates the wallet back to h0; the Ironwood tree must roll back with the
+            // Sapling and Orchard trees.
+            st.wallet_mut().truncate_to_height(h0).unwrap();
+
+            let stale_checkpoints: i64 = st
+                .wallet_mut()
+                .conn_mut()
+                .query_row(
+                    "SELECT COUNT(*) FROM ironwood_tree_checkpoints WHERE checkpoint_id > ?1",
+                    [u32::from(h0)],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                stale_checkpoints, 0,
+                "truncation must remove Ironwood tree checkpoints above the truncation height",
+            );
+        }
+
         prop_compose! {
             // An Orchard note value (which may or may not, on its own, cover the payment) alongside
             // large Sapling and Ironwood notes that always cover it, plus a small payment. This lets
