@@ -30,7 +30,7 @@ use crate::{
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, TransparentSpendPolicy},
+            input_selection::{GreedyInputSelector, SpendPolicy, TransparentSpendPolicy},
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
@@ -1903,7 +1903,7 @@ where
         &change_strategy,
         request,
         ConfirmationsPolicy::MIN,
-        &TransparentSpendPolicy::shielded_only(),
+        &SpendPolicy::default(),
     );
 
     assert_matches!(
@@ -1942,7 +1942,8 @@ where
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
-            &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+            &SpendPolicy::default()
+                .with_transparent(TransparentSpendPolicy::from_any_account_transparent_addresses()),
         )
         .expect("transparent spend must succeed under AnyAccountTaddr");
 
@@ -2090,7 +2091,8 @@ where
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
-            &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+            &SpendPolicy::default()
+                .with_transparent(TransparentSpendPolicy::from_any_account_transparent_addresses()),
         )
         .expect(
             "transparent spend should succeed via the re-gather fallback despite the \
@@ -2198,7 +2200,8 @@ where
         &change_strategy,
         request,
         ConfirmationsPolicy::MIN,
-        &TransparentSpendPolicy::from_any_account_transparent_addresses(),
+        &SpendPolicy::default()
+            .with_transparent(TransparentSpendPolicy::from_any_account_transparent_addresses()),
     );
 
     assert_matches!(
@@ -2296,7 +2299,9 @@ where
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
-            &TransparentSpendPolicy::from_one_transparent_address(addr_named),
+            &SpendPolicy::default().with_transparent(
+                TransparentSpendPolicy::from_one_transparent_address(addr_named),
+            ),
         )
         .expect("transparent spend from named address must succeed");
 

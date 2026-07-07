@@ -1570,6 +1570,68 @@ pub(crate) mod tests {
             .unwrap()
         }
 
+        /// When the caller restricts the spend policy to the Orchard pool, input selection may
+        /// not cross into another pool to cover a shortfall: if the wallet's Orchard notes cannot
+        /// fund the payment on their own, the proposal fails with `InsufficientFunds` even though
+        /// an ample Sapling note exists. Crossing a pool boundary is privacy-breaking and must be
+        /// an explicit choice, expressed by permitting the other pool in the `SpendPolicy`.
+        #[test]
+        fn restricting_spend_policy_to_orchard_forbids_crossing_into_sapling() {
+            use zcash_client_backend::data_api::wallet::input_selection::SpendPolicy;
+
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let account_id = account.id();
+
+            // A small Orchard note that cannot fund the payment on its own, plus a large Sapling
+            // note that easily could.
+            let (h, _, _) = st.generate_next_block(
+                &OrchardPoolTester::test_account_fvk(&st),
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(30_000),
+            );
+            st.generate_next_block(
+                &SaplingPoolTester::test_account_fvk(&st),
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(200_000),
+            );
+            st.scan_cached_blocks(h, 2);
+
+            for _ in 0..5 {
+                let (h, _) = st.generate_empty_block();
+                st.scan_cached_blocks(h, 1);
+            }
+
+            // Pay more than the Orchard note holds, so covering it would require crossing into
+            // Sapling — which the restricted policy forbids.
+            let request = orchard_payment_request(st.network(), 80_000);
+            let change_strategy = orchard_change_strategy();
+            let input_selector = GreedyInputSelector::new();
+
+            let result = st.propose_transfer_with_policy(
+                account_id,
+                &input_selector,
+                &change_strategy,
+                request,
+                ConfirmationsPolicy::MIN,
+                &SpendPolicy::shielded_pools([ShieldedPool::Orchard]),
+            );
+
+            let err = result.expect_err(
+                "restricting to Orchard must forbid crossing into Sapling to cover the shortfall",
+            );
+            assert!(
+                format!("{err:?}").contains("InsufficientFunds"),
+                "expected InsufficientFunds, got: {err:?}",
+            );
+        }
+
         prop_compose! {
             // An Orchard note value (which may or may not, on its own, cover the payment) alongside
             // large Sapling and Ironwood notes that always cover it, plus a small payment. This lets
