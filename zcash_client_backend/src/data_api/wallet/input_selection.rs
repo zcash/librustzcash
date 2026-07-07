@@ -2,7 +2,7 @@
 use core::marker::PhantomData;
 use nonempty::NonEmpty;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     error,
     fmt::{self, Debug, Display},
 };
@@ -42,7 +42,6 @@ use {
         fees::{ChangeValue, StandardFeeRule},
         proposal::{Step, StepOutput, StepOutputIndex},
     },
-    std::collections::BTreeSet,
     std::convert::Infallible,
     transparent::{address::TransparentAddress, bundle::OutPoint},
     zcash_primitives::transaction::fees::transparent as transparent_fees,
@@ -474,13 +473,104 @@ impl<T> NonEmptyBTreeSet<T> {
     }
 }
 
+/// The sources of funds an [`InputSelector`] is permitted to draw upon when satisfying a
+/// transaction request.
+///
+/// Crossing a shielded pool boundary reduces privacy, so it must be an explicit choice of the
+/// caller: the selector only spends notes from the shielded pools named in [`Self::shielded`], and
+/// only spends transparent UTXOs when a [`TransparentSpendPolicy`] is provided. When a single
+/// permitted pool cannot cover the request, the selector may combine the permitted pools (drawing
+/// on the legacy Orchard pool last); if no combination of permitted sources suffices it returns
+/// [`InputSelectorError::InsufficientFunds`] rather than reaching into a pool the caller did not
+/// permit.
+///
+/// The default permits every shielded pool present in the build and no transparent spending,
+/// preserving the historical fully-shielded behavior while letting a caller restrict the set to,
+/// for example, `{Orchard}` to forbid pool crossing.
+#[derive(Clone, Debug)]
+pub struct SpendPolicy {
+    shielded: BTreeSet<ShieldedPool>,
+    #[cfg(feature = "transparent-inputs")]
+    transparent: Option<TransparentSpendPolicy>,
+}
+
+impl Default for SpendPolicy {
+    fn default() -> Self {
+        Self::shielded_pools([
+            ShieldedPool::Sapling,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood,
+        ])
+    }
+}
+
+impl SpendPolicy {
+    /// Constructs a policy permitting selection from exactly the given shielded pools, with no
+    /// transparent spending.
+    pub fn shielded_pools(pools: impl IntoIterator<Item = ShieldedPool>) -> Self {
+        Self {
+            shielded: pools.into_iter().collect(),
+            #[cfg(feature = "transparent-inputs")]
+            transparent: None,
+        }
+    }
+
+    /// Returns whether notes may be selected from the given shielded pool.
+    pub fn permits_shielded(&self, pool: ShieldedPool) -> bool {
+        self.shielded.contains(&pool)
+    }
+
+    /// Returns the set of shielded pools from which notes may be selected.
+    pub fn shielded(&self) -> &BTreeSet<ShieldedPool> {
+        &self.shielded
+    }
+
+    /// Adds a transparent spend policy, permitting transparent UTXOs to be spent as described.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_transparent(mut self, transparent: TransparentSpendPolicy) -> Self {
+        self.transparent = Some(transparent);
+        self
+    }
+
+    /// Returns the transparent spend policy, or `None` if transparent UTXOs may not be spent.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(&self) -> Option<&TransparentSpendPolicy> {
+        self.transparent.as_ref()
+    }
+}
+
+/// The caller's choice of which coinbase transparent outputs a transparent spend may draw upon.
+///
+/// Consensus requires coinbase funds to be spent to a single shielded output with no change and
+/// without being mixed with non-coinbase inputs, so a transparent spend commits to one or the
+/// other rather than combining them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoinbasePolicy {
+    /// Spend only coinbase transparent outputs.
+    OnlyCoinbase,
+    /// Spend only non-coinbase transparent outputs.
+    NonCoinbase,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<CoinbasePolicy> for CoinbaseFilter {
+    fn from(policy: CoinbasePolicy) -> Self {
+        match policy {
+            CoinbasePolicy::OnlyCoinbase => CoinbaseFilter::CoinbaseOnly,
+            CoinbasePolicy::NonCoinbase => CoinbaseFilter::NonCoinbaseOnly,
+        }
+    }
+}
+
 #[cfg(feature = "transparent-inputs")]
 /// Specifies the wallet's intent to spend transparent UTXOs in a transfer.
 ///
 /// Spending transparent funds links the chosen transparent addresses on-chain,
 /// reducing privacy; callers must opt in explicitly. Corresponds to the legacy
 /// `AllowTransparentAddressLinking` privacy policy / `ANY_TADDR`.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub enum TransparentSpendPolicy {
     /// Do not spend any transparent UTXOs (default; fully-shielded behavior).
     #[default]
@@ -2215,5 +2305,50 @@ mod tests {
         assert_eq!(shielding_max_inputs(1), 133); // 20_000 / 150
         assert_eq!(shielding_max_inputs(10), 1333); // 200_000 / 150
         assert_eq!(shielding_max_inputs(100), 13333); // 2_000_000 / 150
+    }
+}
+
+#[cfg(test)]
+mod spend_policy_tests {
+    use super::*;
+
+    // The default spend policy preserves the historical `ShieldedOnly` behavior: notes may be
+    // selected from every shielded pool present in the build, and no transparent UTXOs are
+    // spent. Restricting the set is what a caller does to prevent pool crossing.
+    #[test]
+    fn default_permits_all_shielded_pools_and_no_transparent() {
+        let policy = SpendPolicy::default();
+        assert!(policy.permits_shielded(ShieldedPool::Sapling));
+        #[cfg(feature = "orchard")]
+        {
+            assert!(policy.permits_shielded(ShieldedPool::Orchard));
+            assert!(policy.permits_shielded(ShieldedPool::Ironwood));
+        }
+        #[cfg(feature = "transparent-inputs")]
+        assert!(policy.transparent().is_none());
+    }
+
+    // A caller can restrict selection to a single pool; other pools are then not permitted.
+    #[test]
+    fn shielded_pools_restricts_the_permitted_set() {
+        let policy = SpendPolicy::shielded_pools([ShieldedPool::Orchard]);
+        assert!(policy.permits_shielded(ShieldedPool::Orchard));
+        assert!(!policy.permits_shielded(ShieldedPool::Sapling));
+        assert!(!policy.permits_shielded(ShieldedPool::Ironwood));
+    }
+
+    // The caller-facing coinbase choice maps onto the internal `CoinbaseFilter` query control.
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn coinbase_policy_maps_to_filter() {
+        use crate::data_api::CoinbaseFilter;
+        assert_eq!(
+            CoinbaseFilter::from(CoinbasePolicy::OnlyCoinbase),
+            CoinbaseFilter::CoinbaseOnly
+        );
+        assert_eq!(
+            CoinbaseFilter::from(CoinbasePolicy::NonCoinbase),
+            CoinbaseFilter::NonCoinbaseOnly
+        );
     }
 }
