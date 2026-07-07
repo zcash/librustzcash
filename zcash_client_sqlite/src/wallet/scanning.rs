@@ -2085,4 +2085,43 @@ pub(crate) mod tests {
 
         assert_matches!(proposal, Ok(_));
     }
+
+    /// `put_ironwood_subtree_roots` records Ironwood subtree roots (and their end heights) in the
+    /// wallet's Ironwood shard table, exactly as the Sapling and Orchard equivalents do for their
+    /// pools. Without it, a wallet restoring from a subtree-root source cannot populate its
+    /// Ironwood tree at all.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots_records_the_shard_end_height() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let shard_end = st.sapling_activation_height() + 500;
+        st.wallet_mut()
+            .put_ironwood_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    shard_end,
+                    MerkleHashOrchard::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        let stored: Option<u32> = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT MAX(subtree_end_height) FROM ironwood_tree_shards",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            Some(u32::from(shard_end)),
+            "put_ironwood_subtree_roots must record the subtree end height in ironwood_tree_shards",
+        );
+    }
 }

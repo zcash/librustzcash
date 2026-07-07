@@ -72,6 +72,11 @@ workspace.
 - `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
   an optional accessor that wallet backends can override to provide the Ironwood
   anchors and witnesses used by the transaction builder.
+- `zcash_client_backend::data_api::WalletCommitmentTrees::put_ironwood_subtree_roots`,
+  the Ironwood counterpart of `put_orchard_subtree_roots` for populating the
+  Ironwood note commitment tree from a subtree-root source. It defaults to a
+  no-op for backends that do not track an Ironwood tree, mirroring
+  `with_ironwood_tree_mut`.
 - `zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT`, the shard height of
   the Ironwood note commitment tree (equal to the Orchard shard height).
 - `zcash_client_backend::data_api::NoteCommitmentTree`
