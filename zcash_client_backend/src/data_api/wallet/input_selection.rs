@@ -191,12 +191,14 @@ pub trait InputSelector {
     /// If insufficient funds are available to satisfy the required outputs for the shielding
     /// request, this operation must fail and return [`InputSelectorError::InsufficientFunds`].
     ///
-    /// `spend_policy` (behind the `transparent-inputs` feature flag) controls whether, and
-    /// from which addresses, the account's transparent UTXOs may additionally be spent to
-    /// help satisfy the request. Under the default [`TransparentSpendPolicy::ShieldedOnly`],
-    /// implementations must not spend transparent UTXOs even as a fallback; other policies
-    /// require the caller to have explicitly opted in, since spending transparent funds
-    /// links the chosen addresses on-chain.
+    /// `spend_policy` controls which sources of funds the implementation may draw upon. It names
+    /// the shielded pools from which notes may be selected — the implementation must not select
+    /// notes from a pool the policy does not permit, returning
+    /// [`InputSelectorError::InsufficientFunds`] rather than crossing into a non-permitted pool —
+    /// and, behind the `transparent-inputs` feature flag, whether and from which addresses the
+    /// account's transparent UTXOs may additionally be spent. Spending transparent funds, or
+    /// combining notes across shielded pools, reduces privacy, so the caller must opt in
+    /// explicitly by naming the permitted sources.
     #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     fn propose_transaction<ParamsT, ChangeT>(
@@ -209,7 +211,7 @@ pub trait InputSelector {
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
-        #[cfg(feature = "transparent-inputs")] spend_policy: &TransparentSpendPolicy,
+        spend_policy: &SpendPolicy,
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
@@ -778,7 +780,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
-        #[cfg(feature = "transparent-inputs")] spend_policy: &TransparentSpendPolicy,
+        spend_policy: &SpendPolicy,
         #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
@@ -918,12 +920,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         #[cfg(feature = "transparent-inputs")]
         let mut amount_at_transparent_gather = Zatoshis::ZERO;
         #[cfg(feature = "transparent-inputs")]
-        let mut transparent_inputs = match spend_policy {
-            TransparentSpendPolicy::ShieldedOnly => {
-                // For `ShieldedOnly`, we don't need any transparent inputs; skip the gather entirely.
+        let mut transparent_inputs = match spend_policy.transparent() {
+            None | Some(TransparentSpendPolicy::ShieldedOnly) => {
+                // No transparent spending is permitted; skip the gather entirely.
                 Vec::new()
             }
-            TransparentSpendPolicy::AnyAccountTaddr => self.gather_transparent::<ChangeT>(
+            Some(TransparentSpendPolicy::AnyAccountTaddr) => self.gather_transparent::<ChangeT>(
                 wallet_db,
                 target_height,
                 confirmations_policy,
@@ -933,8 +935,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 &transaction_request,
                 &mut amount_at_transparent_gather,
             )?,
-            TransparentSpendPolicy::FromAddresses(_) => {
-                let address_allow_list = transparent_address_allow_list(spend_policy);
+            Some(transparent @ TransparentSpendPolicy::FromAddresses(_)) => {
+                let address_allow_list = transparent_address_allow_list(transparent);
                 self.gather_transparent::<ChangeT>(
                     wallet_db,
                     target_height,
@@ -967,7 +969,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         // bundle — moving their value into the Ironwood pool — so Ironwood is
         // preferred, with the legacy Orchard pool last within the family.
         #[cfg(feature = "orchard")]
-        let pool_preference = selectable_pool_preference(
+        let mut pool_preference = selectable_pool_preference(
             params,
             target_height,
             sapling_supported,
@@ -975,13 +977,19 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             !orchard_outputs.is_empty(),
         );
         #[cfg(not(feature = "orchard"))]
-        let pool_preference = {
+        let mut pool_preference = {
             let mut pools = vec![];
             if sapling_supported {
                 pools.push(ShieldedPool::Sapling);
             }
             pools
         };
+
+        // Restrict selection to the shielded pools the caller's spend policy permits. Crossing a
+        // pool boundary is privacy-breaking, so a pool the policy does not name is never drawn
+        // upon — not even as a fallback when the permitted pools cannot cover the request, in
+        // which case input selection reports `InsufficientFunds`.
+        pool_preference.retain(|pool| spend_policy.permits_shielded(*pool));
 
         // This loop is guaranteed to terminate because on each iteration we check that the amount
         // of funds selected is strictly increasing. The loop will either return a successful
@@ -1293,11 +1301,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     // defensive fallback. The common case (fee estimate was close) is
                     // a no-op.
                     #[cfg(feature = "transparent-inputs")]
+                    if let Some(transparent) = spend_policy
+                        .transparent()
+                        .filter(|tp| !matches!(tp, TransparentSpendPolicy::ShieldedOnly))
                     {
-                        if !matches!(spend_policy, TransparentSpendPolicy::ShieldedOnly)
-                            && required > amount_at_transparent_gather
-                        {
-                            let address_allow_list = transparent_address_allow_list(spend_policy);
+                        if required > amount_at_transparent_gather {
+                            let address_allow_list = transparent_address_allow_list(transparent);
                             transparent_inputs = wallet_db
                                 .select_spendable_transparent_outputs(
                                     account,

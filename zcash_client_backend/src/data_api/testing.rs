@@ -57,7 +57,7 @@ use super::{
     scanning::ScanRange,
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
-        input_selection::{GreedyInputSelector, InputSelector},
+        input_selection::{GreedyInputSelector, InputSelector, SpendPolicy},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
 };
@@ -78,7 +78,7 @@ use crate::{
 use {
     super::{
         CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
-        wallet::input_selection::{ShieldingSelector, TransparentSpendPolicy},
+        wallet::input_selection::ShieldingSelector,
     },
     crate::wallet::TransparentAddressMetadata,
     ::transparent::address::TransparentAddress,
@@ -1059,8 +1059,7 @@ where
             change_strategy,
             request,
             confirmations_policy,
-            #[cfg(feature = "transparent-inputs")]
-            &TransparentSpendPolicy::default(),
+            &SpendPolicy::default(),
             #[cfg(feature = "unstable")]
             None,
         )?;
@@ -1104,20 +1103,19 @@ where
             change_strategy,
             request,
             confirmations_policy,
-            #[cfg(feature = "transparent-inputs")]
-            &TransparentSpendPolicy::default(),
+            &SpendPolicy::default(),
             #[cfg(feature = "unstable")]
             None,
         )
     }
 
     /// Invokes [`propose_transfer`] with the given arguments and an explicit
-    /// [`TransparentSpendPolicy`].
+    /// [`SpendPolicy`].
     ///
-    /// Unlike [`Self::propose_transfer`], which always uses the default
-    /// (shielded-only) spend policy, this allows tests to opt in to spending the
-    /// account's transparent UTXOs.
-    #[cfg(feature = "transparent-inputs")]
+    /// Unlike [`Self::propose_transfer`], which always uses the default spend
+    /// policy (every shielded pool, no transparent), this allows tests to opt in
+    /// to spending the account's transparent UTXOs or to restrict the shielded
+    /// pools notes may be drawn from.
     #[allow(clippy::type_complexity)]
     pub fn propose_transfer_with_policy<InputsT, ChangeT>(
         &mut self,
@@ -1126,7 +1124,7 @@ where
         change_strategy: &ChangeT,
         request: zip321::TransactionRequest,
         confirmations_policy: ConfirmationsPolicy,
-        spend_policy: &TransparentSpendPolicy,
+        spend_policy: &SpendPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
         super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
