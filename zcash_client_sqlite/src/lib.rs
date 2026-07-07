@@ -2611,6 +2611,28 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
     }
 
     #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        let tx = self
+            .conn
+            .borrow_mut()
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        put_shard_roots::<_, { ORCHARD_SHARD_HEIGHT * 2 }, ORCHARD_SHARD_HEIGHT>(
+            &tx,
+            IRONWOOD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
     fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
     where
         for<'a> F:
@@ -2689,6 +2711,20 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
         put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
             self.conn.0,
             ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
+            self.conn.0,
+            IRONWOOD_TABLES_PREFIX,
             start_index,
             roots,
         )
