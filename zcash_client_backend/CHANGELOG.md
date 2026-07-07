@@ -72,6 +72,10 @@ workspace.
 - `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
   an optional accessor that wallet backends can override to provide the Ironwood
   anchors and witnesses used by the transaction builder.
+- `zcash_client_backend::data_api::WalletCommitmentTrees::put_ironwood_subtree_roots`,
+  which ingests completed Ironwood note commitment subtree roots from a chain
+  source, mirroring `put_orchard_subtree_roots`. `sync::run` now also fetches and
+  stores Ironwood subtree roots.
 - `zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT`, the shard height of
   the Ironwood note commitment tree (equal to the Orchard shard height).
 - `zcash_client_backend::data_api::NoteCommitmentTree`
@@ -247,9 +251,10 @@ workspace.
   that a proposal a user inspects reflects the Ironwood outputs being created.
   `zcash_client_backend::data_api::wallet::create_proposed_transactions` builds
   those outputs through the Ironwood transaction builder.
-- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` continues
-  to use legacy Orchard routing for Orchard-recipient proposals until PCZT has
-  Ironwood role support.
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now builds
+  a V6 PCZT and routes Ironwood spends and outputs through the Ironwood bundle
+  when the proposal targets Ironwood, instead of rejecting the proposal with
+  `Error::ProposalNotSupported`.
 - Renamed `zcash_client_backend::data_api::TransparentOutputFilter` to
   `CoinbaseFilter`, and its `All` variant to `AllTransparentOutputs`.
 - During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as

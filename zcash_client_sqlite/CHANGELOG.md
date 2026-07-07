@@ -46,6 +46,12 @@ workspace.
   now implements the `shardtree` retained-checkpoint store methods, and once
   the NU6.3 activation height is reached scanning retains roughly four anchors
   per day (see the `zcash_client_backend` changelog).
+- The `WalletCommitmentTrees::put_ironwood_subtree_roots` implementation now
+  ingests completed Ironwood note commitment subtree roots into the persisted
+  Ironwood tree, mirroring `put_orchard_subtree_roots`.
+- The Ironwood note commitment tree migration also creates an
+  `ironwood_tree_retained_checkpoints` table, so anchor-checkpoint retention
+  and release cover the Ironwood tree alongside Sapling and Orchard.
 - `zcash_client_sqlite::error::SqliteClientError::PutBlocksCommitmentTree`, a
   new variant that records the shielded pool and the range of block heights
   being added to the wallet when a note commitment tree error occurs during a
@@ -115,6 +121,11 @@ workspace.
   received at the address — moves to the deriving account, since successful derivation
   establishes that account's ownership of the address. Funds received at such an address
   become spendable once the account derives it.
+- `update_chain_tip` now considers the Ironwood note commitment tree's completed
+  shards, alongside Sapling's and Orchard's, when deciding how far back to mark
+  the scan range as `ChainTip` priority near the wallet birthday. Previously it
+  considered only Sapling and Orchard, so a wallet birthday landing inside a
+  completed Ironwood shard could suggest an overly broad `Historic` range.
 
 ## [0.21.1] - 2026-06-19
 
