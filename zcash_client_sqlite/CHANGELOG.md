@@ -115,6 +115,12 @@ workspace.
   received at the address — moves to the deriving account, since successful derivation
   establishes that account's ownership of the address. Funds received at such an address
   become spendable once the account derives it.
+- Rewinding the wallet now truncates the Ironwood note commitment tree alongside the Sapling
+  and Orchard trees. Previously the Ironwood tree retained data for reorged-away blocks, so
+  re-scanning the replacement blocks failed with a shard root conflict on every attempt,
+  leaving the wallet unable to make sync progress. Truncation-height selection, the shared
+  minimum-checkpoint query, chain-state frontier re-anchoring, and the pruning-window
+  checkpoint-parity check now all account for the Ironwood tree as well.
 
 ## [0.21.1] - 2026-06-19
 
