@@ -208,14 +208,6 @@ pub trait ShieldedPoolTester {
     ) -> Result<(), pczt::roles::signer::Error>;
 }
 
-fn shielded_bundle_actions<T: ShieldedPoolTester>(spend_count: u64, output_count: u64) -> u64 {
-    let action_count = spend_count.max(output_count);
-    match T::SHIELDED_PROTOCOL {
-        ShieldedPool::Sapling => action_count.max(2),
-        ShieldedPool::Orchard | ShieldedPool::Ironwood => action_count,
-    }
-}
-
 /// Tests sending funds within the given shielded pool in a single transaction.
 ///
 /// The test:
@@ -1238,8 +1230,7 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
         initial_balance
     );
 
-    let expected_step0_fee =
-        (zip317::MARGINAL_FEE * (shielded_bundle_actions::<T>(1, 0) + 1)).unwrap();
+    let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
     let expected_step1_fee = zip317::MINIMUM_FEE;
     let expected_ephemeral_spend = (value - expected_step0_fee - expected_step1_fee).unwrap();
     let expected_ephemeral_balance = (value - expected_step0_fee).unwrap();
@@ -1891,8 +1882,14 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
             initial_balance.unwrap()
         );
 
+        let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
         let expected_step1_fee = zip317::MINIMUM_FEE;
         let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
+        let expected_step0_change =
+            (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
+        assert!(expected_step0_change.is_positive());
+
+        let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
 
         // Generate a ZIP 320 proposal, sending to another wallet's default transparent address
         // expressed as a TEX address.
@@ -1915,16 +1912,6 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
 
         let steps: Vec<_> = proposal.steps().iter().cloned().collect();
         assert_eq!(steps.len(), 2);
-
-        let selected_note_count = steps[0].shielded_inputs().unwrap().notes().len() as u64;
-        let expected_step0_fee = (zip317::MARGINAL_FEE
-            * (shielded_bundle_actions::<T>(selected_note_count, 1) + 1))
-            .unwrap();
-        let expected_step0_change =
-            (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
-        assert!(expected_step0_change.is_positive());
-
-        let total_sent = (expected_step0_fee + expected_step1_fee + transfer_amount).unwrap();
 
         assert_eq!(steps[0].balance().fee_required(), expected_step0_fee);
         assert_eq!(steps[1].balance().fee_required(), expected_step1_fee);
@@ -2350,7 +2337,7 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
 ///
 /// Desired effects:
 /// - all funds are spent
-/// - Fees are the least possible for the selected pool action counts.
+/// - Fees are the least possible: in this case 15000 for tr0 and 10000 Zats for tr1
 #[cfg(feature = "transparent-inputs")]
 pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
@@ -2371,10 +2358,7 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     let dfvk = T::test_account_fvk(&st);
 
     let value = Zatoshis::const_from_u64(100000);
-    let expected_step0_fee =
-        (zip317::MARGINAL_FEE * (shielded_bundle_actions::<T>(1, 0) + 1)).unwrap();
-    let expected_step1_fee = zip317::MINIMUM_FEE;
-    let transfer_amount = (value - expected_step0_fee - expected_step1_fee).unwrap();
+    let transfer_amount = Zatoshis::const_from_u64(75000);
 
     // Add funds to the wallet.
     let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
@@ -2386,6 +2370,8 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
         initial_balance
     );
 
+    let expected_step0_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
+    let expected_step1_fee = zip317::MINIMUM_FEE;
     let expected_ephemeral = (transfer_amount + expected_step1_fee).unwrap();
     let expected_step0_change =
         (initial_balance - expected_ephemeral - expected_step0_fee).expect("sufficient funds");
@@ -4000,9 +3986,8 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(proposal0.steps().len(), 1);
     let step0 = &proposal0.steps().head;
 
-    let expected_fee = (MARGINAL_FEE
-        * (shielded_bundle_actions::<P0>(1, 0) + shielded_bundle_actions::<P1>(0, 2)))
-    .unwrap();
+    // We expect 4 logical actions, two per pool (due to padding).
+    let expected_fee = Zatoshis::const_from_u64(20000);
     assert_eq!(step0.balance().fee_required(), expected_fee);
 
     let expected_change = (note_value - transfer_amount - expected_fee).unwrap();

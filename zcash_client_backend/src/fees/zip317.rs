@@ -754,18 +754,17 @@ mod tests {
             )
             .unwrap();
 
-        // Sapling still pads up to 2 spends/actions when used. Orchard and Ironwood
-        // use the unpadded default transactional bundle type. Without an Ironwood
-        // bundle: sapling (2) + orchard (1 payment + 1 change = 2) = 4 actions;
-        // with an Ironwood output: + ironwood (1) = 5 actions. At 5000 zat/action
-        // that is 20000 vs 25000.
+        // ZIP 317 floors each shielded bundle that is used at 2 actions. Without
+        // an Ironwood bundle: sapling (2) + orchard (2 outputs) = 4 actions; with
+        // an Ironwood output: + ironwood (2) = 6 actions. At 5000 zat/action that
+        // is 20000 vs 30000.
         assert_eq!(
             without_ironwood.fee_required(),
             Zatoshis::const_from_u64(20000)
         );
         assert_eq!(
             with_ironwood.fee_required(),
-            Zatoshis::const_from_u64(25000)
+            Zatoshis::const_from_u64(30000)
         );
     }
 
@@ -836,12 +835,12 @@ mod tests {
 
         // Change in Orchard: sapling (2) + orchard (1 payment + 1 change = 2) +
         // ironwood (2 payments = 2) = 6 actions = 30000. Routing the change into
-        // Ironwood: orchard (1 payment = 1) + ironwood (2 payments + 1 change = 3)
-        // = 6 actions = 30000.
+        // Ironwood: orchard (1 payment = 2) + ironwood (2 payments + 1 change = 3)
+        // = 7 actions = 35000.
         let change_in_orchard = fee_for(false);
         let change_in_ironwood = fee_for(true);
         assert_eq!(change_in_orchard, Zatoshis::const_from_u64(30000));
-        assert_eq!(change_in_ironwood, Zatoshis::const_from_u64(30000));
+        assert_eq!(change_in_ironwood, Zatoshis::const_from_u64(35000));
     }
 
     #[test]
