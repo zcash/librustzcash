@@ -566,49 +566,85 @@ impl From<CoinbasePolicy> for CoinbaseFilter {
     }
 }
 
-#[cfg(feature = "transparent-inputs")]
-/// Specifies the wallet's intent to spend transparent UTXOs in a transfer.
+/// Specifies how transparent UTXOs may be spent in a transfer, when a [`SpendPolicy`] permits
+/// transparent spending.
 ///
-/// Spending transparent funds links the chosen transparent addresses on-chain,
-/// reducing privacy; callers must opt in explicitly. Corresponds to the legacy
-/// `AllowTransparentAddressLinking` privacy policy / `ANY_TADDR`.
-#[derive(Clone, Debug, Default)]
-pub enum TransparentSpendPolicy {
-    /// Do not spend any transparent UTXOs (default; fully-shielded behavior).
-    #[default]
-    ShieldedOnly,
-    /// Spend from arbitrary transparent receivers belonging to the account, as
-    /// needed to satisfy the request. The proposer chooses the addresses,
-    /// potentially linking them. (`ANY_TADDR`)
-    AnyAccountTaddr,
-    /// Spend only from the specified transparent addresses, intentionally
-    /// linking them.
-    FromAddresses(NonEmptyBTreeSet<TransparentAddress>),
+/// Spending transparent funds links the chosen transparent addresses on-chain, reducing privacy,
+/// so a caller opts in by attaching this to a [`SpendPolicy`] via [`SpendPolicy::with_transparent`]
+/// (the absence of a policy — the default — spends no transparent UTXOs). The policy names the
+/// [`TransparentSource`] the UTXOs may be drawn from and, via [`CoinbasePolicy`], whether coinbase
+/// or non-coinbase outputs are spent.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Debug)]
+pub struct TransparentSpendPolicy {
+    source: TransparentSource,
+    coinbase: CoinbasePolicy,
 }
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentSpendPolicy {
-    /// Creates a policy that only spends from shielded UTXOs.
-    pub fn shielded_only() -> Self {
-        Self::ShieldedOnly
+    /// Spends non-coinbase UTXOs from arbitrary transparent receivers belonging to the account,
+    /// as needed to satisfy the request. The proposer chooses the addresses, potentially linking
+    /// them. (The legacy `ANY_TADDR` behavior.)
+    pub fn any_account_addr() -> Self {
+        Self {
+            source: TransparentSource::AnyAccountAddr,
+            coinbase: CoinbasePolicy::NonCoinbase,
+        }
     }
 
-    /// Creates a policy that spends from arbitrary transparent receivers
-    /// belonging to the account.
-    pub fn from_any_account_transparent_addresses() -> Self {
-        Self::AnyAccountTaddr
+    /// Spends non-coinbase UTXOs only from the specified transparent addresses, intentionally
+    /// linking them.
+    pub fn from_addresses(taddrs: NonEmpty<TransparentAddress>) -> Self {
+        Self {
+            source: TransparentSource::FromAddresses(NonEmptyBTreeSet::from_nonempty(taddrs)),
+            coinbase: CoinbasePolicy::NonCoinbase,
+        }
     }
 
-    /// Creates a policy that only spends from the specified transparent addresses,
-    /// potentially leaking them. (`ANY_TADDR`)
-    pub fn from_specific_transparent_addresses(taddrs: NonEmpty<TransparentAddress>) -> Self {
-        Self::FromAddresses(NonEmptyBTreeSet::from_nonempty(taddrs))
+    /// Spends non-coinbase UTXOs only from a single transparent address.
+    pub fn from_one_address(taddr: TransparentAddress) -> Self {
+        Self {
+            source: TransparentSource::FromAddresses(NonEmptyBTreeSet::singleton(taddr)),
+            coinbase: CoinbasePolicy::NonCoinbase,
+        }
     }
 
-    /// Creates a policy that only spends from a single transparent address.
-    pub fn from_one_transparent_address(taddr: TransparentAddress) -> Self {
-        Self::FromAddresses(NonEmptyBTreeSet::singleton(taddr))
+    /// Returns a copy of this policy with the given coinbase policy in effect.
+    pub fn with_coinbase(mut self, coinbase: CoinbasePolicy) -> Self {
+        self.coinbase = coinbase;
+        self
     }
+
+    /// Returns the transparent source from which UTXOs may be drawn.
+    pub fn source(&self) -> &TransparentSource {
+        &self.source
+    }
+
+    /// Returns the coinbase policy in effect for this transparent spend.
+    pub fn coinbase(&self) -> CoinbasePolicy {
+        self.coinbase
+    }
+
+    /// Returns the explicit list of transparent addresses UTXOs may be drawn from, or `None` if
+    /// any of the account's transparent receivers are permitted.
+    fn address_allow_list(&self) -> Option<Vec<TransparentAddress>> {
+        match &self.source {
+            TransparentSource::FromAddresses(addrs) => Some(addrs.iter().copied().collect()),
+            TransparentSource::AnyAccountAddr => None,
+        }
+    }
+}
+
+/// The transparent receivers a [`TransparentSpendPolicy`] may draw UTXOs from.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Debug)]
+pub enum TransparentSource {
+    /// Any transparent receiver belonging to the account. The proposer chooses which, potentially
+    /// linking them.
+    AnyAccountAddr,
+    /// Only the specified transparent addresses.
+    FromAddresses(NonEmptyBTreeSet<TransparentAddress>),
 }
 
 /// An [`InputSelector`] implementation that uses a greedy strategy to select between available
@@ -673,6 +709,8 @@ impl<DbT> GreedyInputSelector<DbT> {
         // The list used to filter addresses.
         // If `None`, any address is allowed.
         address_allow_list: Option<&[TransparentAddress]>,
+        // Which coinbase outputs are eligible for selection.
+        coinbase: CoinbaseFilter,
         transaction_request: &TransactionRequest,
         amount_at_transparent_gather: &mut Zatoshis,
     ) -> Result<
@@ -720,7 +758,7 @@ impl<DbT> GreedyInputSelector<DbT> {
                 account,
                 target_height,
                 confirmations_policy,
-                CoinbaseFilter::NonCoinbaseOnly,
+                coinbase,
                 address_allow_list,
                 target_value,
                 shielding_max_inputs(self.shielding_block_space_percent),
@@ -740,23 +778,6 @@ impl<DbT> GreedyInputSelector<DbT> {
 #[cfg(feature = "transparent-inputs")]
 fn shielding_max_inputs(block_space_percent: u32) -> usize {
     (MAX_BLOCK_BYTES.saturating_mul(block_space_percent as usize) / 100) / P2PKH_STANDARD_INPUT_SIZE
-}
-
-/// Returns the set of transparent addresses that `spend_policy` permits the transparent
-/// gather to select from, or `None` if any of the account's transparent receivers are
-/// eligible.
-///
-/// This must be applied *within* the gather (not to its results), so that outputs excluded
-/// by the policy do not consume the gather's value bound; see
-/// [`InputSource::select_spendable_transparent_outputs`].
-#[cfg(feature = "transparent-inputs")]
-fn transparent_address_allow_list(
-    spend_policy: &TransparentSpendPolicy,
-) -> Option<Vec<TransparentAddress>> {
-    match spend_policy {
-        TransparentSpendPolicy::FromAddresses(addrs) => Some(addrs.iter().copied().collect()),
-        TransparentSpendPolicy::ShieldedOnly | TransparentSpendPolicy::AnyAccountTaddr => None,
-    }
 }
 
 impl<DbT> Default for GreedyInputSelector<DbT> {
@@ -921,28 +942,19 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut amount_at_transparent_gather = Zatoshis::ZERO;
         #[cfg(feature = "transparent-inputs")]
         let mut transparent_inputs = match spend_policy.transparent() {
-            None | Some(TransparentSpendPolicy::ShieldedOnly) => {
+            None => {
                 // No transparent spending is permitted; skip the gather entirely.
                 Vec::new()
             }
-            Some(TransparentSpendPolicy::AnyAccountTaddr) => self.gather_transparent::<ChangeT>(
-                wallet_db,
-                target_height,
-                confirmations_policy,
-                account,
-                // Pass an empty set as the allow list
-                None,
-                &transaction_request,
-                &mut amount_at_transparent_gather,
-            )?,
-            Some(transparent @ TransparentSpendPolicy::FromAddresses(_)) => {
-                let address_allow_list = transparent_address_allow_list(transparent);
+            Some(transparent) => {
+                let address_allow_list = transparent.address_allow_list();
                 self.gather_transparent::<ChangeT>(
                     wallet_db,
                     target_height,
                     confirmations_policy,
                     account,
                     address_allow_list.as_deref(),
+                    transparent.coinbase().into(),
                     &transaction_request,
                     &mut amount_at_transparent_gather,
                 )?
@@ -1301,18 +1313,15 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     // defensive fallback. The common case (fee estimate was close) is
                     // a no-op.
                     #[cfg(feature = "transparent-inputs")]
-                    if let Some(transparent) = spend_policy
-                        .transparent()
-                        .filter(|tp| !matches!(tp, TransparentSpendPolicy::ShieldedOnly))
-                    {
+                    if let Some(transparent) = spend_policy.transparent() {
                         if required > amount_at_transparent_gather {
-                            let address_allow_list = transparent_address_allow_list(transparent);
+                            let address_allow_list = transparent.address_allow_list();
                             transparent_inputs = wallet_db
                                 .select_spendable_transparent_outputs(
                                     account,
                                     target_height,
                                     confirmations_policy,
-                                    CoinbaseFilter::NonCoinbaseOnly,
+                                    transparent.coinbase().into(),
                                     address_allow_list.as_deref(),
                                     TargetValue::AtLeast(required),
                                     shielding_max_inputs(self.shielding_block_space_percent),
@@ -2359,5 +2368,18 @@ mod spend_policy_tests {
             CoinbaseFilter::from(CoinbasePolicy::NonCoinbase),
             CoinbaseFilter::NonCoinbaseOnly
         );
+    }
+
+    // A transparent spend policy spends non-coinbase UTXOs by default, and `with_coinbase`
+    // overrides that choice while preserving the source.
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn transparent_policy_coinbase_defaults_and_override() {
+        let policy = TransparentSpendPolicy::any_account_addr();
+        assert_eq!(policy.coinbase(), CoinbasePolicy::NonCoinbase);
+
+        let policy = policy.with_coinbase(CoinbasePolicy::OnlyCoinbase);
+        assert_eq!(policy.coinbase(), CoinbasePolicy::OnlyCoinbase);
+        assert!(matches!(policy.source(), TransparentSource::AnyAccountAddr));
     }
 }

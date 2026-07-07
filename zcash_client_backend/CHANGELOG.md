@@ -82,16 +82,27 @@ workspace.
 - `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
   the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
   used to compute the Orchard action count.
+- `zcash_client_backend::data_api::wallet::input_selection::SpendPolicy`:
+  expresses which sources of funds an input selector may draw upon to satisfy a
+  transfer. It names the shielded pools notes may be selected from and, behind
+  the `transparent-inputs` feature flag, an optional `TransparentSpendPolicy`.
+  The default permits every shielded pool present in the build and no transparent
+  spending, preserving the historical fully-shielded behavior; a caller restricts
+  the shielded set (e.g. to `{Orchard}`) to forbid pool crossing, since combining
+  notes across shielded pools reduces privacy and must be an explicit choice.
 - `zcash_client_backend::data_api::wallet::input_selection::TransparentSpendPolicy`
-  (behind the `transparent-inputs` feature flag): expresses a wallet's explicit,
-  privacy-acknowledging intent to spend transparent UTXOs in a transfer. Variants
-  are `ShieldedOnly` (the default; no transparent spends), `AnyAccountTaddr`
-  (the legacy `ANY_TADDR` behavior, spending from arbitrary account transparent
-  receivers and potentially linking them), and `FromAddresses` (spending only
-  from an explicitly named set of transparent addresses).
+  (behind the `transparent-inputs` feature flag): specifies how transparent UTXOs
+  may be spent when a `SpendPolicy` permits it — a `TransparentSource`
+  (`AnyAccountAddr`, the legacy `ANY_TADDR` behavior; or `FromAddresses`, an
+  explicitly named set) together with a `CoinbasePolicy`. Constructed via
+  `any_account_addr`, `from_addresses`, or `from_one_address` (all spending
+  non-coinbase UTXOs by default) and refined with `with_coinbase`.
+- `zcash_client_backend::data_api::wallet::input_selection::CoinbasePolicy`
+  (`OnlyCoinbase` / `NonCoinbase`): the caller's choice of which coinbase
+  transparent outputs a transparent spend may draw upon.
 - `zcash_client_backend::data_api::wallet::input_selection::NonEmptyBTreeSet`
   (behind the `transparent-inputs` feature flag): a minimal non-empty
-  `BTreeSet` wrapper used by `TransparentSpendPolicy::FromAddresses` to hold
+  `BTreeSet` wrapper used by `TransparentSource::FromAddresses` to hold
   the explicit set of transparent addresses to spend from.
 - `zcash_client_backend::data_api::CoinbaseFilter::NonCoinbaseOnly` (behind
   `transparent-inputs`): a selection control (not an encoding of any
@@ -311,11 +322,13 @@ workspace.
   Ironwood pool.
 - `zcash_client_backend::data_api::wallet::propose_transfer` and
   `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
-  now take an additional `&TransparentSpendPolicy` argument (behind the
-  `transparent-inputs` feature flag) that controls whether and how the
-  account's transparent UTXOs may be spent. The default policy preserves the
-  previous shielded-only behavior; transparent UTXOs are never spent unless the
-  caller explicitly opts in.
+  now take an additional `&SpendPolicy` argument (no longer behind the
+  `transparent-inputs` feature flag) that controls which shielded pools notes may
+  be selected from and whether and how the account's transparent UTXOs may be
+  spent. The default policy preserves the previous behavior (every shielded pool
+  permitted, no transparent spending); a pool the policy does not name is never
+  drawn upon, so restricting the policy causes input selection to report
+  `InsufficientFunds` rather than crossing into a non-permitted pool.
 - `zcash_client_backend::TransferType::WalletInternal` semantics have
   narrowed: it now specifically indicates a cross-account internal transfer
   (recipient and funder are distinct wallet accounts). Code that previously
