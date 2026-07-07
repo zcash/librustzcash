@@ -3785,8 +3785,8 @@ pub trait WalletCommitmentTrees {
     ///
     /// Anchor checkpoints are established during scanning (and may be created directly via
     /// [`ShardTree::ensure_retained`]); they are otherwise exempt from automatic pruning of excess
-    /// checkpoints. This releases the retention of those that have aged below `max_height` in both
-    /// the Sapling and (when the `orchard` feature is enabled) Orchard trees.
+    /// checkpoints. This releases the retention of those that have aged below `max_height` in the
+    /// Sapling and (when the `orchard` feature is enabled) Orchard and Ironwood trees.
     fn remove_retained_checkpoints_below(
         &mut self,
         max_height: BlockHeight,
@@ -3806,6 +3806,20 @@ pub trait WalletCommitmentTrees {
 
         #[cfg(feature = "orchard")]
         self.with_orchard_tree_mut(|tree| {
+            for height in tree
+                .store()
+                .retained_checkpoints()
+                .map_err(ShardTreeError::Storage)?
+            {
+                if height < max_height {
+                    tree.remove_retained_checkpoint(&height)?;
+                }
+            }
+            Ok::<_, ShardTreeError<Self::Error>>(())
+        })?;
+
+        #[cfg(feature = "orchard")]
+        self.with_ironwood_tree_mut(|tree| {
             for height in tree
                 .store()
                 .retained_checkpoints()

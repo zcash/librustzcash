@@ -1615,6 +1615,46 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "orchard")]
+    fn remove_retained_checkpoints_below_ironwood() {
+        use std::collections::BTreeSet;
+
+        use shardtree::{error::ShardTreeError, store::ShardStore};
+        use zcash_client_backend::data_api::WalletCommitmentTrees;
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db = WalletDb::for_path(
+            data_file.path(),
+            Network::TestNetwork,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+        WalletMigrator::new().init_or_migrate(&mut db).unwrap();
+
+        db.with_ironwood_tree_mut(|tree| {
+            for h in [100u32, 200, 300] {
+                tree.ensure_retained(BlockHeight::from(h))?;
+            }
+            Ok::<_, ShardTreeError<_>>(())
+        })
+        .unwrap();
+
+        db.remove_retained_checkpoints_below(BlockHeight::from(250))
+            .unwrap();
+
+        let remaining = db
+            .with_ironwood_tree_mut(|tree| {
+                tree.store()
+                    .retained_checkpoints()
+                    .map_err(ShardTreeError::Storage)
+            })
+            .unwrap()
+            .expect("the wallet backend tracks an Ironwood tree");
+        assert_eq!(remaining, BTreeSet::from([BlockHeight::from(300)]));
+    }
+
+    #[test]
     fn sapling_root_hashes() {
         check_root_hashes(new_tree::<SaplingPoolTester>);
     }
