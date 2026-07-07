@@ -1094,6 +1094,78 @@ pub(crate) mod tests {
         assert!(ironwood_shards > 0);
     }
 
+    /// Regression test: rewinding the wallet must truncate the Ironwood note commitment tree
+    /// along with the Sapling and Orchard trees. Stale Ironwood tree state that survives a
+    /// rewind conflicts with the replacement chain's commitments, so every re-scan of the
+    /// reorged range fails with a shard root conflict and no retry can repair the wallet.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn truncation_resets_the_ironwood_tree() {
+        use zcash_client_backend::data_api::testing::{
+            AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
+            pool::ShieldedPoolTester,
+        };
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::value::Zatoshis;
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let orchard_fvk = OrchardPoolTester::test_account_fvk(&st);
+        let ironwood_recipient = IronwoodFvk(orchard_fvk.clone());
+
+        // Establish a rewind target below any Ironwood activity.
+        let (h1, _, _) = st.generate_next_block(
+            &orchard_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+        st.scan_cached_blocks(h1, 1);
+
+        // The next block pays an Ironwood note, giving the Ironwood tree data above the target.
+        let (h2, _, _) = st.generate_next_block(
+            &ironwood_recipient,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(20_000),
+        );
+        st.scan_cached_blocks(h2, 1);
+
+        // Reorg away the Ironwood block.
+        st.truncate_to_height(h1);
+
+        // The replacement block pays a different Ironwood note at the same height, so its note
+        // commitment differs from the reorged-away one at the same tree position.
+        let (h2b, _, _) = st.generate_next_block(
+            &ironwood_recipient,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(30_000),
+        );
+        assert_eq!(h2b, h2);
+        st.scan_cached_blocks(h2b, 1);
+
+        // Only the replacement chain's Ironwood note is mined; the reorged-away note survives
+        // solely as un-mined transaction data.
+        let (mined_count, mined_value): (i64, i64) = st
+            .wallet_mut()
+            .conn_mut()
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MIN(irn.value), 0)
+                 FROM ironwood_received_notes irn
+                 JOIN transactions tx ON tx.id_tx = irn.transaction_id
+                 WHERE tx.mined_height IS NOT NULL",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(mined_count, 1);
+        assert_eq!(mined_value as u64, 30_000);
+    }
+
     /// End-to-end: a wallet that has received an Ironwood note can select and spend it. The
     /// resulting transaction spends the Ironwood note (it carries an Ironwood bundle), pays a
     /// nonzero fee, records the note as spent, and reduces the account balance.
