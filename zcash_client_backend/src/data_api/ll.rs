@@ -59,6 +59,13 @@ pub trait TxMeta {
     #[cfg(feature = "orchard")]
     fn orchard_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier>;
 
+    /// Returns an iterator over the nullifiers of Ironwood notes spent in this transaction.
+    ///
+    /// Ironwood nullifiers share the Orchard nullifier type, but identify notes in the Ironwood
+    /// pool (the transaction's Ironwood bundle, distinct from its Orchard bundle).
+    #[cfg(feature = "orchard")]
+    fn ironwood_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier>;
+
     /// Returns the fee paid by this transaction, given a function that can retrieve the value of
     /// prior transparent outputs spent in the transaction.
     ///
@@ -96,6 +103,13 @@ impl TxMeta for Transaction {
     #[cfg(feature = "orchard")]
     fn orchard_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier> {
         self.orchard_bundle()
+            .into_iter()
+            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier()))
+    }
+
+    #[cfg(feature = "orchard")]
+    fn ironwood_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier> {
+        self.ironwood_bundle()
             .into_iter()
             .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier()))
     }
@@ -153,6 +167,10 @@ pub trait LowLevelWalletRead {
 
         #[cfg(feature = "orchard")]
         funding_accounts.extend(self.detect_accounts_orchard(tx.orchard_spent_note_nullifiers())?);
+
+        #[cfg(feature = "orchard")]
+        funding_accounts
+            .extend(self.detect_accounts_ironwood(tx.ironwood_spent_note_nullifiers())?);
 
         Ok(funding_accounts)
     }
@@ -224,6 +242,20 @@ pub trait LowLevelWalletRead {
     /// [`Nullifier`]: orchard::note::Nullifier
     #[cfg(feature = "orchard")]
     fn detect_accounts_orchard<'a>(
+        &self,
+        spends: impl Iterator<Item = &'a orchard::note::Nullifier>,
+    ) -> Result<HashSet<Self::AccountId>, Self::Error>;
+
+    /// Detects the set of accounts that received Ironwood outputs that, when spent, reveal(ed) the
+    /// given [`Nullifier`]s. This is used to determine which account(s) funded a given
+    /// transaction.
+    ///
+    /// Ironwood notes share the Orchard nullifier type but are tracked separately, so this is
+    /// distinct from [`LowLevelWalletRead::detect_accounts_orchard`].
+    ///
+    /// [`Nullifier`]: orchard::note::Nullifier
+    #[cfg(feature = "orchard")]
+    fn detect_accounts_ironwood<'a>(
         &self,
         spends: impl Iterator<Item = &'a orchard::note::Nullifier>,
     ) -> Result<HashSet<Self::AccountId>, Self::Error>;
