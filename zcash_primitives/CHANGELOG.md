@@ -12,6 +12,10 @@ workspace.
 
 ### Added
 - `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
+- `zcash_primitives::orchard`, a re-export of the `orchard` crate, so that downstream
+  crates which make their own `orchard` dependency optional can still name the
+  `orchard` types that appear in this crate's public API (such as the
+  `orchard_pool_bundle_type` field added below).
 
 ### Changed
 - `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
@@ -27,6 +31,10 @@ workspace.
   in a slot whose value pool is not supported under the transaction's consensus
   branch ID (the Orchard pool prior to NU5; the Ironwood pool prior to NU6.3)
   is now rejected as invalid data.
+- `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries an
+  `orchard_pool_bundle_type` field selecting the transactional bundle type for the
+  Orchard and Ironwood bundles. Pass `orchard::builder::BundleType::DEFAULT` to keep
+  the previous (padded) behavior.
 
 ## [0.29.0-pre.0] - 2026-06-30
 
