@@ -79,6 +79,7 @@ orchard = [
     "dep:nonempty",
     "dep:orchard",
     "dep:pasta_curves",
+    "dep:zcash_note_encryption",
 ]
 
 ## Enables functionality that requires Sapling protocol types.

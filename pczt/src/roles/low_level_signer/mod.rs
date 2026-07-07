@@ -214,7 +214,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec::Vec;
 
-    use crate::orchard::{Action, Bundle, NoteVersion, Output, Spend};
+    use crate::orchard::{Action, Bundle, EncCiphertext, NoteVersion, Output, Spend};
 
     use super::{OrchardParseError, restore_spend_fvks, snapshot_spend_fvks};
 
@@ -284,7 +284,7 @@ mod tests {
                     output: Output {
                         cmx: [0; 32],
                         ephemeral_key: [0; 32],
-                        enc_ciphertext: Vec::new(),
+                        enc_ciphertext: EncCiphertext::Encrypted(Vec::new()),
                         out_ciphertext: Vec::new(),
                         recipient: None,
                         value: None,
