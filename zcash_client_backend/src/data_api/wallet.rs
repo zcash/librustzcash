@@ -137,21 +137,6 @@ fn ironwood_active_at<ParamsT: consensus::Parameters, H: Into<BlockHeight>>(
     params.is_nu_active(NetworkUpgrade::Nu6_3, target_height.into())
 }
 
-/// Maps an Ironwood bundle output index to its index in the wallet's combined
-/// Orchard-family output space.
-///
-/// A V6 transaction's Orchard and Ironwood outputs share a single stored index
-/// space, with the Orchard bundle's actions placed first, so the Ironwood output
-/// at raw index `i` is stored at `orchard_actions + i`. When the transaction has
-/// no Orchard bundle, the raw index is used unchanged.
-#[cfg(feature = "orchard")]
-fn stored_ironwood_output_index(tx: &Transaction, raw_ironwood_output_index: usize) -> usize {
-    tx.orchard_bundle()
-        .map_or(raw_ironwood_output_index, |bundle| {
-            bundle.actions().len() + raw_ironwood_output_index
-        })
-}
-
 #[cfg(feature = "pczt")]
 fn serialize_target_height<S>(
     target_height: &TargetHeight,
@@ -2122,8 +2107,6 @@ where
                 .ironwood_meta()
                 .output_action_index(i)
                 .expect("An action should exist in the transaction for each Ironwood output.");
-            let output_index =
-                stored_ironwood_output_index(build_result.transaction(), raw_output_index);
 
             let recipient = recipient.into_recipient_with_note(|| {
                 build_result
@@ -2139,9 +2122,13 @@ where
                     )
             });
 
+            // The Ironwood output is stored at its raw index within the Ironwood bundle — the same
+            // index the scanner assigns — so the send and scan write paths agree. Each shielded
+            // pool has its own received-notes table keyed by (transaction, action_index), so
+            // Orchard and Ironwood indices never collide despite both starting at zero.
             SentTransactionOutput::from_parts_in_tree(
                 Some(NoteCommitmentTree::Ironwood),
-                output_index,
+                raw_output_index,
                 recipient,
                 value,
                 memo,

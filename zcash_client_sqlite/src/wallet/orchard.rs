@@ -1632,6 +1632,130 @@ pub(crate) mod tests {
             );
         }
 
+        /// A transaction that spends an Orchard note (producing an Orchard bundle) and returns
+        /// wallet-owned Ironwood change must record that change at the same action index the
+        /// scanner assigns — the raw index within the Ironwood bundle. The send path shifted the
+        /// Ironwood index by the Orchard action count (mapping into a "combined Orchard-family
+        /// space"), so the send-stored index disagreed with the scanned index and, when both were
+        /// written, the change was recorded twice (inflating the balance). The two indices must
+        /// agree.
+        #[test]
+        fn ironwood_change_is_stored_at_the_raw_bundle_index() {
+            use std::collections::HashMap;
+            use std::convert::Infallible;
+
+            use zcash_client_backend::{TransferType, data_api::WalletRead, decrypt_transaction};
+
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let account_id = account.id();
+
+            // A small Orchard note (so returning the change to Orchard would violate the turnstile,
+            // spilling it into Ironwood) plus Ironwood and Sapling notes that are jointly required
+            // to cover the payment, forcing the Orchard note to be spent (and an Orchard bundle to
+            // be built).
+            let (h, _, _) = st.generate_next_block(
+                &OrchardPoolTester::test_account_fvk(&st),
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.generate_next_block(
+                &IronwoodFvk(OrchardPoolTester::test_account_fvk(&st)),
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(60_000),
+            );
+            st.generate_next_block(
+                &SaplingPoolTester::test_account_fvk(&st),
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(90_000),
+            );
+            st.scan_cached_blocks(h, 3);
+            for _ in 0..5 {
+                let (h, _) = st.generate_empty_block();
+                st.scan_cached_blocks(h, 1);
+            }
+
+            // No single note covers the payment, so all three pools are combined; the small
+            // Orchard note is drained and its change spills into Ironwood.
+            let request = orchard_payment_request(st.network(), 100_000);
+            let change_strategy = orchard_change_strategy();
+            let input_selector = GreedyInputSelector::new();
+            let proposal = st
+                .propose_transfer(
+                    account_id,
+                    &input_selector,
+                    &change_strategy,
+                    request,
+                    ConfirmationsPolicy::MIN,
+                )
+                .unwrap();
+
+            let created = st
+                .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                    account.usk(),
+                    OvkPolicy::Sender,
+                    &proposal,
+                )
+                .unwrap();
+            let tx = st
+                .wallet()
+                .get_transaction(created[0])
+                .unwrap()
+                .expect("the sent transaction was stored");
+            assert!(
+                tx.orchard_bundle().is_some(),
+                "the Orchard spend must produce an Orchard bundle",
+            );
+            assert!(
+                tx.ironwood_bundle().is_some(),
+                "the Ironwood change must produce an Ironwood bundle",
+            );
+
+            // The send path recorded the wallet-owned Ironwood change as a received note. It is
+            // distinguished from the spent 60k input note (also in this table) by having no
+            // nullifier recorded: the change note has not been scanned, so no `nf` is known yet.
+            let stored_index: i64 = st
+                .wallet_mut()
+                .conn_mut()
+                .query_row(
+                    "SELECT action_index FROM ironwood_received_notes WHERE nf IS NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("the Ironwood change must be recorded on the send path");
+
+            // The canonical index is the raw within-bundle index the decrypt/scan path assigns.
+            // Both Ironwood outputs are decryptable by this wallet: the change with the internal
+            // IVK (an `AccountInternal` transfer) and the Orchard-receiver payment via the wallet's
+            // own OVK (an `Outgoing` transfer, because the transaction was created with
+            // `OvkPolicy::Sender`). Select the change specifically, since the two actions are
+            // shuffled and either may come first.
+            let mut ufvks = HashMap::new();
+            ufvks.insert(account_id, account.ufvk().unwrap().clone());
+            let d_tx = decrypt_transaction(st.network(), None, None, &tx, &ufvks);
+            let change = d_tx
+                .ironwood_outputs()
+                .iter()
+                .find(|o| {
+                    o.value_pool() == ShieldedPool::Ironwood
+                        && o.transfer_type() == TransferType::AccountInternal
+                })
+                .expect("the wallet-owned Ironwood change is detected on decryption");
+            let raw_index = i64::try_from(change.index()).unwrap();
+
+            assert_eq!(
+                stored_index, raw_index,
+                "the send path must record the Ironwood change at the raw bundle index the \
+                 scanner uses, so the two write paths agree and the note is not counted twice",
+            );
+        }
+
         prop_compose! {
             // An Orchard note value (which may or may not, on its own, cover the payment) alongside
             // large Sapling and Ironwood notes that always cover it, plus a small payment. This lets
