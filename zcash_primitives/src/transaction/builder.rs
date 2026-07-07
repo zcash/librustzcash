@@ -318,6 +318,9 @@ impl BuildConfig {
     }
 
     /// Returns the Ironwood builder for this configuration.
+    ///
+    /// Transactional bundles use [`BundleType::DEFAULT`](orchard::builder::BundleType::DEFAULT),
+    /// so the single-output Orchard→Ironwood migration shape builds as one action.
     fn ironwood_builder(&self) -> Option<orchard::builder::Builder> {
         let bundle_version = orchard::bundle::BundleVersion::ironwood_v3();
         match self {
@@ -362,9 +365,10 @@ fn orchard_action_count(
         .checked_add(builder.changes().len())
         .ok_or("num_outputs + num_changes overflowed")?;
 
-    // The flags must match those the builder constructs for each configuration (see
-    // `orchard_builder`). For a `Coinbase` bundle `num_actions` ignores the flags, but supplying
-    // the matching set keeps the two paths consistent.
+    // The bundle type and flags must match those the builder constructs for each
+    // configuration (see `orchard_builder` / `ironwood_builder`). For a `Coinbase`
+    // bundle `num_actions` ignores the flags, but supplying the matching set keeps the
+    // two paths consistent.
     let (bundle_type, flags) = if is_coinbase {
         (
             orchard::builder::BundleType::Coinbase,
@@ -1977,6 +1981,66 @@ mod tests {
             )
             .unwrap(),
             3
+        );
+    }
+
+    /// The default transactional bundle type is unpadded, so both a single-output
+    /// Orchard bundle and the single-output Orchard→Ironwood migration shape count
+    /// as exactly one action.
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn default_transactional_bundles_are_unpadded() {
+        let recipient = orchard::keys::FullViewingKey::from(
+            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
+        )
+        .address_at(0u32, orchard::keys::Scope::External);
+
+        let config = BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+        };
+
+        // `orchard_v2` here: the NU6.3 `orchard_v3` version disables cross-address
+        // transfers, so a bare output cannot be added.
+        let mut orchard_builder = config
+            .orchard_builder(orchard::bundle::BundleVersion::orchard_v2())
+            .unwrap();
+        orchard_builder
+            .add_output(
+                None,
+                recipient,
+                orchard::value::NoteValue::from_raw(10_000),
+                [0u8; 512],
+            )
+            .unwrap();
+        assert_eq!(
+            super::orchard_action_count(
+                &orchard_builder,
+                false,
+                orchard::bundle::BundleVersion::orchard_v2(),
+            )
+            .unwrap(),
+            1
+        );
+
+        let mut ironwood_builder = config.ironwood_builder().unwrap();
+        ironwood_builder
+            .add_output(
+                None,
+                recipient,
+                orchard::value::NoteValue::from_raw(10_000),
+                [0u8; 512],
+            )
+            .unwrap();
+        assert_eq!(
+            super::orchard_action_count(
+                &ironwood_builder,
+                false,
+                orchard::bundle::BundleVersion::ironwood_v3(),
+            )
+            .unwrap(),
+            1
         );
     }
 
