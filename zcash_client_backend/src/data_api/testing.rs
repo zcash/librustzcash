@@ -3402,6 +3402,15 @@ impl WalletWrite for MockWalletDb {
         Err(())
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        _account_id: Self::AccountId,
+        _n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        Err(())
+    }
+
     fn set_transaction_status(
         &mut self,
         _txid: TxId,

@@ -1496,6 +1496,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.reserve_next_n_ephemeral_addresses(account_id, n))
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| wdb.reserve_next_n_internal_addresses(account_id, n))
+    }
+
     fn set_transaction_status(
         &mut self,
         txid: TxId,
@@ -1875,6 +1884,25 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             account_id,
             TransparentKeyScope::EPHEMERAL,
             self.gap_limits.ephemeral(),
+            n,
+        )?;
+
+        Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
+        let reserved = wallet::transparent::reserve_next_n_addresses(
+            self.conn.0,
+            &self.params,
+            account_id,
+            TransparentKeyScope::INTERNAL,
+            self.gap_limits.internal(),
             n,
         )?;
 

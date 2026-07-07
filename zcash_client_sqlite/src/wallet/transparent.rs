@@ -2936,6 +2936,37 @@ mod tests {
     }
 
     #[test]
+    fn reserve_next_n_internal_addresses_gap_limit() {
+        zcash_client_backend::data_api::testing::transparent::reserve_next_n_internal_addresses_gap_limit(
+            TestDbFactory::default(),
+            BlockCache::new(),
+            |e, _, expected_bad_index| {
+                matches!(
+                    e,
+                    SqliteClientError::ReachedGapLimit(scope, bad_index)
+                    if scope == &TransparentKeyScope::INTERNAL && bad_index == &expected_bad_index
+                )
+            },
+        );
+    }
+
+    #[test]
+    fn propose_t2t_with_transparent_change() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_with_transparent_change(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_transparent_change_exact_match() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_transparent_change_exact_match(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn propose_t2shielded_requires_transparent_regather() {
         zcash_client_backend::data_api::testing::transparent::propose_t2shielded_requires_transparent_regather(
             TestDbFactory::default(),

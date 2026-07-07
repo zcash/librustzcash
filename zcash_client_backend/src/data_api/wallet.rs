@@ -186,6 +186,12 @@ enum PcztRecipient<AccountId> {
     InternalAccount {
         receiving_account: AccountId,
     },
+    // This variant is placed at the end of the enum in order to preserve the encoded
+    // representation of the prior variants.
+    #[cfg(feature = "transparent-inputs")]
+    InternalTransparent {
+        receiving_account: AccountId,
+    },
 }
 
 #[cfg(feature = "pczt")]
@@ -200,6 +206,13 @@ impl<AccountId: Copy> PcztRecipient<AccountId> {
                 receiving_account, ..
             } => (
                 PcztRecipient::EphemeralTransparent { receiving_account },
+                None,
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            BuildRecipient::InternalTransparent {
+                receiving_account, ..
+            } => (
+                PcztRecipient::InternalTransparent { receiving_account },
                 None,
             ),
             BuildRecipient::InternalAccount {
@@ -1133,6 +1146,11 @@ enum BuildRecipient<AccountId> {
         receiving_account: AccountId,
         ephemeral_address: TransparentAddress,
     },
+    #[cfg(feature = "transparent-inputs")]
+    InternalTransparent {
+        receiving_account: AccountId,
+        recipient_address: TransparentAddress,
+    },
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
@@ -1151,6 +1169,8 @@ impl<AccountId> BuildRecipient<AccountId> {
             },
             #[cfg(feature = "transparent-inputs")]
             BuildRecipient::EphemeralTransparent { .. } => unreachable!(),
+            #[cfg(feature = "transparent-inputs")]
+            BuildRecipient::InternalTransparent { .. } => unreachable!(),
             BuildRecipient::InternalAccount {
                 receiving_account,
                 external_address,
@@ -1182,6 +1202,14 @@ impl<AccountId> BuildRecipient<AccountId> {
                 receiving_account,
                 ephemeral_address,
                 outpoint,
+            },
+            #[cfg(feature = "transparent-inputs")]
+            BuildRecipient::InternalTransparent {
+                receiving_account,
+                recipient_address,
+            } => Recipient::InternalTransparent {
+                receiving_account,
+                recipient_address,
             },
             BuildRecipient::InternalAccount { .. } => unreachable!(),
         }
@@ -1889,6 +1917,9 @@ where
                 }
             }
             PoolType::Transparent => {
+                // Transparent change outputs (both ephemeral outputs used in multi-step
+                // proposals and non-ephemeral change sent to internal-scope addresses)
+                // are added to the transaction below, after address reservation.
                 #[cfg(not(feature = "transparent-inputs"))]
                 return Err(Error::UnsupportedChangeType(output_pool));
             }
@@ -1960,6 +1991,48 @@ where
                 change_value.value(),
                 StepOutputIndex::Change(*change_index),
             ))
+        }
+    }
+
+    // Add any transparent change outputs, sending them to the next available internal-scope
+    // (change) transparent addresses of the account. As with ephemeral addresses above, this
+    // reserves the internal addresses even if transaction construction subsequently fails.
+    #[cfg(feature = "transparent-inputs")]
+    {
+        let transparent_change_outputs: Vec<(usize, &ChangeValue)> = proposal_step
+            .balance()
+            .proposed_change()
+            .iter()
+            .enumerate()
+            .filter(|(_, change_value)| {
+                !change_value.is_ephemeral() && change_value.output_pool() == PoolType::Transparent
+            })
+            .collect();
+
+        if !transparent_change_outputs.is_empty() {
+            let addresses_and_metadata = wallet_db
+                .reserve_next_n_internal_addresses(account_id, transparent_change_outputs.len())
+                .map_err(Error::DataSource)?;
+            assert_eq!(
+                addresses_and_metadata.len(),
+                transparent_change_outputs.len()
+            );
+
+            for ((change_index, change_value), (change_address, _)) in transparent_change_outputs
+                .iter()
+                .zip(addresses_and_metadata)
+            {
+                builder.add_transparent_output(&change_address, change_value.value())?;
+                transparent_output_meta.push((
+                    BuildRecipient::InternalTransparent {
+                        receiving_account: account_id,
+                        recipient_address: change_address,
+                    },
+                    change_address,
+                    change_value.value(),
+                    StepOutputIndex::Change(*change_index),
+                ))
+            }
         }
     }
 
@@ -2902,6 +2975,10 @@ where
             (PcztRecipient::EphemeralTransparent { .. }, _) => Err(PcztError::Invalid(
                 "shielded output cannot be EphemeralTransparent".into(),
             )),
+            #[cfg(feature = "transparent-inputs")]
+            (PcztRecipient::InternalTransparent { .. }, _) => Err(PcztError::Invalid(
+                "shielded output cannot be InternalTransparent".into(),
+            )),
             (PcztRecipient::InternalAccount { receiving_account }, external_address) => {
                 Ok(Recipient::InternalAccount {
                     receiving_account,
@@ -3023,6 +3100,17 @@ where
                                     receiving_account,
                                     ephemeral_address,
                                     outpoint,
+                                }),
+                            #[cfg(feature = "transparent-inputs")]
+                            (PcztRecipient::InternalTransparent { receiving_account }, _) => output
+                                .recipient_address()
+                                .ok_or(PcztError::Invalid(
+                                    "Transparent change outputs cannot have a non-standard script_pubkey"
+                                        .into(),
+                                ))
+                                .map(|recipient_address| Recipient::InternalTransparent {
+                                    receiving_account,
+                                    recipient_address,
                                 }),
                             (
                                 PcztRecipient::InternalAccount {

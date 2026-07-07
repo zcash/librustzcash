@@ -3604,6 +3604,38 @@ pub trait WalletWrite: WalletRead {
         )
     }
 
+    /// Reserves the next `n` available internal-scope (change) transparent addresses for
+    /// the given account, as described in [BIP 44] under the `change` path level. This
+    /// cannot be undone, so as far as possible, errors associated with transaction
+    /// construction should have been reported before calling this method.
+    ///
+    /// Internal-scope transparent addresses are used to receive change for transactions
+    /// having fully-transparent value flows, when the change strategy in use is configured
+    /// with [`TransparentChangePolicy::TransparentChangeAllowed`].
+    ///
+    /// To ensure that funds sent to internal-scope addresses are recoverable, implementations
+    /// of this method should observe a gap limit as described in [BIP 44]; change addresses
+    /// receive funds immediately upon reservation, so a smaller gap limit than the one used
+    /// for external addresses may be observed.
+    ///
+    /// Returns an error if there is insufficient space within the gap limit to allocate
+    /// the given number of addresses, or if the account identifier does not correspond
+    /// to a known account.
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+    /// [`TransparentChangePolicy::TransparentChangeAllowed`]: crate::fees::TransparentChangePolicy::TransparentChangeAllowed
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        _account_id: Self::AccountId,
+        _n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        unimplemented!(
+            "WalletWrite::reserve_next_n_internal_addresses must be overridden for wallets to \
+             create transactions that produce transparent change"
+        )
+    }
+
     /// Updates the wallet backend with respect to the status of a specific transaction, from the
     /// perspective of the main chain.
     ///

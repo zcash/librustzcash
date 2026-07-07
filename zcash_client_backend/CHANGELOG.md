@@ -115,6 +115,13 @@ workspace.
   such a change value is represented by the existing transparent `valuePool`
   with `isEphemeral` unset; decoding this combination previously returned
   `ProposalDecodingError::InvalidChangeRecipient`.
+- `zcash_client_backend::data_api::WalletWrite::reserve_next_n_internal_addresses`
+  (behind `transparent-inputs`): reserves the next `n` available
+  internal-scope (change) transparent addresses for an account, parallel to
+  the existing `reserve_next_n_ephemeral_addresses` method.
+  `create_proposed_transactions` uses this to allocate the recipient
+  address(es) for non-ephemeral transparent change outputs, which it records
+  using the existing `Recipient::InternalTransparent` variant.
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::proto::proposal::ValuePool::Ironwood`, so that a proposal
