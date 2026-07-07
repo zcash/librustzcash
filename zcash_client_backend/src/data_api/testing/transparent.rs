@@ -1874,7 +1874,7 @@ fn t2t_request(network: &LocalNetwork, amount: Zatoshis) -> TransactionRequest {
 }
 
 /// Regression test enforcing the privacy invariant: with the default
-/// [`TransparentSpendPolicy::ShieldedOnly`] policy, a transfer must NOT silently spend
+/// default spend policy (which permits no transparent spending), a transfer must NOT silently spend
 /// the account's transparent UTXOs as a fallback. An account holding only transparent
 /// funds must fail with [`InsufficientFunds`] rather than producing a t->t proposal.
 ///
@@ -1913,7 +1913,7 @@ where
     );
 }
 
-/// With [`TransparentSpendPolicy::AnyAccountTaddr`] (the legacy `ANY_TADDR` behavior), a
+/// With `TransparentSpendPolicy::any_account_addr` (the legacy `ANY_TADDR` behavior), a
 /// transfer may spend the account's transparent UTXOs. Verifies that the funding UTXO is
 /// selected as a transparent input and that the proposal balance is consistent.
 pub fn propose_t2t_any_account_taddr<DSF>(dsf: DSF, cache: impl TestCache)
@@ -1942,10 +1942,9 @@ where
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
-            &SpendPolicy::default()
-                .with_transparent(TransparentSpendPolicy::from_any_account_transparent_addresses()),
+            &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
         )
-        .expect("transparent spend must succeed under AnyAccountTaddr");
+        .expect("transparent spend must succeed under any-account-address transparent spending");
 
     // A pure t->t transfer is a single step (no ZIP-320 ephemeral roundtrip).
     assert_eq!(proposal.steps().len(), 1);
@@ -2091,8 +2090,7 @@ where
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
-            &SpendPolicy::default()
-                .with_transparent(TransparentSpendPolicy::from_any_account_transparent_addresses()),
+            &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
         )
         .expect(
             "transparent spend should succeed via the re-gather fallback despite the \
@@ -2200,8 +2198,7 @@ where
         &change_strategy,
         request,
         ConfirmationsPolicy::MIN,
-        &SpendPolicy::default()
-            .with_transparent(TransparentSpendPolicy::from_any_account_transparent_addresses()),
+        &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
     );
 
     assert_matches!(
@@ -2213,7 +2210,7 @@ where
     );
 }
 
-/// With [`TransparentSpendPolicy::FromAddresses`], only the explicitly named transparent
+/// With a `TransparentSource::FromAddresses` transparent source, only the explicitly named transparent
 /// addresses are eligible. Funds two of the account's external receivers but names only
 /// one; the proposal must select solely from the named address.
 pub fn propose_t2t_from_addresses<DSF>(dsf: DSF, cache: impl TestCache)
@@ -2299,9 +2296,8 @@ where
             &change_strategy,
             request,
             ConfirmationsPolicy::MIN,
-            &SpendPolicy::default().with_transparent(
-                TransparentSpendPolicy::from_one_transparent_address(addr_named),
-            ),
+            &SpendPolicy::default()
+                .with_transparent(TransparentSpendPolicy::from_one_address(addr_named)),
         )
         .expect("transparent spend from named address must succeed");
 
