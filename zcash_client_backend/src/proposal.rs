@@ -900,6 +900,50 @@ mod tests {
         ChangeValue::shielded(pool, Zatoshis::const_from_u64(value), None)
     }
 
+    /// Proposal construction conserves value: the total output value of a step (payments +
+    /// change + fee) may never exceed its total input value. A step whose outputs exceed its
+    /// inputs is rejected with [`ProposalError::BalanceError`] rather than being constructed.
+    /// This is the value-conservation floor that pool-selection policy builds on: no selection
+    /// of inputs can ever be assembled into a proposal that spends more than it takes in.
+    #[test]
+    fn proposal_construction_conserves_value() {
+        // Inputs: one 10_000 Orchard note. Outputs: 8_000 change + 4_000 fee = 12_000, which
+        // exceeds the 10_000 of input value. (ironwood_active = false so the balance check,
+        // not the turnstile, is what rejects this.)
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes(1, 0),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 8_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                false,
+            ),
+            Err(ProposalError::BalanceError {
+                input_total,
+                output_total,
+            }) if input_total == Zatoshis::const_from_u64(10_000)
+                && output_total == Zatoshis::const_from_u64(12_000)
+        );
+
+        // The matching balanced step (6_000 change + 4_000 fee == 10_000 input) is accepted,
+        // confirming the rejection above is due to the value imbalance and not some unrelated
+        // constraint.
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes(1, 0),
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 6_000)],
+                    Zatoshis::const_from_u64(4_000),
+                )
+                .unwrap(),
+                false,
+            ),
+            Ok(_)
+        );
+    }
+
     #[test]
     fn orchard_turnstile_permits_only_strict_pool_balance_decrease() {
         // Post-activation, change may return to Orchard when strictly less value returns
