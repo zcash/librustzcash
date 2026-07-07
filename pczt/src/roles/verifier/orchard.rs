@@ -13,9 +13,10 @@ impl super::Verifier {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor = orchard.anchor;
 
         let bundle = orchard
-            .into_parsed_with_version(
+            .into_parsed_with_version_allowing_missing_anchor(
                 crate::orchard::orchard_bundle_version(&global)
                     .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
             )
@@ -28,7 +29,7 @@ impl super::Verifier {
                 global,
                 transparent,
                 sapling,
-                orchard: crate::orchard::Bundle::serialize_from(bundle),
+                orchard: crate::orchard::Bundle::serialize_from_preserving_anchor(bundle, anchor),
                 ironwood,
             },
         })
@@ -46,9 +47,10 @@ impl super::Verifier {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor = ironwood.anchor;
 
         let bundle = ironwood
-            .into_ironwood_parsed()
+            .into_ironwood_parsed_allowing_missing_anchor()
             .map_err(OrchardError::Parse)?;
 
         f(&bundle)?;
@@ -59,7 +61,7 @@ impl super::Verifier {
                 transparent,
                 sapling,
                 orchard,
-                ironwood: crate::orchard::Bundle::serialize_from(bundle),
+                ironwood: crate::orchard::Bundle::serialize_from_preserving_anchor(bundle, anchor),
             },
         })
     }

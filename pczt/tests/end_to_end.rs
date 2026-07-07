@@ -1126,6 +1126,85 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
     let fvks_before = wire_spend_fvks(&pczt, true);
     assert_eq!(fvks_before[index], Some(orchard_fvk.to_bytes()));
 
+    let redacted = Redactor::new(pczt.clone())
+        .redact_ironwood_with(|mut r| {
+            r.clear_anchor();
+            r.redact_actions(|mut a| {
+                a.clear_cv_net();
+            });
+        })
+        .finish();
+    assert!(redacted.ironwood().anchor().is_none());
+    assert!(
+        redacted
+            .ironwood()
+            .actions()
+            .iter()
+            .all(|action| action.cv_net().is_none())
+    );
+    let verified = Verifier::new(redacted.clone())
+        .with_ironwood::<std::convert::Infallible, _>(|_| {
+            Ok::<(), pczt::roles::verifier::OrchardError<std::convert::Infallible>>(())
+        })
+        .unwrap()
+        .finish();
+    assert!(verified.ironwood().anchor().is_none());
+    let updated = Updater::new(redacted.clone())
+        .update_ironwood_with(|_| Ok(()))
+        .unwrap()
+        .finish();
+    assert!(updated.ironwood().anchor().is_none());
+
+    let mut resolved = redacted.clone();
+    resolved.resolve_fields().unwrap();
+    assert!(resolved.ironwood().anchor().is_none());
+    assert_eq!(
+        resolved.ironwood().actions()[index].cv_net(),
+        pczt.ironwood().actions()[index].cv_net()
+    );
+    assert!(IoFinalizer::new(redacted.clone()).finalize_io().is_err());
+    assert!(
+        Prover::new(redacted.clone())
+            .create_ironwood_proof(orchard_proving_key())
+            .is_err()
+    );
+    assert_eq!(
+        Signer::new(redacted.clone()).unwrap().shielded_sighash(),
+        sighash
+    );
+
+    let cv_net_redacted = Redactor::new(pczt.clone())
+        .redact_ironwood_with(|mut r| {
+            r.redact_actions(|mut a| {
+                a.clear_cv_net();
+            });
+        })
+        .finish();
+    assert_eq!(
+        Signer::new(cv_net_redacted.clone())
+            .unwrap()
+            .shielded_sighash(),
+        sighash
+    );
+
+    let signed_redacted = low_level_signer::Signer::new(cv_net_redacted)
+        .sign_ironwood_with::<low_level_signer::OrchardParseError, _>(|_, bundle, _| {
+            bundle.actions_mut()[index]
+                .sign(sighash, &orchard_ask, ChaCha20Rng::from_seed(seed))
+                .expect("signing succeeds");
+            Ok(())
+        })
+        .unwrap()
+        .finish();
+    assert_eq!(
+        signed_redacted.ironwood().actions()[index]
+            .spend()
+            .spend_auth_sig()
+            .expect("action was signed"),
+        expected_sig
+    );
+    check_v2_round_trip(&signed_redacted);
+
     // Sign through the low-level Signer's preverified path with the same seed.
     let signed = low_level_signer::Signer::new(pczt.clone())
         .sign_ironwood_with::<low_level_signer::OrchardParseError, _>(|_, bundle, _| {
@@ -1157,4 +1236,26 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
 
     // The wire `fvk` bytes must be preserved (unchanged) after signing.
     assert_eq!(wire_spend_fvks(&signed, true), fvks_before);
+}
+
+#[test]
+fn redacted_anchor_is_not_resolved() {
+    let pczt = Creator::new(
+        zcash_protocol::consensus::BranchId::Nu6.into(),
+        10_000_000,
+        133,
+        [0; 32],
+        [9; 32],
+    )
+    .unwrap()
+    .build();
+
+    let mut redacted = Redactor::new(pczt)
+        .redact_orchard_with(|mut r| {
+            r.clear_anchor();
+        })
+        .finish();
+
+    redacted.resolve_fields().unwrap();
+    assert!(redacted.orchard().anchor().is_none());
 }

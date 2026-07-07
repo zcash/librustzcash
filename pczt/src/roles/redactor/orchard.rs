@@ -52,6 +52,14 @@ impl OrchardRedactor<'_> {
     pub fn clear_bsk(&mut self) {
         self.0.bsk = None;
     }
+
+    /// Removes the bundle anchor.
+    ///
+    /// Parsed roles require the real anchor, so a receiver must restore it before
+    /// parsing this bundle.
+    pub fn clear_anchor(&mut self) {
+        self.0.anchor = None;
+    }
 }
 
 /// A Redactor for Orchard actions.
@@ -77,6 +85,15 @@ impl ActionRedactor<'_> {
                 f(action);
             }
         }
+    }
+
+    /// Removes the action's net value commitment.
+    ///
+    /// The receiver recomputes `cv_net` from the spend and output values and `rcv`.
+    pub fn clear_cv_net(&mut self) {
+        self.redact(|action| {
+            action.cv_net = None;
+        });
     }
 
     /// Removes the spend authorizing signature.

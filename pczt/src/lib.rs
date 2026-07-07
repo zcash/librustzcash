@@ -313,7 +313,7 @@ pub mod v2 {
             let decoded = crate::parse(&encoded.serialize()).unwrap();
 
             assert_eq!(decoded.sapling.anchor, [1; 32]);
-            assert_eq!(decoded.orchard.anchor, [2; 32]);
+            assert_eq!(decoded.orchard.anchor, Some([2; 32]));
         }
 
         #[test]
@@ -379,6 +379,17 @@ impl Pczt {
         Ok(v2::Pczt::try_from(self)?.serialize())
     }
 
+    /// Resolves derived or compact field representations carried by this PCZT.
+    ///
+    /// For improved efficiency, callers that will pass the same PCZT through
+    /// multiple roles should call this once up front. Parsing also resolves fields
+    /// defensively.
+    #[cfg(feature = "orchard")]
+    pub fn resolve_fields(&mut self) -> Result<(), ::orchard::pczt::ParseError> {
+        self.orchard.resolve_fields()?;
+        self.ironwood.resolve_fields()
+    }
+
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
     /// bundle extraction closures.
     ///
@@ -388,6 +399,89 @@ impl Pczt {
     #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
     pub(crate) fn extract_tx_data<A, E>(
         self,
+        extract_transparent: impl FnOnce(
+            &::transparent::pczt::Bundle,
+        ) -> Result<
+            Option<::transparent::bundle::Bundle<A::TransparentAuth>>,
+            E,
+        >,
+        extract_sapling: impl FnOnce(
+            &::sapling::pczt::Bundle,
+        ) -> Result<
+            Option<::sapling::Bundle<A::SaplingAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+        extract_orchard: impl FnOnce(
+            &::orchard::pczt::Bundle,
+        ) -> Result<
+            Option<::orchard::Bundle<A::OrchardAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+        extract_ironwood: impl FnOnce(
+            &::orchard::pczt::Bundle,
+        ) -> Result<
+            Option<::orchard::Bundle<A::OrchardAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+    ) -> Result<ParsedPczt<A>, E>
+    where
+        A: Authorization,
+        E: From<ExtractError>,
+    {
+        self.extract_tx_data_inner(
+            false,
+            extract_transparent,
+            extract_sapling,
+            extract_orchard,
+            extract_ironwood,
+        )
+    }
+
+    #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+    pub(crate) fn extract_tx_data_allowing_missing_anchors<A, E>(
+        self,
+        extract_transparent: impl FnOnce(
+            &::transparent::pczt::Bundle,
+        ) -> Result<
+            Option<::transparent::bundle::Bundle<A::TransparentAuth>>,
+            E,
+        >,
+        extract_sapling: impl FnOnce(
+            &::sapling::pczt::Bundle,
+        ) -> Result<
+            Option<::sapling::Bundle<A::SaplingAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+        extract_orchard: impl FnOnce(
+            &::orchard::pczt::Bundle,
+        ) -> Result<
+            Option<::orchard::Bundle<A::OrchardAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+        extract_ironwood: impl FnOnce(
+            &::orchard::pczt::Bundle,
+        ) -> Result<
+            Option<::orchard::Bundle<A::OrchardAuth, zcash_protocol::value::ZatBalance>>,
+            E,
+        >,
+    ) -> Result<ParsedPczt<A>, E>
+    where
+        A: Authorization,
+        E: From<ExtractError>,
+    {
+        self.extract_tx_data_inner(
+            true,
+            extract_transparent,
+            extract_sapling,
+            extract_orchard,
+            extract_ironwood,
+        )
+    }
+
+    #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+    fn extract_tx_data_inner<A, E>(
+        self,
+        allow_missing_anchors: bool,
         extract_transparent: impl FnOnce(
             &::transparent::pczt::Bundle,
         ) -> Result<
@@ -462,18 +556,23 @@ impl Pczt {
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
         let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
-        let orchard = orchard
-            .into_parsed_with_version(
-                crate::orchard::bundle_version_for_revision(
-                    orchard_protocol_revision,
-                    ::orchard::ValuePool::Orchard,
-                )
-                .expect("the Orchard pool is supported under every protocol revision"),
-            )
-            .map_err(ExtractError::OrchardParse)?;
-        let ironwood = ironwood
-            .into_ironwood_parsed()
-            .map_err(ExtractError::IronwoodParse)?;
+        let orchard_bundle_version = crate::orchard::bundle_version_for_revision(
+            orchard_protocol_revision,
+            ::orchard::ValuePool::Orchard,
+        )
+        .expect("the Orchard pool is supported under every protocol revision");
+        let orchard = if allow_missing_anchors {
+            orchard.into_parsed_with_version_allowing_missing_anchor(orchard_bundle_version)
+        } else {
+            orchard.into_parsed_with_version(orchard_bundle_version)
+        }
+        .map_err(ExtractError::OrchardParse)?;
+        let ironwood = if allow_missing_anchors {
+            ironwood.into_ironwood_parsed_allowing_missing_anchor()
+        } else {
+            ironwood.into_ironwood_parsed()
+        }
+        .map_err(ExtractError::IronwoodParse)?;
 
         let lock_time = determine_lock_time(&global, transparent.inputs())
             .ok_or(ExtractError::IncompatibleLockTimes)?;

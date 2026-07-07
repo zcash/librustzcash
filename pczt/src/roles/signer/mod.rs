@@ -39,6 +39,8 @@ pub struct Signer {
     sapling: sapling::pczt::Bundle,
     orchard: orchard::pczt::Bundle,
     ironwood: orchard::pczt::Bundle,
+    orchard_anchor: Option<[u8; 32]>,
+    ironwood_anchor: Option<[u8; 32]>,
     empty_ironwood: Option<crate::orchard::Bundle>,
     /// Cached across multiple signatures.
     tx_data: TransactionData<EffectsOnly>,
@@ -50,6 +52,8 @@ pub struct Signer {
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
+        let orchard_anchor = pczt.orchard.anchor;
+        let ironwood_anchor = pczt.ironwood.anchor;
         let empty_ironwood = pczt
             .ironwood
             .actions
@@ -63,7 +67,7 @@ impl Signer {
             orchard,
             ironwood,
             tx_data,
-        } = pczt.extract_tx_data(
+        } = pczt.extract_tx_data_allowing_missing_anchors(
             |t| {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
@@ -81,6 +85,8 @@ impl Signer {
             sapling,
             orchard,
             ironwood,
+            orchard_anchor,
+            ironwood_anchor,
             empty_ironwood,
             tx_data,
             txid_parts,
@@ -416,6 +422,8 @@ impl Signer {
             sapling,
             orchard,
             ironwood,
+            orchard_anchor,
+            ironwood_anchor,
             empty_ironwood,
             tx_data: _,
             txid_parts: _,
@@ -427,9 +435,13 @@ impl Signer {
             global,
             transparent: crate::transparent::Bundle::serialize_from(transparent),
             sapling: crate::sapling::Bundle::serialize_from(sapling),
-            orchard: crate::orchard::Bundle::serialize_from(orchard),
-            ironwood: empty_ironwood
-                .unwrap_or_else(|| crate::orchard::Bundle::serialize_from(ironwood)),
+            orchard: crate::orchard::Bundle::serialize_from_preserving_anchor(
+                orchard,
+                orchard_anchor,
+            ),
+            ironwood: empty_ironwood.unwrap_or_else(|| {
+                crate::orchard::Bundle::serialize_from_preserving_anchor(ironwood, ironwood_anchor)
+            }),
         }
     }
 }

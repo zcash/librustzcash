@@ -15,9 +15,10 @@ impl super::Updater {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor = orchard.anchor;
 
         let mut bundle = orchard
-            .into_parsed_with_version(
+            .into_parsed_with_version_allowing_missing_anchor(
                 crate::orchard::orchard_bundle_version(&global)
                     .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
             )
@@ -30,7 +31,7 @@ impl super::Updater {
                 global,
                 transparent,
                 sapling,
-                orchard: crate::orchard::Bundle::serialize_from(bundle),
+                orchard: crate::orchard::Bundle::serialize_from_preserving_anchor(bundle, anchor),
                 ironwood,
             },
         })
@@ -48,9 +49,10 @@ impl super::Updater {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor = ironwood.anchor;
 
         let mut bundle = ironwood
-            .into_ironwood_parsed()
+            .into_ironwood_parsed_allowing_missing_anchor()
             .map_err(OrchardError::Parser)?;
 
         bundle.update_with(f).map_err(OrchardError::Updater)?;
@@ -61,7 +63,7 @@ impl super::Updater {
                 transparent,
                 sapling,
                 orchard,
-                ironwood: crate::orchard::Bundle::serialize_from(bundle),
+                ironwood: crate::orchard::Bundle::serialize_from_preserving_anchor(bundle, anchor),
             },
         })
     }
