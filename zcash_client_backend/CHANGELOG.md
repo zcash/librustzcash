@@ -145,6 +145,10 @@ workspace.
   - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
     which records that a transparent outpoint was confirmed unspent as of a given
     height.
+- `zcash_client_backend::data_api::error::Error::ExpiryHeightBelowTargetHeight`
+  (behind the `pczt` feature flag), returned by `create_pczt_from_proposal`
+  when the caller-supplied `target_expiry_height` is a nonzero height below
+  the proposal's minimum target height.
 
 ### Changed
 - `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
@@ -230,6 +234,12 @@ workspace.
   unspendable data outputs and skipped silently, instead of being logged as
   unsupported script kinds. Other unrecognized transparent script kinds continue to
   be logged.
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes
+  an additional `target_expiry_height: Option<BlockHeight>` argument. `Some`
+  pins the PCZT expiry before finalization, while `None` preserves the
+  builder-derived expiry. Nonzero heights below the proposal's minimum target
+  height are rejected with `Error::ExpiryHeightBelowTargetHeight`; zero still
+  disables expiry. The `test-dependencies` helper mirrors this signature.
 
 ### Removed
 - `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`

@@ -626,13 +626,13 @@ pub(crate) mod tests {
     #[cfg(feature = "pczt-tests")]
     #[test]
     fn pczt_single_step_sapling_only() {
-        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
+        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>(None)
     }
 
     #[cfg(all(feature = "orchard", feature = "pczt-tests"))]
     #[test]
     fn pczt_single_step_sapling_to_orchard() {
-        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
+        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>(None)
     }
 
     #[cfg(feature = "transparent-inputs")]

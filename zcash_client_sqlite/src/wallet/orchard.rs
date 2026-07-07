@@ -725,13 +725,20 @@ pub(crate) mod tests {
     #[cfg(feature = "pczt-tests")]
     #[test]
     fn pczt_single_step_orchard_only() {
-        testing::pool::pczt_single_step::<OrchardPoolTester, OrchardPoolTester>()
+        testing::pool::pczt_single_step::<OrchardPoolTester, OrchardPoolTester>(None)
     }
 
     #[cfg(feature = "pczt-tests")]
     #[test]
     fn pczt_single_step_orchard_to_sapling() {
-        testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>()
+        testing::pool::pczt_single_step::<OrchardPoolTester, SaplingPoolTester>(None)
+    }
+
+    // Regression: pinned expiry must still extract when Orchard adds a dummy action.
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn pczt_single_step_orchard_pinned_expiry() {
+        testing::pool::pczt_single_step::<OrchardPoolTester, OrchardPoolTester>(Some(100))
     }
 
     #[cfg(feature = "transparent-inputs")]
