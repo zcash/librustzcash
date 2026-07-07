@@ -145,6 +145,10 @@ pub struct TransactionBalance {
 /// an ephemeral output, which must be spent by a subsequent step. This is
 /// only supported for transparent outputs. Each ephemeral output will be
 /// given a unique t-address.
+///
+/// When the transparent value pool is selected and the `isEphemeral` field
+/// is not set, the value represents transparent change, which will be sent
+/// to an internal-scope (change) transparent address of the wallet.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ChangeValue {
     /// The value of a change or ephemeral output to be created, in zatoshis.

@@ -969,6 +969,14 @@ impl proposal::Proposal {
                                     (PoolType::Transparent, true) => {
                                         Ok(ChangeValue::ephemeral_transparent(value))
                                     }
+                                    #[cfg(feature = "transparent-inputs")]
+                                    (PoolType::Transparent, false) => {
+                                        Ok(ChangeValue::transparent(value))
+                                    }
+                                    // When all pool features are enabled, the explicit arms above
+                                    // are exhaustive over the non-ephemeral cases; this fallback
+                                    // remains reachable when some pool features are disabled.
+                                    #[allow(unreachable_patterns)]
                                     (pool, false) => {
                                         Err(ProposalDecodingError::InvalidChangeRecipient(pool))
                                     }
