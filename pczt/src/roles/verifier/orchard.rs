@@ -16,6 +16,7 @@ impl super::Verifier {
 
         let bundle = orchard
             .into_parsed_with_version(
+                global.tx_version,
                 crate::orchard::orchard_bundle_version(&global)
                     .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
             )
@@ -48,7 +49,7 @@ impl super::Verifier {
         } = self.pczt;
 
         let bundle = ironwood
-            .into_ironwood_parsed()
+            .into_ironwood_parsed(global.tx_version)
             .map_err(OrchardError::Parse)?;
 
         f(&bundle)?;

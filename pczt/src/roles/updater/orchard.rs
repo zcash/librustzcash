@@ -18,6 +18,7 @@ impl super::Updater {
 
         let mut bundle = orchard
             .into_parsed_with_version(
+                global.tx_version,
                 crate::orchard::orchard_bundle_version(&global)
                     .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
             )
@@ -50,7 +51,7 @@ impl super::Updater {
         } = self.pczt;
 
         let mut bundle = ironwood
-            .into_ironwood_parsed()
+            .into_ironwood_parsed(global.tx_version)
             .map_err(OrchardError::Parser)?;
 
         bundle.update_with(f).map_err(OrchardError::Updater)?;
