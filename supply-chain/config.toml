@@ -847,7 +847,7 @@ version = "11.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.orchard]]
-version = "0.15.0-pre.2@git:9e45f5fbbedb12bd456b3340e35e535e03c8b6ee"
+version = "0.15.0-pre.2@git:475ef0ff77d45aebff93cb039d639250d82518a3"
 criteria = "safe-to-deploy"
 
 [[exemptions.ordered-float]]
