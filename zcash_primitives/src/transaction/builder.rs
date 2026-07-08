@@ -263,7 +263,7 @@ pub enum BuildConfig {
         /// The [`BundleType`](orchard::builder::BundleType) for the transactional
         /// Orchard and Ironwood bundles. Use `BundleType::DEFAULT` unless the
         /// transaction's shape is already public (see
-        /// `BundleType::DEFAULT_UNPADDED`).
+        /// `BundleType::UNPADDED`).
         orchard_pool_bundle_type: orchard::builder::BundleType,
     },
     Coinbase {
@@ -1998,7 +1998,7 @@ mod tests {
 
     /// `BuildConfig::Standard`'s `orchard_pool_bundle_type` controls padding: the
     /// padded default counts a single-output bundle as 2 actions, while
-    /// `DEFAULT_UNPADDED` counts exactly the requested single action.
+    /// `UNPADDED` counts exactly the requested single action.
     #[test]
     #[cfg(feature = "circuits")]
     fn orchard_pool_bundle_type_controls_padding() {
@@ -2038,7 +2038,7 @@ mod tests {
         };
 
         assert_eq!(count_for(orchard::builder::BundleType::DEFAULT), 2);
-        assert_eq!(count_for(orchard::builder::BundleType::DEFAULT_UNPADDED), 1);
+        assert_eq!(count_for(orchard::builder::BundleType::UNPADDED), 1);
     }
 
     #[test]
