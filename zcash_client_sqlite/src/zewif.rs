@@ -520,10 +520,12 @@ pub struct ZewifImportReport {
     /// The number of transactions from the document that were stored because
     /// they involve the imported accounts.
     pub transactions_stored: usize,
-    /// The number of transactions from the document that were not stored
-    /// because trial decryption found no involvement with any imported
-    /// account. Such transactions are expected to be recovered by the
-    /// post-import rescan if they do in fact involve the wallet.
+    /// The number of transactions from the document that were not stored,
+    /// either because trial decryption found no involvement with any imported
+    /// account, or because no imported account had established a chain tip
+    /// against which to store them. Such transactions are expected to be
+    /// recovered by the post-import rescan if they do in fact involve the
+    /// wallet.
     pub transactions_without_wallet_relevance: usize,
     /// The number of transactions in the document that carried no raw
     /// transaction data and therefore could not be stored.
@@ -1079,7 +1081,9 @@ where
 /// [`decrypt_and_store_transaction`] stores a transaction only when trial
 /// decryption or transparent-output matching shows wallet involvement, so the
 /// count of stored transactions is determined by querying for each transaction
-/// id after the attempt.
+/// id after the attempt. Storage additionally requires a known chain tip, which
+/// only an imported account establishes; if none was imported, every
+/// transaction is deferred to the post-import rescan.
 fn import_transactions<C, P, CL, R, S>(
     wdb: &mut WalletDb<C, P, CL, R>,
     params: &P,
@@ -1109,6 +1113,15 @@ where
         .max()
         .map_or(document.export_height(), |h| h + 1);
 
+    // Storing a decrypted transaction requires a known chain tip, which is only
+    // established once an imported account has seeded the scan queue from its
+    // birthday. Without one (for example, a document whose only accounts were
+    // skipped, or that carries no accounts at all), the transactions cannot be
+    // stored here and are deferred to the post-import rescan.
+    let chain_tip_known = crate::wallet::chain_tip_height(wdb.conn.borrow())
+        .map_err(|e| ZewifImportError::Wallet(SqliteClientError::from(e)))?
+        .is_some();
+
     for tx in txs {
         let raw = match tx.tx_data() {
             Some(::zewif::TransactionData::Raw(raw)) => raw.data(),
@@ -1120,6 +1133,12 @@ where
                 continue;
             }
         };
+        if !chain_tip_known {
+            // No chain tip against which to store the transaction; defer it to
+            // the post-import rescan.
+            report.transactions_without_wallet_relevance += 1;
+            continue;
+        }
         let recorded_txid = zcash_protocol::TxId::from_bytes(*tx.txid().as_bytes());
         let mined_height = tx.mined_height().map(|h| BlockHeight::from(u32::from(h)));
         let branch_height = mined_height.unwrap_or_else(|| {
@@ -1865,5 +1884,128 @@ mod tests {
             result,
             Err(ZewifImportError::DerivedKeyMismatch { .. })
         ));
+    }
+
+    /// Builds a transparent-only transaction paying `value` zatoshis to `to`
+    /// under the consensus rules in force at `height`, returning its txid and
+    /// raw bytes.
+    fn transparent_tx_to(
+        to: &TransparentAddress,
+        value: u64,
+        height: u32,
+    ) -> (zcash_protocol::TxId, Vec<u8>) {
+        use ::transparent::address::Script;
+        use ::transparent::bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut};
+        use zcash_primitives::transaction::{TransactionData, TxVersion};
+        use zcash_protocol::value::Zatoshis;
+
+        let height = consensus::BlockHeight::from(height);
+        let tx = TransactionData::from_parts(
+            TxVersion::V5,
+            BranchId::for_height(&TEST_NETWORK, height),
+            0,
+            height + 100,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
+            Some(transparent::Bundle {
+                vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
+                vout: vec![TxOut::new(
+                    Zatoshis::const_from_u64(value),
+                    to.script().into(),
+                )],
+                authorization: Authorized,
+            }),
+            None,
+            None,
+            None,
+        )
+        .freeze()
+        .unwrap();
+
+        let mut bytes = vec![];
+        tx.write(&mut bytes).unwrap();
+        (tx.txid(), bytes)
+    }
+
+    /// Wraps raw transaction bytes as a mined ZeWIF transaction.
+    fn raw_zewif_tx(
+        txid: zcash_protocol::TxId,
+        raw: &[u8],
+        mined_height: u32,
+    ) -> ::zewif::Transaction {
+        let mut tx = ::zewif::Transaction::new(::zewif::TxId::from_bytes(*txid.as_ref()));
+        tx.set_tx_data(::zewif::TransactionData::Raw(::zewif::RawTxData::new(
+            ::zewif::Data::from_bytes(raw),
+        )));
+        tx.set_mined_height(::zewif::BlockHeight::from(mined_height));
+        tx
+    }
+
+    #[test]
+    fn raw_transaction_relevant_to_account_is_stored() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        // The account's default transparent receiver, which the imported HD
+        // account will recognize.
+        let seed = test_seed_bytes(&ts);
+        let usk =
+            UnifiedSpendingKey::from_seed(&TEST_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
+        let (taddr, _) = usk.default_transparent_address();
+
+        let height = 2_600_000;
+        let (txid, raw) = transparent_tx_to(&taddr, 100_000, height);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        let account = hd_account(&ts, ts.fingerprint_encoding.clone(), 0);
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+        let tx = raw_zewif_tx(txid, &raw, height);
+        doc.add_transaction(tx.txid(), tx);
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.transactions_stored, 1);
+        assert_eq!(report.transactions_without_wallet_relevance, 0);
+        assert_eq!(report.transactions_without_raw_data, 0);
+    }
+
+    #[test]
+    fn transactions_are_deferred_when_no_account_establishes_a_chain_tip() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        // A raw transaction, but the document's only account is Sprout and so is
+        // skipped; with no imported account there is no chain tip, and the
+        // transaction must be deferred to the rescan rather than aborting.
+        let seed = test_seed_bytes(&ts);
+        let usk =
+            UnifiedSpendingKey::from_seed(&TEST_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
+        let (taddr, _) = usk.default_transparent_address();
+        let height = 2_600_000;
+        let (txid, raw) = transparent_tx_to(&taddr, 100_000, height);
+
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::SproutViewingKey(
+            ::zewif::sprout::SproutViewingKey::new("ZiVtTestViewingKey"),
+        ));
+        account.set_name("sprout");
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        let tx = raw_zewif_tx(txid, &raw, height);
+        doc.add_transaction(tx.txid(), tx);
+
+        let report = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap();
+
+        assert!(report.imported_accounts.is_empty());
+        assert_eq!(report.transactions_stored, 0);
+        assert_eq!(report.transactions_without_wallet_relevance, 1);
+        assert_eq!(report.transactions_without_raw_data, 0);
     }
 }
