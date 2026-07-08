@@ -260,10 +260,6 @@ pub enum BuildConfig {
         sapling_anchor: Option<sapling::Anchor>,
         orchard_anchor: Option<orchard::Anchor>,
         ironwood_anchor: Option<orchard::Anchor>,
-        /// The [`BundleType`](orchard::builder::BundleType) for the transactional
-        /// Orchard and Ironwood bundles. Use `BundleType::DEFAULT` unless the
-        /// transaction's shape is already public (see
-        /// `BundleType::UNPADDED`).
         orchard_pool_bundle_type: orchard::builder::BundleType,
     },
     Coinbase {
