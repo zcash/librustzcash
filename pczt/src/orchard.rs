@@ -228,12 +228,6 @@ impl EncCiphertext {
     }
 }
 
-impl From<Vec<u8>> for EncCiphertext {
-    fn from(ciphertext: Vec<u8>) -> Self {
-        EncCiphertext::Encrypted(ciphertext)
-    }
-}
-
 #[cfg(feature = "orchard")]
 fn recover_memo_plaintext_from_ciphertext_and_action(
     action: &Action,
