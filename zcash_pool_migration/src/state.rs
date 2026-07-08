@@ -9,8 +9,6 @@
 use crate::types::{AttentionReason, MigrationProgress, MigrationState};
 
 /// A migration run's fine-grained phase (ported from vizor's `PHASE_*` constants).
-#[allow(dead_code)]
-// Consumed by store (Task 7) and backend (Tasks 10-11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Phase {
     NoOrchardFunds,
@@ -31,8 +29,6 @@ pub(crate) enum Phase {
 
 impl Phase {
     /// The persisted string form (identical to vizor's `PHASE_*` values).
-    #[allow(dead_code)]
-    // Consumed by store (Task 7).
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Phase::NoOrchardFunds => "no_orchard_funds",
@@ -54,7 +50,9 @@ impl Phase {
 
     /// Parse a persisted phase string, or `None` if unrecognised.
     #[allow(dead_code)]
-    // Consumed by store (Task 7).
+    // Consumed by context (Task 11): converts a persisted `RunRow::phase` string back to `Phase`
+    // for `to_state`. Not store.rs (Task 7): the store round-trips phase as a plain `String` and
+    // never itself needs it back as a `Phase`.
     pub(crate) fn parse(s: &str) -> Option<Phase> {
         Some(match s {
             "no_orchard_funds" => Phase::NoOrchardFunds,

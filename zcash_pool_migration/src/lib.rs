@@ -8,6 +8,7 @@
 mod denominations;
 mod scheduling;
 mod state;
+mod store;
 
 pub mod error;
 pub mod types;
