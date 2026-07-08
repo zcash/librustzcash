@@ -277,10 +277,8 @@ pub struct UnsignedTransferPczt {
 
 impl UnsignedTransferPczt {
     /// Constructs an unsigned transfer PCZT from its parts. Used internally when staging a
-    /// proven, unsigned PCZT for export to an external signer.
-    // Not yet called outside this module's tests: the external-signer staging flow lands in
-    // Task 12 (`context.rs::create_unsigned_transfer_pczts`).
-    #[allow(dead_code)]
+    /// proven, unsigned PCZT for export to an external signer
+    /// ([`crate::context::MigrationContext::create_unsigned_transfer_pczts`]).
     pub(crate) fn from_parts(id: TransferId, pczt_bytes: Vec<u8>) -> Self {
         UnsignedTransferPczt { id, pczt_bytes }
     }

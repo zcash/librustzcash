@@ -99,8 +99,6 @@ pub(crate) struct PrepTxRow {
 /// `raw_pczt` is the proven, unsigned original the crate keeps; the app only carries the
 /// device-signed counterpart back, and `store_signed_*` pairs the two by `staging_id`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
-// Consumed by context (Task 12): the external-signer staging flow constructs and reads these.
 pub(crate) struct StagedPczt {
     pub staging_id: String,
     pub raw_pczt: Vec<u8>,
@@ -108,12 +106,8 @@ pub(crate) struct StagedPczt {
 }
 
 /// Staged-PCZT kind for the note-split (denomination prep) transaction.
-#[allow(dead_code)]
-// Consumed by context (Task 12).
 pub(crate) const STAGED_KIND_SPLIT: &str = "split";
 /// Staged-PCZT kind for a scheduled migration transfer.
-#[allow(dead_code)]
-// Consumed by context (Task 12).
 pub(crate) const STAGED_KIND_TRANSFER: &str = "transfer";
 
 /// Counts of a run's pending transfers by status.
@@ -542,8 +536,6 @@ pub(crate) fn set_prep_tx_status(
 }
 
 /// Insert or replace a staged (proposed-but-unsigned) PCZT for the external-signer flow.
-#[allow(dead_code)]
-// Consumed by context (Task 12).
 pub(crate) fn upsert_staged_pczt(
     conn: &Connection,
     account_uuid: &str,
@@ -569,8 +561,6 @@ pub(crate) fn upsert_staged_pczt(
 }
 
 /// All staged PCZTs of `kind` for the account, in insertion order.
-#[allow(dead_code)]
-// Consumed by context (Task 12).
 pub(crate) fn staged_pczts(
     conn: &Connection,
     account_uuid: &str,
@@ -593,8 +583,6 @@ pub(crate) fn staged_pczts(
 }
 
 /// Remove every staged PCZT of `kind` for the account, returning the number removed.
-#[allow(dead_code)]
-// Consumed by context (Task 12).
 pub(crate) fn clear_staged_pczts(
     conn: &Connection,
     account_uuid: &str,

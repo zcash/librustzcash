@@ -88,9 +88,6 @@ pub(crate) fn open_wallet<P: Parameters + Clone>(
 ///
 /// Returns [`MigrationError::InvalidState`] if the account is unknown or has no Orchard FVK, and
 /// [`MigrationError::Backend`] on a database access error.
-#[allow(dead_code)]
-// Consumed by context (Task 12): the external-signer split/transfer PCZT builders read the
-// account's Orchard FVK directly (there is no spending key on that path to derive it from).
 pub(crate) fn account_orchard_fvk<P: Parameters>(
     db: &Db<P>,
     account: AccountUuid,
@@ -350,8 +347,9 @@ pub(crate) fn sweep_crossing_value<P: Parameters + Clone>(
 // re-confirmed at runtime against a synced wallet in Task 13.
 
 /// The single shared Orchard-family proving key (`PostNu6_3`), used for both the Orchard and
-/// Ironwood bundles of a migration PCZT.
-fn shielded_proving_key() -> &'static orchard::circuit::ProvingKey {
+/// Ironwood bundles of a migration PCZT. Exposed to the crate so the external-signer round-trip
+/// tests fabricate their PCZTs against the exact key the pipeline proves with.
+pub(crate) fn shielded_proving_key() -> &'static orchard::circuit::ProvingKey {
     static PK: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
     PK.get_or_init(|| {
         orchard::circuit::ProvingKey::build(orchard::circuit::OrchardCircuitVersion::PostNu6_3)
@@ -454,8 +452,6 @@ pub(crate) fn prove_sign_finalize(
 ///
 /// Returns [`MigrationError::Pipeline`] if either PCZT cannot be parsed, if combining or spend
 /// finalization fails, or if serialization/extraction fails.
-#[allow(dead_code)]
-// Consumed by context (Task 12).
 pub(crate) fn combine_signed_pczt(
     proven: &[u8],
     signed: &[u8],
