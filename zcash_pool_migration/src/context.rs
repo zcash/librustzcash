@@ -306,7 +306,9 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// a note split from "pending confirmation" to [`MigrationState::ReadyToPropose`] once its
     /// prep transaction has mined and produced spendable notes, and (3) detects overall
     /// completion once every scheduled transfer is confirmed and the Orchard balance has fully
-    /// drained into Ironwood.
+    /// drained into Ironwood. Completion is **persisted** — the run's phase is set to
+    /// [`Phase::Complete`], a terminal phase — so the run becomes inactive: its note locks are
+    /// released and a later deposit of Orchard funds can start a fresh migration run.
     ///
     /// # Errors
     ///
@@ -375,12 +377,16 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             }
         }
         // Completion: an in-progress run whose transfers are all confirmed, with the Orchard
-        // balance fully migrated into Ironwood.
+        // balance fully migrated into Ironwood. Persist the terminal phase before returning, so the
+        // run drops out of `active_run` — releasing its note locks and freeing a future deposit to
+        // start a new run. Without this the run row stays non-terminal forever and blocks any
+        // subsequent migration.
         if let MigrationState::InProgress(p) = &mapped {
             if p.total_transfers() > 0 && p.completed_transfers() == p.total_transfers() {
                 let db = self.open_wallet()?;
                 let balances = backend::pool_balances(&db, self.account)?;
                 if balances.orchard_spendable == 0 && balances.ironwood_total > 0 {
+                    store::set_phase(&conn, &run.run_id, Phase::Complete, None)?;
                     return Ok(MigrationState::Complete);
                 }
             }
