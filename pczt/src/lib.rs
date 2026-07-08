@@ -346,6 +346,8 @@ pub enum EncodingError {
     UnsupportedTxVersion,
     /// The v1 PCZT encoding does not support this Orchard note plaintext version.
     UnsupportedOrchardNoteVersion,
+    /// The PCZT contains data that can only be represented in v2.
+    RequiresV2,
 }
 
 impl Pczt {
