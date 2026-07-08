@@ -901,14 +901,25 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         // Represent an Orchard-receiver payment as an Ironwood-pool output once
                         // Ironwood is active (its value is accounted to the Ironwood bundle
                         // below), and as an Orchard-pool output otherwise.
-                        payment_pools.insert(
-                            *idx,
-                            if ironwood_active_at(params, target_height) {
-                                PoolType::IRONWOOD
-                            } else {
-                                PoolType::ORCHARD
-                            },
-                        );
+                        let pool = if ironwood_active_at(params, target_height) {
+                            // After NU6.3 the Orchard turnstile (a consensus rule) forbids adding
+                            // value to the Orchard pool, so the payment must be delivered through
+                            // the Ironwood bundle, which only a version 6 transaction carries. If a
+                            // transaction version was explicitly requested that cannot carry an
+                            // Ironwood bundle, reject the proposal here rather than constructing one
+                            // that could only fail at build time.
+                            if let Some(v) = proposed_version {
+                                if !v.has_ironwood() {
+                                    return Err(
+                                        ProposalError::OrchardReceiverRequiresIronwood(v).into()
+                                    );
+                                }
+                            }
+                            PoolType::IRONWOOD
+                        } else {
+                            PoolType::ORCHARD
+                        };
+                        payment_pools.insert(*idx, pool);
                         orchard_outputs.push(OrchardPayment(payment_amount));
                         continue;
                     }

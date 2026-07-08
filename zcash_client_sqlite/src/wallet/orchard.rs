@@ -847,6 +847,12 @@ pub(crate) mod tests {
         testing::pool::pczt_single_step::<OrchardPoolTester, OrchardPoolTester>(Some(100))
     }
 
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn create_pczt_supports_ironwood_output() {
+        testing::pool::create_pczt_supports_ironwood_output();
+    }
+
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn wallet_recovery_compute_fees() {
@@ -927,6 +933,11 @@ pub(crate) mod tests {
     #[test]
     fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood() {
         testing::pool::shielding_coinbase_to_orchard_receiver_delivers_via_ironwood();
+    }
+
+    #[test]
+    fn propose_v5_payment_to_orchard_receiver_is_rejected() {
+        testing::pool::propose_v5_payment_to_orchard_receiver_is_rejected();
     }
 
     /// `put_received_note` records a note in the received-notes table chosen by the caller,

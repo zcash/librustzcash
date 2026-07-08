@@ -6,7 +6,7 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use zcash_primitives::transaction::TxId;
+use zcash_primitives::transaction::{TxId, TxVersion};
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{BlockHeight, BranchId},
@@ -78,6 +78,12 @@ pub enum ProposalError {
     /// The transaction version requested is not compatible with the consensus branch for which the
     /// transaction is intended.
     IncompatibleTxVersion(BranchId),
+    /// After NU6.3 activation, a payment to an Orchard receiver must be delivered through the
+    /// Ironwood pool, which requires a version 6 transaction. The explicitly-requested transaction
+    /// version has no Ironwood bundle, so it cannot carry the payment. (The Orchard turnstile is a
+    /// consensus rule after NU6.3: no payment may add value to the Orchard pool, so such a payment
+    /// cannot be delivered as a plain Orchard output either.)
+    OrchardReceiverRequiresIronwood(TxVersion),
     /// After Ironwood activation, a proposal step would create value in the Orchard pool.
     /// The turnstile only permits value to leave the pool: a step may return change to it
     /// only when strictly less value returns than the step's Orchard inputs remove.
@@ -186,6 +192,10 @@ impl Display for ProposalError {
             ProposalError::IncompatibleTxVersion(branch_id) => write!(
                 f,
                 "The requested transaction version is incompatible with consensus branch {branch_id:?}"
+            ),
+            ProposalError::OrchardReceiverRequiresIronwood(version) => write!(
+                f,
+                "After NU6.3 activation, a payment to an Orchard receiver requires a version 6 (Ironwood) transaction, but version {version:?} was requested."
             ),
         }
     }

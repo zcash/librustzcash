@@ -194,6 +194,12 @@ workspace.
   (A payment directed to the Orchard pool after NU6.3 activation is a
   programming error, which step construction enforces by assertion: payment
   classification always delivers such payments via the Ironwood bundle.)
+- `zcash_client_backend::proposal::ProposalError::OrchardReceiverRequiresIronwood`,
+  returned by proposal construction when a transaction version that cannot carry an
+  Ironwood bundle is explicitly requested for a payment to an Orchard receiver at a
+  post-NU6.3 target height. Such a payment must be delivered through the Ironwood pool
+  (a version 6 transaction feature), as the Orchard turnstile forbids adding value to
+  the Orchard pool after NU6.3.
 - `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
   alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
   instead of a `ChangeStrategy`.
@@ -277,9 +283,12 @@ workspace.
   that a proposal a user inspects reflects the Ironwood outputs being created.
   `zcash_client_backend::data_api::wallet::create_proposed_transactions` builds
   those outputs through the Ironwood transaction builder.
-- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` continues
-  to use legacy Orchard routing for Orchard-recipient proposals until PCZT has
-  Ironwood role support.
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now builds
+  the transaction at the version implied by its target height (version 6 from
+  NU6.3 onward) instead of always version 5, and constructs the Ironwood bundle
+  for payments delivered through the Ironwood pool. A post-NU6.3 payment to an
+  Orchard receiver is therefore realized as a version 6 PCZT carrying an Ironwood
+  bundle.
 - Renamed `zcash_client_backend::data_api::TransparentOutputFilter` to
   `CoinbaseFilter`, and its `All` variant to `AllTransparentOutputs`.
 - During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
