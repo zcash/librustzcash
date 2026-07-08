@@ -7257,6 +7257,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_pool_migration"
+version = "0.1.0"
+dependencies = [
+ "incrementalmerkletree",
+ "orchard",
+ "pczt",
+ "rand 0.8.5",
+ "rusqlite",
+ "shardtree",
+ "tempfile",
+ "uuid",
+ "zcash_address",
+ "zcash_client_backend",
+ "zcash_client_sqlite",
+ "zcash_keys",
+ "zcash_primitives",
+ "zcash_protocol",
+ "zip321",
+]
+
+[[package]]
 name = "zcash_primitives"
 version = "0.29.0-pre.0"
 dependencies = [

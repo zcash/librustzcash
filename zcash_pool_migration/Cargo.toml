@@ -1,0 +1,45 @@
+[package]
+name = "zcash_pool_migration"
+description = "Orchard to Ironwood value-pool migration engine for Zcash wallets"
+version = "0.1.0"
+authors = ["Michal Fousek <michal.fousek@chlup.info>"]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+zcash_address.workspace = true
+zcash_client_backend = { workspace = true, features = ["orchard", "pczt"] }
+zcash_client_sqlite = { workspace = true, features = ["orchard", "transparent-inputs"] }
+zcash_keys = { workspace = true, features = ["orchard"] }
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+zip321.workspace = true
+
+orchard.workspace = true
+pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "signer", "spend-finalizer", "tx-extractor"] }
+shardtree.workspace = true
+
+rand.workspace = true
+rusqlite.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+incrementalmerkletree.workspace = true
+tempfile = "3"
+zcash_client_backend = { workspace = true, features = ["orchard", "pczt", "test-dependencies"] }
+
+[features]
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = []
+expensive-tests = []
+
+[lints]
+workspace = true
