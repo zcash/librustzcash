@@ -144,7 +144,7 @@ impl fmt::Display for MemoPlaintextError {
 /// A memo plaintext with all trailing zero bytes stripped.
 ///
 /// This is the memo portion of an Orchard note plaintext, not the full note
-/// plaintext. It is expanded back to [`MEMO_SIZE`] bytes before recomputing
+/// plaintext. It is expanded back to the protocol memo size before recomputing
 /// [`EncCiphertext::Encrypted`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemoPlaintext(Vec<u8>);
@@ -202,11 +202,14 @@ impl<'de> Deserialize<'de> for MemoPlaintext {
     }
 }
 
-/// The encrypted note ciphertext field, or [`MemoPlaintext`] data to recompute it.
-/// Note that you can recompute the ciphertext from the MemoPlaintext data given
-/// the full output note's data.
+/// The encrypted note plaintext for an output, or the memo plaintext needed to
+/// recompute it.
 ///
-/// The variant order is part of the v2 wire encoding
+/// [`EncCiphertext::MemoPlaintext`] can be resolved to
+/// [`EncCiphertext::Encrypted`] from the output note fields and the action's
+/// spend nullifier.
+///
+/// The variant order is part of the v2 wire encoding.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncCiphertext {
     /// The encrypted note plaintext for the output.
@@ -235,7 +238,7 @@ impl From<Vec<u8>> for EncCiphertext {
 fn recover_memo_plaintext_from_ciphertext_and_action(
     action: &Action,
     note_version: NoteVersion,
-) -> Option<[u8; MEMO_SIZE]> {
+) -> Option<MemoPlaintext> {
     use ::orchard::{
         Address, Note,
         note::{ExtractedNoteCommitment, Nullifier, RandomSeed, Rho},
@@ -271,18 +274,20 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
         domain: &D,
         note: &Note,
         output: &OutputRecoveryData,
-    ) -> Option<[u8; MEMO_SIZE]>
+    ) -> Option<MemoPlaintext>
     where
         D: Domain<Note = Note, Memo = [u8; MEMO_SIZE], ExtractedCommitmentBytes = [u8; 32]>,
     {
         let pk_d = D::get_pk_d(note);
         let esk = D::derive_esk(note)?;
 
-        try_output_recovery_with_pkd_esk(domain, pk_d, esk, output).map(|(_, _, memo)| memo)
+        try_output_recovery_with_pkd_esk(domain, pk_d, esk, output)
+            .map(|(_, _, memo)| MemoPlaintext::from_memo(memo))
     }
 
     let enc_ciphertext = match &action.output.enc_ciphertext {
         EncCiphertext::Encrypted(ciphertext) => ciphertext.as_slice().try_into().ok()?,
+        // we return None here to avoid excess sets or clone operations, as the caller need not do anything in this case.
         EncCiphertext::MemoPlaintext(_) => return None,
     };
     let output = OutputRecoveryData {
@@ -334,8 +339,7 @@ impl Action {
         note_version: NoteVersion,
     ) {
         if let Some(memo) = recover_memo_plaintext_from_ciphertext_and_action(self, note_version) {
-            self.output.enc_ciphertext =
-                EncCiphertext::MemoPlaintext(MemoPlaintext::from_memo(memo));
+            self.output.enc_ciphertext = EncCiphertext::MemoPlaintext(memo);
         }
     }
 }
@@ -467,8 +471,8 @@ pub struct Output {
     pub(crate) cmx: [u8; 32],
     #[getset(get = "pub")]
     pub(crate) ephemeral_key: [u8; 32],
-    /// The encrypted note plaintext for the output, or the memo needed to
-    /// recompute it.
+    /// The encrypted note plaintext for the output, or the memo plaintext
+    /// needed to recompute it.
     #[getset(get = "pub")]
     pub(crate) enc_ciphertext: EncCiphertext,
     /// The encrypted note plaintext for the output.
@@ -1028,24 +1032,8 @@ pub(crate) mod v2 {
             assert_eq!(plaintext.to_memo(), memo);
         }
 
-        #[test]
-        fn v2_round_trips_memo_plaintext_ciphertext_data() {
-            let mut bundle = logical_bundle([5; 32], [6; 32]);
-            let memo = MemoPlaintext::from_stripped_bytes(b"hello".to_vec()).unwrap();
-            bundle.actions[0].output.enc_ciphertext = EncCiphertext::MemoPlaintext(memo.clone());
-
-            let encoded = super::Bundle::try_from(bundle).unwrap();
-            let decoded = LogicalBundle::from(encoded);
-
-            assert_eq!(
-                decoded.actions[0].output.enc_ciphertext,
-                EncCiphertext::MemoPlaintext(memo)
-            );
-        }
-
         #[cfg(feature = "orchard")]
-        #[test]
-        fn decrypted_memo_plaintext_redaction_skips_decryption_failure() {
+        fn decryptable_action_with_memo(memo: [u8; MEMO_SIZE]) -> LogicalAction {
             use ::orchard::{
                 Note,
                 keys::{FullViewingKey, Scope, SpendingKey},
@@ -1077,12 +1065,9 @@ pub(crate) mod v2 {
             ))
             .unwrap();
 
-            let encryptor = OrchardNoteEncryption::new(None, note, [0; MEMO_SIZE]);
-            let mut enc_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
-            enc_ciphertext[0] ^= 1;
-            let original_enc_ciphertext = enc_ciphertext.clone();
+            let encryptor = OrchardNoteEncryption::new(None, note, memo);
 
-            let mut action = LogicalAction {
+            LogicalAction {
                 cv_net: [0; 32],
                 spend: Spend {
                     nullifier,
@@ -1102,7 +1087,9 @@ pub(crate) mod v2 {
                 output: Output {
                     cmx: ExtractedNoteCommitment::from(note.commitment()).to_bytes(),
                     ephemeral_key: OrchardDomain::epk_bytes(encryptor.epk()).0,
-                    enc_ciphertext: EncCiphertext::Encrypted(enc_ciphertext),
+                    enc_ciphertext: EncCiphertext::Encrypted(
+                        encryptor.encrypt_note_plaintext().to_vec(),
+                    ),
                     out_ciphertext: Vec::new(),
                     recipient: Some(recipient.to_raw_address_bytes()),
                     value: Some(value.inner()),
@@ -1113,6 +1100,70 @@ pub(crate) mod v2 {
                     proprietary: BTreeMap::new(),
                 },
                 rcv: None,
+            }
+        }
+
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn v2_round_trips_memo_plaintext_ciphertext_data() {
+            use zcash_protocol::consensus::BranchId;
+
+            use crate::{roles::creator::Creator, roles::redactor::Redactor};
+
+            const HELLO_MEMO_PAYLOAD_SIZE_REDUCTION: usize = 575;
+            // The serialized reduction is one byte larger because postcard uses
+            // a shorter length prefix for the stripped memo plaintext.
+            const HELLO_MEMO_SERIALIZED_SIZE_REDUCTION: usize =
+                HELLO_MEMO_PAYLOAD_SIZE_REDUCTION + 1;
+
+            let mut memo = [0; MEMO_SIZE];
+            memo[..5].copy_from_slice(b"hello");
+
+            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
+                .unwrap()
+                .build();
+            pczt.orchard
+                .actions
+                .push(decryptable_action_with_memo(memo));
+
+            let encrypted_size = pczt.clone().serialize().unwrap().len();
+            let redacted = Redactor::new(pczt)
+                .redact_orchard_with(|mut orchard| {
+                    orchard.redact_actions(|mut action| {
+                        action
+                            .replace_enc_ciphertext_with_decrypted_memo_plaintext(NoteVersion::V2);
+                    });
+                })
+                .finish();
+            let redacted_size = redacted.clone().serialize().unwrap().len();
+
+            assert_eq!(
+                redacted.orchard.actions[0].output.enc_ciphertext,
+                EncCiphertext::MemoPlaintext(MemoPlaintext::from_memo(memo))
+            );
+            assert_eq!(
+                encrypted_size - redacted_size,
+                HELLO_MEMO_SERIALIZED_SIZE_REDUCTION
+            );
+
+            let decoded = crate::parse(&redacted.serialize().unwrap()).unwrap();
+
+            assert_eq!(
+                decoded.orchard.actions[0].output.enc_ciphertext,
+                EncCiphertext::MemoPlaintext(MemoPlaintext::from_memo(memo))
+            );
+        }
+
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn decrypted_memo_plaintext_redaction_skips_decryption_failure() {
+            let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
+            let original_enc_ciphertext = match &mut action.output.enc_ciphertext {
+                EncCiphertext::Encrypted(enc_ciphertext) => {
+                    enc_ciphertext[0] ^= 1;
+                    enc_ciphertext.clone()
+                }
+                EncCiphertext::MemoPlaintext(_) => unreachable!("helper encrypts memo plaintext"),
             };
 
             action.replace_enc_ciphertext_with_decrypted_memo_plaintext(NoteVersion::V2);
@@ -1320,11 +1371,16 @@ pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<B
 
 #[cfg(feature = "orchard")]
 impl Output {
-    /// Recomputes `enc_ciphertext` from memo plaintext, if this output carries it.
+    /// Recomputes [`Self::enc_ciphertext`] from memo plaintext, if present.
+    ///
+    /// If [`Self::enc_ciphertext`] is [`EncCiphertext::MemoPlaintext`], this
+    /// computes the encrypted note plaintext and replaces it with
+    /// [`EncCiphertext::Encrypted`]. If it is already encrypted, this is a
+    /// no-op.
     ///
     /// This requires the action's spend nullifier because the output note's
     /// [`rho`](::orchard::note::Rho) is derived from it.
-    fn resolve_memo_plaintext(
+    fn encrypt_ciphertext_from_memo(
         &mut self,
         note_version: NoteVersion,
         spend_nullifier: [u8; 32],
@@ -1338,7 +1394,7 @@ impl Output {
         };
         use zcash_note_encryption::Domain;
 
-        let memo = match &self.enc_ciphertext {
+        let memo: [u8; 512] = match &self.enc_ciphertext {
             EncCiphertext::Encrypted(_) => return Ok(()),
             EncCiphertext::MemoPlaintext(memo) => memo.to_memo(),
         };
@@ -1383,8 +1439,11 @@ impl Output {
 
 #[cfg(feature = "orchard")]
 impl Bundle {
-    /// Resolves every derived or compact field representation this bundle
-    /// carries.
+    /// Resolves fields that are optionally redacted in the PCZT but implied by
+    /// other known fields.
+    ///
+    /// This currently recomputes [`Output::enc_ciphertext`] when it is
+    /// represented by memo plaintext.
     ///
     /// For improved efficiency, callers that will pass the same bundle through
     /// multiple roles should call this once up front, not in each role. Parsing
@@ -1393,14 +1452,15 @@ impl Bundle {
         self.resolve_memo_plaintexts()
     }
 
-    /// Recomputes every output `enc_ciphertext` represented by memo plaintext.
+    /// Recomputes every [`Output::enc_ciphertext`] represented by memo
+    /// plaintext.
     ///
     /// This is a no-op for outputs that already carry encrypted ciphertext.
     pub fn resolve_memo_plaintexts(&mut self) -> Result<(), ::orchard::pczt::ParseError> {
         for action in &mut self.actions {
             action
                 .output
-                .resolve_memo_plaintext(self.note_version, action.spend.nullifier)?;
+                .encrypt_ciphertext_from_memo(self.note_version, action.spend.nullifier)?;
         }
 
         Ok(())
@@ -1426,6 +1486,10 @@ impl Bundle {
 
     /// Parses this bundle with the given bundle version, deriving each spend's
     /// `FullViewingKey` from its wire `fvk` bytes.
+    ///
+    /// Callers should prefer [`Bundle::resolve_fields`] before parsing, so
+    /// derivations happen once for all uses. This method still resolves
+    /// fields defensively for direct callers.
     pub(crate) fn into_parsed_with_version(
         self,
         bundle_version: BundleVersion,
@@ -1436,6 +1500,10 @@ impl Bundle {
     /// Parses this bundle with the given bundle version for a preverified signing
     /// pass, skipping each spend's `FullViewingKey` derivation (an expensive step the
     /// spend authorization signature does not depend on).
+    ///
+    /// Callers should prefer [`Bundle::resolve_fields`] before parsing, so
+    /// derivations happen once for all uses. This method still resolves
+    /// fields defensively for direct callers.
     ///
     /// Callers MUST have already run the full Verifier checks over the identical PCZT
     /// bytes: the wire `fvk` bytes are neither validated nor retained here (each spend
@@ -1452,10 +1520,6 @@ impl Bundle {
     /// The shared body of [`Bundle::into_parsed_with_version`] and
     /// [`Bundle::into_parsed_with_version_preverified_for_signing`]: `preverified`
     /// selects between the full parse and the preverified signing parse.
-    ///
-    /// Callers should prefer [`Bundle::resolve_fields`] before parsing, so
-    /// derivations happen once at role boundaries. This method still resolves
-    /// fields defensively for direct callers.
     fn into_parsed_inner(
         self,
         bundle_version: BundleVersion,
@@ -1479,6 +1543,7 @@ impl Bundle {
                     orchard::pczt::Zip32Derivation::parse(z.seed_fingerprint, z.derivation_path)
                 })
                 .transpose()?;
+            let spend_nullifier = action.spend.nullifier;
 
             let spend = if preverified {
                 orchard::pczt::Spend::parse_preverified_for_signing(
@@ -1518,7 +1583,7 @@ impl Bundle {
 
             action
                 .output
-                .resolve_memo_plaintext(note_version, spend.nullifier().to_bytes())?;
+                .encrypt_ciphertext_from_memo(note_version, spend_nullifier)?;
 
             let enc_ciphertext = action
                 .output

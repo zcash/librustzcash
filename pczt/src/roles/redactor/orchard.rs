@@ -167,8 +167,9 @@ impl ActionRedactor<'_> {
     /// Replaces the output's encrypted note plaintext with a stripped memo
     /// plaintext.
     ///
-    /// The receiver can recompute `enc_ciphertext` from this memo, the output note
-    /// fields, and the action's spend nullifier.
+    /// The PCZT consumer can recompute
+    /// [`Output::enc_ciphertext`](crate::orchard::Output::enc_ciphertext) from
+    /// this memo, the output note fields, and the action's spend nullifier.
     pub fn replace_enc_ciphertext_with_memo_plaintext(&mut self, memo: [u8; MEMO_SIZE]) {
         self.redact(|action| {
             action.output.enc_ciphertext =
