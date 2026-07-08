@@ -994,6 +994,109 @@ fn check_v2_round_trip(pczt: &Pczt) {
     assert_eq!(encoded, reencoded);
 }
 
+#[derive(Clone, Copy)]
+enum ShieldedPool {
+    Orchard,
+    Ironwood,
+}
+
+fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
+    if matches!(pool, ShieldedPool::Orchard) {
+        return Creator::new(
+            zcash_protocol::consensus::BranchId::Nu6_3.into(),
+            10_000_000,
+            133,
+            [0; 32],
+            [9; 32],
+        )
+        .unwrap()
+        .build();
+    }
+
+    let transparent_account_sk =
+        AccountPrivKey::from_seed(&MainNetwork, &[1; 32], zip32::AccountId::ZERO).unwrap();
+    let (transparent_addr, address_index) = transparent_account_sk
+        .to_account_pubkey()
+        .derive_external_ivk()
+        .unwrap()
+        .default_address();
+    let transparent_sk = transparent_account_sk
+        .derive_external_secret_key(address_index)
+        .unwrap();
+    let secp = secp256k1::Secp256k1::signing_only();
+    let transparent_pubkey = transparent_sk.public_key(&secp);
+
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    let mut builder = Builder::new(
+        nu6_3_test_network(),
+        10_000_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: matches!(pool, ShieldedPool::Orchard).then(orchard::Anchor::empty_tree),
+            ironwood_anchor: matches!(pool, ShieldedPool::Ironwood)
+                .then(orchard::Anchor::empty_tree),
+        },
+    );
+    builder
+        .add_transparent_p2pkh_input(
+            transparent_pubkey,
+            transparent::OutPoint::fake(),
+            transparent::TxOut::new(
+                Zatoshis::const_from_u64(1_000_000),
+                transparent_addr.script().into(),
+            ),
+        )
+        .unwrap();
+
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            Zatoshis::const_from_u64(985_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+
+    let PcztResult { pczt_parts, .. } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
+        .finalize_io()
+        .unwrap()
+}
+
+fn redact_anchor(pczt: Pczt, pool: ShieldedPool) -> Pczt {
+    match pool {
+        ShieldedPool::Orchard => Redactor::new(pczt)
+            .redact_orchard_with(|mut r| r.clear_anchor())
+            .finish(),
+        ShieldedPool::Ironwood => Redactor::new(pczt)
+            .redact_ironwood_with(|mut r| r.clear_anchor())
+            .finish(),
+    }
+}
+
+fn assert_anchor_redacted(pczt: &Pczt, pool: ShieldedPool) {
+    match pool {
+        ShieldedPool::Orchard => assert!(pczt.orchard().anchor().is_none()),
+        ShieldedPool::Ironwood => assert!(pczt.ironwood().anchor().is_none()),
+    }
+}
+
+fn assert_redacted_anchor_v2_round_trip(pczt: Pczt, pool: ShieldedPool) {
+    let redacted = redact_anchor(pczt, pool);
+    assert_anchor_redacted(&redacted, pool);
+    check_v2_round_trip(&redacted);
+
+    let reparsed = Pczt::parse(&redacted.serialize().unwrap()).unwrap();
+    assert_anchor_redacted(&reparsed, pool);
+}
+
 /// A regtest network with NU6.3 activated, for exercising the Ironwood pool.
 fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
     use zcash_protocol::consensus::BlockHeight;
@@ -1012,6 +1115,38 @@ fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
         #[cfg(zcash_unstable = "nu7")]
         nu7: None,
     }
+}
+
+#[test]
+fn redacted_orchard_anchor_round_trips_v2() {
+    assert_redacted_anchor_v2_round_trip(
+        pczt_with_anchor(ShieldedPool::Orchard),
+        ShieldedPool::Orchard,
+    );
+}
+
+#[test]
+fn redacted_ironwood_anchor_round_trips_v2() {
+    assert_redacted_anchor_v2_round_trip(
+        pczt_with_anchor(ShieldedPool::Ironwood),
+        ShieldedPool::Ironwood,
+    );
+}
+
+#[test]
+fn redacted_ironwood_anchor_survives_signer_finish() {
+    let redacted = redact_anchor(
+        pczt_with_anchor(ShieldedPool::Ironwood),
+        ShieldedPool::Ironwood,
+    );
+    assert_anchor_redacted(&redacted, ShieldedPool::Ironwood);
+
+    let signed = Signer::new(redacted).unwrap().finish();
+    assert_anchor_redacted(&signed, ShieldedPool::Ironwood);
+    check_v2_round_trip(&signed);
+
+    let reparsed = Pczt::parse(&signed.serialize().unwrap()).unwrap();
+    assert_anchor_redacted(&reparsed, ShieldedPool::Ironwood);
 }
 
 #[test]
@@ -1126,6 +1261,85 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
     let fvks_before = wire_spend_fvks(&pczt, true);
     assert_eq!(fvks_before[index], Some(orchard_fvk.to_bytes()));
 
+    let redacted = Redactor::new(pczt.clone())
+        .redact_ironwood_with(|mut r| {
+            r.clear_anchor();
+            r.redact_actions(|mut a| {
+                a.clear_cv_net();
+            });
+        })
+        .finish();
+    assert!(redacted.ironwood().anchor().is_none());
+    assert!(
+        redacted
+            .ironwood()
+            .actions()
+            .iter()
+            .all(|action| action.cv_net().is_none())
+    );
+    let verified = Verifier::new(redacted.clone())
+        .with_ironwood::<std::convert::Infallible, _>(|_| {
+            Ok::<(), pczt::roles::verifier::OrchardError<std::convert::Infallible>>(())
+        })
+        .unwrap()
+        .finish();
+    assert!(verified.ironwood().anchor().is_none());
+    let updated = Updater::new(redacted.clone())
+        .update_ironwood_with(|_| Ok(()))
+        .unwrap()
+        .finish();
+    assert!(updated.ironwood().anchor().is_none());
+
+    let mut resolved = redacted.clone();
+    resolved.resolve_fields().unwrap();
+    assert!(resolved.ironwood().anchor().is_none());
+    assert_eq!(
+        resolved.ironwood().actions()[index].cv_net(),
+        pczt.ironwood().actions()[index].cv_net()
+    );
+    assert!(IoFinalizer::new(redacted.clone()).finalize_io().is_err());
+    assert!(
+        Prover::new(redacted.clone())
+            .create_ironwood_proof(orchard_proving_key())
+            .is_err()
+    );
+    assert_eq!(
+        Signer::new(redacted.clone()).unwrap().shielded_sighash(),
+        sighash
+    );
+
+    let cv_net_redacted = Redactor::new(pczt.clone())
+        .redact_ironwood_with(|mut r| {
+            r.redact_actions(|mut a| {
+                a.clear_cv_net();
+            });
+        })
+        .finish();
+    assert_eq!(
+        Signer::new(cv_net_redacted.clone())
+            .unwrap()
+            .shielded_sighash(),
+        sighash
+    );
+
+    let signed_redacted = low_level_signer::Signer::new(cv_net_redacted)
+        .sign_ironwood_with::<low_level_signer::OrchardParseError, _>(|_, bundle, _| {
+            bundle.actions_mut()[index]
+                .sign(sighash, &orchard_ask, ChaCha20Rng::from_seed(seed))
+                .expect("signing succeeds");
+            Ok(())
+        })
+        .unwrap()
+        .finish();
+    assert_eq!(
+        signed_redacted.ironwood().actions()[index]
+            .spend()
+            .spend_auth_sig()
+            .expect("action was signed"),
+        expected_sig
+    );
+    check_v2_round_trip(&signed_redacted);
+
     // Sign through the low-level Signer's preverified path with the same seed.
     let signed = low_level_signer::Signer::new(pczt.clone())
         .sign_ironwood_with::<low_level_signer::OrchardParseError, _>(|_, bundle, _| {
@@ -1157,4 +1371,26 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
 
     // The wire `fvk` bytes must be preserved (unchanged) after signing.
     assert_eq!(wire_spend_fvks(&signed, true), fvks_before);
+}
+
+#[test]
+fn redacted_anchor_is_not_resolved() {
+    let pczt = Creator::new(
+        zcash_protocol::consensus::BranchId::Nu6.into(),
+        10_000_000,
+        133,
+        [0; 32],
+        [9; 32],
+    )
+    .unwrap()
+    .build();
+
+    let mut redacted = Redactor::new(pczt)
+        .redact_orchard_with(|mut r| {
+            r.clear_anchor();
+        })
+        .finish();
+
+    redacted.resolve_fields().unwrap();
+    assert!(redacted.orchard().anchor().is_none());
 }

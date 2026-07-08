@@ -313,7 +313,7 @@ pub mod v2 {
             let decoded = crate::parse(&encoded.serialize()).unwrap();
 
             assert_eq!(decoded.sapling.anchor, [1; 32]);
-            assert_eq!(decoded.orchard.anchor, [2; 32]);
+            assert_eq!(decoded.orchard.anchor, Some([2; 32]));
         }
 
         #[test]
@@ -377,6 +377,17 @@ impl Pczt {
     /// To serialize a specific PCZT version, e.g. v1, use [`v1::Pczt::serialize`].
     pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
         Ok(v2::Pczt::try_from(self)?.serialize())
+    }
+
+    /// Resolves derived or compact field representations carried by this PCZT.
+    ///
+    /// For improved efficiency, callers that will pass the same PCZT through
+    /// multiple roles should call this once up front. Parsing also resolves fields
+    /// defensively.
+    #[cfg(feature = "orchard")]
+    pub fn resolve_fields(&mut self) -> Result<(), ::orchard::pczt::ParseError> {
+        self.orchard.resolve_fields()?;
+        self.ironwood.resolve_fields()
     }
 
     /// Parses this PCZT's bundles and constructs a `TransactionData` using caller-provided
@@ -462,14 +473,13 @@ impl Pczt {
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
         let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
+        let orchard_bundle_version = crate::orchard::bundle_version_for_revision(
+            orchard_protocol_revision,
+            ::orchard::ValuePool::Orchard,
+        )
+        .expect("the Orchard pool is supported under every protocol revision");
         let orchard = orchard
-            .into_parsed_with_version(
-                crate::orchard::bundle_version_for_revision(
-                    orchard_protocol_revision,
-                    ::orchard::ValuePool::Orchard,
-                )
-                .expect("the Orchard pool is supported under every protocol revision"),
-            )
+            .into_parsed_with_version(orchard_bundle_version, global.tx_version)
             .map_err(ExtractError::OrchardParse)?;
         let ironwood = ironwood
             .into_ironwood_parsed()

@@ -78,7 +78,10 @@ impl Signer {
         let mut bundle = pczt
             .orchard
             .clone()
-            .into_parsed_with_version_preverified_for_signing(bundle_version)
+            .into_parsed_with_version_preverified_for_signing(
+                bundle_version,
+                pczt.global.tx_version,
+            )
             .map_err(OrchardParseError::Parse)?;
 
         f(&pczt, &mut bundle, &mut tx_modifiable)?;
@@ -265,7 +268,7 @@ mod tests {
                 // Distinct `rk` per action (`[10; 32]`, `[11; 32]`), shared
                 // nullifier `[3; 32]`.
                 .map(|(i, fvk)| Action {
-                    cv_net: [0; 32],
+                    cv_net: Some([0; 32]),
                     spend: Spend {
                         nullifier: [3u8; 32],
                         rk: [10 + i as u8; 32],
@@ -299,7 +302,7 @@ mod tests {
                 .collect(),
             flags: 0,
             value_sum: (0, false),
-            anchor: [0; 32],
+            anchor: Some([0; 32]),
             note_version: NoteVersion::V2,
             zkproof: None,
             bsk: None,
