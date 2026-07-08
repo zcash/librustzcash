@@ -5,6 +5,8 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 
+mod denominations;
+
 pub mod error;
 pub mod types;
 
