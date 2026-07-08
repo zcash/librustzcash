@@ -23,8 +23,7 @@ pub struct TransferId(String);
 
 impl TransferId {
     /// Run-scoped transfer id: `"<run_id>:<index>"`. Constructed by the engine.
-    // Not yet called outside this module's tests: the scheduler that constructs real
-    // `TransferProposal`s lands in Task 5 (`scheduling.rs`).
+    // Consumed by scheduling (Task 5).
     #[allow(dead_code)]
     pub(crate) fn for_transfer(run_id: &str, index: u32) -> Self {
         TransferId(format!("{run_id}:{index}"))

@@ -6,6 +6,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod denominations;
+mod scheduling;
 
 pub mod error;
 pub mod types;
