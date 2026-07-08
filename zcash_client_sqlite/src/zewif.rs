@@ -424,6 +424,12 @@ impl<S> From<SqliteClientError> for ZewifImportError<S> {
     }
 }
 
+impl<S> From<rusqlite::Error> for ZewifImportError<S> {
+    fn from(e: rusqlite::Error) -> Self {
+        ZewifImportError::Wallet(SqliteClientError::from(e))
+    }
+}
+
 /// The reason an account in a ZeWIF document was not imported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountSkipReason {
@@ -816,6 +822,11 @@ fn zip32_derivation<S>(
 /// material carried by the document is delivered to `sink` and is not stored in
 /// the wallet database; see [`SecretSink`].
 ///
+/// The database is populated within a single transaction: if the import fails,
+/// no partial state is committed and the import can be retried. Secret material
+/// delivered to `sink` is external to the database and is not covered by that
+/// rollback, so `sink` should be idempotent under re-delivery.
+///
 /// Returns a report describing the accounts imported and any items that could
 /// not be represented.
 pub fn import_wallet<C, P, CL, R, S>(
@@ -888,23 +899,29 @@ where
         }
     }
 
-    let mut report = ZewifImportReport::default();
-    let mut taddrs = TransparentAddressRecords::default();
+    // Populate the wallet database within a single transaction, so that any
+    // failure rolls back cleanly and leaves the database untouched (rather than
+    // partially imported, which would collide on a retry). Secret delivery to
+    // the sink above is external to the database and is not covered by this
+    // rollback; sinks are expected to be idempotent under re-delivery.
+    wdb.transactionally::<_, _, ZewifImportError<S::Error>>(|wdb| {
+        let mut report = ZewifImportReport::default();
+        let mut taddrs = TransparentAddressRecords::default();
 
-    for wallet in document.wallets() {
-        report.address_book_entries_not_imported += wallet.address_book().len();
+        for wallet in document.wallets() {
+            report.address_book_entries_not_imported += wallet.address_book().len();
 
-        for account in wallet.accounts() {
-            import_account(wdb, &params, account, &available, &mut taddrs, &mut report)?;
+            for account in wallet.accounts() {
+                import_account(wdb, &params, account, &available, &mut taddrs, &mut report)?;
+            }
         }
-    }
 
-    register_transparent_keys(wdb, &params, secret_store, &taddrs, &mut report)?;
-    mark_addresses_exposed(wdb, &params, &taddrs, &mut report)?;
+        register_transparent_keys(wdb, &params, secret_store, &taddrs, &mut report)?;
+        mark_addresses_exposed(wdb, &params, &taddrs, &mut report)?;
+        import_transactions(wdb, &params, document, &mut report)?;
 
-    import_transactions(wdb, &params, document, &mut report)?;
-
-    Ok(report)
+        Ok(report)
+    })
 }
 
 /// The transparent addresses recorded under imported accounts, indexed for
@@ -936,18 +953,16 @@ fn decode_wif(expected_prefix: u8, wif: &str) -> Option<secp256k1::SecretKey> {
 /// Registers the secret store's standalone transparent spending keys with the
 /// accounts that record their addresses, and the recorded P2SH redeem scripts
 /// with the accounts that carry them.
-fn register_transparent_keys<C, P, CL, R, S>(
-    wdb: &mut WalletDb<C, P, CL, R>,
+fn register_transparent_keys<DbT, P, S>(
+    wdb: &mut DbT,
     params: &P,
     store: Option<&::zewif::SecretStore>,
     taddrs: &TransparentAddressRecords,
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    C: std::borrow::BorrowMut<rusqlite::Connection>,
+    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
     P: consensus::Parameters,
-    CL: Clock,
-    R: RngCore,
     S: std::error::Error,
 {
     let wif_prefix = match params.network_type() {
@@ -1024,21 +1039,17 @@ where
 ///
 /// Only addresses the wallet recognizes as receivers of an imported account
 /// can be marked; unrecognized addresses are counted in the report.
-fn mark_addresses_exposed<C, P, CL, R, S>(
-    wdb: &mut WalletDb<C, P, CL, R>,
+fn mark_addresses_exposed<DbT, P, S>(
+    wdb: &mut DbT,
     params: &P,
     taddrs: &TransparentAddressRecords,
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    C: std::borrow::BorrowMut<rusqlite::Connection>,
+    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
     P: consensus::Parameters,
-    CL: Clock,
-    R: RngCore,
     S: std::error::Error,
 {
-    use zcash_client_backend::data_api::WalletRead;
-
     // The upstream API rejects the entire batch if any address is not a known
     // receiver, so restrict the batch to the receivers the wallet recognizes.
     let mut known = std::collections::HashSet::new();
@@ -1091,21 +1102,17 @@ where
 /// id after the attempt. Storage additionally requires a known chain tip, which
 /// only an imported account establishes; if none was imported, every
 /// transaction is deferred to the post-import rescan.
-fn import_transactions<C, P, CL, R, S>(
-    wdb: &mut WalletDb<C, P, CL, R>,
+fn import_transactions<DbT, P, S>(
+    wdb: &mut DbT,
     params: &P,
     document: &::zewif::Zewif,
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    C: std::borrow::BorrowMut<rusqlite::Connection>,
+    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
     P: consensus::Parameters,
-    CL: Clock,
-    R: RngCore,
     S: std::error::Error,
 {
-    use zcash_client_backend::data_api::WalletRead;
-
     let mut txs: Vec<&::zewif::Transaction> = document.transactions().values().collect();
     txs.sort_by_key(|tx| {
         (
@@ -1127,8 +1134,9 @@ where
     // birthday. Without one (for example, a document whose only accounts were
     // skipped, or that carries no accounts at all), the transactions cannot be
     // stored here and are deferred to the post-import rescan.
-    let chain_tip_known = crate::wallet::chain_tip_height(wdb.conn.borrow())
-        .map_err(|e| ZewifImportError::Wallet(SqliteClientError::from(e)))?
+    let chain_tip_known = wdb
+        .chain_height()
+        .map_err(ZewifImportError::Wallet)?
         .is_some();
 
     for tx in txs {
@@ -1191,8 +1199,8 @@ where
 
 /// Imports a single account, choosing the import path appropriate to its
 /// viewing capability and available secret material.
-fn import_account<C, P, CL, R, S>(
-    wdb: &mut WalletDb<C, P, CL, R>,
+fn import_account<DbT, P, S>(
+    wdb: &mut DbT,
     params: &P,
     account: &::zewif::Account,
     available: &AvailableSecrets,
@@ -1200,10 +1208,8 @@ fn import_account<C, P, CL, R, S>(
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    C: std::borrow::BorrowMut<rusqlite::Connection>,
+    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
     P: consensus::Parameters,
-    CL: Clock,
-    R: RngCore,
     S: std::error::Error,
 {
     let (birthday, birthday_basis) = account_birthday(params, account)?;
@@ -2060,5 +2066,42 @@ mod tests {
         assert_eq!(report.transactions_stored, 0);
         assert_eq!(report.transactions_without_wallet_relevance, 1);
         assert_eq!(report.transactions_without_raw_data, 0);
+    }
+
+    #[test]
+    fn a_failed_import_commits_nothing() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        // A valid view-only account followed by a transaction recorded under the
+        // wrong txid. The account is imported first, then the txid mismatch
+        // aborts the import; the whole import must roll back, leaving nothing
+        // committed.
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+        ));
+        account.set_name("viewing");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+
+        let seed = test_seed_bytes(&ts);
+        let usk =
+            UnifiedSpendingKey::from_seed(&TEST_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
+        let (taddr, _) = usk.default_transparent_address();
+        let height = 2_600_000;
+        let (_txid, raw) = transparent_tx_to(&taddr, 100_000, height);
+        // Record the transaction under a txid that does not match its bytes.
+        let wrong_txid = zcash_protocol::TxId::from_bytes([0xFF; 32]);
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        let tx = raw_zewif_tx(wrong_txid, &raw, height);
+        doc.add_transaction(tx.txid(), tx);
+
+        let result = import_wallet(&mut wdb, &doc, &mut DiscardSecrets);
+        assert!(matches!(result, Err(ZewifImportError::TxidMismatch { .. })));
+
+        // Nothing was committed, so the wallet has no account and no birthday.
+        assert_eq!(wdb.get_wallet_birthday().unwrap(), None);
     }
 }
