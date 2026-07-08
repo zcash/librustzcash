@@ -10,13 +10,20 @@ use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_protocol::{ShieldedPool, consensus};
 
-use super::account_delete_cascade;
+use super::{account_delete_cascade, ironwood_shardtree};
 use crate::wallet::init::WalletMigrationError;
 use crate::wallet::scanning::mark_stabilized_notes;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x64925567_65ae_495e_b6cf_d5f56e99e422);
 
-const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
+// This migration invokes `block_max_scanned`, which reads the `ironwood_commitment_tree_size`
+// column of the `blocks` table; that column is added by `ironwood_shardtree`, so this migration
+// must run after it. (The analogous Orchard column is covered because `orchard_shardtree` is
+// already a transitive dependency.)
+const DEPENDENCIES: &[Uuid] = &[
+    account_delete_cascade::MIGRATION_ID,
+    ironwood_shardtree::MIGRATION_ID,
+];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,

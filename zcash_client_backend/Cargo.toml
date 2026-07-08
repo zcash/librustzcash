@@ -196,8 +196,8 @@ transparent-key-import = ["transparent-inputs"]
 
 ## Enables per-outpoint transparent spend queries, for consumers that have access
 ## to a spent-outpoint index (e.g. a full node's spend index). Adds the
-## `TransactionDataRequest::SpendsOfTransparentOutput` request variant and the
-## `WalletWrite::notify_outpoint_unspent_checked` method, and is what a wallet
+## `TransactionDataRequest::GetSpendingTx` request variant and the
+## `WalletWrite::notify_output_verified_unspent` method, and is what a wallet
 ## targeting such a data source enables instead of relying on address-based
 ## `TransactionsInvolvingAddress` requests for transparent spend detection.
 spend-index = ["transparent-inputs"]

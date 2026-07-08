@@ -492,12 +492,39 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     index,
                     target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Orchard,
+                        })
+                    })
+                });
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
             }
-            ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
+            ShieldedPool::Ironwood => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_ironwood_note(
+                    self.conn.borrow(),
+                    &self.params,
+                    txid,
+                    index,
+                    target_height,
+                )
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Ironwood,
+                        })
+                    })
+                });
+
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::IRONWOOD));
+            }
         }
     }
 
@@ -527,6 +554,20 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             #[cfg(feature = "orchard")]
             if sources.contains(&ShieldedPool::Orchard) {
                 wallet::orchard::select_spendable_orchard_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::orchard::select_spendable_ironwood_notes(
                     self.conn.borrow(),
                     &self.params,
                     account,
@@ -574,6 +615,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ConfirmationsPolicy::MIN,
                     exclude,
                     ShieldedPool::Orchard,
+                    wallet::orchard::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedPool::Ironwood,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
                 )?
@@ -687,7 +744,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(not(feature = "orchard"))]
         let orchard_pool_meta = None;
 
-        Ok(AccountMeta::new(sapling_pool_meta, orchard_pool_meta))
+        #[cfg(feature = "orchard")]
+        let ironwood_pool_meta = unspent_notes_meta(
+            self.conn.borrow(),
+            ShieldedPool::Ironwood,
+            target_height,
+            account_id,
+            selector,
+            exclude,
+        )?;
+        #[cfg(not(feature = "orchard"))]
+        let ironwood_pool_meta = None;
+
+        Ok(AccountMeta::new(
+            sapling_pool_meta,
+            orchard_pool_meta,
+            ironwood_pool_meta,
+        ))
     }
 }
 
@@ -923,6 +996,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
         wallet::orchard::get_orchard_nullifiers(self.conn.borrow(), query)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
+        wallet::orchard::get_ironwood_nullifiers(self.conn.borrow(), query)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1944,8 +2025,21 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
     ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
-        wallet::orchard::detect_spending_accounts(self.conn.borrow(), spends)
+        wallet::orchard::detect_spending_accounts(self.conn.borrow(), ORCHARD_TABLES_PREFIX, spends)
             .map_err(SqliteClientError::from)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn detect_accounts_ironwood<'t>(
+        &self,
+        spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
+    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+        wallet::orchard::detect_spending_accounts(
+            self.conn.borrow(),
+            IRONWOOD_TABLES_PREFIX,
+            spends,
+        )
+        .map_err(SqliteClientError::from)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1983,6 +2077,14 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Orchard, &nf.to_bytes())
     }
 
+    #[cfg(feature = "orchard")]
+    fn detect_ironwood_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error> {
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Ironwood, &nf.to_bytes())
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn get_account_ref(
         &self,
@@ -2012,6 +2114,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         sapling_output_count: u32,
         #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] orchard_action_count: u32,
+        #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] ironwood_action_count: u32,
     ) -> Result<(), Self::Error> {
         wallet::put_block(
             self.conn.borrow(),
@@ -2024,6 +2128,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             orchard_commitment_tree_size,
             #[cfg(feature = "orchard")]
             orchard_action_count,
+            #[cfg(feature = "orchard")]
+            ironwood_commitment_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_action_count,
         )
     }
 
@@ -2114,6 +2222,28 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::orchard::put_received_note(
             self.conn.borrow(),
             &self.params,
+            ShieldedPool::Orchard,
+            output,
+            tx_ref,
+            target_or_mined_height,
+            spent_in,
+        )?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_received_ironwood_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error> {
+        wallet::orchard::put_received_note(
+            self.conn.borrow(),
+            &self.params,
+            ShieldedPool::Ironwood,
             output,
             tx_ref,
             target_or_mined_height,
@@ -2133,6 +2263,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 
     #[cfg(feature = "orchard")]
+    fn mark_ironwood_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error> {
+        wallet::orchard::mark_ironwood_note_spent(self.conn.borrow(), tx_ref, nf)
+    }
+
+    #[cfg(feature = "orchard")]
     fn track_block_orchard_nullifiers(
         &mut self,
         block_height: BlockHeight,
@@ -2142,6 +2281,22 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             self.conn.borrow(),
             block_height,
             ShieldedPool::Orchard,
+            &nfs.iter()
+                .map(|(idx, txid, nfs)| (*idx, *txid, nfs.iter().map(|n| n.to_bytes()).collect()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn track_block_ironwood_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_nullifier_map(
+            self.conn.borrow(),
+            block_height,
+            ShieldedPool::Ironwood,
             &nfs.iter()
                 .map(|(idx, txid, nfs)| (*idx, *txid, nfs.iter().map(|n| n.to_bytes()).collect()))
                 .collect::<Vec<_>>(),
@@ -2469,6 +2624,28 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
     }
 
     #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        let tx = self
+            .conn
+            .borrow_mut()
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        put_shard_roots::<_, { ORCHARD_SHARD_HEIGHT * 2 }, ORCHARD_SHARD_HEIGHT>(
+            &tx,
+            IRONWOOD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
     fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
     where
         for<'a> F:
@@ -2547,6 +2724,20 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
         put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
             self.conn.0,
             ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
+            self.conn.0,
+            IRONWOOD_TABLES_PREFIX,
             start_index,
             roots,
         )

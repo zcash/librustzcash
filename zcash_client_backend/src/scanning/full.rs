@@ -30,6 +30,9 @@ use crate::{
 #[cfg(feature = "orchard")]
 use orchard::{note_encryption::OrchardDomain, primitives::redpallas, tree::MerkleHashOrchard};
 
+#[cfg(feature = "orchard")]
+use super::IronwoodDomain;
+
 #[cfg(not(feature = "orchard"))]
 use std::marker::PhantomData;
 
@@ -69,6 +72,25 @@ type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
     Tasks,
 >;
 
+// Ironwood outputs are decrypted under the Ironwood note-encryption domain, which is distinct from
+// the Orchard domain (it accepts version 3 note plaintexts), so an Ironwood batch is a distinct
+// type from an Orchard batch and requires its own task type.
+#[cfg(feature = "orchard")]
+type TaggedIronwoodBatch<IvkTag> = Batch<
+    IvkTag,
+    IronwoodDomain,
+    orchard::Action<redpallas::Signature<redpallas::SpendAuth>>,
+    FullDecryptor,
+>;
+#[cfg(feature = "orchard")]
+type TaggedIronwoodBatchRunner<IvkTag, Tasks> = BatchRunner<
+    IvkTag,
+    IronwoodDomain,
+    orchard::Action<redpallas::Signature<redpallas::SpendAuth>>,
+    FullDecryptor,
+    Tasks,
+>;
+
 pub(crate) trait SaplingTasks<IvkTag>: Tasks<TaggedSaplingBatch<IvkTag>> {}
 impl<IvkTag, T: Tasks<TaggedSaplingBatch<IvkTag>>> SaplingTasks<IvkTag> for T {}
 
@@ -82,19 +104,37 @@ pub(crate) trait OrchardTasks<IvkTag>: Tasks<TaggedOrchardBatch<IvkTag>> {}
 #[cfg(feature = "orchard")]
 impl<IvkTag, T: Tasks<TaggedOrchardBatch<IvkTag>>> OrchardTasks<IvkTag> for T {}
 
-pub(crate) struct BatchRunners<IvkTag, TS: SaplingTasks<IvkTag>, TO: OrchardTasks<IvkTag>> {
+#[cfg(not(feature = "orchard"))]
+pub(crate) trait IronwoodTasks<IvkTag> {}
+#[cfg(not(feature = "orchard"))]
+impl<IvkTag, T> IronwoodTasks<IvkTag> for T {}
+
+#[cfg(feature = "orchard")]
+pub(crate) trait IronwoodTasks<IvkTag>: Tasks<TaggedIronwoodBatch<IvkTag>> {}
+#[cfg(feature = "orchard")]
+impl<IvkTag, T: Tasks<TaggedIronwoodBatch<IvkTag>>> IronwoodTasks<IvkTag> for T {}
+
+pub(crate) struct BatchRunners<
+    IvkTag,
+    TS: SaplingTasks<IvkTag>,
+    TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
+> {
     sapling: TaggedSaplingBatchRunner<IvkTag, TS>,
     #[cfg(feature = "orchard")]
     orchard: TaggedOrchardBatchRunner<IvkTag, TO>,
+    #[cfg(feature = "orchard")]
+    ironwood: TaggedIronwoodBatchRunner<IvkTag, TI>,
     #[cfg(not(feature = "orchard"))]
-    orchard: PhantomData<TO>,
+    orchard: PhantomData<(TO, TI)>,
 }
 
-impl<IvkTag, TS, TO> BatchRunners<IvkTag, TS, TO>
+impl<IvkTag, TS, TO, TI> BatchRunners<IvkTag, TS, TO, TI>
 where
     IvkTag: Clone + Send + 'static,
     TS: SaplingTasks<IvkTag>,
     TO: OrchardTasks<IvkTag>,
+    TI: IronwoodTasks<IvkTag>,
 {
     /// Constructs a fresh set of batch runners that will trial-decrypt outputs using the
     /// given scanning keys.
@@ -104,6 +144,7 @@ where
     pub(crate) fn for_keys<AccountId>(
         sapling_batch_size_threshold: usize,
         #[cfg(feature = "orchard")] orchard_batch_size_threshold: usize,
+        #[cfg(feature = "orchard")] ironwood_batch_size_threshold: usize,
         scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     ) -> Self {
         BatchRunners {
@@ -119,6 +160,14 @@ where
                 orchard_batch_size_threshold,
                 scanning_keys
                     .orchard()
+                    .iter()
+                    .map(|(id, key)| (id.clone(), key.prepare())),
+            ),
+            #[cfg(feature = "orchard")]
+            ironwood: BatchRunner::new(
+                ironwood_batch_size_threshold,
+                scanning_keys
+                    .ironwood()
                     .iter()
                     .map(|(id, key)| (id.clone(), key.prepare())),
             ),
@@ -162,11 +211,19 @@ where
                 .process_outputs(OrchardDomain::for_action, bundle.actions().iter().cloned())
         });
 
+        #[cfg(feature = "orchard")]
+        let ironwood_batch = tx.ironwood_bundle().map(|bundle| {
+            self.ironwood
+                .process_outputs(IronwoodDomain::for_action, bundle.actions().iter().cloned())
+        });
+
         PendingBatch {
             tx,
             sapling_batch,
             #[cfg(feature = "orchard")]
             orchard_batch,
+            #[cfg(feature = "orchard")]
+            ironwood_batch,
         }
     }
 
@@ -177,6 +234,8 @@ where
         self.sapling.flush();
         #[cfg(feature = "orchard")]
         self.orchard.flush();
+        #[cfg(feature = "orchard")]
+        self.ironwood.flush();
     }
 }
 
@@ -186,6 +245,8 @@ pub(crate) struct PendingBatch<IvkTag> {
     sapling_batch: Option<BatchReceiver<IvkTag, SaplingDomain, <SaplingDomain as Domain>::Memo>>,
     #[cfg(feature = "orchard")]
     orchard_batch: Option<BatchReceiver<IvkTag, OrchardDomain, <OrchardDomain as Domain>::Memo>>,
+    #[cfg(feature = "orchard")]
+    ironwood_batch: Option<BatchReceiver<IvkTag, IronwoodDomain, <IronwoodDomain as Domain>::Memo>>,
 }
 
 impl<IvkTag> PendingBatch<IvkTag> {
@@ -200,6 +261,11 @@ impl<IvkTag> PendingBatch<IvkTag> {
             #[cfg(feature = "orchard")]
             orchard: self
                 .orchard_batch
+                .map(|b| b.into_results())
+                .unwrap_or_default(),
+            #[cfg(feature = "orchard")]
+            ironwood: self
+                .ironwood_batch
                 .map(|b| b.into_results())
                 .unwrap_or_default(),
         }
@@ -220,11 +286,18 @@ impl<IvkTag> PendingBatch<IvkTag> {
             Some(b) => b.into_results_async().await,
             None => HashMap::new(),
         };
+        #[cfg(feature = "orchard")]
+        let ironwood = match self.ironwood_batch {
+            Some(b) => b.into_results_async().await,
+            None => HashMap::new(),
+        };
         BatchResult {
             tx: self.tx,
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 }
@@ -240,6 +313,9 @@ pub struct BatchResult<IvkTag> {
     #[cfg(feature = "orchard")]
     orchard:
         HashMap<usize, DecryptedOutput<IvkTag, OrchardDomain, <OrchardDomain as Domain>::Memo>>,
+    #[cfg(feature = "orchard")]
+    ironwood:
+        HashMap<usize, DecryptedOutput<IvkTag, IronwoodDomain, <IronwoodDomain as Domain>::Memo>>,
 }
 
 /// Decrypts a block with a set of [`ScanningKeys`].
@@ -259,7 +335,9 @@ where
     P: consensus::Parameters + Send + 'static,
     IvkTag: Copy + Send + 'static,
 {
-    let mut runners = BatchRunners::<_, (), ()>::for_keys(
+    let mut runners = BatchRunners::<_, (), (), ()>::for_keys(
+        DEFAULT_BATCH_SIZE_THRESHOLD,
+        #[cfg(feature = "orchard")]
         DEFAULT_BATCH_SIZE_THRESHOLD,
         #[cfg(feature = "orchard")]
         DEFAULT_BATCH_SIZE_THRESHOLD,
@@ -412,12 +490,19 @@ where
     #[cfg(feature = "orchard")]
     let mut orchard_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
+    #[cfg(feature = "orchard")]
+    let mut ironwood_nullifier_map = Vec::with_capacity(vtx.len());
+    #[cfg(feature = "orchard")]
+    let mut ironwood_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
+
     for (tx_index, batch) in vtx.into_iter().enumerate() {
         let BatchResult {
             tx,
             sapling: sapling_decrypted,
             #[cfg(feature = "orchard")]
                 orchard: orchard_decrypted,
+            #[cfg(feature = "orchard")]
+                ironwood: ironwood_decrypted,
         } = batch;
         let txid = tx.txid();
         let tx_index =
@@ -454,11 +539,31 @@ where
             orchard_spends
         };
 
+        #[cfg(feature = "orchard")]
+        let ironwood_spends = {
+            let (ironwood_spends, ironwood_unlinked_nullifiers) = tx
+                .ironwood_bundle()
+                .map(|bundle| {
+                    find_spent(
+                        bundle.actions().iter(),
+                        &nullifiers.ironwood,
+                        |action| *action.nullifier(),
+                        WalletSpend::from_parts,
+                    )
+                })
+                .unwrap_or_default();
+            ironwood_nullifier_map.push((tx_index, txid, ironwood_unlinked_nullifiers));
+            ironwood_spends
+        };
+
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account_id());
         #[cfg(feature = "orchard")]
         let spent_from_accounts =
             spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
+        #[cfg(feature = "orchard")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(ironwood_spends.iter().map(|spend| spend.account_id()));
         let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
 
         // TODO(#1305): Correctly track accounts that fund each transaction output. For now
@@ -506,6 +611,7 @@ where
                     Some(move |_| sapling_decrypted),
                     batch::try_note_decryption,
                     |output| sapling::Node::from_cmu(output.cmu()),
+                    |note| note,
                 )
             })
             .unwrap_or_default();
@@ -531,6 +637,7 @@ where
                     Some(move |_| orchard_decrypted),
                     batch::try_note_decryption,
                     |action| MerkleHashOrchard::from_cmx(action.cmx()),
+                    |note| (note, orchard::ValuePool::Orchard),
                 )
             })
             .unwrap_or_default();
@@ -538,11 +645,42 @@ where
         orchard_note_commitments.append(&mut orchard_nc);
 
         #[cfg(feature = "orchard")]
+        let (ironwood_outputs, mut ironwood_nc) = tx
+            .ironwood_bundle()
+            .map(|bundle| {
+                find_received(
+                    height,
+                    pos_tracker.tx_contains_last_ironwood_actions_in_block(&tx),
+                    txid,
+                    |output_idx| pos_tracker.ironwood_note_position(output_idx),
+                    &scanning_keys.ironwood,
+                    &spent_from_accounts,
+                    &bundle
+                        .actions()
+                        .iter()
+                        .map(|action| (IronwoodDomain::for_action(action), action.clone()))
+                        .collect::<Vec<_>>(),
+                    Some(move |_| ironwood_decrypted),
+                    batch::try_note_decryption,
+                    |action| MerkleHashOrchard::from_cmx(action.cmx()),
+                    |note| (note, orchard::ValuePool::Ironwood),
+                )
+            })
+            .unwrap_or_default();
+        #[cfg(feature = "orchard")]
+        ironwood_note_commitments.append(&mut ironwood_nc);
+
+        #[cfg(feature = "orchard")]
         let has_orchard = !(orchard_spends.is_empty() && orchard_outputs.is_empty());
         #[cfg(not(feature = "orchard"))]
         let has_orchard = false;
 
-        if has_transparent || has_sapling || has_orchard {
+        #[cfg(feature = "orchard")]
+        let has_ironwood = !(ironwood_spends.is_empty() && ironwood_outputs.is_empty());
+        #[cfg(not(feature = "orchard"))]
+        let has_ironwood = false;
+
+        if has_transparent || has_sapling || has_orchard || has_ironwood {
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
@@ -553,6 +691,10 @@ where
                 orchard_spends,
                 #[cfg(feature = "orchard")]
                 orchard_outputs,
+                #[cfg(feature = "orchard")]
+                ironwood_spends,
+                #[cfg(feature = "orchard")]
+                ironwood_outputs,
             ));
         }
 
@@ -576,6 +718,12 @@ where
             pos_tracker.orchard_final_tree_size,
             orchard_note_commitments,
             orchard_nullifier_map,
+        ),
+        #[cfg(feature = "orchard")]
+        ScannedBundles::new(
+            pos_tracker.ironwood_final_tree_size,
+            ironwood_note_commitments,
+            ironwood_nullifier_map,
         ),
     ))
 }
@@ -652,6 +800,17 @@ fn orchard_action_count(tx: &Transaction) -> u32 {
     })
 }
 
+/// Returns the number of Ironwood actions in `tx`.
+///
+/// Note commitment tree sizes are `u32`-bounded by the protocol, so a valid transaction
+/// can never contain more than `u32::MAX` actions.
+#[cfg(feature = "orchard")]
+fn ironwood_action_count(tx: &Transaction) -> u32 {
+    tx.ironwood_bundle().map_or(0, |b| {
+        u32::try_from(b.actions().len()).expect("Ironwood action count cannot exceed a u32")
+    })
+}
+
 impl PositionTracker {
     fn for_block<P, IvkTag>(
         params: &P,
@@ -683,6 +842,16 @@ impl PositionTracker {
             ShieldedPool::Orchard,
         )?;
 
+        #[cfg(feature = "orchard")]
+        let (ironwood_prior_tree_size, ironwood_final_tree_size) = tree_sizes_around(
+            at_height,
+            params.activation_height(NetworkUpgrade::Nu6_3),
+            prior_block_metadata.and_then(|m| m.ironwood_tree_size()),
+            vtx.iter()
+                .map(|b| b.tx.ironwood_bundle().map_or(0, |bd| bd.actions().len())),
+            ShieldedPool::Ironwood,
+        )?;
+
         Ok(Self {
             sapling_tree_position: sapling_prior_tree_size,
             sapling_final_tree_size,
@@ -690,6 +859,10 @@ impl PositionTracker {
             orchard_tree_position: orchard_prior_tree_size,
             #[cfg(feature = "orchard")]
             orchard_final_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_position: ironwood_prior_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_final_tree_size,
         })
     }
 
@@ -717,17 +890,32 @@ impl PositionTracker {
         self.contains_last_orchard_actions(orchard_action_count(tx))
     }
 
+    /// Returns `true` if a transaction contributing `ironwood_action_count` actions would
+    /// bring the Ironwood tree position up to the block's final Ironwood tree size; that is,
+    /// such a transaction contains the last Ironwood output in the block.
+    #[cfg(feature = "orchard")]
+    fn contains_last_ironwood_actions(&self, ironwood_action_count: u32) -> bool {
+        self.ironwood_tree_position + ironwood_action_count == self.ironwood_final_tree_size
+    }
+
+    #[cfg(feature = "orchard")]
+    fn tx_contains_last_ironwood_actions_in_block(&self, tx: &Transaction) -> bool {
+        self.contains_last_ironwood_actions(ironwood_action_count(tx))
+    }
+
     /// Advances the tracked tree positions past a transaction with the given output
     /// counts.
     fn increment(
         &mut self,
         sapling_output_count: u32,
         #[cfg(feature = "orchard")] orchard_action_count: u32,
+        #[cfg(feature = "orchard")] ironwood_action_count: u32,
     ) {
         self.sapling_tree_position += sapling_output_count;
         #[cfg(feature = "orchard")]
         {
             self.orchard_tree_position += orchard_action_count;
+            self.ironwood_tree_position += ironwood_action_count;
         }
     }
 
@@ -736,6 +924,8 @@ impl PositionTracker {
             sapling_output_count(tx),
             #[cfg(feature = "orchard")]
             orchard_action_count(tx),
+            #[cfg(feature = "orchard")]
+            ironwood_action_count(tx),
         );
     }
 
@@ -746,6 +936,8 @@ impl PositionTracker {
         assert_eq!(self.sapling_tree_position, self.sapling_final_tree_size);
         #[cfg(feature = "orchard")]
         assert_eq!(self.orchard_tree_position, self.orchard_final_tree_size);
+        #[cfg(feature = "orchard")]
+        assert_eq!(self.ironwood_tree_position, self.ironwood_final_tree_size);
 
         Ok(())
     }
@@ -925,6 +1117,10 @@ mod tests {
             orchard_tree_position: 0,
             #[cfg(feature = "orchard")]
             orchard_final_tree_size: 0,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_position: 0,
+            #[cfg(feature = "orchard")]
+            ironwood_final_tree_size: 0,
         };
 
         // A transaction adding exactly the remaining outputs contains the block's last
@@ -944,6 +1140,10 @@ mod tests {
             orchard_tree_position: 0,
             #[cfg(feature = "orchard")]
             orchard_final_tree_size: 0,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_position: 0,
+            #[cfg(feature = "orchard")]
+            ironwood_final_tree_size: 0,
         };
 
         // Walk a block of three transactions with 2, 0 and 4 Sapling outputs; only the
@@ -953,9 +1153,13 @@ mod tests {
             2,
             #[cfg(feature = "orchard")]
             0,
+            #[cfg(feature = "orchard")]
+            0,
         );
         assert!(!tracker.contains_last_sapling_outputs(0));
         tracker.increment(
+            0,
+            #[cfg(feature = "orchard")]
             0,
             #[cfg(feature = "orchard")]
             0,
@@ -963,6 +1167,8 @@ mod tests {
         assert!(tracker.contains_last_sapling_outputs(4));
         tracker.increment(
             4,
+            #[cfg(feature = "orchard")]
+            0,
             #[cfg(feature = "orchard")]
             0,
         );
@@ -979,11 +1185,13 @@ mod tests {
             sapling_final_tree_size: 0,
             orchard_tree_position: 4,
             orchard_final_tree_size: 9,
+            ironwood_tree_position: 0,
+            ironwood_final_tree_size: 0,
         };
 
         assert!(tracker.contains_last_orchard_actions(5));
         assert!(!tracker.contains_last_orchard_actions(4));
-        tracker.increment(0, 5);
+        tracker.increment(0, 5, 0);
 
         assert_eq!(tracker.orchard_tree_position, 9);
         tracker.check_end_of_block_consistency().unwrap();
@@ -1001,6 +1209,10 @@ mod tests {
             orchard_tree_position: 0,
             #[cfg(feature = "orchard")]
             orchard_final_tree_size: 0,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_position: 0,
+            #[cfg(feature = "orchard")]
+            ironwood_final_tree_size: 0,
         };
         let _ = tracker.check_end_of_block_consistency();
     }

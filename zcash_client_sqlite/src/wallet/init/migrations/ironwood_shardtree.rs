@@ -84,6 +84,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 FOREIGN KEY (checkpoint_id) REFERENCES ironwood_tree_checkpoints(checkpoint_id)
                 ON DELETE CASCADE,
                 CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+            );
+            CREATE TABLE ironwood_tree_retained_checkpoints (
+                checkpoint_id INTEGER PRIMARY KEY
             );",
         )?;
 

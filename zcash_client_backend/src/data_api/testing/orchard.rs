@@ -185,7 +185,10 @@ impl ShieldedPoolTester for OrchardPoolTester {
             if result.is_some() {
                 return result.map(|(note, addr, memo)| {
                     (
-                        Note::Orchard(note),
+                        Note::Orchard {
+                            note,
+                            pool: orchard::ValuePool::Orchard,
+                        },
                         UnifiedAddress::from_receivers(Some(addr), None, None)
                             .unwrap()
                             .into(),

@@ -129,10 +129,15 @@ pub struct WalletTx<AccountId> {
     orchard_spends: Vec<WalletOrchardSpend<AccountId>>,
     #[cfg(feature = "orchard")]
     orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
+    #[cfg(feature = "orchard")]
+    ironwood_spends: Vec<WalletIronwoodSpend<AccountId>>,
+    #[cfg(feature = "orchard")]
+    ironwood_outputs: Vec<WalletIronwoodOutput<AccountId>>,
 }
 
 impl<AccountId> WalletTx<AccountId> {
     /// Constructs a new [`WalletTx`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         txid: TxId,
         block_index: TxIndex,
@@ -143,6 +148,10 @@ impl<AccountId> WalletTx<AccountId> {
             WalletSpend<orchard::note::Nullifier, AccountId>,
         >,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
+        #[cfg(feature = "orchard")] ironwood_spends: Vec<
+            WalletSpend<orchard::note::Nullifier, AccountId>,
+        >,
+        #[cfg(feature = "orchard")] ironwood_outputs: Vec<WalletIronwoodOutput<AccountId>>,
     ) -> Self {
         Self {
             txid,
@@ -154,6 +163,10 @@ impl<AccountId> WalletTx<AccountId> {
             orchard_spends,
             #[cfg(feature = "orchard")]
             orchard_outputs,
+            #[cfg(feature = "orchard")]
+            ironwood_spends,
+            #[cfg(feature = "orchard")]
+            ironwood_outputs,
         }
     }
 
@@ -198,6 +211,20 @@ impl<AccountId> WalletTx<AccountId> {
     #[cfg(feature = "orchard")]
     pub fn orchard_outputs(&self) -> &[WalletOrchardOutput<AccountId>] {
         self.orchard_outputs.as_ref()
+    }
+
+    /// Returns a record for each Ironwood note belonging to the wallet that was spent in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_spends(&self) -> &[WalletIronwoodSpend<AccountId>] {
+        self.ironwood_spends.as_ref()
+    }
+
+    /// Returns a record for each Ironwood note received or produced by the wallet in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_outputs(&self) -> &[WalletIronwoodOutput<AccountId>] {
+        self.ironwood_outputs.as_ref()
     }
 }
 
@@ -444,6 +471,13 @@ pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, Account
 #[cfg(feature = "orchard")]
 pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
 
+/// A type alias for Ironwood [`WalletSpend`]s.
+///
+/// Ironwood notes are Orchard-shaped and therefore share the Orchard nullifier type, but Ironwood
+/// is a distinct pool from Orchard.
+#[cfg(feature = "orchard")]
+pub type WalletIronwoodSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
+
 /// An output that was successfully decrypted in the process of wallet scanning.
 #[derive(Clone)]
 pub struct WalletOutput<Note, Nullifier, AccountId> {
@@ -529,27 +563,24 @@ pub type WalletSaplingOutput<AccountId> =
 /// [`Action`]: orchard::Action
 #[cfg(feature = "orchard")]
 pub type WalletOrchardOutput<AccountId> =
-    WalletOutput<orchard::note::Note, orchard::note::Nullifier, AccountId>;
+    WalletOutput<(orchard::note::Note, orchard::ValuePool), orchard::note::Nullifier, AccountId>;
+
+/// The output part of an Ironwood [`Action`] that was decrypted in the process of scanning.
+///
+/// [`Action`]: orchard::Action
+#[cfg(feature = "orchard")]
+pub type WalletIronwoodOutput<AccountId> =
+    WalletOutput<(orchard::note::Note, orchard::ValuePool), orchard::note::Nullifier, AccountId>;
 
 /// An enumeration of supported shielded note types for use in [`ReceivedNote`]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Note {
     Sapling(sapling::Note),
     #[cfg(feature = "orchard")]
-    Orchard(orchard::Note),
-}
-
-impl From<sapling::Note> for Note {
-    fn from(note: sapling::Note) -> Self {
-        Note::Sapling(note)
-    }
-}
-
-#[cfg(feature = "orchard")]
-impl From<orchard::Note> for Note {
-    fn from(note: orchard::Note) -> Self {
-        Note::Orchard(note)
-    }
+    Orchard {
+        note: orchard::Note,
+        pool: orchard::ValuePool,
+    },
 }
 
 impl Note {
@@ -558,7 +589,7 @@ impl Note {
         match self {
             Note::Sapling(n) => Receiver::Sapling(n.recipient()),
             #[cfg(feature = "orchard")]
-            Note::Orchard(n) => Receiver::Orchard(n.recipient()),
+            Note::Orchard { note, .. } => Receiver::Orchard(note.recipient()),
         }
     }
 
@@ -568,19 +599,30 @@ impl Note {
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
-            Note::Orchard(n) => Zatoshis::from_u64(n.value().inner()).expect(
+            Note::Orchard { note, .. } => Zatoshis::from_u64(note.value().inner()).expect(
                 "Orchard notes must have values in the range of valid non-negative ZEC values.",
             ),
         }
     }
 
-    /// Returns the shielded protocol used by this note.
-    pub fn protocol(&self) -> ShieldedPool {
+    /// Returns the shielded value pool to which this note belongs.
+    pub fn pool(&self) -> ShieldedPool {
         match self {
             Note::Sapling(_) => ShieldedPool::Sapling,
             #[cfg(feature = "orchard")]
-            Note::Orchard(_) => ShieldedPool::Orchard,
+            Note::Orchard { pool, .. } => shielded_pool_for_value_pool(*pool),
         }
+    }
+}
+
+/// Returns the shielded pool corresponding to an Orchard-protocol value pool. The Orchard protocol
+/// serves both the Orchard pool (version-2 notes) and the Ironwood pool (version-3 notes); this is
+/// the single point at which that classification is made.
+#[cfg(feature = "orchard")]
+pub(crate) fn shielded_pool_for_value_pool(pool: orchard::ValuePool) -> ShieldedPool {
+    match pool {
+        orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+        orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
     }
 }
 

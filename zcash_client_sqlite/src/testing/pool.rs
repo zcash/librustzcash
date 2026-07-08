@@ -429,6 +429,9 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
     assert_eq!(foreign.block_height(), capture_height);
 
     // Claim wallet A's captured height/hash, but substitute wallet B's frontier for pool `T`.
+    // Neither wallet holds Ironwood notes, so the Ironwood tree is empty in either case.
+    #[cfg(feature = "orchard")]
+    let ironwood_initial_tree = incrementalmerkletree::frontier::Frontier::empty();
     #[cfg(feature = "orchard")]
     let bad_chain_state = match T::SHIELDED_PROTOCOL {
         ShieldedPool::Sapling => ChainState::new(
@@ -436,12 +439,14 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
             captured.block_hash(),
             foreign.final_sapling_tree().clone(),
             captured.final_orchard_tree().clone(),
+            ironwood_initial_tree,
         ),
         ShieldedPool::Orchard => ChainState::new(
             capture_height,
             captured.block_hash(),
             captured.final_sapling_tree().clone(),
             foreign.final_orchard_tree().clone(),
+            ironwood_initial_tree,
         ),
         ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     };
@@ -551,6 +556,9 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
 
     // Build a `from_state` claiming wallet A's last-scanned height/hash, but substituting wallet
     // B's frontier for pool `T`.
+    // Neither wallet holds Ironwood notes, so the Ironwood tree is empty in either case.
+    #[cfg(feature = "orchard")]
+    let ironwood_initial_tree = incrementalmerkletree::frontier::Frontier::empty();
     #[cfg(feature = "orchard")]
     let bad_from_state = match T::SHIELDED_PROTOCOL {
         ShieldedPool::Sapling => ChainState::new(
@@ -558,12 +566,14 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
             captured.block_hash(),
             foreign.final_sapling_tree().clone(),
             captured.final_orchard_tree().clone(),
+            ironwood_initial_tree,
         ),
         ShieldedPool::Orchard => ChainState::new(
             from_height - 1,
             captured.block_hash(),
             captured.final_sapling_tree().clone(),
             foreign.final_orchard_tree().clone(),
+            ironwood_initial_tree,
         ),
         ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
     };
@@ -750,6 +760,14 @@ pub(crate) fn propose_shielding_coinbase_succeeds<T: ShieldedPoolTester>() {
 }
 
 #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+pub(crate) fn legacy_proposal_without_confirmations_policy_builds<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::legacy_proposal_without_confirmations_policy_builds::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new());
+}
+
+#[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
 pub(crate) fn propose_shielding_coinbase_transparent_recipient_rejected<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::propose_shielding_coinbase_transparent_recipient_rejected::<T, _>(
         TestDbFactory::default(),
@@ -789,4 +807,40 @@ pub(crate) fn propose_and_build_shielding_coinbase_succeeds<T: ShieldedPoolTeste
         T,
         _,
     >(TestDbFactory::default(), BlockCache::new());
+}
+
+#[cfg(all(
+    feature = "orchard",
+    feature = "pczt-tests",
+    feature = "transparent-inputs"
+))]
+pub(crate) fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood() {
+    zcash_client_backend::data_api::testing::pool::shielding_coinbase_to_orchard_receiver_delivers_via_ironwood(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn propose_v5_payment_to_orchard_receiver_is_rejected() {
+    zcash_client_backend::data_api::testing::pool::propose_v5_payment_to_orchard_receiver_is_rejected(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(all(feature = "orchard", feature = "pczt-tests"))]
+pub(crate) fn create_pczt_supports_ironwood_output() {
+    zcash_client_backend::data_api::testing::pool::create_pczt_supports_ironwood_output(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn proposal_records_and_serializes_proposed_version() {
+    zcash_client_backend::data_api::testing::pool::proposal_records_and_serializes_proposed_version(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
 }

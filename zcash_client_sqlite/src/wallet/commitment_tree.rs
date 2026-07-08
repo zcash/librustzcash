@@ -35,7 +35,7 @@ use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 #[cfg(feature = "orchard")]
-use crate::{ORCHARD_TABLES_PREFIX, orchard_tree};
+use crate::{ORCHARD_TABLES_PREFIX, ironwood_tree, orchard_tree};
 
 use super::common::{TableConstants, table_constants};
 
@@ -1276,6 +1276,31 @@ pub(crate) fn check_witnesses(
             let range = super::get_block_range(conn, ShieldedPool::Orchard, addr)?;
             scan_ranges.extend(range);
         }
+
+        let unspent_ironwood_note_meta = super::common::select_unspent_note_meta(
+            conn,
+            ShieldedPool::Ironwood,
+            wallet_birthday,
+            anchor_height,
+        )?;
+        let mut ironwood_incomplete = vec![];
+        let ironwood_tree = ironwood_tree(conn)?;
+        for m in unspent_ironwood_note_meta.iter() {
+            match ironwood_tree.witness_at_checkpoint_depth(m.commitment_tree_position(), 0) {
+                Ok(_) => {}
+                Err(ShardTreeError::Query(QueryError::TreeIncomplete(mut addrs))) => {
+                    ironwood_incomplete.append(&mut addrs);
+                }
+                Err(other) => {
+                    return Err(SqliteClientError::CommitmentTree(other));
+                }
+            }
+        }
+
+        for addr in ironwood_incomplete {
+            let range = super::get_block_range(conn, ShieldedPool::Ironwood, addr)?;
+            scan_ranges.extend(range);
+        }
     }
 
     Ok(scan_ranges)
@@ -1601,6 +1626,25 @@ mod tests {
         })
         .unwrap();
 
+        #[cfg(feature = "orchard")]
+        {
+            db.with_orchard_tree_mut(|tree| {
+                for h in [100u32, 200, 300] {
+                    tree.ensure_retained(BlockHeight::from(h))?;
+                }
+                Ok::<_, ShardTreeError<_>>(())
+            })
+            .unwrap();
+
+            db.with_ironwood_tree_mut(|tree| {
+                for h in [100u32, 200, 300] {
+                    tree.ensure_retained(BlockHeight::from(h))?;
+                }
+                Ok::<_, ShardTreeError<_>>(())
+            })
+            .unwrap();
+        }
+
         db.remove_retained_checkpoints_below(BlockHeight::from(250))
             .unwrap();
 
@@ -1612,6 +1656,34 @@ mod tests {
             })
             .unwrap();
         assert_eq!(remaining, BTreeSet::from([BlockHeight::from(300)]));
+
+        // The retained checkpoints must be pruned in the Orchard and Ironwood trees as well, not
+        // just Sapling.
+        #[cfg(feature = "orchard")]
+        {
+            let orchard_remaining = db
+                .with_orchard_tree_mut(|tree| {
+                    tree.store()
+                        .retained_checkpoints()
+                        .map_err(ShardTreeError::Storage)
+                })
+                .unwrap();
+            assert_eq!(orchard_remaining, BTreeSet::from([BlockHeight::from(300)]));
+
+            let ironwood_remaining = db
+                .with_ironwood_tree_mut(|tree| {
+                    tree.store()
+                        .retained_checkpoints()
+                        .map_err(ShardTreeError::Storage)
+                })
+                .unwrap()
+                .expect("the wallet tracks an Ironwood tree");
+            assert_eq!(
+                ironwood_remaining,
+                BTreeSet::from([BlockHeight::from(300)]),
+                "retained Ironwood checkpoints below the max height must be released",
+            );
+        }
     }
 
     #[test]

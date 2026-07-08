@@ -7,6 +7,7 @@ use std::{
     collections::BTreeMap,
     fmt::{self, Display},
     io,
+    num::NonZeroU32,
 };
 use zcash_address::unified::{self, Encoding};
 
@@ -15,7 +16,7 @@ use zcash_note_encryption::{COMPACT_NOTE_SIZE, EphemeralKeyBytes};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     merkle_tree::read_commitment_tree,
-    transaction::TxId,
+    transaction::{TxId, TxVersion},
 };
 use zcash_protocol::{
     PoolType, ShieldedPool,
@@ -26,7 +27,11 @@ use zcash_protocol::{
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
-    data_api::{InputSource, chain::ChainState, wallet::TargetHeight},
+    data_api::{
+        InputSource,
+        chain::ChainState,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+    },
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
 };
@@ -402,6 +407,33 @@ impl service::TreeState {
         }
     }
 
+    /// Deserializes and returns the Ironwood note commitment tree field of the tree state.
+    ///
+    /// The Ironwood tree is Orchard-shaped, but Ironwood is a distinct pool tracked separately
+    /// from Orchard. An empty field yields an empty tree, which is the correct treestate at the
+    /// Ironwood pool's activation.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_tree(
+        &self,
+    ) -> io::Result<CommitmentTree<MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>>
+    {
+        if self.ironwood_tree.is_empty() {
+            Ok(CommitmentTree::empty())
+        } else {
+            let ironwood_tree_bytes = hex::decode(&self.ironwood_tree).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Hex decoding of Ironwood tree bytes failed: {e:?}"),
+                )
+            })?;
+            read_commitment_tree::<
+                MerkleHashOrchard,
+                _,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >(&ironwood_tree_bytes[..])
+        }
+    }
+
     /// Parses this tree state into a [`ChainState`] for use with [`scan_cached_blocks`].
     ///
     /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
@@ -425,6 +457,8 @@ impl service::TreeState {
             self.sapling_tree()?.to_frontier(),
             #[cfg(feature = "orchard")]
             self.orchard_tree()?.to_frontier(),
+            #[cfg(feature = "orchard")]
+            self.ironwood_tree()?.to_frontier(),
         ))
     }
 }
@@ -469,6 +503,16 @@ pub enum ProposalDecodingError<DbError> {
     InvalidChangeRecipient(PoolType),
     /// Ephemeral outputs to the specified pool are not supported.
     InvalidEphemeralRecipient(PoolType),
+    /// The encoded confirmations policy was not valid (for example, a zero confirmation count or
+    /// trusted confirmations exceeding untrusted).
+    ConfirmationsPolicyInvalid,
+    /// A payment was directed to the Orchard pool while Ironwood is active at the proposal's target
+    /// height. Once Ironwood is active, Orchard-receiver payments target the Ironwood pool and only
+    /// change may return to Orchard, so such a payment cannot appear in a well-formed proposal.
+    OrchardPaymentProhibited,
+    /// The proposal specified an explicit transaction version header that the wallet does not
+    /// recognize.
+    ProposedVersionInvalid(u32),
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -528,6 +572,17 @@ impl<E: Display> Display for ProposalDecodingError<E> {
                 f,
                 "Ephemeral outputs to the {pool_type} pool are not supported."
             ),
+            ProposalDecodingError::ConfirmationsPolicyInvalid => {
+                write!(f, "The encoded confirmations policy was not valid.")
+            }
+            ProposalDecodingError::OrchardPaymentProhibited => write!(
+                f,
+                "A payment may not be directed to the Orchard pool once Ironwood is active."
+            ),
+            ProposalDecodingError::ProposedVersionInvalid(header) => write!(
+                f,
+                "The proposal specified an unrecognized transaction version header {header:#x}."
+            ),
         }
     }
 }
@@ -548,6 +603,7 @@ fn pool_type<T>(pool_id: i32) -> Result<PoolType, ProposalDecodingError<T>> {
         Ok(proposal::ValuePool::Transparent) => Ok(PoolType::TRANSPARENT),
         Ok(proposal::ValuePool::Sapling) => Ok(PoolType::SAPLING),
         Ok(proposal::ValuePool::Orchard) => Ok(PoolType::ORCHARD),
+        Ok(proposal::ValuePool::Ironwood) => Ok(PoolType::IRONWOOD),
         _ => Err(ProposalDecodingError::ValuePoolNotSupported(pool_id)),
     }
 }
@@ -582,11 +638,7 @@ impl From<ShieldedPool> for proposal::ValuePool {
         match value {
             ShieldedPool::Sapling => proposal::ValuePool::Sapling,
             ShieldedPool::Orchard => proposal::ValuePool::Orchard,
-            ShieldedPool::Ironwood => {
-                todo!(
-                    "Ironwood value pool is not yet representable in the protobuf proposal format"
-                )
-            }
+            ShieldedPool::Ironwood => proposal::ValuePool::Ironwood,
         }
     }
 }
@@ -603,9 +655,9 @@ impl proposal::Proposal {
             .map(|step| {
                 let transaction_request = step.transaction_request().to_uri();
 
-                let anchor_height = step
-                    .shielded_inputs()
-                    .map_or_else(|| 0, |i| u32::from(i.anchor_height()));
+                // A step that defers its anchor (no shielded inputs) encodes as the zero sentinel,
+                // matching the `anchorHeight` field's documented "no shielded inputs" meaning.
+                let anchor_height = step.anchor_height().map_or(0, u32::from);
 
                 let inputs = step
                     .transparent_inputs()
@@ -622,7 +674,7 @@ impl proposal::Proposal {
                         s_in.notes().iter().map(|rec_note| proposal::ProposedInput {
                             value: Some(proposed_input::Value::ReceivedOutput(ReceivedOutput {
                                 txid: rec_note.txid().as_ref().to_vec(),
-                                value_pool: proposal::ValuePool::from(rec_note.note().protocol())
+                                value_pool: proposal::ValuePool::from(rec_note.note().pool())
                                     .into(),
                                 index: rec_note.output_index().into(),
                                 value: rec_note.note().value().into(),
@@ -698,6 +750,7 @@ impl proposal::Proposal {
             })
             .collect();
 
+        let confirmations_policy = value.confirmations_policy();
         proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             fee_rule: match value.fee_rule() {
@@ -706,16 +759,27 @@ impl proposal::Proposal {
             .into(),
             min_target_height: value.min_target_height().into(),
             steps,
+            confirmations_policy: Some(proposal::ConfirmationsPolicy {
+                trusted: confirmations_policy.trusted().into(),
+                untrusted: confirmations_policy.untrusted().into(),
+                #[cfg(feature = "transparent-inputs")]
+                allow_zero_conf_shielding: confirmations_policy.allow_zero_conf_shielding(),
+                #[cfg(not(feature = "transparent-inputs"))]
+                allow_zero_conf_shielding: true,
+            }),
+            proposed_version: value.proposed_version().map(|v| v.header()),
         }
     }
 
     /// Attempts to parse a [`Proposal`] based upon a supported [`StandardFeeRule`] from its
     /// protobuf representation.
-    pub fn try_into_standard_proposal<DbT, DbError>(
+    pub fn try_into_standard_proposal<ParamsT, DbT, DbError>(
         &self,
+        params: &ParamsT,
         wallet_db: &DbT,
     ) -> Result<Proposal<StandardFeeRule, DbT::NoteRef>, ProposalDecodingError<DbError>>
     where
+        ParamsT: consensus::Parameters,
         DbT: InputSource<Error = DbError>,
     {
         use self::proposal::proposed_input::Value::*;
@@ -729,6 +793,15 @@ impl proposal::Proposal {
                 };
 
                 let target_height = TargetHeight::from(self.min_target_height);
+                // Steps are checked against the Orchard turnstile when Ironwood is
+                // active at the height for which the proposal was constructed.
+                #[cfg(feature = "orchard")]
+                let ironwood_active = params.is_nu_active(
+                    consensus::NetworkUpgrade::Nu6_3,
+                    BlockHeight::from(target_height),
+                );
+                #[cfg(not(feature = "orchard"))]
+                let _ = params;
 
                 let mut steps = Vec::with_capacity(self.steps.len());
                 for step in &self.steps {
@@ -746,6 +819,19 @@ impl proposal::Proposal {
                             ))
                         })
                         .collect::<Result<BTreeMap<usize, PoolType>, ProposalDecodingError<DbError>>>()?;
+
+                    // With Ironwood active, no payment may be directed to the Orchard pool: an
+                    // Orchard-receiver payment targets the Ironwood pool, and only change may
+                    // return to Orchard. Reject such a payment from untrusted or legacy input here,
+                    // rather than letting it reach the `debug_assert!` in `Step::from_parts`.
+                    #[cfg(feature = "orchard")]
+                    if ironwood_active
+                        && payment_pools
+                            .values()
+                            .any(|pool| *pool == PoolType::ORCHARD)
+                    {
+                        return Err(ProposalDecodingError::OrchardPaymentProhibited);
+                    }
 
                     #[allow(unused_mut)]
                     let mut transparent_inputs = vec![];
@@ -842,8 +928,8 @@ impl proposal::Proposal {
                         }
                     }
 
-                    let shielded_inputs = NonEmpty::from_vec(received_notes)
-                        .map(|notes| ShieldedInputs::from_parts(step.anchor_height.into(), notes));
+                    let shielded_inputs =
+                        NonEmpty::from_vec(received_notes).map(ShieldedInputs::from_parts);
 
                     let proto_balance = step
                         .balance
@@ -872,6 +958,10 @@ impl proposal::Proposal {
                                     (PoolType::Shielded(ShieldedPool::Orchard), false) => {
                                         Ok(ChangeValue::orchard(value, memo))
                                     }
+                                    #[cfg(feature = "orchard")]
+                                    (PoolType::Shielded(ShieldedPool::Ironwood), false) => Ok(
+                                        ChangeValue::shielded(ShieldedPool::Ironwood, value, memo),
+                                    ),
                                     (PoolType::Transparent, _) if memo.is_some() => {
                                         Err(ProposalDecodingError::TransparentMemo)
                                     }
@@ -899,20 +989,57 @@ impl proposal::Proposal {
                         payment_pools,
                         transparent_inputs,
                         shielded_inputs,
+                        step.anchor_height.into(),
                         prior_step_inputs,
                         balance,
                         step.is_shielding,
+                        #[cfg(feature = "orchard")]
+                        ironwood_active,
                     )
                     .map_err(ProposalDecodingError::ProposalInvalid)?;
 
                     steps.push(step);
                 }
 
+                // Reconstruct the confirmations policy the proposal was built under. Proposals
+                // serialized before this field existed omit it and are interpreted using the
+                // default policy.
+                let confirmations_policy = match &self.confirmations_policy {
+                    Some(cp) => ConfirmationsPolicy::new(
+                        NonZeroU32::new(cp.trusted)
+                            .ok_or(ProposalDecodingError::ConfirmationsPolicyInvalid)?,
+                        NonZeroU32::new(cp.untrusted)
+                            .ok_or(ProposalDecodingError::ConfirmationsPolicyInvalid)?,
+                        #[cfg(feature = "transparent-inputs")]
+                        cp.allow_zero_conf_shielding,
+                    )
+                    .map_err(|_| ProposalDecodingError::ConfirmationsPolicyInvalid)?,
+                    None => ConfirmationsPolicy::default(),
+                };
+
+                // Recover the explicitly-requested transaction version, if any. Proposals
+                // serialized before this field existed, or built without a version request, omit
+                // it and fall back to the version implied by the target height.
+                let proposed_version = self
+                    .proposed_version
+                    .map(|header| {
+                        if header == TxVersion::V5.header() {
+                            Ok(TxVersion::V5)
+                        } else if header == TxVersion::V6.header() {
+                            Ok(TxVersion::V6)
+                        } else {
+                            Err(ProposalDecodingError::ProposedVersionInvalid(header))
+                        }
+                    })
+                    .transpose()?;
+
                 Proposal::multi_step(
                     fee_rule,
                     target_height,
+                    confirmations_policy,
                     NonEmpty::from_vec(steps).ok_or(ProposalDecodingError::NoSteps)?,
                 )
+                .map(|proposal| proposal.with_proposed_version(proposed_version))
                 .map_err(ProposalDecodingError::ProposalInvalid)
             }
             other => Err(ProposalDecodingError::VersionInvalid(other)),

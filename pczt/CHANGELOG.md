@@ -60,6 +60,10 @@ workspace.
 - PCZT version 2 Orchard bundle encodings now represent the bundle anchor and
   per-action `cv_net` as optional fields. Absent values are restored as all zero
   bytes in the logical `pczt::orchard` model.
+- The logical Orchard output model now represents its encrypted note plaintext
+  as `pczt::orchard::EncCiphertext`, allowing v2 serialization to carry either
+  encrypted ciphertext or a trailing-zero-stripped
+  `pczt::orchard::MemoPlaintext`.
 - Direct `serde` serialization implementations have been removed from the
   logical `pczt::orchard::{Bundle, Action, Spend, Output}` types.
 - `pczt::Pczt::serialize` now consumes `self` and returns
@@ -83,6 +87,13 @@ workspace.
 - `pczt::EncodingError::UnsupportedOrchardNoteVersion`, returned when an
   Orchard note plaintext version cannot be represented in the version 1 PCZT
   encoding.
+- `pczt::EncodingError::RequiresV2`, returned when v1 serialization cannot
+  represent v2-only logical PCZT data.
+- `pczt::orchard::{EncCiphertext, MEMO_SIZE, MemoPlaintext,
+  MemoPlaintextError}` for representing encrypted note plaintext data in the
+  logical Orchard output model.
+- `pczt::orchard::Bundle::{resolve_fields, resolve_memo_plaintexts}` and
+  `pczt::roles::redactor::orchard::ActionRedactor::replace_enc_ciphertext_with_memo_plaintext`.
 - `pczt::v1`, a module providing the version 1 PCZT serialization format via
   `pczt::v1::Pczt`.
 - PCZT version 2 serialization, which encodes the Orchard note plaintext

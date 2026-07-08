@@ -84,7 +84,6 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
-        #[cfg(feature = "orchard")] orchard_change_to_ironwood: bool,
         ephemeral_balance: Option<EphemeralBalance>,
         _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
@@ -111,8 +110,6 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
-            #[cfg(feature = "orchard")]
-            orchard_change_to_ironwood,
             // The fixed-fee strategy has no unpadded opt-in; keep the padded default.
             #[cfg(feature = "orchard")]
             ::orchard::builder::BundleType::DEFAULT,
@@ -177,8 +174,6 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            #[cfg(feature = "orchard")]
-            false,
             None,
             &(),
         );
@@ -229,8 +224,6 @@ mod tests {
             &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
-            #[cfg(feature = "orchard")]
-            false,
             None,
             &(),
         );

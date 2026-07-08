@@ -2695,6 +2695,33 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         drop(orchard_trace);
     }
 
+    #[cfg(feature = "orchard")]
+    {
+        let ironwood_trace = tracing::info_span!("ironwood_balances").entered();
+        with_pool_balances(
+            tx,
+            target_height,
+            anchor_height,
+            confirmations_policy,
+            &mut account_balances,
+            ShieldedPool::Ironwood,
+            |balances,
+             spendable_value,
+             change_pending_confirmation,
+             value_pending_spendability,
+             uneconomic_value| {
+                balances.with_ironwood_balance_mut::<_, SqliteClientError>(|bal| {
+                    bal.add_spendable_value(spendable_value)?;
+                    bal.add_pending_change_value(change_pending_confirmation)?;
+                    bal.add_pending_spendable_value(value_pending_spendability)?;
+                    bal.add_uneconomic_value(uneconomic_value)?;
+                    Ok(())
+                })
+            },
+        )?;
+        drop(ironwood_trace);
+    }
+
     let sapling_trace = tracing::info_span!("sapling_balances").entered();
     with_pool_balances(
         tx,
@@ -3084,12 +3111,30 @@ pub(crate) fn get_target_and_anchor_heights(
     }
 }
 
+/// A row of block metadata as selected by [`block_metadata`] and [`block_max_scanned`]: the block
+/// height and hash, the Sapling commitment tree size and legacy Sapling tree, and the Orchard and
+/// Ironwood commitment tree sizes.
+type BlockMetadataRow = (
+    BlockHeight,
+    Vec<u8>,
+    Option<u32>,
+    Vec<u8>,
+    Option<u32>,
+    Option<u32>,
+);
+
 fn parse_block_metadata<P: consensus::Parameters>(
     _params: &P,
-    row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>, Option<u32>),
+    row: BlockMetadataRow,
 ) -> Result<BlockMetadata, SqliteClientError> {
-    let (block_height, hash_data, sapling_tree_size_opt, sapling_tree, _orchard_tree_size_opt) =
-        row;
+    let (
+        block_height,
+        hash_data,
+        sapling_tree_size_opt,
+        sapling_tree,
+        _orchard_tree_size_opt,
+        _ironwood_tree_size_opt,
+    ) = row;
     let sapling_tree_size = sapling_tree_size_opt.map_or_else(|| {
         if sapling_tree == BLOCK_SAPLING_FRONTIER_ABSENT {
             Err(SqliteClientError::CorruptedData("One of either the Sapling tree size or the legacy Sapling commitment tree must be present.".to_owned()))
@@ -3125,6 +3170,15 @@ fn parse_block_metadata<P: consensus::Parameters>(
         } else {
             Some(0)
         },
+        #[cfg(feature = "orchard")]
+        if _params
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .is_some_and(|nu6_3_activation| block_height >= nu6_3_activation)
+        {
+            _ironwood_tree_size_opt
+        } else {
+            Some(0)
+        },
     ))
 }
 
@@ -3135,7 +3189,7 @@ pub(crate) fn block_metadata<P: consensus::Parameters>(
     block_height: BlockHeight,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
-        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size, ironwood_commitment_tree_size
         FROM blocks
         WHERE height = :block_height",
         named_params![":block_height": u32::from(block_height)],
@@ -3145,12 +3199,14 @@ pub(crate) fn block_metadata<P: consensus::Parameters>(
             let sapling_tree_size: Option<u32> = row.get(2)?;
             let sapling_tree: Vec<u8> = row.get(3)?;
             let orchard_tree_size: Option<u32> = row.get(4)?;
+            let ironwood_tree_size: Option<u32> = row.get(5)?;
             Ok((
                 BlockHeight::from(height),
                 block_hash,
                 sapling_tree_size,
                 sapling_tree,
                 orchard_tree_size,
+                ironwood_tree_size,
             ))
         },
     )
@@ -3221,7 +3277,7 @@ pub(crate) fn block_max_scanned<P: consensus::Parameters>(
     params: &P,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
-        "SELECT blocks.height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
+        "SELECT blocks.height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size, ironwood_commitment_tree_size
          FROM blocks
          JOIN (SELECT MAX(height) AS height FROM blocks) blocks_max
          ON blocks.height = blocks_max.height",
@@ -3232,12 +3288,14 @@ pub(crate) fn block_max_scanned<P: consensus::Parameters>(
             let sapling_tree_size: Option<u32> = row.get(2)?;
             let sapling_tree: Vec<u8> = row.get(3)?;
             let orchard_tree_size: Option<u32> = row.get(4)?;
+            let ironwood_tree_size: Option<u32> = row.get(5)?;
             Ok((
                 BlockHeight::from(height),
                 block_hash,
                 sapling_tree_size,
                 sapling_tree,
-                orchard_tree_size
+                orchard_tree_size,
+                ironwood_tree_size,
             ))
         },
     )
@@ -3341,6 +3399,18 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         #[cfg(not(feature = "orchard"))]
         panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
     }
+    if let Some(_bundle) = sent_tx.tx().ironwood_bundle() {
+        #[cfg(feature = "orchard")]
+        {
+            detectable_via_scanning = true;
+            for action in _bundle.actions() {
+                orchard::mark_ironwood_note_spent(conn, tx_ref, action.nullifier())?;
+            }
+        }
+
+        #[cfg(not(feature = "orchard"))]
+        panic!("Sent a transaction with Ironwood Actions without `orchard` enabled?");
+    }
 
     #[cfg(feature = "transparent-inputs")]
     for utxo_outpoint in sent_tx.utxos_spent() {
@@ -3409,6 +3479,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                         &DecryptedOutput::new(
                             output.output_index(),
                             note.clone(),
+                            ShieldedPool::Sapling,
                             *receiving_account,
                             output
                                 .memo()
@@ -3421,13 +3492,16 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     )?;
                 }
                 #[cfg(feature = "orchard")]
-                Note::Orchard(note) => {
+                orchard_note @ Note::Orchard { note, pool } => {
+                    let shielded_pool = orchard_note.pool();
                     orchard::put_received_note(
                         conn,
                         params,
+                        shielded_pool,
                         &DecryptedOutput::new(
                             output.output_index(),
-                            *note,
+                            (*note, *pool),
+                            shielded_pool,
                             *receiving_account,
                             output
                                 .memo()
@@ -3785,6 +3859,16 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
                 })?;
             Ok::<_, SqliteClientError>(())
         })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_ironwood_tree_mut(|tree| {
+            tree.truncate_to_checkpoint(&truncation_height)
+                .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                    pool: ShieldedPool::Ironwood,
+                    height: truncation_height,
+                    error,
+                })?;
+            Ok::<_, SqliteClientError>(())
+        })?;
 
         // Do not delete sent notes; this can contain data that is not recoverable
         // from the chain. Wallets must continue to operate correctly in the
@@ -3925,6 +4009,22 @@ pub(crate) fn truncate_to_chain_state<P: consensus::Parameters, CL, R>(
             )
             .map_err(|error| SqliteClientError::TruncateCommitmentTree {
                 pool: ShieldedPool::Orchard,
+                height: target_height,
+                error,
+            })?;
+            Ok::<_, SqliteClientError>(())
+        })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_ironwood_tree_mut(|tree| {
+            tree.insert_frontier(
+                chain_state.final_ironwood_tree().clone(),
+                Retention::Checkpoint {
+                    id: target_height,
+                    marking: Marking::None,
+                },
+            )
+            .map_err(|error| SqliteClientError::TruncateCommitmentTree {
+                pool: ShieldedPool::Ironwood,
                 height: target_height,
                 error,
             })?;
@@ -4200,6 +4300,8 @@ pub(crate) fn put_block(
     sapling_output_count: u32,
     #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
     #[cfg(feature = "orchard")] orchard_action_count: u32,
+    #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+    #[cfg(feature = "orchard")] ironwood_action_count: u32,
 ) -> Result<(), SqliteClientError> {
     let block_hash_data = conn
         .query_row(
@@ -4232,7 +4334,9 @@ pub(crate) fn put_block(
             sapling_output_count,
             sapling_tree,
             orchard_commitment_tree_size,
-            orchard_action_count
+            orchard_action_count,
+            ironwood_commitment_tree_size,
+            ironwood_action_count
         )
         VALUES (
             :height,
@@ -4242,7 +4346,9 @@ pub(crate) fn put_block(
             :sapling_output_count,
             x'00',
             :orchard_commitment_tree_size,
-            :orchard_action_count
+            :orchard_action_count,
+            :ironwood_commitment_tree_size,
+            :ironwood_action_count
         )
         ON CONFLICT (height) DO UPDATE
         SET hash = :hash,
@@ -4250,13 +4356,19 @@ pub(crate) fn put_block(
             sapling_commitment_tree_size = :sapling_commitment_tree_size,
             sapling_output_count = :sapling_output_count,
             orchard_commitment_tree_size = :orchard_commitment_tree_size,
-            orchard_action_count = :orchard_action_count",
+            orchard_action_count = :orchard_action_count,
+            ironwood_commitment_tree_size = :ironwood_commitment_tree_size,
+            ironwood_action_count = :ironwood_action_count",
     )?;
 
     #[cfg(not(feature = "orchard"))]
     let orchard_commitment_tree_size: Option<u32> = None;
     #[cfg(not(feature = "orchard"))]
     let orchard_action_count: Option<u32> = None;
+    #[cfg(not(feature = "orchard"))]
+    let ironwood_commitment_tree_size: Option<u32> = None;
+    #[cfg(not(feature = "orchard"))]
+    let ironwood_action_count: Option<u32> = None;
 
     stmt_upsert_block.execute(named_params![
         ":height": u32::from(block_height),
@@ -4266,6 +4378,8 @@ pub(crate) fn put_block(
         ":sapling_output_count": sapling_output_count,
         ":orchard_commitment_tree_size": orchard_commitment_tree_size,
         ":orchard_action_count": orchard_action_count,
+        ":ironwood_commitment_tree_size": ironwood_commitment_tree_size,
+        ":ironwood_action_count": ironwood_action_count,
     ])?;
 
     // If we now have a block corresponding to a received transparent output that had not been
@@ -4707,7 +4821,7 @@ fn recipient_params<P: consensus::Parameters>(
                 from_account_id,
                 external_address.as_ref().map(|a| a.encode()),
                 Some(to_account),
-                PoolType::Shielded(note.protocol()),
+                PoolType::Shielded(note.pool()),
             ))
         }
     }
@@ -4974,6 +5088,10 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
             index,
             vec![],
             vec![],
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
             vec![],
             #[cfg(feature = "orchard")]
             vec![],
@@ -5338,6 +5456,7 @@ mod tests {
             )],
             0,
             0,
+            0,
             false,
         );
         let (mid_height, _, _) =
@@ -5441,6 +5560,13 @@ mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -5448,6 +5574,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -5474,6 +5602,7 @@ mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
         for _ in 1..10 {
@@ -5588,6 +5717,13 @@ mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -5595,6 +5731,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -5618,6 +5756,7 @@ mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
         for _ in 1..10 {
@@ -5752,6 +5891,13 @@ mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -5759,6 +5905,8 @@ mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -5782,6 +5930,7 @@ mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
         for _ in 1..10 {

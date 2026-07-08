@@ -12,7 +12,7 @@ use pczt::{
     Pczt,
     roles::{
         combiner::Combiner, creator::Creator, io_finalizer::IoFinalizer, low_level_signer,
-        prover::Prover, signer::Signer, spend_finalizer::SpendFinalizer,
+        prover::Prover, redactor::Redactor, signer::Signer, spend_finalizer::SpendFinalizer,
         tx_extractor::TransactionExtractor, updater::Updater, verifier::Verifier,
     },
     v1, v2,
@@ -135,6 +135,31 @@ fn transparent_to_orchard() {
     // Create the base PCZT.
     let pczt = Creator::build_from_parts(pczt_parts).unwrap();
     check_round_trip(&pczt);
+
+    let memo_redacted = Redactor::new(pczt.clone())
+        .redact_orchard_with(|mut orchard| {
+            orchard.redact_actions(|mut actions| {
+                actions.replace_enc_ciphertext_with_decrypted_memo_plaintext(
+                    orchard::note::NoteVersion::V2,
+                );
+            });
+        })
+        .finish();
+    assert!(memo_redacted.orchard().actions().iter().all(|action| {
+        matches!(
+            action.output().enc_ciphertext(),
+            pczt::orchard::EncCiphertext::MemoPlaintext(_)
+        )
+    }));
+
+    let memo_resolved = IoFinalizer::new(memo_redacted).finalize_io().unwrap();
+    assert!(memo_resolved.orchard().actions().iter().all(|action| {
+        matches!(
+            action.output().enc_ciphertext(),
+            pczt::orchard::EncCiphertext::Encrypted(_)
+        )
+    }));
+    check_round_trip(&memo_resolved);
 
     // Finalize the I/O.
     let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();

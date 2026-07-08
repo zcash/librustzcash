@@ -325,6 +325,7 @@ impl core::ops::Add<Balance> for Balance {
 pub struct AccountBalance {
     sapling_balance: Balance,
     orchard_balance: Balance,
+    ironwood_balance: Balance,
     unshielded_balance: Balance,
 }
 
@@ -333,12 +334,14 @@ impl AccountBalance {
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
         orchard_balance: Balance::ZERO,
+        ironwood_balance: Balance::ZERO,
         unshielded_balance: Balance::ZERO,
     };
 
     fn check_total(&self) -> Result<Zatoshis, BalanceError> {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
+            + self.ironwood_balance.total()
             + self.unshielded_balance.total())
         .ok_or(BalanceError::Overflow)
     }
@@ -373,6 +376,23 @@ impl AccountBalance {
         f: impl FnOnce(&mut Balance) -> Result<A, E>,
     ) -> Result<A, E> {
         let result = f(&mut self.orchard_balance)?;
+        self.check_total()?;
+        Ok(result)
+    }
+
+    /// Returns the [`Balance`] of Ironwood funds in the account.
+    pub fn ironwood_balance(&self) -> &Balance {
+        &self.ironwood_balance
+    }
+
+    /// Provides a mutable reference to the [`Balance`] of Ironwood funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_ironwood_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.ironwood_balance)?;
         self.check_total()?;
         Ok(result)
     }
@@ -414,14 +434,17 @@ impl AccountBalance {
     pub fn total(&self) -> Zatoshis {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
+            + self.ironwood_balance.total()
             + self.unshielded_balance.total())
         .expect("Account balance cannot overflow MAX_MONEY")
     }
 
-    /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
-    /// spent.
+    /// Returns the total value of shielded (Sapling, Orchard, and Ironwood) funds that may
+    /// immediately be spent.
     pub fn spendable_value(&self) -> Zatoshis {
-        (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
+        (self.sapling_balance.spendable_value
+            + self.orchard_balance.spendable_value
+            + self.ironwood_balance.spendable_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
@@ -429,7 +452,8 @@ impl AccountBalance {
     /// sufficient confirmations for spendability.
     pub fn change_pending_confirmation(&self) -> Zatoshis {
         (self.sapling_balance.change_pending_confirmation
-            + self.orchard_balance.change_pending_confirmation)
+            + self.orchard_balance.change_pending_confirmation
+            + self.ironwood_balance.change_pending_confirmation)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
@@ -437,7 +461,8 @@ impl AccountBalance {
     /// is required before it will be possible to derive witnesses for the associated notes.
     pub fn value_pending_spendability(&self) -> Zatoshis {
         (self.sapling_balance.value_pending_spendability
-            + self.orchard_balance.value_pending_spendability)
+            + self.orchard_balance.value_pending_spendability
+            + self.ironwood_balance.value_pending_spendability)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 
@@ -446,6 +471,7 @@ impl AccountBalance {
     pub fn uneconomic_value(&self) -> Zatoshis {
         (self.sapling_balance.uneconomic_value
             + self.orchard_balance.uneconomic_value
+            + self.ironwood_balance.uneconomic_value
             + self.unshielded_balance.uneconomic_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
@@ -906,12 +932,18 @@ pub trait NoteRetention<NoteRef> {
     /// Returns whether the specified Orchard note should be retained.
     #[cfg(feature = "orchard")]
     fn should_retain_orchard(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
+    /// Returns whether the specified Ironwood note should be retained. Ironwood notes are
+    /// Orchard-shaped, so this uses the same note type as Orchard.
+    #[cfg(feature = "orchard")]
+    fn should_retain_ironwood(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
 }
 
 pub(crate) struct SimpleNoteRetention {
     pub(crate) sapling: bool,
     #[cfg(feature = "orchard")]
     pub(crate) orchard: bool,
+    #[cfg(feature = "orchard")]
+    pub(crate) ironwood: bool,
 }
 
 impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
@@ -923,6 +955,11 @@ impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
     fn should_retain_orchard(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
         self.orchard
     }
+
+    #[cfg(feature = "orchard")]
+    fn should_retain_ironwood(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
+        self.ironwood
+    }
 }
 
 /// Shielded outputs that were received by the wallet.
@@ -931,12 +968,19 @@ pub struct ReceivedNotes<NoteRef> {
     sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
     #[cfg(feature = "orchard")]
     orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+    // Ironwood notes are Orchard-shaped `orchard::note::Note` values (note plaintext version 3),
+    // but are tracked as a distinct pool so that Orchard and Ironwood value and bundle action
+    // counts are accounted for separately.
+    #[cfg(feature = "orchard")]
+    ironwood: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
 impl<NoteRef> ReceivedNotes<NoteRef> {
     /// Construct a new empty [`ReceivedNotes`].
     pub fn empty() -> Self {
         Self::new(
+            vec![],
+            #[cfg(feature = "orchard")]
             vec![],
             #[cfg(feature = "orchard")]
             vec![],
@@ -947,11 +991,14 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
     pub fn new(
         sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
         #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+        #[cfg(feature = "orchard")] ironwood: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -977,6 +1024,18 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         self.orchard
     }
 
+    /// Returns the set of spendable Ironwood notes.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
+        self.ironwood.as_ref()
+    }
+
+    /// Consumes this value and returns the Ironwood notes contained within it.
+    #[cfg(feature = "orchard")]
+    pub fn take_ironwood(self) -> Vec<ReceivedNote<NoteRef, orchard::note::Note>> {
+        self.ironwood
+    }
+
     /// Computes the total value of Sapling notes.
     pub fn sapling_value(&self) -> Result<Zatoshis, BalanceError> {
         self.sapling.iter().try_fold(Zatoshis::ZERO, |acc, n| {
@@ -984,10 +1043,18 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         })
     }
 
-    /// Computes the total value of Sapling notes.
+    /// Computes the total value of Orchard notes.
     #[cfg(feature = "orchard")]
     pub fn orchard_value(&self) -> Result<Zatoshis, BalanceError> {
         self.orchard.iter().try_fold(Zatoshis::ZERO, |acc, n| {
+            (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+        })
+    }
+
+    /// Computes the total value of Ironwood notes.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_value(&self) -> Result<Zatoshis, BalanceError> {
+        self.ironwood.iter().try_fold(Zatoshis::ZERO, |acc, n| {
             (acc + n.note_value()?).ok_or(BalanceError::Overflow)
         })
     }
@@ -998,7 +1065,8 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
         return self.sapling_value();
 
         #[cfg(feature = "orchard")]
-        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
+        return (self.sapling_value()? + self.orchard_value()? + self.ironwood_value()?)
+            .ok_or(BalanceError::Overflow);
     }
 
     /// Consumes this [`ReceivedNotes`] value and produces a vector of
@@ -1015,9 +1083,24 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
 
         #[cfg(feature = "orchard")]
         let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
-            retention
-                .should_retain_orchard(&n)
-                .then(|| n.map_note(Note::Orchard))
+            retention.should_retain_orchard(&n).then(|| {
+                n.map_note(|note| Note::Orchard {
+                    note,
+                    pool: orchard::ValuePool::Orchard,
+                })
+            })
+        }));
+
+        // Ironwood notes are `orchard::note::Note` values, so they are emitted as `Note::Orchard`;
+        // the transaction builder routes them to the Ironwood bundle by their version 3 plaintext.
+        #[cfg(feature = "orchard")]
+        let iter = iter.chain(self.ironwood.into_iter().filter_map(|n| {
+            retention.should_retain_ironwood(&n).then(|| {
+                n.map_note(|note| Note::Orchard {
+                    note,
+                    pool: orchard::ValuePool::Ironwood,
+                })
+            })
         }));
 
         iter.collect()
@@ -1258,12 +1341,23 @@ impl PoolMeta {
 pub struct AccountMeta {
     sapling: Option<PoolMeta>,
     orchard: Option<PoolMeta>,
+    ironwood: Option<PoolMeta>,
 }
 
 impl AccountMeta {
     /// Constructs a new [`AccountMeta`] value from its constituent parts.
-    pub fn new(sapling: Option<PoolMeta>, orchard: Option<PoolMeta>) -> Self {
-        Self { sapling, orchard }
+    ///
+    /// Ironwood metadata is tracked separately from Orchard, as Ironwood is a distinct pool.
+    pub fn new(
+        sapling: Option<PoolMeta>,
+        orchard: Option<PoolMeta>,
+        ironwood: Option<PoolMeta>,
+    ) -> Self {
+        Self {
+            sapling,
+            orchard,
+            ironwood,
+        }
     }
 
     /// Returns metadata about Sapling notes belonging to the account for which this was generated.
@@ -1282,6 +1376,15 @@ impl AccountMeta {
         self.orchard.as_ref()
     }
 
+    /// Returns metadata about Ironwood notes belonging to the account for which this was generated.
+    ///
+    /// Ironwood notes are Orchard-shaped but belong to a pool distinct from Orchard. Returns
+    /// [`None`] if no metadata is available or it was not possible to evaluate the query described
+    /// by a [`NoteFilter`] given the available wallet data.
+    pub fn ironwood(&self) -> Option<&PoolMeta> {
+        self.ironwood.as_ref()
+    }
+
     fn sapling_note_count(&self) -> Option<usize> {
         self.sapling.as_ref().map(|m| m.note_count)
     }
@@ -1290,12 +1393,16 @@ impl AccountMeta {
         self.orchard.as_ref().map(|m| m.note_count)
     }
 
-    /// Returns the number of unspent notes in the wallet for the given shielded protocol.
+    fn ironwood_note_count(&self) -> Option<usize> {
+        self.ironwood.as_ref().map(|m| m.note_count)
+    }
+
+    /// Returns the number of unspent notes in the wallet for the given shielded pool.
     pub fn note_count(&self, protocol: ShieldedPool) -> Option<usize> {
         match protocol {
             ShieldedPool::Sapling => self.sapling_note_count(),
             ShieldedPool::Orchard => self.orchard_note_count(),
-            ShieldedPool::Ironwood => todo!("Ironwood note counts are not yet tracked"),
+            ShieldedPool::Ironwood => self.ironwood_note_count(),
         }
     }
 
@@ -1306,9 +1413,14 @@ impl AccountMeta {
     /// described by a [`NoteFilter`] given the available wallet data. If metadata is available
     /// only for a single pool, the metadata for that pool will be returned.
     pub fn total_note_count(&self) -> Option<usize> {
-        let s = self.sapling_note_count();
-        let o = self.orchard_note_count();
-        s.zip(o).map(|(s, o)| s + o).or(s).or(o)
+        [
+            self.sapling_note_count(),
+            self.orchard_note_count(),
+            self.ironwood_note_count(),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(|a, b| a + b)
     }
 
     fn sapling_value(&self) -> Option<Zatoshis> {
@@ -1319,18 +1431,24 @@ impl AccountMeta {
         self.orchard.as_ref().map(|m| m.value)
     }
 
+    fn ironwood_value(&self) -> Option<Zatoshis> {
+        self.ironwood.as_ref().map(|m| m.value)
+    }
+
     /// Returns the total value of shielded notes represented by [`Self::total_note_count`]
     ///
     /// Returns [`None`] if no metadata is available or it was not possible to evaluate the query
     /// described by a [`NoteFilter`] given the available wallet data. If metadata is available
     /// only for a single pool, the metadata for that pool will be returned.
     pub fn total_value(&self) -> Option<Zatoshis> {
-        let s = self.sapling_value();
-        let o = self.orchard_value();
-        s.zip(o)
-            .map(|(s, o)| (s + o).expect("Does not overflow Zcash maximum value."))
-            .or(s)
-            .or(o)
+        [
+            self.sapling_value(),
+            self.orchard_value(),
+            self.ironwood_value(),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(|a, b| (a + b).expect("Does not overflow Zcash maximum value."))
     }
 }
 
@@ -1933,6 +2051,20 @@ pub trait WalletRead {
         )
     }
 
+    /// Returns the nullifiers for Ironwood notes that the wallet is tracking, along with their
+    /// associated account IDs, that are either unspent or have not yet been confirmed as spent.
+    /// Ironwood nullifiers are Orchard-shaped but are tracked as a separate pool.
+    ///
+    /// This is a required method (like [`WalletRead::get_sapling_nullifiers`]) rather than
+    /// defaulting to a panic: it is called on the scan path, so a backend that does not override it
+    /// would abort the process on the first scan. Requiring it surfaces the omission at compile
+    /// time instead.
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error>;
+
     /// Returns the set of non-ephemeral transparent receivers associated with the given
     /// account controlled by this wallet.
     ///
@@ -2318,6 +2450,8 @@ pub struct BlockMetadata {
     sapling_tree_size: Option<u32>,
     #[cfg(feature = "orchard")]
     orchard_tree_size: Option<u32>,
+    #[cfg(feature = "orchard")]
+    ironwood_tree_size: Option<u32>,
 }
 
 impl BlockMetadata {
@@ -2327,6 +2461,7 @@ impl BlockMetadata {
         block_hash: BlockHash,
         sapling_tree_size: Option<u32>,
         #[cfg(feature = "orchard")] orchard_tree_size: Option<u32>,
+        #[cfg(feature = "orchard")] ironwood_tree_size: Option<u32>,
     ) -> Self {
         Self {
             block_height,
@@ -2334,6 +2469,8 @@ impl BlockMetadata {
             sapling_tree_size,
             #[cfg(feature = "orchard")]
             orchard_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_tree_size,
         }
     }
 
@@ -2358,6 +2495,13 @@ impl BlockMetadata {
     #[cfg(feature = "orchard")]
     pub fn orchard_tree_size(&self) -> Option<u32> {
         self.orchard_tree_size
+    }
+
+    /// Returns the size of the Ironwood note commitment tree for the final treestate of the block
+    /// that this [`BlockMetadata`] describes, if available.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_tree_size(&self) -> Option<u32> {
+        self.ironwood_tree_size
     }
 }
 
@@ -2416,6 +2560,10 @@ pub struct ScannedBlockCommitments {
     /// Present only when the `orchard` feature is enabled.
     #[cfg(feature = "orchard")]
     pub orchard: Vec<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>,
+    /// The ordered vector of note commitments for Ironwood outputs of the block.
+    /// Present only when the `orchard` feature is enabled.
+    #[cfg(feature = "orchard")]
+    pub ironwood: Vec<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>,
 }
 
 /// The subset of information that is relevant to this wallet that has been
@@ -2430,6 +2578,8 @@ pub struct ScannedBlock<AccountId> {
     sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
     #[cfg(feature = "orchard")]
     orchard: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
+    #[cfg(feature = "orchard")]
+    ironwood: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
 }
 
 impl<AccountId> ScannedBlock<AccountId> {
@@ -2444,6 +2594,10 @@ impl<AccountId> ScannedBlock<AccountId> {
             orchard::tree::MerkleHashOrchard,
             orchard::note::Nullifier,
         >,
+        #[cfg(feature = "orchard")] ironwood: ScannedBundles<
+            orchard::tree::MerkleHashOrchard,
+            orchard::note::Nullifier,
+        >,
     ) -> Self {
         Self {
             block_height,
@@ -2453,6 +2607,8 @@ impl<AccountId> ScannedBlock<AccountId> {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -2489,13 +2645,23 @@ impl<AccountId> ScannedBlock<AccountId> {
         &self.orchard
     }
 
-    /// Consumes `self` and returns the lists of Sapling and Orchard note commitments associated
-    /// with the scanned block as an owned value.
+    /// Returns the Ironwood note commitment tree and nullifier data for the block.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(
+        &self,
+    ) -> &ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier> {
+        &self.ironwood
+    }
+
+    /// Consumes `self` and returns the lists of Sapling, Orchard, and Ironwood note commitments
+    /// associated with the scanned block as an owned value.
     pub fn into_commitments(self) -> ScannedBlockCommitments {
         ScannedBlockCommitments {
             sapling: self.sapling.commitments,
             #[cfg(feature = "orchard")]
             orchard: self.orchard.commitments,
+            #[cfg(feature = "orchard")]
+            ironwood: self.ironwood.commitments,
         }
     }
 
@@ -2507,6 +2673,8 @@ impl<AccountId> ScannedBlock<AccountId> {
             sapling_tree_size: Some(self.sapling.final_tree_size),
             #[cfg(feature = "orchard")]
             orchard_tree_size: Some(self.orchard.final_tree_size),
+            #[cfg(feature = "orchard")]
+            ironwood_tree_size: Some(self.ironwood.final_tree_size),
         }
     }
 }
@@ -2521,7 +2689,7 @@ pub trait DecryptableTransaction<AccountId> {
 impl<AccountId> DecryptableTransaction<AccountId> for Transaction {
     type DecryptedSaplingOutput = DecryptedOutput<sapling::Note, AccountId>;
     #[cfg(feature = "orchard")]
-    type DecryptedOrchardOutput = DecryptedOutput<orchard::Note, AccountId>;
+    type DecryptedOrchardOutput = DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>;
 }
 
 /// A transaction that was detected during scanning of the blockchain,
@@ -2535,15 +2703,21 @@ pub struct DecryptedTransaction<'a, Tx: DecryptableTransaction<AccountId>, Accou
     sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
     #[cfg(feature = "orchard")]
     orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
+    #[cfg(feature = "orchard")]
+    ironwood_outputs: Vec<Tx::DecryptedOrchardOutput>,
 }
 
 impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<'a, Tx, AccountId> {
     /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
+    ///
+    /// Ironwood outputs are Orchard-shaped but belong to a distinct pool, and are passed and
+    /// tracked separately from Orchard outputs.
     pub fn new(
         mined_height: Option<BlockHeight>,
         tx: &'a Tx,
         sapling_outputs: Vec<Tx::DecryptedSaplingOutput>,
         #[cfg(feature = "orchard")] orchard_outputs: Vec<Tx::DecryptedOrchardOutput>,
+        #[cfg(feature = "orchard")] ironwood_outputs: Vec<Tx::DecryptedOrchardOutput>,
     ) -> Self {
         Self {
             mined_height,
@@ -2551,6 +2725,8 @@ impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<
             sapling_outputs,
             #[cfg(feature = "orchard")]
             orchard_outputs,
+            #[cfg(feature = "orchard")]
+            ironwood_outputs,
         }
     }
 
@@ -2572,11 +2748,19 @@ impl<'a, Tx: DecryptableTransaction<AccountId>, AccountId> DecryptedTransaction<
         &self.orchard_outputs
     }
 
+    /// Returns the Ironwood outputs that were decrypted from the transaction.
+    ///
+    /// Ironwood outputs are Orchard-shaped but belong to a pool distinct from Orchard.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_outputs(&self) -> &[Tx::DecryptedOrchardOutput] {
+        &self.ironwood_outputs
+    }
+
     /// Returns whether the transaction has decrypted outputs
     pub fn has_decrypted_outputs(&self) -> bool {
         let has_sapling = !self.sapling_outputs.is_empty();
         #[cfg(feature = "orchard")]
-        let has_orchard = !self.orchard_outputs.is_empty();
+        let has_orchard = !self.orchard_outputs.is_empty() || !self.ironwood_outputs.is_empty();
         #[cfg(not(feature = "orchard"))]
         let has_orchard = false;
 
@@ -3597,13 +3781,32 @@ pub trait WalletCommitmentTrees {
         Ok(None)
     }
 
+    /// Adds a sequence of Ironwood note commitment tree subtree roots to the data store, if this
+    /// backend tracks an Ironwood tree.
+    ///
+    /// Each such value should be the Merkle root of a subtree of the Ironwood note commitment tree
+    /// containing 2^[`ORCHARD_SHARD_HEIGHT`] note commitments; Ironwood shares the Orchard note
+    /// commitment tree's shape, so the same shard height applies.
+    ///
+    /// The default implementation is a no-op, for backends that do not track an Ironwood tree
+    /// (mirroring [`WalletCommitmentTrees::with_ironwood_tree_mut`]). Backends that track Ironwood
+    /// note commitments should override this.
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        _start_index: u64,
+        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        Ok(())
+    }
+
     /// Releases all retained ("anchor") checkpoints with height strictly less than `max_height`
     /// from the wallet's note commitment trees, allowing them to be pruned normally.
     ///
     /// Anchor checkpoints are established during scanning (and may be created directly via
     /// [`ShardTree::ensure_retained`]); they are otherwise exempt from automatic pruning of excess
-    /// checkpoints. This releases the retention of those that have aged below `max_height` in both
-    /// the Sapling and (when the `orchard` feature is enabled) Orchard trees.
+    /// checkpoints. This releases the retention of those that have aged below `max_height` in the
+    /// Sapling and (when the `orchard` feature is enabled) the Orchard and Ironwood trees.
     fn remove_retained_checkpoints_below(
         &mut self,
         max_height: BlockHeight,
@@ -3635,6 +3838,21 @@ pub trait WalletCommitmentTrees {
             Ok::<_, ShardTreeError<Self::Error>>(())
         })?;
 
+        // A backend that does not track an Ironwood tree returns `None` here and is left unchanged.
+        #[cfg(feature = "orchard")]
+        self.with_ironwood_tree_mut(|tree| {
+            for height in tree
+                .store()
+                .retained_checkpoints()
+                .map_err(ShardTreeError::Storage)?
+            {
+                if height < max_height {
+                    tree.remove_retained_checkpoint(&height)?;
+                }
+            }
+            Ok::<_, ShardTreeError<Self::Error>>(())
+        })?;
+
         Ok(())
     }
 }
@@ -3652,6 +3870,31 @@ mod tests {
     use transparent::address::TransparentAddress;
     use zcash_keys::address::{Address, UnifiedAddress};
     use zip32::DiversifierIndex;
+
+    #[test]
+    fn account_meta_totals_include_ironwood() {
+        let meta = AccountMeta::new(
+            Some(PoolMeta::new(2, Zatoshis::const_from_u64(200))),
+            Some(PoolMeta::new(3, Zatoshis::const_from_u64(300))),
+            Some(PoolMeta::new(5, Zatoshis::const_from_u64(500))),
+        );
+        assert_eq!(meta.note_count(ShieldedPool::Ironwood), Some(5));
+        assert_eq!(meta.total_note_count(), Some(10));
+        assert_eq!(meta.total_value(), Some(Zatoshis::const_from_u64(1000)));
+
+        // With metadata for only the Ironwood pool, the totals reflect that pool alone.
+        let ironwood_only = AccountMeta::new(
+            None,
+            None,
+            Some(PoolMeta::new(4, Zatoshis::const_from_u64(400))),
+        );
+        assert_eq!(ironwood_only.note_count(ShieldedPool::Ironwood), Some(4));
+        assert_eq!(ironwood_only.total_note_count(), Some(4));
+        assert_eq!(
+            ironwood_only.total_value(),
+            Some(Zatoshis::const_from_u64(400))
+        );
+    }
 
     fn derived_source() -> AddressSource {
         AddressSource::Derived {
