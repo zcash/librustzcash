@@ -2054,15 +2054,16 @@ pub trait WalletRead {
     /// Returns the nullifiers for Ironwood notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as spent.
     /// Ironwood nullifiers are Orchard-shaped but are tracked as a separate pool.
+    ///
+    /// This is a required method (like [`WalletRead::get_sapling_nullifiers`]) rather than
+    /// defaulting to a panic: it is called on the scan path, so a backend that does not override it
+    /// would abort the process on the first scan. Requiring it surfaces the omission at compile
+    /// time instead.
     #[cfg(feature = "orchard")]
     fn get_ironwood_nullifiers(
         &self,
-        _query: NullifierQuery,
-    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
-        unimplemented!(
-            "WalletRead::get_ironwood_nullifiers must be overridden for wallets to use the `orchard` feature"
-        )
-    }
+        query: NullifierQuery,
+    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error>;
 
     /// Returns the set of non-ephemeral transparent receivers associated with the given
     /// account controlled by this wallet.

@@ -63,6 +63,8 @@ workspace.
   flag). `WalletRead::get_ironwood_nullifiers` and the low-level
   `detect_ironwood_spend`/`put_received_ironwood_note`/`mark_ironwood_note_spent`/
   `track_block_ironwood_nullifiers` methods mirror their Orchard counterparts.
+  `WalletRead::get_ironwood_nullifiers` is a required method (it is called on the
+  scan path, so it does not default to a panic); backends must implement it.
 - `zcash_client_backend::data_api::chain::ChainState::final_ironwood_tree` and
   `zcash_client_backend::proto::service::TreeState::ironwood_tree` (behind the
   `orchard` feature flag), exposing the Ironwood note commitment tree frontier

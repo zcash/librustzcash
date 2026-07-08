@@ -3209,6 +3209,14 @@ impl WalletRead for MockWalletDb {
         Ok(Vec::new())
     }
 
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_nullifiers(
+        &self,
+        _query: NullifierQuery,
+    ) -> Result<Vec<(Self::AccountId, ::orchard::note::Nullifier)>, Self::Error> {
+        Ok(Vec::new())
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
