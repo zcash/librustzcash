@@ -12,10 +12,6 @@ workspace.
 
 ### Added
 - `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
-- `zcash_primitives::orchard`, a re-export of the `orchard` crate, so that downstream
-  crates which make their own `orchard` dependency optional can still name the
-  `orchard` types that appear in this crate's public API (such as the
-  `orchard_pool_bundle_type` field added below).
 
 ### Changed
 - `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
