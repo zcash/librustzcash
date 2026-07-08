@@ -59,6 +59,7 @@ use crate::{
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
+use orchard::builder::BundleType;
 use sapling::{
     note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
     prover::{OutputProver, SpendProver},
@@ -69,7 +70,6 @@ use zcash_keys::{
     address::Address,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
-use zcash_primitives::orchard::builder::BundleType;
 use zcash_primitives::transaction::{
     Transaction, TxId,
     builder::{BuildConfig, BuildResult, Builder},
