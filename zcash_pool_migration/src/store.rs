@@ -1115,4 +1115,52 @@ mod tests {
         assert!(!has_due_transfer(&conn, "r1", 99).unwrap());
         assert!(has_due_transfer(&conn, "r1", 100).unwrap());
     }
+
+    #[test]
+    fn target_values_codec_round_trips_empty_and_extreme_values() {
+        // Empty array round-trip
+        assert_eq!(encode_target_values(&[]), "[]");
+        assert_eq!(parse_target_values("[]"), vec![]);
+
+        // Single values: 0, 1, and u64::MAX
+        assert_eq!(encode_target_values(&[0]), "[0]");
+        assert_eq!(parse_target_values("[0]"), vec![0]);
+
+        assert_eq!(encode_target_values(&[1]), "[1]");
+        assert_eq!(parse_target_values("[1]"), vec![1]);
+
+        let max = u64::MAX;
+        assert_eq!(encode_target_values(&[max]), format!("[{}]", max));
+        assert_eq!(parse_target_values(&format!("[{}]", max)), vec![max]);
+
+        // Multiple values including extremes
+        let values = vec![0, 1, 999_999_999, u64::MAX];
+        let encoded = encode_target_values(&values);
+        let decoded = parse_target_values(&encoded);
+        assert_eq!(decoded, values);
+    }
+
+    #[test]
+    fn target_values_decode_is_lenient_on_malformed_text() {
+        // Missing brackets: no [ prefix → empty vec
+        assert_eq!(parse_target_values("not json"), vec![]);
+
+        // Empty string → empty vec (no brackets)
+        assert_eq!(parse_target_values(""), vec![]);
+
+        // Malformed array: partially bad numbers → unwrap_or_default returns empty
+        assert_eq!(parse_target_values("[1,x,3]"), vec![]);
+
+        // Missing closing bracket → empty vec
+        assert_eq!(parse_target_values("[1,2,3"), vec![]);
+
+        // Missing opening bracket → empty vec
+        assert_eq!(parse_target_values("1,2,3]"), vec![]);
+
+        // Valid JSON but with extra whitespace (should parse ok)
+        assert_eq!(parse_target_values("[ 1 , 2 , 3 ]"), vec![1, 2, 3]);
+
+        // Empty brackets with whitespace → empty vec
+        assert_eq!(parse_target_values("[  ]"), vec![]);
+    }
 }
