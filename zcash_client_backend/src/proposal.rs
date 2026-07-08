@@ -287,14 +287,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 
             for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
                 let key = (
-                    match &s_out.note() {
-                        Note::Sapling(_) => PoolType::SAPLING,
-                        #[cfg(feature = "orchard")]
-                        Note::Orchard { pool, .. } => match pool {
-                            orchard::ValuePool::Orchard => PoolType::ORCHARD,
-                            orchard::ValuePool::Ironwood => PoolType::IRONWOOD,
-                        },
-                    },
+                    PoolType::Shielded(s_out.note().pool()),
                     *s_out.txid(),
                     s_out.output_index().into(),
                 );

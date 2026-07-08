@@ -216,10 +216,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         >,
         pool: orchard::ValuePool,
     ) -> impl Iterator<Item = DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>> {
-        let shielded_pool = match pool {
-            orchard::ValuePool::Orchard => ShieldedPool::Orchard,
-            orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
-        };
+        let shielded_pool = crate::wallet::shielded_pool_for_value_pool(pool);
         ufvks
             .iter()
             .flat_map(|(account, ufvk)| ufvk.orchard().into_iter().map(|fvk| (*account, fvk)))

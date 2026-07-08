@@ -3492,11 +3492,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     )?;
                 }
                 #[cfg(feature = "orchard")]
-                Note::Orchard { note, pool } => {
-                    let shielded_pool = match pool {
-                        ::orchard::ValuePool::Orchard => ShieldedPool::Orchard,
-                        ::orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
-                    };
+                orchard_note @ Note::Orchard { note, pool } => {
+                    let shielded_pool = orchard_note.pool();
                     orchard::put_received_note(
                         conn,
                         params,

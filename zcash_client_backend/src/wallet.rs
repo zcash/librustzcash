@@ -610,11 +610,19 @@ impl Note {
         match self {
             Note::Sapling(_) => ShieldedPool::Sapling,
             #[cfg(feature = "orchard")]
-            Note::Orchard { pool, .. } => match pool {
-                orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
-                orchard::ValuePool::Orchard => ShieldedPool::Orchard,
-            },
+            Note::Orchard { pool, .. } => shielded_pool_for_value_pool(*pool),
         }
+    }
+}
+
+/// Returns the shielded pool corresponding to an Orchard-protocol value pool. The Orchard protocol
+/// serves both the Orchard pool (version-2 notes) and the Ironwood pool (version-3 notes); this is
+/// the single point at which that classification is made.
+#[cfg(feature = "orchard")]
+pub(crate) fn shielded_pool_for_value_pool(pool: orchard::ValuePool) -> ShieldedPool {
+    match pool {
+        orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+        orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
     }
 }
 
