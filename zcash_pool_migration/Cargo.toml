@@ -40,7 +40,16 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 incrementalmerkletree.workspace = true
 tempfile = "3"
+# The end-to-end integration tests (tests/migration_e2e.rs) drive the real pipelines against a
+# seeded, scanned wallet. They reuse the upstream `data_api::testing` harness (TestBuilder/
+# TestState + the Orchard pool tester) to generate and scan blocks, so both crates need their
+# `test-dependencies` features; the sqlite one additionally provides the `WalletTest` impl on
+# `WalletDb` that the harness's `DataStoreFactory` requires, and `local-consensus` supplies the
+# `LocalNetwork` the harness builds on. No new external crates are introduced — only already-in-
+# workspace `test-dependencies` / `local-consensus` features are enabled.
 zcash_client_backend = { workspace = true, features = ["orchard", "pczt", "test-dependencies"] }
+zcash_client_sqlite = { workspace = true, features = ["orchard", "serde", "transparent-inputs", "test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
 
 [features]
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
