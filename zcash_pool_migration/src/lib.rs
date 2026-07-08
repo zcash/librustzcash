@@ -6,6 +6,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod denominations;
+mod reserved_source;
 mod scheduling;
 mod state;
 mod store;
