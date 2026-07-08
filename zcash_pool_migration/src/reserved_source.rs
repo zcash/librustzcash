@@ -11,19 +11,25 @@
 //! third, `ironwood` pool (Ironwood notes are `orchard::note::Note` values but are tracked
 //! separately from Orchard). Only the `orchard` pool is post-filtered by migration lock below,
 //! matching the prototype: prepared notes awaiting a migration transfer are Orchard notes, so
-//! Sapling and Ironwood notes pass through untouched. The trait's
-//! `#[cfg(feature = "transparent-inputs")]` methods are not overridden here: this crate has no
-//! dependency on the `transparent` (`zcash_transparent`) crate that defines their `OutPoint` /
-//! `TransparentAddress` parameter types, and all four now have default implementations upstream
-//! (three `unimplemented!()`, one a real default), so nothing requires it.
+//! Sapling and Ironwood notes pass through untouched. The trait's transparent-output methods
+//! (`#[cfg(feature = "transparent-inputs")]` upstream) delegate to the wrapped source 1:1 with no
+//! filtering, also matching the prototype: their upstream defaults panic, and reservation
+//! filtering is only meaningful for shielded notes. They are implemented unconditionally — this
+//! crate's own dependency declarations always unify `zcash_client_backend`'s `transparent-inputs`
+//! feature on (via its `zcash_client_sqlite` dependency), so the methods exist in every build of
+//! this crate, and a local `#[cfg(feature = "transparent-inputs")]` (a feature this crate does not
+//! declare) would never be true and would silently compile the delegations away.
 
 use std::collections::BTreeSet;
 
+use transparent::address::TransparentAddress;
+use transparent::bundle::OutPoint;
 use zcash_client_backend::data_api::wallet::{ConfirmationsPolicy, TargetHeight};
 use zcash_client_backend::data_api::{
-    AccountMeta, InputSource, NoteFilter, ReceivedNotes, TargetValue,
+    AccountMeta, CoinbaseFilter, InputSource, NoteFilter, ReceivedNotes, TargetValue,
 };
-use zcash_client_backend::wallet::{Note, ReceivedNote};
+use zcash_client_backend::fees::StandardFeeRule;
+use zcash_client_backend::wallet::{Note, ReceivedNote, WalletTransparentOutput};
 use zcash_protocol::{ShieldedPool, TxId};
 
 /// An [`InputSource`] adapter that excludes reserved and migration-locked notes.
@@ -150,6 +156,69 @@ impl<DbT: InputSource> InputSource for ReservedInputSource<'_, DbT> {
             selector,
             target_height,
             &self.merged_excludes(exclude),
+        )
+    }
+
+    fn get_unspent_transparent_output(
+        &self,
+        outpoint: &OutPoint,
+        target_height: TargetHeight,
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        self.inner
+            .get_unspent_transparent_output(outpoint, target_height)
+    }
+
+    fn get_spendable_transparent_outputs(
+        &self,
+        address: &TransparentAddress,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        self.inner.get_spendable_transparent_outputs(
+            address,
+            target_height,
+            confirmations_policy,
+            output_filter,
+        )
+    }
+
+    fn get_spendable_transparent_outputs_for_addresses(
+        &self,
+        addresses: &[TransparentAddress],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        self.inner.get_spendable_transparent_outputs_for_addresses(
+            addresses,
+            target_height,
+            confirmations_policy,
+            output_filter,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn select_spendable_transparent_outputs(
+        &self,
+        account: Self::AccountId,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+        address_allow_list: Option<&[TransparentAddress]>,
+        target_value: TargetValue,
+        max_inputs: usize,
+        fee_rule: &StandardFeeRule,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        self.inner.select_spendable_transparent_outputs(
+            account,
+            target_height,
+            confirmations_policy,
+            output_filter,
+            address_allow_list,
+            target_value,
+            max_inputs,
+            fee_rule,
         )
     }
 }

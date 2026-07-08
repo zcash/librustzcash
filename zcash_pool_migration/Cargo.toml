@@ -22,6 +22,7 @@ zcash_keys = { workspace = true, features = ["orchard"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip321.workspace = true
+transparent.workspace = true
 
 orchard.workspace = true
 pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "signer", "spend-finalizer", "tx-extractor"] }
