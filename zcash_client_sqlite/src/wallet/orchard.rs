@@ -35,9 +35,13 @@ use super::{
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
+    pool: ShieldedPool,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedPool::Orchard, row.get("id")?);
+    // Orchard and Ironwood notes are both reconstructed here (they are Orchard-shaped); the
+    // `ReceivedNoteId` must carry the pool the note was selected from, so that pool-filtered
+    // exclusion (see `select_unspent_notes`) matches it rather than misrouting it to Orchard.
+    let note_id = ReceivedNoteId(pool, row.get("id")?);
     let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
     let action_index = row.get("action_index")?;
     let diversifier = {
@@ -288,7 +292,7 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
             ":account_uuid": account.0,
             ":height": u32::from(height),
         ],
-        |row| to_received_note(params, row),
+        |row| to_received_note(params, ShieldedPool::Orchard, row),
     )?;
 
     rows.filter_map(|r| r.transpose()).collect()
@@ -1762,6 +1766,93 @@ pub(crate) mod tests {
                 stored_index, raw_index,
                 "the send path must record the Ironwood change at the raw bundle index the \
                  scanner uses, so the two write paths agree and the note is not counted twice",
+            );
+        }
+
+        /// Ironwood notes are Orchard-shaped, but a selected note's `ReceivedNoteId` must carry the
+        /// Ironwood pool, not Orchard. Pool-filtered exclusion during input selection matches an
+        /// excluded id only when its pool equals the pool being queried, so an Orchard-tagged
+        /// Ironwood id would silently escape exclusion and be re-selected.
+        #[test]
+        fn ironwood_received_note_id_carries_the_ironwood_pool() {
+            use std::num::NonZeroU32;
+
+            use zcash_client_backend::data_api::{TargetValue, WalletRead};
+
+            use crate::wallet::orchard::select_spendable_ironwood_notes;
+
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let account_id = account.id();
+            let network = *st.network();
+
+            // Receive two Ironwood notes so exclusion can be exercised as well as the pool tag.
+            let fvk = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let (h, _, _) = st.generate_next_block(
+                &fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(100_000),
+            );
+            st.generate_next_block(
+                &fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(100_000),
+            );
+            st.scan_cached_blocks(h, 2);
+            for _ in 0..5 {
+                let (h, _) = st.generate_empty_block();
+                st.scan_cached_blocks(h, 1);
+            }
+
+            let (target_height, _) = st
+                .wallet()
+                .get_target_and_anchor_heights(NonZeroU32::MIN)
+                .unwrap()
+                .unwrap();
+
+            // Both notes are jointly required to cover the target, so both are selected.
+            let notes = select_spendable_ironwood_notes(
+                st.wallet().conn(),
+                &network,
+                account_id,
+                TargetValue::AtLeast(Zatoshis::const_from_u64(150_000)),
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+            )
+            .unwrap();
+            assert_eq!(notes.len(), 2, "both Ironwood notes are spendable");
+            for note in &notes {
+                assert_eq!(
+                    note.internal_note_id().0,
+                    ShieldedPool::Ironwood,
+                    "an Ironwood note's ReceivedNoteId must carry the Ironwood pool, not Orchard",
+                );
+            }
+
+            // With the pool correctly recorded, excluding a note by its identifier drops exactly
+            // that note from a re-selection (an Orchard-tagged id would fail to match the
+            // Ironwood-pool query and leave the note selectable).
+            let excluded = *notes[0].internal_note_id();
+            let remaining = select_spendable_ironwood_notes(
+                st.wallet().conn(),
+                &network,
+                account_id,
+                TargetValue::AtLeast(Zatoshis::const_from_u64(100_000)),
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[excluded],
+            )
+            .unwrap();
+            assert!(
+                remaining.iter().all(|n| n.internal_note_id() != &excluded),
+                "excluding an Ironwood note must remove it from the selection",
             );
         }
 

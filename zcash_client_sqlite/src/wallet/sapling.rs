@@ -30,9 +30,10 @@ use super::{
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
+    pool: ShieldedPool,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedPool::Sapling, row.get("id")?);
+    let note_id = ReceivedNoteId(pool, row.get("id")?);
     let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
     let output_index = row.get("output_index")?;
     let diversifier = {

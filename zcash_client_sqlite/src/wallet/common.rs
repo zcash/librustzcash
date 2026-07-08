@@ -229,7 +229,11 @@ pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     to_spendable_note: F,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -270,7 +274,7 @@ where
            ":output_index": index,
            ":target_height": u32::from(target_height),
         ],
-        |row| to_spendable_note(params, row),
+        |row| to_spendable_note(params, protocol, row),
     );
 
     // `OptionalExtension` doesn't work here because the error type of `Result` is already
@@ -327,7 +331,11 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     to_spendable_note: F,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let Some(anchor_height) =
         get_anchor_height(conn, target_height, confirmations_policy.trusted())?
@@ -385,7 +393,11 @@ pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
     note_request: NoteRequest,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -452,7 +464,7 @@ where
             ":min_value": u64::from(zip317::MARGINAL_FEE)
         ],
         |row| -> Result<_, SqliteClientError> {
-            let result_note = to_received_note(params, row)?;
+            let result_note = to_received_note(params, protocol, row)?;
             let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
             let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
@@ -543,7 +555,11 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     to_spendable_note: F,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -663,7 +679,7 @@ where
                 .map(BlockHeight::from);
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
             let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
-            let note = to_spendable_note(params, row)?;
+            let note = to_spendable_note(params, protocol, row)?;
 
             Ok(note.map(|n| {
                 (
