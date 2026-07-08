@@ -110,6 +110,9 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+            // The fixed-fee strategy has no unpadded opt-in; keep the padded default.
+            #[cfg(feature = "orchard")]
+            ::orchard::builder::BundleType::DEFAULT,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )

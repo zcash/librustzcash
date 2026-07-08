@@ -228,8 +228,18 @@ workspace.
   - `input_count_in_pool`, `output_count_in_pool`, `change_count_in_pool`
   - `orchard_action_count`, the number of Orchard actions a step requires
     (the greater of its Orchard spends and its Orchard outputs plus change).
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}`
+  gained `with_unpadded_orchard_pool_bundles`, which makes fee and change
+  calculation count Orchard and Ironwood bundles without the 2-action padding
+  minimum. The default behavior is unchanged (padded). Proposals created with
+  this option must be executed with a matching unpadded builder configuration.
 
 ### Changed
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes an
+  `orchard_pool_bundle_type` argument (behind the `pczt` feature flag) selecting
+  the transactional bundle type for the Orchard and Ironwood bundles; it must
+  match the change strategy used to create the proposal. Pass
+  `orchard::builder::BundleType::DEFAULT` for the previous (padded) behavior.
 - The `proposed_version: Option<TxVersion>` parameter of
   `zcash_client_backend::data_api::wallet::propose_transfer`,
   `propose_standard_transfer_to_address`, and `create_proposed_transactions`, along

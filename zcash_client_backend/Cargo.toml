@@ -72,7 +72,7 @@ subtle.workspace = true
 # - Shielded protocols
 bls12_381.workspace = true
 group.workspace = true
-orchard = { workspace = true, optional = true }
+orchard.workspace = true
 sapling.workspace = true
 
 # - Transparent protocol
@@ -203,7 +203,12 @@ transparent-key-import = ["transparent-inputs"]
 spend-index = ["transparent-inputs"]
 
 ## Enables receiving and spending Orchard funds.
-orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
+##
+## The `orchard` crate itself is an unconditional dependency (via
+## `zcash_primitives`, which always requires it because every v5+ transaction
+## carries an Orchard bundle type); this feature gates the wallet's
+## Orchard note-handling code, not the crate linkage.
+orchard = ["dep:pasta_curves", "zcash_keys/orchard"]
 
 ## Enables compatibility with legacy zcashd wallet data
 zcashd-compat = ["zcash_keys/zcashd-compat"]
@@ -279,7 +284,7 @@ test-dependencies = [
     "dep:rand",
     "dep:rand_chacha",
     "transparent/test-dependencies",
-    "orchard?/test-dependencies",
+    "orchard/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_proofs/bundled-prover",
