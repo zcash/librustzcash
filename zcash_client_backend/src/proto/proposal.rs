@@ -23,6 +23,11 @@ pub struct Proposal {
     /// default confirmations policy.
     #[prost(message, optional, tag = "5")]
     pub confirmations_policy: ::core::option::Option<ConfirmationsPolicy>,
+    /// The transaction version header explicitly requested when the proposal was constructed.
+    /// Proposals serialized by older versions, or constructed without an explicit version request,
+    /// omit this field; they are built at the version implied by the target height.
+    #[prost(uint32, optional, tag = "6")]
+    pub proposed_version: ::core::option::Option<u32>,
 }
 /// The number of confirmations required before notes may be spent, per ZIP 315.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]

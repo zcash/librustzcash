@@ -235,6 +235,10 @@ pub struct Proposal<FeeRuleT, NoteRef> {
     /// [`Step::anchor_height`]).
     confirmations_policy: ConfirmationsPolicy,
     steps: NonEmpty<Step<NoteRef>>,
+    /// The transaction version explicitly requested when the proposal was constructed, if any.
+    /// When `None`, the transaction is built at the version implied by the target height (version 6
+    /// from NU6.3 onward).
+    proposed_version: Option<TxVersion>,
 }
 
 impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
@@ -310,6 +314,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             fee_rule,
             min_target_height,
             confirmations_policy,
+            proposed_version: None,
             steps,
         })
     }
@@ -350,6 +355,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             fee_rule,
             min_target_height,
             confirmations_policy,
+            proposed_version: None,
             steps: NonEmpty::singleton(Step::from_parts(
                 &[],
                 transaction_request,
@@ -386,6 +392,22 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         self.confirmations_policy
     }
 
+    /// Returns the transaction version explicitly requested when the proposal was constructed, if
+    /// any. When `None`, the transaction is built at the version implied by the target height
+    /// (version 6 from NU6.3 onward).
+    pub fn proposed_version(&self) -> Option<TxVersion> {
+        self.proposed_version
+    }
+
+    /// Returns this proposal with its requested transaction version set to the given value.
+    ///
+    /// This records the version passed to proposal construction so that it is carried through to
+    /// transaction building; it does not re-validate the proposal against the version.
+    pub fn with_proposed_version(mut self, proposed_version: Option<TxVersion>) -> Self {
+        self.proposed_version = proposed_version;
+        self
+    }
+
     /// Returns the steps of the proposal. Each step corresponds to an independent transaction to
     /// be generated as a result of this proposal.
     pub fn steps(&self) -> &NonEmpty<Step<NoteRef>> {
@@ -412,6 +434,7 @@ impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
         f.debug_struct("Proposal")
             .field("fee_rule", &self.fee_rule)
             .field("min_target_height", &self.min_target_height)
+            .field("proposed_version", &self.proposed_version)
             .field("steps", &self.steps)
             .finish()
     }
@@ -1174,6 +1197,7 @@ mod tests {
                 fee_rule: (),
                 min_target_height: TargetHeight::from(100u32),
                 confirmations_policy: ConfirmationsPolicy::default(),
+                proposed_version: None,
                 steps: NonEmpty::from_vec(vec![step1, step2]).unwrap(),
             };
             prop_assert_eq!(proposal.input_count_in_pool(PoolType::SAPLING), 0);

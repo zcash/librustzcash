@@ -7548,3 +7548,79 @@ where
         "the Ironwood output carries recipient metadata",
     );
 }
+
+/// The transaction version requested at proposal time is recorded on the proposal and preserved
+/// across serialization, so that transaction building honors it. A proposal serialized without a
+/// version request (as older serializers produced) decodes with no requested version and falls
+/// back to the target-height version at build time.
+#[cfg(feature = "orchard")]
+pub fn proposal_records_and_serializes_proposed_version<Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    Dsf: DataStoreFactory,
+{
+    use super::orchard::OrchardPoolTester;
+    use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
+    use zcash_primitives::transaction::TxVersion;
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    // Fund the wallet with a single spendable Orchard note.
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60_000));
+
+    let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+    let to = OrchardPoolTester::sk_default_address(&to_extsk);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10_000),
+    )])
+    .unwrap();
+
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Orchard,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+
+    let account_id = st.get_account().id();
+    let network = *st.network();
+    // The test network's most recent upgrade is NU5, so version 5 is a valid explicit request.
+    let proposal = propose_transfer::<_, _, _, _, Infallible>(
+        st.wallet_mut(),
+        &network,
+        account_id,
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &SpendPolicy::default(),
+        Some(TxVersion::V5),
+    )
+    .expect("proposal construction succeeds");
+
+    // The requested version is recorded on the proposal.
+    assert_eq!(proposal.proposed_version(), Some(TxVersion::V5));
+
+    // ... and is preserved across a round-trip through the proposal's serialized (proto) form.
+    let proto = crate::proto::proposal::Proposal::from_standard_proposal(&proposal);
+    let decoded = proto
+        .try_into_standard_proposal(&network, st.wallet())
+        .expect("the serialized proposal decodes");
+    assert_eq!(decoded.proposed_version(), Some(TxVersion::V5));
+
+    // A proposal serialized without the field (as an older serializer produced) decodes with no
+    // requested version.
+    let mut legacy_proto = crate::proto::proposal::Proposal::from_standard_proposal(&proposal);
+    legacy_proto.proposed_version = None;
+    let decoded_legacy = legacy_proto
+        .try_into_standard_proposal(&network, st.wallet())
+        .expect("a legacy proposal without a requested version must decode");
+    assert_eq!(decoded_legacy.proposed_version(), None);
+}

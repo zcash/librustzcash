@@ -853,6 +853,11 @@ pub(crate) mod tests {
         testing::pool::create_pczt_supports_ironwood_output();
     }
 
+    #[test]
+    fn proposal_records_and_serializes_proposed_version() {
+        testing::pool::proposal_records_and_serializes_proposed_version();
+    }
+
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn wallet_recovery_compute_fees() {

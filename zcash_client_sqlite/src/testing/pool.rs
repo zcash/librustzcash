@@ -836,3 +836,11 @@ pub(crate) fn create_pczt_supports_ironwood_output() {
         BlockCache::new(),
     );
 }
+
+#[cfg(feature = "orchard")]
+pub(crate) fn proposal_records_and_serializes_proposed_version() {
+    zcash_client_backend::data_api::testing::pool::proposal_records_and_serializes_proposed_version(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}

@@ -16,7 +16,7 @@ use zcash_note_encryption::{COMPACT_NOTE_SIZE, EphemeralKeyBytes};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     merkle_tree::read_commitment_tree,
-    transaction::TxId,
+    transaction::{TxId, TxVersion},
 };
 use zcash_protocol::{
     PoolType, ShieldedPool,
@@ -510,6 +510,9 @@ pub enum ProposalDecodingError<DbError> {
     /// height. Once Ironwood is active, Orchard-receiver payments target the Ironwood pool and only
     /// change may return to Orchard, so such a payment cannot appear in a well-formed proposal.
     OrchardPaymentProhibited,
+    /// The proposal specified an explicit transaction version header that the wallet does not
+    /// recognize.
+    ProposedVersionInvalid(u32),
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -575,6 +578,10 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::OrchardPaymentProhibited => write!(
                 f,
                 "A payment may not be directed to the Orchard pool once Ironwood is active."
+            ),
+            ProposalDecodingError::ProposedVersionInvalid(header) => write!(
+                f,
+                "The proposal specified an unrecognized transaction version header {header:#x}."
             ),
         }
     }
@@ -760,6 +767,7 @@ impl proposal::Proposal {
                 #[cfg(not(feature = "transparent-inputs"))]
                 allow_zero_conf_shielding: true,
             }),
+            proposed_version: value.proposed_version().map(|v| v.header()),
         }
     }
 
@@ -1009,12 +1017,29 @@ impl proposal::Proposal {
                     None => ConfirmationsPolicy::default(),
                 };
 
+                // Recover the explicitly-requested transaction version, if any. Proposals
+                // serialized before this field existed, or built without a version request, omit
+                // it and fall back to the version implied by the target height.
+                let proposed_version = self
+                    .proposed_version
+                    .map(|header| {
+                        if header == TxVersion::V5.header() {
+                            Ok(TxVersion::V5)
+                        } else if header == TxVersion::V6.header() {
+                            Ok(TxVersion::V6)
+                        } else {
+                            Err(ProposalDecodingError::ProposedVersionInvalid(header))
+                        }
+                    })
+                    .transpose()?;
+
                 Proposal::multi_step(
                     fee_rule,
                     target_height,
                     confirmations_policy,
                     NonEmpty::from_vec(steps).ok_or(ProposalDecodingError::NoSteps)?,
                 )
+                .map(|proposal| proposal.with_proposed_version(proposed_version))
                 .map_err(ProposalDecodingError::ProposalInvalid)
             }
             other => Err(ProposalDecodingError::VersionInvalid(other)),

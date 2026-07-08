@@ -11,6 +11,13 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::proposal::Proposal::proposed_version` and
+  `with_proposed_version`. The transaction version requested when a proposal is
+  constructed is now recorded on the proposal (and preserved across
+  serialization) so that transaction building honors it.
+- `zcash_client_backend::proto::ProposalDecodingError::ProposedVersionInvalid`,
+  returned when a serialized proposal specifies an unrecognized transaction
+  version header.
 - Received Ironwood notes can now be selected and spent. `InputSource`
   implementations select Ironwood notes when the Ironwood pool is active at the
   target height, the greedy input selector spends them (attributing each spent
@@ -289,6 +296,12 @@ workspace.
   for payments delivered through the Ironwood pool. A post-NU6.3 payment to an
   Orchard receiver is therefore realized as a version 6 PCZT carrying an Ironwood
   bundle.
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` no longer
+  takes a `proposed_version` argument; the transaction version is now carried on the
+  `Proposal` (set when the proposal is constructed) and read from it during building.
+  Remove the argument from calls; to constrain the version, pass it to
+  `propose_transfer`/`propose_standard_transfer_to_address` when constructing the
+  proposal.
 - Renamed `zcash_client_backend::data_api::TransparentOutputFilter` to
   `CoinbaseFilter`, and its `All` variant to `AllTransparentOutputs`.
 - During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as

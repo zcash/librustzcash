@@ -689,7 +689,9 @@ where
         spend_policy,
         proposed_version,
     )?;
-    Ok(proposal)
+    // Record the requested version on the proposal so that it is carried through to transaction
+    // building; when `None`, building falls back to the version implied by the target height.
+    Ok(proposal.with_proposed_version(proposed_version))
 }
 
 /// Proposes making a payment to the specified address from the given account.
@@ -1033,13 +1035,16 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     spending_keys: &SpendingKeys,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
-    proposed_version: Option<TxVersion>,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
+    // The transaction version is carried on the proposal, chosen when the proposal was
+    // constructed; `None` builds at the version implied by the target height.
+    let proposed_version = proposal.proposed_version();
+
     // The set of transparent `StepOutput`s available and unused from prior steps.
     // When a transparent `StepOutput` is created, it is added to the map. When it
     // is consumed, it is removed from the map.
@@ -2308,11 +2313,10 @@ where
     let proposal_step = proposal.steps().first();
 
     let unused_transparent_outputs = &mut HashMap::new();
-    // Build at the version implied by the target height (version 6 from NU6.3 onward). The
-    // version 6 transaction format is fully representable as a PCZT; it is only the Ironwood
-    // bundle that a PCZT cannot yet carry, and any proposal that would produce one is rejected
-    // below once the build reveals it.
-    let proposed_version = None;
+    // Build at the version the proposal requested, falling back to the version implied by the
+    // target height (version 6 from NU6.3 onward). Both the version 6 format and its Ironwood
+    // bundle are fully representable as a PCZT.
+    let proposed_version = proposal.proposed_version();
 
     let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
         wallet_db,
@@ -3137,6 +3141,5 @@ where
         spending_keys,
         OvkPolicy::Sender,
         &proposal,
-        None,
     )
 }

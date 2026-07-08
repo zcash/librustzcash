@@ -23,6 +23,10 @@ message Proposal {
     // Proposals serialized by older versions omit this field; they are interpreted using the
     // default confirmations policy.
     ConfirmationsPolicy confirmationsPolicy = 5;
+    // The transaction version header explicitly requested when the proposal was constructed.
+    // Proposals serialized by older versions, or constructed without an explicit version request,
+    // omit this field; they are built at the version implied by the target height.
+    optional uint32 proposedVersion = 6;
 }
 
 // The number of confirmations required before notes may be spent, per ZIP 315.
