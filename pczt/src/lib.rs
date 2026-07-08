@@ -106,7 +106,7 @@ pub mod v1 {
     pub struct Pczt {
         global: common::Global,
         transparent: transparent::Bundle,
-        sapling: sapling::Bundle,
+        sapling: sapling::v1::Bundle,
         orchard: orchard::v1::Bundle,
     }
 
@@ -140,7 +140,7 @@ pub mod v1 {
             Ok(Self {
                 global: pczt.global,
                 transparent: pczt.transparent,
-                sapling: pczt.sapling,
+                sapling: sapling::v1::Bundle::try_from(pczt.sapling)?,
                 orchard: orchard::v1::Bundle::try_from(pczt.orchard)?,
             })
         }
@@ -151,7 +151,7 @@ pub mod v1 {
             Self {
                 global: pczt.global,
                 transparent: pczt.transparent,
-                sapling: pczt.sapling,
+                sapling: pczt.sapling.into(),
                 orchard: pczt.orchard.into(),
                 ironwood: orchard::EMPTY_IRONWOOD,
             }
@@ -234,7 +234,7 @@ pub mod v2 {
                 global: pczt.global,
                 transparent: (pczt.transparent != transparent::EMPTY_BUNDLE)
                     .then_some(pczt.transparent),
-                sapling: (pczt.sapling != sapling::EMPTY_BUNDLE).then_some(pczt.sapling),
+                sapling: sapling::v2::encode(pczt.sapling),
                 orchard: orchard::v2::encode(pczt.orchard, &orchard::EMPTY_ORCHARD)?,
                 ironwood: orchard::v2::encode(pczt.ironwood, &orchard::EMPTY_IRONWOOD)?,
             })
@@ -287,6 +287,7 @@ pub mod v2 {
             assert!(decoded.transparent.outputs.is_empty());
             assert!(decoded.sapling.spends.is_empty());
             assert!(decoded.sapling.outputs.is_empty());
+            assert!(decoded.sapling.anchor.is_none());
             assert!(decoded.orchard.actions.is_empty());
             assert_eq!(decoded.orchard.note_version, NoteVersion::V2);
             {
@@ -312,7 +313,7 @@ pub mod v2 {
 
             let decoded = crate::parse(&encoded.serialize()).unwrap();
 
-            assert_eq!(decoded.sapling.anchor, [1; 32]);
+            assert_eq!(decoded.sapling.anchor, Some([1; 32]));
             assert_eq!(decoded.orchard.anchor, Some([2; 32]));
         }
 
