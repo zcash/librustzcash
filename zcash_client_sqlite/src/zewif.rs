@@ -59,12 +59,12 @@ use std::fmt;
 use bech32::primitives::decode::CheckedHrpstring;
 use bip0039::{English, Mnemonic};
 use rand::RngCore;
-use secrecy::SecretVec;
+use secrecy::{ExposeSecret, SecretVec};
 use zcash_client_backend::data_api::wallet::decrypt_and_store_transaction;
 use zcash_client_backend::data_api::{
     Account as _, AccountBirthday, AccountPurpose, WalletWrite, Zip32Derivation, chain::ChainState,
 };
-use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
 use zcash_primitives::block::BlockHash;
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::consensus::BranchId;
@@ -201,6 +201,12 @@ pub enum ZewifImportError<S> {
         /// The name of the account whose viewing key failed to parse.
         account_name: String,
     },
+    /// The seed and ZIP 32 account index recorded for a seed-derived account do
+    /// not reproduce the unified full viewing key recorded for that account.
+    DerivedKeyMismatch {
+        /// The name of the account whose derivation is inconsistent.
+        account_name: String,
+    },
     /// A seed fingerprint in the document is not a valid `zip32seedfp` Bech32m
     /// encoding.
     SeedFingerprintDecoding {
@@ -323,6 +329,10 @@ impl<S: fmt::Display> fmt::Display for ZewifImportError<S> {
             ZewifImportError::SaplingFvkDecoding { account_name } => write!(
                 f,
                 "Unable to parse the Sapling extended full viewing key of account \"{account_name}\"."
+            ),
+            ZewifImportError::DerivedKeyMismatch { account_name } => write!(
+                f,
+                "The seed and account index recorded for account \"{account_name}\" do not reproduce its recorded unified full viewing key."
             ),
             ZewifImportError::SeedFingerprintDecoding { encoding } => write!(
                 f,
@@ -527,9 +537,10 @@ pub struct ZewifImportReport {
 /// The secret material available for driving account import, indexed by the
 /// public identifiers accounts use to reference it.
 struct AvailableSecrets {
-    /// Seed bytes ready for ZIP 32 derivation, keyed by the canonical Bech32m
-    /// encoding of their verified seed fingerprints.
-    seeds: HashMap<String, SecretVec<u8>>,
+    /// Seed bytes ready for ZIP 32 derivation, keyed by the canonical 32-byte
+    /// ZIP 32 seed fingerprint, so that textually-differing but equivalent
+    /// fingerprint encodings resolve to the same seed.
+    seeds: HashMap<[u8; 32], SecretVec<u8>>,
     /// The canonical encodings of Sapling extended full viewing keys whose
     /// spending keys were delivered to the sink.
     sapling_fvks: Vec<String>,
@@ -554,7 +565,9 @@ fn decode_seed_fingerprint<S>(encoding: &str) -> Result<SeedFingerprint, ZewifIm
         encoding: encoding.to_owned(),
     };
     let checked = CheckedHrpstring::new::<bech32::Bech32m>(encoding).map_err(|_| err())?;
-    if checked.hrp().as_str() != SEED_FP_HRP {
+    // Bech32m permits an all-uppercase spelling; compare the human-readable
+    // part case-insensitively so that such encodings are accepted.
+    if checked.hrp().to_lowercase() != SEED_FP_HRP {
         return Err(err());
     }
     let bytes = checked.byte_iter().collect::<Vec<_>>();
@@ -564,8 +577,10 @@ fn decode_seed_fingerprint<S>(encoding: &str) -> Result<SeedFingerprint, ZewifIm
 
 /// Converts the seed material of a document seed entry into the byte form used
 /// for ZIP 32 derivation, verifying it against the fingerprint under which it
-/// was recorded.
-fn seed_entry_bytes<S>(entry: &::zewif::SeedEntry) -> Result<SecretVec<u8>, ZewifImportError<S>> {
+/// was recorded and returning that verified fingerprint alongside the material.
+fn seed_entry_bytes<S>(
+    entry: &::zewif::SeedEntry,
+) -> Result<(SeedFingerprint, SecretVec<u8>), ZewifImportError<S>> {
     let claimed_encoding = entry.fingerprint().encoding();
     let claimed = decode_seed_fingerprint(claimed_encoding)?;
     let seed_bytes: Vec<u8> = match entry.material() {
@@ -586,7 +601,7 @@ fn seed_entry_bytes<S>(entry: &::zewif::SeedEntry) -> Result<SecretVec<u8>, Zewi
             claimed: claimed_encoding.to_owned(),
         });
     }
-    Ok(SecretVec::new(seed_bytes))
+    Ok((claimed, SecretVec::new(seed_bytes)))
 }
 
 /// Converts a BIP 39 mnemonic to its 64-byte seed, using the empty passphrase
@@ -829,13 +844,12 @@ where
     if let Some(store) = deliver_secrets::<S>(document)? {
         for entry in store.seeds() {
             sink.store_seed(entry).map_err(ZewifImportError::Sink)?;
-            let seed_bytes = seed_entry_bytes(entry)?;
-            // The fingerprint encoding was verified against the material by
-            // `seed_entry_bytes`, so account key sources can match it by
-            // string equality.
-            available
-                .seeds
-                .insert(entry.fingerprint().encoding().to_owned(), seed_bytes);
+            let (fingerprint, seed_bytes) = seed_entry_bytes(entry)?;
+            // The material was verified against its fingerprint by
+            // `seed_entry_bytes`; index it by the canonical fingerprint bytes so
+            // that account key sources resolve to it regardless of how their
+            // fingerprint encoding is spelled.
+            available.seeds.insert(fingerprint.to_bytes(), seed_bytes);
         }
         for entry in store.transparent_keys() {
             sink.store_transparent_key(entry)
@@ -1175,9 +1189,13 @@ where
         Some(::zewif::KeySource::Derived(d)) => Some(d),
         _ => None,
     };
-    let available_seed = derived_source
-        .and_then(|d| available.seeds.get(d.seed_fingerprint().encoding()))
-        .map(|seed| (seed, derived_source.expect("checked above")));
+    let available_seed = derived_source.and_then(|d| {
+        let fingerprint = decode_seed_fingerprint::<S>(d.seed_fingerprint().encoding()).ok()?;
+        available
+            .seeds
+            .get(&fingerprint.to_bytes())
+            .map(|seed| (seed, d))
+    });
 
     let account_uuid = match account.viewing_key() {
         ::zewif::AccountViewingKey::Ufvk(ufvk) => {
@@ -1191,6 +1209,28 @@ where
                             index: source.account_index(),
                         }
                     })?;
+                // Confirm that the recorded derivation actually reproduces the
+                // account's recorded viewing key before creating it, so that a
+                // corrupt derivation record cannot silently import an account
+                // for a different key.
+                let recorded =
+                    UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|message| {
+                        ZewifImportError::UfvkDecoding {
+                            account_name: account.name().to_owned(),
+                            message,
+                        }
+                    })?;
+                let derived =
+                    UnifiedSpendingKey::from_seed(params, seed.expose_secret(), account_index)
+                        .map_err(|_| ZewifImportError::DerivedKeyMismatch {
+                            account_name: account.name().to_owned(),
+                        })?
+                        .to_unified_full_viewing_key();
+                if !ufvk_components_consistent(&derived, &recorded) {
+                    return Err(ZewifImportError::DerivedKeyMismatch {
+                        account_name: account.name().to_owned(),
+                    });
+                }
                 let (imported, _usk) = wdb
                     .import_account_hd(account.name(), seed, account_index, &birthday, key_source)
                     .map_err(ZewifImportError::Wallet)?;
@@ -1319,6 +1359,33 @@ fn account_purpose<S>(
             }
         }
     })
+}
+
+/// Returns `true` when every key component present in both unified full viewing
+/// keys is byte-for-byte identical.
+///
+/// A component present on only one side is ignored, so a recorded viewing key
+/// that omits a receiver the seed-derived key includes is still consistent; a
+/// component present on both sides that differs is not. Because a seed-derived
+/// key always carries every component, a mismatched account index (which changes
+/// all derived components) is always detected.
+fn ufvk_components_consistent(
+    derived: &UnifiedFullViewingKey,
+    recorded: &UnifiedFullViewingKey,
+) -> bool {
+    let transparent_ok = match (derived.transparent(), recorded.transparent()) {
+        (Some(a), Some(b)) => a.serialize() == b.serialize(),
+        _ => true,
+    };
+    let sapling_ok = match (derived.sapling(), recorded.sapling()) {
+        (Some(a), Some(b)) => a.to_bytes() == b.to_bytes(),
+        _ => true,
+    };
+    let orchard_ok = match (derived.orchard(), recorded.orchard()) {
+        (Some(a), Some(b)) => a.to_bytes() == b.to_bytes(),
+        _ => true,
+    };
+    transparent_ok && sapling_ok && orchard_ok
 }
 
 #[cfg(test)]
@@ -1716,5 +1783,87 @@ mod tests {
         assert_eq!(report.transactions_without_raw_data, 1);
         assert_eq!(report.transactions_stored, 0);
         assert_eq!(report.transactions_without_wallet_relevance, 0);
+    }
+
+    /// The raw seed for a [`TestSeed`], as ZIP 32 derivation consumes it.
+    fn test_seed_bytes(ts: &TestSeed) -> Vec<u8> {
+        <Mnemonic<English>>::from_phrase(&ts.mnemonic_phrase)
+            .unwrap()
+            .to_seed("")
+            .to_vec()
+    }
+
+    /// A derived-account document that re-derives account 0 of `ts` as an HD
+    /// account, with the fingerprint spelled by `fingerprint_encoding` on the
+    /// account's derivation record.
+    fn hd_account(
+        ts: &TestSeed,
+        fingerprint_encoding: String,
+        account_index: u32,
+    ) -> ::zewif::Account {
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+        ));
+        account.set_name("hd");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+        account.set_key_source(::zewif::KeySource::Derived(::zewif::DerivedKeySource::new(
+            ::zewif::SeedFingerprint::new(fingerprint_encoding),
+            account_index,
+            None,
+        )));
+        account
+    }
+
+    #[test]
+    fn seed_is_matched_by_a_case_differing_fingerprint_encoding() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+
+        // The account records the same fingerprint as the secret store, but in
+        // the uppercase Bech32m spelling; canonical matching must still resolve
+        // it to the delivered seed and import the account via HD derivation.
+        let account = hd_account(&ts, ts.fingerprint_encoding.to_uppercase(), 0);
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let mut sink = RecordingSink::default();
+        let report = import_wallet(&mut wdb, &doc, &mut sink).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        let imported = wdb
+            .get_account(report.imported_accounts[0].account_uuid)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(imported.source(), AccountSource::Derived { .. }));
+    }
+
+    #[test]
+    fn hd_derivation_inconsistent_with_recorded_ufvk_is_rejected() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+
+        // The account's recorded UFVK is account 0's, but its derivation record
+        // claims account index 1; re-derivation must detect the mismatch.
+        let account = hd_account(&ts, ts.fingerprint_encoding.clone(), 1);
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let result = import_wallet(&mut wdb, &doc, &mut RecordingSink::default());
+        assert!(matches!(
+            result,
+            Err(ZewifImportError::DerivedKeyMismatch { .. })
+        ));
     }
 }
