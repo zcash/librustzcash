@@ -1898,6 +1898,47 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn unified_account_is_spending_when_its_key_was_delivered() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        // Deliver a unified spending key whose viewing key matches the account's;
+        // the account (a bare UFVK with no derivation record) must then be
+        // imported as spending rather than view-only.
+        let mut store = ::zewif::SecretStore::new();
+        store.add_unified_key(::zewif::UnifiedKeyEntry::new(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+            ::zewif::UnifiedSpendingKey::new("usk1testspendingkey"),
+        ));
+
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::Ufvk(
+            ::zewif::UnifiedFullViewingKey::new(ts.ufvk.encode(&TEST_NETWORK)),
+        ));
+        account.set_name("spending");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        let imported = wdb
+            .get_account(report.imported_accounts[0].account_uuid)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            imported.source(),
+            AccountSource::Imported {
+                purpose: AccountPurpose::Spending { .. },
+                ..
+            }
+        ));
+    }
+
     /// Builds a transparent-only transaction paying `value` zatoshis to `to`
     /// under the consensus rules in force at `height`, returning its txid and
     /// raw bytes.
