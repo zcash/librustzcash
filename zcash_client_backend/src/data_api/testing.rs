@@ -57,7 +57,7 @@ use super::{
     scanning::ScanRange,
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
-        input_selection::{GreedyInputSelector, InputSelector},
+        input_selection::{GreedyInputSelector, InputSelector, SpendPolicy},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
 };
@@ -78,7 +78,7 @@ use crate::{
 use {
     super::{
         CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
-        wallet::input_selection::{ShieldingSelector, TransparentSpendPolicy},
+        wallet::input_selection::ShieldingSelector,
     },
     crate::wallet::TransparentAddressMetadata,
     ::transparent::address::TransparentAddress,
@@ -267,11 +267,12 @@ pub struct CachedBlock {
     chain_state: ChainState,
     sapling_end_size: u32,
     orchard_end_size: u32,
+    ironwood_end_size: u32,
 }
 
 impl CachedBlock {
-    /// Produces metadata for a block "before shielded time", when the Sapling and Orchard
-    /// trees were (by definition) empty.
+    /// Produces metadata for a block "before shielded time", when the Sapling, Orchard, and
+    /// Ironwood trees were (by definition) empty.
     ///
     /// `block_height` must be a height before Sapling activation (and therefore also
     /// before NU5 activation).
@@ -280,11 +281,17 @@ impl CachedBlock {
             chain_state: ChainState::empty(block_height, BlockHash([0; 32])),
             sapling_end_size: 0,
             orchard_end_size: 0,
+            ironwood_end_size: 0,
         }
     }
 
     /// Produces metadata for a block as of the given chain state.
-    pub fn at(chain_state: ChainState, sapling_end_size: u32, orchard_end_size: u32) -> Self {
+    pub fn at(
+        chain_state: ChainState,
+        sapling_end_size: u32,
+        orchard_end_size: u32,
+        ironwood_end_size: u32,
+    ) -> Self {
         assert_eq!(
             chain_state.final_sapling_tree().tree_size() as u32,
             sapling_end_size
@@ -294,11 +301,17 @@ impl CachedBlock {
             chain_state.final_orchard_tree().tree_size() as u32,
             orchard_end_size
         );
+        #[cfg(feature = "orchard")]
+        assert_eq!(
+            chain_state.final_ironwood_tree().tree_size() as u32,
+            ironwood_end_size
+        );
 
         Self {
             chain_state,
             sapling_end_size,
             orchard_end_size,
+            ironwood_end_size,
         }
     }
 
@@ -329,6 +342,25 @@ impl CachedBlock {
             sz + (tx.actions.len() as u32)
         });
 
+        #[cfg(feature = "orchard")]
+        let ironwood_final_tree = cb
+            .vtx
+            .iter()
+            .flat_map(|tx| tx.ironwood_actions.iter())
+            .fold(
+                self.chain_state.final_ironwood_tree().clone(),
+                |mut acc, c_act| {
+                    acc.append(MerkleHashOrchard::from_cmx(&c_act.cmx().unwrap()));
+                    acc
+                },
+            );
+        #[cfg(feature = "orchard")]
+        let ironwood_end_size = ironwood_final_tree.tree_size() as u32;
+        #[cfg(not(feature = "orchard"))]
+        let ironwood_end_size = cb.vtx.iter().fold(self.ironwood_end_size, |sz, tx| {
+            sz + (tx.ironwood_actions.len() as u32)
+        });
+
         Self {
             chain_state: ChainState::new(
                 cb.height(),
@@ -336,9 +368,12 @@ impl CachedBlock {
                 sapling_final_tree,
                 #[cfg(feature = "orchard")]
                 orchard_final_tree,
+                #[cfg(feature = "orchard")]
+                ironwood_final_tree,
             ),
             sapling_end_size,
             orchard_end_size,
+            ironwood_end_size,
         }
     }
 
@@ -360,6 +395,11 @@ impl CachedBlock {
     /// Returns the size of the Orchard note commitment tree as of the end of this block.
     pub fn orchard_end_size(&self) -> u32 {
         self.orchard_end_size
+    }
+
+    /// Returns the size of the Ironwood note commitment tree as of the end of this block.
+    pub fn ironwood_end_size(&self) -> u32 {
+        self.ironwood_end_size
     }
 }
 
@@ -589,6 +629,7 @@ where
             outputs,
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
+            prior_cached_block.ironwood_end_size,
             false,
         );
 
@@ -621,8 +662,7 @@ where
         cb.chain_metadata = Some(compact_formats::ChainMetadata {
             sapling_commitment_tree_size: prior_cached_block.sapling_end_size,
             orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
-            // The test framework does not generate Ironwood notes.
-            ironwood_commitment_tree_size: 0,
+            ironwood_commitment_tree_size: prior_cached_block.ironwood_end_size,
         });
 
         let res = self.cache_block(&prior_cached_block, cb);
@@ -644,6 +684,7 @@ where
         outputs: &[FakeCompactOutput<Fvk>],
         initial_sapling_tree_size: u32,
         initial_orchard_tree_size: u32,
+        initial_ironwood_tree_size: u32,
         allow_broken_hash_chain: bool,
     ) -> (Cache::InsertResult, Vec<Fvk::Nullifier>) {
         let mut prior_cached_block = self
@@ -653,6 +694,7 @@ where
         assert!(prior_cached_block.chain_state.block_height() < height);
         assert!(prior_cached_block.sapling_end_size <= initial_sapling_tree_size);
         assert!(prior_cached_block.orchard_end_size <= initial_orchard_tree_size);
+        assert!(prior_cached_block.ironwood_end_size <= initial_ironwood_tree_size);
 
         // If the block height has increased or the Sapling and/or Orchard tree sizes have changed,
         // we need to generate a new prior cached block that the block to be generated can
@@ -683,6 +725,16 @@ where
                     },
                 );
 
+            #[cfg(feature = "orchard")]
+            let final_ironwood_tree =
+                (prior_cached_block.ironwood_end_size..initial_ironwood_tree_size).fold(
+                    prior_cached_block.chain_state.final_ironwood_tree().clone(),
+                    |mut acc, _| {
+                        acc.append(MerkleHashOrchard::random(&mut self.rng));
+                        acc
+                    },
+                );
+
             prior_cached_block = CachedBlock::at(
                 ChainState::new(
                     height - 1,
@@ -690,9 +742,12 @@ where
                     final_sapling_tree,
                     #[cfg(feature = "orchard")]
                     final_orchard_tree,
+                    #[cfg(feature = "orchard")]
+                    final_ironwood_tree,
                 ),
                 initial_sapling_tree_size,
                 initial_orchard_tree_size,
+                initial_ironwood_tree_size,
             );
 
             self.cached_blocks
@@ -707,6 +762,7 @@ where
             outputs,
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            initial_ironwood_tree_size,
             &mut self.rng,
         );
         assert_eq!(cb.height(), height);
@@ -742,6 +798,7 @@ where
             value,
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
+            prior_cached_block.ironwood_end_size,
             &mut self.rng,
         );
         assert_eq!(cb.height(), height);
@@ -796,6 +853,7 @@ where
             tx,
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
+            prior_cached_block.ironwood_end_size,
             &mut self.rng,
         );
         assert_eq!(cb.height(), height);
@@ -1001,9 +1059,7 @@ where
             change_strategy,
             request,
             confirmations_policy,
-            #[cfg(feature = "transparent-inputs")]
-            &TransparentSpendPolicy::default(),
-            #[cfg(feature = "unstable")]
+            &SpendPolicy::default(),
             None,
         )?;
 
@@ -1015,8 +1071,6 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             &proposal,
-            #[cfg(feature = "unstable")]
-            None,
         )
     }
 
@@ -1046,20 +1100,18 @@ where
             change_strategy,
             request,
             confirmations_policy,
-            #[cfg(feature = "transparent-inputs")]
-            &TransparentSpendPolicy::default(),
-            #[cfg(feature = "unstable")]
+            &SpendPolicy::default(),
             None,
         )
     }
 
     /// Invokes [`propose_transfer`] with the given arguments and an explicit
-    /// [`TransparentSpendPolicy`].
+    /// [`SpendPolicy`].
     ///
-    /// Unlike [`Self::propose_transfer`], which always uses the default
-    /// (shielded-only) spend policy, this allows tests to opt in to spending the
-    /// account's transparent UTXOs.
-    #[cfg(feature = "transparent-inputs")]
+    /// Unlike [`Self::propose_transfer`], which always uses the default spend
+    /// policy (every shielded pool, no transparent), this allows tests to opt in
+    /// to spending the account's transparent UTXOs or to restrict the shielded
+    /// pools notes may be drawn from.
     #[allow(clippy::type_complexity)]
     pub fn propose_transfer_with_policy<InputsT, ChangeT>(
         &mut self,
@@ -1068,7 +1120,7 @@ where
         change_strategy: &ChangeT,
         request: zip321::TransactionRequest,
         confirmations_policy: ConfirmationsPolicy,
-        spend_policy: &TransparentSpendPolicy,
+        spend_policy: &SpendPolicy,
     ) -> Result<
         Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
         super::wallet::ProposeTransferErrT<DbT, Infallible, InputsT, ChangeT>,
@@ -1087,7 +1139,6 @@ where
             request,
             confirmations_policy,
             spend_policy,
-            #[cfg(feature = "unstable")]
             None,
         )
     }
@@ -1157,12 +1208,11 @@ where
             memo,
             change_memo,
             fallback_change_pool,
-            #[cfg(feature = "unstable")]
             None,
         );
 
         if let Ok(proposal) = &result {
-            check_proposal_serialization_roundtrip(self.wallet(), proposal);
+            check_proposal_serialization_roundtrip(&network, self.wallet(), proposal);
         }
 
         result
@@ -1269,8 +1319,6 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
-            #[cfg(feature = "unstable")]
-            None,
         )
     }
 
@@ -1509,12 +1557,13 @@ pub fn single_output_change_strategy<DbT: InputSource>(
 
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
-fn check_proposal_serialization_roundtrip<DbT: InputSource>(
+fn check_proposal_serialization_roundtrip<ParamsT: consensus::Parameters, DbT: InputSource>(
+    params: &ParamsT,
     wallet_data: &DbT,
     proposal: &Proposal<StandardFeeRule, DbT::NoteRef>,
 ) {
     let proposal_proto = crate::proto::proposal::Proposal::from_standard_proposal(proposal);
-    let deserialized_proposal = proposal_proto.try_into_standard_proposal(wallet_data);
+    let deserialized_proposal = proposal_proto.try_into_standard_proposal(params, wallet_data);
     assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }
 
@@ -1653,6 +1702,16 @@ impl<A> TestBuilder<A, ()> {
 }
 
 impl<A, B> TestBuilder<A, B> {
+    /// Overrides the network parameters used by the test (the default is
+    /// [`TestBuilder::DEFAULT_NETWORK`]). This must be called before the account birthday is
+    /// established (i.e. before `with_account_from_sapling_activation` /
+    /// `with_account_having_current_birthday`), because the birthday is derived from the network's
+    /// activation heights.
+    pub fn with_network(mut self, network: LocalNetwork) -> Self {
+        self.network = network;
+        self
+    }
+
     #[cfg(feature = "transparent-inputs")]
     pub fn with_gap_limits(self, gap_limits: GapLimits) -> TestBuilder<A, B> {
         TestBuilder {
@@ -1744,6 +1803,8 @@ impl<Cache, DsFactory> TestBuilder<Cache, DsFactory> {
     ///                 sapling_initial_tree,
     ///                 #[cfg(feature = "orchard")]
     ///                 orchard_initial_tree,
+    ///                 #[cfg(feature = "orchard")]
+    ///                 Frontier::empty(),
     ///             ),
     ///             prior_sapling_roots,
     ///             #[cfg(feature = "orchard")]
@@ -1873,6 +1934,10 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             #[cfg(feature = "orchard")]
             let _final_orchard_tree_size =
                 initial_state.chain_state.final_orchard_tree().tree_size() as u32;
+            let _final_ironwood_tree_size = 0;
+            #[cfg(feature = "orchard")]
+            let _final_ironwood_tree_size =
+                initial_state.chain_state.final_ironwood_tree().tree_size() as u32;
 
             cached_blocks.insert(
                 initial_state.chain_state.block_height(),
@@ -1880,6 +1945,7 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
                     chain_state: initial_state.chain_state.clone(),
                     sapling_end_size: final_sapling_tree_size,
                     orchard_end_size: _final_orchard_tree_size,
+                    ironwood_end_size: _final_ironwood_tree_size,
                 },
             );
         };
@@ -2257,6 +2323,116 @@ impl TestFvk for ::orchard::keys::FullViewingKey {
     }
 }
 
+/// A test-only viewing key that receives Ironwood (version 3) notes. It wraps the account's Orchard
+/// full viewing key, but its outputs are version 3 notes placed in `tx.ironwood_actions` and
+/// encrypted under the Ironwood note-encryption domain, so a wallet scanning them exercises the
+/// Ironwood receive path.
+#[cfg(feature = "orchard")]
+#[derive(Clone)]
+pub struct IronwoodFvk(pub ::orchard::keys::FullViewingKey);
+
+#[cfg(feature = "orchard")]
+impl TestFvk for IronwoodFvk {
+    type Nullifier = ::orchard::note::Nullifier;
+    type OutgoingViewingKey = ::orchard::keys::OutgoingViewingKey;
+
+    fn to_ovk(&self, scope: zip32::Scope) -> Self::OutgoingViewingKey {
+        self.0.to_ovk(scope)
+    }
+
+    fn ovk_bytes(&self, scope: zip32::Scope) -> [u8; 32] {
+        *self.0.to_ovk(scope).as_ref()
+    }
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nullifier_to_reveal: Self::Nullifier,
+        rng: &mut R,
+    ) {
+        // Generate a dummy recipient; the output will be zero-valued and be encrypted with a
+        // random OVK.
+        let recipient = loop {
+            let mut bytes = [0; 32];
+            rng.fill_bytes(&mut bytes);
+            let sk = ::orchard::keys::SpendingKey::from_bytes(bytes);
+            if sk.is_some().into() {
+                break ::orchard::keys::FullViewingKey::from(&sk.unwrap())
+                    .address_at(0u32, zip32::Scope::External);
+            }
+        };
+
+        let (cact, _) =
+            compact_ironwood_action(nullifier_to_reveal, recipient, Zatoshis::ZERO, None, rng);
+        ctx.ironwood_actions.push(cact);
+    }
+
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        _: &P,
+        _: BlockHeight,
+        sender_ovk: Option<&Self::OutgoingViewingKey>,
+        recipient_address_type: AddressType,
+        value: Zatoshis,
+        _: u32, // the position is not required for computing the Orchard nullifier
+        mut rng: &mut R,
+    ) -> Self::Nullifier {
+        // Generate a dummy nullifier for the spend
+        let nullifier_to_reveal =
+            ::orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+                .unwrap();
+
+        let (j, scope) = match recipient_address_type {
+            AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
+            AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
+            AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
+        };
+
+        let (cact, note) = compact_ironwood_action(
+            nullifier_to_reveal,
+            self.0.address_at(j, scope),
+            value,
+            sender_ovk,
+            rng,
+        );
+        ctx.ironwood_actions.push(cact);
+
+        note.nullifier(&self.0)
+    }
+
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        _: &P,
+        _: BlockHeight,
+        nf_to_reveal_in_spend: Self::Nullifier,
+        sender_ovk: Option<&Self::OutgoingViewingKey>,
+        recipient_address_type: AddressType,
+        value: Zatoshis,
+        _: u32, // the position is not required for computing the Orchard nullifier
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        let (j, scope) = match recipient_address_type {
+            AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
+            AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
+            AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
+        };
+
+        let (cact, note) = compact_ironwood_action(
+            nf_to_reveal_in_spend,
+            self.0.address_at(j, scope),
+            value,
+            sender_ovk,
+            rng,
+        );
+        ctx.ironwood_actions.push(cact);
+
+        // Return the nullifier of the newly created output note
+        note.nullifier(&self.0)
+    }
+}
+
 /// Configures how a [`TestFvk`] receives a particular output.
 ///
 /// Used with [`TestFvk::add_output`] and [`TestFvk::add_logical_action`].
@@ -2353,6 +2529,57 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
     )
 }
 
+/// Builds a version 3 (Ironwood) compact action paying `recipient` the given value, encrypted
+/// under the Ironwood note-encryption domain, for placement in `tx.ironwood_actions`. Returns the
+/// `CompactOrchardAction` and the note. This mirrors [`compact_orchard_action`], but constructs the
+/// action directly because the orchard crate's `fake_compact_action` only produces version 2 notes.
+#[cfg(feature = "orchard")]
+fn compact_ironwood_action<R: RngCore + CryptoRng>(
+    nf_old: ::orchard::note::Nullifier,
+    recipient: ::orchard::Address,
+    value: Zatoshis,
+    sender_ovk: Option<&::orchard::keys::OutgoingViewingKey>,
+    rng: &mut R,
+) -> (CompactOrchardAction, ::orchard::Note) {
+    use ::orchard::note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho};
+    use ::orchard::note_encryption::{IronwoodDomain, IronwoodNoteEncryption};
+    use zcash_note_encryption::Domain;
+
+    // Derive `rho` from the revealed nullifier exactly as the crate does internally
+    // (`Rho::from_nf_old(nf) == Rho(nf.inner())`), so that the domain the scanner reconstructs via
+    // `IronwoodDomain::for_compact_action(nf_old)` matches and decryption succeeds.
+    let rho = Rho::from_bytes(&nf_old.to_bytes()).unwrap();
+    let rseed = loop {
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        if let Some(rseed) = Option::from(RandomSeed::from_bytes(bytes, &rho)) {
+            break rseed;
+        }
+    };
+    let note = Note::from_parts(
+        recipient,
+        ::orchard::value::NoteValue::from_raw(value.into_u64()),
+        rho,
+        rseed,
+        NoteVersion::V3,
+    )
+    .unwrap();
+    let encryptor = IronwoodNoteEncryption::new(sender_ovk.cloned(), note, [0u8; 512]);
+    let cmx = ExtractedNoteCommitment::from(note.commitment());
+    let ephemeral_key = IronwoodDomain::epk_bytes(encryptor.epk());
+    let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
+    (
+        CompactOrchardAction {
+            nullifier: nf_old.to_bytes().to_vec(),
+            cmx: cmx.to_bytes().to_vec(),
+            ephemeral_key: ephemeral_key.0.to_vec(),
+            ciphertext: enc_ciphertext[..52].to_vec(),
+        },
+        note,
+    )
+}
+
 /// Creates a fake `CompactTx` with a random transaction ID and no spends or outputs.
 fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
     let mut ctx = CompactTx::default();
@@ -2409,6 +2636,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     outputs: &[FakeCompactOutput<Fvk>],
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    initial_ironwood_tree_size: u32,
     mut rng: impl RngCore + CryptoRng,
 ) -> (CompactBlock, Vec<Fvk::Nullifier>) {
     // Create a fake CompactBlock containing the note
@@ -2434,6 +2662,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
         prev_hash,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        initial_ironwood_tree_size,
         rng,
     );
     (cb, nfs)
@@ -2441,6 +2670,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
 
 /// Create a fake CompactBlock at the given height containing only the given transaction.
 // TODO: `tx` could be a slice and we could add multiple transactions here
+#[allow(clippy::too_many_arguments)]
 fn fake_compact_block_from_tx(
     height: BlockHeight,
     prev_hash: BlockHash,
@@ -2448,6 +2678,7 @@ fn fake_compact_block_from_tx(
     tx: &Transaction,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    initial_ironwood_tree_size: u32,
     rng: impl RngCore,
 ) -> CompactBlock {
     // Create a fake CompactTx containing the transaction.
@@ -2473,12 +2704,20 @@ fn fake_compact_block_from_tx(
         }
     }
 
+    #[cfg(feature = "orchard")]
+    if let Some(bundle) = tx.ironwood_bundle() {
+        for action in bundle.actions() {
+            ctx.ironwood_actions.push(action.into());
+        }
+    }
+
     fake_compact_block_from_compact_tx(
         ctx,
         height,
         prev_hash,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        initial_ironwood_tree_size,
         rng,
     )
 }
@@ -2496,6 +2735,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     value: Zatoshis,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    initial_ironwood_tree_size: u32,
     mut rng: impl RngCore + CryptoRng,
 ) -> CompactBlock {
     let mut ctx = fake_compact_tx(&mut rng);
@@ -2584,6 +2824,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
         prev_hash,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        initial_ironwood_tree_size,
         rng,
     )
 }
@@ -2594,6 +2835,7 @@ fn fake_compact_block_from_compact_tx(
     prev_hash: BlockHash,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    initial_ironwood_tree_size: u32,
     mut rng: impl RngCore,
 ) -> CompactBlock {
     let mut cb = CompactBlock {
@@ -2612,8 +2854,11 @@ fn fake_compact_block_from_compact_tx(
             + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
         orchard_commitment_tree_size: initial_orchard_tree_size
             + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
-        // The test framework does not generate Ironwood notes.
-        ironwood_commitment_tree_size: 0,
+        ironwood_commitment_tree_size: initial_ironwood_tree_size
+            + cb.vtx
+                .iter()
+                .map(|tx| tx.ironwood_actions.len() as u32)
+                .sum::<u32>(),
     });
     cb
 }
@@ -2950,6 +3195,14 @@ impl WalletRead for MockWalletDb {
 
     #[cfg(feature = "orchard")]
     fn get_orchard_nullifiers(
+        &self,
+        _query: NullifierQuery,
+    ) -> Result<Vec<(Self::AccountId, ::orchard::note::Nullifier)>, Self::Error> {
+        Ok(Vec::new())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_nullifiers(
         &self,
         _query: NullifierQuery,
     ) -> Result<Vec<(Self::AccountId, ::orchard::note::Nullifier)>, Self::Error> {
