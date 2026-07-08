@@ -20,6 +20,7 @@ impl super::Updater {
             .into_parsed_with_version(
                 crate::orchard::orchard_bundle_version(&global)
                     .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
+                global.tx_version,
             )
             .map_err(OrchardError::Parser)?;
 
