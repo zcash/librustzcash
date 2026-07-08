@@ -123,11 +123,12 @@ use {
         fees::StandardFeeRule,
         wallet::TransparentAddressMetadata,
     },
-    zcash_keys::{
-        encoding::AddressCodec,
-        keys::transparent::gap_limits::{AddressStore, GapLimits},
-    },
+    zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
 };
+
+#[cfg(feature = "transparent-inputs")]
+#[allow(unused_imports)]
+use zcash_keys::encoding::AddressCodec;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 use {

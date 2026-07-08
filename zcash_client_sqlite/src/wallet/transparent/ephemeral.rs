@@ -1,19 +1,24 @@
 //! Functions for wallet support of ephemeral transparent addresses.
+#[allow(unused_imports)]
 use std::{ops::Range, time::SystemTime};
 
 use rand::{RngCore, seq::SliceRandom};
 use rusqlite::{OptionalExtension, named_params};
 
+#[allow(unused_imports)]
 use ::transparent::{
     address::TransparentAddress,
     keys::{NonHardenedChildIndex, TransparentKeyScope},
 };
 use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
+#[allow(unused_imports)]
 use zcash_keys::encoding::AddressCodec;
+#[allow(unused_imports)]
 use zcash_protocol::consensus::{self, BlockHeight};
 
 #[cfg(any(test, feature = "test-dependencies"))]
 use crate::GapLimits;
+#[allow(unused_imports)]
 use crate::{
     AccountRef, AccountUuid,
     error::SqliteClientError,
@@ -28,6 +33,7 @@ use super::next_check_time;
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
+#[allow(dead_code)]
 pub(crate) fn metadata(
     address_index: NonHardenedChildIndex,
     exposure: Exposure,
@@ -132,6 +138,7 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
 }
 
 /// If this is a known ephemeral address in any account, return its account id.
+#[allow(dead_code)]
 pub(crate) fn find_account_for_ephemeral_address_str(
     conn: &rusqlite::Connection,
     address_str: &str,
