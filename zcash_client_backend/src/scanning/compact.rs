@@ -314,14 +314,26 @@ where
         let tx_index =
             TxIndex::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
 
+        // A compact spend carries its nullifier as raw bytes; validate them up front so that a
+        // malformed (wrong-length) nullifier from an untrusted server yields a handleable
+        // `ScanError` rather than panicking the scanner.
+        let sapling_spend_nfs = tx
+            .spends
+            .iter()
+            .enumerate()
+            .map(|(index, spend)| {
+                spend.nf().map_err(|_| ScanError::EncodingInvalid {
+                    at_height: cur_height,
+                    txid,
+                    pool_type: ShieldedPool::Sapling,
+                    index,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let (sapling_spends, sapling_unlinked_nullifiers) = find_spent(
-            &tx.spends,
+            &sapling_spend_nfs,
             &nullifiers.sapling,
-            |spend| {
-                spend.nf().expect(
-                    "Could not deserialize nullifier for spend from protobuf representation.",
-                )
-            },
+            |nf| *nf,
             WalletSpend::from_parts,
         );
 
@@ -329,14 +341,23 @@ where
 
         #[cfg(feature = "orchard")]
         let orchard_spends = {
+            let orchard_spend_nfs = tx
+                .actions
+                .iter()
+                .enumerate()
+                .map(|(index, spend)| {
+                    spend.nf().map_err(|_| ScanError::EncodingInvalid {
+                        at_height: cur_height,
+                        txid,
+                        pool_type: ShieldedPool::Orchard,
+                        index,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let (orchard_spends, orchard_unlinked_nullifiers) = find_spent(
-                &tx.actions,
+                &orchard_spend_nfs,
                 &nullifiers.orchard,
-                |spend| {
-                    spend.nf().expect(
-                        "Could not deserialize nullifier for spend from protobuf representation.",
-                    )
-                },
+                |nf| *nf,
                 WalletSpend::from_parts,
             );
             orchard_nullifier_map.push((tx_index, txid, orchard_unlinked_nullifiers));
@@ -345,14 +366,23 @@ where
 
         #[cfg(feature = "orchard")]
         let ironwood_spends = {
+            let ironwood_spend_nfs = tx
+                .ironwood_actions
+                .iter()
+                .enumerate()
+                .map(|(index, spend)| {
+                    spend.nf().map_err(|_| ScanError::EncodingInvalid {
+                        at_height: cur_height,
+                        txid,
+                        pool_type: ShieldedPool::Ironwood,
+                        index,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let (ironwood_spends, ironwood_unlinked_nullifiers) = find_spent(
-                &tx.ironwood_actions,
+                &ironwood_spend_nfs,
                 &nullifiers.ironwood,
-                |spend| {
-                    spend.nf().expect(
-                        "Could not deserialize nullifier for spend from protobuf representation.",
-                    )
-                },
+                |nf| *nf,
                 WalletSpend::from_parts,
             );
             ironwood_nullifier_map.push((tx_index, txid, ironwood_unlinked_nullifiers));
@@ -1018,6 +1048,77 @@ mod tests {
             prop_assert_eq!(scanned_block.ironwood().final_tree_size(), 1);
             prop_assert_eq!(scanned_block.orchard().final_tree_size(), 0);
         }
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn malformed_compact_ironwood_spend_nullifier_is_a_scan_error() {
+        use zcash_protocol::ShieldedPool;
+
+        use super::ScanError;
+        use crate::proto::compact_formats::{
+            ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
+        };
+
+        let network = Network::TestNetwork;
+        let account = AccountId::ZERO;
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
+        let scanning_keys =
+            ScanningKeys::from_account_ufvks([(account, usk.to_unified_full_viewing_key())]);
+
+        // A compact Ironwood action whose revealed nullifier is not 32 bytes, as a buggy or
+        // malicious lightwalletd might serve. The output fields are well-formed, so it is the
+        // spend-side nullifier validation that must reject the block (rather than panicking).
+        let action = CompactOrchardAction {
+            nullifier: vec![0u8; 31],
+            cmx: vec![0u8; 32],
+            ephemeral_key: vec![0u8; 32],
+            ciphertext: vec![0u8; 52],
+        };
+        let mut ctx = CompactTx {
+            txid: vec![0u8; 32],
+            ..Default::default()
+        };
+        ctx.ironwood_actions.push(action);
+        let mut cb = CompactBlock {
+            hash: vec![0u8; 32],
+            prev_hash: vec![0u8; 32],
+            height: 1,
+            ..Default::default()
+        };
+        cb.vtx.push(ctx);
+        cb.chain_metadata = Some(ChainMetadata {
+            sapling_commitment_tree_size: 0,
+            orchard_commitment_tree_size: 0,
+            ironwood_commitment_tree_size: 1,
+        });
+
+        // Single-threaded scan (no batch runners); the spend-side nullifier check runs first.
+        let result = scan_block_with_runners::<_, _, _, (), (), ()>(
+            &network,
+            cb,
+            &scanning_keys,
+            &Nullifiers::empty(),
+            Some(&BlockMetadata::from_parts(
+                BlockHeight::from(0),
+                BlockHash([0u8; 32]),
+                Some(0),
+                Some(0),
+                Some(0),
+            )),
+            None,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(ScanError::EncodingInvalid {
+                    pool_type: ShieldedPool::Ironwood,
+                    index: 0,
+                    ..
+                })
+            ),
+            "a malformed Ironwood spend nullifier must produce a handleable ScanError",
+        );
     }
 
     #[test]
