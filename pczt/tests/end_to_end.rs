@@ -996,11 +996,24 @@ fn check_v2_round_trip(pczt: &Pczt) {
 
 #[derive(Clone, Copy)]
 enum ShieldedPool {
+    Sapling,
     Orchard,
     Ironwood,
 }
 
 fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
+    if matches!(pool, ShieldedPool::Sapling) {
+        return Creator::new(
+            zcash_protocol::consensus::BranchId::Nu6.into(),
+            10_000_000,
+            133,
+            [9; 32],
+            [0; 32],
+        )
+        .unwrap()
+        .build();
+    }
+
     if matches!(pool, ShieldedPool::Orchard) {
         return Creator::new(
             zcash_protocol::consensus::BranchId::Nu6_3.into(),
@@ -1072,6 +1085,9 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
 
 fn redact_anchor(pczt: Pczt, pool: ShieldedPool) -> Pczt {
     match pool {
+        ShieldedPool::Sapling => Redactor::new(pczt)
+            .redact_sapling_with(|mut r| r.clear_anchor())
+            .finish(),
         ShieldedPool::Orchard => Redactor::new(pczt)
             .redact_orchard_with(|mut r| r.clear_anchor())
             .finish(),
@@ -1083,6 +1099,7 @@ fn redact_anchor(pczt: Pczt, pool: ShieldedPool) -> Pczt {
 
 fn assert_anchor_redacted(pczt: &Pczt, pool: ShieldedPool) {
     match pool {
+        ShieldedPool::Sapling => assert!(pczt.sapling().anchor().is_none()),
         ShieldedPool::Orchard => assert!(pczt.orchard().anchor().is_none()),
         ShieldedPool::Ironwood => assert!(pczt.ironwood().anchor().is_none()),
     }
@@ -1095,6 +1112,14 @@ fn assert_redacted_anchor_v2_round_trip(pczt: Pczt, pool: ShieldedPool) {
 
     let reparsed = Pczt::parse(&redacted.serialize().unwrap()).unwrap();
     assert_anchor_redacted(&reparsed, pool);
+}
+
+#[test]
+fn redacted_sapling_anchor_round_trips_v2() {
+    assert_redacted_anchor_v2_round_trip(
+        pczt_with_anchor(ShieldedPool::Sapling),
+        ShieldedPool::Sapling,
+    );
 }
 
 /// A regtest network with NU6.3 activated, for exercising the Ironwood pool.
