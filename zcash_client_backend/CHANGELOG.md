@@ -37,6 +37,10 @@ workspace.
   protocol (Sapling or Orchard).
 - `zcash_client_backend::proposal::Proposal::input_count_in_pool`, which returns
   the total number of inputs from a given pool across all steps of the proposal.
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::anchor_height`,
+  which returns the shielded anchor height for a given target height under the
+  policy. It is used to resolve the anchor of a proposal step that spends no
+  shielded notes and therefore defers its anchor choice.
 - `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
   `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
   funds in an account. Received Ironwood notes are now included in the account's
@@ -312,13 +316,24 @@ workspace.
     whether the Ironwood pool is active at the target height; when set, the
     step is validated against the Orchard turnstile (see
     `ProposalError::OrchardPoolValueCreation`).
+  - `Proposal::single_step` and `Proposal::multi_step` now take the
+    `ConfirmationsPolicy` under which the proposal was constructed, exposed by
+    the new `Proposal::confirmations_policy` accessor. It is used to resolve the
+    anchor of a step that defers its anchor choice (see `Step::anchor_height`).
   - The shielded anchor height has moved from `ShieldedInputs` to `Step`:
-    `Step::anchor_height` is new, `ShieldedInputs::from_parts` no longer takes an
-    anchor height, and `ShieldedInputs::anchor_height` has been removed.
+    `Step::anchor_height` is new and returns `Option<BlockHeight>`. It is `Some`
+    only for a step that spends shielded notes; a step with no shielded inputs
+    returns `None`, deferring its anchor to interpretation time where it is
+    resolved from the proposal's confirmations policy and target height.
+    `ShieldedInputs::from_parts` no longer takes an anchor height, and
+    `ShieldedInputs::anchor_height` has been removed.
 - `zcash_client_backend::proto::proposal::Proposal::try_into_standard_proposal`
   now takes the network parameters as an additional argument, in order to
   validate decoded proposals against the Orchard turnstile when Ironwood is
-  active at the proposal's target height.
+  active at the proposal's target height. The serialized proposal format gains a
+  `confirmationsPolicy` field; a proposal serialized without it (by an earlier
+  version) decodes using the default confirmations policy, and a step's zero
+  anchor height decodes as a deferred anchor.
 - The change strategies in `zcash_client_backend::fees` now enforce the Orchard
   turnstile when selecting the change pool for a proposal with a post-NU6.3
   target height: change is directed to the Orchard pool only when the

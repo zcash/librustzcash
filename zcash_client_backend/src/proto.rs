@@ -7,6 +7,7 @@ use std::{
     collections::BTreeMap,
     fmt::{self, Display},
     io,
+    num::NonZeroU32,
 };
 use zcash_address::unified::{self, Encoding};
 
@@ -26,7 +27,11 @@ use zcash_protocol::{
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
-    data_api::{InputSource, chain::ChainState, wallet::TargetHeight},
+    data_api::{
+        InputSource,
+        chain::ChainState,
+        wallet::{ConfirmationsPolicy, TargetHeight},
+    },
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
 };
@@ -498,6 +503,9 @@ pub enum ProposalDecodingError<DbError> {
     InvalidChangeRecipient(PoolType),
     /// Ephemeral outputs to the specified pool are not supported.
     InvalidEphemeralRecipient(PoolType),
+    /// The encoded confirmations policy was not valid (for example, a zero confirmation count or
+    /// trusted confirmations exceeding untrusted).
+    ConfirmationsPolicyInvalid,
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -557,6 +565,9 @@ impl<E: Display> Display for ProposalDecodingError<E> {
                 f,
                 "Ephemeral outputs to the {pool_type} pool are not supported."
             ),
+            ProposalDecodingError::ConfirmationsPolicyInvalid => {
+                write!(f, "The encoded confirmations policy was not valid.")
+            }
         }
     }
 }
@@ -629,7 +640,9 @@ impl proposal::Proposal {
             .map(|step| {
                 let transaction_request = step.transaction_request().to_uri();
 
-                let anchor_height = u32::from(step.anchor_height());
+                // A step that defers its anchor (no shielded inputs) encodes as the zero sentinel,
+                // matching the `anchorHeight` field's documented "no shielded inputs" meaning.
+                let anchor_height = step.anchor_height().map_or(0, u32::from);
 
                 let inputs = step
                     .transparent_inputs()
@@ -722,6 +735,7 @@ impl proposal::Proposal {
             })
             .collect();
 
+        let confirmations_policy = value.confirmations_policy();
         proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             fee_rule: match value.fee_rule() {
@@ -730,6 +744,14 @@ impl proposal::Proposal {
             .into(),
             min_target_height: value.min_target_height().into(),
             steps,
+            confirmations_policy: Some(proposal::ConfirmationsPolicy {
+                trusted: confirmations_policy.trusted().into(),
+                untrusted: confirmations_policy.untrusted().into(),
+                #[cfg(feature = "transparent-inputs")]
+                allow_zero_conf_shielding: confirmations_policy.allow_zero_conf_shielding(),
+                #[cfg(not(feature = "transparent-inputs"))]
+                allow_zero_conf_shielding: true,
+            }),
         }
     }
 
@@ -950,9 +972,26 @@ impl proposal::Proposal {
                     steps.push(step);
                 }
 
+                // Reconstruct the confirmations policy the proposal was built under. Proposals
+                // serialized before this field existed omit it and are interpreted using the
+                // default policy.
+                let confirmations_policy = match &self.confirmations_policy {
+                    Some(cp) => ConfirmationsPolicy::new(
+                        NonZeroU32::new(cp.trusted)
+                            .ok_or(ProposalDecodingError::ConfirmationsPolicyInvalid)?,
+                        NonZeroU32::new(cp.untrusted)
+                            .ok_or(ProposalDecodingError::ConfirmationsPolicyInvalid)?,
+                        #[cfg(feature = "transparent-inputs")]
+                        cp.allow_zero_conf_shielding,
+                    )
+                    .map_err(|_| ProposalDecodingError::ConfirmationsPolicyInvalid)?,
+                    None => ConfirmationsPolicy::default(),
+                };
+
                 Proposal::multi_step(
                     fee_rule,
                     target_height,
+                    confirmations_policy,
                     NonEmpty::from_vec(steps).ok_or(ProposalDecodingError::NoSteps)?,
                 )
                 .map_err(ProposalDecodingError::ProposalInvalid)

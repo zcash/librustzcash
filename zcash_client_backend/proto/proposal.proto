@@ -18,6 +18,21 @@ message Proposal {
     uint32 minTargetHeight = 3;
     // The series of transactions to be created.
     repeated ProposalStep steps = 4;
+    // The confirmations policy under which the proposal was constructed. It is used to resolve the
+    // anchor for any step that spends no shielded notes (such a step defers the choice of anchor).
+    // Proposals serialized by older versions omit this field; they are interpreted using the
+    // default confirmations policy.
+    ConfirmationsPolicy confirmationsPolicy = 5;
+}
+
+// The number of confirmations required before notes may be spent, per ZIP 315.
+message ConfirmationsPolicy {
+    // The number of confirmations required before trusted notes may be spent.
+    uint32 trusted = 1;
+    // The number of confirmations required before untrusted notes may be spent.
+    uint32 untrusted = 2;
+    // Whether transparent inputs may be spent with zero confirmations in shielding transactions.
+    bool allowZeroConfShielding = 3;
 }
 
 // A data structure that describes the inputs to be consumed and outputs to

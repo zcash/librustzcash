@@ -11,7 +11,7 @@ use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zato
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
-    data_api::wallet::TargetHeight,
+    data_api::wallet::{ConfirmationsPolicy, TargetHeight},
     fees::TransactionBalance,
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
 };
@@ -221,6 +221,10 @@ impl<NoteRef> ShieldedInputs<NoteRef> {
 pub struct Proposal<FeeRuleT, NoteRef> {
     fee_rule: FeeRuleT,
     min_target_height: TargetHeight,
+    /// The confirmations policy under which the proposal was constructed. It is used to resolve
+    /// the anchor for any step that defers its anchor choice (a step with no shielded inputs; see
+    /// [`Step::anchor_height`]).
+    confirmations_policy: ConfirmationsPolicy,
     steps: NonEmpty<Step<NoteRef>>,
 }
 
@@ -238,6 +242,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn multi_step(
         fee_rule: FeeRuleT,
         min_target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         steps: NonEmpty<Step<NoteRef>>,
     ) -> Result<Self, ProposalError> {
         let mut consumed_chain_inputs: BTreeSet<(PoolType, TxId, u32)> = BTreeSet::new();
@@ -302,6 +307,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         Ok(Self {
             fee_rule,
             min_target_height,
+            confirmations_policy,
             steps,
         })
     }
@@ -334,12 +340,14 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
         min_target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
         is_shielding: bool,
         #[cfg(feature = "orchard")] ironwood_active: bool,
     ) -> Result<Self, ProposalError> {
         Ok(Self {
             fee_rule,
             min_target_height,
+            confirmations_policy,
             steps: NonEmpty::singleton(Step::from_parts(
                 &[],
                 transaction_request,
@@ -367,6 +375,13 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// be executed.
     pub fn min_target_height(&self) -> TargetHeight {
         self.min_target_height
+    }
+
+    /// Returns the confirmations policy under which the proposal was constructed. It is used to
+    /// resolve the anchor for any step that defers its anchor choice (a step with no shielded
+    /// inputs; see [`Step::anchor_height`]).
+    pub fn confirmations_policy(&self) -> ConfirmationsPolicy {
+        self.confirmations_policy
     }
 
     /// Returns the steps of the proposal. Each step corresponds to an independent transaction to
@@ -443,11 +458,16 @@ pub struct Step<NoteRef> {
     transparent_inputs: Vec<WalletTransparentOutput<()>>,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     /// The anchor height that binds every shielded-tree lookup performed while building this
-    /// step's transaction — both shielded-input witnesses and shielded-output anchors. A single
-    /// anchor per step is required so that transactions with only routed shielded outputs (for
-    /// example, an Orchard-recipient payment post-NU6.3 that the builder routes into a fresh
-    /// Ironwood bundle) are indistinguishable from transactions that spend real shielded notes.
-    anchor_height: BlockHeight,
+    /// step's transaction — both shielded-input witnesses and shielded-output anchors.
+    ///
+    /// This is `Some` only when the step spends shielded notes, which must be witnessed against a
+    /// specific anchor. A step with no shielded inputs carries `None` and defers the choice of
+    /// anchor to interpretation time, where it is derived from the proposal's confirmations policy
+    /// and target height; such a step witnesses no notes, so any recent valid anchor is sound. The
+    /// resolved anchor is still applied to every shielded-output bundle, so a transaction with only
+    /// routed shielded outputs (for example an Orchard-receiver payment routed into the Ironwood
+    /// bundle post-NU6.3) remains indistinguishable from one that spends real shielded notes.
+    anchor_height: Option<BlockHeight>,
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
     is_shielding: bool,
@@ -618,6 +638,11 @@ impl<NoteRef> Step<NoteRef> {
             }
         }
 
+        // Only a step that spends shielded notes binds a concrete anchor (needed to witness those
+        // notes). An input-less step defers to interpretation time, so its stored anchor is `None`
+        // regardless of the value passed here.
+        let anchor_height = shielded_inputs.as_ref().map(|_| anchor_height);
+
         if input_total == output_total {
             Ok(Self {
                 transaction_request,
@@ -655,8 +680,9 @@ impl<NoteRef> Step<NoteRef> {
         self.shielded_inputs.as_ref()
     }
     /// Returns the anchor height that binds every shielded-tree lookup performed while building
-    /// this step's transaction.
-    pub fn anchor_height(&self) -> BlockHeight {
+    /// this step's transaction, or `None` if the step spends no shielded notes and therefore
+    /// defers the choice of anchor to interpretation time.
+    pub fn anchor_height(&self) -> Option<BlockHeight> {
         self.anchor_height
     }
     /// Returns the inputs that should be obtained from the outputs of the transaction
@@ -819,7 +845,7 @@ mod tests {
 
     use super::{Proposal, ProposalError, ShieldedInputs, Step};
     use crate::{
-        data_api::wallet::TargetHeight,
+        data_api::wallet::{ConfirmationsPolicy, TargetHeight},
         fees::{ChangeValue, TransactionBalance},
         wallet::Note,
     };
@@ -869,7 +895,7 @@ mod tests {
             payment_pools: BTreeMap::new(),
             transparent_inputs: vec![],
             shielded_inputs,
-            anchor_height: BlockHeight::from_u32(100),
+            anchor_height: Some(BlockHeight::from_u32(100)),
             prior_step_inputs: vec![],
             balance: TransactionBalance::new(vec![], Zatoshis::ZERO).unwrap(),
             is_shielding: false,
@@ -1143,6 +1169,7 @@ mod tests {
             let proposal = Proposal::<(), u32> {
                 fee_rule: (),
                 min_target_height: TargetHeight::from(100u32),
+                confirmations_policy: ConfirmationsPolicy::default(),
                 steps: NonEmpty::from_vec(vec![step1, step2]).unwrap(),
             };
             prop_assert_eq!(proposal.input_count_in_pool(PoolType::SAPLING), 0);

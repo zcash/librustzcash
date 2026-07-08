@@ -398,7 +398,7 @@ impl core::fmt::Display for ConfirmationsPolicyError {
 }
 
 /// [`ZIP 315`]: https://zips.z.cash/zip-0315
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConfirmationsPolicy {
     trusted: NonZeroU32,
     untrusted: NonZeroU32,
@@ -537,6 +537,17 @@ impl ConfirmationsPolicy {
     /// [`ZIP 315`]: https://zips.z.cash/zip-0315#trusted-and-untrusted-txos
     pub fn untrusted(&self) -> NonZeroU32 {
         self.untrusted
+    }
+
+    /// Returns the shielded anchor height to use for a transaction targeting `target_height` under
+    /// this policy: `target_height` less the number of required trusted confirmations.
+    ///
+    /// This is the anchor used to interpret a proposal step that does not carry an explicit anchor
+    /// height (see [`crate::proposal::Step::anchor_height`]). Such a step spends no shielded notes,
+    /// so any recent valid anchor is sound; deferring the choice to interpretation lets it reflect
+    /// the confirmations policy under which the proposal was constructed.
+    pub fn anchor_height(&self, target_height: TargetHeight) -> BlockHeight {
+        target_height.saturating_sub(u32::from(self.trusted()))
     }
 
     /// Returns whether or not transparent inputs may be spent with zero confirmations in shielding
@@ -1056,6 +1067,7 @@ where
             ovk_policy.clone(),
             proposal.fee_rule(),
             proposal.min_target_height(),
+            proposal.confirmations_policy(),
             &step_results,
             step,
             #[cfg(feature = "transparent-inputs")]
@@ -1208,6 +1220,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     min_target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1253,11 +1266,16 @@ where
         return Err(Error::ProposalNotSupported);
     }
 
-    // Each shielded-tree anchor is derived from the step's single anchor height so that a
-    // transaction with only routed shielded outputs (for example, an Orchard-recipient payment
-    // routed by the builder into a fresh Ironwood bundle post-NU6.3) is indistinguishable from
-    // one that spends real notes in that pool.
-    let anchor_height = proposal_step.anchor_height();
+    // Every shielded-tree lookup for this step is bound to a single anchor height, so that a
+    // transaction with only routed shielded outputs (for example, an Orchard-receiver payment
+    // routed into a fresh Ironwood bundle post-NU6.3) is indistinguishable from one that spends
+    // real notes in that pool. A step that spends shielded notes carries an explicit anchor; a
+    // step with no shielded inputs deferred the choice, so resolve it now from the proposal's
+    // confirmations policy and target height (it witnesses no notes, so any recent anchor is
+    // sound).
+    let anchor_height = proposal_step
+        .anchor_height()
+        .unwrap_or_else(|| confirmations_policy.anchor_height(min_target_height));
 
     let (sapling_anchor, sapling_inputs) = if proposal_step
         .involves(PoolType::Shielded(ShieldedPool::Sapling))
@@ -1972,6 +1990,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
     ovk_policy: OvkPolicy,
     fee_rule: &FeeRuleT,
     min_target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
     prior_step_results: &[(&Step<N>, StepResult<<DbT as WalletRead>::AccountId>)],
     proposal_step: &Step<N>,
     #[cfg(feature = "transparent-inputs")] unused_transparent_outputs: &mut HashMap<
@@ -1995,6 +2014,7 @@ where
         account_id,
         ovk_policy,
         min_target_height,
+        confirmations_policy,
         prior_step_results,
         proposal_step,
         #[cfg(feature = "transparent-inputs")]
@@ -2303,6 +2323,7 @@ where
         account_id,
         ovk_policy,
         min_target_height,
+        proposal.confirmations_policy(),
         prior_step_results,
         proposal_step,
         #[cfg(feature = "transparent-inputs")]

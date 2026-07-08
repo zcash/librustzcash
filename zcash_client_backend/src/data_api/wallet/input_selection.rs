@@ -1259,6 +1259,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         tr0_balance,
                         target_height,
                         anchor_height,
+                        confirmations_policy,
                         shielded_inputs,
                         transparent_inputs,
                         transaction_request,
@@ -1697,6 +1698,7 @@ where
         tr0_balance,
         target_height,
         anchor_height,
+        confirmations_policy,
         shielded_inputs,
         vec![],
         transaction_request,
@@ -1731,6 +1733,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
     tr0_balance: TransactionBalance,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
+    confirmations_policy: ConfirmationsPolicy,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     transparent_inputs: Vec<WalletTransparentOutput<()>>,
     transaction_request: TransactionRequest,
@@ -1810,6 +1813,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
         return Proposal::multi_step(
             fee_rule.clone(),
             target_height,
+            confirmations_policy,
             NonEmpty::from_vec(steps).expect("steps is known to be nonempty"),
         );
     }
@@ -1823,6 +1827,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
         tr0_balance,
         fee_rule.clone(),
         target_height,
+        confirmations_policy,
         false,
         #[cfg(feature = "orchard")]
         ironwood_active,
@@ -1886,6 +1891,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 balance,
                 (*change_strategy.fee_rule()).clone(),
                 target_height,
+                confirmations_policy,
                 true,
                 #[cfg(feature = "orchard")]
                 ironwood_active_at(params, target_height),
@@ -2057,6 +2063,10 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             final_balance,
             fee_rule.clone(),
             target_height,
+            // Coinbase shielding spends no shielded notes, so the anchor the resulting step defers
+            // to is resolved from this policy at interpretation; the exact confirmation depth does
+            // not matter for an input-less step.
+            ConfirmationsPolicy::default(),
             false,
             #[cfg(feature = "orchard")]
             ironwood_active_at(params, target_height),

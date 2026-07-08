@@ -881,6 +881,12 @@ pub(crate) mod tests {
 
     #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
     #[test]
+    fn legacy_proposal_without_confirmations_policy_builds() {
+        testing::pool::legacy_proposal_without_confirmations_policy_builds::<OrchardPoolTester>();
+    }
+
+    #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
+    #[test]
     fn propose_shielding_coinbase_transparent_recipient_rejected() {
         testing::pool::propose_shielding_coinbase_transparent_recipient_rejected::<OrchardPoolTester>(
         );

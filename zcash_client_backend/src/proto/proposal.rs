@@ -17,6 +17,25 @@ pub struct Proposal {
     /// The series of transactions to be created.
     #[prost(message, repeated, tag = "4")]
     pub steps: ::prost::alloc::vec::Vec<ProposalStep>,
+    /// The confirmations policy under which the proposal was constructed. It is used to resolve the
+    /// anchor for any step that spends no shielded notes (such a step defers the choice of anchor).
+    /// Proposals serialized by older versions omit this field; they are interpreted using the
+    /// default confirmations policy.
+    #[prost(message, optional, tag = "5")]
+    pub confirmations_policy: ::core::option::Option<ConfirmationsPolicy>,
+}
+/// The number of confirmations required before notes may be spent, per ZIP 315.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ConfirmationsPolicy {
+    /// The number of confirmations required before trusted notes may be spent.
+    #[prost(uint32, tag = "1")]
+    pub trusted: u32,
+    /// The number of confirmations required before untrusted notes may be spent.
+    #[prost(uint32, tag = "2")]
+    pub untrusted: u32,
+    /// Whether transparent inputs may be spent with zero confirmations in shielding transactions.
+    #[prost(bool, tag = "3")]
+    pub allow_zero_conf_shielding: bool,
 }
 /// A data structure that describes the inputs to be consumed and outputs to
 /// be produced in a proposed transaction.
