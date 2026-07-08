@@ -332,10 +332,13 @@ workspace.
 - `zcash_client_backend::proto::proposal::Proposal::try_into_standard_proposal`
   now takes the network parameters as an additional argument, in order to
   validate decoded proposals against the Orchard turnstile when Ironwood is
-  active at the proposal's target height. The serialized proposal format gains a
-  `confirmationsPolicy` field; a proposal serialized without it (by an earlier
-  version) decodes using the default confirmations policy, and a step's zero
-  anchor height decodes as a deferred anchor.
+  active at the proposal's target height. It rejects a proposal that directs a
+  payment to the Orchard pool once Ironwood is active with the new
+  `ProposalDecodingError::OrchardPaymentProhibited` (returning an error rather
+  than panicking on untrusted or legacy input). The serialized proposal format
+  gains a `confirmationsPolicy` field; a proposal serialized without it (by an
+  earlier version) decodes using the default confirmations policy, and a step's
+  zero anchor height decodes as a deferred anchor.
 - The change strategies in `zcash_client_backend::fees` now enforce the Orchard
   turnstile when selecting the change pool for a proposal with a post-NU6.3
   target height: change is directed to the Orchard pool only when the

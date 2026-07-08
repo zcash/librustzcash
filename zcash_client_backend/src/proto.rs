@@ -506,6 +506,10 @@ pub enum ProposalDecodingError<DbError> {
     /// The encoded confirmations policy was not valid (for example, a zero confirmation count or
     /// trusted confirmations exceeding untrusted).
     ConfirmationsPolicyInvalid,
+    /// A payment was directed to the Orchard pool while Ironwood is active at the proposal's target
+    /// height. Once Ironwood is active, Orchard-receiver payments target the Ironwood pool and only
+    /// change may return to Orchard, so such a payment cannot appear in a well-formed proposal.
+    OrchardPaymentProhibited,
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -568,6 +572,10 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::ConfirmationsPolicyInvalid => {
                 write!(f, "The encoded confirmations policy was not valid.")
             }
+            ProposalDecodingError::OrchardPaymentProhibited => write!(
+                f,
+                "A payment may not be directed to the Orchard pool once Ironwood is active."
+            ),
         }
     }
 }
@@ -803,6 +811,19 @@ impl proposal::Proposal {
                             ))
                         })
                         .collect::<Result<BTreeMap<usize, PoolType>, ProposalDecodingError<DbError>>>()?;
+
+                    // With Ironwood active, no payment may be directed to the Orchard pool: an
+                    // Orchard-receiver payment targets the Ironwood pool, and only change may
+                    // return to Orchard. Reject such a payment from untrusted or legacy input here,
+                    // rather than letting it reach the `debug_assert!` in `Step::from_parts`.
+                    #[cfg(feature = "orchard")]
+                    if ironwood_active
+                        && payment_pools
+                            .values()
+                            .any(|pool| *pool == PoolType::ORCHARD)
+                    {
+                        return Err(ProposalDecodingError::OrchardPaymentProhibited);
+                    }
 
                     #[allow(unused_mut)]
                     let mut transparent_inputs = vec![];

@@ -1856,6 +1856,71 @@ pub(crate) mod tests {
             );
         }
 
+        /// Once Ironwood is active, a payment may not be directed to the Orchard pool: input
+        /// selection routes Orchard-receiver payments to the Ironwood pool. A proposal that
+        /// nonetheless directs a payment to the Orchard pool can only arise from a programming
+        /// error or untrusted/legacy input. Decoding such a proposal must return a
+        /// `ProposalDecodingError` rather than panicking — the internal `Step::from_parts`
+        /// invariant is a `debug_assert!`, so the untrusted decode boundary must reject it first.
+        #[test]
+        fn decoding_an_orchard_payment_after_activation_is_rejected() {
+            use zcash_client_backend::proto::{ProposalDecodingError, proposal};
+
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let account_id = account.id();
+
+            let (h, _, _) = st.generate_next_block(
+                &OrchardPoolTester::test_account_fvk(&st),
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(100_000),
+            );
+            st.scan_cached_blocks(h, 1);
+            for _ in 0..5 {
+                let (h, _) = st.generate_empty_block();
+                st.scan_cached_blocks(h, 1);
+            }
+
+            // A payment to an Orchard receiver post-NU6.3 is classified as an Ironwood-pool output.
+            let request = orchard_payment_request(st.network(), 50_000);
+            let change_strategy = orchard_change_strategy();
+            let input_selector = GreedyInputSelector::new();
+            let proposal = st
+                .propose_transfer(
+                    account_id,
+                    &input_selector,
+                    &change_strategy,
+                    request,
+                    ConfirmationsPolicy::MIN,
+                )
+                .unwrap();
+
+            let mut proto = proposal::Proposal::from_standard_proposal(&proposal);
+            assert_eq!(
+                proto.steps[0].payment_output_pools[0].value_pool,
+                proposal::ValuePool::Ironwood as i32,
+                "the Orchard-receiver payment must be represented as an Ironwood-pool output",
+            );
+
+            // Simulate a malicious or legacy proposal that directs the payment to the Orchard pool.
+            proto.steps[0].payment_output_pools[0].value_pool = proposal::ValuePool::Orchard as i32;
+
+            let decoded = proto.try_into_standard_proposal(st.network(), st.wallet());
+            assert!(
+                matches!(
+                    decoded,
+                    Err(ProposalDecodingError::OrchardPaymentProhibited)
+                ),
+                "decoding a post-activation Orchard payment must be rejected, not panic",
+            );
+        }
+
         /// A reorg truncation must roll back the Ironwood note commitment tree along with the
         /// Sapling and Orchard trees. If it does not, checkpoints (and commitments) for the
         /// rolled-back blocks remain, and a later re-scan appends onto a stale frontier,

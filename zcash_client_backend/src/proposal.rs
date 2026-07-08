@@ -599,8 +599,10 @@ impl<NoteRef> Step<NoteRef> {
             // payment to the Ironwood pool before a step is constructed, so a payment
             // directed to the Orchard pool here is a programming error, not a condition a
             // well-formed proposal can exhibit. The only Orchard-pool outputs a step may
-            // create are change, which is validated below.
-            assert!(
+            // create are change, which is validated below. This is a `debug_assert!` for the
+            // internal (input-selection) caller; the untrusted decode path must reject such a
+            // payment pool before calling `from_parts` (see `try_into_standard_proposal`).
+            debug_assert!(
                 !payment_pools
                     .iter()
                     .any(|(_, pool)| *pool == PoolType::ORCHARD),
