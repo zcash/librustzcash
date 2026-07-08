@@ -757,16 +757,31 @@ fn account_birthday<P: Parameters, S>(
     }
 }
 
-/// Delivers the document's secret store to the sink and indexes the material
-/// that account import can make use of.
-fn deliver_secrets<S: SecretSink>(
+/// Returns the document's plaintext secret store to draw secret material from,
+/// or an error if the store is encrypted. Delivery of that material to the sink
+/// is performed by the caller.
+fn plaintext_secret_store<E>(
     document: &::zewif::Zewif,
-) -> Result<Option<&::zewif::SecretStore>, ZewifImportError<S::Error>> {
+) -> Result<Option<&::zewif::SecretStore>, ZewifImportError<E>> {
     match document.secrets() {
         None => Ok(None),
         Some(::zewif::Secrets::Plain(store)) => Ok(Some(store)),
         Some(::zewif::Secrets::Encrypted(_)) => Err(ZewifImportError::EncryptedSecrets),
     }
+}
+
+/// Parses the ZIP 32 account index recorded by a derived key source, mapping an
+/// out-of-range value to [`ZewifImportError::InvalidAccountIndex`].
+fn derived_account_index<S>(
+    account_name: &str,
+    source: &::zewif::DerivedKeySource,
+) -> Result<zip32::AccountId, ZewifImportError<S>> {
+    zip32::AccountId::try_from(source.account_index()).map_err(|_| {
+        ZewifImportError::InvalidAccountIndex {
+            account_name: account_name.to_owned(),
+            index: source.account_index(),
+        }
+    })
 }
 
 /// Constructs the ZIP 32 derivation metadata recorded by a derived key source.
@@ -775,12 +790,7 @@ fn zip32_derivation<S>(
     source: &::zewif::DerivedKeySource,
 ) -> Result<Zip32Derivation, ZewifImportError<S>> {
     let seed_fp = decode_seed_fingerprint(source.seed_fingerprint().encoding())?;
-    let account_index = zip32::AccountId::try_from(source.account_index()).map_err(|_| {
-        ZewifImportError::InvalidAccountIndex {
-            account_name: account_name.to_owned(),
-            index: source.account_index(),
-        }
-    })?;
+    let account_index = derived_account_index(account_name, source)?;
     let legacy_address_index = source
         .legacy_address_index()
         .map(|i| {
@@ -842,8 +852,9 @@ where
 
     // Deliver all secret material to the sink, indexing what account import can
     // use.
+    let secret_store = plaintext_secret_store::<S::Error>(document)?;
     let mut available = AvailableSecrets::empty();
-    if let Some(store) = deliver_secrets::<S>(document)? {
+    if let Some(store) = secret_store {
         for entry in store.seeds() {
             sink.store_seed(entry).map_err(ZewifImportError::Sink)?;
             let (fingerprint, seed_bytes) = seed_entry_bytes(entry)?;
@@ -888,13 +899,7 @@ where
         }
     }
 
-    register_transparent_keys(
-        wdb,
-        &params,
-        deliver_secrets::<S>(document)?,
-        &taddrs,
-        &mut report,
-    )?;
+    register_transparent_keys(wdb, &params, secret_store, &taddrs, &mut report)?;
     mark_addresses_exposed(wdb, &params, &taddrs, &mut report)?;
 
     import_transactions(wdb, &params, document, &mut report)?;
@@ -913,16 +918,16 @@ struct TransparentAddressRecords {
     redeem_scripts: Vec<(AccountUuid, Vec<u8>)>,
 }
 
-/// Decodes a WIF-encoded transparent spending key, returning the secret key
-/// and whether the corresponding public key uses the compressed encoding.
-fn decode_wif(expected_prefix: u8, wif: &str) -> Option<(secp256k1::SecretKey, bool)> {
+/// Decodes a WIF-encoded transparent spending key, accepting both the
+/// uncompressed and the compressed (`0x01`-suffixed) payload forms.
+fn decode_wif(expected_prefix: u8, wif: &str) -> Option<secp256k1::SecretKey> {
     let payload = bs58::decode(wif).with_check(None).into_vec().ok()?;
     match payload.as_slice() {
         [prefix, key_data @ ..] if *prefix == expected_prefix && key_data.len() == 32 => {
-            Some((secp256k1::SecretKey::from_slice(key_data).ok()?, false))
+            secp256k1::SecretKey::from_slice(key_data).ok()
         }
         [prefix, key_data @ .., 0x01] if *prefix == expected_prefix && key_data.len() == 32 => {
-            Some((secp256k1::SecretKey::from_slice(key_data).ok()?, true))
+            secp256k1::SecretKey::from_slice(key_data).ok()
         }
         _ => None,
     }
@@ -964,9 +969,11 @@ where
         let address = TransparentAddress::from_pubkey(&pubkey).encode(params);
 
         // Verify that the spending key corresponds to the recorded public key.
-        let (secret_key, _compressed) = decode_wif(wif_prefix, entry.spending_key().encoding())
-            .ok_or_else(|| ZewifImportError::InvalidTransparentKeyEncoding {
-                address: address.clone(),
+        let secret_key =
+            decode_wif(wif_prefix, entry.spending_key().encoding()).ok_or_else(|| {
+                ZewifImportError::InvalidTransparentKeyEncoding {
+                    address: address.clone(),
+                }
             })?;
         if secret_key.public_key(&secp) != pubkey {
             return Err(ZewifImportError::TransparentKeyMismatch { address });
@@ -1097,6 +1104,8 @@ where
     R: RngCore,
     S: std::error::Error,
 {
+    use zcash_client_backend::data_api::WalletRead;
+
     let mut txs: Vec<&::zewif::Transaction> = document.transactions().values().collect();
     txs.sort_by_key(|tx| {
         (
@@ -1163,15 +1172,13 @@ where
         decrypt_and_store_transaction(params, wdb, &parsed, mined_height)
             .map_err(ZewifImportError::Wallet)?;
 
+        // `decrypt_and_store_transaction` persists the transaction only when it
+        // is relevant to the wallet, so its presence afterward determines the
+        // stored/deferred tally.
         let stored = wdb
-            .conn
-            .borrow()
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM transactions WHERE txid = :txid)",
-                rusqlite::named_params![":txid": recorded_txid.as_ref()],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(|e| ZewifImportError::Wallet(SqliteClientError::from(e)))?;
+            .get_transaction(recorded_txid)
+            .map_err(ZewifImportError::Wallet)?
+            .is_some();
         if stored {
             report.transactions_stored += 1;
         } else {
@@ -1216,45 +1223,34 @@ where
             .map(|seed| (seed, d))
     });
 
-    let account_uuid = match account.viewing_key() {
-        ::zewif::AccountViewingKey::Ufvk(ufvk) => {
-            if let Some((seed, source)) = available_seed {
-                // Re-derive the account from its seed, preserving the recorded
-                // ZIP 32 account index.
-                let account_index =
-                    zip32::AccountId::try_from(source.account_index()).map_err(|_| {
-                        ZewifImportError::InvalidAccountIndex {
-                            account_name: account.name().to_owned(),
-                            index: source.account_index(),
-                        }
-                    })?;
-                // Confirm that the recorded derivation actually reproduces the
-                // account's recorded viewing key before creating it, so that a
-                // corrupt derivation record cannot silently import an account
-                // for a different key.
-                let recorded =
-                    UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|message| {
-                        ZewifImportError::UfvkDecoding {
-                            account_name: account.name().to_owned(),
-                            message,
-                        }
-                    })?;
-                let derived =
-                    UnifiedSpendingKey::from_seed(params, seed.expose_secret(), account_index)
-                        .map_err(|_| ZewifImportError::DerivedKeyMismatch {
-                            account_name: account.name().to_owned(),
-                        })?
-                        .to_unified_full_viewing_key();
-                if !ufvk_components_consistent(&derived, &recorded) {
-                    return Err(ZewifImportError::DerivedKeyMismatch {
-                        account_name: account.name().to_owned(),
-                    });
-                }
-                let (imported, _usk) = wdb
-                    .import_account_hd(account.name(), seed, account_index, &birthday, key_source)
-                    .map_err(ZewifImportError::Wallet)?;
-                imported.id()
-            } else {
+    // A UFVK or transparent-only account whose derivation record points at a
+    // seed present in the document is re-derived by HD derivation; both variants
+    // take the identical import path.
+    let hd_derivation = match account.viewing_key() {
+        ::zewif::AccountViewingKey::Ufvk(_) | ::zewif::AccountViewingKey::TransparentAddressSet => {
+            available_seed
+        }
+        _ => None,
+    };
+
+    let account_uuid = if let Some((seed, source)) = hd_derivation {
+        // Re-derive the account from its seed, preserving the recorded ZIP 32
+        // account index.
+        let account_index = derived_account_index(account.name(), source)?;
+        // For a UFVK account, confirm the recorded derivation actually
+        // reproduces the account's recorded viewing key before creating it, so
+        // that a corrupt derivation record cannot silently import an account for
+        // a different key.
+        if let ::zewif::AccountViewingKey::Ufvk(ufvk) = account.viewing_key() {
+            verify_hd_derivation(params, account.name(), ufvk, seed, account_index)?;
+        }
+        let (imported, _usk) = wdb
+            .import_account_hd(account.name(), seed, account_index, &birthday, key_source)
+            .map_err(ZewifImportError::Wallet)?;
+        imported.id()
+    } else {
+        match account.viewing_key() {
+            ::zewif::AccountViewingKey::Ufvk(ufvk) => {
                 let decoded =
                     UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|message| {
                         ZewifImportError::UfvkDecoding {
@@ -1272,55 +1268,41 @@ where
                     .map_err(ZewifImportError::Wallet)?;
                 imported.id()
             }
-        }
-        ::zewif::AccountViewingKey::SaplingExtFvk(efvk) => {
-            let decoded = zcash_keys::encoding::decode_extended_full_viewing_key(
-                params
-                    .network_type()
-                    .hrp_sapling_extended_full_viewing_key(),
-                efvk.encoding(),
-            )
-            .map_err(|_| ZewifImportError::SaplingFvkDecoding {
-                account_name: account.name().to_owned(),
-            })?;
-            let ufvk = UnifiedFullViewingKey::from_sapling_extended_full_viewing_key(decoded)
-                .map_err(|e| ZewifImportError::UfvkDecoding {
+            ::zewif::AccountViewingKey::SaplingExtFvk(efvk) => {
+                let decoded = zcash_keys::encoding::decode_extended_full_viewing_key(
+                    params
+                        .network_type()
+                        .hrp_sapling_extended_full_viewing_key(),
+                    efvk.encoding(),
+                )
+                .map_err(|_| ZewifImportError::SaplingFvkDecoding {
+                    account_name: account.name().to_owned(),
+                })?;
+                let ufvk = UnifiedFullViewingKey::from_sapling_extended_full_viewing_key(decoded)
+                    .map_err(|e| ZewifImportError::UfvkDecoding {
                     account_name: account.name().to_owned(),
                     message: e.to_string(),
                 })?;
-            let purpose = account_purpose(
-                account,
-                available.sapling_fvks.iter().any(|s| s == efvk.encoding()),
-                derived_source,
-            )?;
-            let imported = wdb
-                .import_account_ufvk(account.name(), &ufvk, &birthday, purpose, key_source)
-                .map_err(ZewifImportError::Wallet)?;
-            imported.id()
-        }
-        ::zewif::AccountViewingKey::SproutViewingKey(_) => {
-            report.skipped_accounts.push(SkippedAccount {
-                name: account.name().to_owned(),
-                reason: AccountSkipReason::SproutViewingKey,
-            });
-            return Ok(());
-        }
-        ::zewif::AccountViewingKey::TransparentAddressSet => {
-            if let Some((seed, source)) = available_seed {
-                // A transparent-only account (e.g. the zcashd legacy account)
-                // whose contents can be re-derived from its seed.
-                let account_index =
-                    zip32::AccountId::try_from(source.account_index()).map_err(|_| {
-                        ZewifImportError::InvalidAccountIndex {
-                            account_name: account.name().to_owned(),
-                            index: source.account_index(),
-                        }
-                    })?;
-                let (imported, _usk) = wdb
-                    .import_account_hd(account.name(), seed, account_index, &birthday, key_source)
+                let purpose = account_purpose(
+                    account,
+                    available.sapling_fvks.iter().any(|s| s == efvk.encoding()),
+                    derived_source,
+                )?;
+                let imported = wdb
+                    .import_account_ufvk(account.name(), &ufvk, &birthday, purpose, key_source)
                     .map_err(ZewifImportError::Wallet)?;
                 imported.id()
-            } else {
+            }
+            ::zewif::AccountViewingKey::SproutViewingKey(_) => {
+                report.skipped_accounts.push(SkippedAccount {
+                    name: account.name().to_owned(),
+                    reason: AccountSkipReason::SproutViewingKey,
+                });
+                return Ok(());
+            }
+            ::zewif::AccountViewingKey::TransparentAddressSet => {
+                // A transparent-only account with no seed available cannot be
+                // re-derived from a seed, so it is skipped.
                 report.skipped_accounts.push(SkippedAccount {
                     name: account.name().to_owned(),
                     reason: AccountSkipReason::TransparentAddressSetWithoutSeed,
@@ -1405,6 +1387,36 @@ fn ufvk_components_consistent(
         _ => true,
     };
     transparent_ok && sapling_ok && orchard_ok
+}
+
+/// Verifies that `seed`, derived at `account_index`, reproduces the unified full
+/// viewing key recorded for the account, returning
+/// [`ZewifImportError::DerivedKeyMismatch`] otherwise.
+fn verify_hd_derivation<P: Parameters, S>(
+    params: &P,
+    account_name: &str,
+    ufvk: &::zewif::UnifiedFullViewingKey,
+    seed: &SecretVec<u8>,
+    account_index: zip32::AccountId,
+) -> Result<(), ZewifImportError<S>> {
+    let recorded = UnifiedFullViewingKey::decode(params, ufvk.encoding()).map_err(|message| {
+        ZewifImportError::UfvkDecoding {
+            account_name: account_name.to_owned(),
+            message,
+        }
+    })?;
+    let derived = UnifiedSpendingKey::from_seed(params, seed.expose_secret(), account_index)
+        .map_err(|_| ZewifImportError::DerivedKeyMismatch {
+            account_name: account_name.to_owned(),
+        })?
+        .to_unified_full_viewing_key();
+    if ufvk_components_consistent(&derived, &recorded) {
+        Ok(())
+    } else {
+        Err(ZewifImportError::DerivedKeyMismatch {
+            account_name: account_name.to_owned(),
+        })
+    }
 }
 
 #[cfg(test)]
