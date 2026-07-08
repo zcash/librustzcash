@@ -344,8 +344,6 @@ pub(crate) fn set_phase(
     Ok(())
 }
 
-#[allow(dead_code)]
-// Consumed by backend (Task 10) and context (Task 12).
 pub(crate) fn insert_prepared_notes(
     conn: &Connection,
     run_id: &str,
@@ -375,8 +373,6 @@ pub(crate) fn insert_prepared_notes(
 /// the run's split prepared (locks exist to keep *other* migration operations off them), and the
 /// split itself predates its notes. Nothing ever unlocks a note; runs release theirs by reaching a
 /// terminal phase.
-#[allow(dead_code)]
-// Consumed by backend (Task 10) and context (Tasks 11-12).
 pub(crate) fn locked_note_refs(
     conn: &Connection,
     account_uuid: &str,
@@ -397,8 +393,6 @@ pub(crate) fn locked_note_refs(
     rows.collect()
 }
 
-#[allow(dead_code)]
-// Consumed by backend (Task 10) and context (Task 12).
 pub(crate) fn insert_pending_txs(
     conn: &Connection,
     run_id: &str,
@@ -524,8 +518,6 @@ pub(crate) fn clear_scheduled_pending(conn: &Connection, run_id: &str) -> rusqli
     )
 }
 
-#[allow(dead_code)]
-// Consumed by backend (Task 10) and context (Task 12).
 pub(crate) fn insert_prep_tx(
     conn: &Connection,
     run_id: &str,

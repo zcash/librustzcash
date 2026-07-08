@@ -42,8 +42,6 @@ const GRACE_ACTIONS: u64 = 2;
 ///
 /// Defined here so this module is self-contained; `backend.rs` (Task 10) re-uses this alias
 /// rather than redefining it.
-#[allow(dead_code)]
-// Consumed by backend (Task 10).
 pub(crate) type Db<P> = zcash_client_sqlite::WalletDb<
     rusqlite::Connection,
     P,
@@ -97,8 +95,6 @@ pub(crate) fn adjust_outputs_for_exact_balance(
 /// `ShieldedPool` variants — so selecting from `ShieldedPool::Orchard` already excludes V3
 /// (Ironwood) notes. The explicit version filter below is kept anyway, defensively: at split time
 /// no V3 note should exist in the Orchard-pool result in the first place.
-#[allow(dead_code)]
-// Consumed by build_split_pczt (below); backend (Task 10) may also call it directly.
 pub(crate) fn select_spendable_orchard_notes<P: Parameters>(
     db: &Db<P>,
     account: AccountUuid,
@@ -142,8 +138,6 @@ pub(crate) fn select_spendable_orchard_notes<P: Parameters>(
 /// be balanced against the selected total (see [`adjust_outputs_for_exact_balance`]), if the note
 /// commitment tree is missing the anchor/witness data needed to spend a selected note, or if the
 /// transaction-builder/PCZT-assembly pipeline itself fails.
-#[allow(dead_code)]
-// Consumed by backend (Task 10).
 pub(crate) fn build_split_pczt<P: Parameters + Clone>(
     db: &mut Db<P>,
     network: &P,

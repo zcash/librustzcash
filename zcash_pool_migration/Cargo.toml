@@ -17,7 +17,12 @@ all-features = true
 [dependencies]
 zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = ["orchard", "pczt"] }
-zcash_client_sqlite = { workspace = true, features = ["orchard", "transparent-inputs"] }
+# The `serde` feature is required transitively: the high-level `create_pczt_from_proposal`
+# (the mandated transfer-construction path, spec D4) has a `DbT::AccountId: serde::Serialize`
+# bound, and `AccountUuid` only implements `Serialize` under `zcash_client_sqlite/serde`. This
+# enables serialization of an upstream id type; this crate itself derives no serde and hand-rolls
+# its own storage encodings (spec D3).
+zcash_client_sqlite = { workspace = true, features = ["orchard", "serde", "transparent-inputs"] }
 zcash_keys = { workspace = true, features = ["orchard"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
