@@ -1601,6 +1601,25 @@ mod tests {
         })
         .unwrap();
 
+        #[cfg(feature = "orchard")]
+        {
+            db.with_orchard_tree_mut(|tree| {
+                for h in [100u32, 200, 300] {
+                    tree.ensure_retained(BlockHeight::from(h))?;
+                }
+                Ok::<_, ShardTreeError<_>>(())
+            })
+            .unwrap();
+
+            db.with_ironwood_tree_mut(|tree| {
+                for h in [100u32, 200, 300] {
+                    tree.ensure_retained(BlockHeight::from(h))?;
+                }
+                Ok::<_, ShardTreeError<_>>(())
+            })
+            .unwrap();
+        }
+
         db.remove_retained_checkpoints_below(BlockHeight::from(250))
             .unwrap();
 
@@ -1612,6 +1631,34 @@ mod tests {
             })
             .unwrap();
         assert_eq!(remaining, BTreeSet::from([BlockHeight::from(300)]));
+
+        // The retained checkpoints must be pruned in the Orchard and Ironwood trees as well, not
+        // just Sapling.
+        #[cfg(feature = "orchard")]
+        {
+            let orchard_remaining = db
+                .with_orchard_tree_mut(|tree| {
+                    tree.store()
+                        .retained_checkpoints()
+                        .map_err(ShardTreeError::Storage)
+                })
+                .unwrap();
+            assert_eq!(orchard_remaining, BTreeSet::from([BlockHeight::from(300)]));
+
+            let ironwood_remaining = db
+                .with_ironwood_tree_mut(|tree| {
+                    tree.store()
+                        .retained_checkpoints()
+                        .map_err(ShardTreeError::Storage)
+                })
+                .unwrap()
+                .expect("the wallet tracks an Ironwood tree");
+            assert_eq!(
+                ironwood_remaining,
+                BTreeSet::from([BlockHeight::from(300)]),
+                "retained Ironwood checkpoints below the max height must be released",
+            );
+        }
     }
 
     #[test]
