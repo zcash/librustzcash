@@ -1304,7 +1304,6 @@ where
             ovk_policy,
             proposal,
             target_expiry_height,
-            ::orchard::builder::BundleType::DEFAULT,
         )
     }
 

@@ -59,7 +59,6 @@ use crate::{
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
     wallet::{Note, OvkPolicy, Recipient},
 };
-use orchard::builder::BundleType;
 use sapling::{
     note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
     prover::{OutputProver, SpendProver},
@@ -1276,9 +1275,6 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
         (TransparentAddress, OutPoint),
     >,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
-    // The transactional bundle type for the Orchard and Ironwood bundles; the PCZT path
-    // threads the proposal's configured type here, other callers pass `BundleType::DEFAULT`.
-    orchard_pool_bundle_type: BundleType,
 ) -> Result<BuildState<ParamsT, DbT::AccountId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -1523,7 +1519,6 @@ where
             sapling_anchor,
             orchard_anchor,
             ironwood_anchor,
-            orchard_pool_bundle_type,
         },
     );
 
@@ -2069,8 +2064,6 @@ where
         unused_transparent_outputs,
         #[cfg(feature = "unstable")]
         proposed_version,
-        // The non-PCZT path always builds padded Orchard-pool bundles.
-        BundleType::DEFAULT,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -2304,12 +2297,6 @@ where
 /// [`min_target_height`](Proposal::min_target_height) is rejected with
 /// [`Error::ExpiryHeightBelowTargetHeight`]. A `target_expiry_height` of zero,
 /// which disables expiry, is exempt from this check.
-///
-/// `orchard_pool_bundle_type` selects the transactional bundle type for the Orchard
-/// and Ironwood bundles, and must match the change strategy used to create
-/// `proposal` (see
-/// `zip317::SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`); pass
-/// [`BundleType::DEFAULT`](orchard::builder::BundleType) otherwise.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]
@@ -2320,7 +2307,6 @@ pub fn create_pczt_from_proposal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
     target_expiry_height: Option<BlockHeight>,
-    orchard_pool_bundle_type: BundleType,
 ) -> Result<pczt::Pczt, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -2373,7 +2359,6 @@ where
         unused_transparent_outputs,
         #[cfg(feature = "unstable")]
         proposed_version,
-        orchard_pool_bundle_type,
     )?;
 
     // Build the transaction with the specified fee rule

@@ -27,10 +27,6 @@ workspace.
   in a slot whose value pool is not supported under the transaction's consensus
   branch ID (the Orchard pool prior to NU5; the Ironwood pool prior to NU6.3)
   is now rejected as invalid data.
-- `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries an
-  `orchard_pool_bundle_type` field selecting the transactional bundle type for the
-  Orchard and Ironwood bundles. Pass `orchard::builder::BundleType::DEFAULT` to keep
-  the previous (padded) behavior.
 
 ## [0.29.0-pre.0] - 2026-06-30
 

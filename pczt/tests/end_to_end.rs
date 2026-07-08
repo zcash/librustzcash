@@ -106,7 +106,6 @@ fn transparent_to_orchard() {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder
@@ -272,7 +271,6 @@ fn transparent_p2sh_multisig_to_orchard() {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder
@@ -482,7 +480,6 @@ fn sapling_to_orchard() {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder
@@ -646,7 +643,6 @@ fn orchard_to_orchard() {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
             ironwood_anchor: None,
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder
@@ -858,7 +854,6 @@ fn orchard_low_level_signer_uses_preverified_signing_parse() {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
             ironwood_anchor: None,
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder
@@ -1057,7 +1052,6 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
             sapling_anchor: None,
             orchard_anchor: None,
             ironwood_anchor: Some(anchor),
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder

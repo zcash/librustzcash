@@ -1267,9 +1267,6 @@ where
             0
         };
         orchard_fees::transactional_action_count(
-            // Input selection estimates fees with the padded default bundle type; the
-            // unpadded opt-in is applied later by the change strategy.
-            ::orchard::builder::BundleType::DEFAULT,
             orchard_bundle_version_for_height(params, target_height),
             spendable_notes.orchard.len(),
             requested_orchard_actions,
@@ -1674,7 +1671,6 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             #[cfg(feature = "orchard")]
             PoolType::ORCHARD => {
                 let count = orchard_fees::transactional_action_count(
-                    ::orchard::builder::BundleType::DEFAULT,
                     orchard_bundle_version_for_height(params, target_height),
                     0,
                     1,
