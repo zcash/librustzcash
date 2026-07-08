@@ -25,7 +25,7 @@ zip321.workspace = true
 transparent.workspace = true
 
 orchard.workspace = true
-pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "signer", "spend-finalizer", "tx-extractor"] }
+pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "signer", "spend-finalizer", "tx-extractor", "zcp-builder"] }
 shardtree.workspace = true
 
 rand.workspace = true
