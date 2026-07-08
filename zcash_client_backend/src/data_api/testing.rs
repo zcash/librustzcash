@@ -1060,7 +1060,6 @@ where
             request,
             confirmations_policy,
             &SpendPolicy::default(),
-            #[cfg(feature = "unstable")]
             None,
         )?;
 
@@ -1072,7 +1071,6 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             &proposal,
-            #[cfg(feature = "unstable")]
             None,
         )
     }
@@ -1104,7 +1102,6 @@ where
             request,
             confirmations_policy,
             &SpendPolicy::default(),
-            #[cfg(feature = "unstable")]
             None,
         )
     }
@@ -1143,7 +1140,6 @@ where
             request,
             confirmations_policy,
             spend_policy,
-            #[cfg(feature = "unstable")]
             None,
         )
     }
@@ -1213,7 +1209,6 @@ where
             memo,
             change_memo,
             fallback_change_pool,
-            #[cfg(feature = "unstable")]
             None,
         );
 
@@ -1325,7 +1320,6 @@ where
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
-            #[cfg(feature = "unstable")]
             None,
         )
     }

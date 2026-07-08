@@ -7,7 +7,11 @@ use std::{
 
 use nonempty::NonEmpty;
 use zcash_primitives::transaction::TxId;
-use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+use zcash_protocol::{
+    PoolType, ShieldedPool,
+    consensus::{BlockHeight, BranchId},
+    value::Zatoshis,
+};
 use zip321::{TransactionRequest, Zip321Error};
 
 use crate::{
@@ -15,9 +19,6 @@ use crate::{
     fees::TransactionBalance,
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
 };
-
-#[cfg(feature = "unstable")]
-use zcash_protocol::consensus::BranchId;
 
 /// Errors that can occur in construction of a [`Step`].
 #[derive(Debug, Clone)]
@@ -76,7 +77,6 @@ pub enum ProposalError {
     ShieldingRequiresShieldedRecipient,
     /// The transaction version requested is not compatible with the consensus branch for which the
     /// transaction is intended.
-    #[cfg(feature = "unstable")]
     IncompatibleTxVersion(BranchId),
     /// After Ironwood activation, a proposal step would create value in the Orchard pool.
     /// The turnstile only permits value to leave the pool: a step may return change to it
@@ -183,7 +183,6 @@ impl Display for ProposalError {
                 u64::from(*input_total),
                 u64::from(*output_total),
             ),
-            #[cfg(feature = "unstable")]
             ProposalError::IncompatibleTxVersion(branch_id) => write!(
                 f,
                 "The requested transaction version is incompatible with consensus branch {branch_id:?}"

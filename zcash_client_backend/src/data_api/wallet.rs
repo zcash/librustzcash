@@ -118,7 +118,6 @@ use {
     zcash_protocol::consensus::NetworkConstants,
 };
 
-#[cfg(feature = "unstable")]
 use zcash_primitives::transaction::TxVersion;
 
 pub mod input_selection;
@@ -656,7 +655,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
     spend_policy: &input_selection::SpendPolicy,
-    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
     ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -688,7 +687,6 @@ where
         request,
         change_strategy,
         spend_policy,
-        #[cfg(feature = "unstable")]
         proposed_version,
     )?;
     Ok(proposal)
@@ -732,7 +730,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
-    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
     ProposeTransferErrT<
@@ -780,7 +778,6 @@ where
         request,
         confirmations_policy,
         &input_selection::SpendPolicy::default(),
-        #[cfg(feature = "unstable")]
         proposed_version,
     )
 }
@@ -1036,7 +1033,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     spending_keys: &SpendingKeys,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
-    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    proposed_version: Option<TxVersion>,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -1072,7 +1069,6 @@ where
             step,
             #[cfg(feature = "transparent-inputs")]
             &mut unused_transparent_outputs,
-            #[cfg(feature = "unstable")]
             proposed_version,
         )?;
         step_results.push((step, step_result));
@@ -1227,7 +1223,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
         StepOutput,
         (TransparentAddress, OutPoint),
     >,
-    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    proposed_version: Option<TxVersion>,
 ) -> Result<BuildState<ParamsT, DbT::AccountId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -1436,7 +1432,6 @@ where
         },
     );
 
-    #[cfg(feature = "unstable")]
     if let Some(version) = proposed_version {
         builder.propose_version(version)?;
     }
@@ -1997,7 +1992,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
         StepOutput,
         (TransparentAddress, OutPoint),
     >,
-    #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+    proposed_version: Option<TxVersion>,
 ) -> Result<
     StepResult<<DbT as WalletRead>::AccountId>,
     CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
@@ -2019,7 +2014,6 @@ where
         proposal_step,
         #[cfg(feature = "transparent-inputs")]
         unused_transparent_outputs,
-        #[cfg(feature = "unstable")]
         proposed_version,
     )?;
 
@@ -2312,8 +2306,8 @@ where
 
     let prior_step_results = &[];
     let proposal_step = proposal.steps().first();
+
     let unused_transparent_outputs = &mut HashMap::new();
-    #[cfg(feature = "unstable")]
     let proposed_version = Some(TxVersion::V5);
 
     let build_state = build_proposed_transaction::<_, _, _, FeeRuleT, _, _>(
@@ -2328,7 +2322,6 @@ where
         proposal_step,
         #[cfg(feature = "transparent-inputs")]
         unused_transparent_outputs,
-        #[cfg(feature = "unstable")]
         proposed_version,
     )?;
 
@@ -3075,7 +3068,6 @@ where
         spending_keys,
         OvkPolicy::Sender,
         &proposal,
-        #[cfg(feature = "unstable")]
         None,
     )
 }

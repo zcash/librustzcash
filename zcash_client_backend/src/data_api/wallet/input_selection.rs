@@ -51,7 +51,6 @@ use {
 #[cfg(feature = "orchard")]
 use crate::{data_api::wallet::ironwood_active_at, fees::orchard as orchard_fees};
 
-#[cfg(feature = "unstable")]
 use zcash_primitives::transaction::TxVersion;
 
 /// The type of errors that may be produced in input selection.
@@ -212,7 +211,7 @@ pub trait InputSelector {
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
         spend_policy: &SpendPolicy,
-        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+        proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
         InputSelectorError<
@@ -802,7 +801,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         transaction_request: TransactionRequest,
         change_strategy: &ChangeT,
         spend_policy: &SpendPolicy,
-        #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
+        proposed_version: Option<TxVersion>,
     ) -> Result<
         Proposal<<ChangeT as ChangeStrategy>::FeeRule, DbT::NoteRef>,
         InputSelectorError<<DbT as InputSource>::Error, Self::Error, ChangeT::Error, DbT::NoteRef>,
@@ -812,7 +811,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         Self::InputSource: InputSource,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
-        #[cfg(feature = "unstable")]
         let (sapling_supported, orchard_supported) =
             proposed_version.map_or(Ok((true, true)), |v| {
                 let branch_id =
@@ -826,8 +824,6 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     Err(ProposalError::IncompatibleTxVersion(branch_id))
                 }
             })?;
-        #[cfg(not(feature = "unstable"))]
-        let (sapling_supported, orchard_supported) = (true, cfg!(feature = "orchard"));
         // Without the `orchard` feature there are no Orchard-family pools to select from, so
         // `orchard_supported` (always false) is only referenced by Orchard-gated code.
         #[cfg(not(feature = "orchard"))]

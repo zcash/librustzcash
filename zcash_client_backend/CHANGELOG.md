@@ -217,6 +217,14 @@ workspace.
     (the greater of its Orchard spends and its Orchard outputs plus change).
 
 ### Changed
+- The `proposed_version: Option<TxVersion>` parameter of
+  `zcash_client_backend::data_api::wallet::propose_transfer`,
+  `propose_standard_transfer_to_address`, and `create_proposed_transactions`, along
+  with `input_selection::InputSelector::propose_transaction` and the
+  `ProposalError::IncompatibleTxVersion` variant, are no longer gated behind the
+  `unstable` feature flag. Callers that did not previously enable `unstable` must now
+  pass this argument explicitly; pass `None` to retain the previous behavior of
+  selecting the transaction version from the target height.
 - When a transaction spends Orchard notes once the Ironwood pool is active, its
   Orchard-pool change now stays in the Orchard pool instead of being routed into
   the Ironwood bundle. The change is returned to a spent note's own address,
