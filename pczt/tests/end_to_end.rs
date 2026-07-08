@@ -1012,11 +1012,12 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
             zcash_protocol::consensus::BranchId::Nu6.into(),
             10_000_000,
             133,
-            [9; 32],
-            [0; 32],
+            Some([9; 32]),
+            Some([0; 32]),
         )
         .unwrap()
-        .build();
+        .build()
+        .unwrap();
     }
 
     if matches!(pool, ShieldedPool::Orchard) {
@@ -1024,11 +1025,12 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
             zcash_protocol::consensus::BranchId::Nu6_3.into(),
             10_000_000,
             133,
-            [0; 32],
-            [9; 32],
+            Some([0; 32]),
+            Some([9; 32]),
         )
         .unwrap()
-        .build();
+        .build()
+        .unwrap();
     }
 
     let transparent_account_sk =
@@ -1057,6 +1059,7 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
             orchard_anchor: matches!(pool, ShieldedPool::Orchard).then(orchard::Anchor::empty_tree),
             ironwood_anchor: matches!(pool, ShieldedPool::Ironwood)
                 .then(orchard::Anchor::empty_tree),
+            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder
@@ -1410,11 +1413,12 @@ fn redacted_anchor_is_not_resolved() {
         zcash_protocol::consensus::BranchId::Nu6.into(),
         10_000_000,
         133,
-        [0; 32],
-        [9; 32],
+        Some([0; 32]),
+        Some([9; 32]),
     )
     .unwrap()
-    .build();
+    .build()
+    .unwrap();
 
     let mut redacted = Redactor::new(pczt)
         .redact_orchard_with(|mut r| {

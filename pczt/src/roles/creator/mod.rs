@@ -29,6 +29,10 @@ const INITIAL_TX_MODIFIABLE: u8 = FLAG_TRANSPARENT_INPUTS_MODIFIABLE
 /// Errors that can occur when creating a PCZT.
 #[derive(Debug)]
 pub enum Error {
+    /// A v5 transaction's shielded bundle anchors must be set by the Creator,
+    /// because they are transaction effecting data and cannot subsequently
+    /// change.
+    AnchorRequiredForV5,
     /// The transaction version implied by the consensus branch ID does not carry an
     /// Ironwood bundle.
     IronwoodNotSupported,
@@ -66,9 +70,9 @@ pub struct Creator {
     coin_type: u32,
     orchard_flags: u8,
     ironwood_flags: u8,
-    sapling_anchor: [u8; 32],
-    orchard_anchor: [u8; 32],
-    ironwood_anchor: [u8; 32],
+    sapling_anchor: Option<[u8; 32]>,
+    orchard_anchor: Option<[u8; 32]>,
+    ironwood_anchor: Option<[u8; 32]>,
 }
 
 impl Creator {
@@ -76,6 +80,9 @@ impl Creator {
     ///
     /// The transaction version is implied by the consensus branch ID: the v6
     /// transaction format from NU6.3 onward, and the v5 format for earlier upgrades.
+    /// For v5 transactions, `sapling_anchor` and `orchard_anchor` must both be
+    /// [`Option::Some`]. For v6 transactions, either anchor may be
+    /// [`Option::None`] and restored later.
     ///
     /// # Errors
     ///
@@ -86,8 +93,8 @@ impl Creator {
         consensus_branch_id: u32,
         expiry_height: u32,
         coin_type: u32,
-        sapling_anchor: [u8; 32],
-        orchard_anchor: [u8; 32],
+        sapling_anchor: Option<[u8; 32]>,
+        orchard_anchor: Option<[u8; 32]>,
     ) -> Result<Self, Error> {
         let branch_id = consensus_branch_id_for_pczt(consensus_branch_id)?;
 
@@ -120,7 +127,7 @@ impl Creator {
             ironwood_flags: crate::orchard::IRONWOOD_SPENDS_OUTPUTS_AND_CROSS_ADDRESS_ENABLED,
             sapling_anchor,
             orchard_anchor,
-            ironwood_anchor: [0; 32],
+            ironwood_anchor: None,
         })
     }
 
@@ -176,7 +183,7 @@ impl Creator {
         if self.tx_version != V6_TX_VERSION {
             return Err(Error::IronwoodNotSupported);
         }
-        self.ironwood_anchor = ironwood_anchor;
+        self.ironwood_anchor = Some(ironwood_anchor);
         Ok(self)
     }
 
@@ -202,13 +209,46 @@ impl Creator {
         Ok(self)
     }
 
-    pub fn build(self) -> Pczt {
-        let optional_sapling_anchor =
-            |anchor| (anchor != crate::sapling::DEFAULT_ANCHOR).then_some(anchor);
-        let optional_orchard_anchor =
-            |anchor| (anchor != crate::orchard::DEFAULT_ANCHOR).then_some(anchor);
+    /// Builds the initial PCZT.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::AnchorRequiredForV5`] if this Creator describes a v5
+    /// transaction and either the Sapling anchor is missing from a bundle with
+    /// spends, or the Orchard anchor is missing from a bundle with actions.
+    pub fn build(self) -> Result<Pczt, Error> {
+        let sapling = crate::sapling::Bundle {
+            spends: vec![],
+            outputs: vec![],
+            value_sum: 0,
+            anchor: self.sapling_anchor,
+            bsk: None,
+        };
+        let orchard = OrchardBundle {
+            actions: vec![],
+            flags: self.orchard_flags,
+            value_sum: (0, false),
+            anchor: self.orchard_anchor,
+            // The note-plaintext version is determined by the Orchard bundle version.
+            #[cfg(feature = "orchard")]
+            note_version: self
+                .bundle_version(orchard::ValuePool::Orchard)
+                .expect("`Creator::new` rejects branches that predate NU5")
+                .note_version(),
+            #[cfg(not(feature = "orchard"))]
+            note_version: crate::orchard::NoteVersion::V2,
+            zkproof: None,
+            bsk: None,
+        };
 
-        Pczt {
+        if self.tx_version == V5_TX_VERSION
+            && ((sapling.anchor.is_none() && !sapling.spends.is_empty())
+                || (orchard.anchor.is_none() && !orchard.actions.is_empty()))
+        {
+            return Err(Error::AnchorRequiredForV5);
+        }
+
+        Ok(Pczt {
             global: crate::common::Global {
                 tx_version: self.tx_version,
                 version_group_id: self.version_group_id,
@@ -223,35 +263,14 @@ impl Creator {
                 inputs: vec![],
                 outputs: vec![],
             },
-            sapling: crate::sapling::Bundle {
-                spends: vec![],
-                outputs: vec![],
-                value_sum: 0,
-                anchor: optional_sapling_anchor(self.sapling_anchor),
-                bsk: None,
-            },
-            orchard: OrchardBundle {
-                actions: vec![],
-                flags: self.orchard_flags,
-                value_sum: (0, false),
-                anchor: optional_orchard_anchor(self.orchard_anchor),
-                // The note-plaintext version is determined by the Orchard bundle version.
-                #[cfg(feature = "orchard")]
-                note_version: self
-                    .bundle_version(orchard::ValuePool::Orchard)
-                    .expect("`Creator::new` rejects branches that predate NU5")
-                    .note_version(),
-                #[cfg(not(feature = "orchard"))]
-                note_version: crate::orchard::NoteVersion::V2,
-                zkproof: None,
-                bsk: None,
-            },
+            sapling,
+            orchard,
             ironwood: OrchardBundle {
                 flags: self.ironwood_flags,
-                anchor: optional_orchard_anchor(self.ironwood_anchor),
+                anchor: self.ironwood_anchor,
                 ..crate::orchard::EMPTY_IRONWOOD
             },
-        }
+        })
     }
 
     /// Builds a PCZT from the output of a [`Builder`].
@@ -329,33 +348,85 @@ mod tests {
 
     #[test]
     fn tx_version_follows_branch() {
-        let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, [0; 32], [0; 32])
-            .unwrap()
-            .build();
+        let pczt = Creator::new(
+            BranchId::Nu6_2.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         assert_eq!(pczt.global.tx_version, V5_TX_VERSION);
         assert_eq!(pczt.global.version_group_id, V5_VERSION_GROUP_ID);
 
-        let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
-            .unwrap()
-            .build();
+        let pczt = Creator::new(
+            BranchId::Nu6_3.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         assert_eq!(pczt.global.tx_version, V6_TX_VERSION);
         assert_eq!(pczt.global.version_group_id, V6_VERSION_GROUP_ID);
     }
 
     #[test]
+    fn optional_anchors_are_supported_for_empty_bundles() {
+        let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, None, Some([0; 32]))
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(pczt.sapling.anchor.is_none());
+        assert_eq!(pczt.orchard.anchor, Some([0; 32]));
+
+        let pczt = Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, Some([0; 32]), None)
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(pczt.sapling.anchor, Some([0; 32]));
+        assert!(pczt.orchard.anchor.is_none());
+
+        let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, None, None)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        assert!(pczt.sapling.anchor.is_none());
+        assert!(pczt.orchard.anchor.is_none());
+    }
+
+    #[test]
     fn ironwood_anchor_requires_v6() {
         assert!(matches!(
-            Creator::new(BranchId::Nu6_2.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .with_ironwood_anchor([1; 32]),
+            Creator::new(
+                BranchId::Nu6_2.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32])
+            )
+            .unwrap()
+            .with_ironwood_anchor([1; 32]),
             Err(Error::IronwoodNotSupported)
         ));
 
-        let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
-            .unwrap()
-            .with_ironwood_anchor([1; 32])
-            .unwrap()
-            .build();
+        let pczt = Creator::new(
+            BranchId::Nu6_3.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .with_ironwood_anchor([1; 32])
+        .unwrap()
+        .build()
+        .unwrap();
         assert_eq!(pczt.ironwood.anchor, Some([1; 32]));
     }
 }

@@ -46,6 +46,12 @@ workspace.
 - `pczt::roles::creator::Creator::new` is now fallible, returning
   `Result<Self, pczt::roles::creator::Error>`; it rejects unrecognized consensus
   branch IDs and upgrades that predate the v5 transaction format.
+- `pczt::roles::creator::Creator::new` now takes optional Sapling and Orchard
+  anchors. These may be [`None`] for v6 transactions, but v5 transactions still
+  require an anchor for each corresponding non-empty shielded bundle when the
+  PCZT is built.
+- `pczt::roles::creator::Creator::build` is now fallible, returning
+  `Result<Pczt, pczt::roles::creator::Error>`.
 - `pczt::roles::creator::Creator::with_orchard_flags` is now fallible, returning
   `Result<Self, pczt::roles::creator::Error>`. The Orchard bundle version (and
   hence the note-plaintext version and flag-byte encoding) is now derived from the
@@ -83,6 +89,8 @@ workspace.
 ### Added
 - `pczt::roles::creator::Error`, the error type returned by the now-fallible
   `Creator` methods.
+- `pczt::roles::creator::Error::AnchorRequiredForV5`, returned when building a
+  v5 PCZT with a non-empty shielded bundle whose anchor is missing.
 - `pczt::parse`, a free function for parsing PCZT encodings.
 - `pczt::EncodingError`, for errors that can occur during PCZT encoding.
 - `pczt::EncodingError::UnsupportedOrchardNoteVersion`, returned when an

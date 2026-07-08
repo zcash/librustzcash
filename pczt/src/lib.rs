@@ -168,9 +168,16 @@ pub mod v1 {
         fn v1_refuses_v6_pczts_and_non_canonical_ironwood_bundles() {
             // A v6 tx cannot be encoded as a v1 PCZT, even when its Ironwood bundle is
             // canonically empty.
-            let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let pczt = Creator::new(
+                BranchId::Nu6_3.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             assert!(matches!(
                 super::Pczt::try_from(pczt),
                 Err(crate::EncodingError::UnsupportedTxVersion)
@@ -178,9 +185,16 @@ pub mod v1 {
 
             // A v5 tx carrying non-canonical Ironwood bundle data cannot be encoded
             // as a v1 PCZT, because the data would be dropped.
-            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let mut pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             pczt.ironwood.bsk = Some([1; 32]);
             assert!(matches!(
                 super::Pczt::try_from(pczt),
@@ -268,11 +282,12 @@ pub mod v2 {
 
         #[test]
         fn empty_bundles_encode_as_none_and_decode_as_empty() {
-            // Zero anchors: the shielded bundles carry no anchor and no
+            // Absent anchors: the shielded bundles carry no anchor and no
             // spends/actions, so they are fully empty and omitted.
-            let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
+            let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, None, None)
                 .unwrap()
-                .build();
+                .build()
+                .unwrap();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -301,9 +316,16 @@ pub mod v2 {
             // A Sapling/Orchard bundle with a non-empty anchor differs from its
             // empty form, so it must not be omitted even with no spends/actions,
             // and the anchor must survive the v2 round-trip.
-            let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [1; 32], [2; 32])
-                .unwrap()
-                .build();
+            let pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([1; 32]),
+                Some([2; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -319,9 +341,16 @@ pub mod v2 {
 
         #[test]
         fn non_canonical_orchard_flags_and_note_version_prevent_omission() {
-            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let mut pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             pczt.orchard.flags = 0;
             pczt.orchard.note_version = NoteVersion::V3;
 
@@ -646,9 +675,16 @@ mod extraction_tests {
 
     #[test]
     fn v5_pczt_with_ironwood_data_does_not_extract() {
-        let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-            .unwrap()
-            .build();
+        let mut pczt = Creator::new(
+            BranchId::Nu6.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         pczt.ironwood.bsk = Some([1; 32]);
         assert!(matches!(
             pczt.into_effects(),
@@ -658,9 +694,16 @@ mod extraction_tests {
 
     #[test]
     fn v6_pczt_with_pre_nu6_3_branch_does_not_extract() {
-        let mut pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
-            .unwrap()
-            .build();
+        let mut pczt = Creator::new(
+            BranchId::Nu6_3.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         pczt.global.consensus_branch_id = BranchId::Nu6_2.into();
         assert!(matches!(
             pczt.into_effects(),
