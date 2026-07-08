@@ -33,8 +33,6 @@ use zcash_client_backend::wallet::{Note, ReceivedNote, WalletTransparentOutput};
 use zcash_protocol::{ShieldedPool, TxId};
 
 /// An [`InputSource`] adapter that excludes reserved and migration-locked notes.
-#[allow(dead_code)]
-// Consumed by backend (Task 10).
 pub(crate) struct ReservedInputSource<'a, DbT: InputSource> {
     inner: &'a DbT,
     reserved: &'a BTreeSet<DbT::NoteRef>,
@@ -42,8 +40,6 @@ pub(crate) struct ReservedInputSource<'a, DbT: InputSource> {
     migration_locks: &'a BTreeSet<(String, u32)>,
 }
 
-#[allow(dead_code)]
-// Consumed by backend (Task 10).
 impl<'a, DbT: InputSource> ReservedInputSource<'a, DbT> {
     /// Constructs a new [`ReservedInputSource`] from its constituent parts.
     pub(crate) fn new(

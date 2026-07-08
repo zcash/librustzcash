@@ -23,24 +23,16 @@ pub struct TransferId(String);
 
 impl TransferId {
     /// Run-scoped transfer id: `"<run_id>:<index>"`. Constructed by the engine.
-    // Consumed by scheduling (Task 5).
-    #[allow(dead_code)]
     pub(crate) fn for_transfer(run_id: &str, index: u32) -> Self {
         TransferId(format!("{run_id}:{index}"))
     }
 
     /// The note-split prep transaction id: `"prep:<run_id>"`.
-    // Not yet called outside this module's tests: the note-split signing pipeline that mints
-    // prep-tx ids lands in Task 10 (`backend.rs::sign_split`).
-    #[allow(dead_code)]
     pub(crate) fn for_prep(run_id: &str) -> Self {
         TransferId(format!("prep:{run_id}"))
     }
 
     /// Wraps an already-formatted id string, e.g. one read back from the store.
-    // Not yet called outside this module's tests: store/backend round-trips land in Tasks 7 and
-    // 10-11 (`store.rs`, `backend.rs`, `context.rs`).
-    #[allow(dead_code)]
     pub(crate) fn from_raw(raw: String) -> Self {
         TransferId(raw)
     }
@@ -52,9 +44,6 @@ impl TransferId {
 
     /// Returns `true` if this is the note-split "prep" transaction's id (i.e. it was built by
     /// `TransferId::for_prep`), as opposed to an ordinary per-transfer id.
-    // Not yet called outside this module's tests: the broadcast-result reconciliation that
-    // dispatches on this lands in Task 11 (`context.rs::record_transfer_result`).
-    #[allow(dead_code)]
     pub(crate) fn is_prep(&self) -> bool {
         self.0.starts_with("prep:")
     }
@@ -247,9 +236,6 @@ pub struct PreparedTransfer {
 impl PreparedTransfer {
     /// Constructs a prepared transfer from its parts. Used internally once a transfer's PCZT has
     /// been built, proven, signed, and finalized.
-    // Not yet called outside this module's tests: the signing pipelines that produce these land
-    // in Task 10 (`backend.rs`) and Tasks 11-12 (`context.rs`).
-    #[allow(dead_code)]
     pub(crate) fn from_parts(id: TransferId, txid: TxId, pczt_bytes: Vec<u8>) -> Self {
         PreparedTransfer {
             id,

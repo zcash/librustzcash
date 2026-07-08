@@ -35,8 +35,6 @@ const PENDING_COLUMNS: &str = "txid_hex, raw_pczt, anchor_height, target_height,
     selected_note_output_index, selected_note_value, status, metadata_json";
 
 /// Fields needed to create a new migration run.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) struct NewRun<'a> {
     pub run_id: &'a str,
     pub account_uuid: &'a str,
@@ -101,6 +99,8 @@ pub(crate) struct PrepTxRow {
 /// `raw_pczt` is the proven, unsigned original the crate keeps; the app only carries the
 /// device-signed counterpart back, and `store_signed_*` pairs the two by `staging_id`.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+// Consumed by context (Task 12): the external-signer staging flow constructs and reads these.
 pub(crate) struct StagedPczt {
     pub staging_id: String,
     pub raw_pczt: Vec<u8>,
@@ -207,8 +207,6 @@ fn map_pending_row(row: &rusqlite::Row) -> rusqlite::Result<PendingTxRow> {
 }
 
 /// Create the `ext_ironwood_migration_*` tables if they do not yet exist.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ext_ironwood_migration_runs (
@@ -272,8 +270,6 @@ pub(crate) fn init(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn insert_run(conn: &Connection, run: &NewRun) -> rusqlite::Result<()> {
     let now = now_ms();
     let target_values_json = encode_target_values(run.target_values);
@@ -308,8 +304,6 @@ pub(crate) fn run_by_id(conn: &Connection, run_id: &str) -> rusqlite::Result<Opt
     .optional()
 }
 
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn active_run(
     conn: &Connection,
     account_uuid: &str,
@@ -328,8 +322,6 @@ pub(crate) fn active_run(
     .optional()
 }
 
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn set_phase(
     conn: &Connection,
     run_id: &str,
@@ -426,8 +418,6 @@ pub(crate) fn insert_pending_txs(
     Ok(())
 }
 
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn next_due_transfer(
     conn: &Connection,
     run_id: &str,
@@ -446,8 +436,6 @@ pub(crate) fn next_due_transfer(
 }
 
 /// The earliest send height among a run's still-scheduled transfers, or `None` if none remain.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn next_scheduled_send_height(
     conn: &Connection,
     run_id: &str,
@@ -461,8 +449,6 @@ pub(crate) fn next_scheduled_send_height(
 }
 
 /// Txids of a run's broadcasted-but-not-yet-confirmed transfers.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn broadcasted_txids(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT txid_hex FROM ext_ironwood_migration_pending_txs
@@ -472,8 +458,6 @@ pub(crate) fn broadcasted_txids(conn: &Connection, run_id: &str) -> rusqlite::Re
     rows.collect()
 }
 
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn mark_pending_status(
     conn: &Connection,
     txid_hex: &str,
@@ -486,8 +470,6 @@ pub(crate) fn mark_pending_status(
     Ok(())
 }
 
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn pending_totals(conn: &Connection, run_id: &str) -> rusqlite::Result<PendingTotals> {
     let mut totals = PendingTotals::default();
     let mut stmt = conn.prepare(
@@ -509,8 +491,6 @@ pub(crate) fn pending_totals(conn: &Connection, run_id: &str) -> rusqlite::Resul
     Ok(totals)
 }
 
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn clear_scheduled_pending(conn: &Connection, run_id: &str) -> rusqlite::Result<usize> {
     conn.execute(
         "DELETE FROM ext_ironwood_migration_pending_txs WHERE run_id = ?1 AND status = 'scheduled'",
@@ -533,8 +513,6 @@ pub(crate) fn insert_prep_tx(
     Ok(())
 }
 
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn prep_tx(conn: &Connection, run_id: &str) -> rusqlite::Result<Option<PrepTxRow>> {
     conn.query_row(
         "SELECT run_id, txid_hex, raw_pczt, status FROM ext_ironwood_migration_prep_tx WHERE run_id = ?1",
@@ -551,8 +529,6 @@ pub(crate) fn prep_tx(conn: &Connection, run_id: &str) -> rusqlite::Result<Optio
     .optional()
 }
 
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn set_prep_tx_status(
     conn: &Connection,
     run_id: &str,
@@ -636,8 +612,6 @@ pub(crate) fn clear_staged_pczts(
 /// `EXISTS` check that never loads a `raw_pczt` blob, unlike [`next_due_transfer`]. Backs the
 /// on-launch reconciliation path (`has_overdue_transfers`, spec §4.3), which only needs the
 /// boolean.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn has_due_transfer(
     conn: &Connection,
     run_id: &str,

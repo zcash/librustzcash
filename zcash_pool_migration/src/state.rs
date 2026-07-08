@@ -49,10 +49,6 @@ impl Phase {
     }
 
     /// Parse a persisted phase string, or `None` if unrecognised.
-    #[allow(dead_code)]
-    // Consumed by context (Task 11): converts a persisted `RunRow::phase` string back to `Phase`
-    // for `to_state`. Not store.rs (Task 7): the store round-trips phase as a plain `String` and
-    // never itself needs it back as a `Phase`.
     pub(crate) fn parse(s: &str) -> Option<Phase> {
         Some(match s {
             "no_orchard_funds" => Phase::NoOrchardFunds,
@@ -77,8 +73,6 @@ impl Phase {
 /// Map a run's `phase` to the public state. `progress` is used by in-progress phases;
 /// `attention` overrides the reason for attention-requiring phases (defaulting to
 /// `TransferExpired`, the common recoverable case).
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn to_state(
     phase: Phase,
     progress: MigrationProgress,

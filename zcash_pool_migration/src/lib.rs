@@ -6,6 +6,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 mod backend;
+mod context;
 mod denominations;
 mod reserved_source;
 mod scheduling;
@@ -16,6 +17,7 @@ mod store;
 pub mod error;
 pub mod types;
 
+pub use context::MigrationContext;
 pub use error::{InvalidStateError, MigrationError};
 pub use types::{
     AttentionReason, MigrationProgress, MigrationSchedule, MigrationState, NoteSplitProposal,

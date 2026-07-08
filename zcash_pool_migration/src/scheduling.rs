@@ -23,8 +23,6 @@ use zcash_protocol::value::Zatoshis;
 /// Blocks between successive transfers' send windows.
 pub(crate) const TRANSFER_CADENCE_BLOCKS: u32 = 288;
 /// Blocks after its send window during which a transfer remains valid.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) const TRANSFER_EXPIRY_WINDOW_BLOCKS: u32 = 288;
 /// Approximate blocks per hour (~75 s/block).
 pub(crate) const BLOCKS_PER_HOUR: u32 = 48;
@@ -37,8 +35,6 @@ pub(crate) const BLOCKS_PER_HOUR: u32 = 48;
 /// `TRANSFER_EXPIRY_WINDOW_BLOCKS` later. Both paths pass `first_delay_blocks = 0` today (the first
 /// transfer is executable immediately; send-time machinery owns de-correlation) — the parameter
 /// remains for schedule shaping.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn build_schedule(
     run_id: &str,
     crossing_values: &[u64],
@@ -71,8 +67,6 @@ pub(crate) fn build_schedule(
 }
 
 /// Hours until the last transfer's send window, rounded up. Zero for an empty schedule.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 fn estimated_duration_hours(transfer_count: usize, first_delay_blocks: u32) -> u32 {
     let Some(last_index) = transfer_count.checked_sub(1) else {
         return 0;

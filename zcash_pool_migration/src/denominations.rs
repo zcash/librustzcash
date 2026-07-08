@@ -38,8 +38,6 @@ pub(crate) struct DenominationPlan {
 /// power-of-ten ZEC notes, capped at [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`]. Each note costs
 /// `power_of_ten + TRANSFER_FEE_BUFFER_ZATOSHI` from the budget; whatever cannot form a whole note
 /// stays in Orchard as change.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn plan_denominations(
     total_input_zatoshi: u64,
     prep_fee_zatoshi: u64,

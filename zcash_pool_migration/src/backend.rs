@@ -54,8 +54,6 @@ use crate::store;
 use crate::types::{MigrationSchedule, NoteSplitProposal, TransferProposal};
 
 /// Spendable Orchard balance and total Ironwood balance (zatoshi) for an account.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) struct PoolBalances {
     pub orchard_spendable: u64,
     pub ironwood_total: u64,
@@ -63,8 +61,6 @@ pub(crate) struct PoolBalances {
 
 /// A proven, signed migration transaction, carried as a serialized PCZT ready for the platform to
 /// extract and broadcast, alongside the finalized transaction id.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) struct SignedPcztOutcome {
     pub txid: TxId,
     pub pczt_bytes: Vec<u8>,
@@ -76,8 +72,6 @@ pub(crate) struct SignedPcztOutcome {
 /// # Errors
 ///
 /// Returns [`MigrationError::Pipeline`] if the database cannot be opened.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn open_wallet<P: Parameters + Clone>(
     db_path: &Path,
     network: P,
@@ -95,7 +89,8 @@ pub(crate) fn open_wallet<P: Parameters + Clone>(
 /// Returns [`MigrationError::InvalidState`] if the account is unknown or has no Orchard FVK, and
 /// [`MigrationError::Backend`] on a database access error.
 #[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
+// Consumed by context (Task 12): the external-signer split/transfer PCZT builders read the
+// account's Orchard FVK directly (there is no spending key on that path to derive it from).
 pub(crate) fn account_orchard_fvk<P: Parameters>(
     db: &Db<P>,
     account: AccountUuid,
@@ -123,8 +118,6 @@ pub(crate) fn account_orchard_fvk<P: Parameters>(
 /// Returns [`MigrationError::NotSynced`] if no wallet summary is available yet,
 /// [`MigrationError::InvalidState`] if the account is unknown, and [`MigrationError::Backend`] on a
 /// database access error.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn pool_balances<P: Parameters>(
     db: &Db<P>,
     account: AccountUuid,
@@ -150,8 +143,6 @@ pub(crate) fn pool_balances<P: Parameters>(
 /// # Errors
 ///
 /// Returns [`MigrationError::Backend`] on a database access error.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn is_tx_mined<P: Parameters>(db: &Db<P>, txid: TxId) -> Result<bool, MigrationError> {
     Ok(db.get_tx_height(txid)?.is_some())
 }
@@ -162,8 +153,6 @@ pub(crate) fn is_tx_mined<P: Parameters>(db: &Db<P>, txid: TxId) -> Result<bool,
 /// # Errors
 ///
 /// Returns [`MigrationError::NotSynced`] if the wallet has no scanned block data yet.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn target_and_anchor<P: Parameters>(db: &Db<P>) -> Result<(u32, u32), MigrationError> {
     let (target, anchor) = native_target_and_anchor(db)?;
     Ok((u32::from(target), u32::from(anchor)))
@@ -175,8 +164,6 @@ pub(crate) fn target_and_anchor<P: Parameters>(db: &Db<P>) -> Result<(u32, u32),
 /// # Errors
 ///
 /// Returns [`MigrationError::NotSynced`] if the wallet has no scanned block data yet.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn native_target_and_anchor<P: Parameters>(
     db: &Db<P>,
 ) -> Result<(TargetHeight, BlockHeight), MigrationError> {
@@ -210,8 +197,6 @@ fn build_self_payment(
 ///
 /// Returns [`MigrationError::InvalidState`] if the account has no current unified address, and
 /// [`MigrationError::Backend`] on a database access error.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn self_payment_request<P: Parameters>(
     db: &Db<P>,
     network: &P,
@@ -241,9 +226,7 @@ pub(crate) fn self_payment_request<P: Parameters>(
 /// # Errors
 ///
 /// Returns [`MigrationError::Pipeline`] if input selection fails (including insufficient funds).
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn propose_migration_transfer<'a, P: Parameters + Clone>(
     db: &'a Db<P>,
     network: &P,
@@ -295,8 +278,6 @@ pub(crate) fn propose_migration_transfer<'a, P: Parameters + Clone>(
 /// Returns [`MigrationError::NotSynced`] if the wallet has no scanned block data yet, and
 /// [`MigrationError::Pipeline`] if the probe proposal fails for a reason other than insufficient
 /// funds.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn sweep_crossing_value<P: Parameters + Clone>(
     db: &Db<P>,
     network: &P,
@@ -370,8 +351,6 @@ pub(crate) fn sweep_crossing_value<P: Parameters + Clone>(
 
 /// The single shared Orchard-family proving key (`PostNu6_3`), used for both the Orchard and
 /// Ironwood bundles of a migration PCZT.
-#[allow(dead_code)]
-// Consumed by prove_pczt (below), which context (Task 11) drives.
 fn shielded_proving_key() -> &'static orchard::circuit::ProvingKey {
     static PK: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
     PK.get_or_init(|| {
@@ -385,8 +364,6 @@ fn shielded_proving_key() -> &'static orchard::circuit::ProvingKey {
 /// # Errors
 ///
 /// Returns [`MigrationError::Pipeline`] if proof generation fails.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via prove_sign_finalize.
 pub(crate) fn prove_pczt(pczt: pczt::Pczt) -> Result<pczt::Pczt, MigrationError> {
     let mut prover = pczt::roles::prover::Prover::new(pczt);
     if prover.requires_orchard_proof() {
@@ -414,8 +391,6 @@ pub(crate) fn prove_pczt(pczt: pczt::Pczt) -> Result<pczt::Pczt, MigrationError>
 ///
 /// Returns [`MigrationError::Pipeline`] if the signer cannot be constructed or a spend fails to
 /// sign for a reason other than a wrong key.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via prove_sign_finalize.
 pub(crate) fn sign_all_orchard_spends(
     pczt: pczt::Pczt,
     usk: &UnifiedSpendingKey,
@@ -443,8 +418,6 @@ pub(crate) fn sign_all_orchard_spends(
 ///
 /// Returns [`MigrationError::Pipeline`] if any of proving, signing, spend finalization,
 /// serialization, or extraction fails.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via sign_schedule / sign_split.
 pub(crate) fn prove_sign_finalize(
     pczt: pczt::Pczt,
     usk: &UnifiedSpendingKey,
@@ -517,8 +490,6 @@ pub(crate) fn combine_signed_pczt(
 ///
 /// Returns [`MigrationError::Pipeline`] if the PCZT cannot be parsed, extracted, or the transaction
 /// cannot be encoded.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12).
 pub(crate) fn extract_broadcast_tx(pczt_bytes: &[u8]) -> Result<Vec<u8>, MigrationError> {
     let pczt = pczt::Pczt::parse(pczt_bytes)
         .map_err(|e| MigrationError::Pipeline(format!("parse pczt: {e:?}")))?;
@@ -543,8 +514,6 @@ pub(crate) fn extract_broadcast_tx(pczt_bytes: &[u8]) -> Result<Vec<u8>, Migrati
 ///
 /// Returns [`MigrationError::Pipeline`] if PCZT creation fails (including an expiry height below the
 /// proposal's minimum target height).
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via sign_schedule.
 pub(crate) fn create_transfer_pczt<P: Parameters + Clone>(
     db: &mut Db<P>,
     network: &P,
@@ -571,8 +540,6 @@ pub(crate) fn create_transfer_pczt<P: Parameters + Clone>(
 /// Pinning is hardening, not correctness: witnesses bake into the PCZT at sign time, so a failure
 /// to pin is non-fatal and is intentionally swallowed. `ensure_retained` marks the checkpoint
 /// exempt from ordinary pruning so a long-running schedule cannot lose its anchor mid-flight.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via sign_schedule.
 pub(crate) fn retain_anchor<P: Parameters>(
     db: &mut Db<P>,
     anchor_height: u32,
@@ -596,8 +563,6 @@ pub(crate) fn retain_anchor<P: Parameters>(
 /// # Errors
 ///
 /// Returns [`MigrationError::Pipeline`] if the commitment tree update fails.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via sign_schedule.
 pub(crate) fn release_retained_anchors<P: Parameters>(
     db: &mut Db<P>,
     below: u32,
@@ -607,8 +572,6 @@ pub(crate) fn release_retained_anchors<P: Parameters>(
 }
 
 /// The internal note ids a proposal selected as inputs, so successive transfers can reserve them.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via sign_schedule.
 pub(crate) fn proposal_note_refs(
     proposal: &Proposal<Zip317FeeRule, ReceivedNoteId>,
 ) -> Vec<ReceivedNoteId> {
@@ -624,8 +587,6 @@ pub(crate) fn proposal_note_refs(
 /// Map a schedule transfer plus its proposal and finalized PCZT to the pending row the store
 /// persists: the crossing value and heights come from the [`TransferProposal`], the fee from the
 /// proposal's single step, and the selected-note triple from that step's first shielded input.
-#[allow(dead_code)]
-// Consumed by context (Tasks 11-12) via sign_schedule.
 pub(crate) fn pending_row(
     t: &TransferProposal,
     proposal: &Proposal<Zip317FeeRule, ReceivedNoteId>,
@@ -675,8 +636,6 @@ pub(crate) fn pending_row(
 /// Returns [`MigrationError::NotSynced`] if the wallet has no scanned block data yet, and
 /// [`MigrationError::Pipeline`]/[`MigrationError::Backend`] if any transfer fails to propose,
 /// build, sign, or persist.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn sign_schedule<P: Parameters + Clone>(
     db: &mut Db<P>,
     network: &P,
@@ -744,8 +703,6 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
 /// Returns [`MigrationError::NotSynced`] if the wallet has no scanned block data yet, and
 /// [`MigrationError::Pipeline`]/[`MigrationError::Backend`] if the split cannot be built, signed, or
 /// persisted.
-#[allow(dead_code)]
-// Consumed by context (Task 11).
 pub(crate) fn sign_split<P: Parameters + Clone>(
     db: &mut Db<P>,
     network: &P,
