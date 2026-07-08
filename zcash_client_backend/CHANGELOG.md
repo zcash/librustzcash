@@ -194,6 +194,12 @@ workspace.
   (A payment directed to the Orchard pool after NU6.3 activation is a
   programming error, which step construction enforces by assertion: payment
   classification always delivers such payments via the Ironwood bundle.)
+- `zcash_client_backend::proposal::ProposalError::OrchardReceiverRequiresIronwood`,
+  returned by proposal construction when a transaction version that cannot carry an
+  Ironwood bundle is explicitly requested for a payment to an Orchard receiver at a
+  post-NU6.3 target height. Such a payment must be delivered through the Ironwood pool
+  (a version 6 transaction feature), as the Orchard turnstile forbids adding value to
+  the Orchard pool after NU6.3.
 - `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
   alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
   instead of a `ChangeStrategy`.

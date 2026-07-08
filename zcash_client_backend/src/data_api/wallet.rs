@@ -2238,6 +2238,26 @@ where
     })
 }
 
+/// Returns `true` if evaluating this proposal step would move value through the Ironwood pool —
+/// an Orchard-receiver payment after NU6.3, an Ironwood note spend, or Ironwood change. PCZT
+/// construction cannot yet produce the version 6 transaction such a step requires.
+#[cfg(feature = "pczt")]
+fn step_uses_ironwood<N>(step: &Step<N>) -> bool {
+    step.payment_pools()
+        .values()
+        .any(|pool| *pool == PoolType::IRONWOOD)
+        || step
+            .balance()
+            .proposed_change()
+            .iter()
+            .any(|change| change.output_pool() == PoolType::IRONWOOD)
+        || step
+            .shielded_inputs()
+            .iter()
+            .flat_map(|inputs| inputs.notes().iter())
+            .any(|note| note.note().pool() == ShieldedPool::Ironwood)
+}
+
 /// Constructs a transaction using the inputs supplied by the given proposal.
 ///
 /// Only single-step proposals are currently supported.
@@ -2306,6 +2326,14 @@ where
 
     let prior_step_results = &[];
     let proposal_step = proposal.steps().first();
+
+    // PCZT construction cannot yet produce an Ironwood bundle (a version 6 transaction feature),
+    // so a proposal that moves value through the Ironwood pool cannot be realized as a PCZT.
+    // Reject it up front rather than forcing the version 5 build below to fail opaquely with a
+    // builder error.
+    if step_uses_ironwood(proposal_step) {
+        return Err(Error::ProposalNotSupported);
+    }
 
     let unused_transparent_outputs = &mut HashMap::new();
     let proposed_version = Some(TxVersion::V5);

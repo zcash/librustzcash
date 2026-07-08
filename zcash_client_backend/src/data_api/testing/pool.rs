@@ -7366,3 +7366,167 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
         proposal,
     );
 }
+
+/// After NU6.3 activation, a payment to an Orchard receiver must be delivered through the
+/// Ironwood pool, which requires a version 6 transaction. Explicitly requesting a version 5
+/// transaction — which has no Ironwood bundle — for such a payment must be rejected at proposal
+/// time with [`ProposalError::OrchardReceiverRequiresIronwood`], rather than producing a proposal
+/// that could only fail later at build time.
+#[cfg(feature = "orchard")]
+pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+{
+    use super::orchard::OrchardPoolTester;
+    use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
+    use crate::proposal::ProposalError;
+    use zcash_primitives::transaction::TxVersion;
+
+    // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
+    let ironwood_active_network = {
+        let activation = BlockHeight::from_u32(100_000);
+        LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    // Fund the wallet with a single spendable Orchard note.
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60_000));
+
+    // The destination has an Orchard receiver controlled by a separate spending key.
+    let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+    let to = OrchardPoolTester::sk_default_address(&to_extsk);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10_000),
+    )])
+    .unwrap();
+
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Orchard,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+
+    let account = st.get_account();
+    let network = *st.network();
+    let result = propose_transfer::<_, _, _, _, Infallible>(
+        st.wallet_mut(),
+        &network,
+        account.id(),
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &SpendPolicy::default(),
+        Some(TxVersion::V5),
+    );
+
+    assert_matches!(
+        result,
+        Err(Error::Proposal(
+            ProposalError::OrchardReceiverRequiresIronwood(TxVersion::V5)
+        ))
+    );
+}
+
+/// PCZT construction cannot yet produce an Ironwood bundle (a version 6 transaction feature), so
+/// after NU6.3 a proposal that delivers a payment to an Orchard receiver — routed through the
+/// Ironwood pool — must be rejected by `create_pczt_from_proposal` with a clear
+/// [`Error::ProposalNotSupported`], rather than failing with an opaque builder error.
+#[cfg(all(feature = "orchard", feature = "pczt"))]
+pub fn create_pczt_rejects_ironwood_orchard_receiver_payment<Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: serde::Serialize,
+{
+    use super::orchard::OrchardPoolTester;
+
+    // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
+    let ironwood_active_network = {
+        let activation = BlockHeight::from_u32(100_000);
+        LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    // Fund the wallet with a single spendable Orchard note.
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60_000));
+
+    // The destination has an Orchard receiver controlled by a separate spending key; post-NU6.3
+    // the payment is routed through the Ironwood pool.
+    let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+    let to = OrchardPoolTester::sk_default_address(&to_extsk);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10_000),
+    )])
+    .unwrap();
+
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Orchard,
+        DustOutputPolicy::default(),
+    );
+    let input_selector = GreedyInputSelector::new();
+
+    let account_id = st.get_account().id();
+    let proposal = st
+        .propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("proposal construction succeeds; the Orchard-receiver payment routes to Ironwood");
+
+    // The payment routes to the Ironwood pool, so realizing this proposal as a PCZT is what is
+    // being rejected below.
+    assert_eq!(
+        proposal.steps().head.payment_pools().get(&0),
+        Some(&PoolType::IRONWOOD),
+    );
+
+    let result = st.create_pczt_from_proposal::<Infallible, _, Infallible>(
+        account_id,
+        OvkPolicy::Sender,
+        &proposal,
+        None,
+    );
+
+    assert_matches!(result, Err(Error::ProposalNotSupported));
+}

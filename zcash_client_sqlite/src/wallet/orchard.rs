@@ -929,6 +929,17 @@ pub(crate) mod tests {
         testing::pool::shielding_coinbase_to_orchard_receiver_delivers_via_ironwood();
     }
 
+    #[test]
+    fn propose_v5_payment_to_orchard_receiver_is_rejected() {
+        testing::pool::propose_v5_payment_to_orchard_receiver_is_rejected();
+    }
+
+    #[cfg(feature = "pczt-tests")]
+    #[test]
+    fn create_pczt_rejects_ironwood_orchard_receiver_payment() {
+        testing::pool::create_pczt_rejects_ironwood_orchard_receiver_payment();
+    }
+
     /// `put_received_note` records a note in the received-notes table chosen by the caller,
     /// preserving the note's plaintext version in the `note_version` column. An Orchard-pool note
     /// and an Ironwood-pool note sharing an action index may both be recorded in their respective

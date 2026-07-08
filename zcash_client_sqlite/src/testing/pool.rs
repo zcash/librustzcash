@@ -820,3 +820,19 @@ pub(crate) fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood() {
         BlockCache::new(),
     );
 }
+
+#[cfg(feature = "orchard")]
+pub(crate) fn propose_v5_payment_to_orchard_receiver_is_rejected() {
+    zcash_client_backend::data_api::testing::pool::propose_v5_payment_to_orchard_receiver_is_rejected(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(all(feature = "orchard", feature = "pczt-tests"))]
+pub(crate) fn create_pczt_rejects_ironwood_orchard_receiver_payment() {
+    zcash_client_backend::data_api::testing::pool::create_pczt_rejects_ironwood_orchard_receiver_payment(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
