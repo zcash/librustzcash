@@ -152,6 +152,8 @@ pub mod chain;
 pub mod error;
 pub mod util;
 pub mod wallet;
+#[cfg(feature = "zewif")]
+pub mod zewif;
 
 #[cfg(test)]
 mod testing;
