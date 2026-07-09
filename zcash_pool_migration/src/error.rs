@@ -70,8 +70,6 @@ impl fmt::Display for InvalidStateError {
 pub enum MigrationError {
     /// The wallet must finish syncing before this operation can proceed.
     NotSynced,
-    /// `initialize_post_upgrade` has not been called yet.
-    NotInitialized,
     /// The migration is in a state that does not permit this operation.
     InvalidState(InvalidStateError),
     /// A database (SQLite) error from the engine's own tables.
@@ -93,12 +91,13 @@ impl MigrationError {
     /// `#[non_exhaustive]` marker must be given a new, previously-unused code rather than reusing
     /// one of the codes below.
     ///
-    /// Current codes: `NotSynced` = 1, `NotInitialized` = 2, `InvalidState` = 3, `Db` = 4,
-    /// `Backend` = 5, `Pipeline` = 6.
+    /// Current codes: `NotSynced` = 1, `InvalidState` = 3, `Db` = 4, `Backend` = 5,
+    /// `Pipeline` = 6. Code `2` is retired — it belonged to a `NotInitialized` variant that was
+    /// removed before release — and must never be reassigned, so the remaining codes keep their
+    /// original values rather than being compacted.
     pub fn error_code(&self) -> u32 {
         match self {
             MigrationError::NotSynced => 1,
-            MigrationError::NotInitialized => 2,
             MigrationError::InvalidState(_) => 3,
             MigrationError::Db(_) => 4,
             MigrationError::Backend(_) => 5,
@@ -111,12 +110,6 @@ impl fmt::Display for MigrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MigrationError::NotSynced => write!(f, "wallet must finish syncing first"),
-            MigrationError::NotInitialized => {
-                write!(
-                    f,
-                    "migration not initialized; call initialize_post_upgrade first"
-                )
-            }
             MigrationError::InvalidState(e) => write!(f, "invalid migration state: {e}"),
             MigrationError::Db(e) => write!(f, "database error: {e}"),
             MigrationError::Backend(e) => write!(f, "wallet backend error: {e}"),
@@ -163,7 +156,7 @@ mod tests {
     #[test]
     fn error_codes_are_stable_and_display_readable() {
         assert_eq!(MigrationError::NotSynced.error_code(), 1);
-        assert_eq!(MigrationError::NotInitialized.error_code(), 2);
+        // Code 2 is retired (was `NotInitialized`, removed pre-release); `InvalidState` keeps 3.
         let e = MigrationError::InvalidState(InvalidStateError::NoActiveRun);
         assert_eq!(e.error_code(), 3);
         assert!(e.to_string().to_lowercase().contains("no active"));
@@ -181,18 +174,12 @@ mod tests {
     }
 
     #[test]
-    fn not_synced_and_not_initialized_display() {
+    fn not_synced_display() {
         assert!(
             MigrationError::NotSynced
                 .to_string()
                 .to_lowercase()
                 .contains("sync")
-        );
-        assert!(
-            MigrationError::NotInitialized
-                .to_string()
-                .to_lowercase()
-                .contains("initial")
         );
     }
 
