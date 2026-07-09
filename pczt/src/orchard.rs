@@ -1211,9 +1211,16 @@ pub(crate) mod v2 {
             let mut memo = [0; MEMO_SIZE];
             memo[..5].copy_from_slice(b"hello");
 
-            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let mut pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             pczt.orchard
                 .actions
                 .push(decryptable_action_with_memo(memo));
