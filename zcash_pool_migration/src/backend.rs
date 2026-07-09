@@ -747,7 +747,7 @@ pub(crate) fn sign_split<P: Parameters + Clone>(
     run_id: &str,
     proposal: &NoteSplitProposal,
     usk: &UnifiedSpendingKey,
-) -> Result<(SignedPcztOutcome, Vec<(u32, u64)>), MigrationError> {
+) -> Result<(SignedPcztOutcome, crate::split::SplitOutputs), MigrationError> {
     let account_str = account.expose_uuid().to_string();
     // Exclude this run's own (not-yet-existing) notes for symmetry; other live runs' stay locked.
     let locks = store::locked_note_refs(conn, &account_str, Some(run_id))?;
@@ -757,10 +757,10 @@ pub(crate) fn sign_split<P: Parameters + Clone>(
         .iter()
         .map(|v| u64::from(*v))
         .collect();
-    let (pczt, placed_outputs) =
+    let (pczt, split_outputs) =
         crate::split::build_split_pczt(db, network, account, &orchard_fvk, &locks, &outputs)?;
     let signed = prove_sign_finalize(pczt, usk)?;
-    Ok((signed, placed_outputs))
+    Ok((signed, split_outputs))
 }
 
 #[cfg(test)]

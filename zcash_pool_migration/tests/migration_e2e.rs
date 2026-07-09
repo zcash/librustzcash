@@ -353,9 +353,12 @@ fn transfer_pipeline_produces_a_v6_ironwood_crossing_tx() {
 /// recorded broadcast.
 #[test]
 fn note_split_plans_and_signs_against_a_seeded_wallet() {
-    // 12.0007 ZEC decomposes (after the 10_000 prep-fee reserve) into exactly [10, 1, 1] ZEC
-    // crossings, i.e. three self-funding output notes.
-    let seed_value = 1_200_070_000u64;
+    // 12.0008 ZEC decomposes into exactly [10, 1, 1] ZEC crossings (three self-funding output
+    // notes) with zero leftover, once the plan reserves the *real* split fee for 1 spend + 3
+    // change outputs (20_000 zatoshi) rather than the flat prep-fee estimate — see
+    // `note_split_leaves_a_genuine_leftover_as_plain_change` for the (much more common) case where
+    // the balance does not divide evenly.
+    let seed_value = 1_200_080_000u64;
     let (_dir, st, db_path, account) = seed_wallet(&[seed_value], 10);
     let usk = st.get_account().usk().clone();
     // Captured before the split is built: `build_split_pczt` (via `Builder::new`) computes this
@@ -423,6 +426,65 @@ fn note_split_plans_and_signs_against_a_seeded_wallet() {
     assert_eq!(
         ctx.migration_state().unwrap(),
         MigrationState::SplitPendingConfirmation
+    );
+}
+
+/// The much more common case: the spendable balance does not divide evenly into self-funding
+/// notes plus the real split fee. The leftover must surface as its own plain, **unlocked** Orchard
+/// change output — never folded into the last migration note's value (which would leak the
+/// leftover amount when that note later crosses into Ironwood) and never tracked as a
+/// migration-locked prepared note (it is ordinary balance, left for the wallet/user, not reserved
+/// for a scheduled transfer).
+#[test]
+fn note_split_leaves_a_genuine_leftover_as_plain_change() {
+    // 12.0007 ZEC: under the *real* fee for 1 spend + 3 change outputs (20_000 zatoshi), a third
+    // 1-ZEC denomination would need 100_020_000 zatoshi but only 100_010_000 remains once two
+    // notes are set aside — so the plan settles on two notes, and the ~1.0001 ZEC left over
+    // becomes a real (unlocked) change output at signing time.
+    let seed_value = 1_200_070_000u64;
+    let (_dir, st, db_path, account) = seed_wallet(&[seed_value], 10);
+    let usk = st.get_account().usk().clone();
+    drop(st);
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    let proposal = ctx.prepare_note_split().unwrap();
+    let expected: Vec<Zatoshis> = [1_000_020_000u64, 100_020_000]
+        .into_iter()
+        .map(Zatoshis::const_from_u64)
+        .collect();
+    assert_eq!(
+        proposal.output_values(),
+        &expected[..],
+        "the plan settles on two notes rather than force-fitting a third"
+    );
+    let n_denoms = proposal.output_values().len();
+
+    let prepared = ctx.sign_note_split(&proposal, &usk).unwrap();
+    let raw_tx = ctx.extract_broadcast_tx(prepared.pczt_bytes()).unwrap();
+    let tx = Transaction::read(&raw_tx[..], BranchId::Nu6_3).expect("split tx parses");
+    let orchard = tx.orchard_bundle().expect("orchard bundle present");
+    assert_eq!(
+        orchard.actions().len(),
+        1 + n_denoms + 1,
+        "one action per spend (1), one per migration note (denominations), plus one for the \
+         genuine leftover change output"
+    );
+
+    // Only the two migration notes are migration-locked; the leftover change output is not
+    // tracked in the engine's own tables at all — it is ordinary, unlocked Orchard balance.
+    let conn = Connection::open(&db_path).unwrap();
+    let locked: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ext_ironwood_migration_prepared_notes \
+             WHERE txid_hex = ?1 AND lock_state = 'locked'",
+            [prepared.txid().to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        locked, 2,
+        "only the two self-funding migration notes are locked, not the leftover change"
     );
 }
 

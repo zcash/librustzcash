@@ -455,10 +455,12 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     }
 
     /// Compute the optimal note split for the spendable Orchard balance. Each output note is
-    /// self-funding (`power_of_ten + buffer`); any residual stays in Orchard. The reported fee is
-    /// the exact ZIP-317 fee for the split transaction (`5000 × (spends + outputs)`, floored at 2
-    /// actions); at signing time the last output absorbs any drift between this plan and the
-    /// then-current balance.
+    /// self-funding (`power_of_ten + buffer`) and always keeps that exact value — any leftover
+    /// (fee-estimate drift, or a balance that doesn't decompose evenly) is left as ordinary,
+    /// unlocked Orchard change at signing time instead of being folded into a migration note (see
+    /// [`crate::split::finalize_split_outputs`]). The reported fee is the exact ZIP-317 fee for the
+    /// split transaction (`5000 × (spends + outputs)`, floored at 2 actions), converged against the
+    /// resulting output count so the real signing step reserves enough headroom.
     ///
     /// # Errors
     ///
@@ -468,14 +470,29 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     pub fn prepare_note_split(&self) -> Result<NoteSplitProposal, MigrationError> {
         let db = self.open_wallet()?;
         let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
-        let plan =
-            plan_denominations(total, FEE_ESTIMATE_ZATOSHI).map_err(MigrationError::Pipeline)?;
         // Pre-split there are no migration locks yet, so no exclusions apply.
         let locks = BTreeSet::new();
         let n_spends = crate::split::select_spendable_orchard_notes(&db, self.account, &locks)?
             .len()
             .max(1);
-        let n_outputs = plan.migration_outputs.len();
+        // The prep-fee reserved while decomposing must match the real split fee this plan will be
+        // signed with (`split::split_fee` / `split::finalize_split_outputs`), which itself depends
+        // on the resulting output count — so converge by re-planning with the fee implied by the
+        // previous round's output count. `FEE_ESTIMATE_ZATOSHI` seeds the first guess; output count
+        // only takes a handful of discrete values (bounded by the note-count cap), so this settles
+        // in a few iterations. `finalize_split_outputs` still errors defensively at signing time if
+        // the real balance ever undershoots this estimate (e.g. a note became unspendable between
+        // planning and signing), rather than shrinking a migration note to compensate.
+        let mut fee_estimate = FEE_ESTIMATE_ZATOSHI;
+        let mut plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+        for _ in 0..8 {
+            let real_fee = crate::split::split_fee(n_spends, plan.migration_outputs.len().max(1));
+            if real_fee == fee_estimate {
+                break;
+            }
+            fee_estimate = real_fee;
+            plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+        }
         let output_values = plan
             .migration_outputs
             .iter()
@@ -483,7 +500,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             .collect();
         Ok(NoteSplitProposal::from_parts(
             output_values,
-            Zatoshis::const_from_u64(crate::split::split_fee(n_spends, n_outputs)),
+            Zatoshis::const_from_u64(fee_estimate),
         ))
     }
 
@@ -526,7 +543,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             .collect();
         // Sign FIRST: build, prove, and sign the split without touching the engine's tables.
         let mut db = self.open_wallet()?;
-        let (signed, placed_outputs) = backend::sign_split(
+        let (signed, split_outputs) = backend::sign_split(
             &mut db,
             &self.network,
             self.account,
@@ -536,7 +553,12 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             usk,
         )?;
         let txid_hex = signed.txid.to_string();
-        let prepared: Vec<store::PreparedNote> = placed_outputs
+        // Only the self-funding migration notes are locked for the schedule. Any plain change
+        // output (`split_outputs.change`) is deliberately left untracked here: it is ordinary,
+        // unlocked Orchard balance for the wallet's regular scanner to pick up once the split
+        // mines, not a note this engine reserves for a scheduled transfer.
+        let prepared: Vec<store::PreparedNote> = split_outputs
+            .migration_notes
             .iter()
             .map(|&(action_index, value_zatoshi)| store::PreparedNote {
                 txid_hex: txid_hex.clone(),
@@ -613,7 +635,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             .iter()
             .map(|&v| u64::from(v))
             .collect();
-        let (pczt, placed_outputs) = crate::split::build_split_pczt(
+        let (pczt, split_outputs) = crate::split::build_split_pczt(
             &mut db,
             &self.network,
             self.account,
@@ -621,6 +643,10 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             &locks,
             &output_notes,
         )?;
+        // Only the migration notes are staged for locking; any plain change output
+        // (`split_outputs.change`) is deliberately dropped here — it is ordinary, unlocked Orchard
+        // balance, not a note this engine reserves for a scheduled transfer.
+        let placed_outputs = split_outputs.migration_notes;
         // The device-facing copy is serialized before proving: the proof is not signed over, and
         // the platform redacts the PCZT for the QR channel anyway.
         let unsigned = pczt.clone().serialize().map_err(|e| {
