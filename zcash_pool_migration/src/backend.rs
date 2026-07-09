@@ -526,6 +526,9 @@ pub(crate) fn create_transfer_pczt<P: Parameters + Clone>(
         OvkPolicy::Sender,
         proposal,
         Some(BlockHeight::from_u32(expiry_height)),
+        // The padded default preserves the pre-configurability behavior (matches upstream's
+        // own callers); transfer fees assume the padded two-action Orchard bundle.
+        orchard::builder::BundleType::DEFAULT,
     )
     .map_err(|e| MigrationError::Pipeline(format!("create transfer pczt: {e:?}")))
 }
