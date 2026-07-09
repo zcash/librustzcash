@@ -11,6 +11,19 @@ workspace.
 ## [0.24.0] - PLANNED
 
 ### Added
+- `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (with the
+  `PutBlocksRows` result type and the `PutBlocksRowsDbT` trait alias): the
+  row-writing stage of `put_blocks`, extracted as a public function over
+  `LowLevelWalletWrite` so that wallet stores that maintain their note
+  commitment trees by other means can reuse it without also implementing
+  `WalletCommitmentTrees`. `put_blocks` itself is unchanged in behavior; it is
+  now expressed as `put_blocks_rows` followed by the note commitment tree
+  updates.
+- The helper functions used by the note commitment tree stage of `put_blocks`
+  are now `pub`, so that alternative `ShardStore`-backed stores can reuse the
+  exact tree-update logic: `zcash_client_backend::data_api::ll::wallet::`
+  `{build_subtrees, checkpoint_positions, ensure_checkpoints,
+  cross_pool_ensure_heights, update_tree}`.
 - `zcash_client_backend::proposal::Proposal::proposed_version` and
   `with_proposed_version`. The transaction version requested when a proposal is
   constructed is now recorded on the proposal (and preserved across
