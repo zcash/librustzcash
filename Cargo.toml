@@ -53,7 +53,7 @@ bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 ff = { version = "0.13", default-features = false }
 group = "0.13"
 incrementalmerkletree = { version = "0.8.2", default-features = false }
-shardtree = "0.6.2"
+shardtree = "0.7"
 zcash_spec = "0.2"
 
 # Payment protocols
@@ -229,13 +229,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-# TEMPORARY: explicit checkpoint retention (ensure_retained / retained_checkpoints).
-# Points at zcash/incrementalmerkletree main (includes #184); replace with a published
-# shardtree release once one is cut.
-shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
-incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "decefc469dbf1e686b20b7e7dcaa7cb4f122125b" }
-
 # TEMPORARY: orchard revision that keeps `BundleType::DEFAULT` padded and adds the
 # opt-in `BundleType::DEFAULT_UNPADDED` + `Builder::bundle_type()`; replace with a
 # published orchard release once one carries these.
