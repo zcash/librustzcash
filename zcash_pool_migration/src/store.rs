@@ -1074,7 +1074,7 @@ mod tests {
     fn target_values_codec_round_trips_empty_and_extreme_values() {
         // Empty array round-trip
         assert_eq!(encode_target_values(&[]), "[]");
-        assert_eq!(parse_target_values("[]"), vec![]);
+        assert_eq!(parse_target_values("[]"), Vec::<u64>::new());
 
         // Single values: 0, 1, and u64::MAX
         assert_eq!(encode_target_values(&[0]), "[0]");
@@ -1097,24 +1097,24 @@ mod tests {
     #[test]
     fn target_values_decode_is_lenient_on_malformed_text() {
         // Missing brackets: no [ prefix → empty vec
-        assert_eq!(parse_target_values("not json"), vec![]);
+        assert_eq!(parse_target_values("not json"), Vec::<u64>::new());
 
         // Empty string → empty vec (no brackets)
-        assert_eq!(parse_target_values(""), vec![]);
+        assert_eq!(parse_target_values(""), Vec::<u64>::new());
 
         // Malformed array: partially bad numbers → unwrap_or_default returns empty
-        assert_eq!(parse_target_values("[1,x,3]"), vec![]);
+        assert_eq!(parse_target_values("[1,x,3]"), Vec::<u64>::new());
 
         // Missing closing bracket → empty vec
-        assert_eq!(parse_target_values("[1,2,3"), vec![]);
+        assert_eq!(parse_target_values("[1,2,3"), Vec::<u64>::new());
 
         // Missing opening bracket → empty vec
-        assert_eq!(parse_target_values("1,2,3]"), vec![]);
+        assert_eq!(parse_target_values("1,2,3]"), Vec::<u64>::new());
 
         // Valid JSON but with extra whitespace (should parse ok)
         assert_eq!(parse_target_values("[ 1 , 2 , 3 ]"), vec![1, 2, 3]);
 
         // Empty brackets with whitespace → empty vec
-        assert_eq!(parse_target_values("[  ]"), vec![]);
+        assert_eq!(parse_target_values("[  ]"), Vec::<u64>::new());
     }
 }
