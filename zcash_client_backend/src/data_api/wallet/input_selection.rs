@@ -908,12 +908,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             // transaction version was explicitly requested that cannot carry an
                             // Ironwood bundle, reject the proposal here rather than constructing one
                             // that could only fail at build time.
-                            if let Some(v) = proposed_version {
-                                if !v.has_ironwood() {
-                                    return Err(
-                                        ProposalError::OrchardReceiverRequiresIronwood(v).into()
-                                    );
-                                }
+                            if let Some(v) = proposed_version
+                                && !v.has_ironwood()
+                            {
+                                return Err(
+                                    ProposalError::OrchardReceiverRequiresIronwood(v).into()
+                                );
                             }
                             PoolType::IRONWOOD
                         } else {
@@ -1321,32 +1321,32 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     // defensive fallback. The common case (fee estimate was close) is
                     // a no-op.
                     #[cfg(feature = "transparent-inputs")]
-                    if let Some(transparent) = spend_policy.transparent() {
-                        if required > amount_at_transparent_gather {
-                            let address_allow_list = transparent.address_allow_list();
-                            transparent_inputs = wallet_db
-                                .select_spendable_transparent_outputs(
-                                    account,
-                                    target_height,
-                                    confirmations_policy,
-                                    transparent.coinbase().into(),
-                                    address_allow_list.as_deref(),
-                                    TargetValue::AtLeast(required),
-                                    shielding_max_inputs(self.shielding_block_space_percent),
-                                    &StandardFeeRule::Zip317,
-                                )
-                                .map_err(InputSelectorError::DataSource)?
-                                .into_iter()
-                                // Do not re-introduce outputs previously pruned as dust; the
-                                // value they would contribute is (approximately) consumed by
-                                // their own fee cost, so their absence does not meaningfully
-                                // reduce the gathered value.
-                                .filter(|utxo| !transparent_dust.contains(utxo.outpoint()))
-                                .map(|utxo| utxo.redact_account_data())
-                                .collect::<Vec<_>>();
-                            amount_at_transparent_gather = required;
-                            transparent_inputs_changed = true;
-                        }
+                    if let Some(transparent) = spend_policy.transparent()
+                        && required > amount_at_transparent_gather
+                    {
+                        let address_allow_list = transparent.address_allow_list();
+                        transparent_inputs = wallet_db
+                            .select_spendable_transparent_outputs(
+                                account,
+                                target_height,
+                                confirmations_policy,
+                                transparent.coinbase().into(),
+                                address_allow_list.as_deref(),
+                                TargetValue::AtLeast(required),
+                                shielding_max_inputs(self.shielding_block_space_percent),
+                                &StandardFeeRule::Zip317,
+                            )
+                            .map_err(InputSelectorError::DataSource)?
+                            .into_iter()
+                            // Do not re-introduce outputs previously pruned as dust; the
+                            // value they would contribute is (approximately) consumed by
+                            // their own fee cost, so their absence does not meaningfully
+                            // reduce the gathered value.
+                            .filter(|utxo| !transparent_dust.contains(utxo.outpoint()))
+                            .map(|utxo| utxo.redact_account_data())
+                            .collect::<Vec<_>>();
+                        amount_at_transparent_gather = required;
+                        transparent_inputs_changed = true;
                     }
                 }
                 Err(other) => return Err(InputSelectorError::Change(other)),

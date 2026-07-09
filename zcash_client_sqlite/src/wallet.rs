@@ -1242,10 +1242,10 @@ fn find_account_for_shielded_address<P: consensus::Parameters>(
                 "Not a valid Zcash recipient address".to_owned(),
             ))
         })?;
-        if let Address::Unified(stored_ua) = stored {
-            if address_receiver_matches_ua(address, &stored_ua, params) {
-                return Ok(Some(AccountUuid::from_uuid(row_uuid)));
-            }
+        if let Address::Unified(stored_ua) = stored
+            && address_receiver_matches_ua(address, &stored_ua, params)
+        {
+            return Ok(Some(AccountUuid::from_uuid(row_uuid)));
         }
     }
 
@@ -3437,35 +3437,34 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 if _pool == &PoolType::Transparent {
                     let address = Address::try_from_zcash_address(params, _zaddr.clone())
                         .expect("recipient is an understood Zcash address.");
-                    if let Some(taddr) = address.to_transparent_address() {
-                        if transparent::find_account_uuid_for_transparent_address(
+                    if let Some(taddr) = address.to_transparent_address()
+                        && transparent::find_account_uuid_for_transparent_address(
                             conn, params, &taddr,
                         )?
                         .is_some()
-                        {
-                            transparent::put_transparent_output(
-                                conn,
-                                params,
-                                gap_limits,
-                                &WalletTransparentOutput::from_parts(
-                                    OutPoint::new(
-                                        sent_tx.tx().txid().into(),
-                                        u32::try_from(output.output_index())
-                                            .expect("output index fits into a u32")
-                                    ),
-                                    TxOut::new(output.value(), taddr.script().into()),
-                                    None,
-                                    None,
-                                    Some(TransparentKeyScope::EXTERNAL),
-                                    Some(*sent_tx.funding_account()),
-                                )
-                                .expect(
-                                    "can extract a recipient address from an internal address script",
+                    {
+                        transparent::put_transparent_output(
+                            conn,
+                            params,
+                            gap_limits,
+                            &WalletTransparentOutput::from_parts(
+                                OutPoint::new(
+                                    sent_tx.tx().txid().into(),
+                                    u32::try_from(output.output_index())
+                                        .expect("output index fits into a u32"),
                                 ),
-                                sent_tx.target_height().into(),
-                                true,
-                            )?;
-                        }
+                                TxOut::new(output.value(), taddr.script().into()),
+                                None,
+                                None,
+                                Some(TransparentKeyScope::EXTERNAL),
+                                Some(*sent_tx.funding_account()),
+                            )
+                            .expect(
+                                "can extract a recipient address from an internal address script",
+                            ),
+                            sent_tx.target_height().into(),
+                            true,
+                        )?;
                     }
                 }
             }
@@ -4149,55 +4148,54 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     if let Some(max_scanned_height) = block_max_scanned(conn, params)
         .map_err(RewindError::DataSource)?
         .map(|m| m.block_height())
+        && target_height < max_scanned_height
     {
-        if target_height < max_scanned_height {
-            // Compute the floor height of the pruning window.
-            let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
-            let truncation_target = target_height.max(pruning_floor);
+        // Compute the floor height of the pruning window.
+        let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
+        let truncation_target = target_height.max(pruning_floor);
 
-            // Determine the minimum sapling and orchard checkpoints within the pruning window.
-            let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+        // Determine the minimum sapling and orchard checkpoints within the pruning window.
+        let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+            conn,
+            crate::SAPLING_TABLES_PREFIX,
+            truncation_target,
+        )
+        .map_err(ShardTreeError::Storage)
+        .map_err(SqliteClientError::from)
+        .map_err(RewindError::DataSource)?;
+
+        #[cfg(feature = "orchard")]
+        {
+            // Check that Orchard checkpoint matches the Sapling checkpoint. These should
+            // always match unless the database is corrupted.
+            let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
                 conn,
-                crate::SAPLING_TABLES_PREFIX,
+                crate::ORCHARD_TABLES_PREFIX,
                 truncation_target,
             )
             .map_err(ShardTreeError::Storage)
             .map_err(SqliteClientError::from)
             .map_err(RewindError::DataSource)?;
-
-            #[cfg(feature = "orchard")]
-            {
-                // Check that Orchard checkpoint matches the Sapling checkpoint. These should
-                // always match unless the database is corrupted.
-                let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
-                    conn,
-                    crate::ORCHARD_TABLES_PREFIX,
-                    truncation_target,
-                )
-                .map_err(ShardTreeError::Storage)
-                .map_err(SqliteClientError::from)
-                .map_err(RewindError::DataSource)?;
-                if orchard_window_floor != sapling_window_floor {
-                    return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
-                        "Sapling and Orchard should have the same checkpoints".into(),
-                    )));
-                }
+            if orchard_window_floor != sapling_window_floor {
+                return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
+                    "Sapling and Orchard should have the same checkpoints".into(),
+                )));
             }
-
-            // Combine the per-pool floors by taking the shallower (larger height).
-            let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
-
-            // Use `truncate_to_height_internal` to perform full truncation of data within the
-            // pruning window.
-            truncate_to_height_internal(
-                conn,
-                params,
-                #[cfg(feature = "transparent-inputs")]
-                gap_limits,
-                truncation_height,
-            )
-            .map_err(RewindError::DataSource)?;
         }
+
+        // Combine the per-pool floors by taking the shallower (larger height).
+        let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
+
+        // Use `truncate_to_height_internal` to perform full truncation of data within the
+        // pruning window.
+        truncate_to_height_internal(
+            conn,
+            params,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits,
+            truncation_height,
+        )
+        .map_err(RewindError::DataSource)?;
     }
 
     // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
@@ -4209,20 +4207,20 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     // those whose priority would dominate `Historic` even under a forced rescan
     // (`ChainTip`, `OpenAdjacent`, `FoundNote`, `Verify`); `Ignored` is the lowest priority
     // and cannot overwrite anything.
-    if let Some(t) = chain_tip {
-        if target_height < t {
-            let rescan_range = (target_height + 1)..(t + 1);
-            replace_queue_entries::<SqliteClientError>(
-                conn,
-                &rescan_range,
-                std::iter::once(ScanRange::from_parts(
-                    rescan_range.clone(),
-                    ScanPriority::Historic,
-                )),
-                true,
-            )
-            .map_err(RewindError::DataSource)?;
-        }
+    if let Some(t) = chain_tip
+        && target_height < t
+    {
+        let rescan_range = (target_height + 1)..(t + 1);
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &rescan_range,
+            std::iter::once(ScanRange::from_parts(
+                rescan_range.clone(),
+                ScanPriority::Historic,
+            )),
+            true,
+        )
+        .map_err(RewindError::DataSource)?;
     }
 
     let new_sapling_tree_size: u64 = chain_state.final_sapling_tree().tree_size();
@@ -4641,15 +4639,15 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     tx_ref: TxRef,
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
-    if let Some(b) = d_tx.tx().transparent_bundle() {
-        if !b.is_coinbase() {
-            // queue the transparent inputs for enhancement
-            queue_tx_retrieval(
-                conn,
-                b.vin.iter().map(|txin| *txin.prevout().txid()),
-                Some(tx_ref),
-            )?;
-        }
+    if let Some(b) = d_tx.tx().transparent_bundle()
+        && !b.is_coinbase()
+    {
+        // queue the transparent inputs for enhancement
+        queue_tx_retrieval(
+            conn,
+            b.vin.iter().map(|txin| *txin.prevout().txid()),
+            Some(tx_ref),
+        )?;
     }
 
     Ok(())

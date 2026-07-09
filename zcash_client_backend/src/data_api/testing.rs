@@ -2797,21 +2797,19 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
                 done = true;
             }
 
-            if !done {
-                if let Some(recipient) = ua.sapling() {
-                    ctx.outputs.push(
-                        compact_sapling_output(
-                            params,
-                            height,
-                            *recipient,
-                            value,
-                            Some(::sapling::keys::OutgoingViewingKey(ovk_bytes)),
-                            &mut rng,
-                        )
-                        .0,
-                    );
-                    done = true;
-                }
+            if !done && let Some(recipient) = ua.sapling() {
+                ctx.outputs.push(
+                    compact_sapling_output(
+                        params,
+                        height,
+                        *recipient,
+                        value,
+                        Some(::sapling::keys::OutgoingViewingKey(ovk_bytes)),
+                        &mut rng,
+                    )
+                    .0,
+                );
+                done = true;
             }
             if !done {
                 panic!("No supported shielded receiver to send funds to");

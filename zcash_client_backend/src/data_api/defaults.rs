@@ -106,14 +106,13 @@ pub fn find_account_for_address<W: WalletRead, P: consensus::Parameters>(
             if stored == address {
                 return Ok(Some(acc_id));
             }
-            if let Address::Unified(stored_ua) = stored {
-                if stored_ua
+            if let Address::Unified(stored_ua) = stored
+                && stored_ua
                     .as_understood_receivers()
                     .iter()
                     .any(|r| r.corresponds(&zcash_address))
-                {
-                    return Ok(Some(acc_id));
-                }
+            {
+                return Ok(Some(acc_id));
             }
         }
     }

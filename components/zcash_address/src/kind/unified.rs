@@ -148,13 +148,13 @@ impl fmt::Display for ParseError {
         match self {
             ParseError::BothP2phkAndP2sh => write!(f, "UA contains both P2PKH and P2SH items"),
             ParseError::DuplicateTypecode(c) => write!(f, "Duplicate typecode {}", u32::from(*c)),
-            ParseError::InvalidTypecodeValue(v) => write!(f, "Typecode value out of range {}", v),
-            ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
+            ParseError::InvalidTypecodeValue(v) => write!(f, "Typecode value out of range {v}"),
+            ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {msg}"),
             ParseError::InvalidTypecodeOrder => write!(f, "Items are out of order."),
             ParseError::OnlyTransparent => write!(f, "UA only contains transparent items"),
             ParseError::NotUnified => write!(f, "Address is not Bech32m encoded"),
             ParseError::UnknownPrefix(s) => {
-                write!(f, "Unrecognized Bech32m human-readable prefix: {}", s)
+                write!(f, "Unrecognized Bech32m human-readable prefix: {s}")
             }
         }
     }
@@ -266,27 +266,23 @@ pub(crate) mod private {
                     .map(|v| u32::try_from(v).expect("CompactSize::read enforces MAX_SIZE limit"))
                     .map_err(|e| {
                         ParseError::InvalidEncoding(format!(
-                            "Failed to deserialize CompactSize-encoded typecode {}",
-                            e
+                            "Failed to deserialize CompactSize-encoded typecode {e}"
                         ))
                     })?;
                 let length = CompactSize::read(&mut cursor).map_err(|e| {
                     ParseError::InvalidEncoding(format!(
-                        "Failed to deserialize CompactSize-encoded length {}",
-                        e
+                        "Failed to deserialize CompactSize-encoded length {e}"
                     ))
                 })?;
                 let addr_end = cursor.position().checked_add(length).ok_or_else(|| {
                     ParseError::InvalidEncoding(format!(
-                        "Length value {} caused an overflow error",
-                        length
+                        "Length value {length} caused an overflow error"
                     ))
                 })?;
                 let buf = cursor.get_ref();
                 if (buf.len() as u64) < addr_end {
                     return Err(ParseError::InvalidEncoding(format!(
-                        "Truncated: unable to read {} bytes of item data",
-                        length
+                        "Truncated: unable to read {length} bytes of item data"
                     )));
                 }
                 let result = R::try_from((
@@ -300,7 +296,7 @@ pub(crate) mod private {
             // Here we allocate if necessary to get a mutable Vec<u8> to unjumble.
             let mut encoded = buf.into();
             f4jumble::f4jumble_inv_mut(&mut encoded[..]).map_err(|e| {
-                ParseError::InvalidEncoding(format!("F4Jumble decoding failed: {}", e))
+                ParseError::InvalidEncoding(format!("F4Jumble decoding failed: {e}"))
             })?;
 
             // Validate and strip trailing padding bytes.
