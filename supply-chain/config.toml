@@ -35,10 +35,8 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.incrementalmerkletree]
-audit-as-crates-io = false
 
 [policy.incrementalmerkletree-testing]
-audit-as-crates-io = false
 
 [policy.orchard]
 audit-as-crates-io = true
@@ -47,7 +45,6 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.shardtree]
-audit-as-crates-io = false
 
 [policy.zcash]
 audit-as-crates-io = true
