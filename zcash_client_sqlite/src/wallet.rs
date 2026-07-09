@@ -803,6 +803,10 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
 ) -> Result<usize, SqliteClientError> {
     use ::transparent::address::TransparentAddress;
 
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // inferred from a zero-row INSERT below.
+    let account_id = get_account_ref(conn, account_uuid)?;
+
     let existing_import_account = conn
         .query_row(
             "SELECT accounts.uuid AS account_uuid
@@ -844,14 +848,13 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
           account_id, key_scope, address, cached_transparent_receiver_address,
           receiver_flags, imported_transparent_receiver_pubkey
         )
-        SELECT
-          id, :key_scope, :address, :address,
+        VALUES (
+          :account_id, :key_scope, :address, :address,
           :receiver_flags, :imported_transparent_receiver_pubkey
-          FROM accounts
-          WHERE accounts.uuid = :account_uuid
+        )
         "#,
         named_params![
-            ":account_uuid": account_uuid.0,
+            ":account_id": account_id.0,
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2PKH.bits(),
@@ -859,10 +862,8 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
         ],
     )?;
 
-    if rows_affected == 0 {
-        return Err(SqliteClientError::AccountUnknown);
-    }
-
+    // The account is known (resolved above) and the receiver is not already recorded (checked
+    // above), so exactly one row is inserted.
     Ok(rows_affected)
 }
 
@@ -876,6 +877,10 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     use ::transparent::address::TransparentAddress;
     use zcash_script::descriptor::sh;
     use zcash_script::script::Evaluable;
+
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // inferred from a zero-row INSERT below.
+    let account_id = get_account_ref(conn, account_uuid)?;
 
     // This mirrors `zcash_script::opcode::push_value::LargeValue::MAX_SIZE`, which is
     // currently `pub(crate)`. Replace with a direct reference if it becomes public.
@@ -930,30 +935,25 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     }
 
     let addr_str = Address::Transparent(addr).encode(params);
-    let rows_affected = conn.execute(
+    conn.execute(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
           receiver_flags, imported_transparent_receiver_script
         )
-        SELECT
-          id, :key_scope, :address, :address,
+        VALUES (
+          :account_id, :key_scope, :address, :address,
           :receiver_flags, :imported_transparent_receiver_script
-          FROM accounts
-          WHERE accounts.uuid = :account_uuid
+        )
         "#,
         named_params![
-            ":account_uuid": account_uuid.0,
+            ":account_id": account_id.0,
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2SH.bits(),
             ":imported_transparent_receiver_script": &rs_bytes[..]
         ],
     )?;
-
-    if rows_affected == 0 {
-        return Err(SqliteClientError::AccountUnknown);
-    }
 
     Ok(())
 }

@@ -3414,6 +3414,36 @@ mod tests {
         );
     }
 
+    /// Importing into an account that does not exist returns `AccountUnknown`, resolved
+    /// explicitly up front rather than inferred from a zero-row insert.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey_unknown_account() {
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let network = *st.network();
+        let pubkey = PublicKey::from_secret_key(
+            &Secp256k1::new(),
+            &SecretKey::from_slice(&[0x11; 32]).unwrap(),
+        );
+
+        // A uuid that matches no account in the wallet.
+        let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xff; 16]));
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let result =
+            crate::wallet::import_standalone_transparent_pubkey(&tx, &network, unknown, pubkey);
+        assert!(matches!(
+            result,
+            Err(crate::error::SqliteClientError::AccountUnknown)
+        ));
+    }
+
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn test_import_standalone_transparent_pubkey() {
