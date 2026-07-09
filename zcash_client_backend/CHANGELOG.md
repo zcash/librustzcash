@@ -90,6 +90,10 @@ workspace.
   Ironwood note commitment tree from a subtree-root source. It defaults to a
   no-op for backends that do not track an Ironwood tree, mirroring
   `with_ironwood_tree_mut`.
+- `zcash_client_backend::data_api::WalletSummary::next_ironwood_subtree_index`,
+  the Ironwood counterpart of `next_orchard_subtree_index`. `WalletSummary::new`
+  now also takes the next Ironwood subtree index when the `orchard` feature is
+  enabled.
 - `zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT`, the shard height of
   the Ironwood note commitment tree (equal to the Orchard shard height).
 - `zcash_client_backend::data_api::NoteCommitmentTree`

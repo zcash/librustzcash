@@ -110,7 +110,7 @@ use zcash_keys::{
 };
 use zcash_primitives::{
     block::BlockHash,
-    merkle_tree::read_commitment_tree,
+    merkle_tree::{HashSer, read_commitment_tree},
     transaction::{Transaction, TransactionData, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317},
 };
 use zcash_protocol::{
@@ -2403,6 +2403,25 @@ impl ProgressEstimator for SubtreeProgressEstimator {
     }
 }
 
+fn next_subtree_index<H: HashSer, const SHARD_HEIGHT: u8>(
+    tx: &rusqlite::Transaction,
+    table_prefix: &'static str,
+) -> Result<u64, SqliteClientError> {
+    let shard_store = SqliteShardStore::<_, H, SHARD_HEIGHT>::from_connection(tx, table_prefix)?;
+
+    // The last shard will be incomplete, and we want the next range to overlap with
+    // the last complete shard, so return the index of the second-to-last shard root.
+    let roots = shard_store
+        .get_shard_roots()
+        .map_err(ShardTreeError::Storage)?;
+    Ok(roots
+        .iter()
+        .rev()
+        .nth(1)
+        .map(|addr| addr.index())
+        .unwrap_or(0))
+}
+
 /// Returns the spendable balance for the account at the specified height.
 ///
 /// This may be used to obtain a balance that ignores notes that have been detected so recently
@@ -2757,47 +2776,25 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         &mut account_balances,
     )?;
 
-    // The approach used here for Sapling and Orchard subtree indexing was a quick hack
+    // The approach used here for shielded subtree indexing was a quick hack
     // that has not yet been replaced. TODO: Make less hacky.
     // https://github.com/zcash/librustzcash/issues/1249
-    let next_sapling_subtree_index = {
-        let shard_store =
-            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
-                tx,
-                crate::SAPLING_TABLES_PREFIX,
-            )?;
-
-        // The last shard will be incomplete, and we want the next range to overlap with
-        // the last complete shard, so return the index of the second-to-last shard root.
-        shard_store
-            .get_shard_roots()
-            .map_err(ShardTreeError::Storage)?
-            .iter()
-            .rev()
-            .nth(1)
-            .map(|addr| addr.index())
-            .unwrap_or(0)
-    };
+    let next_sapling_subtree_index = next_subtree_index::<::sapling::Node, SAPLING_SHARD_HEIGHT>(
+        tx,
+        crate::SAPLING_TABLES_PREFIX,
+    )?;
 
     #[cfg(feature = "orchard")]
-    let next_orchard_subtree_index = {
-        let shard_store = SqliteShardStore::<
-            _,
-            ::orchard::tree::MerkleHashOrchard,
-            ORCHARD_SHARD_HEIGHT,
-        >::from_connection(tx, crate::ORCHARD_TABLES_PREFIX)?;
+    let next_orchard_subtree_index = next_subtree_index::<
+        ::orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >(tx, crate::ORCHARD_TABLES_PREFIX)?;
 
-        // The last shard will be incomplete, and we want the next range to overlap with
-        // the last complete shard, so return the index of the second-to-last shard root.
-        shard_store
-            .get_shard_roots()
-            .map_err(ShardTreeError::Storage)?
-            .iter()
-            .rev()
-            .nth(1)
-            .map(|addr| addr.index())
-            .unwrap_or(0)
-    };
+    #[cfg(feature = "orchard")]
+    let next_ironwood_subtree_index = next_subtree_index::<
+        ::orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >(tx, crate::IRONWOOD_TABLES_PREFIX)?;
 
     let summary = WalletSummary::new(
         account_balances,
@@ -2807,6 +2804,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         next_sapling_subtree_index,
         #[cfg(feature = "orchard")]
         next_orchard_subtree_index,
+        #[cfg(feature = "orchard")]
+        next_ironwood_subtree_index,
     );
 
     Ok(Some(summary))
