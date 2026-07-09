@@ -213,8 +213,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             .map(|address_index| {
                 NonHardenedChildIndex::from_index(address_index).ok_or(
                     SqliteClientError::CorruptedData(format!(
-                        "{} is not a valid transparent child index",
-                        address_index
+                        "{address_index} is not a valid transparent child index"
                     )),
                 )
             })
@@ -277,7 +276,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                                     })
                                 })?;
                         let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
-                            SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
+                            SqliteClientError::CorruptedData(format!("Invalid public key: {e}"))
                         })?;
                         Ok(TransparentAddressMetadata::standalone_p2pkh(
                             pubkey,
@@ -314,8 +313,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     let imported_transparent_receiver_script =
                         script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
                             SqliteClientError::CorruptedData(format!(
-                                "Invalid redeem script: {:?}",
-                                e
+                                "Invalid redeem script: {e:?}"
                             ))
                         })?;
 
@@ -1470,14 +1468,10 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
         if let Ok(Some(rs_bytes)) =
             row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
+            && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
+            && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
         {
-            if let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes)) {
-                if let Some(input_size) =
-                    transparent::builder::p2sh_input_serialized_len(&from_chain)
-                {
-                    output = output.with_known_input_size(input_size);
-                }
-            }
+            output = output.with_known_input_size(input_size);
         }
         utxos.push(output);
     }
@@ -2420,8 +2414,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                     let imported_transparent_receiver_script =
                                         script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
                                             SqliteClientError::CorruptedData(format!(
-                                                "Invalid redeem script: {:?}",
-                                                e
+                                                "Invalid redeem script: {e:?}"
                                             ))
                                         })?;
 
@@ -2476,16 +2469,15 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 
     if let Some((legacy_taddr, address_index)) =
         get_legacy_transparent_address(params, conn, account_uuid)?
+        && &legacy_taddr == address
     {
-        if &legacy_taddr == address {
-            let metadata = TransparentAddressMetadata::derived(
-                Scope::External.into(),
-                address_index,
-                Exposure::CannotKnow,
-                None,
-            );
-            return Ok(Some(metadata));
-        }
+        let metadata = TransparentAddressMetadata::derived(
+            Scope::External.into(),
+            address_index,
+            Exposure::CannotKnow,
+            None,
+        );
+        return Ok(Some(metadata));
     }
 
     Ok(None)
@@ -2531,10 +2523,10 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
     // look up the legacy address for each account in the wallet, and check whether it
     // matches the address for the received UTXO.
     for &account_id in account_ids.iter() {
-        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
-            if &legacy_taddr == address {
-                return Ok(Some((account_id, KeyScope::EXTERNAL)));
-            }
+        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)?
+            && &legacy_taddr == address
+        {
+            return Ok(Some((account_id, KeyScope::EXTERNAL)));
         }
     }
 

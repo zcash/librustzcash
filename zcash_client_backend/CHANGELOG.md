@@ -282,6 +282,7 @@ workspace.
   this option must be executed with a matching unpadded builder configuration.
 
 ### Changed
+- MSRV is now 1.88
 - `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes an
   `orchard_pool_bundle_type` argument (behind the `pczt` feature flag) selecting
   the transactional bundle type for the Orchard and Ironwood bundles; it must

@@ -14,6 +14,9 @@ workspace.
 - `zcash_protocol::consensus::OrchardProtocolRevision`
 - `zcash_protocol::consensus::BranchId::orchard_protocol_revision`
 
+### Changed
+- MSRV is now 1.88
+
 ## [0.10.0-pre.0] - 2026-06-30
 
 This release sets the NU6.3 activation height to 4134000 on testnet.

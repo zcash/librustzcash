@@ -40,11 +40,9 @@ impl<E> From<E> for ConversionError<E> {
 impl<E: fmt::Display> fmt::Display for ConversionError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IncorrectNetwork { expected, actual } => write!(
-                f,
-                "Address is for {:?} but we expected {:?}",
-                actual, expected,
-            ),
+            Self::IncorrectNetwork { expected, actual } => {
+                write!(f, "Address is for {actual:?} but we expected {expected:?}",)
+            }
             Self::Unsupported(e) => e.fmt(f),
             Self::User(e) => e.fmt(f),
         }

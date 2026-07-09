@@ -222,7 +222,7 @@ mod tests {
 
         let solutions = solve_200_9(input, || {
             let variable_nonce = nonces.next()?;
-            println!("Using variable nonce [0..4] of {}", variable_nonce);
+            println!("Using variable nonce [0..4] of {variable_nonce}");
 
             let variable_nonce = variable_nonce.to_le_bytes();
             nonce[0] = variable_nonce[0];

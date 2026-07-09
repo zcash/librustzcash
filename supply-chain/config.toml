@@ -41,6 +41,7 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.orchard]
+audit-as-crates-io = true
 
 [policy.pczt]
 audit-as-crates-io = true
@@ -1082,15 +1083,7 @@ version = "1.11.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-automata]]
-version = "0.1.10"
-criteria = "safe-to-deploy"
-
-[[exemptions.regex-automata]]
 version = "0.4.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.regex-syntax]]
-version = "0.6.26"
 criteria = "safe-to-deploy"
 
 [[exemptions.retry-error]]
@@ -1158,7 +1151,7 @@ version = "0.101.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.1"
+version = "0.103.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusty-fork]]
@@ -1338,7 +1331,11 @@ version = "2.0.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.time]]
-version = "0.3.23"
+version = "0.3.53"
+criteria = "safe-to-deploy"
+
+[[exemptions.time-macros]]
+version = "0.2.31"
 criteria = "safe-to-deploy"
 
 [[exemptions.tinytemplate]]

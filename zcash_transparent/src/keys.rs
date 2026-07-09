@@ -880,7 +880,7 @@ mod tests {
     fn account_priv_key_debug_redaction() {
         let sk =
             AccountPrivKey::from_seed(&MAIN_NETWORK, &[0u8; 64], zip32::AccountId::ZERO).unwrap();
-        assert_eq!(format!("{:?}", sk), "AccountPrivKey(\"...\")");
+        assert_eq!(format!("{sk:?}"), "AccountPrivKey(\"...\")");
     }
 
     #[test]
@@ -890,19 +890,19 @@ mod tests {
         let account_sk =
             AccountPrivKey::from_seed(&MAIN_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
         let account_pubkey = account_sk.to_account_pubkey();
-        assert_eq!(format!("{:?}", account_pubkey), "AccountPubKey(\"...\")");
+        assert_eq!(format!("{account_pubkey:?}"), "AccountPubKey(\"...\")");
 
         let external_ivk = account_pubkey.derive_external_ivk().unwrap();
-        assert_eq!(format!("{:?}", external_ivk), "ExternalIvk(\"...\")");
+        assert_eq!(format!("{external_ivk:?}"), "ExternalIvk(\"...\")");
 
         let internal_ivk = account_pubkey.derive_internal_ivk().unwrap();
-        assert_eq!(format!("{:?}", internal_ivk), "InternalIvk(\"...\")");
+        assert_eq!(format!("{internal_ivk:?}"), "InternalIvk(\"...\")");
 
         let ephemeral_ivk = account_pubkey.derive_ephemeral_ivk().unwrap();
-        assert_eq!(format!("{:?}", ephemeral_ivk), "EphemeralIvk(\"...\")");
+        assert_eq!(format!("{ephemeral_ivk:?}"), "EphemeralIvk(\"...\")");
 
         let (internal_ovk, external_ovk) = account_pubkey.ovks_for_shielding();
-        assert_eq!(format!("{:?}", internal_ovk), "InternalOvk(\"...\")");
-        assert_eq!(format!("{:?}", external_ovk), "ExternalOvk(\"...\")");
+        assert_eq!(format!("{internal_ovk:?}"), "InternalOvk(\"...\")");
+        assert_eq!(format!("{external_ovk:?}"), "ExternalOvk(\"...\")");
     }
 }

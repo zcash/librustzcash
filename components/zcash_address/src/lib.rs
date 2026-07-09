@@ -183,7 +183,7 @@ impl ZcashAddress {
     /// [`Display` implementation]: core::fmt::Display
     /// [`address.to_string()`]: alloc::string::ToString
     pub fn encode(&self) -> String {
-        format!("{}", self)
+        format!("{self}")
     }
 
     /// Attempts to parse the given string as a Zcash address.
