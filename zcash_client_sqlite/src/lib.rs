@@ -123,11 +123,16 @@ use {
         fees::StandardFeeRule,
         wallet::TransparentAddressMetadata,
     },
-    zcash_keys::{
-        encoding::AddressCodec,
-        keys::transparent::gap_limits::{AddressStore, GapLimits},
-    },
+    zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
 };
+
+// `AddressCodec` is used only by `find_account_for_ephemeral_address`, which is
+// part of the `WalletTest` surface.
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
+use zcash_keys::encoding::AddressCodec;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 use {
