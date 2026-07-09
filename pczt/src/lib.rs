@@ -241,21 +241,23 @@ pub mod v2 {
         }
     }
 
-    impl From<Pczt> for super::Pczt {
-        fn from(pczt: Pczt) -> Self {
-            Self {
-                global: pczt.global,
-                transparent: pczt.transparent.unwrap_or(transparent::EMPTY_BUNDLE),
-                sapling: pczt.sapling.unwrap_or(sapling::EMPTY_BUNDLE),
-                orchard: pczt
+    impl Pczt {
+        pub(super) fn into_logical(self) -> Result<super::Pczt, super::ParseError> {
+            Ok(super::Pczt {
+                global: self.global,
+                transparent: self.transparent.unwrap_or(transparent::EMPTY_BUNDLE),
+                sapling: self.sapling.unwrap_or(sapling::EMPTY_BUNDLE),
+                orchard: self
                     .orchard
-                    .map(orchard::Bundle::from)
+                    .map(orchard::v2::Bundle::into_logical)
+                    .transpose()?
                     .unwrap_or(orchard::EMPTY_ORCHARD),
-                ironwood: pczt
+                ironwood: self
                     .ironwood
-                    .map(orchard::Bundle::from)
+                    .map(orchard::v2::Bundle::into_logical)
+                    .transpose()?
                     .unwrap_or(orchard::EMPTY_IRONWOOD),
-            }
+            })
         }
     }
 
@@ -330,7 +332,7 @@ pub mod v2 {
             let encoded = Pczt::try_from(pczt.clone()).unwrap();
             assert!(encoded.orchard.is_some());
 
-            let decoded = crate::Pczt::from(encoded);
+            let decoded = encoded.into_logical().unwrap();
             assert_eq!(decoded.orchard, pczt.orchard);
             assert_eq!(decoded.orchard.flags, 0);
             assert_eq!(decoded.orchard.note_version, NoteVersion::V3);
@@ -367,8 +369,8 @@ impl Pczt {
                 .map(Pczt::from)
                 .map_err(ParseError::Invalid),
             PCZT_VERSION_2 => postcard::from_bytes::<v2::Pczt>(&bytes[8..])
-                .map(Pczt::from)
-                .map_err(ParseError::Invalid),
+                .map_err(ParseError::Invalid)
+                .and_then(v2::Pczt::into_logical),
             _ => Err(ParseError::UnknownVersion(version)),
         }
     }
@@ -632,6 +634,9 @@ pub enum ParseError {
     NotPczt,
     /// The PCZT encoding was invalid.
     Invalid(postcard::Error),
+    /// The PCZT encoding omitted a field that is required by the logical PCZT
+    /// type.
+    MissingRequiredField(&'static str),
     /// The bytes are too short to contain a PCZT.
     TooShort,
     /// The PCZT has an unknown version.
