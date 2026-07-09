@@ -48,8 +48,11 @@
 //!   block scanning can establish. Importing an account seeds the scan queue from
 //!   its birthday; the wallet's balance becomes visible and spendable as the
 //!   post-import rescan progresses.
-//! * Documents recorded against a regtest network are not currently supported,
-//!   as the equivalence of regtest activation schedules cannot be verified here.
+//! * Documents recorded against a regtest network are imported against the
+//!   wallet database's regtest [`Parameters`]. A network-upgrade activation
+//!   schedule carried by the document is verified against those parameters; a
+//!   document that carries no schedule is trusted, as the operator controls both
+//!   the node's activation heights and the import parameters.
 //! * Encrypted secret stores must be decrypted by the caller (using the `zewif`
 //!   crate's decryption support) before import.
 
@@ -163,9 +166,17 @@ pub enum ZewifImportError<S> {
         /// The network type of the database parameters.
         expected: NetworkType,
     },
-    /// The document was recorded against a regtest network, which this importer
-    /// does not currently support.
-    UnsupportedRegtest,
+    /// A network-upgrade activation height recorded in a regtest document does
+    /// not match the wallet database's regtest [`Parameters`].
+    RegtestActivationMismatch {
+        /// The consensus branch ID whose activation height disagrees.
+        branch_id: u32,
+        /// The activation height recorded in the document.
+        document_height: u32,
+        /// The activation height configured in the wallet database, or `None`
+        /// if the upgrade is not activated there or the branch ID is unknown.
+        expected: Option<u32>,
+    },
     /// The document's secret store is encrypted; the caller must decrypt it (via
     /// the `zewif` crate's decryption support) before import.
     EncryptedSecrets,
@@ -291,9 +302,13 @@ impl<S: fmt::Display> fmt::Display for ZewifImportError<S> {
                 f,
                 "Document was recorded for network {document:?}, but the wallet database is for {expected:?}."
             ),
-            ZewifImportError::UnsupportedRegtest => write!(
+            ZewifImportError::RegtestActivationMismatch {
+                branch_id,
+                document_height,
+                expected,
+            } => write!(
                 f,
-                "Documents recorded against regtest networks are not currently supported."
+                "The document's regtest activation height ({document_height}) for consensus branch ID {branch_id:#010x} does not match the wallet database's configured schedule ({expected:?})."
             ),
             ZewifImportError::EncryptedSecrets => write!(
                 f,
@@ -801,6 +816,40 @@ fn zip32_derivation<S>(
     ))
 }
 
+/// Verifies that every network-upgrade activation height recorded in a regtest
+/// document matches the wallet database's regtest [`Parameters`].
+///
+/// The document's schedule is advisory: an empty schedule (as produced by
+/// exporters that cannot recover the node's `-nuparams`) is trusted, since the
+/// operator controls both the node's activation heights and the import
+/// parameters. Each activation the document does record must agree with the
+/// configured parameters, so that consensus-branch-ID selection and other
+/// height-dependent interpretation are consistent with the chain against which
+/// the wallet was recorded.
+fn verify_regtest_activations<P, S>(
+    params: &P,
+    regtest: &::zewif::RegtestParams,
+) -> Result<(), ZewifImportError<S>>
+where
+    P: Parameters,
+{
+    for (&branch_id, &document_height) in regtest.activations() {
+        let expected = BranchId::try_from(branch_id)
+            .ok()
+            .and_then(|id| id.network_upgrade())
+            .and_then(|nu| params.activation_height(nu))
+            .map(u32::from);
+        if expected != Some(document_height) {
+            return Err(ZewifImportError::RegtestActivationMismatch {
+                branch_id,
+                document_height,
+                expected,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Imports the contents of a ZeWIF document into the wallet database.
 ///
 /// The database must already have been initialized (or migrated to the current
@@ -835,8 +884,8 @@ where
         match (wallet.network(), expected) {
             (::zewif::Network::Mainnet, NetworkType::Main) => {}
             (::zewif::Network::Testnet, NetworkType::Test) => {}
-            (::zewif::Network::Regtest(_), _) => {
-                return Err(ZewifImportError::UnsupportedRegtest);
+            (::zewif::Network::Regtest(rp), NetworkType::Regtest) => {
+                verify_regtest_activations::<_, S::Error>(&params, rp)?;
             }
             (document_network, _) => {
                 return Err(ZewifImportError::NetworkMismatch {
@@ -1416,11 +1465,13 @@ fn verify_hd_derivation<P: Parameters, S>(
 mod tests {
     use bip0039::{English, Mnemonic};
     use incrementalmerkletree::Hashable as _;
+    use std::collections::BTreeMap;
     use tempfile::NamedTempFile;
     use zcash_client_backend::data_api::{Account as _, AccountPurpose, AccountSource, WalletRead};
     use zcash_keys::encoding::AddressCodec;
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_protocol::consensus;
+    use zcash_protocol::local_consensus::LocalNetwork;
     use zip32::fingerprint::SeedFingerprint;
 
     use super::*;
@@ -1493,6 +1544,146 @@ mod tests {
             WalletDb::for_path(db_file.path(), TEST_NETWORK, test_clock(), test_rng()).unwrap();
         WalletMigrator::new().init_or_migrate(&mut wdb).unwrap();
         (db_file, wdb)
+    }
+
+    /// A regtest network that activates every upgrade at height 1, as a typical
+    /// `regtest` node does.
+    fn regtest_local_network() -> LocalNetwork {
+        let one = Some(BlockHeight::from_u32(1));
+        LocalNetwork {
+            overwinter: one,
+            sapling: one,
+            blossom: one,
+            heartwood: one,
+            canopy: one,
+            nu5: one,
+            nu6: one,
+            nu6_1: one,
+            nu6_2: one,
+            nu6_3: one,
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: one,
+        }
+    }
+
+    /// Creates an initialized empty wallet database on a regtest network.
+    fn regtest_wallet_db() -> (
+        NamedTempFile,
+        WalletDb<
+            rusqlite::Connection,
+            LocalNetwork,
+            crate::util::testing::FixedClock,
+            rand_chacha::ChaChaRng,
+        >,
+    ) {
+        let db_file = NamedTempFile::new().unwrap();
+        let mut wdb = WalletDb::for_path(
+            db_file.path(),
+            regtest_local_network(),
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+        WalletMigrator::new().init_or_migrate(&mut wdb).unwrap();
+        (db_file, wdb)
+    }
+
+    /// A regtest document network whose activation schedule assigns each of the
+    /// given upgrades the specified height.
+    fn regtest_network(activations: BTreeMap<u32, u32>) -> ::zewif::Network {
+        ::zewif::Network::Regtest(::zewif::RegtestParams::new(activations))
+    }
+
+    #[test]
+    fn regtest_empty_schedule_is_trusted() {
+        let params = regtest_local_network();
+        let regtest = ::zewif::RegtestParams::new(BTreeMap::new());
+        assert!(
+            verify_regtest_activations::<_, core::convert::Infallible>(&params, &regtest).is_ok()
+        );
+    }
+
+    #[test]
+    fn regtest_matching_schedule_is_accepted() {
+        let params = regtest_local_network();
+        let activations = BTreeMap::from([
+            (u32::from(BranchId::Sapling), 1),
+            (u32::from(BranchId::Nu5), 1),
+            (u32::from(BranchId::Nu6_3), 1),
+        ]);
+        let regtest = ::zewif::RegtestParams::new(activations);
+        assert!(
+            verify_regtest_activations::<_, core::convert::Infallible>(&params, &regtest).is_ok()
+        );
+    }
+
+    #[test]
+    fn regtest_mismatched_height_is_rejected() {
+        let params = regtest_local_network();
+        let activations = BTreeMap::from([(u32::from(BranchId::Sapling), 2)]);
+        let regtest = ::zewif::RegtestParams::new(activations);
+        let err = verify_regtest_activations::<_, core::convert::Infallible>(&params, &regtest)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ZewifImportError::RegtestActivationMismatch {
+                branch_id,
+                document_height: 2,
+                expected: Some(1),
+            } if branch_id == u32::from(BranchId::Sapling)
+        ));
+    }
+
+    #[test]
+    fn regtest_unknown_branch_id_is_rejected() {
+        let params = regtest_local_network();
+        let activations = BTreeMap::from([(0xDEAD_BEEFu32, 1)]);
+        let regtest = ::zewif::RegtestParams::new(activations);
+        let err = verify_regtest_activations::<_, core::convert::Infallible>(&params, &regtest)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ZewifImportError::RegtestActivationMismatch {
+                branch_id: 0xDEAD_BEEF,
+                document_height: 1,
+                expected: None,
+            }
+        ));
+    }
+
+    #[test]
+    fn regtest_document_imports_against_regtest_params() {
+        let (_file, mut wdb) = regtest_wallet_db();
+        let (mut doc, wallet) = document(regtest_network(BTreeMap::new()));
+        doc.add_wallet(wallet);
+
+        let report = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap();
+        assert!(report.imported_accounts.is_empty());
+        assert!(report.skipped_accounts.is_empty());
+    }
+
+    #[test]
+    fn regtest_document_with_mismatched_schedule_is_rejected() {
+        let (_file, mut wdb) = regtest_wallet_db();
+        let activations = BTreeMap::from([(u32::from(BranchId::Sapling), 999)]);
+        let (mut doc, wallet) = document(regtest_network(activations));
+        doc.add_wallet(wallet);
+
+        let err = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap_err();
+        assert!(matches!(
+            err,
+            ZewifImportError::RegtestActivationMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn regtest_document_against_testnet_params_is_a_mismatch() {
+        let (_file, mut wdb) = test_wallet_db();
+        let (mut doc, wallet) = document(regtest_network(BTreeMap::new()));
+        doc.add_wallet(wallet);
+
+        let err = import_wallet(&mut wdb, &doc, &mut DiscardSecrets).unwrap_err();
+        assert!(matches!(err, ZewifImportError::NetworkMismatch { .. }));
     }
 
     /// Encodes a seed fingerprint in the canonical Bech32m form ZeWIF uses.
