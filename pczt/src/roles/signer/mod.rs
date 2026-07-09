@@ -13,6 +13,8 @@
 //!   - Signatures (RedJubjub / RedPallas)
 //!   - A source of randomness.
 
+use alloc::vec::Vec;
+
 use blake2b_simd::Hash as Blake2bHash;
 use orchard::primitives::redpallas;
 use rand_core::OsRng;
@@ -32,6 +34,83 @@ use crate::{
 
 pub use crate::EffectsOnly;
 use crate::sighash;
+
+/// A spend authorization signature for an action in one of the Orchard-protocol
+/// value pools.
+///
+/// This type can be used by external signers that return signatures separately from
+/// a PCZT. The value pool and action index identify where the signature belongs when
+/// it is later applied with [`Signer::apply_orchard_spend_auth_signature`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrchardSpendAuthSignature {
+    value_pool: orchard::ValuePool,
+    action_index: usize,
+    signature: [u8; 64],
+}
+
+impl OrchardSpendAuthSignature {
+    /// Constructs a spend authorization signature for the action at `action_index`
+    /// in `value_pool`.
+    pub fn from_parts(
+        value_pool: orchard::ValuePool,
+        action_index: usize,
+        signature: [u8; 64],
+    ) -> Self {
+        Self {
+            value_pool,
+            action_index,
+            signature,
+        }
+    }
+
+    /// Returns the Orchard-protocol value pool containing the signed action.
+    pub fn value_pool(&self) -> orchard::ValuePool {
+        self.value_pool
+    }
+
+    /// Returns the index of the signed action within its value pool's bundle.
+    pub fn action_index(&self) -> usize {
+        self.action_index
+    }
+
+    /// Returns the raw RedPallas spend authorization signature bytes.
+    pub fn signature(&self) -> &[u8; 64] {
+        &self.signature
+    }
+}
+
+/// Extracts the Orchard-protocol spend authorization signatures present in `pczt`.
+///
+/// The returned signatures are tagged with their Orchard or Ironwood value pool and
+/// action index, so they can be transported independently and later applied to a
+/// corresponding PCZT with [`Signer::apply_orchard_spend_auth_signature`]. Actions
+/// without a spend authorization signature are omitted.
+pub fn extract_orchard_spend_auth_signatures(pczt: &Pczt) -> Vec<OrchardSpendAuthSignature> {
+    fn extract_from_bundle(
+        signatures: &mut Vec<OrchardSpendAuthSignature>,
+        value_pool: orchard::ValuePool,
+        bundle: &crate::orchard::Bundle,
+    ) {
+        for (action_index, action) in bundle.actions().iter().enumerate() {
+            if let Some(signature) = action.spend().spend_auth_sig() {
+                signatures.push(OrchardSpendAuthSignature::from_parts(
+                    value_pool,
+                    action_index,
+                    *signature,
+                ));
+            }
+        }
+    }
+
+    let mut signatures = Vec::new();
+    extract_from_bundle(&mut signatures, orchard::ValuePool::Orchard, pczt.orchard());
+    extract_from_bundle(
+        &mut signatures,
+        orchard::ValuePool::Ironwood,
+        pczt.ironwood(),
+    );
+    signatures
+}
 
 pub struct Signer {
     global: Global,
@@ -306,6 +385,30 @@ impl Signer {
         self.generate_or_apply_orchard_signature(index, |action, shielded_sighash| {
             action.apply_signature(shielded_sighash, signature)
         })
+    }
+
+    /// Applies an externally produced Orchard-protocol spend authorization signature.
+    ///
+    /// The signature's value pool selects the Orchard or Ironwood bundle, and its
+    /// action index selects the spend within that bundle. The signature is verified
+    /// against the action's randomized verification key before it is stored.
+    ///
+    /// Returns an error if the action index is invalid, the action data is
+    /// inconsistent, or the signature does not verify.
+    pub fn apply_orchard_spend_auth_signature(
+        &mut self,
+        signature: &OrchardSpendAuthSignature,
+    ) -> Result<(), Error> {
+        let spend_auth_sig =
+            redpallas::Signature::<redpallas::SpendAuth>::from(*signature.signature());
+        match signature.value_pool() {
+            orchard::ValuePool::Orchard => {
+                self.apply_orchard_signature(signature.action_index(), spend_auth_sig)
+            }
+            orchard::ValuePool::Ironwood => {
+                self.apply_ironwood_signature(signature.action_index(), spend_auth_sig)
+            }
+        }
     }
 
     fn generate_or_apply_orchard_signature<F>(&mut self, index: usize, f: F) -> Result<(), Error>
