@@ -1137,6 +1137,159 @@ fn redacted_sapling_anchor_round_trips_v2() {
     );
 }
 
+#[test]
+fn redacted_sapling_anchor_can_be_restored_after_signing() {
+    let mut rng = OsRng;
+
+    let sapling_extsk = sapling::zip32::ExtendedSpendingKey::master(&[1; 32]);
+    let sapling_dfvk = sapling_extsk.to_diversifiable_full_viewing_key();
+    let sapling_internal_dfvk = sapling_extsk
+        .derive_internal()
+        .to_diversifiable_full_viewing_key();
+    let sapling_recipient = sapling_dfvk.default_address().1;
+
+    let value = sapling::value::NoteValue::from_raw(1_000_000);
+    let note = {
+        let mut sapling_builder = sapling::builder::Builder::new(
+            sapling::note_encryption::Zip212Enforcement::On,
+            sapling::builder::BundleType::DEFAULT,
+            sapling::Anchor::empty_tree(),
+        );
+        sapling_builder
+            .add_output(
+                None,
+                sapling_recipient,
+                value,
+                Memo::Empty.encode().into_bytes(),
+            )
+            .unwrap();
+        let (bundle, meta) = sapling_builder
+            .build::<LocalTxProver, LocalTxProver, _, i64>(&[], &mut rng)
+            .unwrap()
+            .unwrap();
+        let output = bundle
+            .shielded_outputs()
+            .get(meta.output_index(0).unwrap())
+            .unwrap();
+        let domain = sapling::note_encryption::SaplingDomain::new(
+            sapling::note_encryption::Zip212Enforcement::On,
+        );
+        let (note, _, _) =
+            try_note_decryption(&domain, &sapling_dfvk.to_external_ivk().prepare(), output)
+                .unwrap();
+        note
+    };
+
+    let (anchor, merkle_path) = {
+        let cmu = note.cmu();
+        let leaf = sapling::Node::from_cmu(&cmu);
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<sapling::Node, u32>::empty(), 100);
+        tree.append(leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+        tree.checkpoint(9_999_999).unwrap();
+        let position = 0.into();
+        let merkle_path = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path.root(leaf);
+        (anchor.into(), merkle_path)
+    };
+
+    let mut builder = Builder::new(
+        nu6_3_test_network(),
+        10_000_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: Some(anchor),
+            orchard_anchor: Some(orchard::Anchor::empty_tree()),
+            ironwood_anchor: None,
+            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
+        },
+    );
+    builder
+        .add_sapling_spend::<zip317::FeeRule>(sapling_dfvk.fvk().clone(), note, merkle_path)
+        .unwrap();
+    builder
+        .add_sapling_output::<zip317::FeeRule>(
+            Some(sapling_dfvk.to_ovk(zip32::Scope::Internal)),
+            sapling_internal_dfvk.find_address(0u32.into()).unwrap().1,
+            Zatoshis::const_from_u64(990_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        sapling_meta,
+        ..
+    } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
+        .finalize_io()
+        .unwrap();
+    let index = sapling_meta.spend_index(0).unwrap();
+    let pczt = Updater::new(pczt)
+        .update_sapling_with(|mut updater| {
+            updater.update_spend_with(index, |mut spend_updater| {
+                spend_updater.set_proof_generation_key(sapling_extsk.expsk.proof_generation_key())
+            })
+        })
+        .unwrap()
+        .finish();
+    check_v2_round_trip(&pczt);
+
+    assert!(matches!(
+        Updater::new(pczt.clone()).set_sapling_anchor(sapling::Anchor::empty_tree()),
+        Err(pczt::roles::updater::AnchorUpdateError::ConflictingAnchor)
+    ));
+
+    let mut signer = Signer::new(pczt).unwrap();
+    let sighash = signer.shielded_sighash();
+    signer
+        .sign_sapling(index, &sapling_extsk.expsk.ask)
+        .unwrap();
+    let signed = signer.finish();
+
+    let redacted = Redactor::new(signed)
+        .redact_sapling_with(|mut r| r.clear_anchor())
+        .finish();
+    assert!(redacted.sapling().anchor().is_none());
+    assert!(
+        Prover::new(redacted.clone())
+            .create_sapling_proofs(&LocalTxProver::bundled(), &LocalTxProver::bundled())
+            .is_err()
+    );
+
+    let updated = Updater::new(redacted)
+        .set_sapling_anchor(anchor)
+        .unwrap()
+        .finish();
+    assert_eq!(updated.sapling().anchor(), &Some(anchor.to_bytes()));
+    assert_eq!(
+        Signer::new(updated.clone()).unwrap().shielded_sighash(),
+        sighash
+    );
+
+    let sapling_prover = LocalTxProver::bundled();
+    let proved = Prover::new(updated)
+        .create_sapling_proofs(&sapling_prover, &sapling_prover)
+        .unwrap()
+        .finish();
+    assert!(matches!(
+        Updater::new(proved.clone()).set_sapling_anchor(anchor),
+        Err(pczt::roles::updater::AnchorUpdateError::ProofAlreadyPresent)
+    ));
+
+    let (spend_vk, output_vk) = sapling_prover.verifying_keys();
+    let tx = TransactionExtractor::new(proved)
+        .with_sapling(&spend_vk, &output_vk)
+        .extract()
+        .unwrap();
+    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+}
+
 /// A regtest network with NU6.3 activated, for exercising the Ironwood pool.
 fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
     use zcash_protocol::consensus::BlockHeight;
@@ -1166,7 +1319,7 @@ fn redacted_orchard_anchor_round_trips_v2() {
 }
 
 #[test]
-fn redacted_v6_orchard_anchor_can_be_restored_after_signing() {
+fn redacted_orchard_anchor_can_be_restored_after_signing() {
     let mut rng = OsRng;
 
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -1252,6 +1405,14 @@ fn redacted_v6_orchard_anchor_can_be_restored_after_signing() {
     let index = orchard_meta.spend_action_index(0).unwrap();
     check_v2_round_trip(&pczt);
 
+    Updater::new(pczt.clone())
+        .set_orchard_anchor(anchor)
+        .unwrap();
+    assert!(matches!(
+        Updater::new(pczt.clone()).set_orchard_anchor(orchard::Anchor::empty_tree()),
+        Err(pczt::roles::updater::AnchorUpdateError::ConflictingAnchor)
+    ));
+
     let redacted = Redactor::new(pczt)
         .redact_orchard_with(|mut r| r.clear_anchor())
         .finish();
@@ -1268,7 +1429,7 @@ fn redacted_v6_orchard_anchor_can_be_restored_after_signing() {
     let signed = signer.finish();
 
     let updated = Updater::new(signed)
-        .set_v6_orchard_anchor(anchor)
+        .set_orchard_anchor(anchor)
         .unwrap()
         .finish();
     assert_eq!(updated.orchard().anchor(), &Some(anchor.to_bytes()));
@@ -1295,8 +1456,8 @@ fn redacted_v6_orchard_anchor_can_be_restored_after_signing() {
     check_v2_round_trip(&proved);
 
     assert!(matches!(
-        Updater::new(proved.clone()).set_v6_orchard_anchor(anchor),
-        Err(pczt::roles::updater::OrchardAnchorUpdateError::ProofAlreadyPresent)
+        Updater::new(proved.clone()).set_orchard_anchor(anchor),
+        Err(pczt::roles::updater::AnchorUpdateError::ProofAlreadyPresent)
     ));
 
     let tx = TransactionExtractor::new(proved).extract().unwrap();
@@ -1328,7 +1489,7 @@ fn redacted_ironwood_anchor_survives_signer_finish() {
     assert_anchor_redacted(&reparsed, ShieldedPool::Ironwood);
 
     let updated = Updater::new(signed)
-        .set_v6_ironwood_anchor(anchor)
+        .set_ironwood_anchor(anchor)
         .unwrap()
         .finish();
     assert_eq!(updated.ironwood().anchor(), &Some(anchor.to_bytes()));
@@ -1336,22 +1497,31 @@ fn redacted_ironwood_anchor_survives_signer_finish() {
 }
 
 #[test]
-fn v6_anchor_setters_reject_v5_pczts() {
-    let anchor = orchard::Anchor::empty_tree();
+fn anchor_setters_reject_unsupported_transaction_formats() {
+    let sapling_anchor = sapling::Anchor::empty_tree();
+    let orchard_anchor = orchard::Anchor::empty_tree();
     let pczt = Creator::new(
         zcash_protocol::consensus::BranchId::Nu6.into(),
         10_000_000,
         133,
-        Some([0; 32]),
-        Some(anchor.to_bytes()),
+        Some(sapling_anchor.to_bytes()),
+        Some(orchard_anchor.to_bytes()),
     )
     .unwrap()
     .build()
     .unwrap();
 
     assert!(matches!(
-        Updater::new(pczt).set_v6_orchard_anchor(anchor),
-        Err(pczt::roles::updater::OrchardAnchorUpdateError::RequiresV6)
+        Updater::new(pczt.clone()).set_sapling_anchor(sapling_anchor),
+        Err(pczt::roles::updater::AnchorUpdateError::UnsupportedTransactionFormat)
+    ));
+    assert!(matches!(
+        Updater::new(pczt.clone()).set_orchard_anchor(orchard_anchor),
+        Err(pczt::roles::updater::AnchorUpdateError::UnsupportedTransactionFormat)
+    ));
+    assert!(matches!(
+        Updater::new(pczt).set_ironwood_anchor(orchard_anchor),
+        Err(pczt::roles::updater::AnchorUpdateError::UnsupportedTransactionFormat)
     ));
 }
 

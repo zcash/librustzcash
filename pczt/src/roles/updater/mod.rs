@@ -59,41 +59,66 @@ impl Updater {
         }
     }
 
-    /// Sets the Orchard bundle anchor for a version 6 PCZT on NU6.3 or later.
+    /// Sets the Sapling bundle anchor.
     ///
-    /// Orchard signatures in v6 do not commit to this anchor, so this may be
-    /// called after shielded signatures have been added. Orchard proofs do
-    /// depend on the anchor, so this must be called before proof creation.
+    /// This may be called after shielded signatures have been added for
+    /// transaction formats that do not commit shielded signatures to anchors.
+    /// Sapling spend proofs depend on the anchor, so this must be called before
+    /// proof creation for Sapling spends.
     ///
-    /// Returns an error if the PCZT is not version 6 on NU6.3 or later, or if an
-    /// Orchard proof is already present.
-    #[cfg(feature = "orchard")]
-    pub fn set_v6_orchard_anchor(
+    /// Returns an error if the PCZT's transaction format does not support this
+    /// update, if any Sapling spend proof is already present, or if the PCZT
+    /// already contains a different Sapling anchor.
+    #[cfg(feature = "sapling")]
+    pub fn set_sapling_anchor(
         mut self,
-        anchor: ::orchard::Anchor,
-    ) -> Result<Self, OrchardAnchorUpdateError> {
-        ensure_v6_consensus_branch(&self.pczt.global)?;
-        ensure_no_orchard_proof(&self.pczt.orchard)?;
-        self.pczt.orchard.anchor = Some(anchor.to_bytes());
+        anchor: ::sapling::Anchor,
+    ) -> Result<Self, AnchorUpdateError> {
+        ensure_anchor_update_supported(&self.pczt.global)?;
+        ensure_no_sapling_spend_proof(&self.pczt.sapling)?;
+        set_anchor(&mut self.pczt.sapling.anchor, anchor.to_bytes())?;
         Ok(self)
     }
 
-    /// Sets the Ironwood bundle anchor for a version 6 PCZT on NU6.3 or later.
+    /// Sets the Orchard bundle anchor.
     ///
-    /// Ironwood signatures in v6 do not commit to this anchor, so this may be
-    /// called after shielded signatures have been added. Ironwood proofs do
-    /// depend on the anchor, so this must be called before proof creation.
+    /// This may be called after shielded signatures have been added for
+    /// transaction formats that do not commit shielded signatures to anchors.
+    /// Orchard proofs depend on the anchor, so this must be called before proof
+    /// creation.
     ///
-    /// Returns an error if the PCZT is not version 6 on NU6.3 or later, or if an
-    /// Ironwood proof is already present.
+    /// Returns an error if the PCZT's transaction format does not support this
+    /// update, if an Orchard proof is already present, or if the PCZT already
+    /// contains a different Orchard anchor.
     #[cfg(feature = "orchard")]
-    pub fn set_v6_ironwood_anchor(
+    pub fn set_orchard_anchor(
         mut self,
         anchor: ::orchard::Anchor,
-    ) -> Result<Self, OrchardAnchorUpdateError> {
-        ensure_v6_consensus_branch(&self.pczt.global)?;
+    ) -> Result<Self, AnchorUpdateError> {
+        ensure_anchor_update_supported(&self.pczt.global)?;
+        ensure_no_orchard_proof(&self.pczt.orchard)?;
+        set_anchor(&mut self.pczt.orchard.anchor, anchor.to_bytes())?;
+        Ok(self)
+    }
+
+    /// Sets the Ironwood bundle anchor.
+    ///
+    /// This may be called after shielded signatures have been added for
+    /// transaction formats that do not commit shielded signatures to anchors.
+    /// Ironwood proofs depend on the anchor, so this must be called before proof
+    /// creation.
+    ///
+    /// Returns an error if the PCZT's transaction format does not support this
+    /// update, if an Ironwood proof is already present, or if the PCZT already
+    /// contains a different Ironwood anchor.
+    #[cfg(feature = "orchard")]
+    pub fn set_ironwood_anchor(
+        mut self,
+        anchor: ::orchard::Anchor,
+    ) -> Result<Self, AnchorUpdateError> {
+        ensure_anchor_update_supported(&self.pczt.global)?;
         ensure_no_orchard_proof(&self.pczt.ironwood)?;
-        self.pczt.ironwood.anchor = Some(anchor.to_bytes());
+        set_anchor(&mut self.pczt.ironwood.anchor, anchor.to_bytes())?;
         Ok(self)
     }
 
@@ -103,34 +128,54 @@ impl Updater {
     }
 }
 
-#[cfg(feature = "orchard")]
-fn ensure_no_orchard_proof(
-    bundle: &crate::orchard::Bundle,
-) -> Result<(), OrchardAnchorUpdateError> {
-    if bundle.zkproof.is_some() {
-        Err(OrchardAnchorUpdateError::ProofAlreadyPresent)
+#[cfg(feature = "sapling")]
+fn ensure_no_sapling_spend_proof(bundle: &crate::sapling::Bundle) -> Result<(), AnchorUpdateError> {
+    if bundle.spends.iter().any(|spend| spend.zkproof.is_some()) {
+        Err(AnchorUpdateError::ProofAlreadyPresent)
     } else {
         Ok(())
     }
 }
 
 #[cfg(feature = "orchard")]
-fn ensure_v6_consensus_branch(global: &Global) -> Result<(), OrchardAnchorUpdateError> {
+fn ensure_no_orchard_proof(bundle: &crate::orchard::Bundle) -> Result<(), AnchorUpdateError> {
+    if bundle.zkproof.is_some() {
+        Err(AnchorUpdateError::ProofAlreadyPresent)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(any(feature = "sapling", feature = "orchard"))]
+fn ensure_anchor_update_supported(global: &Global) -> Result<(), AnchorUpdateError> {
     use zcash_protocol::{
         consensus::BranchId,
         constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID},
     };
 
-    if global.tx_version != V6_TX_VERSION || global.version_group_id != V6_VERSION_GROUP_ID {
-        return Err(OrchardAnchorUpdateError::RequiresV6);
+    if global.tx_version < V6_TX_VERSION
+        || (global.tx_version == V6_TX_VERSION && global.version_group_id != V6_VERSION_GROUP_ID)
+    {
+        return Err(AnchorUpdateError::UnsupportedTransactionFormat);
     }
 
     match BranchId::try_from(global.consensus_branch_id) {
         Ok(BranchId::Nu6_3) => Ok(()),
         #[cfg(zcash_unstable = "nu7")]
         Ok(BranchId::Nu7) => Ok(()),
-        Ok(_) => Err(OrchardAnchorUpdateError::UnsupportedConsensusBranchId),
-        Err(_) => Err(OrchardAnchorUpdateError::UnknownConsensusBranchId),
+        Ok(_) => Err(AnchorUpdateError::UnsupportedConsensusBranchId),
+        Err(_) => Err(AnchorUpdateError::UnknownConsensusBranchId),
+    }
+}
+
+#[cfg(any(feature = "sapling", feature = "orchard"))]
+fn set_anchor(slot: &mut Option<[u8; 32]>, anchor: [u8; 32]) -> Result<(), AnchorUpdateError> {
+    match slot {
+        Some(existing) if *existing != anchor => Err(AnchorUpdateError::ConflictingAnchor),
+        _ => {
+            *slot = Some(anchor);
+            Ok(())
+        }
     }
 }
 
@@ -144,42 +189,50 @@ impl GlobalUpdater<'_> {
     }
 }
 
-/// Errors that can occur while setting Orchard or Ironwood anchors.
-#[cfg(feature = "orchard")]
+/// Errors that can occur while setting Sapling, Orchard, or Ironwood anchors.
+#[cfg(any(feature = "sapling", feature = "orchard"))]
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum OrchardAnchorUpdateError {
-    /// The PCZT must use the version 6 transaction format for this update.
-    RequiresV6,
+pub enum AnchorUpdateError {
+    /// The PCZT transaction format does not support this update.
+    UnsupportedTransactionFormat,
     /// The PCZT's consensus branch ID is unrecognized.
     UnknownConsensusBranchId,
-    /// The PCZT's consensus branch ID does not support version 6 PCZTs.
+    /// The PCZT's consensus branch ID does not support this update.
     UnsupportedConsensusBranchId,
     /// The bundle already contains a proof that depends on the current anchor.
     ProofAlreadyPresent,
+    /// The bundle already contains a different anchor.
+    ConflictingAnchor,
 }
 
-#[cfg(feature = "orchard")]
-impl core::fmt::Display for OrchardAnchorUpdateError {
+#[cfg(any(feature = "sapling", feature = "orchard"))]
+impl core::fmt::Display for AnchorUpdateError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            OrchardAnchorUpdateError::RequiresV6 => {
+            AnchorUpdateError::UnsupportedTransactionFormat => {
                 write!(
                     f,
-                    "PCZT must be version 6 for this Orchard or Ironwood anchor update"
+                    "PCZT transaction format does not support shielded anchor updates"
                 )
             }
-            OrchardAnchorUpdateError::UnknownConsensusBranchId => {
+            AnchorUpdateError::UnknownConsensusBranchId => {
                 write!(f, "unknown consensus branch ID")
             }
-            OrchardAnchorUpdateError::UnsupportedConsensusBranchId => {
+            AnchorUpdateError::UnsupportedConsensusBranchId => {
                 write!(
                     f,
-                    "consensus branch ID does not support version 6 Orchard or Ironwood anchor updates"
+                    "consensus branch ID does not support shielded anchor updates"
                 )
             }
-            OrchardAnchorUpdateError::ProofAlreadyPresent => {
-                write!(f, "Orchard or Ironwood proof is already present")
+            AnchorUpdateError::ProofAlreadyPresent => {
+                write!(
+                    f,
+                    "shielded proof that depends on the anchor is already present"
+                )
+            }
+            AnchorUpdateError::ConflictingAnchor => {
+                write!(f, "bundle already contains a different anchor")
             }
         }
     }

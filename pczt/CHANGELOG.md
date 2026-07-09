@@ -123,9 +123,10 @@ workspace.
 - `pczt::roles::signer::Error::{IronwoodSign, IronwoodVerify}`
 - `pczt::roles::verifier::Verifier::with_ironwood`
 - `pczt::roles::updater::Updater::update_ironwood_with`
-- `pczt::roles::updater::OrchardAnchorUpdateError` and
-  `pczt::roles::updater::Updater::{set_v6_orchard_anchor, set_v6_ironwood_anchor}`
-  for wallets that need to restore v6 anchors after signing.
+- `pczt::roles::updater::AnchorUpdateError` and
+  `pczt::roles::updater::Updater::{set_sapling_anchor, set_orchard_anchor,
+  set_ironwood_anchor}` for wallets that need to restore shielded anchors after
+  signing.
 - `pczt::roles::creator::Error::IronwoodNotSupported`
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
