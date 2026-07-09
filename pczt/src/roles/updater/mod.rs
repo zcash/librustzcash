@@ -8,60 +8,6 @@ use alloc::vec::Vec;
 
 use crate::{Pczt, common::Global};
 
-/// An Orchard-style spend witness to set on an Orchard or Ironwood PCZT action.
-#[cfg(feature = "orchard")]
-#[derive(Clone, Debug)]
-pub struct OrchardSpendWitness {
-    action_index: usize,
-    merkle_path: ::orchard::tree::MerklePath,
-}
-
-#[cfg(feature = "orchard")]
-impl OrchardSpendWitness {
-    /// Constructs a witness update from a typed Orchard-style Merkle path.
-    pub fn from_merkle_path(action_index: usize, merkle_path: ::orchard::tree::MerklePath) -> Self {
-        Self {
-            action_index,
-            merkle_path,
-        }
-    }
-
-    /// Parses and validates a witness update from serialized Orchard-style Merkle path data.
-    pub fn parse(
-        action_index: usize,
-        position: u32,
-        auth_path: [[u8; 32]; 32],
-    ) -> Result<Self, OrchardSpendWitnessError> {
-        let mut nodes = Vec::with_capacity(32);
-        for from in auth_path {
-            nodes.push(
-                ::orchard::tree::MerkleHashOrchard::from_bytes(&from)
-                    .into_option()
-                    .ok_or(OrchardSpendWitnessError::InvalidWitness)?,
-            );
-        }
-        let nodes = nodes
-            .try_into()
-            .map_err(|_| OrchardSpendWitnessError::InvalidWitness)?;
-
-        Ok(Self::from_merkle_path(
-            action_index,
-            ::orchard::tree::MerklePath::from_parts(position, nodes),
-        ))
-    }
-
-    fn action_index(&self) -> usize {
-        self.action_index
-    }
-
-    fn serialized_witness(&self) -> (u32, [[u8; 32]; 32]) {
-        (
-            self.merkle_path.position(),
-            self.merkle_path.auth_path().map(|node| node.to_bytes()),
-        )
-    }
-}
-
 #[cfg(feature = "orchard")]
 mod orchard;
 #[cfg(feature = "orchard")]
@@ -125,7 +71,7 @@ impl Updater {
     pub fn set_v6_orchard_anchor(
         mut self,
         anchor: ::orchard::Anchor,
-    ) -> Result<Self, OrchardSpendWitnessError> {
+    ) -> Result<Self, OrchardProofDataError> {
         ensure_v6_consensus_branch(&self.pczt.global)?;
         ensure_no_orchard_proof(&self.pczt.orchard)?;
         self.pczt.orchard.anchor = Some(anchor.to_bytes());
@@ -139,23 +85,13 @@ impl Updater {
     #[cfg(feature = "orchard")]
     pub fn set_orchard_spend_witnesses(
         mut self,
-        witnesses: impl IntoIterator<Item = OrchardSpendWitness>,
-    ) -> Result<Self, OrchardSpendWitnessError> {
+        witnesses: impl IntoIterator<Item = (usize, ::orchard::tree::MerklePath)>,
+    ) -> Result<Self, OrchardProofDataError> {
         if self.pczt.orchard.note_version != crate::orchard::NoteVersion::V2 {
-            return Err(OrchardSpendWitnessError::UnexpectedNoteVersion);
+            return Err(OrchardProofDataError::UnexpectedNoteVersion);
         }
         ensure_no_orchard_proof(&self.pczt.orchard)?;
-        for witness in witnesses {
-            let action = self
-                .pczt
-                .orchard
-                .actions
-                .get_mut(witness.action_index())
-                .ok_or(OrchardSpendWitnessError::InvalidActionIndex(
-                    witness.action_index(),
-                ))?;
-            action.spend.witness = Some(witness.serialized_witness());
-        }
+        set_spend_witnesses(&mut self.pczt.orchard.actions, witnesses)?;
 
         Ok(self)
     }
@@ -172,7 +108,7 @@ impl Updater {
     pub fn set_v6_ironwood_anchor(
         mut self,
         anchor: ::orchard::Anchor,
-    ) -> Result<Self, OrchardSpendWitnessError> {
+    ) -> Result<Self, OrchardProofDataError> {
         ensure_v6_consensus_branch(&self.pczt.global)?;
         ensure_no_orchard_proof(&self.pczt.ironwood)?;
         self.pczt.ironwood.anchor = Some(anchor.to_bytes());
@@ -187,24 +123,14 @@ impl Updater {
     #[cfg(feature = "orchard")]
     pub fn set_ironwood_spend_witnesses(
         mut self,
-        witnesses: impl IntoIterator<Item = OrchardSpendWitness>,
-    ) -> Result<Self, OrchardSpendWitnessError> {
+        witnesses: impl IntoIterator<Item = (usize, ::orchard::tree::MerklePath)>,
+    ) -> Result<Self, OrchardProofDataError> {
         ensure_v6_consensus_branch(&self.pczt.global)?;
         if self.pczt.ironwood.note_version != crate::orchard::NoteVersion::V3 {
-            return Err(OrchardSpendWitnessError::UnexpectedNoteVersion);
+            return Err(OrchardProofDataError::UnexpectedNoteVersion);
         }
         ensure_no_orchard_proof(&self.pczt.ironwood)?;
-        for witness in witnesses {
-            let action = self
-                .pczt
-                .ironwood
-                .actions
-                .get_mut(witness.action_index())
-                .ok_or(OrchardSpendWitnessError::InvalidActionIndex(
-                    witness.action_index(),
-                ))?;
-            action.spend.witness = Some(witness.serialized_witness());
-        }
+        set_spend_witnesses(&mut self.pczt.ironwood.actions, witnesses)?;
 
         Ok(self)
     }
@@ -216,34 +142,50 @@ impl Updater {
 }
 
 #[cfg(feature = "orchard")]
-fn ensure_no_orchard_proof(
-    bundle: &crate::orchard::Bundle,
-) -> Result<(), OrchardSpendWitnessError> {
+fn ensure_no_orchard_proof(bundle: &crate::orchard::Bundle) -> Result<(), OrchardProofDataError> {
     if bundle.zkproof.is_some() {
-        Err(OrchardSpendWitnessError::ProofAlreadyPresent)
+        Err(OrchardProofDataError::ProofAlreadyPresent)
     } else {
         Ok(())
     }
 }
 
 #[cfg(feature = "orchard")]
-fn ensure_v6_consensus_branch(global: &Global) -> Result<(), OrchardSpendWitnessError> {
+fn ensure_v6_consensus_branch(global: &Global) -> Result<(), OrchardProofDataError> {
     use zcash_protocol::{
         consensus::BranchId,
         constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID},
     };
 
     if global.tx_version != V6_TX_VERSION || global.version_group_id != V6_VERSION_GROUP_ID {
-        return Err(OrchardSpendWitnessError::RequiresV6);
+        return Err(OrchardProofDataError::RequiresV6);
     }
 
     match BranchId::try_from(global.consensus_branch_id) {
         Ok(BranchId::Nu6_3) => Ok(()),
         #[cfg(zcash_unstable = "nu7")]
         Ok(BranchId::Nu7) => Ok(()),
-        Ok(_) => Err(OrchardSpendWitnessError::UnsupportedConsensusBranchId),
-        Err(_) => Err(OrchardSpendWitnessError::UnknownConsensusBranchId),
+        Ok(_) => Err(OrchardProofDataError::UnsupportedConsensusBranchId),
+        Err(_) => Err(OrchardProofDataError::UnknownConsensusBranchId),
     }
+}
+
+#[cfg(feature = "orchard")]
+fn set_spend_witnesses(
+    actions: &mut [crate::orchard::Action],
+    witnesses: impl IntoIterator<Item = (usize, ::orchard::tree::MerklePath)>,
+) -> Result<(), OrchardProofDataError> {
+    for (action_index, merkle_path) in witnesses {
+        let action = actions
+            .get_mut(action_index)
+            .ok_or(OrchardProofDataError::InvalidActionIndex(action_index))?;
+        action.spend.witness = Some((
+            merkle_path.position(),
+            merkle_path.auth_path().map(|node| node.to_bytes()),
+        ));
+    }
+
+    Ok(())
 }
 
 /// An updater for a transparent PCZT output.
@@ -256,54 +198,51 @@ impl GlobalUpdater<'_> {
     }
 }
 
-/// Errors that can occur while setting Orchard or Ironwood anchor or spend witness data.
+/// Errors that can occur while setting Orchard or Ironwood proof data.
 #[cfg(feature = "orchard")]
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum OrchardSpendWitnessError {
+pub enum OrchardProofDataError {
     /// The requested action index does not exist in the bundle.
     InvalidActionIndex(usize),
-    /// The provided serialized witness contains an invalid Orchard-style Merkle node.
-    InvalidWitness,
     /// The PCZT must use the version 6 transaction format for this update.
     RequiresV6,
     /// The PCZT's consensus branch ID is unrecognized.
     UnknownConsensusBranchId,
     /// The PCZT's consensus branch ID does not support version 6 PCZTs.
     UnsupportedConsensusBranchId,
-    /// The bundle already contains a proof that depends on the current witness data.
+    /// The bundle already contains a proof that depends on the current proof data.
     ProofAlreadyPresent,
     /// The bundle's note-plaintext version does not match the pool being updated.
     UnexpectedNoteVersion,
 }
 
 #[cfg(feature = "orchard")]
-impl core::fmt::Display for OrchardSpendWitnessError {
+impl core::fmt::Display for OrchardProofDataError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            OrchardSpendWitnessError::InvalidActionIndex(index) => {
+            OrchardProofDataError::InvalidActionIndex(index) => {
                 write!(f, "Orchard or Ironwood action index {index} does not exist")
             }
-            OrchardSpendWitnessError::InvalidWitness => write!(f, "invalid Orchard-style witness"),
-            OrchardSpendWitnessError::RequiresV6 => {
+            OrchardProofDataError::RequiresV6 => {
                 write!(
                     f,
                     "PCZT must be version 6 for this Orchard or Ironwood update"
                 )
             }
-            OrchardSpendWitnessError::UnknownConsensusBranchId => {
+            OrchardProofDataError::UnknownConsensusBranchId => {
                 write!(f, "unknown consensus branch ID")
             }
-            OrchardSpendWitnessError::UnsupportedConsensusBranchId => {
+            OrchardProofDataError::UnsupportedConsensusBranchId => {
                 write!(
                     f,
                     "consensus branch ID does not support version 6 Orchard or Ironwood updates"
                 )
             }
-            OrchardSpendWitnessError::ProofAlreadyPresent => {
+            OrchardProofDataError::ProofAlreadyPresent => {
                 write!(f, "Orchard or Ironwood proof is already present")
             }
-            OrchardSpendWitnessError::UnexpectedNoteVersion => {
+            OrchardProofDataError::UnexpectedNoteVersion => {
                 write!(
                     f,
                     "bundle note-plaintext version does not match the pool being updated"

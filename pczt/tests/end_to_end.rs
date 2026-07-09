@@ -12,17 +12,9 @@ use orchard::tree::MerkleHashOrchard;
 use pczt::{
     Pczt,
     roles::{
-        combiner::Combiner,
-        creator::Creator,
-        io_finalizer::IoFinalizer,
-        low_level_signer,
-        prover::Prover,
-        redactor::Redactor,
-        signer::Signer,
-        spend_finalizer::SpendFinalizer,
-        tx_extractor::TransactionExtractor,
-        updater::{OrchardSpendWitness, Updater},
-        verifier::Verifier,
+        combiner::Combiner, creator::Creator, io_finalizer::IoFinalizer, low_level_signer,
+        prover::Prover, redactor::Redactor, signer::Signer, spend_finalizer::SpendFinalizer,
+        tx_extractor::TransactionExtractor, updater::Updater, verifier::Verifier,
     },
     v1, v2,
 };
@@ -1286,10 +1278,7 @@ fn wallet_can_set_v6_orchard_anchor_and_witness_after_signing() {
     let updated = Updater::new(signed)
         .set_v6_orchard_anchor(anchor)
         .unwrap()
-        .set_orchard_spend_witnesses([OrchardSpendWitness::from_merkle_path(
-            index,
-            merkle_path_for_update,
-        )])
+        .set_orchard_spend_witnesses([(index, merkle_path_for_update)])
         .unwrap()
         .finish();
     assert_eq!(
