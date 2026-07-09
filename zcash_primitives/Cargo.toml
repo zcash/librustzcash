@@ -43,7 +43,6 @@ nonempty.workspace = true
 orchard.workspace = true
 pasta_curves.workspace = true
 sapling.workspace = true
-zcash_tachyon.workspace = true
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
@@ -77,6 +76,13 @@ corez.workspace = true
 [dependencies.zcash_note_encryption]
 workspace = true
 features = ["pre-zip-212"]
+
+# Tachyon (NU7) is only referenced under `#[cfg(zcash_unstable = "nu7")]`, so gate
+# the dependency on the same cfg. This keeps the heavy proving stack (ragu, etc.)
+# out of non-nu7 builds — in particular the `no_std` targets, which the tachyon
+# dependency tree does not currently support.
+[target.'cfg(zcash_unstable = "nu7")'.dependencies]
+zcash_tachyon.workspace = true
 
 [dev-dependencies]
 chacha20poly1305 = "0.10"

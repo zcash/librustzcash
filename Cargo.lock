@@ -1201,7 +1201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1b84d32b18d9a256d81e4fec2e4cfd0ab6dde5e5ff49be1713ae0adbd0060c2"
 dependencies = [
  "heck",
- "indexmap 2.12.0",
+ "indexmap 1.9.3",
  "itertools 0.13.0",
  "proc-macro-crate 1.3.1",
  "proc-macro2",
@@ -1219,7 +1219,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd5f2b7218a51c827a11d22d1439b598121fac94bf9b99452e4afffe512d78c9"
 dependencies = [
  "heck",
- "indexmap 2.12.0",
+ "indexmap 1.9.3",
  "itertools 0.14.0",
  "proc-macro-crate 1.3.1",
  "proc-macro2",
@@ -2079,7 +2079,7 @@ dependencies = [
  "group",
  "halo2_legacy_pdqsort",
  "indexmap 1.9.3",
- "maybe-rayon",
+ "maybe-rayon 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pasta_curves",
  "rand_core 0.6.4",
  "tracing",
@@ -2643,6 +2643,15 @@ name = "maybe-rayon"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ea1f30cedd69f0a2954655f7188c6a834246d2bcf1e315e2ac40c4b24dc9519"
+dependencies = [
+ "cfg-if",
+ "rayon",
+]
+
+[[package]]
+name = "maybe-rayon"
+version = "0.1.1"
+source = "git+https://github.com/tachyon-zcash/maybe-rayon.git?rev=5c37ee0dd448e8c1edc4529d0b8897ecaff5aad1#5c37ee0dd448e8c1edc4529d0b8897ecaff5aad1"
 dependencies = [
  "cfg-if",
  "rayon",
@@ -3651,7 +3660,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 [[package]]
 name = "ragu"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
  "blake2b_simd",
  "ragu_arithmetic",
@@ -3665,11 +3674,11 @@ dependencies = [
 [[package]]
 name = "ragu_arithmetic"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
  "ff",
  "group",
- "maybe-rayon",
+ "maybe-rayon 0.1.1 (git+https://github.com/tachyon-zcash/maybe-rayon.git?rev=5c37ee0dd448e8c1edc4529d0b8897ecaff5aad1)",
  "pasta_curves",
  "ragu_macros",
  "rand 0.8.5",
@@ -3678,10 +3687,10 @@ dependencies = [
 [[package]]
 name = "ragu_circuits"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
  "blake2b_simd",
- "maybe-rayon",
+ "maybe-rayon 0.1.1 (git+https://github.com/tachyon-zcash/maybe-rayon.git?rev=5c37ee0dd448e8c1edc4529d0b8897ecaff5aad1)",
  "ragu_arithmetic",
  "ragu_core",
  "ragu_primitives",
@@ -3690,7 +3699,7 @@ dependencies = [
 [[package]]
 name = "ragu_core"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
  "ragu_arithmetic",
  "ragu_macros",
@@ -3700,7 +3709,7 @@ dependencies = [
 [[package]]
 name = "ragu_macros"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
  "num-bigint",
  "num-traits",
@@ -3713,7 +3722,7 @@ dependencies = [
 [[package]]
 name = "ragu_pasta"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
  "lazy_static",
  "ragu_arithmetic",
@@ -3722,9 +3731,9 @@ dependencies = [
 [[package]]
 name = "ragu_pcd"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
- "maybe-rayon",
+ "maybe-rayon 0.1.1 (git+https://github.com/tachyon-zcash/maybe-rayon.git?rev=5c37ee0dd448e8c1edc4529d0b8897ecaff5aad1)",
  "ragu_arithmetic",
  "ragu_circuits",
  "ragu_core",
@@ -3734,7 +3743,7 @@ dependencies = [
 [[package]]
 name = "ragu_primitives"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/ragu?rev=2f926fdcb5f1d402ca06aad4230b16540367e850#2f926fdcb5f1d402ca06aad4230b16540367e850"
+source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
 dependencies = [
  "ragu_arithmetic",
  "ragu_core",
@@ -7265,7 +7274,7 @@ dependencies = [
  "incrementalmerkletree",
  "incrementalmerkletree-testing",
  "jubjub",
- "maybe-rayon",
+ "maybe-rayon 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nonempty",
  "orchard",
  "pasta_curves",
@@ -7481,7 +7490,7 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon?rev=5d6977cbb690a5946aaf97163428b8473dd192d2#5d6977cbb690a5946aaf97163428b8473dd192d2"
+source = "git+https://github.com/S1nus/tachyon?rev=af003b1aa55e0c19943141611ebb4afd79b76523#af003b1aa55e0c19943141611ebb4afd79b76523"
 dependencies = [
  "blake2b_simd",
  "corez",
