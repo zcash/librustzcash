@@ -65,6 +65,9 @@ workspace.
   as `pczt::orchard::EncCiphertext`, allowing v2 serialization to carry either
   encrypted ciphertext or a trailing-zero-stripped
   `pczt::orchard::MemoPlaintext`.
+- PCZT version 2 Orchard action serialization now represents spend nullifiers
+  and `rk` values as optional fields, while parsing rejects encodings that omit
+  either field until the logical Orchard spend model supports their absence.
 - Direct `serde` serialization implementations have been removed from the
   logical `pczt::orchard::{Bundle, Action, Spend, Output}` types.
 - `pczt::Pczt::serialize` now consumes `self` and returns
@@ -90,6 +93,8 @@ workspace.
   encoding.
 - `pczt::EncodingError::RequiresV2`, returned when v1 serialization cannot
   represent v2-only logical PCZT data.
+- `pczt::ParseError::MissingRequiredField`, returned when the PCZT encoding
+  omits a field that the logical PCZT type still requires.
 - `pczt::orchard::{EncCiphertext, MEMO_SIZE, MemoPlaintext,
   MemoPlaintextError}` for representing encrypted note plaintext data in the
   logical Orchard output model.

@@ -758,7 +758,7 @@ pub(crate) mod v2 {
     use serde::{Deserialize, Serialize};
     use serde_with::serde_as;
 
-    use super::{NoteVersion, v1};
+    use super::NoteVersion;
 
     /// A serializable representation of Orchard note plaintext versions.
     #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -801,9 +801,33 @@ pub(crate) mod v2 {
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub(crate) struct Action {
         cv_net: Option<[u8; 32]>,
-        spend: v1::Spend,
+        spend: Spend,
         output: Output,
         rcv: Option<[u8; 32]>,
+    }
+
+    /// Information about the spend part of an Orchard action.
+    #[serde_as]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub(crate) struct Spend {
+        #[serde_as(as = "Option<[_; 32]>")]
+        nullifier: Option<[u8; 32]>,
+        #[serde_as(as = "Option<[_; 32]>")]
+        rk: Option<[u8; 32]>,
+        #[serde_as(as = "Option<[_; 64]>")]
+        spend_auth_sig: Option<[u8; 64]>,
+        #[serde_as(as = "Option<[_; 43]>")]
+        recipient: Option<[u8; 43]>,
+        value: Option<u64>,
+        rho: Option<[u8; 32]>,
+        rseed: Option<[u8; 32]>,
+        #[serde_as(as = "Option<[_; 96]>")]
+        fvk: Option<[u8; 96]>,
+        witness: Option<(u32, [[u8; 32]; 32])>,
+        alpha: Option<[u8; 32]>,
+        zip32_derivation: Option<crate::common::Zip32Derivation>,
+        dummy_sk: Option<[u8; 32]>,
+        proprietary: BTreeMap<String, Vec<u8>>,
     }
 
     /// Information about the output part of an Orchard action.
@@ -844,21 +868,21 @@ pub(crate) mod v2 {
         }
     }
 
-    impl From<Bundle> for super::Bundle {
-        fn from(bundle: Bundle) -> Self {
-            Self {
-                actions: bundle
+    impl Bundle {
+        pub(crate) fn into_logical(self) -> Result<super::Bundle, crate::ParseError> {
+            Ok(super::Bundle {
+                actions: self
                     .actions
                     .into_iter()
-                    .map(super::Action::from)
-                    .collect(),
-                flags: bundle.flags,
-                value_sum: bundle.value_sum,
-                anchor: bundle.anchor,
-                note_version: bundle.note_version.into(),
-                zkproof: bundle.zkproof,
-                bsk: bundle.bsk,
-            }
+                    .map(Action::into_logical)
+                    .collect::<Result<Vec<_>, _>>()?,
+                flags: self.flags,
+                value_sum: self.value_sum,
+                anchor: self.anchor,
+                note_version: self.note_version.into(),
+                zkproof: self.zkproof,
+                bsk: self.bsk,
+            })
         }
     }
 
@@ -866,21 +890,67 @@ pub(crate) mod v2 {
         fn from(action: super::Action) -> Self {
             Self {
                 cv_net: action.cv_net,
-                spend: v1::Spend::from(action.spend),
+                spend: Spend::from(action.spend),
                 output: Output::from(action.output),
                 rcv: action.rcv,
             }
         }
     }
 
-    impl From<Action> for super::Action {
-        fn from(action: Action) -> Self {
+    impl Action {
+        fn into_logical(self) -> Result<super::Action, crate::ParseError> {
+            Ok(super::Action {
+                cv_net: self.cv_net,
+                spend: self.spend.into_logical()?,
+                output: super::Output::from(self.output),
+                rcv: self.rcv,
+            })
+        }
+    }
+
+    impl From<super::Spend> for Spend {
+        fn from(spend: super::Spend) -> Self {
             Self {
-                cv_net: action.cv_net,
-                spend: super::Spend::from(action.spend),
-                output: super::Output::from(action.output),
-                rcv: action.rcv,
+                nullifier: Some(spend.nullifier),
+                rk: Some(spend.rk),
+                spend_auth_sig: spend.spend_auth_sig,
+                recipient: spend.recipient,
+                value: spend.value,
+                rho: spend.rho,
+                rseed: spend.rseed,
+                fvk: spend.fvk,
+                witness: spend.witness,
+                alpha: spend.alpha,
+                zip32_derivation: spend.zip32_derivation,
+                dummy_sk: spend.dummy_sk,
+                proprietary: spend.proprietary,
             }
+        }
+    }
+
+    impl Spend {
+        fn into_logical(self) -> Result<super::Spend, crate::ParseError> {
+            Ok(super::Spend {
+                nullifier: self
+                    .nullifier
+                    .ok_or(crate::ParseError::MissingRequiredField(
+                        "orchard.actions[].spend.nullifier",
+                    ))?,
+                rk: self.rk.ok_or(crate::ParseError::MissingRequiredField(
+                    "orchard.actions[].spend.rk",
+                ))?,
+                spend_auth_sig: self.spend_auth_sig,
+                recipient: self.recipient,
+                value: self.value,
+                rho: self.rho,
+                rseed: self.rseed,
+                fvk: self.fvk,
+                witness: self.witness,
+                alpha: self.alpha,
+                zip32_derivation: self.zip32_derivation,
+                dummy_sk: self.dummy_sk,
+                proprietary: self.proprietary,
+            })
         }
     }
 
@@ -1011,8 +1081,35 @@ pub(crate) mod v2 {
                 assert_eq!(encoded.anchor, anchor);
                 assert_eq!(encoded.actions[0].cv_net, cv_net);
 
-                let decoded = LogicalBundle::from(encoded);
+                let decoded = encoded.into_logical().unwrap();
                 assert_eq!(decoded, bundle);
+            }
+        }
+
+        #[test]
+        fn missing_spend_nullifier_or_rk_is_rejected() {
+            let bundle = logical_bundle(Some([5; 32]), Some([6; 32]));
+
+            for (clear_field, missing_field) in [
+                (
+                    (|spend: &mut super::Spend| spend.nullifier = None) as fn(&mut super::Spend),
+                    "orchard.actions[].spend.nullifier",
+                ),
+                (
+                    |spend: &mut super::Spend| spend.rk = None,
+                    "orchard.actions[].spend.rk",
+                ),
+            ] {
+                let mut encoded = super::Bundle::try_from(bundle.clone()).unwrap();
+                assert_eq!(encoded.actions[0].spend.nullifier, Some([1; 32]));
+                assert_eq!(encoded.actions[0].spend.rk, Some([2; 32]));
+
+                clear_field(&mut encoded.actions[0].spend);
+
+                assert!(matches!(
+                    encoded.into_logical(),
+                    Err(crate::ParseError::MissingRequiredField(field)) if field == missing_field
+                ));
             }
         }
 
