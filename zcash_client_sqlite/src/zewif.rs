@@ -1293,8 +1293,9 @@ where
                 return Ok(());
             }
             ::zewif::AccountViewingKey::TransparentAddressSet => {
-                // A transparent-only account with no seed available cannot be
-                // re-derived from a seed, so it is skipped.
+                // A bare set of transparent addresses has no unified key
+                // structure to anchor an account to, so it is skipped for now.
+                // Retaining its address set is tracked in zcash/librustzcash#2582.
                 report.skipped_accounts.push(SkippedAccount {
                     name: account.name().to_owned(),
                     reason: AccountSkipReason::TransparentAddressSetWithoutSeed,
