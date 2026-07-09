@@ -307,7 +307,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// prep transaction has mined and produced spendable notes, and (3) detects overall
     /// completion once every scheduled transfer is confirmed and the Orchard balance has fully
     /// drained into Ironwood. Completion is **persisted** — the run's phase is set to
-    /// [`Phase::Complete`], a terminal phase — so the run becomes inactive: its note locks are
+    /// `Phase::Complete`, a terminal phase — so the run becomes inactive: its note locks are
     /// released and a later deposit of Orchard funds can start a fresh migration run.
     ///
     /// # Errors
@@ -1082,7 +1082,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// Record the platform's broadcast outcome, advancing the engine's state.
     ///
     /// A result for the note-split ("prep") transaction (`id.is_prep()`) advances the split phase
-    /// to [`Phase::WaitingDenomConfirmations`] on success; there is at most one active run (and
+    /// to `Phase::WaitingDenomConfirmations` on success; there is at most one active run (and
     /// one prep transaction) per account/network, so the active run's own id is used directly
     /// rather than extracting a run id out of `id`. A network error on the prep transaction is
     /// simply left for the platform to retry; a prep transaction is never itself reported as
@@ -1090,7 +1090,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// the reported transaction id, which the platform obtained by broadcasting exactly the bytes
     /// [`Self::next_due_transfer`] returned); a retryable network error leaves it scheduled for a
     /// later attempt; `InvalidNote`/`Expired` park the whole run in
-    /// [`Phase::FailedRecoverable`] for [`Self::restart_current_migration_step`] /
+    /// `Phase::FailedRecoverable` for [`Self::restart_current_migration_step`] /
     /// [`Self::refresh_stale_transfers`] to resolve.
     ///
     /// # Errors
@@ -1144,7 +1144,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
 
     /// Whether any scheduled transfer is past its send height but not yet broadcast.
     ///
-    /// Uses a blob-free `EXISTS` check ([`store::has_due_transfer`]) rather than loading the next
+    /// Uses a blob-free `EXISTS` check (`store::has_due_transfer`) rather than loading the next
     /// due transfer's PCZT, since only the boolean is needed for on-launch reconciliation.
     ///
     /// # Errors
@@ -1164,7 +1164,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// Whether the migration is in an invalid state: spendable Orchard remains but no scheduled
     /// transfer covers it.
     ///
-    /// Only meaningful once a schedule should exist (from [`Phase::BroadcastScheduled`] onward).
+    /// Only meaningful once a schedule should exist (from `Phase::BroadcastScheduled` onward).
     /// In the pre-schedule phases — the note split underway or confirmed, the transfer plan not
     /// yet user-approved — having no queued transfers while the balance still sits in Orchard is
     /// the expected state, not an invalid one; without this gate a relaunch in those phases would
