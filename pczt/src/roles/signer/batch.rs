@@ -42,9 +42,7 @@ impl BatchSignRequest {
     /// Parses a Postcard-encoded batched PCZT signing request.
     pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
         let body = parse_version(bytes)?;
-        postcard::from_bytes::<v1::BatchSignRequest>(body)
-            .map(Self::from)
-            .map_err(ParseError::Invalid)
+        parse_body::<v1::BatchSignRequest>(body).map(Self::from)
     }
 
     /// Serializes this request using the current Postcard wire version.
@@ -106,8 +104,7 @@ impl BatchSignResponse {
     /// Parses a Postcard-encoded batched PCZT signing response.
     pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
         let body = parse_version(bytes)?;
-        let response =
-            postcard::from_bytes::<v1::BatchSignResponse>(body).map_err(ParseError::Invalid)?;
+        let response = parse_body::<v1::BatchSignResponse>(body)?;
         Self::try_from(response)
     }
 
@@ -162,6 +159,8 @@ pub enum ParseError {
     InvalidValuePool(u8),
     /// A signature's action index cannot be represented on this platform.
     ActionIndexOutOfRange,
+    /// Bytes remain after the complete message body.
+    TrailingData,
     /// The message uses an unsupported wire version.
     UnknownVersion(u32),
 }
@@ -172,6 +171,14 @@ fn parse_version(bytes: &[u8]) -> Result<&[u8], ParseError> {
         return Err(ParseError::UnknownVersion(version));
     }
     Ok(body)
+}
+
+fn parse_body<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, ParseError> {
+    let (value, remaining) = postcard::take_from_bytes(bytes).map_err(ParseError::Invalid)?;
+    if !remaining.is_empty() {
+        return Err(ParseError::TrailingData);
+    }
+    Ok(value)
 }
 
 fn serialize_versioned<T: Serialize>(value: &T) -> Vec<u8> {
@@ -384,6 +391,16 @@ mod tests {
         assert!(matches!(
             BatchSignRequest::parse(&[2, 0, 0]),
             Err(ParseError::UnknownVersion(2))
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_trailing_data() {
+        let mut encoded = BatchSignRequest::new(vec![], vec![]).serialize();
+        encoded.push(0);
+        assert!(matches!(
+            BatchSignRequest::parse(&encoded),
+            Err(ParseError::TrailingData)
         ));
     }
 
