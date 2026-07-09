@@ -5,6 +5,22 @@
 version = "0.13.0"
 audited_as = "0.13.0-pre.0"
 
+[[unpublished.zcash_history]]
+version = "0.5.0"
+audited_as = "0.5.0-pre.0"
+
+[[unpublished.zcash_keys]]
+version = "0.15.0"
+audited_as = "0.15.0-pre.0"
+
+[[unpublished.zcash_primitives]]
+version = "0.29.0"
+audited_as = "0.29.0-pre.0"
+
+[[unpublished.zcash_proofs]]
+version = "0.29.0"
+audited_as = "0.29.0-pre.0"
+
 [[unpublished.zcash_protocol]]
 version = "0.10.0"
 audited_as = "0.10.0-pre.0"
