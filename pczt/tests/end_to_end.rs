@@ -37,10 +37,17 @@ use zcash_protocol::{
 use zcash_script::script::{self, Evaluable};
 
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
+static POST_NU6_3_ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
 fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
     ORCHARD_PROVING_KEY.get_or_init(|| {
         orchard::circuit::ProvingKey::build(orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2)
+    })
+}
+
+fn post_nu6_3_orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
+    POST_NU6_3_ORCHARD_PROVING_KEY.get_or_init(|| {
+        orchard::circuit::ProvingKey::build(orchard::circuit::OrchardCircuitVersion::PostNu6_3)
     })
 }
 
@@ -1159,6 +1166,144 @@ fn redacted_orchard_anchor_round_trips_v2() {
 }
 
 #[test]
+fn redacted_v6_orchard_anchor_can_be_restored_after_signing() {
+    let mut rng = OsRng;
+
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    let value = orchard::value::NoteValue::from_raw(1_000_000);
+    let note = {
+        let orchard_bundle_version = orchard::bundle::BundleVersion::orchard_v2();
+        let mut orchard_builder = orchard::builder::Builder::new(
+            orchard::builder::BundleType::DEFAULT,
+            orchard_bundle_version,
+            orchard_bundle_version.default_flags(),
+            orchard::Anchor::empty_tree(),
+        )
+        .unwrap();
+        orchard_builder
+            .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
+            .unwrap();
+        let (bundle, meta) = orchard_builder.build::<i64>(&mut rng).unwrap().unwrap();
+        let action = bundle
+            .actions()
+            .get(meta.output_action_index(0).unwrap())
+            .unwrap();
+        let domain = orchard::note_encryption::OrchardDomain::for_action(action);
+        let (note, _, _) = try_note_decryption(&domain, &orchard_ivk.prepare(), action).unwrap();
+        assert_eq!(note.version(), orchard::note::NoteVersion::V2);
+        note
+    };
+
+    let (anchor, merkle_path): (orchard::Anchor, orchard::tree::MerklePath) = {
+        let cmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
+        let leaf = MerkleHashOrchard::from_cmx(&cmx);
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+        tree.append(leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+        tree.checkpoint(9_999_999).unwrap();
+        let position = 0.into();
+        let merkle_path = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path.root(leaf);
+        (anchor.into(), merkle_path.into())
+    };
+
+    let mut builder = Builder::new(
+        nu6_3_test_network(),
+        10_000_000.into(),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(anchor),
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
+        },
+    );
+    builder
+        .add_orchard_spend::<zip317::FeeRule>(orchard_fvk, note, merkle_path)
+        .unwrap();
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            Zatoshis::const_from_u64(980_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        orchard_meta,
+        ..
+    } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+
+    let pczt = IoFinalizer::new(Creator::build_from_parts(pczt_parts).unwrap())
+        .finalize_io()
+        .unwrap();
+    let index = orchard_meta.spend_action_index(0).unwrap();
+    check_v2_round_trip(&pczt);
+
+    let redacted = Redactor::new(pczt)
+        .redact_orchard_with(|mut r| r.clear_anchor())
+        .finish();
+    assert!(redacted.orchard().anchor().is_none());
+    assert!(
+        Prover::new(redacted.clone())
+            .create_orchard_proof(post_nu6_3_orchard_proving_key())
+            .is_err()
+    );
+
+    let mut signer = Signer::new(redacted).unwrap();
+    let sighash = signer.shielded_sighash();
+    signer.sign_orchard(index, &orchard_ask).unwrap();
+    let signed = signer.finish();
+
+    let updated = Updater::new(signed)
+        .set_v6_orchard_anchor(anchor)
+        .unwrap()
+        .finish();
+    assert_eq!(updated.orchard().anchor(), &Some(anchor.to_bytes()));
+    assert_eq!(
+        Signer::new(updated.clone()).unwrap().shielded_sighash(),
+        sighash
+    );
+    let produced_sig = updated.orchard().actions()[index]
+        .spend()
+        .spend_auth_sig()
+        .expect("action was signed");
+    assert_valid_spend_auth_sig(
+        updated.orchard().actions()[index].spend().rk(),
+        sighash,
+        produced_sig,
+    );
+
+    let proved = Prover::new(updated)
+        .create_orchard_proof(post_nu6_3_orchard_proving_key())
+        .unwrap()
+        .create_ironwood_proof(post_nu6_3_orchard_proving_key())
+        .unwrap()
+        .finish();
+    check_v2_round_trip(&proved);
+
+    assert!(matches!(
+        Updater::new(proved.clone()).set_v6_orchard_anchor(anchor),
+        Err(pczt::roles::updater::OrchardAnchorUpdateError::ProofAlreadyPresent)
+    ));
+
+    let tx = TransactionExtractor::new(proved).extract().unwrap();
+    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+}
+
+#[test]
 fn redacted_ironwood_anchor_round_trips_v2() {
     assert_redacted_anchor_v2_round_trip(
         pczt_with_anchor(ShieldedPool::Ironwood),
@@ -1168,6 +1313,7 @@ fn redacted_ironwood_anchor_round_trips_v2() {
 
 #[test]
 fn redacted_ironwood_anchor_survives_signer_finish() {
+    let anchor = orchard::Anchor::empty_tree();
     let redacted = redact_anchor(
         pczt_with_anchor(ShieldedPool::Ironwood),
         ShieldedPool::Ironwood,
@@ -1178,8 +1324,35 @@ fn redacted_ironwood_anchor_survives_signer_finish() {
     assert_anchor_redacted(&signed, ShieldedPool::Ironwood);
     check_v2_round_trip(&signed);
 
-    let reparsed = Pczt::parse(&signed.serialize().unwrap()).unwrap();
+    let reparsed = Pczt::parse(&signed.clone().serialize().unwrap()).unwrap();
     assert_anchor_redacted(&reparsed, ShieldedPool::Ironwood);
+
+    let updated = Updater::new(signed)
+        .set_v6_ironwood_anchor(anchor)
+        .unwrap()
+        .finish();
+    assert_eq!(updated.ironwood().anchor(), &Some(anchor.to_bytes()));
+    check_v2_round_trip(&updated);
+}
+
+#[test]
+fn v6_anchor_setters_reject_v5_pczts() {
+    let anchor = orchard::Anchor::empty_tree();
+    let pczt = Creator::new(
+        zcash_protocol::consensus::BranchId::Nu6.into(),
+        10_000_000,
+        133,
+        Some([0; 32]),
+        Some(anchor.to_bytes()),
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+
+    assert!(matches!(
+        Updater::new(pczt).set_v6_orchard_anchor(anchor),
+        Err(pczt::roles::updater::OrchardAnchorUpdateError::RequiresV6)
+    ));
 }
 
 #[test]
