@@ -115,6 +115,9 @@ workspace.
 - `pczt::roles::signer::Error::{IronwoodSign, IronwoodVerify}`
 - `pczt::roles::verifier::Verifier::with_ironwood`
 - `pczt::roles::updater::Updater::update_ironwood_with`
+- `pczt::roles::updater::{OrchardSpendWitness, OrchardSpendWitnessError}`
+  and Orchard or Ironwood anchor and spend witness setters for wallets that
+  need to restore v6 proof data after signing.
 - `pczt::roles::creator::Error::IronwoodNotSupported`
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
