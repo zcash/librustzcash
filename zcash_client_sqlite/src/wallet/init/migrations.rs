@@ -455,7 +455,10 @@ pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
 pub(crate) mod tests {
     use std::collections::HashSet;
 
+    // Used only by the orchard-gated note-generation strategies below.
+    #[cfg(feature = "orchard")]
     use proptest::prelude::any;
+    #[cfg(feature = "orchard")]
     use proptest::prop_compose;
     use rusqlite::Connection;
     use secrecy::Secret;

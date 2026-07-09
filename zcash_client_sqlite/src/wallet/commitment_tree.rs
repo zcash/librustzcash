@@ -1533,13 +1533,15 @@ mod tests {
     use super::SqliteShardStore;
     use crate::{
         WalletDb,
-        error::SqliteClientError,
         testing::{
             db::{test_clock, test_rng},
             pool::ShieldedPoolPersistence,
         },
         wallet::init::WalletMigrator,
     };
+    // Used only by the orchard-gated `HistoricalWitnessGenerator` type alias below.
+    #[cfg(feature = "orchard")]
+    use crate::error::SqliteClientError;
 
     fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(
         m: usize,
