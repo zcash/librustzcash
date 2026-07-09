@@ -203,7 +203,82 @@ impl<
 {
 }
 
-/// Adds information about a sequence of scanned blocks to the provided data store.
+/// A trait alias capturing the database capabilities required by [`put_blocks_rows`].
+///
+/// Unlike [`PutBlocksDbT`], this does not require [`WalletCommitmentTrees`]: the row stage
+/// of [`put_blocks`] only writes through the [`LowLevelWalletWrite`] interface.
+#[cfg(not(feature = "transparent-inputs"))]
+pub trait PutBlocksRowsDbT<SE, AR>: LowLevelWalletWrite<Error = SE> {}
+
+#[cfg(not(feature = "transparent-inputs"))]
+impl<T: LowLevelWalletWrite<Error = SE>, SE, AR> PutBlocksRowsDbT<SE, AR> for T {}
+
+/// A trait alias capturing the database capabilities required by [`put_blocks_rows`].
+///
+/// Unlike [`PutBlocksDbT`], this does not require [`WalletCommitmentTrees`]: the row stage
+/// of [`put_blocks`] only writes through the [`LowLevelWalletWrite`] interface.
+///
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be maintained as new blocks are
+/// scanned.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
+#[cfg(feature = "transparent-inputs")]
+pub trait PutBlocksRowsDbT<SE, AR>:
+    LowLevelWalletWrite<Error = SE> + AddressStore<Error = SE, AccountRef = AR>
+{
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<T: LowLevelWalletWrite<Error = SE> + AddressStore<Error = SE, AccountRef = AR>, SE, AR>
+    PutBlocksRowsDbT<SE, AR> for T
+{
+}
+
+/// The note commitment data accumulated by [`put_blocks_rows`] across a sequence of scanned
+/// blocks: exactly the input that the note commitment tree stage of [`put_blocks`] consumes.
+///
+/// Commitment entries are wrapped in `Option` so that downstream subtree construction (see
+/// [`build_subtrees`]) can move them out of the buffer from within a `rayon` parallel iterator;
+/// every entry is `Some` on return from [`put_blocks_rows`].
+#[derive(Default)]
+pub struct PutBlocksRows {
+    /// The ordered vector of note commitments for Sapling outputs, beginning at the position
+    /// following the final Sapling tree state of the `from_state` argument.
+    pub sapling_commitments: Vec<Option<(sapling::Node, Retention<BlockHeight>)>>,
+    /// The ordered vector of note commitments for Orchard outputs, beginning at the position
+    /// following the final Orchard tree state of the `from_state` argument.
+    #[cfg(feature = "orchard")]
+    pub orchard_commitments:
+        Vec<Option<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>>,
+    /// The ordered vector of note commitments for Ironwood outputs, beginning at the position
+    /// following the final Ironwood tree state of the `from_state` argument.
+    #[cfg(feature = "orchard")]
+    pub ironwood_commitments:
+        Vec<Option<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>>,
+    /// The note commitment tree positions of outputs received by the wallet, for use with
+    /// [`LowLevelWalletWrite::notify_scan_complete`].
+    pub note_positions: Vec<(ShieldedPool, Position)>,
+    /// The height of the last block in the persisted sequence; `None` if and only if the
+    /// provided block vector was empty.
+    pub last_scanned_height: Option<BlockHeight>,
+}
+
+/// Persists the row-level (non-tree) data for a sequence of scanned blocks: block metadata,
+/// transaction and note rows, spent-note marking, nullifier tracking and pruning, and — when
+/// the `transparent-inputs` feature is enabled — transparent gap address maintenance for the
+/// involved accounts.
+///
+/// This is the first stage of [`put_blocks`], which is equivalent to `put_blocks_rows` followed
+/// by the note commitment tree updates (see [`build_subtrees`] and [`update_tree`]) and
+/// [`LowLevelWalletWrite::notify_scan_complete`]. It is exposed so that wallet stores that
+/// maintain their note commitment trees by other means can reuse the row-writing logic through
+/// the [`LowLevelWalletWrite`] interface without also taking on the [`WalletCommitmentTrees`]
+/// requirement.
+///
+/// The `TE` type parameter is unconstrained here (the row stage cannot produce a tree error);
+/// it exists so that errors propagate directly as the [`PutBlocksError`] of the enclosing
+/// [`put_blocks`] call.
 ///
 /// # Parameters
 /// - `wallet_db`: A handle to the underlying data store.
@@ -213,22 +288,18 @@ impl<
 /// - `blocks`: The scanned block data to be added to the data store. This vector must contain
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
-/// - `anchor_retention_height`: If `Some(h)`, checkpoints established at or above height `h` whose
-///   height falls on the [`ANCHOR_RETENTION_INTERVAL`] are retained as durable anchors, exempting
-///   them from automatic pruning of excess checkpoints. `None` disables anchor retention.
-pub fn put_blocks<DbT, SE, TE>(
+pub fn put_blocks_rows<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
-    anchor_retention_height: Option<BlockHeight>,
-) -> Result<(), PutBlocksError<SE, TE>>
+) -> Result<PutBlocksRows, PutBlocksError<SE, TE>>
 where
-    DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
+    DbT: PutBlocksRowsDbT<SE, <DbT as LowLevelWalletRead>::AccountRef>,
     DbT::TxRef: Eq + Hash,
 {
     if blocks.is_empty() {
-        return Ok(());
+        return Ok(PutBlocksRows::default());
     }
 
     let initial_block = blocks.first().expect("blocks is known to be nonempty");
@@ -495,6 +566,60 @@ where
     wallet_db
         .prune_tracked_nullifiers(PRUNING_DEPTH)
         .map_err(PutBlocksError::Storage)?;
+
+    Ok(PutBlocksRows {
+        sapling_commitments,
+        #[cfg(feature = "orchard")]
+        orchard_commitments,
+        #[cfg(feature = "orchard")]
+        ironwood_commitments,
+        note_positions,
+        last_scanned_height,
+    })
+}
+
+/// Adds information about a sequence of scanned blocks to the provided data store.
+///
+/// This is equivalent to persisting the row-level data via [`put_blocks_rows`] and then
+/// updating the note commitment trees with the returned commitments.
+///
+/// # Parameters
+/// - `wallet_db`: A handle to the underlying data store.
+/// - `from_state`: The note commitment tree state as of the end of the last block prior to the
+///   first block in the provided block vector; [`PutBlocksError::NonSequentialBlocks`] will be
+///   returned if this invariant is violated.
+/// - `blocks`: The scanned block data to be added to the data store. This vector must contain
+///   data for blocks in sequentially increasing height order;
+///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
+/// - `anchor_retention_height`: If `Some(h)`, checkpoints established at or above height `h` whose
+///   height falls on the [`ANCHOR_RETENTION_INTERVAL`] are retained as durable anchors, exempting
+///   them from automatic pruning of excess checkpoints. `None` disables anchor retention.
+pub fn put_blocks<DbT, SE, TE>(
+    wallet_db: &mut DbT,
+    #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    from_state: &ChainState,
+    blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
+    anchor_retention_height: Option<BlockHeight>,
+) -> Result<(), PutBlocksError<SE, TE>>
+where
+    DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
+    DbT::TxRef: Eq + Hash,
+{
+    let rows = put_blocks_rows(
+        wallet_db,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        from_state,
+        blocks,
+    )?;
+
+    let mut sapling_commitments = rows.sapling_commitments;
+    #[cfg(feature = "orchard")]
+    let mut orchard_commitments = rows.orchard_commitments;
+    #[cfg(feature = "orchard")]
+    let mut ironwood_commitments = rows.ironwood_commitments;
+    let note_positions = rows.note_positions;
+    let last_scanned_height = rows.last_scanned_height;
 
     // We will have a start position and a last scanned height in all cases where
     // `blocks` is non-empty.
@@ -1318,8 +1443,12 @@ where
 /// Creates subtrees from note commitments in parallel.
 ///
 /// `commitments` is an `&mut [Option<_>]` to emulate move semantics inside a `rayon`
-/// parallel iterator.
-fn build_subtrees<H, const SHARD_HEIGHT: u8>(
+/// parallel iterator; every entry must be `Some` on entry, and every entry will have been
+/// taken on return.
+///
+/// Returns each located subtree together with the map from checkpointed block height to
+/// note commitment tree position within that subtree.
+pub fn build_subtrees<H, const SHARD_HEIGHT: u8>(
     start_position: Position,
     commitments: &mut [Option<(H, Retention<BlockHeight>)>],
     chunk_size: usize,
@@ -1346,7 +1475,7 @@ where
 
 /// Produces an overall set of checkpoints from a list of subtrees.
 #[cfg(feature = "orchard")]
-fn checkpoint_positions<H>(
+pub fn checkpoint_positions<H>(
     subtrees: &[(LocatedPrunableTree<H>, BTreeMap<BlockHeight, Position>)],
 ) -> BTreeMap<BlockHeight, Position> {
     subtrees
@@ -1356,8 +1485,12 @@ fn checkpoint_positions<H>(
         .collect()
 }
 
+/// Produces the checkpoints that must be added to a pool's note commitment tree so that it
+/// gains a checkpoint at each of the requested heights, drawing position information from the
+/// existing checkpoint positions (or from the provided frontier when no preceding checkpoint
+/// exists). Heights at which a checkpoint already exists are skipped.
 #[cfg(feature = "orchard")]
-fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u8>(
+pub fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u8>(
     // An iterator of checkpoints heights for which we wish to ensure that
     // checkpoints exists.
     ensure_heights: I,
@@ -1440,7 +1573,7 @@ where
 /// checkpointed at the same set of heights. When one pool has no checkpoints, the sets returned for
 /// the other two reduce to each other's heights, matching the prior two-pool behavior.
 #[cfg(feature = "orchard")]
-fn cross_pool_ensure_heights(
+pub fn cross_pool_ensure_heights(
     sapling: &BTreeSet<BlockHeight>,
     orchard: &BTreeSet<BlockHeight>,
     ironwood: &BTreeSet<BlockHeight>,
@@ -1459,9 +1592,12 @@ fn cross_pool_ensure_heights(
 /// at the block `frontier_height + 1`.
 ///
 /// If `anchor_retention_height` is `Some`, every checkpoint established at or above that height
-/// whose height falls on the [`ANCHOR_RETENTION_INTERVAL`] is retained as a durable anchor (see
-/// [`retain_anchor_checkpoint`]).
-fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+/// whose height falls on the [`ANCHOR_RETENTION_INTERVAL`] is retained as a durable anchor.
+///
+/// This is generic over the [`ShardStore`] backing the tree, so stores that maintain their note
+/// commitment trees by other means (for example, accumulating updates in memory and flushing
+/// them in bulk) can reuse the exact tree-update logic that [`put_blocks`] applies.
+pub fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     protocol: &'static str,
     frontier: &Frontier<S::H, DEPTH>,
     frontier_height: BlockHeight,
