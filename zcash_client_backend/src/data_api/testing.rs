@@ -2499,8 +2499,8 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
                 done = true;
             }
 
-            if !done {
-                if let Some(recipient) = ua.sapling() {
+            if !done
+                && let Some(recipient) = ua.sapling() {
                     ctx.outputs.push(
                         compact_sapling_output(
                             params,
@@ -2514,7 +2514,6 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
                     );
                     done = true;
                 }
-            }
             if !done {
                 panic!("No supported shielded receiver to send funds to");
             }

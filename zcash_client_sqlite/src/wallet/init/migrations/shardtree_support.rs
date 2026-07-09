@@ -134,7 +134,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     )
                 })?;
 
-                if block_height % 1000 == 0 {
+                if block_height.is_multiple_of(1000) {
                     debug!(height = block_height, "Migrating tree data to shardtree");
                 }
                 trace!(

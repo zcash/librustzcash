@@ -14,11 +14,10 @@ impl super::Input {
                 }
             }
             Some(TransparentAddress::ScriptHash(hash)) => {
-                if let Some(redeem_script) = self.redeem_script() {
-                    if hash[..] != crate::util::hash160::hash(&redeem_script.to_bytes())[..] {
+                if let Some(redeem_script) = self.redeem_script()
+                    && hash[..] != crate::util::hash160::hash(&redeem_script.to_bytes())[..] {
                         return Err(VerifyError::WrongRedeemScript);
                     }
-                }
             }
             None => return Err(VerifyError::UnsupportedScriptPubkey),
         }
@@ -39,11 +38,10 @@ impl super::Output {
                 }
             }
             Some(TransparentAddress::ScriptHash(hash)) => {
-                if let Some(redeem_script) = self.redeem_script() {
-                    if hash[..] != crate::util::hash160::hash(&redeem_script.to_bytes())[..] {
+                if let Some(redeem_script) = self.redeem_script()
+                    && hash[..] != crate::util::hash160::hash(&redeem_script.to_bytes())[..] {
                         return Err(VerifyError::WrongRedeemScript);
                     }
-                }
             }
             None => return Err(VerifyError::UnsupportedScriptPubkey),
         }

@@ -56,8 +56,8 @@ fn init_accounts<P: consensus::Parameters>(
     while let Some(row) = rows.next()? {
         let account_id = AccountRef(row.get(0)?);
         let ufvk_str: Option<String> = row.get(1)?;
-        if let Some(ufvk_str) = ufvk_str {
-            if let Some(tfvk) = UnifiedFullViewingKey::decode(params, &ufvk_str)
+        if let Some(ufvk_str) = ufvk_str
+            && let Some(tfvk) = UnifiedFullViewingKey::decode(params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData)?
                 .transparent()
             {
@@ -94,7 +94,6 @@ fn init_accounts<P: consensus::Parameters>(
                     })?;
                 }
             }
-        }
     }
 
     Ok(())

@@ -117,8 +117,8 @@ impl FromStr for ZcashAddress {
         }
 
         // The rest use Base58Check.
-        if let Ok(decoded) = bs58::decode(s).with_check(None).into_vec() {
-            if decoded.len() >= 2 {
+        if let Ok(decoded) = bs58::decode(s).with_check(None).into_vec()
+            && decoded.len() >= 2 {
                 let (prefix, net) = match decoded[..2].try_into().unwrap() {
                     prefix @ (mainnet::B58_PUBKEY_ADDRESS_PREFIX
                     | mainnet::B58_SCRIPT_ADDRESS_PREFIX
@@ -144,8 +144,7 @@ impl FromStr for ZcashAddress {
                 }
                 .map_err(|_| ParseError::InvalidEncoding)
                 .map(|kind| ZcashAddress { kind, net });
-            }
-        };
+            };
 
         // If it's not valid Bech32, Bech32m, or Base58Check, it's not a Zcash address.
         Err(ParseError::NotZcash)

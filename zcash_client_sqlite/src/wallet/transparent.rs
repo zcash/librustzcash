@@ -1312,15 +1312,13 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
         let imported_transparent_receiver_script_bytes: Option<Vec<u8>> =
             row.get("imported_transparent_receiver_script")?;
-        if let Some(rs_bytes) = imported_transparent_receiver_script_bytes {
-            if let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes)) {
-                if let Some(input_size) =
+        if let Some(rs_bytes) = imported_transparent_receiver_script_bytes
+            && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
+                && let Some(input_size) =
                     transparent::builder::p2sh_input_serialized_len(&from_chain)
                 {
                     output = output.with_known_input_size(input_size);
                 }
-            }
-        }
 
         utxos.push(output);
     }
@@ -2180,8 +2178,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
 
     if let Some((legacy_taddr, address_index)) =
         get_legacy_transparent_address(params, conn, account_uuid)?
-    {
-        if &legacy_taddr == address {
+        && &legacy_taddr == address {
             let metadata = TransparentAddressMetadata::derived(
                 Scope::External.into(),
                 address_index,
@@ -2190,7 +2187,6 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
             );
             return Ok(Some(metadata));
         }
-    }
 
     Ok(None)
 }
@@ -2235,11 +2231,10 @@ pub(crate) fn find_account_uuid_for_transparent_address<P: consensus::Parameters
     // look up the legacy address for each account in the wallet, and check whether it
     // matches the address for the received UTXO.
     for &account_id in account_ids.iter() {
-        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)? {
-            if &legacy_taddr == address {
+        if let Some((legacy_taddr, _)) = get_legacy_transparent_address(params, conn, account_id)?
+            && &legacy_taddr == address {
                 return Ok(Some((account_id, KeyScope::EXTERNAL)));
             }
-        }
     }
 
     Ok(None)

@@ -167,11 +167,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                                                 &self._params,
                                                 &uivk_str,
                                             )?
-                                        {
-                                            if legacy_taddr == address {
+                                            && legacy_taddr == address {
                                                 return Ok(Some(account_id));
                                             }
-                                        }
                                     }
 
                                     Ok(None)
@@ -252,8 +250,8 @@ fn queue_transparent_input_retrieval<AccountId>(
     tx_ref: TxRef,
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
-    if let Some(b) = d_tx.tx().transparent_bundle() {
-        if !b.is_coinbase() {
+    if let Some(b) = d_tx.tx().transparent_bundle()
+        && !b.is_coinbase() {
             // queue the transparent inputs for enhancement
             queue_tx_retrieval(
                 conn,
@@ -261,7 +259,6 @@ fn queue_transparent_input_retrieval<AccountId>(
                 Some(tx_ref),
             )?;
         }
-    }
 
     Ok(())
 }

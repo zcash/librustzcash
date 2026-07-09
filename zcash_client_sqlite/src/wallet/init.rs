@@ -637,8 +637,8 @@ fn init_wallet_db_internal<
     // but unfortunately `schemer` does not currently expose its DAG of migrations. As a
     // consequence, the caller has to choose whether or not this check should be performed
     // based upon which migrations they're asking to apply.
-    if verify_seed_relevance {
-        if let Some(seed) = seed {
+    if verify_seed_relevance
+        && let Some(seed) = seed {
             match wdb
                 .seed_relevance_to_derived_accounts(&seed)
                 .map_err(sqlite_client_error_to_wallet_migration_error)?
@@ -653,7 +653,6 @@ fn init_wallet_db_internal<
                 }
             }
         }
-    }
 
     Ok(())
 }

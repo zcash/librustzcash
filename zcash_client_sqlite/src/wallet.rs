@@ -1242,11 +1242,10 @@ fn find_account_for_shielded_address<P: consensus::Parameters>(
                 "Not a valid Zcash recipient address".to_owned(),
             ))
         })?;
-        if let Address::Unified(stored_ua) = stored {
-            if address_receiver_matches_ua(address, &stored_ua, params) {
+        if let Address::Unified(stored_ua) = stored
+            && address_receiver_matches_ua(address, &stored_ua, params) {
                 return Ok(Some(AccountUuid::from_uuid(row_uuid)));
             }
-        }
     }
 
     Ok(None)
@@ -3364,8 +3363,8 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 if _pool == &PoolType::Transparent {
                     let address = Address::try_from_zcash_address(params, _zaddr.clone())
                         .expect("recipient is an understood Zcash address.");
-                    if let Some(taddr) = address.to_transparent_address() {
-                        if transparent::find_account_uuid_for_transparent_address(
+                    if let Some(taddr) = address.to_transparent_address()
+                        && transparent::find_account_uuid_for_transparent_address(
                             conn, params, &taddr,
                         )?
                         .is_some()
@@ -3393,7 +3392,6 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                                 true,
                             )?;
                         }
-                    }
                 }
             }
             Recipient::InternalAccount {
@@ -4046,8 +4044,7 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     if let Some(max_scanned_height) = block_max_scanned(conn, params)
         .map_err(RewindError::DataSource)?
         .map(|m| m.block_height())
-    {
-        if target_height < max_scanned_height {
+        && target_height < max_scanned_height {
             // Compute the floor height of the pruning window.
             let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
             let truncation_target = target_height.max(pruning_floor);
@@ -4095,7 +4092,6 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             )
             .map_err(RewindError::DataSource)?;
         }
-    }
 
     // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
     // forcing re-scan of any blocks that previously appeared above the target. This both
@@ -4106,8 +4102,8 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     // those whose priority would dominate `Historic` even under a forced rescan
     // (`ChainTip`, `OpenAdjacent`, `FoundNote`, `Verify`); `Ignored` is the lowest priority
     // and cannot overwrite anything.
-    if let Some(t) = chain_tip {
-        if target_height < t {
+    if let Some(t) = chain_tip
+        && target_height < t {
             let rescan_range = (target_height + 1)..(t + 1);
             replace_queue_entries::<SqliteClientError>(
                 conn,
@@ -4120,7 +4116,6 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             )
             .map_err(RewindError::DataSource)?;
         }
-    }
 
     let new_sapling_tree_size: u64 = chain_state.final_sapling_tree().tree_size();
     #[cfg(feature = "orchard")]
@@ -4524,8 +4519,8 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     tx_ref: TxRef,
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
-    if let Some(b) = d_tx.tx().transparent_bundle() {
-        if !b.is_coinbase() {
+    if let Some(b) = d_tx.tx().transparent_bundle()
+        && !b.is_coinbase() {
             // queue the transparent inputs for enhancement
             queue_tx_retrieval(
                 conn,
@@ -4533,7 +4528,6 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
                 Some(tx_ref),
             )?;
         }
-    }
 
     Ok(())
 }

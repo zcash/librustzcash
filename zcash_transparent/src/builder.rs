@@ -822,8 +822,8 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
             let sighash_msg = secp256k1::Message::from_digest(self.sighashes[input_idx]);
 
             // We only support external signatures for P2PKH inputs.
-            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info {
-                if self
+            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info
+                && self
                     .secp_ctx
                     .verify_ecdsa(&sighash_msg, signature, pubkey)
                     .is_ok()
@@ -834,7 +834,6 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
                     }
                     matched_input_idx = Some((input_idx, pubkey));
                 }
-            }
         }
 
         if let Some((final_input_idx, pubkey)) = matched_input_idx {
