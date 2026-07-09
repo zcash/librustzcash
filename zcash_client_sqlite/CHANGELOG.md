@@ -11,6 +11,10 @@ workspace.
 ## Unreleased
 
 ### Added
+- `WalletDb` implements the new
+  `WalletWrite::import_standalone_transparent_pubkeys` batch method (behind the
+  `transparent-key-import` feature flag), resolving the target account a single
+  time for the whole batch.
 - `WalletDb` now implements the new
   `WalletWrite::reserve_next_n_internal_addresses` method (behind the
   `transparent-inputs` feature flag), reserving internal-scope (change)

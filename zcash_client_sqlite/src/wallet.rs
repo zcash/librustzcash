@@ -801,11 +801,50 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     pubkey: secp256k1::PublicKey,
 ) -> Result<usize, SqliteClientError> {
-    use ::transparent::address::TransparentAddress;
-
     // Resolve the account up front so an unknown account is reported explicitly, rather than
-    // inferred from a zero-row INSERT below.
+    // inferred from a zero-row INSERT.
     let account_id = get_account_ref(conn, account_uuid)?;
+    import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)
+}
+
+/// Imports a batch of standalone transparent P2PKH receivers by their pubkeys into the given
+/// account, resolving the account a single time for the whole batch (rather than once per
+/// pubkey). Returns the total number of address rows inserted.
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    pubkeys: &[secp256k1::PublicKey],
+) -> Result<usize, SqliteClientError> {
+    let account_id = get_account_ref(conn, account_uuid)?;
+    let mut inserted = 0;
+    for pubkey in pubkeys {
+        inserted += import_standalone_transparent_pubkey_inner(
+            conn,
+            params,
+            account_uuid,
+            account_id,
+            *pubkey,
+        )?;
+    }
+    Ok(inserted)
+}
+
+/// Imports a single standalone transparent P2PKH receiver into the account identified by both
+/// `account_uuid` (for the cross-account conflict check) and its already-resolved `account_id`.
+///
+/// Returns the number of address rows inserted (`1` when a new receiver row was added, `0` when
+/// nothing was inserted because the receiver address was already present).
+#[cfg(feature = "transparent-key-import")]
+fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    account_id: AccountRef,
+    pubkey: secp256k1::PublicKey,
+) -> Result<usize, SqliteClientError> {
+    use ::transparent::address::TransparentAddress;
 
     let existing_import_account = conn
         .query_row(
