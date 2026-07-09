@@ -8,7 +8,9 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.10.0] - 2026-07-09
+This release sets the NU6.3 mainnet activation height to 3428143.
+Mainnet activation will be set in the 0.10.0 final release.
 
 ### Added
 - `zcash_protocol::consensus::OrchardProtocolRevision`

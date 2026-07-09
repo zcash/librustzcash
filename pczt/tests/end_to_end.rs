@@ -39,7 +39,6 @@ use zcash_primitives::transaction::{
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
-    consensus::MainNetwork,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
 };
@@ -83,7 +82,7 @@ fn check_round_trip(pczt: &Pczt) {
 
 #[test]
 fn transparent_to_orchard() {
-    let params = MainNetwork;
+    let params = pre_nu6_3_test_network();
     let rng = OsRng;
 
     // Create a transparent account to send funds from.
@@ -269,7 +268,7 @@ fn transparent_to_orchard() {
 
 #[test]
 fn transparent_p2sh_multisig_to_orchard() {
-    let params = MainNetwork;
+    let params = pre_nu6_3_test_network();
     let rng = OsRng;
 
     // Construct a 2-of-3 ZIP 48 P2SH account.
@@ -517,7 +516,7 @@ fn sapling_to_orchard() {
 
     // Build the Orchard bundle we'll be using.
     let mut builder = Builder::new(
-        MainNetwork,
+        pre_nu6_3_test_network(),
         10_000_000.into(),
         BuildConfig::Standard {
             sapling_anchor: Some(anchor),
@@ -681,7 +680,7 @@ fn orchard_to_orchard() {
 
     // Build the Orchard bundle we'll be using.
     let mut builder = Builder::new(
-        MainNetwork,
+        pre_nu6_3_test_network(),
         10_000_000.into(),
         BuildConfig::Standard {
             sapling_anchor: None,
@@ -893,7 +892,7 @@ fn orchard_low_level_signer_uses_preverified_signing_parse() {
 
     // Build the Orchard bundle we'll be using.
     let mut builder = Builder::new(
-        MainNetwork,
+        pre_nu6_3_test_network(),
         10_000_000.into(),
         BuildConfig::Standard {
             sapling_anchor: None,
@@ -1050,7 +1049,7 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
     }
 
     let transparent_account_sk =
-        AccountPrivKey::from_seed(&MainNetwork, &[1; 32], zip32::AccountId::ZERO).unwrap();
+        AccountPrivKey::from_seed(&nu6_3_test_network(), &[1; 32], zip32::AccountId::ZERO).unwrap();
     let (transparent_addr, address_index) = transparent_account_sk
         .to_account_pubkey()
         .derive_external_ivk()
@@ -1367,7 +1366,7 @@ fn wallet_can_set_sapling_witness_after_signing() {
 
     // Build the Sapling transaction that a wallet will sign before proof creation.
     let mut builder = Builder::new(
-        MainNetwork,
+        pre_nu6_3_test_network(),
         10_000_000.into(),
         BuildConfig::Standard {
             sapling_anchor: Some(anchor),
@@ -1460,6 +1459,28 @@ fn wallet_can_set_sapling_witness_after_signing() {
         Err(SpendWitnessUpdateError::ProofAlreadyPresent)
     ));
     check_round_trip(&proved);
+}
+
+/// A regtest network on which NU6.2 is the most recent network upgrade, for exercising
+/// pre-Ironwood (V5 transaction) flows independently of the mainnet NU6.3 activation
+/// height.
+fn pre_nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
+    use zcash_protocol::consensus::BlockHeight;
+
+    zcash_protocol::local_consensus::LocalNetwork {
+        overwinter: Some(BlockHeight::from_u32(1)),
+        sapling: Some(BlockHeight::from_u32(2)),
+        blossom: Some(BlockHeight::from_u32(3)),
+        heartwood: Some(BlockHeight::from_u32(4)),
+        canopy: Some(BlockHeight::from_u32(5)),
+        nu5: Some(BlockHeight::from_u32(6)),
+        nu6: Some(BlockHeight::from_u32(7)),
+        nu6_1: Some(BlockHeight::from_u32(8)),
+        nu6_2: Some(BlockHeight::from_u32(9)),
+        nu6_3: None,
+        #[cfg(zcash_unstable = "nu7")]
+        nu7: None,
+    }
 }
 
 /// A regtest network with NU6.3 activated, for exercising the Ironwood pool.
@@ -1694,7 +1715,7 @@ fn wallet_can_set_orchard_witness_after_signing() {
 
     // Build the Orchard transaction that a wallet will sign before proof creation.
     let mut builder = Builder::new(
-        MainNetwork,
+        pre_nu6_3_test_network(),
         10_000_000.into(),
         BuildConfig::Standard {
             sapling_anchor: None,
