@@ -847,6 +847,8 @@ pub struct WalletSummary<AccountId: Eq + Hash> {
     next_sapling_subtree_index: u64,
     #[cfg(feature = "orchard")]
     next_orchard_subtree_index: u64,
+    #[cfg(feature = "orchard")]
+    next_ironwood_subtree_index: u64,
 }
 
 impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
@@ -858,6 +860,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         progress: Progress,
         next_sapling_subtree_index: u64,
         #[cfg(feature = "orchard")] next_orchard_subtree_index: u64,
+        #[cfg(feature = "orchard")] next_ironwood_subtree_index: u64,
     ) -> Self {
         Self {
             account_balances,
@@ -867,6 +870,8 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
             next_sapling_subtree_index,
             #[cfg(feature = "orchard")]
             next_orchard_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_ironwood_subtree_index,
         }
     }
 
@@ -916,6 +921,13 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     #[cfg(feature = "orchard")]
     pub fn next_orchard_subtree_index(&self) -> u64 {
         self.next_orchard_subtree_index
+    }
+
+    /// Returns the Ironwood subtree index that should start the next range of subtree
+    /// roots passed to [`WalletCommitmentTrees::put_ironwood_subtree_roots`].
+    #[cfg(feature = "orchard")]
+    pub fn next_ironwood_subtree_index(&self) -> u64 {
+        self.next_ironwood_subtree_index
     }
 
     /// Returns whether or not wallet scanning is complete.
