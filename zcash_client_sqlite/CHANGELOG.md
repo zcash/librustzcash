@@ -129,6 +129,10 @@ workspace.
   received at the address — moves to the deriving account, since successful derivation
   establishes that account's ownership of the address. Funds received at such an address
   become spendable once the account derives it.
+- Importing a standalone transparent pubkey whose receiver address is already recorded (for
+  example because it was derived as an account receiver) is now a no-op instead of failing on
+  the transparent-receiver uniqueness invariant added in this release. This is the
+  import-direction counterpart of the derivation-side fix above.
 
 ## [0.21.1] - 2026-06-19
 

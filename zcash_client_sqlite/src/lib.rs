@@ -1686,6 +1686,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), Self::Error> {
         wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
+            .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]

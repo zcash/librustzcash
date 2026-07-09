@@ -3273,6 +3273,147 @@ mod tests {
         tx.commit().unwrap();
     }
 
+    /// Importing a standalone (`Foreign`) receiver whose address is already present as a derived
+    /// account receiver inserts nothing (returns 0) rather than failing the transparent-receiver
+    /// uniqueness invariant. This is the import-direction counterpart of
+    /// `store_address_range_upgrades_imported_receiver`.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey_noop_when_address_derived() {
+        use proptest::prelude::*;
+        use rusqlite::named_params;
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+        use transparent::address::TransparentAddress;
+        use zcash_keys::{address::Address, encoding::AddressCodec};
+
+        proptest!(
+            ProptestConfig::with_cases(16),
+            |(
+                sk in any::<[u8; 32]>()
+                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()),
+                // Above the account's default external gap (10) so store_address_range actually
+                // inserts our receiver rather than skipping an already-derived index.
+                child_index in 16u32..0x8000_0000u32,
+            )| {
+                let st = TestBuilder::new()
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account_uuid = st.test_account().unwrap().id();
+                let network = *st.network();
+
+                // A real pubkey and the transparent receiver it hashes to.
+                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let taddr = TransparentAddress::from_pubkey(&pubkey);
+                let taddr_enc = taddr.encode(&network);
+                let child = NonHardenedChildIndex::from_index(child_index).unwrap();
+
+                let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+                let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+                // Derive the receiver into `addresses` (as the account-import path would), so a
+                // row with a NULL `imported_transparent_receiver_pubkey` already holds this
+                // receiver address.
+                super::store_address_range(
+                    &tx,
+                    &network,
+                    account_id,
+                    TransparentKeyScope::EXTERNAL,
+                    vec![(Address::from(taddr), taddr, child)],
+                )
+                .unwrap();
+
+                // Importing the same receiver as a standalone pubkey inserts nothing: the pubkey
+                // lookup does not match the derived (NULL-pubkey) row, but the address-existence
+                // check does.
+                let inserted = crate::wallet::import_standalone_transparent_pubkey(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    pubkey,
+                )
+                .unwrap();
+                prop_assert_eq!(inserted, 0);
+
+                // Exactly one row remains for the receiver.
+                let count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM addresses \
+                         WHERE cached_transparent_receiver_address = :taddr",
+                        named_params! { ":taddr": &taddr_enc },
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                prop_assert_eq!(count, 1);
+            }
+        );
+    }
+
+    /// Importing a standalone receiver that is not yet recorded inserts exactly one row (returns
+    /// 1); importing the same pubkey again is a no-op (returns 0). Together with
+    /// `import_standalone_transparent_pubkey_noop_when_address_derived` this covers both return
+    /// values.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey_returns_rows_inserted() {
+        use proptest::prelude::*;
+        use rusqlite::named_params;
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+        use transparent::address::TransparentAddress;
+        use zcash_keys::encoding::AddressCodec;
+
+        proptest!(
+            ProptestConfig::with_cases(16),
+            |(sk in any::<[u8; 32]>()
+                .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()))| {
+                let st = TestBuilder::new()
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account_uuid = st.test_account().unwrap().id();
+                let network = *st.network();
+
+                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let taddr_enc = TransparentAddress::from_pubkey(&pubkey).encode(&network);
+
+                let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+
+                // The receiver is not yet recorded: the first import inserts exactly one row.
+                let inserted = crate::wallet::import_standalone_transparent_pubkey(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    pubkey,
+                )
+                .unwrap();
+                prop_assert_eq!(inserted, 1);
+
+                // Re-importing the same pubkey inserts nothing.
+                let reinserted = crate::wallet::import_standalone_transparent_pubkey(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    pubkey,
+                )
+                .unwrap();
+                prop_assert_eq!(reinserted, 0);
+
+                // Exactly one row exists for the receiver.
+                let count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM addresses \
+                         WHERE cached_transparent_receiver_address = :taddr",
+                        named_params! { ":taddr": &taddr_enc },
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                prop_assert_eq!(count, 1);
+            }
+        );
+    }
+
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn test_import_standalone_transparent_pubkey() {
