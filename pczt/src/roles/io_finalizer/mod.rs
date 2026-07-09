@@ -31,8 +31,8 @@ impl IoFinalizer {
 
         let has_orchard_actions = !pczt.orchard.actions.is_empty();
         let has_ironwood_actions = !pczt.ironwood.actions.is_empty();
-        let has_shielded_spends =
-            !(pczt.sapling.spends.is_empty() && !has_orchard_actions && !has_ironwood_actions);
+        let has_sapling_spends = !pczt.sapling.spends.is_empty();
+        let has_shielded_spends = has_sapling_spends || has_orchard_actions || has_ironwood_actions;
         let has_shielded_outputs =
             !(pczt.sapling.outputs.is_empty() && !has_orchard_actions && !has_ironwood_actions);
 
@@ -43,6 +43,21 @@ impl IoFinalizer {
         }
         if pczt.transparent.outputs.is_empty() && !has_shielded_outputs {
             return Err(Error::NoOutputs);
+        }
+        if has_orchard_actions && pczt.orchard.anchor.is_none() {
+            return Err(Error::Extract(ExtractError::OrchardParse(
+                ::orchard::pczt::ParseError::InvalidAnchor,
+            )));
+        }
+        if has_sapling_spends && pczt.sapling.anchor.is_none() {
+            return Err(Error::Extract(ExtractError::SaplingParse(
+                ::sapling::pczt::ParseError::InvalidAnchor,
+            )));
+        }
+        if has_ironwood_actions && pczt.ironwood.anchor.is_none() {
+            return Err(Error::Extract(ExtractError::IronwoodParse(
+                ::orchard::pczt::ParseError::InvalidAnchor,
+            )));
         }
 
         let ParsedPczt {

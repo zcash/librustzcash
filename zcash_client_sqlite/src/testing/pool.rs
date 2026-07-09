@@ -448,7 +448,13 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
             foreign.final_orchard_tree().clone(),
             ironwood_initial_tree,
         ),
-        ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
+        ShieldedPool::Ironwood => ChainState::new(
+            capture_height,
+            captured.block_hash(),
+            captured.final_sapling_tree().clone(),
+            captured.final_orchard_tree().clone(),
+            foreign.final_ironwood_tree().clone(),
+        ),
     };
     #[cfg(not(feature = "orchard"))]
     let bad_chain_state = ChainState::new(
@@ -575,7 +581,13 @@ pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
             foreign.final_orchard_tree().clone(),
             ironwood_initial_tree,
         ),
-        ShieldedPool::Ironwood => todo!("Ironwood pool support is not yet implemented"),
+        ShieldedPool::Ironwood => ChainState::new(
+            from_height - 1,
+            captured.block_hash(),
+            captured.final_sapling_tree().clone(),
+            captured.final_orchard_tree().clone(),
+            foreign.final_ironwood_tree().clone(),
+        ),
     };
     #[cfg(not(feature = "orchard"))]
     let bad_from_state = ChainState::new(

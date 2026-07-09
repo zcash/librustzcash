@@ -203,6 +203,11 @@ impl Creator {
     }
 
     pub fn build(self) -> Pczt {
+        let optional_sapling_anchor =
+            |anchor| (anchor != crate::sapling::DEFAULT_ANCHOR).then_some(anchor);
+        let optional_orchard_anchor =
+            |anchor| (anchor != crate::orchard::DEFAULT_ANCHOR).then_some(anchor);
+
         Pczt {
             global: crate::common::Global {
                 tx_version: self.tx_version,
@@ -222,14 +227,14 @@ impl Creator {
                 spends: vec![],
                 outputs: vec![],
                 value_sum: 0,
-                anchor: self.sapling_anchor,
+                anchor: optional_sapling_anchor(self.sapling_anchor),
                 bsk: None,
             },
             orchard: OrchardBundle {
                 actions: vec![],
                 flags: self.orchard_flags,
                 value_sum: (0, false),
-                anchor: self.orchard_anchor,
+                anchor: optional_orchard_anchor(self.orchard_anchor),
                 // The note-plaintext version is determined by the Orchard bundle version.
                 #[cfg(feature = "orchard")]
                 note_version: self
@@ -243,7 +248,7 @@ impl Creator {
             },
             ironwood: OrchardBundle {
                 flags: self.ironwood_flags,
-                anchor: self.ironwood_anchor,
+                anchor: optional_orchard_anchor(self.ironwood_anchor),
                 ..crate::orchard::EMPTY_IRONWOOD
             },
         }
@@ -351,6 +356,6 @@ mod tests {
             .with_ironwood_anchor([1; 32])
             .unwrap()
             .build();
-        assert_eq!(pczt.ironwood.anchor, [1; 32]);
+        assert_eq!(pczt.ironwood.anchor, Some([1; 32]));
     }
 }

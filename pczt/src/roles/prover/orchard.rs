@@ -13,10 +13,17 @@ impl super::Prover {
             ironwood,
         } = self.pczt;
 
+        if !orchard.actions.is_empty() && orchard.anchor.is_none() {
+            return Err(OrchardError::Parser(
+                orchard::pczt::ParseError::InvalidAnchor,
+            ));
+        }
+
         let mut bundle = orchard
             .into_parsed_with_version(
                 crate::orchard::orchard_bundle_version(&global)
                     .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
+                global.tx_version,
             )
             .map_err(OrchardError::Parser)?;
 
@@ -43,6 +50,12 @@ impl super::Prover {
             orchard,
             ironwood,
         } = self.pczt;
+
+        if !ironwood.actions.is_empty() && ironwood.anchor.is_none() {
+            return Err(IronwoodError::Parser(
+                orchard::pczt::ParseError::InvalidAnchor,
+            ));
+        }
 
         let mut bundle = ironwood
             .into_ironwood_parsed()

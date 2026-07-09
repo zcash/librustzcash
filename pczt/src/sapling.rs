@@ -36,7 +36,7 @@ pub struct Bundle {
     ///
     /// Set by the Creator.
     #[getset(get = "pub")]
-    pub(crate) anchor: [u8; 32],
+    pub(crate) anchor: Option<[u8; 32]>,
 
     /// The Sapling binding signature signing key.
     ///
@@ -51,9 +51,13 @@ pub(crate) const EMPTY_BUNDLE: Bundle = Bundle {
     spends: Vec::new(),
     outputs: Vec::new(),
     value_sum: 0,
-    anchor: [0; 32],
+    anchor: None,
     bsk: None,
 };
+
+/// The default anchor used as a parse-time placeholder for redacted empty
+/// Sapling bundles.
+pub(crate) const DEFAULT_ANCHOR: [u8; 32] = [0; 32];
 
 /// Information about a Sapling spend within a transaction.
 #[serde_as]
@@ -359,7 +363,7 @@ impl Bundle {
             }
         }
 
-        if self.anchor != anchor {
+        if !merge_optional(&mut self.anchor, anchor) {
             return None;
         }
 
@@ -454,9 +458,81 @@ impl Bundle {
     }
 }
 
+/// Types for the v1 Sapling PCZT encoding.
+pub(crate) mod v1 {
+    use alloc::vec::Vec;
+
+    use serde::{Deserialize, Serialize};
+
+    /// PCZT fields that are specific to producing the transaction's Sapling
+    /// bundle.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub(crate) struct Bundle {
+        spends: Vec<super::Spend>,
+        outputs: Vec<super::Output>,
+        value_sum: i128,
+        anchor: [u8; 32],
+        bsk: Option<[u8; 32]>,
+    }
+
+    impl TryFrom<super::Bundle> for Bundle {
+        type Error = crate::EncodingError;
+
+        fn try_from(bundle: super::Bundle) -> Result<Self, Self::Error> {
+            let anchor = match bundle.anchor {
+                Some(anchor) => anchor,
+                None if bundle.spends.is_empty() => super::DEFAULT_ANCHOR,
+                None => return Err(crate::EncodingError::RequiresV2),
+            };
+
+            Ok(Self {
+                spends: bundle.spends,
+                outputs: bundle.outputs,
+                value_sum: bundle.value_sum,
+                anchor,
+                bsk: bundle.bsk,
+            })
+        }
+    }
+
+    impl From<Bundle> for super::Bundle {
+        fn from(bundle: Bundle) -> Self {
+            Self {
+                spends: bundle.spends,
+                outputs: bundle.outputs,
+                value_sum: bundle.value_sum,
+                anchor: Some(bundle.anchor),
+                bsk: bundle.bsk,
+            }
+        }
+    }
+}
+
+/// Types and operations for the v2 Sapling PCZT encoding.
+pub(crate) mod v2 {
+    /// Encodes a logical Sapling bundle for the v2 PCZT format, owning the
+    /// decision of whether the bundle can be omitted. A bundle that is exactly
+    /// equal to [`super::EMPTY_BUNDLE`] serializes to `None` and is dropped from
+    /// the encoding. An otherwise-empty bundle carrying
+    /// [`super::DEFAULT_ANCHOR`] is treated as empty for this purpose.
+    pub(crate) fn encode(bundle: super::Bundle) -> Option<super::Bundle> {
+        (!is_default_empty(&bundle)).then_some(bundle)
+    }
+
+    fn is_default_empty(bundle: &super::Bundle) -> bool {
+        let mut bundle = bundle.clone();
+        if bundle.anchor == Some(super::DEFAULT_ANCHOR) {
+            bundle.anchor = None;
+        }
+
+        bundle == super::EMPTY_BUNDLE
+    }
+}
+
 #[cfg(feature = "sapling")]
 impl Bundle {
     pub(crate) fn into_parsed(self) -> Result<sapling::pczt::Bundle, sapling::pczt::ParseError> {
+        let has_spends = !self.spends.is_empty();
         let spends = self
             .spends
             .into_iter()
@@ -521,7 +597,13 @@ impl Bundle {
             })
             .collect::<Result<_, _>>()?;
 
-        sapling::pczt::Bundle::parse(spends, outputs, self.value_sum, self.anchor, self.bsk)
+        let anchor = match self.anchor {
+            Some(anchor) => anchor,
+            None if !has_spends => DEFAULT_ANCHOR,
+            None => return Err(sapling::pczt::ParseError::InvalidAnchor),
+        };
+
+        sapling::pczt::Bundle::parse(spends, outputs, self.value_sum, anchor, self.bsk)
     }
 
     pub(crate) fn serialize_from(bundle: sapling::pczt::Bundle) -> Self {
@@ -605,7 +687,8 @@ impl Bundle {
             spends,
             outputs,
             value_sum: bundle.value_sum().to_raw(),
-            anchor: bundle.anchor().to_bytes(),
+            anchor: (bundle.anchor().to_bytes() != DEFAULT_ANCHOR)
+                .then_some(bundle.anchor().to_bytes()),
             bsk: bundle.bsk().map(|bsk| bsk.into()),
         }
     }

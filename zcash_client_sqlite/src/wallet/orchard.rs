@@ -2096,6 +2096,7 @@ pub(crate) mod tests {
                     sapling_anchor: None,
                     orchard_anchor: None,
                     ironwood_anchor: Some(anchor),
+                    orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
                 },
             );
             builder

@@ -846,6 +846,10 @@ criteria = "safe-to-deploy"
 version = "11.1.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.orchard]]
+version = "0.15.0-pre.2@git:475ef0ff77d45aebff93cb039d639250d82518a3"
+criteria = "safe-to-deploy"
+
 [[exemptions.ordered-float]]
 version = "2.10.1"
 criteria = "safe-to-deploy"
