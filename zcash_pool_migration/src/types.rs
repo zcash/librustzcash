@@ -32,7 +32,8 @@ impl TransferId {
         TransferId(format!("prep:{run_id}"))
     }
 
-    /// Wraps an already-formatted id string, e.g. one read back from the store.
+    /// Wraps an already-formatted id string, e.g. one read back from the store. No validation is
+    /// performed on `raw`.
     pub(crate) fn from_raw(raw: String) -> Self {
         TransferId(raw)
     }
@@ -477,7 +478,7 @@ mod tests {
 
     #[test]
     fn signed_transfer_pczt_round_trips_parts() {
-        let id = TransferId::for_prep("run-1");
+        let id = TransferId::for_transfer("run-1", 0);
         let bytes = vec![0x01, 0x02];
         let pczt = SignedTransferPczt::from_parts(id.clone(), bytes.clone());
         assert_eq!(pczt.id(), &id);

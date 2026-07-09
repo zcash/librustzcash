@@ -625,7 +625,9 @@ pub(crate) fn pending_row(
 /// The shared anchor is pinned for the duration of the loop (spec D5); each transfer is proposed
 /// against the cumulative set of notes reserved by prior transfers (so no two transfers spend the
 /// same note), realized as a version-6 PCZT with its own consensus expiry, proven, signed, and
-/// finalized. The pin is released only after the whole loop succeeds.
+/// finalized. The signing loop runs as a single inner step so the pin is released once it
+/// finishes, whether every transfer signed successfully or it failed partway through — a mid-loop
+/// failure must not leave the anchor pinned forever.
 ///
 /// # Errors
 ///
@@ -657,36 +659,43 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
         retain_anchor(db, anchor)?;
     }
 
-    let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
-    for t in schedule.transfers() {
-        let request = self_payment_request(db, network, account, t.amount())?;
-        let proposal = propose_migration_transfer(
-            db,
-            network,
-            account,
-            target,
-            u32::from(t.anchor_height()),
-            &reserved,
-            &locks,
-            request,
-        )?;
-        reserved.extend(proposal_note_refs(&proposal));
-        let pczt = create_transfer_pczt(
-            db,
-            network,
-            account,
-            &proposal,
-            u32::from(t.expiry_height()),
-        )?;
-        let signed = prove_sign_finalize(pczt, usk)?;
-        store::insert_pending_txs(conn, run_id, &[pending_row(t, &proposal, &signed)])?;
-    }
+    // Sign every transfer as one self-contained step so the anchor pin below is released on both
+    // the success and the error path.
+    let sign_all = |db: &mut Db<P>| -> Result<(), MigrationError> {
+        let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
+        for t in schedule.transfers() {
+            let request = self_payment_request(db, network, account, t.amount())?;
+            let proposal = propose_migration_transfer(
+                db,
+                network,
+                account,
+                target,
+                u32::from(t.anchor_height()),
+                &reserved,
+                &locks,
+                request,
+            )?;
+            reserved.extend(proposal_note_refs(&proposal));
+            let pczt = create_transfer_pczt(
+                db,
+                network,
+                account,
+                &proposal,
+                u32::from(t.expiry_height()),
+            )?;
+            let signed = prove_sign_finalize(pczt, usk)?;
+            store::insert_pending_txs(conn, run_id, &[pending_row(t, &proposal, &signed)])?;
+        }
+        Ok(())
+    };
+    let result = sign_all(db);
 
-    // Release the pin only after a fully successful loop.
+    // Release the pin unconditionally: on success this is unchanged from before; on a mid-loop
+    // failure the pin no longer leaks past this call.
     if let Some(anchor) = pinned_anchor {
         release_retained_anchors(db, anchor + 1)?;
     }
-    Ok(())
+    result
 }
 
 /// Build, sign (as a PCZT), and persist the note-split (denomination prep) transaction: spend the

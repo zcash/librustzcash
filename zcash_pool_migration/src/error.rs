@@ -14,6 +14,9 @@ use zcash_client_sqlite::error::SqliteClientError;
 /// This is the payload of [`MigrationError::InvalidState`]; it exists as its own type so that
 /// callers who only care about the "wrong state" case can match on it without also handling the
 /// database/backend/pipeline error variants.
+///
+/// Marked `#[non_exhaustive]` for the same reason as [`MigrationError`]: new variants can be
+/// added later without a semver-breaking change for downstream `match` expressions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidStateError {
@@ -132,12 +135,14 @@ impl std::error::Error for MigrationError {
     }
 }
 
+/// A SQLite error from the engine's own `ext_ironwood_migration_*` tables.
 impl From<rusqlite::Error> for MigrationError {
     fn from(e: rusqlite::Error) -> Self {
         MigrationError::Db(e)
     }
 }
 
+/// An error from the `zcash_client_sqlite` wallet backend (balance/anchor/data access).
 impl From<SqliteClientError> for MigrationError {
     fn from(e: SqliteClientError) -> Self {
         MigrationError::Backend(e)

@@ -25,7 +25,6 @@ use rand::rngs::OsRng;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-use zcash_client_backend::data_api::Account as _;
 use zcash_client_backend::data_api::chain::BlockSource;
 use zcash_client_backend::data_api::chain::error::Error as ChainError;
 use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
@@ -33,6 +32,8 @@ use zcash_client_backend::data_api::testing::pool::dsl::{TestDsl, TestScenario};
 use zcash_client_backend::data_api::testing::{
     CacheInsertionResult, DataStoreFactory, TestBuilder, TestCache,
 };
+use zcash_client_backend::data_api::wallet::ConfirmationsPolicy;
+use zcash_client_backend::data_api::{Account as _, WalletRead as _};
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_client_sqlite::error::SqliteClientError;
 use zcash_client_sqlite::util::SystemClock;
@@ -41,6 +42,7 @@ use zcash_client_sqlite::wallet::init::WalletMigrator;
 use zcash_client_sqlite::{AccountUuid, WalletDb};
 use zcash_keys::keys::transparent::gap_limits::GapLimits;
 use zcash_primitives::block::BlockHash;
+use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
 use zcash_primitives::transaction::{Transaction, TxVersion};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::{BlockHeight, BranchId};
@@ -264,7 +266,10 @@ fn transfer_pipeline_produces_a_v6_ironwood_crossing_tx() {
 
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
 
-    let start = std::time::Instant::now();
+    // §10.2 evidence: `sign_and_store_migration_schedule` below performs this crate's first real
+    // Ironwood proof (spec risk item 2 — confirming the Orchard-bundle vs Ironwood-bundle
+    // proving-key/circuit-version pairing against upstream orchard 0.15 at the first proving
+    // test).
     let schedule = ctx.propose_migration_transfers().unwrap();
     assert_eq!(
         schedule.transfers().len(),
@@ -286,8 +291,6 @@ fn transfer_pipeline_produces_a_v6_ironwood_crossing_tx() {
 
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
-    let elapsed = start.elapsed();
-    eprintln!("IRONWOOD-PROOF transfer sign+prove took {elapsed:?}");
 
     let due = ctx.next_due_transfer().unwrap().expect("a transfer is due");
     let raw_tx = ctx.extract_broadcast_tx(due.pczt_bytes()).unwrap();
@@ -355,6 +358,17 @@ fn note_split_plans_and_signs_against_a_seeded_wallet() {
     let seed_value = 1_200_070_000u64;
     let (_dir, st, db_path, account) = seed_wallet(&[seed_value], 10);
     let usk = st.get_account().usk().clone();
+    // Captured before the split is built: `build_split_pczt` (via `Builder::new`) computes this
+    // same target height internally, and — absent an explicit override, which the split never
+    // supplies — the builder's default `DEFAULT_TX_EXPIRY_DELTA` sets the split transaction's
+    // expiry to `target + 40`.
+    let target_height = u32::from(
+        st.wallet()
+            .get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted())
+            .unwrap()
+            .unwrap()
+            .0,
+    );
     drop(st);
 
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
@@ -390,6 +404,11 @@ fn note_split_plans_and_signs_against_a_seeded_wallet() {
     assert!(
         tx.ironwood_bundle().is_none_or(|b| b.actions().is_empty()),
         "a note split never crosses into Ironwood"
+    );
+    assert_eq!(
+        u32::from(tx.expiry_height()),
+        target_height + DEFAULT_TX_EXPIRY_DELTA,
+        "the split never overrides the builder's default expiry (target + 40)"
     );
 
     // The run is persisted in the split phase, and a recorded broadcast advances it.
@@ -497,13 +516,16 @@ fn next_due_transfer_is_height_gated() {
         "the second transfer is gated one cadence (288 blocks) into the future"
     );
 
-    // Advance the chain tip past the second transfer's send window.
+    // The due-height check is inclusive (`next_executable_after_height <= target`), so mining
+    // exactly 288 blocks would already land the re-read target precisely on the second transfer's
+    // threshold. Mine one extra block (289) so the assertion below does not depend on hitting that
+    // exact boundary.
     st.add_empty_blocks(289);
 
     let second = ctx
         .next_due_transfer()
         .unwrap()
-        .expect("second transfer due after advancing 288 blocks");
+        .expect("second transfer due after advancing past its 288-block cadence");
     assert_ne!(
         first.txid(),
         second.txid(),
