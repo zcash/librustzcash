@@ -71,6 +71,7 @@ use zcash_protocol::consensus::BranchId;
 use zcash_protocol::consensus::{
     self, BlockHeight, NetworkConstants as _, NetworkType, NetworkUpgrade, Parameters,
 };
+use zcash_protocol::{PoolType, ShieldedPool};
 use zip32::fingerprint::SeedFingerprint;
 
 use ::transparent::address::TransparentAddress;
@@ -148,27 +149,6 @@ impl SecretSink for DiscardSecrets {
 
     fn store_unified_key(&mut self, _entry: &::zewif::UnifiedKeyEntry) -> Result<(), Self::Error> {
         Ok(())
-    }
-}
-
-/// The shielded pool to which an invalid tree frontier belongs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FrontierPool {
-    /// The Sapling note commitment tree.
-    Sapling,
-    /// The Orchard note commitment tree.
-    Orchard,
-    /// The Ironwood note commitment tree.
-    Ironwood,
-}
-
-impl fmt::Display for FrontierPool {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FrontierPool::Sapling => write!(f, "Sapling"),
-            FrontierPool::Orchard => write!(f, "Orchard"),
-            FrontierPool::Ironwood => write!(f, "Ironwood"),
-        }
     }
 }
 
@@ -252,7 +232,7 @@ pub enum ZewifImportError<S> {
         /// The name of the account whose birthday contains the invalid node.
         account_name: String,
         /// The pool whose frontier contains the invalid node.
-        pool: FrontierPool,
+        pool: ShieldedPool,
     },
     /// A note commitment tree frontier in an account birthday is structurally
     /// invalid.
@@ -260,7 +240,7 @@ pub enum ZewifImportError<S> {
         /// The name of the account whose birthday contains the invalid frontier.
         account_name: String,
         /// The pool whose frontier is invalid.
-        pool: FrontierPool,
+        pool: ShieldedPool,
         /// The underlying structural error.
         source: incrementalmerkletree::frontier::FrontierError,
     },
@@ -367,18 +347,24 @@ impl<S: fmt::Display> fmt::Display for ZewifImportError<S> {
                 f,
                 "Account \"{account_name}\" records legacy address index {index}, which is outside the valid range."
             ),
-            ZewifImportError::InvalidMerkleNode { account_name, pool } => write!(
-                f,
-                "The {pool} tree frontier in the birthday of account \"{account_name}\" contains an invalid node hash."
-            ),
+            ZewifImportError::InvalidMerkleNode { account_name, pool } => {
+                let pool = PoolType::Shielded(*pool);
+                write!(
+                    f,
+                    "The {pool} tree frontier in the birthday of account \"{account_name}\" contains an invalid node hash."
+                )
+            }
             ZewifImportError::InvalidFrontier {
                 account_name,
                 pool,
                 source,
-            } => write!(
-                f,
-                "The {pool} tree frontier in the birthday of account \"{account_name}\" is invalid: {source:?}"
-            ),
+            } => {
+                let pool = PoolType::Shielded(*pool);
+                write!(
+                    f,
+                    "The {pool} tree frontier in the birthday of account \"{account_name}\" is invalid: {source:?}"
+                )
+            }
             ZewifImportError::InvalidTransparentPubKey { source } => write!(
                 f,
                 "A transparent public key in the secret store is not a valid secp256k1 point: {source}"
@@ -647,7 +633,7 @@ fn mnemonic_to_seed(m: &::zewif::Bip39Mnemonic) -> Result<Vec<u8>, bip0039::Erro
 /// the given node type.
 fn convert_frontier<H, S, const DEPTH: u8>(
     account_name: &str,
-    pool: FrontierPool,
+    pool: ShieldedPool,
     frontier: Option<&::zewif::Frontier>,
     read_node: impl Fn(&::zewif::MerkleNode) -> Option<H>,
 ) -> Result<incrementalmerkletree::frontier::Frontier<H, DEPTH>, ZewifImportError<S>>
@@ -695,7 +681,7 @@ fn account_birthday<P: Parameters, S>(
     if let Some(cs) = account.birthday_chain_state() {
         let sapling = convert_frontier(
             account.name(),
-            FrontierPool::Sapling,
+            ShieldedPool::Sapling,
             cs.sapling_tree(),
             |n| {
                 let repr = *n.as_bytes();
@@ -704,13 +690,13 @@ fn account_birthday<P: Parameters, S>(
         )?;
         let orchard = convert_frontier(
             account.name(),
-            FrontierPool::Orchard,
+            ShieldedPool::Orchard,
             cs.orchard_tree(),
             |n| Option::from(orchard::tree::MerkleHashOrchard::from_bytes(n.as_bytes())),
         )?;
         let ironwood = convert_frontier(
             account.name(),
-            FrontierPool::Ironwood,
+            ShieldedPool::Ironwood,
             cs.ironwood_tree(),
             |n| Option::from(orchard::tree::MerkleHashOrchard::from_bytes(n.as_bytes())),
         )?;
