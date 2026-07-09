@@ -8,6 +8,11 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [Unreleased]
+
+### Changed
+- Migrated to `zcash_primitives 0.29.0`.
+
 ## [0.29.0-pre.0] - 2026-06-30
 
 ### Changed

@@ -8,7 +8,7 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [Unreleased]
+## [0.29.0] - 2026-07-09
 
 ### Added
 - `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
