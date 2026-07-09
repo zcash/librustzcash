@@ -974,9 +974,10 @@ impl Transaction {
         }
 
         if self.version.has_sapling()
-            && let Some(bundle) = self.sapling_bundle.as_ref() {
-                writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
-            }
+            && let Some(bundle) = self.sapling_bundle.as_ref()
+        {
+            writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
+        }
 
         Ok(())
     }

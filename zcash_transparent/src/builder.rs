@@ -827,13 +827,13 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
                     .secp_ctx
                     .verify_ecdsa(&sighash_msg, signature, pubkey)
                     .is_ok()
-                {
-                    if matched_input_idx.is_some() {
-                        // This signature was already valid for a different input.
-                        return Err(Error::DuplicateSignature);
-                    }
-                    matched_input_idx = Some((input_idx, pubkey));
+            {
+                if matched_input_idx.is_some() {
+                    // This signature was already valid for a different input.
+                    return Err(Error::DuplicateSignature);
                 }
+                matched_input_idx = Some((input_idx, pubkey));
+            }
         }
 
         if let Some((final_input_idx, pubkey)) = matched_input_idx {

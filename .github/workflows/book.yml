@@ -23,8 +23,10 @@ jobs:
         uses: ./.github/actions/prepare
         with:
           all-features: true
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         id: toolchain
+        with:
+          toolchain: nightly
       - run: rustup override set "${TOOLCHAIN}"
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}

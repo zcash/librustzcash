@@ -111,9 +111,9 @@ pub fn find_account_for_address<W: WalletRead, P: consensus::Parameters>(
                     .as_understood_receivers()
                     .iter()
                     .any(|r| r.corresponds(&zcash_address))
-                {
-                    return Ok(Some(acc_id));
-                }
+            {
+                return Ok(Some(acc_id));
+            }
         }
     }
     Ok(None)

@@ -60,40 +60,40 @@ fn init_accounts<P: consensus::Parameters>(
             && let Some(tfvk) = UnifiedFullViewingKey::decode(params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData)?
                 .transparent()
-            {
-                let ephemeral_ivk = tfvk.derive_ephemeral_ivk().map_err(|_| {
-                    SqliteClientError::CorruptedData(
-                        "Unexpected failure to derive ephemeral transparent IVK".to_owned(),
-                    )
-                })?;
+        {
+            let ephemeral_ivk = tfvk.derive_ephemeral_ivk().map_err(|_| {
+                SqliteClientError::CorruptedData(
+                    "Unexpected failure to derive ephemeral transparent IVK".to_owned(),
+                )
+            })?;
 
-                let mut ea_insert = transaction.prepare(
-                    "INSERT INTO ephemeral_addresses (account_id, address_index, address)
+            let mut ea_insert = transaction.prepare(
+                "INSERT INTO ephemeral_addresses (account_id, address_index, address)
                      VALUES (:account_id, :address_index, :address)",
-                )?;
+            )?;
 
-                // NB: we have reduced the initial space of generated ephemeral addresses
-                // from 20 addresses to 5, as ephemeral addresses should always be used in
-                // a transaction immediately after being reserved, and as a consequence
-                // there is no significant benefit in having a larger gap limit.
-                for i in 0..ephemeral_gap_limit {
-                    let address = ephemeral_ivk
-                        .derive_ephemeral_address(
-                            NonHardenedChildIndex::from_index(i).expect("index is valid"),
+            // NB: we have reduced the initial space of generated ephemeral addresses
+            // from 20 addresses to 5, as ephemeral addresses should always be used in
+            // a transaction immediately after being reserved, and as a consequence
+            // there is no significant benefit in having a larger gap limit.
+            for i in 0..ephemeral_gap_limit {
+                let address = ephemeral_ivk
+                    .derive_ephemeral_address(
+                        NonHardenedChildIndex::from_index(i).expect("index is valid"),
+                    )
+                    .map_err(|_| {
+                        AddressGenerationError::InvalidTransparentChildIndex(
+                            DiversifierIndex::from(i),
                         )
-                        .map_err(|_| {
-                            AddressGenerationError::InvalidTransparentChildIndex(
-                                DiversifierIndex::from(i),
-                            )
-                        })?;
-
-                    ea_insert.execute(named_params! {
-                        ":account_id": account_id.0,
-                        ":address_index": i,
-                        ":address": address.encode(params)
                     })?;
-                }
+
+                ea_insert.execute(named_params! {
+                    ":account_id": account_id.0,
+                    ":address_index": i,
+                    ":address": address.encode(params)
+                })?;
             }
+        }
     }
 
     Ok(())
