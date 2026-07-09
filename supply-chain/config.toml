@@ -280,7 +280,7 @@ version = "0.9.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.convert_case]]
-version = "0.7.1"
+version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.cookie-factory]]
@@ -416,11 +416,11 @@ version = "0.11.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.derive_more]]
-version = "2.0.1"
+version = "2.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.derive_more-impl]]
-version = "2.0.1"
+version = "2.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.diff]]
@@ -509,14 +509,6 @@ criteria = "safe-to-run"
 
 [[exemptions.event-listener]]
 version = "5.3.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.fallible-iterator]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fallible-streaming-iterator]]
-version = "0.1.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.ff]]
@@ -811,6 +803,10 @@ criteria = "safe-to-deploy"
 version = "0.4.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.num-bigint]]
+version = "0.4.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.num-bigint-dig]]
 version = "0.8.4"
 criteria = "safe-to-deploy"
@@ -987,6 +983,10 @@ criteria = "safe-to-deploy"
 version = "1.2.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.proc-macro-crate]]
+version = "3.3.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.proc-macro2]]
 version = "1.0.103"
 criteria = "safe-to-deploy"
@@ -1022,6 +1022,10 @@ criteria = "safe-to-deploy"
 [[exemptions.quick-xml]]
 version = "0.26.0"
 criteria = "safe-to-run"
+
+[[exemptions.quote]]
+version = "1.0.46"
+criteria = "safe-to-deploy"
 
 [[exemptions.r-efi]]
 version = "5.3.0"
@@ -1296,7 +1300,7 @@ version = "1.0.109"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
-version = "2.0.100"
+version = "2.0.118"
 criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
@@ -1365,6 +1369,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.toml_edit]]
 version = "0.22.22"
+criteria = "safe-to-deploy"
+
+[[exemptions.toml_edit]]
+version = "0.23.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml_parser]]
