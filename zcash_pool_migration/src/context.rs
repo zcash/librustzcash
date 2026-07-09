@@ -489,9 +489,16 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// PCZT for the platform to extract and broadcast. The split is a wallet-internal
     /// multi-output send to the account's own address.
     ///
+    /// The transaction is built and signed *before* any engine rows are written, then the run, its
+    /// prep transaction, and its locked prepared notes are persisted in a single database
+    /// transaction. A signing failure therefore leaves the store untouched, rather than stranding a
+    /// phantom run in the non-terminal `PreparingDenominations` phase — which `active_run` would
+    /// keep returning, blocking every future migration for the account.
+    ///
     /// # Errors
     ///
-    /// Returns [`MigrationError::Db`] if the new run cannot be recorded, and
+    /// Returns [`MigrationError::InvalidState`] (carrying [`InvalidStateError::NotApplicable`]) if
+    /// `proposal` has no outputs, [`MigrationError::Db`] if the run cannot be recorded, and
     /// [`MigrationError::NotSynced`]/[`MigrationError::Backend`]/[`MigrationError::Pipeline`] if
     /// the split transaction cannot be built, proven, or signed.
     pub fn sign_note_split(
@@ -499,6 +506,15 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         proposal: &NoteSplitProposal,
         usk: &UnifiedSpendingKey,
     ) -> Result<PreparedTransfer, MigrationError> {
+        // Reject an output-less proposal up front — before any run is created or the wallet is
+        // opened — mirroring the empty-schedule guard in `sign_and_store_migration_schedule`.
+        // Signing a split with nothing to fan into would produce a degenerate transaction and, but
+        // for this guard, could strand a non-terminal run.
+        if proposal.output_values().is_empty() {
+            return Err(MigrationError::InvalidState(
+                InvalidStateError::NotApplicable("note split proposal has no outputs"),
+            ));
+        }
         let conn = self.store_conn()?;
         let run_id = new_run_id();
         let target_values: Vec<u64> = proposal
@@ -506,8 +522,35 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             .iter()
             .map(|&v| u64::from(v))
             .collect();
-        store::insert_run(
+        // Sign FIRST: build, prove, and sign the split without touching the engine's tables.
+        let mut db = self.open_wallet()?;
+        let (signed, placed_outputs) = backend::sign_split(
+            &mut db,
+            &self.network,
+            self.account,
             &conn,
+            &run_id,
+            proposal,
+            usk,
+        )?;
+        let txid_hex = signed.txid.to_string();
+        let prepared: Vec<store::PreparedNote> = placed_outputs
+            .iter()
+            .map(|&(action_index, value_zatoshi)| store::PreparedNote {
+                txid_hex: txid_hex.clone(),
+                output_index: action_index,
+                value_zatoshi,
+                note_version: 2,
+                nullifier_hex: None,
+                lock_state: "locked".to_string(),
+            })
+            .collect();
+        // Persist AFTER, atomically: the run, its prep transaction, and its locked prepared notes
+        // appear together in the `PreparingDenominations` phase, or nothing does. Mirrors the
+        // external-signer `store_signed_note_split_pczt` storage shape.
+        let tx = conn.unchecked_transaction()?;
+        store::insert_run(
+            &tx,
             &store::NewRun {
                 run_id: &run_id,
                 account_uuid: &self.account_str(),
@@ -518,16 +561,9 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 target_values: &target_values,
             },
         )?;
-        let mut db = self.open_wallet()?;
-        let signed = backend::sign_split(
-            &mut db,
-            &self.network,
-            self.account,
-            &conn,
-            &run_id,
-            proposal,
-            usk,
-        )?;
+        store::insert_prep_tx(&tx, &run_id, &txid_hex, &signed.pczt_bytes, "pending")?;
+        store::insert_prepared_notes(&tx, &run_id, &prepared)?;
+        tx.commit()?;
         Ok(PreparedTransfer::from_parts(
             TransferId::for_prep(&run_id),
             signed.txid,
@@ -1117,7 +1153,19 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         }
         match result {
             TransferResult::Success(txid) => {
-                store::mark_pending_status(&conn, &txid.to_string().to_lowercase(), "broadcasted")?;
+                // A success must key an actual pending row; if it updates none, the platform
+                // reported a txid the engine never scheduled. Surface it rather than silently
+                // succeeding (which would drop the broadcast on the floor).
+                let updated = store::mark_pending_status(
+                    &conn,
+                    &txid.to_string().to_lowercase(),
+                    "broadcasted",
+                )?;
+                if updated == 0 {
+                    return Err(MigrationError::Pipeline(format!(
+                        "transfer result references unknown txid {txid}"
+                    )));
+                }
             }
             TransferResult::NetworkError { .. } => { /* leave scheduled for retry */ }
             TransferResult::InvalidNote => {
@@ -1326,6 +1374,61 @@ mod tests {
     fn has_invalid_transfers_is_false_when_ready_to_migrate() {
         let (_file, ctx) = ctx_with_run_at(Phase::ReadyToMigrate);
         assert!(!ctx.has_invalid_transfers().unwrap());
+    }
+
+    /// A throwaway spending key for tests that reject their input before ever using the key. Only
+    /// its existence is needed; it is never used to sign.
+    fn test_usk() -> UnifiedSpendingKey {
+        UnifiedSpendingKey::from_seed(&Network::MainNetwork, &[0u8; 32], zip32::AccountId::ZERO)
+            .expect("USK derives from the fixed test seed")
+    }
+
+    // An output-less note-split proposal is rejected up front, before any run is created or the
+    // wallet (which the fixture's path is not) is opened — so this runs without a real wallet.
+    #[test]
+    fn sign_note_split_rejects_a_proposal_with_no_outputs() {
+        let (_file, ctx) = ctx();
+        let empty = NoteSplitProposal::from_parts(vec![], Zatoshis::const_from_u64(10_000));
+        assert_not_applicable(ctx.sign_note_split(&empty, &test_usk()).unwrap_err());
+        // The guard returns before touching the store: no phantom run is left behind.
+        let conn = ctx.store_conn().unwrap();
+        assert_eq!(count(&conn, "ext_ironwood_migration_runs"), 0);
+    }
+
+    /// A scheduled `PendingTxRow` with an arbitrary txid, for seeding the pending-transfer table.
+    fn scheduled_pending(txid_hex: &str) -> store::PendingTxRow {
+        store::PendingTxRow {
+            txid_hex: txid_hex.to_string(),
+            raw_pczt: vec![1, 2, 3],
+            anchor_height: 100,
+            target_height: 1000,
+            next_executable_after_height: 1000,
+            expiry_height: 1288,
+            value_zatoshi: 100,
+            fee_zatoshi: 10,
+            selected_note_txid: "note".to_string(),
+            selected_note_output_index: 0,
+            selected_note_value: 110,
+            status: "scheduled".to_string(),
+            metadata_json: "{}".to_string(),
+        }
+    }
+
+    // Regression: a `Success` result whose txid matches no scheduled pending row means the platform
+    // broadcast a transaction the engine never handed out. Surface it as a pipeline error instead of
+    // silently succeeding and dropping the outcome on the floor.
+    #[test]
+    fn record_transfer_result_errors_on_success_for_unknown_txid() {
+        let (_file, ctx) = ctx_with_run_at(Phase::BroadcastScheduled);
+        let conn = ctx.store_conn().unwrap();
+        store::insert_pending_txs(&conn, "run-phase-test", &[scheduled_pending("seeded-txid")])
+            .unwrap();
+        let unknown = TxId::from_bytes([9u8; 32]);
+        let id = TransferId::from_raw("run-phase-test:0".to_string());
+        let err = ctx
+            .record_transfer_result(&id, TransferResult::Success(unknown))
+            .unwrap_err();
+        assert!(matches!(err, MigrationError::Pipeline(_)), "got {err:?}");
     }
 
     // ===== external-signer (hardware wallet) path =====

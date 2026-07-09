@@ -619,15 +619,25 @@ pub(crate) fn pending_row(
     }
 }
 
-/// Build a signed PCZT for every scheduled transfer at the schedule's shared bucketed anchor and
-/// persist each as a pending transaction.
+/// Build a signed PCZT for every scheduled transfer at the schedule's shared anchor and persist
+/// each as a pending transaction.
 ///
-/// The shared anchor is pinned for the duration of the loop (spec D5); each transfer is proposed
-/// against the cumulative set of notes reserved by prior transfers (so no two transfers spend the
-/// same note), realized as a version-6 PCZT with its own consensus expiry, proven, signed, and
-/// finalized. The signing loop runs as a single inner step so the pin is released once it
-/// finishes, whether every transfer signed successfully or it failed partway through — a mid-loop
-/// failure must not leave the anchor pinned forever.
+/// `schedule` must come from one of this crate's `propose_*` methods: the pinned anchor is taken
+/// from the schedule's shared anchor height (identical across every transfer, the wallet's natural
+/// witnessable anchor), and pinning against a height the wallet never checkpointed would be a
+/// no-op. That anchor's checkpoint is pinned for the duration of the loop (spec D5); each transfer
+/// is proposed against the cumulative set of notes reserved by prior transfers (so no two
+/// transfers spend the same note), realized as a version-6 PCZT with its own consensus expiry,
+/// proven, signed, and finalized.
+///
+/// Failure containment: the loop inserts each signed transfer's pending row as it goes, so a
+/// mid-loop failure can leave a *partial* schedule persisted. Because `next_due_transfer` has no
+/// phase gate, those orphan rows would be handed out for broadcast; on any per-transfer failure
+/// this therefore best-effort clears the run's still-`scheduled` rows before returning, and the
+/// original error is always the one propagated. The anchor pin is likewise released on **both**
+/// the success and the error path, and a release failure never masks the signing outcome (witnesses
+/// are already baked into each signed PCZT, so a failed release is non-fatal). The release itself
+/// is a bulk operation — see [`release_retained_anchors`].
 ///
 /// # Errors
 ///
@@ -644,8 +654,8 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
     usk: &UnifiedSpendingKey,
 ) -> Result<(), MigrationError> {
     let account_str = account.expose_uuid().to_string();
-    // The natural target is shared by every transfer; each transfer's anchor is its own bucketed
-    // anchor (identical across a schedule, per `TransferProposal::anchor_height`).
+    // The natural target and the schedule's shared anchor (identical across a schedule, per
+    // `TransferProposal::anchor_height`) drive every transfer's proposal.
     let (target, _natural_anchor) = target_and_anchor(db)?;
     // Exclude the run's OWN prepared notes from the lock set — the transfers exist to spend them.
     let locks = store::locked_note_refs(conn, &account_str, Some(run_id))?;
@@ -659,7 +669,7 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
         retain_anchor(db, anchor)?;
     }
 
-    // Sign every transfer as one self-contained step so the anchor pin below is released on both
+    // Sign every transfer as one self-contained step so the containment/release below runs on both
     // the success and the error path.
     let sign_all = |db: &mut Db<P>| -> Result<(), MigrationError> {
         let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
@@ -690,24 +700,35 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
     };
     let result = sign_all(db);
 
-    // Release the pin unconditionally: on success this is unchanged from before; on a mid-loop
-    // failure the pin no longer leaks past this call.
+    // On failure, drop any pending rows the loop managed to insert before it broke: a partial
+    // schedule must not persist, since `next_due_transfer` would otherwise hand those orphan rows
+    // out for broadcast. Best-effort — the signing error is what we report.
+    if result.is_err() {
+        let _ = store::clear_scheduled_pending(conn, run_id);
+    }
+
+    // Release the pin on both paths, and never let a release failure mask the signing outcome.
     if let Some(anchor) = pinned_anchor {
-        release_retained_anchors(db, anchor + 1)?;
+        let _ = release_retained_anchors(db, anchor + 1);
     }
     result
 }
 
-/// Build, sign (as a PCZT), and persist the note-split (denomination prep) transaction: spend the
-/// wallet's version-2 notes and fan the value into one same-address change output per planned
-/// denomination. Stored notes carry the residual-adjusted values at their real (shuffled) action
-/// indices, so the `(txid, output_index)` refs match what the scanner records.
+/// Build and sign (as a PCZT) the note-split (denomination prep) transaction: spend the wallet's
+/// version-2 notes and fan the value into one same-address change output per planned denomination.
+/// Returns the signed PCZT outcome together with each planned change output's residual-adjusted
+/// `(action_index, value)` at its real (post-shuffle) action position, so the caller can persist
+/// prepared-note refs whose `(txid, output_index)` match what the scanner records.
+///
+/// This performs **no** persistence: the caller records the run, prep transaction, and prepared
+/// notes atomically only after signing has succeeded (mirroring the external-signer
+/// `store_signed_note_split_pczt` storage shape), so a signing failure cannot strand a phantom
+/// non-terminal run in the store.
 ///
 /// # Errors
 ///
 /// Returns [`MigrationError::NotSynced`] if the wallet has no scanned block data yet, and
-/// [`MigrationError::Pipeline`]/[`MigrationError::Backend`] if the split cannot be built, signed, or
-/// persisted.
+/// [`MigrationError::Pipeline`]/[`MigrationError::Backend`] if the split cannot be built or signed.
 pub(crate) fn sign_split<P: Parameters + Clone>(
     db: &mut Db<P>,
     network: &P,
@@ -716,7 +737,7 @@ pub(crate) fn sign_split<P: Parameters + Clone>(
     run_id: &str,
     proposal: &NoteSplitProposal,
     usk: &UnifiedSpendingKey,
-) -> Result<SignedPcztOutcome, MigrationError> {
+) -> Result<(SignedPcztOutcome, Vec<(u32, u64)>), MigrationError> {
     let account_str = account.expose_uuid().to_string();
     // Exclude this run's own (not-yet-existing) notes for symmetry; other live runs' stay locked.
     let locks = store::locked_note_refs(conn, &account_str, Some(run_id))?;
@@ -729,26 +750,7 @@ pub(crate) fn sign_split<P: Parameters + Clone>(
     let (pczt, placed_outputs) =
         crate::split::build_split_pczt(db, network, account, &orchard_fvk, &locks, &outputs)?;
     let signed = prove_sign_finalize(pczt, usk)?;
-    store::insert_prep_tx(
-        conn,
-        run_id,
-        &signed.txid.to_string(),
-        &signed.pczt_bytes,
-        "pending",
-    )?;
-    let prepared: Vec<store::PreparedNote> = placed_outputs
-        .iter()
-        .map(|&(action_index, value_zatoshi)| store::PreparedNote {
-            txid_hex: signed.txid.to_string(),
-            output_index: action_index,
-            value_zatoshi,
-            note_version: 2,
-            nullifier_hex: None,
-            lock_state: "locked".to_string(),
-        })
-        .collect();
-    store::insert_prepared_notes(conn, run_id, &prepared)?;
-    Ok(signed)
+    Ok((signed, placed_outputs))
 }
 
 #[cfg(test)]

@@ -452,16 +452,18 @@ pub(crate) fn broadcasted_txids(conn: &Connection, run_id: &str) -> rusqlite::Re
     rows.collect()
 }
 
+/// Set the status of the pending transfer keyed by `txid_hex`, returning the number of rows the
+/// update affected (`0` when no pending transfer has that txid). Callers that report a broadcast
+/// outcome use the count to detect a result referencing an unknown transaction.
 pub(crate) fn mark_pending_status(
     conn: &Connection,
     txid_hex: &str,
     status: &str,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<usize> {
     conn.execute(
         "UPDATE ext_ironwood_migration_pending_txs SET status = ?2 WHERE txid_hex = ?1",
         params![txid_hex, status],
-    )?;
-    Ok(())
+    )
 }
 
 pub(crate) fn pending_totals(conn: &Connection, run_id: &str) -> rusqlite::Result<PendingTotals> {
@@ -855,11 +857,24 @@ mod tests {
         let (_dir, conn) = test_conn();
         sample_run(&conn, "r1", Phase::BroadcastScheduled);
         insert_pending_txs(&conn, "r1", &[pending("t1", 1500, "scheduled")]).unwrap();
-        mark_pending_status(&conn, "t1", "broadcasted").unwrap();
+        assert_eq!(mark_pending_status(&conn, "t1", "broadcasted").unwrap(), 1);
         assert!(next_due_transfer(&conn, "r1", 9999).unwrap().is_none());
         let totals = pending_totals(&conn, "r1").unwrap();
         assert_eq!(totals.broadcasted, 1);
         assert_eq!(totals.scheduled, 0);
+    }
+
+    #[test]
+    fn mark_pending_status_reports_zero_rows_for_unknown_txid() {
+        let (_dir, conn) = test_conn();
+        sample_run(&conn, "r1", Phase::BroadcastScheduled);
+        insert_pending_txs(&conn, "r1", &[pending("t1", 1500, "scheduled")]).unwrap();
+        // A known txid updates exactly its row; an unknown txid updates nothing.
+        assert_eq!(mark_pending_status(&conn, "t1", "broadcasted").unwrap(), 1);
+        assert_eq!(
+            mark_pending_status(&conn, "unknown-txid", "broadcasted").unwrap(),
+            0
+        );
     }
 
     #[test]

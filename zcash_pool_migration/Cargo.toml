@@ -40,6 +40,9 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 incrementalmerkletree.workspace = true
 tempfile = "3"
+# Only for constructing a throwaway `UnifiedSpendingKey` (via `AccountId`) in unit tests that
+# reject their input before the key is ever used; already an in-workspace crate.
+zip32.workspace = true
 # The end-to-end integration tests (tests/migration_e2e.rs) drive the real pipelines against a
 # seeded, scanned wallet. They reuse the upstream `data_api::testing` harness (TestBuilder/
 # TestState + the Orchard pool tester) to generate and scan blocks, so both crates need their
