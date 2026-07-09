@@ -3866,6 +3866,138 @@ pub trait WalletCommitmentTrees {
         Ok(())
     }
 
+    /// Bulk-writes previously accumulated changes to the wallet's Sapling note commitment tree.
+    ///
+    /// Writes the provided shards to the backing [`ShardStore`] (`shards` must be in ascending
+    /// shard-index order; stores may reject sequences that would leave gaps in the tree),
+    /// replaces the tree cap if one is provided, and applies the checkpoint delta — removals
+    /// before additions, so that a checkpoint whose data has changed may appear in both lists.
+    ///
+    /// This is intended for wallet stores that accumulate note commitment tree updates outside
+    /// the backing store (for example, in an in-memory tree) and periodically flush the
+    /// accumulated changes. The default implementation applies the changes through
+    /// [`WalletCommitmentTrees::with_sapling_tree_mut`].
+    fn put_sapling_shards(
+        &mut self,
+        shards: &[shardtree::LocatedPrunableTree<sapling::Node>],
+        cap: Option<&shardtree::PrunableTree<sapling::Node>>,
+        checkpoints_remove: &[BlockHeight],
+        checkpoints_add: &[(BlockHeight, shardtree::store::Checkpoint)],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        self.with_sapling_tree_mut(|tree| {
+            for shard in shards {
+                tree.store_mut()
+                    .put_shard(shard.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            if let Some(cap) = cap {
+                tree.store_mut()
+                    .put_cap(cap.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            for height in checkpoints_remove {
+                tree.store_mut()
+                    .remove_checkpoint(height)
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            for (height, checkpoint) in checkpoints_add {
+                tree.store_mut()
+                    .add_checkpoint(*height, checkpoint.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            Ok::<_, ShardTreeError<Self::Error>>(())
+        })
+    }
+
+    /// Bulk-writes previously accumulated changes to the wallet's Orchard note commitment tree.
+    ///
+    /// Writes the provided shards to the backing [`ShardStore`] (`shards` must be in ascending
+    /// shard-index order; stores may reject sequences that would leave gaps in the tree),
+    /// replaces the tree cap if one is provided, and applies the checkpoint delta — removals
+    /// before additions, so that a checkpoint whose data has changed may appear in both lists.
+    ///
+    /// This is intended for wallet stores that accumulate note commitment tree updates outside
+    /// the backing store (for example, in an in-memory tree) and periodically flush the
+    /// accumulated changes. The default implementation applies the changes through
+    /// [`WalletCommitmentTrees::with_orchard_tree_mut`].
+    #[cfg(feature = "orchard")]
+    fn put_orchard_shards(
+        &mut self,
+        shards: &[shardtree::LocatedPrunableTree<orchard::tree::MerkleHashOrchard>],
+        cap: Option<&shardtree::PrunableTree<orchard::tree::MerkleHashOrchard>>,
+        checkpoints_remove: &[BlockHeight],
+        checkpoints_add: &[(BlockHeight, shardtree::store::Checkpoint)],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        self.with_orchard_tree_mut(|tree| {
+            for shard in shards {
+                tree.store_mut()
+                    .put_shard(shard.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            if let Some(cap) = cap {
+                tree.store_mut()
+                    .put_cap(cap.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            for height in checkpoints_remove {
+                tree.store_mut()
+                    .remove_checkpoint(height)
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            for (height, checkpoint) in checkpoints_add {
+                tree.store_mut()
+                    .add_checkpoint(*height, checkpoint.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            Ok::<_, ShardTreeError<Self::Error>>(())
+        })
+    }
+
+    /// Bulk-writes previously accumulated changes to the wallet's Ironwood note commitment tree,
+    /// if this backend tracks one.
+    ///
+    /// Writes the provided shards to the backing [`ShardStore`] (`shards` must be in ascending
+    /// shard-index order; stores may reject sequences that would leave gaps in the tree),
+    /// replaces the tree cap if one is provided, and applies the checkpoint delta — removals
+    /// before additions, so that a checkpoint whose data has changed may appear in both lists.
+    ///
+    /// The default implementation applies the changes through
+    /// [`WalletCommitmentTrees::with_ironwood_tree_mut`]; for backends that do not track an
+    /// Ironwood tree (see that method's documentation), the changes are ignored.
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_shards(
+        &mut self,
+        shards: &[shardtree::LocatedPrunableTree<orchard::tree::MerkleHashOrchard>],
+        cap: Option<&shardtree::PrunableTree<orchard::tree::MerkleHashOrchard>>,
+        checkpoints_remove: &[BlockHeight],
+        checkpoints_add: &[(BlockHeight, shardtree::store::Checkpoint)],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        self.with_ironwood_tree_mut(|tree| {
+            for shard in shards {
+                tree.store_mut()
+                    .put_shard(shard.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            if let Some(cap) = cap {
+                tree.store_mut()
+                    .put_cap(cap.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            for height in checkpoints_remove {
+                tree.store_mut()
+                    .remove_checkpoint(height)
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            for (height, checkpoint) in checkpoints_add {
+                tree.store_mut()
+                    .add_checkpoint(*height, checkpoint.clone())
+                    .map_err(ShardTreeError::Storage)?;
+            }
+            Ok::<_, ShardTreeError<Self::Error>>(())
+        })?;
+        Ok(())
+    }
+
     /// Releases all retained ("anchor") checkpoints with height strictly less than `max_height`
     /// from the wallet's note commitment trees, allowing them to be pruned normally.
     ///
@@ -3936,6 +4068,92 @@ mod tests {
     use transparent::address::TransparentAddress;
     use zcash_keys::address::{Address, UnifiedAddress};
     use zip32::DiversifierIndex;
+
+    #[test]
+    fn put_sapling_shards_flushes_through_the_interface() {
+        use incrementalmerkletree::{Address, Hashable, Level, Marking, Position};
+        use shardtree::store::Checkpoint;
+
+        let mut db = MockWalletDb::new(zcash_protocol::consensus::Network::TestNetwork);
+
+        // Build a shard-rooted subtree the same way `put_blocks` does, with a checkpoint on
+        // the final leaf.
+        let leaf = <sapling::Node as Hashable>::empty_leaf();
+        let checkpoint_height = BlockHeight::from(3);
+        let commitments = (0u64..4).map(|i| {
+            (
+                leaf,
+                if i == 3 {
+                    Retention::Checkpoint {
+                        id: checkpoint_height,
+                        marking: Marking::None,
+                    }
+                } else {
+                    Retention::Ephemeral
+                },
+            )
+        });
+        let built = shardtree::LocatedTree::from_iter(
+            Position::from(0)..Position::from(4),
+            Level::from(SAPLING_SHARD_HEIGHT),
+            commitments,
+        )
+        .expect("commitments produce a subtree");
+        let checkpoints_add = built
+            .checkpoints
+            .iter()
+            .map(|(height, position)| (*height, Checkpoint::at_position(*position)))
+            .collect::<Vec<_>>();
+
+        db.put_sapling_shards(&[built.subtree], None, &[], &checkpoints_add)
+            .expect("bulk flush succeeds");
+
+        // The shard and checkpoint are visible through the standard tree access path.
+        db.with_sapling_tree_mut(|tree| {
+            assert!(
+                tree.store()
+                    .get_shard(Address::from_parts(Level::from(SAPLING_SHARD_HEIGHT), 0))
+                    .map_err(ShardTreeError::Storage)?
+                    .is_some()
+            );
+            assert_eq!(
+                tree.store()
+                    .max_checkpoint_id()
+                    .map_err(ShardTreeError::Storage)?,
+                Some(checkpoint_height)
+            );
+            Ok::<_, ShardTreeError<_>>(())
+        })
+        .expect("tree reads succeed");
+
+        // Removals are applied before additions, so a checkpoint set can be replaced in a
+        // single call.
+        let new_height = BlockHeight::from(7);
+        db.put_sapling_shards(
+            &[],
+            None,
+            &[checkpoint_height],
+            &[(new_height, Checkpoint::tree_empty())],
+        )
+        .expect("checkpoint replacement succeeds");
+
+        db.with_sapling_tree_mut(|tree| {
+            assert_eq!(
+                tree.store()
+                    .max_checkpoint_id()
+                    .map_err(ShardTreeError::Storage)?,
+                Some(new_height)
+            );
+            assert_eq!(
+                tree.store()
+                    .checkpoint_count()
+                    .map_err(ShardTreeError::Storage)?,
+                1
+            );
+            Ok::<_, ShardTreeError<_>>(())
+        })
+        .expect("tree reads succeed");
+    }
 
     #[test]
     fn account_meta_totals_include_ironwood() {
