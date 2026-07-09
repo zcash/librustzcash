@@ -80,6 +80,9 @@ workspace.
 - `zcash_client_sqlite::error::SqliteClientError::FeeRuleError`, a new variant
   (behind the `transparent-inputs` feature flag) that wraps an error produced
   by a `FeeRule` during transparent input selection.
+- `WalletDb::generate_ironwood_witnesses_at_historical_height`, which mirrors
+  the existing Orchard historical witness helper over the wallet's Ironwood
+  commitment tree shard tables.
 
 ### Changed
 - Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`,
