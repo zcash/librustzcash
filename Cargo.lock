@@ -7196,7 +7196,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_history"
-version = "0.5.0-pre.0"
+version = "0.5.0"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
