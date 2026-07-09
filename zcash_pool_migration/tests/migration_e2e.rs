@@ -551,7 +551,12 @@ fn record_transfer_result_advances_to_complete() {
 // ======================================================================================
 
 /// A two-transfer schedule is height-gated: only the first transfer is due at the current tip; the
-/// second becomes due only after the chain advances by the 288-block cadence.
+/// second becomes due only once the chain has advanced far enough. The gap to the second
+/// transfer's send height is now an independently sampled exponential (see `scheduling.rs`), not a
+/// fixed cadence, so this test only relies on its documented hard cap
+/// (`scheduling::MAX_CADENCE_BLOCKS`) rather than an exact block count — the height-gating query
+/// itself (`next_executable_after_height <= target`) is already covered precisely by
+/// `store::tests`.
 #[test]
 fn next_due_transfer_is_height_gated() {
     // Two separate 1-ZEC-fundable notes so each transfer spends its own (a single large note would
@@ -573,21 +578,18 @@ fn next_due_transfer_is_height_gated() {
         .expect("first transfer due");
     ctx.record_transfer_result(first.id(), TransferResult::Success(first.txid()))
         .unwrap();
-    assert!(
-        ctx.next_due_transfer().unwrap().is_none(),
-        "the second transfer is gated one cadence (288 blocks) into the future"
-    );
 
-    // The due-height check is inclusive (`next_executable_after_height <= target`), so mining
-    // exactly 288 blocks would already land the re-read target precisely on the second transfer's
-    // threshold. Mine one extra block (289) so the assertion below does not depend on hitting that
-    // exact boundary.
-    st.add_empty_blocks(289);
+    // Mine past the hard cap on any single sampled gap (`scheduling::MAX_CADENCE_BLOCKS`, a
+    // crate-private constant — duplicated here as a plain literal since it isn't part of the
+    // public API), guaranteeing the second transfer's send height has been reached regardless of
+    // what its particular gap was sampled as.
+    const MAX_CADENCE_BLOCKS: usize = 1152;
+    st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
 
     let second = ctx
         .next_due_transfer()
         .unwrap()
-        .expect("second transfer due after advancing past its 288-block cadence");
+        .expect("second transfer due once its (capped) sampled gap has elapsed");
     assert_ne!(
         first.txid(),
         second.txid(),

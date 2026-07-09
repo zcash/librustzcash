@@ -34,12 +34,17 @@ pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "sig
 shardtree.workspace = true
 
 rand.workspace = true
+rand_distr.workspace = true
 rusqlite.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
 tempfile = "3"
+# Deterministic seeding for the scheduling tests: transfer cadence is sampled from an exponential
+# distribution (see `scheduling::sample_cadence_blocks`), so tests need a reproducible RNG rather
+# than `OsRng`.
+rand_chacha.workspace = true
 # Only for constructing a throwaway `UnifiedSpendingKey` (via `AccountId`) in unit tests that
 # reject their input before the key is ever used; already an in-workspace crate.
 zip32.workspace = true

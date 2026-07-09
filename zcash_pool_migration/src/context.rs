@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use rand::rngs::OsRng;
 use rusqlite::Connection;
 use uuid::Uuid;
 use zcash_client_sqlite::{AccountUuid, ReceivedNoteId};
@@ -971,6 +972,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             plan_denominations(total, FEE_ESTIMATE_ZATOSHI).map_err(MigrationError::Pipeline)?;
         let run_id = new_run_id();
         Ok(scheduling::build_schedule(
+            &mut OsRng,
             &run_id,
             &plan.crossing_values,
             target,
@@ -1001,7 +1003,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let run_id = new_run_id();
         let amounts = crossing.map(|value| vec![value]).unwrap_or_default();
         Ok(scheduling::build_schedule(
-            &run_id, &amounts, target, anchor,
+            &mut OsRng, &run_id, &amounts, target, anchor,
             // immediate: executable now, no first-transfer privacy delay
             0,
         ))
