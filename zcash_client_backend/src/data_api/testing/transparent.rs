@@ -2441,3 +2441,293 @@ where
         .expect("AllFunds gather should succeed");
     assert_eq!(all.len(), n_dust);
 }
+
+/// Tests that [`WalletWrite::reserve_next_n_internal_addresses`] reserves sequential
+/// internal-scope (change) addresses, that reservation observes the internal-scope gap
+/// limit, and that internal-scope reservations are accounted independently of
+/// ephemeral-scope reservations.
+///
+/// This test expects the data store to be configured with the default gap limits, under
+/// which the internal-scope gap limit is 5.
+///
+/// The `is_reached_gap_limit` predicate must return `true` if and only if the provided
+/// error is the backend's exact "reached gap limit" error variant, the scope reported by
+/// that error is [`TransparentKeyScope::INTERNAL`], and the address index reported by that
+/// error equals the provided expected index. It must not match any other error. (A
+/// predicate is used because this test cannot name the backend's concrete error type
+/// without inverting the crate dependency.)
+pub fn reserve_next_n_internal_addresses_gap_limit<DSF>(
+    dsf: DSF,
+    cache: impl TestCache,
+    is_reached_gap_limit: impl Fn(
+        &<DSF::DataStore as crate::data_api::WalletRead>::Error,
+        DSF::AccountId,
+        u32,
+    ) -> bool,
+) where
+    DSF: DataStoreFactory,
+{
+    use std::collections::HashSet;
+    use transparent::keys::NonHardenedChildIndex;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+    let account_id = st.test_account().cloned().unwrap().id();
+
+    // Seed the chain so that a chain height is known; address reservation records the
+    // exposure height of each reserved address.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    st.scan_cached_blocks(start_height, 1);
+
+    // Reserving internal addresses yields distinct, sequentially-indexed addresses derived
+    // under the internal (change) key scope.
+    let reserved = st
+        .wallet_mut()
+        .reserve_next_n_internal_addresses(account_id, 3)
+        .unwrap();
+    assert_eq!(reserved.len(), 3);
+    for (i, (_, meta)) in reserved.iter().enumerate() {
+        assert_eq!(meta.scope(), Some(TransparentKeyScope::INTERNAL));
+        assert_eq!(
+            meta.address_index(),
+            Some(NonHardenedChildIndex::const_from_index(
+                u32::try_from(i).unwrap()
+            )),
+        );
+    }
+    // None of the reserved addresses have received funds, so the gap cannot advance: with
+    // the default internal-scope gap limit of 5, only two more addresses may be reserved.
+    // Reservation continues at the next sequential indices, so the returned addresses are
+    // distinct from those of the first batch.
+    let more = st
+        .wallet_mut()
+        .reserve_next_n_internal_addresses(account_id, 2)
+        .unwrap();
+    assert_eq!(more.len(), 2);
+    for (i, (_, meta)) in more.iter().enumerate() {
+        assert_eq!(meta.scope(), Some(TransparentKeyScope::INTERNAL));
+        assert_eq!(
+            meta.address_index(),
+            Some(NonHardenedChildIndex::const_from_index(
+                u32::try_from(reserved.len() + i).unwrap()
+            )),
+        );
+    }
+    let unique_addrs = reserved
+        .iter()
+        .chain(more.iter())
+        .map(|(a, _)| *a)
+        .collect::<HashSet<_>>();
+    assert_eq!(unique_addrs.len(), reserved.len() + more.len());
+
+    assert_matches!(
+        st.wallet_mut().reserve_next_n_internal_addresses(account_id, 1),
+        Err(e) if is_reached_gap_limit(&e, account_id, 5)
+    );
+
+    // Internal-scope reservations must not consume ephemeral-scope gap space.
+    let ephemeral = st
+        .wallet_mut()
+        .reserve_next_n_ephemeral_addresses(account_id, 1)
+        .unwrap();
+    assert_eq!(ephemeral[0].1.scope(), Some(TransparentKeyScope::EPHEMERAL),);
+    assert_eq!(
+        ephemeral[0].1.address_index(),
+        Some(NonHardenedChildIndex::const_from_index(0)),
+    );
+}
+
+/// Tests the full lifecycle of a t->t transfer with transparent change: a change strategy
+/// configured with [`TransparentChangePolicy::TransparentChangeAllowed`] must propose a
+/// non-ephemeral transparent change output, and transaction creation must send that change
+/// to a previously-unexposed internal-scope (change) transparent address of the spending
+/// account, where it is recorded as received and becomes spendable once mined.
+///
+/// [`TransparentChangePolicy::TransparentChangeAllowed`]: crate::fees::TransparentChangePolicy::TransparentChangeAllowed
+pub fn propose_t2t_with_transparent_change<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use std::convert::Infallible;
+
+    use crate::{
+        fees::{ChangeValue, TransparentChangePolicy},
+        wallet::{Exposure, OvkPolicy},
+    };
+
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let transfer_amount = Zatoshis::const_from_u64(40_000);
+    let (mut st, account, outpoint) = setup_transparent_only_account(dsf, cache, utxo_value);
+
+    let network = *st.network();
+    let request = t2t_request(&network, transfer_amount);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    )
+    .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
+        )
+        .expect("t->t proposal with transparent change must succeed");
+
+    // A t->t transfer with non-ephemeral transparent change is a single step.
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.transparent_inputs().len(), 1);
+    assert_eq!(step.transparent_inputs()[0].outpoint(), &outpoint);
+    assert!(step.shielded_inputs().is_none());
+
+    // Under ZIP 317, one P2PKH input and two P2PKH outputs (the payment plus the change
+    // output) require `5_000 * max(1, 2) = 10_000` zats in fees.
+    let expected_fee = Zatoshis::const_from_u64(10_000);
+    let expected_change = ((utxo_value - transfer_amount).unwrap() - expected_fee).unwrap();
+    assert_eq!(step.balance().fee_required(), expected_fee);
+    assert_eq!(
+        step.balance().proposed_change(),
+        [ChangeValue::transparent(expected_change)],
+    );
+    assert!(!step.balance().proposed_change()[0].is_ephemeral());
+
+    // A proposal containing a transparent change output must survive a serialization
+    // round trip.
+    super::check_proposal_serialization_roundtrip(&network, st.wallet(), &proposal);
+
+    // Creating the transaction should reserve an internal-scope address for the change.
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .expect("transaction creation must succeed");
+    assert_eq!(txids.len(), 1);
+    let txid = txids.head;
+
+    // The transaction must be fully transparent, with exactly the payment and change outputs.
+    let tx = st
+        .wallet()
+        .get_transaction(txid)
+        .unwrap()
+        .expect("the created transaction is retrievable");
+    assert!(tx.sapling_bundle().is_none());
+    #[cfg(feature = "orchard")]
+    assert!(tx.orchard_bundle().is_none());
+    let bundle = tx
+        .transparent_bundle()
+        .expect("the transaction has a transparent bundle");
+    assert_eq!(bundle.vin.len(), 1);
+    assert_eq!(bundle.vout.len(), 2);
+
+    // Identify the change output as the output that does not pay the external recipient.
+    let payment_recipient = TransparentAddress::PublicKeyHash([7u8; 20]);
+    let change_outputs: Vec<_> = bundle
+        .vout
+        .iter()
+        .filter(|out| out.recipient_address() != Some(payment_recipient))
+        .collect();
+    assert_eq!(change_outputs.len(), 1);
+    let change_output = change_outputs[0];
+    assert_eq!(change_output.value(), expected_change);
+    let change_address = change_output
+        .recipient_address()
+        .expect("the change output pays a standard P2PKH address");
+
+    // The change address must be an internal-scope (change) address of the spending account,
+    // exposed at the current chain height by having been reserved for change.
+    let receivers = st
+        .wallet()
+        .get_transparent_receivers(account.id(), true, false)
+        .unwrap();
+    let change_meta = receivers
+        .get(&change_address)
+        .expect("the change address belongs to the spending account");
+    assert_eq!(change_meta.scope(), Some(TransparentKeyScope::INTERNAL));
+    let cur_height = st.wallet().chain_height().unwrap().unwrap();
+    assert_matches!(
+        change_meta.exposure(),
+        Exposure::Exposed { at_height, .. } if at_height == cur_height
+    );
+
+    // Mine the transaction; the change output should then be spendable at the change address.
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
+
+    let mut expected_balance = Balance::ZERO;
+    expected_balance
+        .add_spendable_value(expected_change)
+        .unwrap();
+    check_balance::<DSF>(
+        &st,
+        &account,
+        &change_address,
+        ConfirmationsPolicy::MIN,
+        &expected_balance,
+    );
+}
+
+/// Tests that when a fully-transparent transaction balances exactly (input value equals
+/// payments plus the minimum fee), no transparent change output is produced even when the
+/// change strategy is configured with [`TransparentChangePolicy::TransparentChangeAllowed`].
+///
+/// [`TransparentChangePolicy::TransparentChangeAllowed`]: crate::fees::TransparentChangePolicy::TransparentChangeAllowed
+pub fn propose_t2t_transparent_change_exact_match<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use crate::fees::TransparentChangePolicy;
+
+    // Under ZIP 317, one P2PKH input and one P2PKH output require the minimum fee of
+    // 10_000 zats, so a 50_000-zat UTXO exactly covers a 40_000-zat payment.
+    let utxo_value = Zatoshis::const_from_u64(50_000);
+    let transfer_amount = Zatoshis::const_from_u64(40_000);
+    let (mut st, account, _outpoint) = setup_transparent_only_account(dsf, cache, utxo_value);
+
+    let network = *st.network();
+    let request = t2t_request(&network, transfer_amount);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    )
+    .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default().with_transparent(TransparentSpendPolicy::any_account_addr()),
+        )
+        .expect("exactly-balanced t->t proposal must succeed");
+
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(
+        step.balance().fee_required(),
+        Zatoshis::const_from_u64(10_000),
+    );
+    assert_eq!(step.balance().proposed_change(), []);
+}

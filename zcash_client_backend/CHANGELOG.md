@@ -96,6 +96,36 @@ workspace.
   enabled.
 - `zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT`, the shard height of
   the Ironwood note commitment tree (equal to the Orchard shard height).
+- `zcash_client_backend::fees::TransparentChangePolicy` (behind the
+  `transparent-inputs` feature flag): expresses whether change for a
+  transaction whose net flows are fully transparent should be shielded (the
+  default, `ShieldChange`) or returned to the transparent pool
+  (`TransparentChangeAllowed`) at an internal-scope (change) transparent
+  address of the wallet, as described under the BIP 44 `change` path level.
+  The policy has no effect on transactions that involve any shielded flows;
+  change for such transactions is always shielded. This enables `zallet` to
+  replicate `zcashd`'s `z_sendmany` behavior for fully-transparent spends.
+- `with_transparent_change_policy` builder methods (behind
+  `transparent-inputs`) on the ZIP 317 change strategies
+  `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}`
+  and on `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy`.
+  When transparent change is produced it is always emitted as a single
+  output; the `SplitPolicy` configured for `MultiOutputChangeStrategy`
+  applies only to shielded change.
+- `zcash_client_backend::fees::ChangeValue::transparent` (behind
+  `transparent-inputs`): constructs a non-ephemeral transparent change value,
+  distinct from the ephemeral (ZIP 320) transparent output value constructed
+  by `ChangeValue::ephemeral_transparent`. In the proposal protobuf encoding,
+  such a change value is represented by the existing transparent `valuePool`
+  with `isEphemeral` unset; decoding this combination previously returned
+  `ProposalDecodingError::InvalidChangeRecipient`.
+- `zcash_client_backend::data_api::WalletWrite::reserve_next_n_internal_addresses`
+  (behind `transparent-inputs`): reserves the next `n` available
+  internal-scope (change) transparent addresses for an account, parallel to
+  the existing `reserve_next_n_ephemeral_addresses` method.
+  `create_proposed_transactions` uses this to allocate the recipient
+  address(es) for non-ephemeral transparent change outputs, which it records
+  using the existing `Recipient::InternalTransparent` variant.
 - `zcash_client_backend::data_api::NoteCommitmentTree`
 - `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
 - `zcash_client_backend::proto::proposal::ValuePool::Ironwood`, so that a proposal

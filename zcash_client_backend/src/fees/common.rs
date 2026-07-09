@@ -18,6 +18,8 @@ use super::{
     TransactionBalance, sapling as sapling_fees,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
@@ -242,6 +244,8 @@ pub(crate) struct SinglePoolBalanceConfig<'a, P, F> {
     default_dust_threshold: Zatoshis,
     split_policy: &'a SplitPolicy,
     fallback_change_pool: ShieldedPool,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_change_policy: TransparentChangePolicy,
     marginal_fee: Zatoshis,
     grace_actions: usize,
 }
@@ -255,6 +259,7 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
         default_dust_threshold: Zatoshis,
         split_policy: &'a SplitPolicy,
         fallback_change_pool: ShieldedPool,
+        #[cfg(feature = "transparent-inputs")] transparent_change_policy: TransparentChangePolicy,
         marginal_fee: Zatoshis,
         grace_actions: usize,
     ) -> Self {
@@ -265,6 +270,8 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
             default_dust_threshold,
             split_policy,
             fallback_change_pool,
+            #[cfg(feature = "transparent-inputs")]
+            transparent_change_policy,
             marginal_fee,
             grace_actions,
         }
@@ -313,6 +320,16 @@ where
 
     // We don't create a fully-transparent transaction if a change memo is used.
     let fully_transparent = net_flows.is_transparent() && change_memo.is_none();
+
+    // Whether change should be returned to the transparent pool instead of being shielded.
+    // Transparent change is only ever produced when the flows of the transaction are fully
+    // transparent, so that shielded flows never leak change information to the transparent
+    // pool.
+    #[cfg(feature = "transparent-inputs")]
+    let wants_transparent_change = fully_transparent
+        && cfg.transparent_change_policy == TransparentChangePolicy::TransparentChangeAllowed;
+    #[cfg(not(feature = "transparent-inputs"))]
+    let wants_transparent_change = false;
 
     let total_in = net_flows
         .total_in()
@@ -445,31 +462,47 @@ where
         (total_in - total_out_with_min_fee).unwrap_or(Zatoshis::ZERO),
     );
 
-    let target_change_count = wallet_meta.map_or(1, |m| {
-        usize::from(cfg.split_policy.target_output_count)
-            // If we cannot determine a total note count, fall back to a single output
-            .saturating_sub(m.total_note_count().unwrap_or(usize::MAX))
-            .max(1)
-    });
-    let target_change_counts = OutputManifest {
-        transparent: 0,
-        sapling: if change_pool == ShieldedPool::Sapling {
-            target_change_count
-        } else {
-            0
-        },
-        orchard: if change_pool == ShieldedPool::Orchard {
-            target_change_count
-        } else {
-            0
-        },
-        ironwood: if change_pool == ShieldedPool::Ironwood {
-            target_change_count
-        } else {
-            0
-        },
+    let (target_change_count, target_change_counts) = if wants_transparent_change {
+        // Transparent change is always emitted as a single output; the note-splitting policy
+        // exists to improve the spendability of shielded notes and does not apply to
+        // transparent outputs.
+        (
+            1,
+            OutputManifest {
+                transparent: 1,
+                sapling: 0,
+                orchard: 0,
+                ironwood: 0,
+            },
+        )
+    } else {
+        let target_change_count = wallet_meta.map_or(1, |m| {
+            usize::from(cfg.split_policy.target_output_count)
+                // If we cannot determine a total note count, fall back to a single output
+                .saturating_sub(m.total_note_count().unwrap_or(usize::MAX))
+                .max(1)
+        });
+        let target_change_counts = OutputManifest {
+            transparent: 0,
+            sapling: if change_pool == ShieldedPool::Sapling {
+                target_change_count
+            } else {
+                0
+            },
+            orchard: if change_pool == ShieldedPool::Orchard {
+                target_change_count
+            } else {
+                0
+            },
+            ironwood: if change_pool == ShieldedPool::Ironwood {
+                target_change_count
+            } else {
+                0
+            },
+        };
+        assert!(target_change_counts.total_shielded() == target_change_count);
+        (target_change_count, target_change_counts)
     };
-    assert!(target_change_counts.total_shielded() == target_change_count);
 
     // If we have a non-zero marginal fee, we need to check for uneconomic inputs.
     // This is basically assuming that fee rules with non-zero marginal fee are
@@ -530,7 +563,11 @@ where
                         cfg.params,
                         BlockHeight::from(target_height),
                         transparent_input_sizes.clone(),
-                        transparent_output_sizes.clone(),
+                        transparent_output_sizes
+                            .clone()
+                            // Count the standard size of the P2PKH change output when change is
+                            // to be returned to the transparent pool.
+                            .chain(wants_transparent_change.then_some(P2PKH_STANDARD_OUTPUT_SIZE)),
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
@@ -543,17 +580,22 @@ where
 
             // We obtain a split count based on the total number of notes of sufficient size
             // available in the wallet, irrespective of pool. If we don't have any wallet metadata
-            // available, we fall back to generating a single change output.
-            let split_count = usize::from(wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
-                cfg.split_policy.split_count(
-                    wm.total_note_count(),
-                    wm.total_value(),
-                    // We use a saturating subtraction here because there may be insufficient funds to pay
-                    // the fee, *if* the requested number of split outputs are created. If there is no
-                    // proposed change, the split policy should recommend only a single change output.
-                    (total_in - total_out_with_max_fee).unwrap_or(Zatoshis::ZERO),
-                )
-            }));
+            // available, we fall back to generating a single change output. Transparent change is
+            // always emitted as a single output.
+            let split_count = if wants_transparent_change {
+                1
+            } else {
+                usize::from(wallet_meta.map_or(NonZeroUsize::MIN, |wm| {
+                    cfg.split_policy.split_count(
+                        wm.total_note_count(),
+                        wm.total_value(),
+                        // We use a saturating subtraction here because there may be insufficient funds to pay
+                        // the fee, *if* the requested number of split outputs are created. If there is no
+                        // proposed change, the split policy should recommend only a single change output.
+                        (total_in - total_out_with_max_fee).unwrap_or(Zatoshis::ZERO),
+                    )
+                }))
+            };
 
             // If we don't have as many change outputs as we expected, recompute the fee.
             let total_fee = if split_count < target_change_count {
@@ -596,6 +638,22 @@ where
                 NonZeroU64::new(u64::try_from(split_count).expect("usize fits into u64")).unwrap(),
             );
             let simple_case = || {
+                #[cfg(feature = "transparent-inputs")]
+                if wants_transparent_change {
+                    return (
+                        if total_change.is_zero() {
+                            // A zero-valued transparent output would be unspendable, so we omit
+                            // it. Unlike the shielded change case, omitting the output does not
+                            // reveal additional information, because transparent output values
+                            // are already publicly visible.
+                            vec![]
+                        } else {
+                            vec![ChangeValue::transparent(total_change)]
+                        },
+                        total_fee,
+                    );
+                }
+
                 (
                     (0usize..split_count)
                         .map(|i| {

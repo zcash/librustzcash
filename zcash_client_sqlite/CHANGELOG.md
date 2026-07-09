@@ -11,6 +11,16 @@ workspace.
 ## Unreleased
 
 ### Added
+- `WalletDb` now implements the new
+  `WalletWrite::reserve_next_n_internal_addresses` method (behind the
+  `transparent-inputs` feature flag), reserving internal-scope (change)
+  transparent addresses subject to the internal-scope gap limit. This is used
+  to allocate recipient addresses for non-ephemeral transparent change
+  outputs when a change strategy is configured with
+  `zcash_client_backend::fees::TransparentChangePolicy::TransparentChangeAllowed`.
+  No new migration is required: internal-scope gap addresses are already
+  generated at account creation, and received transparent change outputs are
+  recorded via the existing `Recipient::InternalTransparent` handling.
 - A new migration adds a `note_version` column to `orchard_received_notes`,
   recording the note plaintext version from which each received note was
   obtained. The Orchard note encryption domain accepts only version 2 note
