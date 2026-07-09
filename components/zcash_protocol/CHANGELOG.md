@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-09
+
+This release sets the NU6.3 mainnet activation height to 3428143.
+
 ### Added
 - `zcash_protocol::consensus::OrchardProtocolRevision`
 - `zcash_protocol::consensus::BranchId::orchard_protocol_revision`

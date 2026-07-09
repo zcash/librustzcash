@@ -12,8 +12,9 @@ workspace.
 
 ### Changed
 - MSRV is now 1.88
-- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
-  `zcash_primitives 0.29.0-pre.0`, `zcash_proofs 0.29.0-pre.0`.
+- Migrated to `zcash_protocol 0.10.0`, `zcash_transparent 0.9.0`,
+  `zcash_primitives 0.29.0`, `zcash_proofs 0.29.0`
+  `orchard 0.15`, `shardtree 0.7`.
 - The empty states of the transparent, Sapling, Orchard, and Ironwood bundles
   now have a single canonical representation, produced consistently by the
   Creator, `Creator::build_from_parts`, the serialization formats, and the IO
