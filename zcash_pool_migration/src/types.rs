@@ -11,13 +11,17 @@ use std::fmt;
 
 use zcash_protocol::{TxId, consensus::BlockHeight, value::Zatoshis};
 
-/// A run-scoped identifier for a single migration transfer, or for the one-off note-split
-/// ("prep") transaction that precedes them.
+/// An opaque identifier for a single migration transfer, or for the one-off note-split ("prep")
+/// transaction that precedes them.
 ///
-/// Backed by a string of the form `"<run_id>:<index>"` (built by `TransferId::for_transfer`) or
-/// `"prep:<run_id>"` (built by `TransferId::for_prep`), rather than a bare run id, so a single
-/// value round-trips through storage and identifies both the run it belongs to and, for ordinary
-/// transfers, its position within that run's schedule.
+/// Treat the value as opaque. Internally it takes one of a few forms — a run-scoped
+/// `"<run_id>:<index>"` (built by `TransferId::for_transfer`), a `"prep:<run_id>"` prep id (built
+/// by `TransferId::for_prep`), or, for an ordinary transfer handed out by
+/// [`crate::context::MigrationContext::next_due_transfer`], the finalized transaction's own txid
+/// hex — but which form a given id takes is not part of the contract and may change. The
+/// guarantees callers can rely on are that the value round-trips through storage and that an id
+/// issued by the engine can be reconstructed with [`TransferId::from_raw`] and handed back
+/// unchanged (e.g. to [`crate::context::MigrationContext::record_transfer_result`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TransferId(String);
 
@@ -32,9 +36,14 @@ impl TransferId {
         TransferId(format!("prep:{run_id}"))
     }
 
-    /// Wraps an already-formatted id string, e.g. one read back from the store. No validation is
-    /// performed on `raw`.
-    pub(crate) fn from_raw(raw: String) -> Self {
+    /// Wraps an opaque, engine-issued id string — one obtained earlier from this crate: a
+    /// schedule's [`TransferProposal::id`], a [`PreparedTransfer::id`]/[`UnsignedTransferPczt::id`],
+    /// or the txid-derived id handed out by
+    /// [`crate::context::MigrationContext::next_due_transfer`]. Lets the platform reconstruct a
+    /// [`TransferId`] to hand back to the engine (e.g. to
+    /// [`crate::context::MigrationContext::record_transfer_result`]). No validation is performed on
+    /// `raw`.
+    pub fn from_raw(raw: String) -> Self {
         TransferId(raw)
     }
 
@@ -127,8 +136,9 @@ impl TransferProposal {
 
     /// The anchor height this transfer's PCZT is built against.
     ///
-    /// Comes from a shared network-wide 288-block bucket, shared by every transfer in the same
-    /// [`MigrationSchedule`].
+    /// This is the wallet's natural (witnessable) anchor at proposal time — the anchor height
+    /// `get_target_and_anchor_heights` returns, not a bucketed or rounded value — and is shared by
+    /// every transfer in the same [`MigrationSchedule`].
     pub fn anchor_height(&self) -> BlockHeight {
         self.anchor_height
     }
@@ -382,6 +392,17 @@ mod tests {
         assert_eq!(p.as_str(), "prep:run-1");
         assert!(p.is_prep());
         assert_eq!(TransferId::from_raw("prep:run-1".into()), p);
+    }
+
+    #[test]
+    fn from_raw_round_trips_an_arbitrary_opaque_id() {
+        // The now-public `from_raw` wraps any string verbatim, without validation — e.g. the
+        // txid-hex id `next_due_transfer` hands out for an ordinary transfer.
+        let raw = "9f8e7d6c5b4a39281706f5e4d3c2b1a0ffeeddccbbaa998877665544332211".to_string();
+        let id = TransferId::from_raw(raw.clone());
+        assert_eq!(id.as_str(), raw);
+        assert!(!id.is_prep());
+        assert_eq!(TransferId::from_raw(raw.clone()), TransferId::from_raw(raw));
     }
 
     #[test]

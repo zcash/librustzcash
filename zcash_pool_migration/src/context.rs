@@ -412,6 +412,8 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         run_id: &str,
     ) -> Result<MigrationProgress, MigrationError> {
         let totals = store::pending_totals(conn, run_id)?;
+        // `unwrap_or(0)`: remaining value reads zero when the wallet cannot provide a summary (e.g.
+        // still unsyncing) rather than failing the whole progress read — prototype-parity behavior.
         let remaining_orchard = Zatoshis::const_from_u64(self.orchard_spendable().unwrap_or(0));
         let next_transfer_ready_at_height =
             store::next_scheduled_send_height(conn, run_id)?.map(BlockHeight::from_u32);
@@ -979,7 +981,8 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         ))
     }
 
-    /// Pre-sign and persist every transfer in the schedule, each at its bucketed anchor.
+    /// Pre-sign and persist every transfer in the schedule, each at the schedule's shared natural
+    /// anchor.
     ///
     /// Reuses the account's active run if one already exists (e.g. a note split already in
     /// progress); otherwise starts a new one.

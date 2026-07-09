@@ -3,7 +3,7 @@
 //!
 //! All transfers in a schedule share one **anchor** — the wallet's natural anchor from
 //! `get_target_and_anchor_heights`. De-correlation between a wallet's own transfers comes from
-//! staggered send heights (`next_executable_after_height`, one bucket apart) and distinct expiry
+//! staggered send heights (`next_executable_after_height`, one cadence apart) and distinct expiry
 //! heights. The first transfer is executable immediately (`first_delay_blocks = 0` on both paths):
 //! de-correlation from user activity is the *send-time* machinery's job (background delivery, and —
 //! future rule — no send earlier than ~10 minutes after the last sync), not the schedule's. Sends

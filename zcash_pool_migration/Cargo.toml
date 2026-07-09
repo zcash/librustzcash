@@ -55,8 +55,10 @@ zcash_client_sqlite = { workspace = true, features = ["orchard", "serde", "trans
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 
 [features]
-## Exposes APIs that are useful for testing, such as `proptest` strategies.
-test-dependencies = []
+# This crate gates no code on `expensive-tests`, but the workspace CI "Run slow tests" job runs
+# `cargo test --workspace ... --features expensive-tests`, applying the feature across every
+# member; the feature is kept defined (empty) so that workspace-wide invocation is not perturbed.
+# The prototype's equally-inert `test-dependencies` feature was removed (nothing referenced it).
 expensive-tests = []
 
 [lints]

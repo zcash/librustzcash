@@ -4,7 +4,7 @@
 
 //! Wallet-backend integration for the migration engine: opening the wallet database, resolving
 //! accounts and spending keys, reading Orchard/Ironwood balances and chain heights, proposing the
-//! self-payment migration transfer at an explicit bucketed anchor, and driving the PCZT
+//! self-payment migration transfer at the wallet's natural anchor, and driving the PCZT
 //! prove/sign/finalize pipeline.
 //!
 //! Unlike the prototype, the migration **transfer** path is built with the upstream high-level
@@ -212,8 +212,8 @@ pub(crate) fn self_payment_request<P: Parameters>(
 }
 
 /// Propose a single migration transfer: spend reserved Orchard notes (excluding locked ones) at
-/// the bucket-aligned `anchor_height` and emit one Ironwood (version-6) output described by
-/// `request`.
+/// the schedule's shared `anchor_height` (the wallet's natural anchor) and emit one Ironwood
+/// (version-6) output described by `request`.
 ///
 /// Selection is restricted to the Orchard shielded pool via [`SpendPolicy::shielded_pools`], so a
 /// transfer never crosses another pool boundary; change falls back to the Orchard pool (the actual
@@ -553,8 +553,15 @@ pub(crate) fn retain_anchor<P: Parameters>(
     Ok(())
 }
 
-/// Release the retained anchor checkpoints below `below`, allowing them to be pruned normally again
-/// (spec D5). Called with `anchor + 1` after a signing loop to release exactly the pinned anchor.
+/// Release retained ("anchor") checkpoints, allowing them to be pruned normally again (spec D5).
+/// Called with `anchor + 1` after a signing loop.
+///
+/// The semantics are **bulk**: this delegates to the upstream `remove_retained_checkpoints_below`,
+/// which releases *every* retained checkpoint at or below `below - 1` (i.e. strictly below `below`)
+/// across both the Orchard and Ironwood commitment trees — not only the single checkpoint this
+/// crate pinned via [`retain_anchor`]. The migration engine only ever pins one anchor at a time, so
+/// in practice `anchor + 1` releases exactly that pin; but any other checkpoints a caller had
+/// retained below `below` for unrelated reasons would be released too.
 ///
 /// # Errors
 ///
