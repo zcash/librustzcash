@@ -35,6 +35,8 @@ use crate::{
 pub use crate::EffectsOnly;
 use crate::sighash;
 
+pub mod batch;
+
 /// A spend authorization signature for an action in one of the Orchard-protocol
 /// value pools.
 ///

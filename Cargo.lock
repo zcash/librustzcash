@@ -3186,6 +3186,7 @@ dependencies = [
  "document-features",
  "ff",
  "getset",
+ "hex",
  "incrementalmerkletree",
  "jubjub",
  "nonempty",
