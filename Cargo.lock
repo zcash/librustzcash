@@ -7207,7 +7207,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.15.0-pre.0"
+version = "0.15.0"
 dependencies = [
  "assert_matches",
  "bech32",
