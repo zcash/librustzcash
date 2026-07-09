@@ -816,29 +816,6 @@ fn zip32_derivation<S>(
     ))
 }
 
-/// Maps a consensus branch ID to the network upgrade it activates, or `None`
-/// for the pre-Overwinter Sprout rules, which have no activation height.
-///
-/// This mirrors the branch-ID assignment in [`zcash_protocol::consensus`], which
-/// does not expose the mapping publicly.
-fn network_upgrade_for_branch_id(branch_id: BranchId) -> Option<NetworkUpgrade> {
-    Some(match branch_id {
-        BranchId::Sprout => return None,
-        BranchId::Overwinter => NetworkUpgrade::Overwinter,
-        BranchId::Sapling => NetworkUpgrade::Sapling,
-        BranchId::Blossom => NetworkUpgrade::Blossom,
-        BranchId::Heartwood => NetworkUpgrade::Heartwood,
-        BranchId::Canopy => NetworkUpgrade::Canopy,
-        BranchId::Nu5 => NetworkUpgrade::Nu5,
-        BranchId::Nu6 => NetworkUpgrade::Nu6,
-        BranchId::Nu6_1 => NetworkUpgrade::Nu6_1,
-        BranchId::Nu6_2 => NetworkUpgrade::Nu6_2,
-        BranchId::Nu6_3 => NetworkUpgrade::Nu6_3,
-        #[cfg(zcash_unstable = "nu7")]
-        BranchId::Nu7 => NetworkUpgrade::Nu7,
-    })
-}
-
 /// Verifies that every network-upgrade activation height recorded in a regtest
 /// document matches the wallet database's regtest [`Parameters`].
 ///
@@ -859,7 +836,7 @@ where
     for (&branch_id, &document_height) in regtest.activations() {
         let expected = BranchId::try_from(branch_id)
             .ok()
-            .and_then(network_upgrade_for_branch_id)
+            .and_then(|id| id.network_upgrade())
             .and_then(|nu| params.activation_height(nu))
             .map(u32::from);
         if expected != Some(document_height) {

@@ -13,6 +13,8 @@ workspace.
 ### Added
 - `zcash_protocol::consensus::OrchardProtocolRevision`
 - `zcash_protocol::consensus::BranchId::orchard_protocol_revision`
+- `zcash_protocol::consensus::BranchId::network_upgrade`
+- `zcash_protocol::consensus::NetworkUpgrade::branch_id` (previously private)
 
 ## [0.10.0-pre.0] - 2026-06-30
 
