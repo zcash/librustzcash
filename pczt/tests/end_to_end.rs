@@ -1058,6 +1058,7 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
             orchard_anchor: matches!(pool, ShieldedPool::Orchard).then(orchard::Anchor::empty_tree),
             ironwood_anchor: matches!(pool, ShieldedPool::Ironwood)
                 .then(orchard::Anchor::empty_tree),
+            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     builder
