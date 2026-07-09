@@ -305,7 +305,7 @@ workspace.
   transaction spends no Orchard notes (e.g. an Orchard-receiver payment funded
   from the Sapling and Ironwood pools).
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
-  `zcash_address 0.13.0`, `zcash_transparent 0.9.0-pre.0`,
+  `zcash_address 0.13.0`, `zcash_transparent 0.9.0`,
   `zcash_keys 0.15.0-pre.0`, `zcash_primitives 0.29.0-pre.0`,
   `zcash_proofs 0.29.0-pre.0`. The `lightwallet-protocol v0.5.0` migration
   changes `zcash_client_backend::proto`:
