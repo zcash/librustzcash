@@ -66,7 +66,7 @@ redjubjub = { version = "0.8", default-features = false }
 sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
 
 # - Orchard
-orchard = { version = "0.15.0-pre.2", default-features = false }
+orchard = { version = "0.15.0", default-features = false }
 pasta_curves = "0.5"
 
 # - Transparent
@@ -229,8 +229,4 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-# TEMPORARY: orchard revision that keeps `BundleType::DEFAULT` padded and adds the
-# opt-in `BundleType::DEFAULT_UNPADDED` + `Builder::bundle_type()`; replace with a
-# published orchard release once one carries these.
-orchard = { git = "https://github.com/zcash/orchard", rev = "475ef0ff77d45aebff93cb039d639250d82518a3" }
 zewif = { git = "https://github.com/zcash/zewif.git", branch = "main" }

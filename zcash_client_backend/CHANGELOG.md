@@ -304,6 +304,7 @@ workspace.
   Ironwood. Orchard-pool change is still routed into the Ironwood bundle when the
   transaction spends no Orchard notes (e.g. an Orchard-receiver payment funded
   from the Sapling and Ironwood pools).
+- Migrated to `orchard 0.15`, `shardtree 0.7`.
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
   `zcash_address 0.13.0`, `zcash_transparent 0.9.0`,
   `zcash_keys 0.15.0-pre.0`, `zcash_primitives 0.29.0-pre.0`,

@@ -99,6 +99,7 @@ workspace.
 - Migrated to `zcash_protocol 0.10.0`, `zcash_address 0.13.0`,
   `zcash_transparent 0.9.0`, `zcash_keys 0.15.0-pre.0`,
   `zcash_primitives 0.29.0-pre.0`, `zcash_proofs 0.29.0-pre.0`.
+- Migrated to `orchard 0.15`, `shardtree 0.7`.
 - (behind the new `spend-index` feature) `WalletRead::transaction_data_requests`
   emits `TransactionDataRequest::GetSpendingTx` for transparent spend
   detection instead of `TransactionDataRequest::TransactionsInvolvingAddress`.
