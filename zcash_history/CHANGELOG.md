@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [0.5.0-pre.0] - 2026-06-30
 ### Changed
-- MSRV is now 1.85.1.
+- MSRV is now 1.88
 - `zcash_history::MAX_NODE_DATA_SIZE` is now 317 bytes and the derived
   `zcash_history::MAX_ENTRY_SIZE` is now 326 bytes, to account for Ironwood
   history node metadata.

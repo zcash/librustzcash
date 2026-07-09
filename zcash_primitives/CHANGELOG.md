@@ -14,6 +14,7 @@ workspace.
 - `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
 
 ### Changed
+- MSRV is now 1.88
 - `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
   the consensus branch ID under which the transaction was constructed instead of
   an `orchard::bundle::BundleVersion`; the Orchard bundle version is derived

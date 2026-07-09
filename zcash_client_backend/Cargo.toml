@@ -136,9 +136,6 @@ serde = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 webpki-roots = { workspace = true, optional = true }
 
-# Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
-time-core.workspace = true
-
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Boilerplate

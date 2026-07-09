@@ -494,6 +494,12 @@ criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.4.5"
 notes = "New uses of unsafe look reasonable."
 
+[[audits.num-conv]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.2.1 -> 0.2.2"
+notes = "No changes to unsafe code, straightforward refactoring and cleanup."
+
 [[audits.num_enum]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -992,6 +998,12 @@ delta = "1.0.60 -> 1.0.61"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "1.0.61 -> 1.0.63"
+
+[[audits.time-core]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.1.8 -> 0.1.9"
+notes = "No unsafe code; macro additions are straightforward refactoring changes."
 
 [[audits.tokio-stream]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"

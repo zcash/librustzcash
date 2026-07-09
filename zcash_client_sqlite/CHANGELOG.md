@@ -95,6 +95,7 @@ workspace.
   commitment tree shard tables.
 
 ### Changed
+- MSRV is now 1.88
 - Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`,
   `zcash_transparent 0.9.0-pre.0`, `zcash_keys 0.15.0-pre.0`,
   `zcash_primitives 0.29.0-pre.0`, `zcash_proofs 0.29.0-pre.0`.
