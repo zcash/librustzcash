@@ -126,8 +126,13 @@ use {
     zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
 };
 
-#[cfg(feature = "transparent-inputs")]
-#[allow(unused_imports)]
+// `AddressCodec` is used only by the `WalletTest` ephemeral-address helpers below, which are
+// themselves gated on both the test/test-dependencies surface and `transparent-inputs`; gate the
+// import to match exactly, rather than blanket-allowing it unused, so the lint stays active.
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
 use zcash_keys::encoding::AddressCodec;
 
 #[cfg(any(test, feature = "test-dependencies"))]

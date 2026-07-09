@@ -1,26 +1,8 @@
 //! Functions for wallet support of ephemeral transparent addresses.
-#[allow(unused_imports)]
-use std::{ops::Range, time::SystemTime};
-
 use rand::{RngCore, seq::SliceRandom};
-use rusqlite::{OptionalExtension, named_params};
+use rusqlite::named_params;
 
-#[allow(unused_imports)]
-use ::transparent::{
-    address::TransparentAddress,
-    keys::{NonHardenedChildIndex, TransparentKeyScope},
-};
-use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
-#[allow(unused_imports)]
-use zcash_keys::encoding::AddressCodec;
-#[allow(unused_imports)]
-use zcash_protocol::consensus::{self, BlockHeight};
-
-#[cfg(any(test, feature = "test-dependencies"))]
-use crate::GapLimits;
-#[allow(unused_imports)]
 use crate::{
-    AccountRef, AccountUuid,
     error::SqliteClientError,
     util::Clock,
     wallet::{
@@ -31,9 +13,44 @@ use crate::{
 
 use super::next_check_time;
 
+// The imports below back only this module's test / test-dependencies surface (`metadata`,
+// `get_known_ephemeral_addresses`, `find_account_for_ephemeral_address_str`), which is compiled
+// out of ordinary builds. Each is gated to exactly the configurations that use it — rather than
+// blanket-`allow`ing unused imports — so the unused-import lint stays active in every feature
+// combination.
+#[cfg(any(test, feature = "test-dependencies"))]
+use crate::{AccountRef, GapLimits};
+#[cfg(any(test, feature = "test-dependencies"))]
+use ::transparent::{
+    address::TransparentAddress,
+    keys::{NonHardenedChildIndex, TransparentKeyScope},
+};
+#[cfg(any(test, feature = "test-dependencies"))]
+use std::{ops::Range, time::SystemTime};
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_keys::encoding::AddressCodec;
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_protocol::consensus::{self, BlockHeight};
+
+// `find_account_for_ephemeral_address_str` (and hence `AccountUuid` and the `.optional()` extension
+// here) is reachable only through the `transparent-inputs` `WalletTest` methods, so it additionally
+// requires that feature.
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
+use crate::AccountUuid;
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
+use rusqlite::OptionalExtension;
+
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
-#[allow(dead_code)]
+#[cfg(any(test, feature = "test-dependencies"))]
 pub(crate) fn metadata(
     address_index: NonHardenedChildIndex,
     exposure: Exposure,
@@ -138,7 +155,10 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
 }
 
 /// If this is a known ephemeral address in any account, return its account id.
-#[allow(dead_code)]
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
 pub(crate) fn find_account_for_ephemeral_address_str(
     conn: &rusqlite::Connection,
     address_str: &str,
