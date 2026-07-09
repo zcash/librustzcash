@@ -127,6 +127,10 @@ workspace.
   `pczt::roles::updater::Updater::{set_sapling_anchor, set_orchard_anchor,
   set_ironwood_anchor}` for wallets that need to restore shielded anchors after
   signing.
+- `pczt::roles::updater::Updater::{set_sapling_spend_witnesses,
+  set_orchard_spend_witnesses, set_ironwood_spend_witnesses}` for restoring
+  shielded spend witnesses before proof creation.
+- `pczt::roles::updater::SpendWitnessUpdateError`
 - `pczt::roles::creator::Error::IronwoodNotSupported`
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
