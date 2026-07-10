@@ -1,4 +1,4 @@
-use crate::Pczt;
+use crate::{Pczt, common::AnchorRequirement};
 
 impl super::Verifier {
     /// Parses the Sapling bundle and then verifies it in the given closure.
@@ -13,16 +13,19 @@ impl super::Verifier {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor_requirement = AnchorRequirement::for_pre_authorization(global.tx_version);
 
-        let bundle = sapling.into_parsed().map_err(SaplingError::Parser)?;
+        let parsed = sapling
+            .into_parsed(anchor_requirement)
+            .map_err(SaplingError::Parser)?;
 
-        f(&bundle)?;
+        f(&parsed.bundle)?;
 
         Ok(Self {
             pczt: Pczt {
                 global,
                 transparent,
-                sapling: crate::sapling::Bundle::serialize_from(bundle),
+                sapling: parsed.reserialize(),
                 orchard,
                 ironwood,
             },
@@ -33,7 +36,7 @@ impl super::Verifier {
 /// Errors that can occur while verifying the Sapling bundle of a PCZT.
 #[derive(Debug)]
 pub enum SaplingError<E> {
-    Parser(sapling::pczt::ParseError),
+    Parser(crate::sapling::ParseError),
     Verifier(sapling::pczt::VerifyError),
     Custom(E),
 }

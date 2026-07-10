@@ -78,6 +78,7 @@ impl<'a> TransactionExtractor<'a> {
         } = self;
 
         let crate::ParsedPczt { tx_data, .. } = pczt.extract_tx_data::<Unbound, Error>(
+            crate::common::AnchorRequirement::Required,
             |t| {
                 t.extract()
                     .map_err(|e| Error::Transparent(TransparentError::Extract(e)))

@@ -14,6 +14,72 @@ pub(crate) const FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE: u8 = 0b0000_0010;
 pub(crate) const FLAG_HAS_SIGHASH_SINGLE: u8 = 0b0000_0100;
 pub(crate) const FLAG_SHIELDED_MODIFIABLE: u8 = 0b1000_0000;
 
+/// A placeholder anchor used internally when parsing a shielded bundle for an
+/// operation that does not read the anchor's value. Zero is always a valid anchor
+/// encoding for the Sapling, Orchard, and Ironwood note commitment trees.
+pub(crate) const PLACEHOLDER_ANCHOR: [u8; 32] = [0; 32];
+
+/// Governs whether a shielded bundle's `anchor` must be set in order to parse it into
+/// the form used by the payment protocol crates.
+///
+/// [ZIP 374](https://zips.z.cash/zip-0374) makes the anchor of a v6 transaction's
+/// shielded bundles deferrable until proving, so operations that do not depend on the
+/// anchor's value (for example computing a v6 sighash, which excludes anchors, or
+/// updating unrelated fields) can proceed with it absent.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum AnchorRequirement {
+    /// The operation does not read the anchor, so an absent anchor is parsed using a
+    /// placeholder value.
+    ///
+    /// Only constructed when the `orchard` or `sapling` feature is enabled, as those
+    /// are the only operations lenient enough to use it.
+    #[cfg_attr(not(any(feature = "orchard", feature = "sapling")), allow(dead_code))]
+    NotRequired,
+    /// The operation requires the anchor's real value; parsing fails if it is absent
+    /// and a bundle item consumes it.
+    Required,
+}
+
+impl AnchorRequirement {
+    /// Returns the requirement for operations that do not themselves consume the
+    /// anchor, but still parse bundles through the protocol crates.
+    ///
+    /// V6 signatures do not commit to shielded anchors, so signing and IO
+    /// finalization can proceed before anchors are set. V5 signatures do commit to
+    /// anchors for Sapling spends and Orchard-protocol actions, so those bundles must
+    /// keep requiring them.
+    pub(crate) fn for_pre_authorization(tx_version: u32) -> Self {
+        if tx_version == zcash_protocol::constants::V6_TX_VERSION {
+            AnchorRequirement::NotRequired
+        } else {
+            AnchorRequirement::Required
+        }
+    }
+
+    /// Resolves a shielded bundle's wire `anchor` to the anchor that should be used
+    /// when parsing it, given whether the bundle has no items that consume the anchor
+    /// (no Sapling spends or no Orchard-protocol actions).
+    ///
+    /// Returns `None` to mean "the anchor is absent and required"; callers should map
+    /// that case to their own missing-anchor error. An absent anchor that no bundle
+    /// item consumes always resolves to [`PLACEHOLDER_ANCHOR`], since no operation on
+    /// the parsed bundle can read the anchor's value in that case.
+    pub(crate) fn resolve(
+        self,
+        anchor: Option<[u8; 32]>,
+        anchor_is_unused: bool,
+    ) -> Option<[u8; 32]> {
+        match anchor {
+            Some(anchor) => Some(anchor),
+            None if anchor_is_unused => Some(PLACEHOLDER_ANCHOR),
+            None => match self {
+                AnchorRequirement::NotRequired => Some(PLACEHOLDER_ANCHOR),
+                AnchorRequirement::Required => None,
+            },
+        }
+    }
+}
+
 /// Global fields that are relevant to the transaction as a whole.
 #[derive(Clone, Debug, Serialize, Deserialize, Getters)]
 pub struct Global {
