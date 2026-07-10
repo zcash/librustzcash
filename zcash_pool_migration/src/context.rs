@@ -473,27 +473,12 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
         // Pre-split there are no migration locks yet, so no exclusions apply.
         let locks = BTreeSet::new();
-        let n_spends = crate::split::select_spendable_orchard_notes(&db, self.account, &locks)?
-            .len()
-            .max(1);
-        // The prep-fee reserved while decomposing must match the real split fee this plan will be
-        // signed with (`split::split_fee` / `split::finalize_split_outputs`), which itself depends
-        // on the resulting output count — so converge by re-planning with the fee implied by the
-        // previous round's output count. `FEE_ESTIMATE_ZATOSHI` seeds the first guess; output count
-        // only takes a handful of discrete values (bounded by the note-count cap), so this settles
-        // in a few iterations. `finalize_split_outputs` still errors defensively at signing time if
-        // the real balance ever undershoots this estimate (e.g. a note became unspendable between
-        // planning and signing), rather than shrinking a migration note to compensate.
-        let mut fee_estimate = FEE_ESTIMATE_ZATOSHI;
-        let mut plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
-        for _ in 0..8 {
-            let real_fee = crate::split::split_fee(n_spends, plan.migration_outputs.len().max(1));
-            if real_fee == fee_estimate {
-                break;
-            }
-            fee_estimate = real_fee;
-            plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
-        }
+        let reserved = BTreeSet::new();
+        let n_spends =
+            crate::split::select_spendable_orchard_notes(&db, self.account, &reserved, &locks)?
+                .len()
+                .max(1);
+        let (plan, fee_estimate) = converge_denomination_plan(total, n_spends)?;
         let output_values = plan
             .migration_outputs
             .iter()
@@ -795,29 +780,49 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             self.network_str(),
             store::STAGED_KIND_TRANSFER,
         )?;
+        let orchard_fvk = backend::account_orchard_fvk(&db, self.account)?;
         let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
         let mut pairs = Vec::with_capacity(schedule.transfers().len());
         for t in schedule.transfers() {
-            let request =
-                backend::self_payment_request(&db, &self.network, self.account, t.amount())?;
-            let proposal = backend::propose_migration_transfer(
-                &db,
-                &self.network,
-                self.account,
-                target,
-                u32::from(t.anchor_height()),
-                &reserved,
-                &locks,
-                request,
-            )?;
-            reserved.extend(backend::proposal_note_refs(&proposal));
-            let pczt = backend::create_transfer_pczt(
+            // Direct-builder path first (matches `sign_and_store_migration_schedule`): a
+            // self-funding note pays its own fee, no wallet fee/change logic needed. Falls back to
+            // the ordinary input-selection pipeline when no such note exists (the immediate/sweep
+            // migration path).
+            let pczt = if let Some(outcome) = backend::build_self_funding_transfer_pczt(
                 &mut db,
                 &self.network,
                 self.account,
-                &proposal,
+                &orchard_fvk,
+                u64::from(t.amount()),
+                &reserved,
+                &locks,
+                target,
                 u32::from(t.expiry_height()),
-            )?;
+            )? {
+                reserved.insert(outcome.spent_note_id);
+                outcome.pczt
+            } else {
+                let request =
+                    backend::self_payment_request(&db, &self.network, self.account, t.amount())?;
+                let proposal = backend::propose_migration_transfer(
+                    &db,
+                    &self.network,
+                    self.account,
+                    target,
+                    u32::from(t.anchor_height()),
+                    &reserved,
+                    &locks,
+                    request,
+                )?;
+                reserved.extend(backend::proposal_note_refs(&proposal));
+                backend::create_transfer_pczt(
+                    &mut db,
+                    &self.network,
+                    self.account,
+                    &proposal,
+                    u32::from(t.expiry_height()),
+                )?
+            };
             let unsigned = pczt.clone().serialize().map_err(|e| {
                 MigrationError::Pipeline(format!("serialize unsigned transfer pczt: {e:?}"))
             })?;
@@ -968,8 +973,16 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let db = self.open_wallet()?;
         let (target, anchor) = backend::target_and_anchor(&db)?;
         let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
-        let plan =
-            plan_denominations(total, FEE_ESTIMATE_ZATOSHI).map_err(MigrationError::Pipeline)?;
+        // No fee reservation here (unlike `prepare_note_split`): by the time this runs, the
+        // spendable balance is expected to already consist of the split's self-funding notes
+        // (each already carrying its own transfer-fee buffer) — there is no further transaction
+        // fee to pay to "unlock" them, so decomposing with a zero prep-fee is what reproduces
+        // those exact notes back as crossing values. A balance that is not (yet, or no longer)
+        // purely self-funding notes — including leftover Orchard change — decomposes on a
+        // best-effort basis; `MigrationContext::sign_and_store_migration_schedule` falls back to
+        // the ordinary input-selection pipeline for any crossing value with no matching note (see
+        // `backend::build_self_funding_transfer_pczt`).
+        let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
         let run_id = new_run_id();
         Ok(scheduling::build_schedule(
             &mut OsRng,
@@ -1298,6 +1311,39 @@ impl<P: Parameters + Clone> MigrationContext<P> {
 
 fn new_run_id() -> String {
     Uuid::new_v4().to_string()
+}
+
+/// Decompose `total` into self-funding power-of-ten notes ([`plan_denominations`]), converging the
+/// reserved fee estimate against the resulting output count.
+///
+/// The prep-fee reserved while decomposing must match the real split fee
+/// (`split::split_fee(n_spends, n_outputs)`), which itself depends on the resulting output count —
+/// so this re-plans with the fee implied by the previous round's output count until it settles.
+/// `FEE_ESTIMATE_ZATOSHI` seeds the first guess; output count only takes a handful of discrete
+/// values (bounded by the note-count cap), so this converges in a few iterations.
+///
+/// Both [`MigrationContext::prepare_note_split`] (planning a new split) and
+/// [`MigrationContext::propose_migration_transfers`] (re-deriving the schedule from the wallet's
+/// post-split balance) call this with the same `total`/`n_spends` a real split run would see, so
+/// they agree on the same denominations — otherwise a re-derived schedule could request crossing
+/// values that don't match any of the split's real self-funding notes.
+///
+/// Returns the plan together with the converged fee estimate.
+fn converge_denomination_plan(
+    total: u64,
+    n_spends: usize,
+) -> Result<(crate::denominations::DenominationPlan, u64), MigrationError> {
+    let mut fee_estimate = FEE_ESTIMATE_ZATOSHI;
+    let mut plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+    for _ in 0..8 {
+        let real_fee = crate::split::split_fee(n_spends, plan.migration_outputs.len().max(1));
+        if real_fee == fee_estimate {
+            break;
+        }
+        fee_estimate = real_fee;
+        plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+    }
+    Ok((plan, fee_estimate))
 }
 
 /// Classify a recoverable failure's error message into an [`AttentionReason`].

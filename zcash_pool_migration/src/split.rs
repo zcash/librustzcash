@@ -134,8 +134,9 @@ pub(crate) fn finalize_split_outputs(
     Ok((fee_with_change, Some(leftover - extra_action_cost)))
 }
 
-/// All spendable Orchard **V2** notes for `account`, excluding migration-locked notes. Selection
-/// goes through [`ReservedInputSource`] so its (txid, output_index) lock filtering applies.
+/// All spendable Orchard **V2** notes for `account`, excluding migration-locked notes and any
+/// already `reserved` by an earlier step in the same signing loop. Selection goes through
+/// [`ReservedInputSource`] so its (txid, output_index) lock filtering applies.
 ///
 /// Upstream now tracks Ironwood as a value pool distinct from Orchard — both share the
 /// `orchard::note::Note` plaintext shape, but the wallet backend accounts for them under separate
@@ -145,13 +146,13 @@ pub(crate) fn finalize_split_outputs(
 pub(crate) fn select_spendable_orchard_notes<P: Parameters>(
     db: &Db<P>,
     account: AccountUuid,
+    reserved: &BTreeSet<ReceivedNoteId>,
     migration_locks: &BTreeSet<(String, u32)>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, MigrationError> {
     let (target, _anchor) = db
         .get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted())?
         .ok_or(MigrationError::NotSynced)?;
-    let reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
-    let source = ReservedInputSource::new(db, &reserved, migration_locks);
+    let source = ReservedInputSource::new(db, reserved, migration_locks);
     let notes = source
         .select_unspent_notes(account, &[ShieldedPool::Orchard], target, &[])
         .map_err(|e| MigrationError::Pipeline(format!("note split: select notes: {e:?}")))?
@@ -193,7 +194,8 @@ pub(crate) fn build_split_pczt<P: Parameters + Clone>(
     outputs: &[u64],
 ) -> Result<(pczt::Pczt, SplitOutputs), MigrationError> {
     // --- immutable phase: select the notes to consolidate ---
-    let notes = select_spendable_orchard_notes(db, account, migration_locks)?;
+    let reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
+    let notes = select_spendable_orchard_notes(db, account, &reserved, migration_locks)?;
     if notes.is_empty() {
         return Err(MigrationError::Pipeline(
             "note split: no spendable Orchard notes".into(),

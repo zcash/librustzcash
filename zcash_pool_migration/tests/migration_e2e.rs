@@ -342,6 +342,70 @@ fn transfer_pipeline_produces_a_v6_ironwood_crossing_tx() {
     );
 }
 
+/// The direct-builder counterpart of the test above: when the spent note is *exactly*
+/// self-funding (`D + TRANSFER_FEE_BUFFER_ZATOSHI`, the shape a note split always mints), the
+/// transfer pipeline builds it directly (no wallet fee/change-selection logic) rather than falling
+/// back to the high-level input-selection pipeline — and produces no Orchard change output at all,
+/// since the note's value covers the crossing plus fee exactly.
+#[test]
+fn transfer_pipeline_builds_self_funding_notes_directly_with_no_change() {
+    const D: u64 = 100_000_000;
+    const SELF_FUNDING_VALUE: u64 = D + 20_000; // TRANSFER_FEE_BUFFER_ZATOSHI
+    let (_dir, st, db_path, account) = seed_wallet(&[SELF_FUNDING_VALUE], 10);
+    let usk = st.get_account().usk().clone();
+    drop(st);
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    let schedule = ctx.propose_migration_transfers().unwrap();
+    assert_eq!(
+        schedule.transfers().len(),
+        1,
+        "one crossing for a 1-ZEC plan"
+    );
+    ctx.sign_and_store_migration_schedule(&schedule, &usk)
+        .unwrap();
+
+    let due = ctx.next_due_transfer().unwrap().expect("a transfer is due");
+    let raw_tx = ctx.extract_broadcast_tx(due.pczt_bytes()).unwrap();
+    let tx = Transaction::read(&raw_tx[..], BranchId::Nu6_3).expect("extracted tx parses as V6");
+
+    let orchard = tx.orchard_bundle().expect("orchard bundle present");
+    assert_eq!(
+        orchard.actions().len(),
+        2,
+        "exactly one real spend plus the padded minimum — no real change output was added"
+    );
+
+    let iw_in = ironwood_value_in(&tx);
+    let orch_out = orchard_value_out(&tx);
+    assert_eq!(iw_in, D as i64, "exactly the crossing D lands in Ironwood");
+    assert_eq!(
+        orch_out, SELF_FUNDING_VALUE as i64,
+        "the whole self-funding note's value leaves the Orchard pool — none of it comes back as \
+         change"
+    );
+    assert_eq!(
+        orch_out - iw_in,
+        20_000,
+        "the fee is exactly the self-funding buffer"
+    );
+
+    // The persisted pending row's fee/selected-note fields come from the direct-builder path
+    // (`self_funding_pending_row`), not a `Proposal`'s shielded inputs.
+    let conn = Connection::open(&db_path).unwrap();
+    let (fee_zatoshi, selected_note_value): (i64, i64) = conn
+        .query_row(
+            "SELECT fee_zatoshi, selected_note_value FROM ext_ironwood_migration_pending_txs \
+             WHERE txid_hex = ?1",
+            [due.txid().to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(fee_zatoshi, 20_000);
+    assert_eq!(selected_note_value, SELF_FUNDING_VALUE as i64);
+}
+
 // ======================================================================================
 // Test 1: the note split plans and signs against the seeded wallet.
 // ======================================================================================
@@ -426,6 +490,102 @@ fn note_split_plans_and_signs_against_a_seeded_wallet() {
     assert_eq!(
         ctx.migration_state().unwrap(),
         MigrationState::SplitPendingConfirmation
+    );
+}
+
+/// The full pipeline, split through to transfer: once the note split's own self-funding notes are
+/// mined and spendable, `propose_migration_transfers` must re-derive the exact same crossing
+/// values the split minted, and `sign_and_store_migration_schedule` must spend each one directly
+/// (no wallet change output) rather than falling back to the ordinary input-selection pipeline —
+/// proving the two halves of the pipeline actually agree with each other, not just each in
+/// isolation.
+#[test]
+fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
+    // Same seed as `note_split_plans_and_signs_against_a_seeded_wallet`: divides evenly into
+    // [10, 1, 1] ZEC crossings (three self-funding notes), zero leftover.
+    let seed_value = 1_200_080_000u64;
+    let (_dir, mut st, db_path, account) = seed_wallet(&[seed_value], 10);
+    let usk = st.get_account().usk().clone();
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    // --- Phase 1: split, then mine + scan it for real ---
+    let split_proposal = ctx.prepare_note_split().unwrap();
+    let prepared_split = ctx.sign_note_split(&split_proposal, &usk).unwrap();
+    let split_raw_tx = ctx
+        .extract_broadcast_tx(prepared_split.pczt_bytes())
+        .unwrap();
+    let split_tx = Transaction::read(&split_raw_tx[..], BranchId::Nu6_3).expect("split tx parses");
+    ctx.record_transfer_result(
+        prepared_split.id(),
+        TransferResult::Success(prepared_split.txid()),
+    )
+    .unwrap();
+
+    let (h, _) = st.generate_next_block_from_tx(0, &split_tx);
+    st.scan_cached_blocks(h, 1);
+    // The split's own change outputs are "trusted" (wallet-produced), needing
+    // `ConfirmationsPolicy::default()`'s 3 confirmations before they count as spendable — the
+    // mined block is the first, so five more blocks leaves a comfortable margin.
+    st.add_empty_blocks(5);
+
+    assert_eq!(
+        ctx.migration_state().unwrap(),
+        MigrationState::ReadyToPropose,
+        "the split's notes are mined and spendable"
+    );
+
+    // --- Phase 2: propose + sign the schedule against the now-real self-funding notes ---
+    let schedule = ctx.propose_migration_transfers().unwrap();
+    let mut crossings: Vec<u64> = schedule
+        .transfers()
+        .iter()
+        .map(|t| u64::from(t.amount()))
+        .collect();
+    crossings.sort_unstable();
+    assert_eq!(
+        crossings,
+        vec![100_000_000u64, 100_000_000, 1_000_000_000],
+        "propose_migration_transfers reproduces exactly the split's own crossing values"
+    );
+    ctx.sign_and_store_migration_schedule(&schedule, &usk)
+        .unwrap();
+
+    // Every persisted transfer must have gone through the direct-builder path: exactly one real
+    // spend plus the padded minimum, no Orchard change, and the self-funding fee — checked against
+    // every pending row directly (order doesn't matter; the assertions are identical per row).
+    let conn = Connection::open(&db_path).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT raw_pczt, fee_zatoshi FROM ext_ironwood_migration_pending_txs")
+        .unwrap();
+    let rows: Vec<(Vec<u8>, i64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows.len(), 3, "one persisted transfer per crossing");
+
+    let mut observed_crossings: Vec<i64> = Vec::new();
+    for (raw_pczt, fee_zatoshi) in rows {
+        let raw_tx = ctx.extract_broadcast_tx(&raw_pczt).unwrap();
+        let tx = Transaction::read(&raw_tx[..], BranchId::Nu6_3).expect("transfer tx parses");
+        let orchard = tx.orchard_bundle().expect("orchard bundle present");
+        assert_eq!(
+            orchard.actions().len(),
+            2,
+            "direct-builder transfer: one real spend plus the padded minimum, no change"
+        );
+        assert_eq!(
+            fee_zatoshi, 20_000,
+            "direct-builder fee is the self-funding buffer"
+        );
+        observed_crossings.push(ironwood_value_in(&tx));
+    }
+    observed_crossings.sort_unstable();
+    assert_eq!(
+        observed_crossings,
+        vec![100_000_000i64, 100_000_000, 1_000_000_000],
+        "the same crossing values land in Ironwood as were scheduled"
     );
 }
 
