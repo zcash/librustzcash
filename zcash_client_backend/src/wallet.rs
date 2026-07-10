@@ -65,13 +65,19 @@ impl NoteId {
     }
 }
 
-/// A type that represents the recipient of a transaction output:
+/// A type that represents the recipient of a transaction output.
 ///
-/// * a recipient address;
-/// * for external unified addresses, the pool to which the payment is sent;
-/// * for wallet-internal outputs, the internal account ID and metadata about the note.
-/// * if the `transparent-inputs` feature is enabled, for ephemeral transparent outputs, the
-///   internal account ID and metadata about the outpoint;
+/// Variants vary along two independent axes:
+///
+/// * **Relationship to the wallet**: whether the recipient address is [`Self::External`] to
+///   the wallet, an [`Self::EphemeralTransparent`] address of a wallet account (used
+///   transiently as a middle hop), or otherwise internal to a wallet account (recorded as
+///   [`Self::InternalShielded`] or [`Self::InternalTransparent`], depending on payload
+///   domain).
+/// * **Payload domain**: whether the output is shielded (in which case what is recorded is
+///   the decrypted [`Note`], since the recipient address is not itself externally
+///   meaningful) or transparent (in which case what is recorded is the on-chain-observable
+///   recipient address, since transparent outputs carry no analogous decryptable payload).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient<AccountId> {
     /// An output sent to a recipient external to the wallet.
@@ -93,7 +99,7 @@ pub enum Recipient<AccountId> {
     /// a wallet account. Used to record the send side of a transparent output that
     /// the wallet both funded and received.
     ///
-    /// Distinct from [`Self::InternalAccount`] because for transparent outputs
+    /// Distinct from [`Self::InternalShielded`] because for transparent outputs
     /// the recipient address is observable on chain and must be recorded;
     /// additionally, the receiving account may not be known at the point the
     /// send is recorded. For shielded outputs the recipient address is not
@@ -108,7 +114,7 @@ pub enum Recipient<AccountId> {
     /// same-account outputs such as change (`external_address` is `None`) and
     /// for outputs received via an external IVK but funded by another wallet
     /// account, in which case `external_address` is the address that was paid.
-    InternalAccount {
+    InternalShielded {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
         note: Box<Note>,

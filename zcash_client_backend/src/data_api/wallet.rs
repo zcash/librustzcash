@@ -183,7 +183,7 @@ enum PcztRecipient<AccountId> {
     EphemeralTransparent {
         receiving_account: AccountId,
     },
-    InternalAccount {
+    InternalShielded {
         receiving_account: AccountId,
     },
     // This variant is placed at the end of the enum in order to preserve the encoded
@@ -215,11 +215,11 @@ impl<AccountId: Copy> PcztRecipient<AccountId> {
                 PcztRecipient::InternalTransparent { receiving_account },
                 None,
             ),
-            BuildRecipient::InternalAccount {
+            BuildRecipient::InternalShielded {
                 receiving_account,
                 external_address,
             } => (
-                PcztRecipient::InternalAccount { receiving_account },
+                PcztRecipient::InternalShielded { receiving_account },
                 external_address,
             ),
         }
@@ -1151,7 +1151,7 @@ enum BuildRecipient<AccountId> {
         receiving_account: AccountId,
         recipient_address: TransparentAddress,
     },
-    InternalAccount {
+    InternalShielded {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
     },
@@ -1171,10 +1171,10 @@ impl<AccountId> BuildRecipient<AccountId> {
             BuildRecipient::EphemeralTransparent { .. } => unreachable!(),
             #[cfg(feature = "transparent-inputs")]
             BuildRecipient::InternalTransparent { .. } => unreachable!(),
-            BuildRecipient::InternalAccount {
+            BuildRecipient::InternalShielded {
                 receiving_account,
                 external_address,
-            } => Recipient::InternalAccount {
+            } => Recipient::InternalShielded {
                 receiving_account,
                 external_address,
                 note: Box::new(note()),
@@ -1211,7 +1211,7 @@ impl<AccountId> BuildRecipient<AccountId> {
                 receiving_account,
                 recipient_address,
             },
-            BuildRecipient::InternalAccount { .. } => unreachable!(),
+            BuildRecipient::InternalShielded { .. } => unreachable!(),
         }
     }
 }
@@ -1856,7 +1856,7 @@ where
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
-                    BuildRecipient::InternalAccount {
+                    BuildRecipient::InternalShielded {
                         receiving_account: account_id,
                         external_address: None,
                     },
@@ -1891,7 +1891,7 @@ where
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            BuildRecipient::InternalAccount {
+                            BuildRecipient::InternalShielded {
                                 receiving_account: account_id,
                                 external_address: None,
                             },
@@ -1906,7 +1906,7 @@ where
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            BuildRecipient::InternalAccount {
+                            BuildRecipient::InternalShielded {
                                 receiving_account: account_id,
                                 external_address: None,
                             },
@@ -1943,7 +1943,7 @@ where
                         memo.clone(),
                     )?;
                     ironwood_output_meta.push((
-                        BuildRecipient::InternalAccount {
+                        BuildRecipient::InternalShielded {
                             receiving_account: account_id,
                             external_address: None,
                         },
@@ -2979,8 +2979,8 @@ where
             (PcztRecipient::InternalTransparent { .. }, _) => Err(PcztError::Invalid(
                 "shielded output cannot be InternalTransparent".into(),
             )),
-            (PcztRecipient::InternalAccount { receiving_account }, external_address) => {
-                Ok(Recipient::InternalAccount {
+            (PcztRecipient::InternalShielded { receiving_account }, external_address) => {
+                Ok(Recipient::InternalShielded {
                     receiving_account,
                     external_address,
                     note: Box::new(wallet_note(note)),
@@ -3113,12 +3113,12 @@ where
                                     recipient_address,
                                 }),
                             (
-                                PcztRecipient::InternalAccount {
+                                PcztRecipient::InternalShielded {
                                     receiving_account,
                                 },
                                 _,
                             ) => Err(PcztError::Invalid(
-                                "Transparent output cannot be InternalAccount".into(),
+                                "Transparent output cannot be InternalShielded".into(),
                             )),
                         }?;
 
