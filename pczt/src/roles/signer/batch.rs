@@ -11,22 +11,19 @@ pub const VERSION: u32 = 1;
 
 /// A request to sign several PCZTs as one operation.
 ///
-/// Protocol policy such as non-empty identifiers, unique messages, batch size,
-/// and all-or-nothing behavior is enforced by the application transporting the
-/// request.
+/// The PCZTs retain their caller-provided order. Protocol policy such as a
+/// non-empty request identifier, unique PCZTs, batch size, and all-or-nothing
+/// behavior is enforced by the application transporting the request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BatchSignRequest {
     request_id: Vec<u8>,
-    messages: Vec<BatchSignRequestMessage>,
+    pczts: Vec<Vec<u8>>,
 }
 
 impl BatchSignRequest {
     /// Constructs a batched PCZT signing request.
-    pub fn new(request_id: Vec<u8>, messages: Vec<BatchSignRequestMessage>) -> Self {
-        Self {
-            request_id,
-            messages,
-        }
+    pub fn new(request_id: Vec<u8>, pczts: Vec<Vec<u8>>) -> Self {
+        Self { request_id, pczts }
     }
 
     /// Returns the identifier that correlates this request with its response.
@@ -34,9 +31,9 @@ impl BatchSignRequest {
         &self.request_id
     }
 
-    /// Returns the PCZT messages to sign.
-    pub fn messages(&self) -> &[BatchSignRequestMessage] {
-        &self.messages
+    /// Returns the encoded PCZTs to sign, in request order.
+    pub fn pczts(&self) -> &[Vec<u8>] {
+        &self.pczts
     }
 
     /// Parses a Postcard-encoded batched PCZT signing request.
@@ -51,43 +48,20 @@ impl BatchSignRequest {
     }
 }
 
-/// One PCZT in a [`BatchSignRequest`].
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BatchSignRequestMessage {
-    message_id: Vec<u8>,
-    pczt: Vec<u8>,
-}
-
-impl BatchSignRequestMessage {
-    /// Constructs a PCZT signing message.
-    pub fn new(message_id: Vec<u8>, pczt: Vec<u8>) -> Self {
-        Self { message_id, pczt }
-    }
-
-    /// Returns the identifier that correlates this message with its signatures.
-    pub fn message_id(&self) -> &[u8] {
-        &self.message_id
-    }
-
-    /// Returns the encoded PCZT to sign.
-    pub fn pczt(&self) -> &[u8] {
-        &self.pczt
-    }
-}
-
-/// The signatures produced for a [`BatchSignRequest`].
+/// The signatures produced for a [`BatchSignRequest`], in request order.
+/// Entry `i` contains the signatures produced for PCZT `i` in the request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BatchSignResponse {
     request_id: Vec<u8>,
-    results: Vec<BatchSignResponseMessage>,
+    signatures: Vec<Vec<OrchardSpendAuthSignature>>,
 }
 
 impl BatchSignResponse {
     /// Constructs a batched PCZT signing response.
-    pub fn new(request_id: Vec<u8>, results: Vec<BatchSignResponseMessage>) -> Self {
+    pub fn new(request_id: Vec<u8>, signatures: Vec<Vec<OrchardSpendAuthSignature>>) -> Self {
         Self {
             request_id,
-            results,
+            signatures,
         }
     }
 
@@ -96,9 +70,9 @@ impl BatchSignResponse {
         &self.request_id
     }
 
-    /// Returns the signatures produced for each request message.
-    pub fn results(&self) -> &[BatchSignResponseMessage] {
-        &self.results
+    /// Returns the signatures produced for each request PCZT, in request order.
+    pub fn signatures(&self) -> &[Vec<OrchardSpendAuthSignature>] {
+        &self.signatures
     }
 
     /// Parses a Postcard-encoded batched PCZT signing response.
@@ -111,33 +85,6 @@ impl BatchSignResponse {
     /// Serializes this response using the current Postcard wire version.
     pub fn serialize(&self) -> Result<Vec<u8>, EncodingError> {
         Ok(serialize_versioned(&v1::BatchSignResponse::try_from(self)?))
-    }
-}
-
-/// The signatures produced for one message in a [`BatchSignRequest`].
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BatchSignResponseMessage {
-    message_id: Vec<u8>,
-    signatures: Vec<OrchardSpendAuthSignature>,
-}
-
-impl BatchSignResponseMessage {
-    /// Constructs a per-message signing response.
-    pub fn new(message_id: Vec<u8>, signatures: Vec<OrchardSpendAuthSignature>) -> Self {
-        Self {
-            message_id,
-            signatures,
-        }
-    }
-
-    /// Returns the identifier of the request message these signatures answer.
-    pub fn message_id(&self) -> &[u8] {
-        &self.message_id
-    }
-
-    /// Returns the produced Orchard-protocol spend authorization signatures.
-    pub fn signatures(&self) -> &[OrchardSpendAuthSignature] {
-        &self.signatures
     }
 }
 
@@ -193,25 +140,13 @@ mod v1 {
     #[derive(Deserialize, Serialize)]
     pub(super) struct BatchSignRequest {
         request_id: Vec<u8>,
-        messages: Vec<BatchSignRequestMessage>,
-    }
-
-    #[derive(Deserialize, Serialize)]
-    struct BatchSignRequestMessage {
-        message_id: Vec<u8>,
-        pczt: Vec<u8>,
+        pczts: Vec<Vec<u8>>,
     }
 
     #[derive(Deserialize, Serialize)]
     pub(super) struct BatchSignResponse {
         pub(super) request_id: Vec<u8>,
-        pub(super) results: Vec<BatchSignResponseMessage>,
-    }
-
-    #[derive(Deserialize, Serialize)]
-    pub(super) struct BatchSignResponseMessage {
-        pub(super) message_id: Vec<u8>,
-        pub(super) signatures: Vec<OrchardSpendAuthSignature>,
+        pub(super) signatures: Vec<Vec<OrchardSpendAuthSignature>>,
     }
 
     #[serde_as]
@@ -227,14 +162,7 @@ mod v1 {
         fn from(request: &super::BatchSignRequest) -> Self {
             Self {
                 request_id: request.request_id.clone(),
-                messages: request
-                    .messages
-                    .iter()
-                    .map(|message| BatchSignRequestMessage {
-                        message_id: message.message_id.clone(),
-                        pczt: message.pczt.clone(),
-                    })
-                    .collect(),
+                pczts: request.pczts.clone(),
             }
         }
     }
@@ -243,14 +171,7 @@ mod v1 {
         fn from(request: BatchSignRequest) -> Self {
             Self {
                 request_id: request.request_id,
-                messages: request
-                    .messages
-                    .into_iter()
-                    .map(|message| super::BatchSignRequestMessage {
-                        message_id: message.message_id,
-                        pczt: message.pczt,
-                    })
-                    .collect(),
+                pczts: request.pczts,
             }
         }
     }
@@ -261,18 +182,14 @@ mod v1 {
         fn try_from(response: &super::BatchSignResponse) -> Result<Self, Self::Error> {
             Ok(Self {
                 request_id: response.request_id.clone(),
-                results: response
-                    .results
+                signatures: response
+                    .signatures
                     .iter()
-                    .map(|result| {
-                        Ok(BatchSignResponseMessage {
-                            message_id: result.message_id.clone(),
-                            signatures: result
-                                .signatures
-                                .iter()
-                                .map(OrchardSpendAuthSignature::try_from)
-                                .collect::<Result<_, _>>()?,
-                        })
+                    .map(|signatures| {
+                        signatures
+                            .iter()
+                            .map(OrchardSpendAuthSignature::try_from)
+                            .collect::<Result<_, _>>()
                     })
                     .collect::<Result<_, EncodingError>>()?,
             })
@@ -285,18 +202,14 @@ mod v1 {
         fn try_from(response: BatchSignResponse) -> Result<Self, Self::Error> {
             Ok(Self {
                 request_id: response.request_id,
-                results: response
-                    .results
+                signatures: response
+                    .signatures
                     .into_iter()
-                    .map(|result| {
-                        Ok(super::BatchSignResponseMessage {
-                            message_id: result.message_id,
-                            signatures: result
-                                .signatures
-                                .into_iter()
-                                .map(super::OrchardSpendAuthSignature::try_from)
-                                .collect::<Result<_, _>>()?,
-                        })
+                    .map(|signatures| {
+                        signatures
+                            .into_iter()
+                            .map(super::OrchardSpendAuthSignature::try_from)
+                            .collect::<Result<_, _>>()
                     })
                     .collect::<Result<_, ParseError>>()?,
             })
@@ -347,17 +260,14 @@ mod tests {
     fn request_round_trip() {
         let request = BatchSignRequest::new(
             b"request".to_vec(),
-            vec![
-                BatchSignRequestMessage::new(b"first".to_vec(), b"pczt-1".to_vec()),
-                BatchSignRequestMessage::new(b"second".to_vec(), b"pczt-2".to_vec()),
-            ],
+            vec![b"pczt-1".to_vec(), b"pczt-2".to_vec()],
         );
 
         let encoded = request.serialize();
         assert_eq!(BatchSignRequest::parse(&encoded).unwrap(), request);
         assert_eq!(
             hex::encode(encoded),
-            "010772657175657374020566697273740670637a742d31067365636f6e640670637a742d32"
+            "010772657175657374020670637a742d310670637a742d32"
         );
     }
 
@@ -365,21 +275,18 @@ mod tests {
     fn response_round_trip() {
         let response = BatchSignResponse::new(
             b"request".to_vec(),
-            vec![BatchSignResponseMessage::new(
-                b"first".to_vec(),
-                vec![
-                    OrchardSpendAuthSignature::from_parts(
-                        orchard::ValuePool::Orchard,
-                        0,
-                        [0x11; 64],
-                    ),
-                    OrchardSpendAuthSignature::from_parts(
-                        orchard::ValuePool::Ironwood,
-                        12,
-                        [0x22; 64],
-                    ),
-                ],
-            )],
+            vec![
+                vec![OrchardSpendAuthSignature::from_parts(
+                    orchard::ValuePool::Orchard,
+                    0,
+                    [0x11; 64],
+                )],
+                vec![OrchardSpendAuthSignature::from_parts(
+                    orchard::ValuePool::Ironwood,
+                    12,
+                    [0x22; 64],
+                )],
+            ],
         );
 
         let encoded = response.serialize().unwrap();
@@ -408,14 +315,11 @@ mod tests {
     fn response_parse_rejects_unknown_value_pool() {
         let wire = v1::BatchSignResponse {
             request_id: vec![],
-            results: vec![v1::BatchSignResponseMessage {
-                message_id: vec![],
-                signatures: vec![v1::OrchardSpendAuthSignature {
-                    value_pool: 2,
-                    action_index: 0,
-                    signature: [0; 64],
-                }],
-            }],
+            signatures: vec![vec![v1::OrchardSpendAuthSignature {
+                value_pool: 2,
+                action_index: 0,
+                signature: [0; 64],
+            }]],
         };
         let encoded = serialize_versioned(&wire);
         assert!(matches!(
