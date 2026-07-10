@@ -96,6 +96,16 @@ impl ActionRedactor<'_> {
         });
     }
 
+    /// Removes the output note commitment.
+    ///
+    /// The receiver recomputes `cmx` from the output note fields and the
+    /// action's spend nullifier.
+    pub fn clear_cmx(&mut self) {
+        self.redact(|action| {
+            action.output.cmx = None;
+        });
+    }
+
     /// Removes the spend authorizing signature.
     pub fn clear_spend_auth_sig(&mut self) {
         self.redact(|action| {
