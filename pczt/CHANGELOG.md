@@ -135,7 +135,8 @@ workspace.
   of PCZTs to an external signer and returning their Orchard and Ironwood spend
   authorization signatures. Sapling spend authorization signatures are not represented.
   Requests expose logical `Pczt` values, and both directions preserve request order in
-  a versioned Postcard wire format.
+  a versioned Postcard wire format. Request and response correlation is left to the
+  application transport.
 - `pczt::roles::verifier::Verifier::with_ironwood`
 - `pczt::roles::updater::Updater::update_ironwood_with`
 - `pczt::roles::updater::AnchorUpdateError` and

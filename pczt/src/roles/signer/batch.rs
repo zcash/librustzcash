@@ -3,6 +3,8 @@
 //! Responses only represent Orchard-protocol spend authorization signatures for the
 //! Orchard and Ironwood value pools. Sapling spend authorization signatures are not
 //! represented.
+//!
+//! Request and response correlation is the responsibility of the application transport.
 
 use alloc::vec::Vec;
 
@@ -16,24 +18,18 @@ pub const VERSION: u32 = 1;
 
 /// A request to sign several PCZTs as one operation.
 ///
-/// The PCZTs retain their caller-provided order. Protocol policy such as a
-/// non-empty request identifier, unique PCZTs, batch size, and all-or-nothing
-/// behavior is enforced by the application transporting the request.
+/// The PCZTs retain their caller-provided order. Protocol policy such as unique
+/// PCZTs, batch size, and all-or-nothing behavior is enforced by the application
+/// transporting the request.
 #[derive(Clone, Debug)]
 pub struct BatchSignRequest {
-    request_id: Vec<u8>,
     pczts: Vec<Pczt>,
 }
 
 impl BatchSignRequest {
     /// Constructs a batched PCZT signing request.
-    pub fn new(request_id: Vec<u8>, pczts: Vec<Pczt>) -> Self {
-        Self { request_id, pczts }
-    }
-
-    /// Returns the identifier that correlates this request with its response.
-    pub fn request_id(&self) -> &[u8] {
-        &self.request_id
+    pub fn new(pczts: Vec<Pczt>) -> Self {
+        Self { pczts }
     }
 
     /// Returns the PCZTs to sign, in request order.
@@ -70,22 +66,13 @@ impl BatchSignRequest {
 /// spend authorization signatures are not supported by this response format.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BatchSignResponse {
-    request_id: Vec<u8>,
     signatures: Vec<Vec<SpendAuthSignature>>,
 }
 
 impl BatchSignResponse {
     /// Constructs a batched PCZT signing response.
-    pub fn new(request_id: Vec<u8>, signatures: Vec<Vec<SpendAuthSignature>>) -> Self {
-        Self {
-            request_id,
-            signatures,
-        }
-    }
-
-    /// Returns the identifier of the request answered by this response.
-    pub fn request_id(&self) -> &[u8] {
-        &self.request_id
+    pub fn new(signatures: Vec<Vec<SpendAuthSignature>>) -> Self {
+        Self { signatures }
     }
 
     /// Returns the Orchard and Ironwood signatures produced for each request PCZT, in
@@ -160,13 +147,11 @@ mod v1 {
 
     #[derive(Deserialize, Serialize)]
     pub(super) struct BatchSignRequest {
-        request_id: Vec<u8>,
         pczts: Vec<Vec<u8>>,
     }
 
     #[derive(Deserialize, Serialize)]
     pub(super) struct BatchSignResponse {
-        pub(super) request_id: Vec<u8>,
         pub(super) signatures: Vec<Vec<SpendAuthSignature>>,
     }
 
@@ -190,7 +175,6 @@ mod v1 {
 
         fn try_from(request: &super::BatchSignRequest) -> Result<Self, Self::Error> {
             Ok(Self {
-                request_id: request.request_id.clone(),
                 pczts: request
                     .pczts
                     .iter()
@@ -206,7 +190,6 @@ mod v1 {
 
         fn try_from(request: BatchSignRequest) -> Result<Self, Self::Error> {
             Ok(Self {
-                request_id: request.request_id,
                 pczts: request
                     .pczts
                     .into_iter()
@@ -221,7 +204,6 @@ mod v1 {
 
         fn try_from(response: &super::BatchSignResponse) -> Result<Self, Self::Error> {
             Ok(Self {
-                request_id: response.request_id.clone(),
                 signatures: response
                     .signatures
                     .iter()
@@ -241,7 +223,6 @@ mod v1 {
 
         fn try_from(response: BatchSignResponse) -> Result<Self, Self::Error> {
             Ok(Self {
-                request_id: response.request_id,
                 signatures: response
                     .signatures
                     .into_iter()
@@ -316,16 +297,12 @@ mod tests {
 
     #[test]
     fn request_round_trip() {
-        let request = BatchSignRequest::new(
-            b"request".to_vec(),
-            vec![empty_pczt(10_000_000), empty_pczt(10_000_001)],
-        );
+        let request = BatchSignRequest::new(vec![empty_pczt(10_000_000), empty_pczt(10_000_001)]);
 
         let expected_pczts = serialize_pczts(request.pczts());
         let encoded = request.serialize().unwrap();
         let decoded = BatchSignRequest::parse(&encoded).unwrap();
 
-        assert_eq!(decoded.request_id(), request.request_id());
         assert_eq!(serialize_pczts(decoded.pczts()), expected_pczts);
     }
 
@@ -333,12 +310,10 @@ mod tests {
     fn request_parse_rejects_invalid_pczt() {
         #[derive(Serialize)]
         struct RawBatchSignRequest {
-            request_id: Vec<u8>,
             pczts: Vec<Vec<u8>>,
         }
 
         let encoded = serialize_versioned(&RawBatchSignRequest {
-            request_id: vec![],
             pczts: vec![b"not-a-pczt".to_vec()],
         });
         assert!(matches!(
@@ -349,21 +324,18 @@ mod tests {
 
     #[test]
     fn response_round_trip() {
-        let response = BatchSignResponse::new(
-            b"request".to_vec(),
-            vec![
-                vec![SpendAuthSignature::from_parts(
-                    orchard::ValuePool::Orchard,
-                    0,
-                    [0x11; 64],
-                )],
-                vec![SpendAuthSignature::from_parts(
-                    orchard::ValuePool::Ironwood,
-                    12,
-                    [0x22; 64],
-                )],
-            ],
-        );
+        let response = BatchSignResponse::new(vec![
+            vec![SpendAuthSignature::from_parts(
+                orchard::ValuePool::Orchard,
+                0,
+                [0x11; 64],
+            )],
+            vec![SpendAuthSignature::from_parts(
+                orchard::ValuePool::Ironwood,
+                12,
+                [0x22; 64],
+            )],
+        ]);
 
         let encoded = response.serialize().unwrap();
         assert_eq!(BatchSignResponse::parse(&encoded).unwrap(), response);
@@ -379,7 +351,7 @@ mod tests {
 
     #[test]
     fn parse_rejects_trailing_data() {
-        let mut encoded = BatchSignRequest::new(vec![], vec![]).serialize().unwrap();
+        let mut encoded = BatchSignRequest::new(vec![]).serialize().unwrap();
         encoded.push(0);
         assert!(matches!(
             BatchSignRequest::parse(&encoded),
@@ -391,7 +363,6 @@ mod tests {
     fn response_parse_rejects_unknown_value_pool() {
         #[derive(Serialize)]
         struct RawBatchSignResponse {
-            request_id: Vec<u8>,
             signatures: Vec<Vec<RawSpendAuthSignature>>,
         }
 
@@ -405,7 +376,6 @@ mod tests {
         }
 
         let wire = RawBatchSignResponse {
-            request_id: vec![],
             signatures: vec![vec![RawSpendAuthSignature {
                 value_pool: 2,
                 action_index: 0,
