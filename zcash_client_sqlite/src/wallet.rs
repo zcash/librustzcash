@@ -3674,28 +3674,26 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
 }
 
 /// Returns the minimum checkpoint height that exists in all note commitment trees that contain
-/// data. When both trees have checkpoints, returns the minimum of their intersection. When only
-/// one tree has checkpoints, returns that tree's minimum. Returns `None` when both are empty.
+/// data. A height qualifies when every tree that has any checkpoints has a checkpoint at that
+/// height. Returns `None` when all trees are empty.
 fn min_shared_checkpoint_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     Ok(conn
         .query_row(
             "SELECT MIN(checkpoint_id) FROM (
-                -- When both trees have checkpoints, returns the minimum of their intersection.
-                SELECT MIN(sc.checkpoint_id) AS checkpoint_id
-                    FROM sapling_tree_checkpoints sc
-                    JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = sc.checkpoint_id
-                -- When only one tree has checkpoints, returns that tree's minimum.
-                UNION ALL
-                    SELECT MIN(sc.checkpoint_id) AS checkpoint_id
-                    FROM sapling_tree_checkpoints sc
-                    WHERE NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints)
-                UNION ALL
-                    SELECT MIN(oc.checkpoint_id) AS checkpoint_id
-                    FROM orchard_tree_checkpoints oc
-                    WHERE NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints)
-             )",
+                SELECT checkpoint_id FROM sapling_tree_checkpoints
+                UNION
+                SELECT checkpoint_id FROM orchard_tree_checkpoints
+                UNION
+                SELECT checkpoint_id FROM ironwood_tree_checkpoints
+             )
+             WHERE (checkpoint_id IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
+                    OR NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints))
+             AND (checkpoint_id IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
+                  OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+             AND (checkpoint_id IN (SELECT checkpoint_id FROM ironwood_tree_checkpoints)
+                  OR NOT EXISTS (SELECT 1 FROM ironwood_tree_checkpoints))",
             [],
             |row| row.get::<_, Option<u32>>(0),
         )
@@ -3711,7 +3709,7 @@ fn min_shared_checkpoint_height(
 /// "active" is defined according to the features enabled on this crate.
 ///
 /// This will return the height that has a checkpoint in every tree that contains data. The orchard
-/// table exists unconditionally but is empty when the orchard feature is not active.
+/// and ironwood tables exist unconditionally but are empty when the orchard feature is not active.
 fn select_truncation_height(
     conn: &rusqlite::Transaction,
     requested_height: BlockHeight,
@@ -3723,6 +3721,8 @@ fn select_truncation_height(
             AND height IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
             AND (height IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
                  OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+            AND (height IN (SELECT checkpoint_id FROM ironwood_tree_checkpoints)
+                 OR NOT EXISTS (SELECT 1 FROM ironwood_tree_checkpoints))
             "#,
         named_params! {":requested_height": u32::from(requested_height)},
         |row| row.get::<_, Option<u32>>(0),
@@ -4154,7 +4154,7 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
         let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
         let truncation_target = target_height.max(pruning_floor);
 
-        // Determine the minimum sapling and orchard checkpoints within the pruning window.
+        // Determine the minimum Sapling checkpoint within the pruning window.
         let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
             conn,
             crate::SAPLING_TABLES_PREFIX,
@@ -4166,8 +4166,8 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
 
         #[cfg(feature = "orchard")]
         {
-            // Check that Orchard checkpoint matches the Sapling checkpoint. These should
-            // always match unless the database is corrupted.
+            // Check that the Orchard and Ironwood checkpoints match the Sapling checkpoint.
+            // These should always match unless the database is corrupted.
             let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
                 conn,
                 crate::ORCHARD_TABLES_PREFIX,
@@ -4179,6 +4179,20 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
             if orchard_window_floor != sapling_window_floor {
                 return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
                     "Sapling and Orchard should have the same checkpoints".into(),
+                )));
+            }
+
+            let ironwood_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+                conn,
+                crate::IRONWOOD_TABLES_PREFIX,
+                truncation_target,
+            )
+            .map_err(ShardTreeError::Storage)
+            .map_err(SqliteClientError::from)
+            .map_err(RewindError::DataSource)?;
+            if ironwood_window_floor != sapling_window_floor {
+                return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
+                    "Sapling and Ironwood should have the same checkpoints".into(),
                 )));
             }
         }
@@ -5327,6 +5341,7 @@ pub mod testing {
 mod tests {
     use std::num::NonZeroU32;
 
+    use rusqlite::Connection;
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, SecretVec};
     use uuid::Uuid;
@@ -5337,7 +5352,7 @@ mod tests {
     };
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::value::Zatoshis;
+    use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
     use crate::{
         AccountUuid,
@@ -5345,7 +5360,50 @@ mod tests {
         testing::{BlockCache, db::TestDbFactory},
     };
 
-    use super::account_birthday;
+    use super::{account_birthday, min_shared_checkpoint_height, select_truncation_height};
+
+    fn connection_with_checkpoint_tables() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE blocks (height INTEGER PRIMARY KEY);
+             CREATE TABLE sapling_tree_checkpoints (checkpoint_id INTEGER PRIMARY KEY);
+             CREATE TABLE orchard_tree_checkpoints (checkpoint_id INTEGER PRIMARY KEY);
+             CREATE TABLE ironwood_tree_checkpoints (checkpoint_id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn truncation_height_requires_an_ironwood_checkpoint() {
+        let mut conn = connection_with_checkpoint_tables();
+        conn.execute_batch(
+            "INSERT INTO blocks (height) VALUES (10), (11);
+             INSERT INTO sapling_tree_checkpoints (checkpoint_id) VALUES (10), (11);
+             INSERT INTO orchard_tree_checkpoints (checkpoint_id) VALUES (10), (11);
+             INSERT INTO ironwood_tree_checkpoints (checkpoint_id) VALUES (10);",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        assert_eq!(
+            select_truncation_height(&tx, BlockHeight::from_u32(11)).unwrap(),
+            BlockHeight::from_u32(10),
+        );
+    }
+
+    #[test]
+    fn safe_rewind_height_requires_an_ironwood_checkpoint() {
+        let conn = connection_with_checkpoint_tables();
+        conn.execute_batch(
+            "INSERT INTO sapling_tree_checkpoints (checkpoint_id) VALUES (10);
+             INSERT INTO orchard_tree_checkpoints (checkpoint_id) VALUES (10);
+             INSERT INTO ironwood_tree_checkpoints (checkpoint_id) VALUES (11);",
+        )
+        .unwrap();
+
+        assert_eq!(min_shared_checkpoint_height(&conn).unwrap(), None);
+    }
 
     #[test]
     fn empty_database_has_no_balance() {
