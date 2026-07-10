@@ -94,8 +94,8 @@ workspace.
   error and leaves the PCZT unmodified.
 - PCZT roles that do not consume shielded anchors now preserve absent Sapling,
   Orchard, and Ironwood anchors while parsing v6 transactions. Proving and
-  transaction extraction still require anchors for Sapling bundles with spends
-  and Orchard or Ironwood bundles with actions.
+  transaction extraction still require anchors for non-empty Sapling, Orchard,
+  and Ironwood bundles.
 - The Sapling, Orchard, and Ironwood Provers now reject non-zero-valued spends
   whose witnesses do not root to the bundle anchor before creating proofs.
 - PCZT parse errors surfaced by Sapling and Orchard role APIs now use

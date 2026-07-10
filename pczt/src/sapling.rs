@@ -535,8 +535,8 @@ impl Bundle {
     ///
     /// If the bundle's `anchor` is absent and `anchor_requirement` is
     /// [`AnchorRequirement::Required`], returns [`ParseError::MissingAnchor`] unless the
-    /// bundle has no spends (in which case no operation on the parsed bundle can read
-    /// the anchor's value).
+    /// bundle has no spends or outputs (in which case there is nothing to prove or
+    /// extract).
     ///
     /// [`AnchorRequirement::Required`]: crate::common::AnchorRequirement::Required
     pub(crate) fn into_parsed(
@@ -545,7 +545,10 @@ impl Bundle {
     ) -> Result<Parsed, ParseError> {
         let wire_anchor = self.anchor;
         let anchor = anchor_requirement
-            .resolve(wire_anchor, self.spends.is_empty())
+            .resolve(
+                wire_anchor,
+                self.spends.is_empty() && self.outputs.is_empty(),
+            )
             .ok_or(ParseError::MissingAnchor)?;
 
         let spends = self
@@ -712,6 +715,7 @@ impl Bundle {
 /// the `sapling` crate.
 #[cfg(feature = "sapling")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ParseError {
     /// The operation requires the bundle's `anchor` to be set, but it was absent.
     ///
@@ -733,6 +737,7 @@ impl From<sapling::pczt::ParseError> for ParseError {
 /// consistent with its anchor.
 #[cfg(feature = "sapling")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AnchorConsistencyError {
     /// A non-zero-valued spend has a `witness` but is missing other note data required
     /// to compute its Merkle path root.
@@ -813,11 +818,10 @@ impl Parsed {
 mod tests {
     use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 
-    use super::Bundle;
+    use super::{Bundle, ParseError};
     use crate::common::AnchorRequirement;
 
-    #[test]
-    fn output_only_bundle_parses_without_anchor() {
+    fn output_only_bundle() -> Bundle {
         let recipient = sapling::zip32::ExtendedSpendingKey::master(&[0; 32])
             .to_diversifiable_full_viewing_key()
             .default_address()
@@ -838,11 +842,25 @@ mod tests {
         let (bundle, _) = builder
             .build_for_pczt(ChaCha20Rng::from_seed([0; 32]))
             .unwrap();
-        let output_count = bundle.outputs().len();
         let mut bundle = Bundle::serialize_from(bundle);
         bundle.anchor = None;
+        bundle
+    }
 
-        let parsed = bundle.into_parsed(AnchorRequirement::Required).unwrap();
+    #[test]
+    fn output_only_bundle_requires_anchor_when_required() {
+        assert!(matches!(
+            output_only_bundle().into_parsed(AnchorRequirement::Required),
+            Err(ParseError::MissingAnchor)
+        ));
+    }
+
+    #[test]
+    fn output_only_bundle_preserves_absent_anchor_when_not_required() {
+        let bundle = output_only_bundle();
+        let output_count = bundle.outputs.len();
+
+        let parsed = bundle.into_parsed(AnchorRequirement::NotRequired).unwrap();
         assert!(parsed.bundle.spends().is_empty());
         assert_eq!(parsed.bundle.outputs().len(), output_count);
 

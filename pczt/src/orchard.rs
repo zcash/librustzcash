@@ -229,7 +229,7 @@ pub(crate) mod testing {
                 proprietary: BTreeMap::new(),
             },
             output: Output {
-                cmx: [4; 32],
+                cmx: Some([4; 32]),
                 ephemeral_key: [5; 32],
                 enc_ciphertext: EncCiphertext::Encrypted(alloc::vec![6; 580]),
                 out_ciphertext: alloc::vec![7; 80],
@@ -1632,6 +1632,7 @@ pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<B
 /// Ironwood) into the form used by the `orchard` crate.
 #[cfg(feature = "orchard")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ParseError {
     /// The operation requires the bundle's `anchor` to be set, but it was absent.
     ///
@@ -1653,6 +1654,7 @@ impl From<orchard::pczt::ParseError> for ParseError {
 /// witnesses are consistent with its anchor.
 #[cfg(feature = "orchard")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum AnchorConsistencyError {
     /// A non-zero-valued spend has a `witness` but is missing other note data required
     /// to compute its Merkle path root.

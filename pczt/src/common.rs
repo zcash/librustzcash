@@ -19,8 +19,8 @@ pub(crate) const FLAG_SHIELDED_MODIFIABLE: u8 = 0b1000_0000;
 /// encoding for the Sapling, Orchard, and Ironwood note commitment trees.
 pub(crate) const PLACEHOLDER_ANCHOR: [u8; 32] = [0; 32];
 
-/// Governs whether a shielded bundle's `anchor` must be set in order to parse it into
-/// the form used by the payment protocol crates.
+/// Governs whether a non-empty shielded bundle's `anchor` must be set in order to parse
+/// it into the form used by the payment protocol crates.
 ///
 /// [ZIP 374](https://zips.z.cash/zip-0374) makes the anchor of a v6 transaction's
 /// shielded bundles deferrable until proving, so operations that do not depend on the
@@ -36,7 +36,7 @@ pub(crate) enum AnchorRequirement {
     #[cfg_attr(not(any(feature = "orchard", feature = "sapling")), allow(dead_code))]
     NotRequired,
     /// The operation requires the anchor's real value; parsing fails if it is absent
-    /// and a bundle item consumes it.
+    /// from a non-empty bundle.
     Required,
 }
 
@@ -57,25 +57,22 @@ impl AnchorRequirement {
     }
 
     /// Resolves a shielded bundle's wire `anchor` to the anchor that should be used
-    /// when parsing it, given whether the bundle has no items that consume the anchor
-    /// (no Sapling spends or no Orchard-protocol actions).
+    /// when parsing it, given whether the bundle has no transaction items (no Sapling
+    /// spends or outputs, or no Orchard-protocol actions).
     ///
     /// Returns `None` to mean "the anchor is absent and required"; callers should map
-    /// that case to their own missing-anchor error. An absent anchor that no bundle
-    /// item consumes always resolves to [`PLACEHOLDER_ANCHOR`], since no operation on
-    /// the parsed bundle can read the anchor's value in that case.
+    /// that case to their own missing-anchor error. An absent anchor on an empty bundle
+    /// resolves to [`PLACEHOLDER_ANCHOR`], since there is nothing to prove or extract.
     pub(crate) fn resolve(
         self,
         anchor: Option<[u8; 32]>,
-        anchor_is_unused: bool,
+        bundle_is_empty: bool,
     ) -> Option<[u8; 32]> {
-        match anchor {
-            Some(anchor) => Some(anchor),
-            None if anchor_is_unused => Some(PLACEHOLDER_ANCHOR),
-            None => match self {
-                AnchorRequirement::NotRequired => Some(PLACEHOLDER_ANCHOR),
-                AnchorRequirement::Required => None,
-            },
+        match (self, anchor) {
+            (_, Some(anchor)) => Some(anchor),
+            (AnchorRequirement::NotRequired, None) => Some(PLACEHOLDER_ANCHOR),
+            (AnchorRequirement::Required, None) if bundle_is_empty => Some(PLACEHOLDER_ANCHOR),
+            (AnchorRequirement::Required, None) => None,
         }
     }
 }
