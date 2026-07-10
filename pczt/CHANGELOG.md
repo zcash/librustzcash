@@ -92,6 +92,15 @@ workspace.
   add, remove, or reorder actions; doing so now returns the new
   `pczt::roles::low_level_signer::OrchardParseError::SigningClosureModifiedActions`
   error and leaves the PCZT unmodified.
+- PCZT roles that do not consume shielded anchors now preserve absent Sapling,
+  Orchard, and Ironwood anchors while parsing v6 transactions. Proving and
+  transaction extraction still require anchors for Sapling bundles with spends
+  and Orchard or Ironwood bundles with actions.
+- The Sapling, Orchard, and Ironwood Provers now reject non-zero-valued spends
+  whose witnesses do not root to the bundle anchor before creating proofs.
+- PCZT parse errors surfaced by Sapling and Orchard role APIs now use
+  `pczt::sapling::ParseError` and `pczt::orchard::ParseError`, so callers can
+  distinguish missing anchors from other malformed bundle data.
 
 ### Added
 - `pczt::roles::creator::Error`, the error type returned by the now-fallible
@@ -156,6 +165,11 @@ workspace.
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
   `pczt::roles::verifier::OrchardError`, and `pczt::roles::prover::OrchardError`.
+- `pczt::sapling::ParseError`, `pczt::sapling::AnchorConsistencyError`
+- `pczt::orchard::ParseError`, `pczt::orchard::AnchorConsistencyError`
+- `pczt::roles::prover::SaplingError::InconsistentWitness`
+- `pczt::roles::prover::OrchardError::InconsistentWitness`
+- `pczt::roles::prover::IronwoodError::InconsistentWitness`
 
 ## [0.7.0] - 2026-06-02
 
