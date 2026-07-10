@@ -60,9 +60,38 @@ pub mod orchard;
 pub mod sapling;
 pub mod transparent;
 
-pub(crate) const MAGIC_BYTES: &[u8] = b"PCZT";
+pub(crate) const MAGIC_BYTES: &[u8; 4] = b"PCZT";
 pub(crate) const PCZT_VERSION_1: u32 = 1;
 pub(crate) const PCZT_VERSION_2: u32 = 2;
+
+const VERSIONED_HEADER_LEN: usize = 8;
+
+pub(crate) enum HeaderParseError {
+    InvalidMagic,
+    TooShort,
+}
+
+pub(crate) fn parse_header<'a>(
+    bytes: &'a [u8],
+    magic: &[u8; 4],
+) -> Result<(u32, &'a [u8]), HeaderParseError> {
+    if bytes.len() < VERSIONED_HEADER_LEN {
+        return Err(HeaderParseError::TooShort);
+    }
+    if &bytes[..4] != magic {
+        return Err(HeaderParseError::InvalidMagic);
+    }
+
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    Ok((version, &bytes[VERSIONED_HEADER_LEN..]))
+}
+
+pub(crate) fn serialize_header(magic: &[u8; 4], version: u32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(VERSIONED_HEADER_LEN);
+    bytes.extend_from_slice(magic);
+    bytes.extend_from_slice(&version.to_le_bytes());
+    bytes
+}
 
 /// Parses a PCZT from its encoding.
 pub fn parse(bytes: &[u8]) -> Result<Pczt, ParseError> {
@@ -112,9 +141,7 @@ pub mod v1 {
 
     impl Pczt {
         pub fn serialize(&self) -> Vec<u8> {
-            let mut bytes = vec![];
-            bytes.extend_from_slice(crate::MAGIC_BYTES);
-            bytes.extend_from_slice(&crate::PCZT_VERSION_1.to_le_bytes());
+            let bytes = crate::serialize_header(crate::MAGIC_BYTES, crate::PCZT_VERSION_1);
             postcard::to_extend(&self, bytes).expect("can serialize into memory")
         }
     }
@@ -231,9 +258,7 @@ pub mod v2 {
 
     impl Pczt {
         pub fn serialize(&self) -> Vec<u8> {
-            let mut bytes = vec![];
-            bytes.extend_from_slice(crate::MAGIC_BYTES);
-            bytes.extend_from_slice(&crate::PCZT_VERSION_2.to_le_bytes());
+            let bytes = crate::serialize_header(crate::MAGIC_BYTES, crate::PCZT_VERSION_2);
             postcard::to_extend(&self, bytes).expect("can serialize into memory")
         }
     }
@@ -385,19 +410,15 @@ pub enum EncodingError {
 impl Pczt {
     /// Parses a PCZT from its encoding.
     pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
-        if bytes.len() < 8 {
-            return Err(ParseError::TooShort);
-        }
-        if &bytes[..4] != MAGIC_BYTES {
-            return Err(ParseError::NotPczt);
-        }
-
-        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        let (version, body) = parse_header(bytes, MAGIC_BYTES).map_err(|e| match e {
+            HeaderParseError::InvalidMagic => ParseError::NotPczt,
+            HeaderParseError::TooShort => ParseError::TooShort,
+        })?;
         match version {
-            PCZT_VERSION_1 => postcard::from_bytes::<v1::Pczt>(&bytes[8..])
+            PCZT_VERSION_1 => postcard::from_bytes::<v1::Pczt>(body)
                 .map(Pczt::from)
                 .map_err(ParseError::Invalid),
-            PCZT_VERSION_2 => postcard::from_bytes::<v2::Pczt>(&bytes[8..])
+            PCZT_VERSION_2 => postcard::from_bytes::<v2::Pczt>(body)
                 .map_err(ParseError::Invalid)
                 .and_then(v2::Pczt::into_logical),
             _ => Err(ParseError::UnknownVersion(version)),

@@ -5,6 +5,12 @@
 //! represented.
 //!
 //! Request and response correlation is the responsibility of the application transport.
+//! Requests encode one shared PCZT version followed by headerless, version-specific PCZT
+//! payloads, so every PCZT in a batch uses the same encoding version.
+//!
+//! The request encoding is `"PCZB" || batch_version_le || pczt_version_le || body`, and
+//! the response encoding is `"PCZS" || batch_version_le || body`. Both version fields
+//! are four-byte little-endian integers, and each body uses the Postcard wire format.
 
 use alloc::vec::Vec;
 
@@ -15,6 +21,9 @@ use crate::Pczt;
 
 /// The current batched PCZT signing wire version.
 pub const VERSION: u32 = 1;
+
+const REQUEST_MAGIC_BYTES: &[u8; 4] = b"PCZB"; // PCZT batch.
+const RESPONSE_MAGIC_BYTES: &[u8; 4] = b"PCZS"; // PCZT signatures.
 
 /// A request to sign several PCZTs as one operation.
 ///
@@ -44,8 +53,17 @@ impl BatchSignRequest {
     /// Returns an error if the batch encoding is invalid or contains a PCZT that
     /// cannot be parsed.
     pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
-        let body = parse_version(bytes)?;
-        Self::try_from(parse_body::<v1::BatchSignRequest>(body)?)
+        let body = parse_version(bytes, REQUEST_MAGIC_BYTES)?;
+        let (pczt_version, body) = parse_pczt_version(body)?;
+        match pczt_version {
+            crate::PCZT_VERSION_1 => {
+                Ok(parse_body::<v1::BatchSignRequest<crate::v1::Pczt>>(body)?.into())
+            }
+            crate::PCZT_VERSION_2 => {
+                Self::try_from(parse_body::<v1::BatchSignRequest<crate::v2::Pczt>>(body)?)
+            }
+            _ => Err(ParseError::UnknownPcztVersion(pczt_version)),
+        }
     }
 
     /// Serializes this request using the current Postcard wire version.
@@ -55,7 +73,10 @@ impl BatchSignRequest {
     /// Returns an error if a PCZT cannot be serialized using the current PCZT
     /// encoding.
     pub fn serialize(&self) -> Result<Vec<u8>, EncodingError> {
-        Ok(serialize_versioned(&v1::BatchSignRequest::try_from(self)?))
+        Ok(serialize_request(
+            crate::PCZT_VERSION_2,
+            &v1::BatchSignRequest::<crate::v2::Pczt>::try_from(self)?,
+        ))
     }
 }
 
@@ -83,14 +104,17 @@ impl BatchSignResponse {
 
     /// Parses a Postcard-encoded batched PCZT signing response.
     pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
-        let body = parse_version(bytes)?;
+        let body = parse_version(bytes, RESPONSE_MAGIC_BYTES)?;
         let response = parse_body::<v1::BatchSignResponse>(body)?;
         Self::try_from(response)
     }
 
     /// Serializes this response using the current Postcard wire version.
     pub fn serialize(&self) -> Result<Vec<u8>, EncodingError> {
-        Ok(serialize_versioned(&v1::BatchSignResponse::try_from(self)?))
+        Ok(serialize_versioned(
+            RESPONSE_MAGIC_BYTES,
+            &v1::BatchSignResponse::try_from(self)?,
+        ))
     }
 }
 
@@ -110,22 +134,39 @@ pub enum EncodingError {
 pub enum ParseError {
     /// The Postcard body is invalid.
     Invalid(postcard::Error),
+    /// The bytes do not contain the expected batched PCZT signing message.
+    InvalidMagic,
     /// A signature's action index cannot be represented on this platform.
     ActionIndexOutOfRange,
     /// An encoded PCZT is invalid.
     PcztParse(crate::ParseError),
     /// Bytes remain after the complete message body.
     TrailingData,
+    /// The bytes are too short to contain a batched PCZT signing message header.
+    TooShort,
+    /// The request uses an unsupported PCZT wire version.
+    UnknownPcztVersion(u32),
     /// The message uses an unsupported wire version.
     UnknownVersion(u32),
 }
 
-fn parse_version(bytes: &[u8]) -> Result<&[u8], ParseError> {
-    let (version, body) = postcard::take_from_bytes::<u32>(bytes).map_err(ParseError::Invalid)?;
+fn parse_version<'a>(bytes: &'a [u8], magic: &[u8; 4]) -> Result<&'a [u8], ParseError> {
+    let (version, body) = crate::parse_header(bytes, magic).map_err(|e| match e {
+        crate::HeaderParseError::InvalidMagic => ParseError::InvalidMagic,
+        crate::HeaderParseError::TooShort => ParseError::TooShort,
+    })?;
     if version != VERSION {
         return Err(ParseError::UnknownVersion(version));
     }
     Ok(body)
+}
+
+fn parse_pczt_version(bytes: &[u8]) -> Result<(u32, &[u8]), ParseError> {
+    let version = bytes
+        .get(..4)
+        .ok_or(ParseError::TooShort)
+        .map(|version| u32::from_le_bytes(version.try_into().unwrap()))?;
+    Ok((version, &bytes[4..]))
 }
 
 fn parse_body<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, ParseError> {
@@ -136,8 +177,14 @@ fn parse_body<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, ParseError> 
     Ok(value)
 }
 
-fn serialize_versioned<T: Serialize>(value: &T) -> Vec<u8> {
-    let bytes = postcard::to_allocvec(&VERSION).expect("can serialize a wire version");
+fn serialize_request<T: Serialize>(pczt_version: u32, value: &T) -> Vec<u8> {
+    let mut bytes = crate::serialize_header(REQUEST_MAGIC_BYTES, VERSION);
+    bytes.extend_from_slice(&pczt_version.to_le_bytes());
+    postcard::to_extend(value, bytes).expect("can serialize into memory")
+}
+
+fn serialize_versioned<T: Serialize>(magic: &[u8; 4], value: &T) -> Vec<u8> {
+    let bytes = crate::serialize_header(magic, VERSION);
     postcard::to_extend(value, bytes).expect("can serialize into memory")
 }
 
@@ -146,8 +193,8 @@ mod v1 {
     use serde_with::serde_as;
 
     #[derive(Deserialize, Serialize)]
-    pub(super) struct BatchSignRequest {
-        pczts: Vec<Vec<u8>>,
+    pub(super) struct BatchSignRequest<P> {
+        pub(super) pczts: Vec<P>,
     }
 
     #[derive(Deserialize, Serialize)]
@@ -170,7 +217,7 @@ mod v1 {
         pub(super) signature: [u8; 64],
     }
 
-    impl TryFrom<&super::BatchSignRequest> for BatchSignRequest {
+    impl TryFrom<&super::BatchSignRequest> for BatchSignRequest<crate::v2::Pczt> {
         type Error = EncodingError;
 
         fn try_from(request: &super::BatchSignRequest) -> Result<Self, Self::Error> {
@@ -179,21 +226,31 @@ mod v1 {
                     .pczts
                     .iter()
                     .cloned()
-                    .map(|pczt| pczt.serialize().map_err(EncodingError::PcztEncoding))
+                    .map(|pczt| {
+                        crate::v2::Pczt::try_from(pczt).map_err(EncodingError::PcztEncoding)
+                    })
                     .collect::<Result<_, _>>()?,
             })
         }
     }
 
-    impl TryFrom<BatchSignRequest> for super::BatchSignRequest {
+    impl From<BatchSignRequest<crate::v1::Pczt>> for super::BatchSignRequest {
+        fn from(request: BatchSignRequest<crate::v1::Pczt>) -> Self {
+            Self {
+                pczts: request.pczts.into_iter().map(Into::into).collect(),
+            }
+        }
+    }
+
+    impl TryFrom<BatchSignRequest<crate::v2::Pczt>> for super::BatchSignRequest {
         type Error = ParseError;
 
-        fn try_from(request: BatchSignRequest) -> Result<Self, Self::Error> {
+        fn try_from(request: BatchSignRequest<crate::v2::Pczt>) -> Result<Self, Self::Error> {
             Ok(Self {
                 pczts: request
                     .pczts
                     .into_iter()
-                    .map(|pczt| crate::parse(&pczt).map_err(ParseError::PcztParse))
+                    .map(|pczt| pczt.into_logical().map_err(ParseError::PcztParse))
                     .collect::<Result<_, _>>()?,
             })
         }
@@ -287,38 +344,81 @@ mod tests {
             .unwrap()
     }
 
-    fn serialize_pczts(pczts: &[Pczt]) -> Vec<Vec<u8>> {
-        pczts
-            .iter()
-            .cloned()
-            .map(|pczt| pczt.serialize().unwrap())
-            .collect()
+    fn v5_pczt(expiry_height: u32) -> Pczt {
+        Creator::new(
+            BranchId::Nu6.into(),
+            expiry_height,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
     }
 
     #[test]
     fn request_round_trip() {
         let request = BatchSignRequest::new(vec![empty_pczt(10_000_000), empty_pczt(10_000_001)]);
 
-        let expected_pczts = serialize_pczts(request.pczts());
+        let expected_pczts = request
+            .pczts()
+            .iter()
+            .cloned()
+            .map(|pczt| pczt.serialize().unwrap())
+            .collect::<Vec<_>>();
+        let expected_body = postcard::to_allocvec(
+            &v1::BatchSignRequest::<crate::v2::Pczt>::try_from(&request).unwrap(),
+        )
+        .unwrap();
         let encoded = request.serialize().unwrap();
         let decoded = BatchSignRequest::parse(&encoded).unwrap();
 
-        assert_eq!(serialize_pczts(decoded.pczts()), expected_pczts);
+        assert_eq!(&encoded[..4], REQUEST_MAGIC_BYTES);
+        assert_eq!(
+            u32::from_le_bytes(encoded[4..8].try_into().unwrap()),
+            VERSION
+        );
+        assert_eq!(
+            u32::from_le_bytes(encoded[8..12].try_into().unwrap()),
+            crate::PCZT_VERSION_2
+        );
+        assert_eq!(&encoded[12..], expected_body);
+        assert_eq!(decoded.pczts().len(), expected_pczts.len());
+        for (decoded, expected) in decoded.pczts().iter().zip(expected_pczts) {
+            assert_eq!(decoded.clone().serialize().unwrap(), expected);
+        }
     }
 
     #[test]
-    fn request_parse_rejects_invalid_pczt() {
-        #[derive(Serialize)]
-        struct RawBatchSignRequest {
-            pczts: Vec<Vec<u8>>,
-        }
+    fn request_parse_accepts_v1_pczt_payloads() {
+        let pczt = v5_pczt(10_000_000);
+        let expected = crate::v1::Pczt::try_from(pczt.clone()).unwrap().serialize();
+        let wire = v1::BatchSignRequest {
+            pczts: vec![crate::v1::Pczt::try_from(pczt).unwrap()],
+        };
 
-        let encoded = serialize_versioned(&RawBatchSignRequest {
-            pczts: vec![b"not-a-pczt".to_vec()],
-        });
+        let encoded = serialize_request(crate::PCZT_VERSION_1, &wire);
+        let decoded = BatchSignRequest::parse(&encoded).unwrap();
+
+        assert_eq!(decoded.pczts().len(), 1);
+        assert_eq!(
+            crate::v1::Pczt::try_from(decoded.pczts()[0].clone())
+                .unwrap()
+                .serialize(),
+            expected
+        );
+    }
+
+    #[test]
+    fn request_parse_rejects_invalid_body() {
+        let mut encoded = crate::serialize_header(REQUEST_MAGIC_BYTES, VERSION);
+        encoded.extend_from_slice(&crate::PCZT_VERSION_2.to_le_bytes());
+        encoded.push(1);
+
         assert!(matches!(
             BatchSignRequest::parse(&encoded),
-            Err(ParseError::PcztParse(crate::ParseError::NotPczt))
+            Err(ParseError::Invalid(_))
         ));
     }
 
@@ -338,14 +438,56 @@ mod tests {
         ]);
 
         let encoded = response.serialize().unwrap();
+
+        assert_eq!(&encoded[..4], RESPONSE_MAGIC_BYTES);
+        assert_eq!(
+            u32::from_le_bytes(encoded[4..8].try_into().unwrap()),
+            VERSION
+        );
         assert_eq!(BatchSignResponse::parse(&encoded).unwrap(), response);
     }
 
     #[test]
     fn parse_rejects_unknown_version() {
+        let encoded = crate::serialize_header(REQUEST_MAGIC_BYTES, VERSION + 1);
         assert!(matches!(
-            BatchSignRequest::parse(&[2, 0, 0]),
+            BatchSignRequest::parse(&encoded),
             Err(ParseError::UnknownVersion(2))
+        ));
+    }
+
+    #[test]
+    fn request_parse_rejects_unknown_pczt_version_before_parsing_body() {
+        let mut encoded = crate::serialize_header(REQUEST_MAGIC_BYTES, VERSION);
+        encoded.extend_from_slice(&(crate::PCZT_VERSION_2 + 1).to_le_bytes());
+        encoded.extend_from_slice(b"not a Postcard body");
+
+        assert!(matches!(
+            BatchSignRequest::parse(&encoded),
+            Err(ParseError::UnknownPcztVersion(3))
+        ));
+    }
+
+    #[test]
+    fn request_and_response_use_distinct_magic_bytes() {
+        let request = BatchSignRequest::new(vec![]).serialize().unwrap();
+        let response = BatchSignResponse::new(vec![]).serialize().unwrap();
+
+        assert!(matches!(
+            BatchSignResponse::parse(&request),
+            Err(ParseError::InvalidMagic)
+        ));
+        assert!(matches!(
+            BatchSignRequest::parse(&response),
+            Err(ParseError::InvalidMagic)
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_short_header() {
+        assert!(matches!(
+            BatchSignRequest::parse(&[0; 7]),
+            Err(ParseError::TooShort)
         ));
     }
 
@@ -382,7 +524,7 @@ mod tests {
                 signature: [0; 64],
             }]],
         };
-        let encoded = serialize_versioned(&wire);
+        let encoded = serialize_versioned(RESPONSE_MAGIC_BYTES, &wire);
         assert!(matches!(
             BatchSignResponse::parse(&encoded),
             Err(ParseError::Invalid(_))
