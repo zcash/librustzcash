@@ -18,7 +18,7 @@ use pczt::{
         low_level_signer,
         prover::Prover,
         redactor::Redactor,
-        signer::Signer,
+        signer::{Signer, extract_orchard_spend_auth_signatures},
         spend_finalizer::SpendFinalizer,
         tx_extractor::TransactionExtractor,
         updater::{SpendWitnessUpdateError, Updater},
@@ -78,6 +78,41 @@ fn check_round_trip(pczt: &Pczt) {
         .serialize()
         .expect("serialization succeeds");
     assert_eq!(encoded, reencoded);
+}
+
+/// Emulates an external signer returning Orchard-protocol spend authorization
+/// signatures separately from the PCZT, and asserts that reapplying the complete
+/// signature set reproduces the signed PCZT.
+fn assert_external_orchard_signature_round_trip(
+    unsigned_pczt: Pczt,
+    signed_pczt: &Pczt,
+    value_pool: orchard::ValuePool,
+    expected_action_index: usize,
+) -> Pczt {
+    let signatures = extract_orchard_spend_auth_signatures(signed_pczt);
+    assert!(
+        signatures
+            .iter()
+            .all(|signature| signature.value_pool() == value_pool)
+    );
+    assert!(
+        signatures
+            .iter()
+            .any(|signature| signature.action_index() == expected_action_index)
+    );
+
+    let mut signer = Signer::new(unsigned_pczt).unwrap();
+    for signature in &signatures {
+        signer
+            .apply_orchard_spend_auth_signature(signature)
+            .unwrap();
+    }
+    let reapplied_pczt = signer.finish();
+    assert_eq!(
+        reapplied_pczt.clone().serialize().unwrap(),
+        signed_pczt.clone().serialize().unwrap()
+    );
+    reapplied_pczt
 }
 
 #[test]
@@ -733,9 +768,18 @@ fn orchard_to_orchard() {
 
     // Apply signatures.
     let index = orchard_meta.spend_action_index(0).unwrap();
+    let pczt_without_signatures = pczt.clone();
     let mut signer = Signer::new(pczt).unwrap();
     signer.sign_orchard(index, &orchard_ask).unwrap();
-    let pczt = signer.finish();
+    let signed_pczt = signer.finish();
+    check_round_trip(&signed_pczt);
+
+    let pczt = assert_external_orchard_signature_round_trip(
+        pczt_without_signatures,
+        &signed_pczt,
+        orchard::ValuePool::Orchard,
+        index,
+    );
     check_round_trip(&pczt);
 
     // We should now be able to extract the fully authorized transaction.
@@ -1938,6 +1982,13 @@ fn wallet_can_set_ironwood_witness_after_signing() {
     let sighash = signer.shielded_sighash();
     signer.sign_ironwood(index, &orchard_ask).unwrap();
     let signed = signer.finish();
+
+    let signed = assert_external_orchard_signature_round_trip(
+        redacted,
+        &signed,
+        orchard::ValuePool::Ironwood,
+        index,
+    );
     let invalid_index = signed.ironwood().actions().len();
     assert!(matches!(
         Updater::new(signed.clone())
