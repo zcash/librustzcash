@@ -3771,6 +3771,10 @@ pub trait WalletWrite: WalletRead {
 ///
 /// This is the shared implementation of the [`WalletCommitmentTrees`] `put_*_shards`
 /// provided methods.
+///
+/// NOTE: This procedure must be called only within a the context of a transaction, such as
+/// in the scope of a `with_*_tree_mut` call; otherwise, failure of an intermediate step could
+/// lead to data corruption.
 fn apply_tree_changes<H, S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
     shards: &[shardtree::LocatedPrunableTree<H>],
