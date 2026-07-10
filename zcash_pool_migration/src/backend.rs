@@ -776,10 +776,13 @@ pub(crate) fn pending_row(
 }
 
 /// The [`pending_row`] counterpart for the direct-builder ([`build_self_funding_transfer_pczt`])
-/// path: the fee is always exactly `TRANSFER_FEE_BUFFER_ZATOSHI` (a self-funding note pays its own
-/// fee in full, with nothing left over), and the selected-note triple is passed straight through
-/// rather than read from a `Proposal`'s shielded inputs (the caller takes these fields by value out
-/// of a [`SelfFundingTransferOutcome`] before consuming its `pczt`, which is not `Clone`).
+/// path: the fee is derived as `spent_note_value - crossing_value` (the note-matching predicate in
+/// `build_self_funding_transfer_pczt` guarantees this always equals `TRANSFER_FEE_BUFFER_ZATOSHI`
+/// exactly, but computing it from the actual spent/crossing values — rather than assuming the
+/// constant — keeps this row self-consistent even if that invariant ever changes). The
+/// selected-note triple is passed straight through rather than read from a `Proposal`'s shielded
+/// inputs (the caller takes these fields by value out of a [`SelfFundingTransferOutcome`] before
+/// consuming its `pczt`, which is not `Clone`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn self_funding_pending_row(
     t: &TransferProposal,
@@ -788,6 +791,7 @@ pub(crate) fn self_funding_pending_row(
     spent_note_value: u64,
     signed: &SignedPcztOutcome,
 ) -> store::PendingTxRow {
+    let crossing_value = u64::from(t.amount());
     store::PendingTxRow {
         txid_hex: signed.txid.to_string(),
         raw_pczt: signed.pczt_bytes.clone(),
@@ -795,8 +799,8 @@ pub(crate) fn self_funding_pending_row(
         target_height: u32::from(t.next_executable_after_height()),
         next_executable_after_height: u32::from(t.next_executable_after_height()),
         expiry_height: u32::from(t.expiry_height()),
-        value_zatoshi: u64::from(t.amount()),
-        fee_zatoshi: crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI,
+        value_zatoshi: crossing_value,
+        fee_zatoshi: spent_note_value.saturating_sub(crossing_value),
         selected_note_txid: spent_note_txid.to_string(),
         selected_note_output_index: spent_note_output_index,
         selected_note_value: spent_note_value,

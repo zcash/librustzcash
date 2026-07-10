@@ -758,9 +758,10 @@ fn residual_after_migration_is_opt_in() {
         "the residual (net of the fee estimate) is scheduled alongside the round crossing"
     );
 
-    // The round crossing spends the self-funding note directly (no change); the residual transfer
-    // doesn't match any self-funding note, so it spends the separate residual note via the
-    // ordinary input-selection pipeline instead.
+    // Both transfers go through the direct-builder path and spend their own note with no change:
+    // the round crossing matches the self-funding note, and the residual transfer's netted-out
+    // crossing value (RESIDUAL_NOTE - TRANSFER_FEE_BUFFER_ZATOSHI) plus that same buffer is, by
+    // construction, exactly RESIDUAL_NOTE — the residual note's real value.
     ctx.sign_and_store_migration_schedule(&with_residual, &usk)
         .unwrap();
     let conn = Connection::open(&db_path).unwrap();
@@ -780,9 +781,9 @@ fn residual_after_migration_is_opt_in() {
     assert_eq!(residual_row.0, (RESIDUAL_NOTE - 20_000) as i64);
     assert_eq!(
         residual_row.1, 20_000,
-        "the fallback pipeline's own ZIP-317 computation pads to the same 2 Orchard + 2 Ironwood \
-         actions as the direct-builder path, landing on the same fee here — but it was computed \
-         independently by the wallet's own fee rule, not copied from TRANSFER_FEE_BUFFER_ZATOSHI"
+        "the direct-builder fee, derived from spent-note-value minus crossing-value \
+         (self_funding_pending_row) rather than hardcoded, still comes out to \
+         TRANSFER_FEE_BUFFER_ZATOSHI for the residual note exactly as for a planned one"
     );
 }
 

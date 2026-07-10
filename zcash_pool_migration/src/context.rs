@@ -1026,17 +1026,17 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 .orchard_change
                 .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
             {
-                // Unlike a self-funding note (D + TRANSFER_FEE_BUFFER_ZATOSHI, already sized to
-                // cover its own fee), the residual is raw leftover balance with no fee reserved —
-                // net out an estimate here so the scheduled crossing value is (approximately) what
-                // actually lands in Ironwood. The estimate is the same TRANSFER_FEE_BUFFER_ZATOSHI
-                // a self-funding note reserves: every migration transfer pads to the same 2
-                // Orchard + 2 Ironwood actions regardless of which pipeline builds it. This
-                // transfer never matches a self-funding note (see
-                // `backend::build_self_funding_transfer_pczt`), so it signs via the ordinary
-                // input-selection pipeline, which computes the *exact* ZIP-317 fee and returns any
-                // estimation drift as genuine Orchard change rather than erroring — unlike the
-                // direct-builder path, it isn't restricted to an exact-balance spend.
+                // Unlike a planned self-funding note, the residual has no fee pre-reserved by a
+                // denomination plan — net out TRANSFER_FEE_BUFFER_ZATOSHI here so the scheduled
+                // crossing value is what actually lands in Ironwood. This is exactly the value
+                // `build_self_funding_transfer_pczt` will look for later
+                // (`crossing_value + TRANSFER_FEE_BUFFER_ZATOSHI == residual`): the residual note
+                // `finalize_split_outputs` (split.rs) minted is worth exactly `residual`, so this
+                // transfer *does* match it and signs via the same direct-builder path as the
+                // round-number crossings — not the ordinary input-selection fallback, despite the
+                // residual's non-round crossing amount. Only a residual that didn't originate from
+                // a real split's exact accounting (or was already partially spent) would miss and
+                // fall back to `propose_migration_transfer`/`create_transfer_pczt` instead.
                 crossing_values.push(
                     residual.saturating_sub(crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI),
                 );
@@ -1383,30 +1383,40 @@ fn new_run_id() -> String {
 }
 
 /// Decompose `total` into self-funding power-of-ten notes ([`plan_denominations`]), converging the
-/// reserved fee estimate against the resulting output count.
+/// reserved fee estimate against the resulting output count. Used by
+/// [`MigrationContext::prepare_note_split`], which is about to pay a real split-transaction fee
+/// and so needs that fee reserved accurately up front (unlike
+/// [`MigrationContext::propose_migration_transfers`], which re-derives a schedule from an
+/// *already* self-funded balance and so needs no fee reservation at all — see its own doc
+/// comment).
 ///
-/// The prep-fee reserved while decomposing must match the real split fee
-/// (`split::split_fee(n_spends, n_outputs)`), which itself depends on the resulting output count —
-/// so this re-plans with the fee implied by the previous round's output count until it settles.
-/// `FEE_ESTIMATE_ZATOSHI` seeds the first guess; output count only takes a handful of discrete
-/// values (bounded by the note-count cap), so this converges in a few iterations.
+/// The prep-fee reserved while decomposing must cover the real split fee
+/// (`split::split_fee(n_spends, n_outputs)`), which itself depends on the resulting output count.
+/// Naively re-planning with the fee implied by the previous round's output count can **oscillate**
+/// forever between two fee/output-count pairs that imply each other (e.g. fee A decomposes to k
+/// outputs, whose real fee is B; fee B decomposes to k−1 outputs, whose real fee is A again) — the
+/// discrete jumps in `plan_denominations`'s greedy decomposition mean an *exact* fixed point
+/// (`real_fee == fee_estimate`) does not always exist. So instead of requiring exact equality,
+/// this stops as soon as the reserved fee is *sufficient* (`real_fee <= fee_estimate`) — which
+/// happens well before any cycle would repeat, since each non-terminating round strictly
+/// increases `fee_estimate` (bounded above by the note-count cap, so this always terminates) — and
+/// is provably safe: `plan_denominations` never lets a plan's outputs exceed its `total -
+/// fee_estimate` budget, so `sum(outputs) <= total - fee_estimate <= total - real_fee`, which is
+/// exactly the non-error condition [`crate::split::finalize_split_outputs`] checks at signing
+/// time. A stricter fixed point (spending exactly the reserved fee, not more than needed) is not
+/// required for correctness, only for optimality — the loop bound below is a defensive cap, not
+/// load-bearing.
 ///
-/// Both [`MigrationContext::prepare_note_split`] (planning a new split) and
-/// [`MigrationContext::propose_migration_transfers`] (re-deriving the schedule from the wallet's
-/// post-split balance) call this with the same `total`/`n_spends` a real split run would see, so
-/// they agree on the same denominations — otherwise a re-derived schedule could request crossing
-/// values that don't match any of the split's real self-funding notes.
-///
-/// Returns the plan together with the converged fee estimate.
+/// Returns the plan together with the converged (sufficient, not necessarily exact) fee estimate.
 fn converge_denomination_plan(
     total: u64,
     n_spends: usize,
 ) -> Result<(crate::denominations::DenominationPlan, u64), MigrationError> {
     let mut fee_estimate = FEE_ESTIMATE_ZATOSHI;
     let mut plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
-    for _ in 0..8 {
+    for _ in 0..=crate::denominations::MIGRATION_MAX_PREPARED_NOTES_PER_RUN {
         let real_fee = crate::split::split_fee(n_spends, plan.migration_outputs.len().max(1));
-        if real_fee == fee_estimate {
+        if real_fee <= fee_estimate {
             break;
         }
         fee_estimate = real_fee;
@@ -1471,6 +1481,27 @@ mod tests {
         let (_file, ctx) = ctx();
         assert_eq!(ctx.migration_state().unwrap(), MigrationState::NotStarted);
         assert!(ctx.migration_progress().unwrap().is_none());
+    }
+
+    #[test]
+    fn converge_denomination_plan_terminates_on_an_oscillating_total() {
+        // 2.0005 ZEC, 1 spendable note: fee=10_000 decomposes to two 1-ZEC notes (real fee for 2
+        // outputs is 15_000); fee=15_000 decomposes to only one 1-ZEC note (real fee for 1 output
+        // is back down to 10_000, the 2-action grace floor) — an exact fixed point does not exist,
+        // it cycles between these two states forever. The loop must still terminate and return a
+        // plan whose reserved fee is *sufficient* for its own real fee, not necessarily equal to
+        // it (see the function's doc comment for why that's the correct, safe termination rule).
+        let (plan, fee_estimate) = converge_denomination_plan(200_050_000, 1).unwrap();
+        let real_fee = crate::split::split_fee(1, plan.migration_outputs.len().max(1));
+        assert!(
+            real_fee <= fee_estimate,
+            "the reserved fee ({fee_estimate}) must cover the real fee ({real_fee}) for the \
+             plan's own output count, or finalize_split_outputs will reject it at signing time"
+        );
+        // Confirm the plan is actually signable: finalize_split_outputs must not error given the
+        // exact total and outputs converge_denomination_plan settled on.
+        crate::split::finalize_split_outputs(1, 200_050_000, &plan.migration_outputs)
+            .expect("a converged plan must always be signable");
     }
 
     #[test]

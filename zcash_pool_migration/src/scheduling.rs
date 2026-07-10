@@ -37,15 +37,19 @@ pub(crate) const TRANSFER_EXPIRY_WINDOW_BLOCKS: u32 = 288;
 pub(crate) const BLOCKS_PER_HOUR: u32 = 48;
 
 /// Sample the block-count gap to the next transfer's send window from an exponential
-/// distribution with expected value [`TARGET_CADENCE_BLOCKS`], capped at [`MAX_CADENCE_BLOCKS`].
+/// distribution with expected value [`TARGET_CADENCE_BLOCKS`], clamped to `[1,
+/// MAX_CADENCE_BLOCKS]`.
 ///
 /// Mirrors `zcash_client_sqlite::wallet::transparent::next_check_time`'s inverse-transform
 /// sampling (a rate `λ = 1 / mean` gives that expected value). Each transfer's gap is an
 /// independent draw, chained onto the previous transfer's send height — gaps are neither uniform
-/// nor correlated with each other, unlike a fixed per-index offset.
+/// nor correlated with each other, unlike a fixed per-index offset. The exponential distribution's
+/// support is `(0, ∞)`, so a raw draw below 0.5 would round to 0 — floored to 1 so two consecutive
+/// transfers never land on the exact same send/expiry height (rare — well under 1% per gap — but
+/// not negligible over a full multi-transfer schedule).
 fn sample_cadence_blocks<R: RngCore>(rng: &mut R) -> u32 {
     let dist = Exp::new(1.0 / f64::from(TARGET_CADENCE_BLOCKS)).expect("rate is positive");
-    (dist.sample(rng).round() as u32).min(MAX_CADENCE_BLOCKS)
+    (dist.sample(rng).round() as u32).clamp(1, MAX_CADENCE_BLOCKS)
 }
 
 /// Build a migration schedule mapping each output amount (zatoshi) to a `TransferProposal`.
@@ -162,6 +166,23 @@ mod tests {
         let mut r = rng();
         for _ in 0..10_000 {
             assert!(sample_cadence_blocks(&mut r) <= MAX_CADENCE_BLOCKS);
+        }
+    }
+
+    #[test]
+    fn sampled_gaps_are_never_zero() {
+        // A single fixed seed (as used elsewhere in this module) never happens to draw a value
+        // that rounds to 0 — so sweep many distinct seeds instead, giving the near-zero tail of
+        // the exponential distribution (~0.17% per draw) many independent chances to appear.
+        for seed in 0..2_000u64 {
+            let mut r = ChaCha8Rng::seed_from_u64(seed);
+            for _ in 0..50 {
+                assert_ne!(
+                    sample_cadence_blocks(&mut r),
+                    0,
+                    "seed {seed}: a zero-block gap would let two transfers share a send height"
+                );
+            }
         }
     }
 
