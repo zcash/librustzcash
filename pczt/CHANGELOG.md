@@ -134,7 +134,8 @@ workspace.
 - `pczt::roles::signer::batch` request and response types for transporting batches
   of PCZTs to an external signer and returning their Orchard and Ironwood spend
   authorization signatures. Sapling spend authorization signatures are not represented.
-  Both directions use ordered vectors in a versioned Postcard wire format.
+  Requests expose logical `Pczt` values, and both directions preserve request order in
+  a versioned Postcard wire format.
 - `pczt::roles::verifier::Verifier::with_ironwood`
 - `pczt::roles::updater::Updater::update_ironwood_with`
 - `pczt::roles::updater::AnchorUpdateError` and

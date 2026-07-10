@@ -54,7 +54,6 @@ getset.workspace = true
 document-features = { workspace = true, optional = true }
 
 [dev-dependencies]
-hex.workspace = true
 incrementalmerkletree.workspace = true
 rand_chacha.workspace = true
 ripemd.workspace = true
