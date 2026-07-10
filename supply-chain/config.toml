@@ -39,7 +39,6 @@ audit-as-crates-io = true
 [policy.incrementalmerkletree-testing]
 
 [policy.orchard]
-audit-as-crates-io = true
 
 [policy.pczt]
 audit-as-crates-io = true
@@ -853,10 +852,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.oorandom]]
 version = "11.1.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.orchard]]
-version = "0.15.0-pre.2@git:475ef0ff77d45aebff93cb039d639250d82518a3"
 criteria = "safe-to-deploy"
 
 [[exemptions.ordered-float]]

@@ -1,6 +1,34 @@
 
 # cargo-vet imports lock
 
+[[unpublished.zcash_address]]
+version = "0.13.0"
+audited_as = "0.13.0-pre.0"
+
+[[unpublished.zcash_history]]
+version = "0.5.0"
+audited_as = "0.5.0-pre.0"
+
+[[unpublished.zcash_keys]]
+version = "0.15.0"
+audited_as = "0.15.0-pre.0"
+
+[[unpublished.zcash_primitives]]
+version = "0.29.0"
+audited_as = "0.29.0-pre.0"
+
+[[unpublished.zcash_proofs]]
+version = "0.29.0"
+audited_as = "0.29.0-pre.0"
+
+[[unpublished.zcash_protocol]]
+version = "0.10.0"
+audited_as = "0.10.0-pre.0"
+
+[[unpublished.zcash_transparent]]
+version = "0.9.0"
+audited_as = "0.9.0-pre.0"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -84,6 +112,13 @@ when = "2024-12-13"
 user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
+
+[[publisher.orchard]]
+version = "0.15.0"
+when = "2026-07-09"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
 
 [[publisher.pczt]]
 version = "0.7.0"

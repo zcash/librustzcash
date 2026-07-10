@@ -285,7 +285,7 @@ mod tests {
                         proprietary: BTreeMap::new(),
                     },
                     output: Output {
-                        cmx: [0; 32],
+                        cmx: Some([0; 32]),
                         ephemeral_key: [0; 32],
                         enc_ciphertext: EncCiphertext::Encrypted(Vec::new()),
                         out_ciphertext: Vec::new(),

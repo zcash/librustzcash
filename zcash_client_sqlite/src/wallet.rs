@@ -3468,7 +3468,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                     }
                 }
             }
-            Recipient::InternalAccount {
+            Recipient::InternalShielded {
                 receiving_account,
                 note,
                 ..
@@ -4811,7 +4811,7 @@ fn recipient_params<P: consensus::Parameters>(
                 PoolType::TRANSPARENT,
             ))
         }
-        Recipient::InternalAccount {
+        Recipient::InternalShielded {
             receiving_account,
             external_address,
             note,

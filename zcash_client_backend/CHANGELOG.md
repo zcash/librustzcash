@@ -282,6 +282,11 @@ workspace.
   this option must be executed with a matching unpadded builder configuration.
 
 ### Changed
+- `zcash_client_backend::wallet::Recipient::InternalAccount` has been renamed
+  to `Recipient::InternalShielded`, for symmetry with `Recipient::InternalTransparent`
+  and to clarify that the distinguishing feature of this variant is that its
+  payload is a shielded note, not that it is somehow more "the account" than the
+  other internal variant.
 - MSRV is now 1.88
 - `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes an
   `orchard_pool_bundle_type` argument (behind the `pczt` feature flag) selecting
@@ -304,10 +309,11 @@ workspace.
   Ironwood. Orchard-pool change is still routed into the Ironwood bundle when the
   transaction spends no Orchard notes (e.g. an Orchard-receiver payment funded
   from the Sapling and Ironwood pools).
-- Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0-pre.0`,
-  `zcash_address 0.13.0-pre.0`, `zcash_transparent 0.9.0-pre.0`,
-  `zcash_keys 0.15.0-pre.0`, `zcash_primitives 0.29.0-pre.0`,
-  `zcash_proofs 0.29.0-pre.0`. The `lightwallet-protocol v0.5.0` migration
+- Migrated to `orchard 0.15`, `shardtree 0.7`.
+- Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
+  `zcash_address 0.13.0`, `zcash_transparent 0.9.0`,
+  `zcash_keys 0.15.0`, `zcash_primitives 0.29.0`,
+  `zcash_proofs 0.29.0`. The `lightwallet-protocol v0.5.0` migration
   changes `zcash_client_backend::proto`:
   - Adds the `service::PoolType::Ironwood` and `service::ShieldedProtocol::Ironwood`
     variants.

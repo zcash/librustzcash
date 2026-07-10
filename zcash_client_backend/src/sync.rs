@@ -226,6 +226,36 @@ where
 }
 
 #[cfg(feature = "sync")]
+async fn download_subtree_roots<ChT, H>(
+    client: &mut CompactTxStreamerClient<ChT>,
+    protocol: service::ShieldedProtocol,
+) -> Result<Vec<CommitmentTreeRoot<H>>, tonic::Status>
+where
+    ChT: GrpcService<TonicBody>,
+    ChT::Error: Into<StdError>,
+    ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
+    <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
+    H: HashSer,
+{
+    let mut request = service::GetSubtreeRootsArg::default();
+    request.set_shielded_protocol(protocol);
+
+    client
+        .get_subtree_roots(request)
+        .await?
+        .into_inner()
+        .and_then(|root| async move {
+            let root_hash = H::read(&root.root_hash[..])?;
+            Ok(CommitmentTreeRoot::from_parts(
+                BlockHeight::from_u32(root.completing_block_height as u32),
+                root_hash,
+            ))
+        })
+        .try_collect()
+        .await
+}
+
+#[cfg(feature = "sync")]
 async fn update_subtree_roots<ChT, DbT, CaErr, DbErr>(
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
@@ -238,22 +268,8 @@ where
     DbT: WalletCommitmentTrees,
     <DbT as WalletCommitmentTrees>::Error: std::error::Error + Send + Sync + 'static,
 {
-    let mut request = service::GetSubtreeRootsArg::default();
-    request.set_shielded_protocol(service::ShieldedProtocol::Sapling);
-
-    let sapling_roots: Vec<CommitmentTreeRoot<sapling::Node>> = client
-        .get_subtree_roots(request)
-        .await?
-        .into_inner()
-        .and_then(|root| async move {
-            let root_hash = sapling::Node::read(&root.root_hash[..])?;
-            Ok(CommitmentTreeRoot::from_parts(
-                BlockHeight::from_u32(root.completing_block_height as u32),
-                root_hash,
-            ))
-        })
-        .try_collect()
-        .await?;
+    let sapling_roots: Vec<CommitmentTreeRoot<sapling::Node>> =
+        download_subtree_roots(client, service::ShieldedProtocol::Sapling).await?;
 
     info!("Sapling tree has {} subtrees", sapling_roots.len());
     db_data
@@ -262,26 +278,20 @@ where
 
     #[cfg(feature = "orchard")]
     {
-        let mut request = service::GetSubtreeRootsArg::default();
-        request.set_shielded_protocol(service::ShieldedProtocol::Orchard);
-
-        let orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>> = client
-            .get_subtree_roots(request)
-            .await?
-            .into_inner()
-            .and_then(|root| async move {
-                let root_hash = MerkleHashOrchard::read(&root.root_hash[..])?;
-                Ok(CommitmentTreeRoot::from_parts(
-                    BlockHeight::from_u32(root.completing_block_height as u32),
-                    root_hash,
-                ))
-            })
-            .try_collect()
-            .await?;
+        let orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>> =
+            download_subtree_roots(client, service::ShieldedProtocol::Orchard).await?;
 
         info!("Orchard tree has {} subtrees", orchard_roots.len());
         db_data
             .put_orchard_subtree_roots(0, &orchard_roots)
+            .map_err(Error::WalletTrees)?;
+
+        let ironwood_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>> =
+            download_subtree_roots(client, service::ShieldedProtocol::Ironwood).await?;
+
+        info!("Ironwood tree has {} subtrees", ironwood_roots.len());
+        db_data
+            .put_ironwood_subtree_roots(0, &ironwood_roots)
             .map_err(Error::WalletTrees)?;
     }
 
@@ -620,5 +630,69 @@ impl<CaErr, DbErr, TrErr> From<ChainError<DbErr, CaErr>> for Error<CaErr, DbErr,
 impl<CaErr, DbErr, TrErr> From<tonic::Status> for Error<CaErr, DbErr, TrErr> {
     fn from(status: tonic::Status) -> Self {
         Error::Server(status)
+    }
+}
+
+#[cfg(all(test, feature = "sync", feature = "orchard"))]
+mod tests {
+    use std::{
+        convert::Infallible,
+        future::{Ready, ready},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        task::{Context, Poll},
+    };
+
+    use tonic::{
+        body::Body as TonicBody,
+        codegen::{Service, http::Request, http::Response},
+    };
+    use zcash_protocol::consensus::Network;
+
+    use crate::{
+        data_api::testing::MockWalletDb,
+        proto::service::compact_tx_streamer_client::CompactTxStreamerClient,
+    };
+
+    use super::update_subtree_roots;
+
+    #[derive(Clone)]
+    struct CountingGrpcService(Arc<AtomicUsize>);
+
+    impl Service<Request<TonicBody>> for CountingGrpcService {
+        type Response = Response<TonicBody>;
+        type Error = Infallible;
+        type Future = Ready<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _request: Request<TonicBody>) -> Self::Future {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            ready(Ok(Response::builder()
+                .header("content-type", "application/grpc")
+                .header("grpc-status", "0")
+                .body(TonicBody::empty())
+                .unwrap()))
+        }
+    }
+
+    #[test]
+    fn subtree_root_sync_requests_all_pools() {
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let mut client =
+            CompactTxStreamerClient::new(CountingGrpcService(Arc::clone(&request_count)));
+        let mut wallet = MockWalletDb::new(Network::TestNetwork);
+
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            update_subtree_roots::<_, _, Infallible, Infallible>(&mut client, &mut wallet)
+                .await
+                .unwrap();
+        });
+
+        assert_eq!(request_count.load(Ordering::Relaxed), 3);
     }
 }
