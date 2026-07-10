@@ -1264,7 +1264,7 @@ where
                 let note = output.to_wallet_note();
                 let value = note.value();
 
-                let recipient = Recipient::InternalAccount {
+                let recipient = Recipient::InternalShielded {
                     receiving_account: output.account_id(),
                     external_address: None,
                     note: Box::new(note),
@@ -1282,7 +1282,7 @@ where
                     let value = note.value();
 
                     // Even if the recipient address is external, record the send as internal.
-                    let recipient = Recipient::InternalAccount {
+                    let recipient = Recipient::InternalShielded {
                         receiving_account: output.account_id(),
                         external_address: Some(external_address(
                             wallet_db,

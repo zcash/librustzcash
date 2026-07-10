@@ -282,6 +282,11 @@ workspace.
   this option must be executed with a matching unpadded builder configuration.
 
 ### Changed
+- `zcash_client_backend::wallet::Recipient::InternalAccount` has been renamed
+  to `Recipient::InternalShielded`, for symmetry with `Recipient::InternalTransparent`
+  and to clarify that the distinguishing feature of this variant is that its
+  payload is a shielded note, not that it is somehow more "the account" than the
+  other internal variant.
 - MSRV is now 1.88
 - `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes an
   `orchard_pool_bundle_type` argument (behind the `pczt` feature flag) selecting
