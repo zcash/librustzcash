@@ -10,6 +10,11 @@ workspace.
 
 ## [0.24.0] - PLANNED
 
+### Fixed
+- Transparent-to-shielded proposals now preserve the wallet checkpoint selected during proposal
+  construction. This prevents output-only Orchard and Ironwood bundles from attempting to use an
+  unrecorded anchor when a wallet has no shielded inputs.
+
 ### Added
 - `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (with the
   `PutBlocksRows` result type and the `PutBlocksRowsDbT` trait alias): the

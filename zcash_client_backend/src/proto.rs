@@ -655,8 +655,7 @@ impl proposal::Proposal {
             .map(|step| {
                 let transaction_request = step.transaction_request().to_uri();
 
-                // A step that defers its anchor (no shielded inputs) encodes as the zero sentinel,
-                // matching the `anchorHeight` field's documented "no shielded inputs" meaning.
+                // A decoded legacy step that defers its anchor encodes as the zero sentinel.
                 let anchor_height = step.anchor_height().map_or(0, u32::from);
 
                 let inputs = step

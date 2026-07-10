@@ -485,13 +485,13 @@ pub struct Step<NoteRef> {
     /// The anchor height that binds every shielded-tree lookup performed while building this
     /// step's transaction — both shielded-input witnesses and shielded-output anchors.
     ///
-    /// This is `Some` only when the step spends shielded notes, which must be witnessed against a
-    /// specific anchor. A step with no shielded inputs carries `None` and defers the choice of
-    /// anchor to interpretation time, where it is derived from the proposal's confirmations policy
-    /// and target height; such a step witnesses no notes, so any recent valid anchor is sound. The
-    /// resolved anchor is still applied to every shielded-output bundle, so a transaction with only
-    /// routed shielded outputs (for example an Orchard-receiver payment routed into the Ironwood
-    /// bundle post-NU6.3) remains indistinguishable from one that spends real shielded notes.
+    /// This is `Some` for newly constructed steps. It is selected from the wallet's available
+    /// checkpoints and must be retained so shielded-output bundles use an anchor the wallet can
+    /// prove. A decoded legacy step with no shielded inputs may carry `None`; interpretation then
+    /// derives its anchor from the proposal's confirmations policy and target height. The resolved
+    /// anchor is applied to every shielded-output bundle, so a transaction with only routed
+    /// shielded outputs (for example an Orchard-receiver payment routed into the Ironwood bundle
+    /// post-NU6.3) remains indistinguishable from one that spends real shielded notes.
     anchor_height: Option<BlockHeight>,
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
@@ -665,10 +665,18 @@ impl<NoteRef> Step<NoteRef> {
             }
         }
 
-        // Only a step that spends shielded notes binds a concrete anchor (needed to witness those
-        // notes). An input-less step defers to interpretation time, so its stored anchor is `None`
-        // regardless of the value passed here.
-        let anchor_height = shielded_inputs.as_ref().map(|_| anchor_height);
+        // Keep the checkpoint selected during proposal construction even for transparent-only
+        // inputs: output-only Orchard and Ironwood bundles still require a tree anchor. The zero
+        // sentinel remains reserved for decoded legacy proposals that deferred their anchor, and
+        // is invalid for steps that spend shielded inputs.
+        let anchor_height = if u32::from(anchor_height) == 0 {
+            if shielded_inputs.is_some() {
+                return Err(ProposalError::AnchorNotFound(anchor_height));
+            }
+            None
+        } else {
+            Some(anchor_height)
+        };
 
         if input_total == output_total {
             Ok(Self {
@@ -707,8 +715,8 @@ impl<NoteRef> Step<NoteRef> {
         self.shielded_inputs.as_ref()
     }
     /// Returns the anchor height that binds every shielded-tree lookup performed while building
-    /// this step's transaction, or `None` if the step spends no shielded notes and therefore
-    /// defers the choice of anchor to interpretation time.
+    /// this step's transaction, or `None` for a decoded legacy step that defers its anchor choice
+    /// to interpretation time.
     pub fn anchor_height(&self) -> Option<BlockHeight> {
         self.anchor_height
     }

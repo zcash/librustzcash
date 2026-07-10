@@ -6897,11 +6897,11 @@ pub fn propose_shielding_coinbase_succeeds<T: ShieldedPoolTester, Dsf>(
     );
 }
 
-/// A shielding proposal spends no shielded notes, so its step defers the choice of anchor and
-/// serializes it as the zero sentinel. A proposal produced by an older library version also omits
-/// the confirmations policy field entirely. Decoding such a proposal must interpret the zero anchor
-/// as deferred and fall back to the default confirmations policy, and building it must resolve the
-/// anchor from that policy rather than failing with `AnchorNotFound(0)`.
+/// A newly constructed shielding proposal preserves the checkpoint selected by the wallet, even
+/// though it spends no shielded notes. A proposal produced by an older library version uses the
+/// zero anchor sentinel and omits the confirmations policy field entirely. Decoding that legacy
+/// proposal must interpret the zero anchor as deferred and fall back to the default confirmations
+/// policy rather than failing with `AnchorNotFound(0)`.
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
 pub fn legacy_proposal_without_confirmations_policy_builds<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
@@ -6943,20 +6943,26 @@ pub fn legacy_proposal_without_confirmations_policy_builds<T: ShieldedPoolTester
         )
         .expect("coinbase shielding proposal should succeed");
 
-    // The shielding step spends no shielded notes, so it carries no explicit anchor.
-    assert_eq!(
-        proposal.steps().first().anchor_height(),
-        None,
-        "an input-less shielding step must defer its anchor",
-    );
+    // The shielding step keeps the checkpoint selected by input selection.
+    let selected_anchor = proposal
+        .steps()
+        .first()
+        .anchor_height()
+        .expect("an input-less shielding step must preserve its selected checkpoint");
 
     // Serialize, then downgrade to a proposal as an older version would have produced it: drop the
-    // confirmations policy field, and confirm the deferred anchor encodes as the zero sentinel.
+    // confirmations policy field and replace the preserved anchor with the zero sentinel.
     let mut proto = crate::proto::proposal::Proposal::from_standard_proposal(&proposal);
+    assert_eq!(
+        proto.steps[0].anchor_height,
+        u32::from(selected_anchor),
+        "a newly constructed shielding step must serialize its selected checkpoint",
+    );
     proto.confirmations_policy = None;
+    proto.steps[0].anchor_height = 0;
     assert_eq!(
         proto.steps[0].anchor_height, 0,
-        "a deferred anchor must encode as the zero sentinel",
+        "a legacy deferred anchor must encode as the zero sentinel",
     );
 
     // Decoding must fall back to the default policy and keep the anchor deferred.

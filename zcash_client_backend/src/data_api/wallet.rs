@@ -567,10 +567,8 @@ impl ConfirmationsPolicy {
     /// Returns the shielded anchor height to use for a transaction targeting `target_height` under
     /// this policy: `target_height` less the number of required trusted confirmations.
     ///
-    /// This is the anchor used to interpret a proposal step that does not carry an explicit anchor
-    /// height (see [`crate::proposal::Step::anchor_height`]). Such a step spends no shielded notes,
-    /// so any recent valid anchor is sound; deferring the choice to interpretation lets it reflect
-    /// the confirmations policy under which the proposal was constructed.
+    /// This is the anchor used to interpret a decoded legacy proposal step that does not carry an
+    /// explicit anchor height (see [`crate::proposal::Step::anchor_height`]).
     pub fn anchor_height(&self, target_height: TargetHeight) -> BlockHeight {
         target_height.saturating_sub(u32::from(self.trusted()))
     }
@@ -1350,10 +1348,9 @@ where
     // Every shielded-tree lookup for this step is bound to a single anchor height, so that a
     // transaction with only routed shielded outputs (for example, an Orchard-receiver payment
     // routed into a fresh Ironwood bundle post-NU6.3) is indistinguishable from one that spends
-    // real notes in that pool. A step that spends shielded notes carries an explicit anchor; a
-    // step with no shielded inputs deferred the choice, so resolve it now from the proposal's
-    // confirmations policy and target height (it witnesses no notes, so any recent anchor is
-    // sound).
+    // real notes in that pool. Newly constructed steps preserve the checkpoint selected by input
+    // selection. Decoded legacy steps can defer their anchor, so resolve those from the proposal's
+    // confirmations policy and target height.
     let anchor_height = proposal_step
         .anchor_height()
         .unwrap_or_else(|| confirmations_policy.anchor_height(min_target_height));
