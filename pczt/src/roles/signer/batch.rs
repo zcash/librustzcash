@@ -102,8 +102,6 @@ pub enum EncodingError {
 pub enum ParseError {
     /// The Postcard body is invalid.
     Invalid(postcard::Error),
-    /// A signature contains an unknown Orchard-protocol value pool tag.
-    InvalidValuePool(u8),
     /// A signature's action index cannot be represented on this platform.
     ActionIndexOutOfRange,
     /// Bytes remain after the complete message body.
@@ -149,10 +147,16 @@ mod v1 {
         pub(super) signatures: Vec<Vec<OrchardSpendAuthSignature>>,
     }
 
+    #[derive(Deserialize, Serialize)]
+    pub(super) enum ValuePool {
+        Orchard,
+        Ironwood,
+    }
+
     #[serde_as]
     #[derive(Deserialize, Serialize)]
     pub(super) struct OrchardSpendAuthSignature {
-        pub(super) value_pool: u8,
+        pub(super) value_pool: ValuePool,
         pub(super) action_index: u32,
         #[serde_as(as = "[_; 64]")]
         pub(super) signature: [u8; 64],
@@ -222,8 +226,8 @@ mod v1 {
         fn try_from(signature: &super::OrchardSpendAuthSignature) -> Result<Self, Self::Error> {
             Ok(Self {
                 value_pool: match signature.value_pool() {
-                    orchard::ValuePool::Orchard => 0,
-                    orchard::ValuePool::Ironwood => 1,
+                    orchard::ValuePool::Orchard => ValuePool::Orchard,
+                    orchard::ValuePool::Ironwood => ValuePool::Ironwood,
                 },
                 action_index: u32::try_from(signature.action_index())
                     .map_err(|_| EncodingError::ActionIndexOutOfRange)?,
@@ -237,9 +241,8 @@ mod v1 {
 
         fn try_from(signature: OrchardSpendAuthSignature) -> Result<Self, Self::Error> {
             let value_pool = match signature.value_pool {
-                0 => orchard::ValuePool::Orchard,
-                1 => orchard::ValuePool::Ironwood,
-                value_pool => return Err(ParseError::InvalidValuePool(value_pool)),
+                ValuePool::Orchard => orchard::ValuePool::Orchard,
+                ValuePool::Ironwood => orchard::ValuePool::Ironwood,
             };
             let action_index = usize::try_from(signature.action_index)
                 .map_err(|_| ParseError::ActionIndexOutOfRange)?;
@@ -255,6 +258,7 @@ mod v1 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_with::serde_as;
 
     #[test]
     fn request_round_trip() {
@@ -313,9 +317,24 @@ mod tests {
 
     #[test]
     fn response_parse_rejects_unknown_value_pool() {
-        let wire = v1::BatchSignResponse {
+        #[derive(Serialize)]
+        struct RawBatchSignResponse {
+            request_id: Vec<u8>,
+            signatures: Vec<Vec<SpendAuthSignature>>,
+        }
+
+        #[serde_as]
+        #[derive(Serialize)]
+        struct SpendAuthSignature {
+            value_pool: u8,
+            action_index: u32,
+            #[serde_as(as = "[_; 64]")]
+            signature: [u8; 64],
+        }
+
+        let wire = RawBatchSignResponse {
             request_id: vec![],
-            signatures: vec![vec![v1::OrchardSpendAuthSignature {
+            signatures: vec![vec![SpendAuthSignature {
                 value_pool: 2,
                 action_index: 0,
                 signature: [0; 64],
@@ -324,7 +343,7 @@ mod tests {
         let encoded = serialize_versioned(&wire);
         assert!(matches!(
             BatchSignResponse::parse(&encoded),
-            Err(ParseError::InvalidValuePool(2))
+            Err(ParseError::Invalid(_))
         ));
     }
 }
