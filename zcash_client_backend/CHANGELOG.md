@@ -31,13 +31,13 @@ workspace.
   each pubkey individually.
 - `zcash_client_backend::data_api::WalletCommitmentTrees::put_sapling_shards`
   (and `put_orchard_shards` / `put_ironwood_shards` under the `orchard`
-  feature): provided methods that bulk-write previously accumulated note
-  commitment tree changes — shards, an optional tree cap, and a checkpoint
-  delta — to the backing store, for wallet stores that maintain their note
-  commitment trees outside the backing store (e.g. in memory) and periodically
-  flush. The default implementations apply the changes through the
-  corresponding `with_*_tree_mut` methods, so existing implementations of the
-  trait are unaffected.
+  feature): provided methods that bulk-write a batch of note commitment tree
+  changes — shards, an optional replacement tree cap, and a checkpoint delta —
+  to the backing store, for wallet stores that maintain their note commitment
+  trees outside the backing store (e.g. in memory) and flush in batches. The
+  default implementations apply the changes through the corresponding
+  `with_*_tree_mut` methods, so existing implementations of the trait are
+  unaffected.
 - `zcash_client_backend::proposal::Proposal::proposed_version` and
   `with_proposed_version`. The transaction version requested when a proposal is
   constructed is now recorded on the proposal (and preserved across
