@@ -961,15 +961,52 @@ impl<P: Parameters + Clone> MigrationContext<P> {
 
     // ----- migration proposal -----
 
-    /// Generate the full migration schedule for the spendable Orchard balance. Each transfer's
-    /// `amount` is the value that crosses the turnstile (the pre-split note pays its own fee).
+    /// The leftover Orchard balance that a migration schedule would *not* cross, reported only
+    /// when it is large enough to be worth offering the user a choice about (see
+    /// [`crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI`]). Values below that threshold are
+    /// true dust — moving them would cost more in fees than they're worth — and are never
+    /// reported; the caller should just leave them in the wallet.
+    ///
+    /// Intended for the "also migrate the rest?" opt-in: whales who prize the round-number
+    /// crossing-value privacy property may decline (the residual is not a power of ten, so
+    /// migrating it is comparatively more identifiable); everyday users who would rather have
+    /// nothing left behind can opt in, which [`Self::propose_migration_transfers`]'s
+    /// `include_residual` flag then adds to the schedule as one extra transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError::NotSynced`]/[`MigrationError::Backend`] if the spendable Orchard
+    /// balance cannot be read, and [`MigrationError::Pipeline`] if the plan would exceed the
+    /// per-run prepared-note limit.
+    pub fn residual_after_migration(&self) -> Result<Option<Zatoshis>, MigrationError> {
+        let db = self.open_wallet()?;
+        let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
+        let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
+        Ok(plan
+            .orchard_change
+            .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+            .map(Zatoshis::const_from_u64))
+    }
+
+    /// Generate the full migration schedule for the spendable Orchard balance. Each staggered
+    /// transfer's `amount` is the value that crosses the turnstile (the pre-split note pays its own
+    /// fee).
+    ///
+    /// When `include_residual` is `true` and the balance leaves a residual worth offering (see
+    /// [`Self::residual_after_migration`]), one further transfer for exactly that (non-round)
+    /// amount is appended to the schedule — it will not match any self-funding note, so it signs
+    /// via the ordinary input-selection pipeline rather than the direct-builder path the staggered
+    /// transfers use (see `backend::build_self_funding_transfer_pczt`).
     ///
     /// # Errors
     ///
     /// Returns [`MigrationError::NotSynced`]/[`MigrationError::Backend`] if the target/anchor
     /// heights or spendable Orchard balance cannot be read, and [`MigrationError::Pipeline`] if
     /// the resulting plan would exceed the per-run prepared-note limit.
-    pub fn propose_migration_transfers(&self) -> Result<MigrationSchedule, MigrationError> {
+    pub fn propose_migration_transfers(
+        &self,
+        include_residual: bool,
+    ) -> Result<MigrationSchedule, MigrationError> {
         let db = self.open_wallet()?;
         let (target, anchor) = backend::target_and_anchor(&db)?;
         let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
@@ -983,11 +1020,33 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         // the ordinary input-selection pipeline for any crossing value with no matching note (see
         // `backend::build_self_funding_transfer_pczt`).
         let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
+        let mut crossing_values = plan.crossing_values;
+        if include_residual {
+            if let Some(residual) = plan
+                .orchard_change
+                .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+            {
+                // Unlike a self-funding note (D + TRANSFER_FEE_BUFFER_ZATOSHI, already sized to
+                // cover its own fee), the residual is raw leftover balance with no fee reserved —
+                // net out an estimate here so the scheduled crossing value is (approximately) what
+                // actually lands in Ironwood. The estimate is the same TRANSFER_FEE_BUFFER_ZATOSHI
+                // a self-funding note reserves: every migration transfer pads to the same 2
+                // Orchard + 2 Ironwood actions regardless of which pipeline builds it. This
+                // transfer never matches a self-funding note (see
+                // `backend::build_self_funding_transfer_pczt`), so it signs via the ordinary
+                // input-selection pipeline, which computes the *exact* ZIP-317 fee and returns any
+                // estimation drift as genuine Orchard change rather than erroring — unlike the
+                // direct-builder path, it isn't restricted to an exact-balance spend.
+                crossing_values.push(
+                    residual.saturating_sub(crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI),
+                );
+            }
+        }
         let run_id = new_run_id();
         Ok(scheduling::build_schedule(
             &mut OsRng,
             &run_id,
-            &plan.crossing_values,
+            &crossing_values,
             target,
             anchor,
             // First transfer executable immediately; de-correlation from user activity is the
@@ -1148,12 +1207,19 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// refinement re-anchors the persisted PCZTs in place via the updater role rather than
     /// regenerating them.
     ///
+    /// `include_residual` should match whatever choice the user made when the schedule being
+    /// refreshed was first proposed (see [`Self::propose_migration_transfers`]).
+    ///
     /// # Errors
     ///
     /// Returns whatever [`Self::restart_current_migration_step`] and
     /// [`Self::sign_and_store_migration_schedule`] can return.
-    pub fn refresh_stale_transfers(&self, usk: &UnifiedSpendingKey) -> Result<u32, MigrationError> {
-        let schedule = self.restart_current_migration_step()?;
+    pub fn refresh_stale_transfers(
+        &self,
+        usk: &UnifiedSpendingKey,
+        include_residual: bool,
+    ) -> Result<u32, MigrationError> {
+        let schedule = self.restart_current_migration_step(include_residual)?;
         let count = schedule.transfers().len() as u32;
         self.sign_and_store_migration_schedule(&schedule, usk)?;
         Ok(count)
@@ -1300,12 +1366,15 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     ///
     /// Returns [`MigrationError::Db`] if the run's stale scheduled transfers cannot be cleared,
     /// and whatever [`Self::propose_migration_transfers`] can return.
-    pub fn restart_current_migration_step(&self) -> Result<MigrationSchedule, MigrationError> {
+    pub fn restart_current_migration_step(
+        &self,
+        include_residual: bool,
+    ) -> Result<MigrationSchedule, MigrationError> {
         let conn = self.store_conn()?;
         if let Some(run) = self.active_run(&conn)? {
             store::clear_scheduled_pending(&conn, &run.run_id)?;
         }
-        self.propose_migration_transfers()
+        self.propose_migration_transfers(include_residual)
     }
 }
 

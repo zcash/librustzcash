@@ -270,7 +270,7 @@ fn transfer_pipeline_produces_a_v6_ironwood_crossing_tx() {
     // Ironwood proof (spec risk item 2 — confirming the Orchard-bundle vs Ironwood-bundle
     // proving-key/circuit-version pairing against upstream orchard 0.15 at the first proving
     // test).
-    let schedule = ctx.propose_migration_transfers().unwrap();
+    let schedule = ctx.propose_migration_transfers(false).unwrap();
     assert_eq!(
         schedule.transfers().len(),
         1,
@@ -357,7 +357,7 @@ fn transfer_pipeline_builds_self_funding_notes_directly_with_no_change() {
 
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
 
-    let schedule = ctx.propose_migration_transfers().unwrap();
+    let schedule = ctx.propose_migration_transfers(false).unwrap();
     assert_eq!(
         schedule.transfers().len(),
         1,
@@ -536,7 +536,7 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
     );
 
     // --- Phase 2: propose + sign the schedule against the now-real self-funding notes ---
-    let schedule = ctx.propose_migration_transfers().unwrap();
+    let schedule = ctx.propose_migration_transfers(false).unwrap();
     let mut crossings: Vec<u64> = schedule
         .transfers()
         .iter()
@@ -706,6 +706,86 @@ fn record_transfer_result_advances_to_complete() {
     );
 }
 
+/// The opt-in "also migrate the residual" toggle: a balance that leaves a genuine (non-dust)
+/// residual is reported by `residual_after_migration`, excluded from the schedule by default, and
+/// included as one extra non-round transfer when `include_residual` is set.
+///
+/// Seeds two *separate* notes — a self-funding 10-ZEC note plus a small change-shaped note — to
+/// simulate a post-split wallet: the split's own note-split transaction is what actually produces
+/// this shape (self-funding notes plus one plain, real leftover Orchard note), not a single raw
+/// balance decomposed from scratch (which the round crossing's direct-builder spend would fully
+/// consume before a residual transfer could exist to spend anything separately).
+#[test]
+fn residual_after_migration_is_opt_in() {
+    const SELF_FUNDING_NOTE: u64 = 1_000_020_000; // 10 ZEC crossing + TRANSFER_FEE_BUFFER_ZATOSHI
+    const RESIDUAL_NOTE: u64 = 130_000; // above RESIDUAL_MIGRATION_MIN_ZATOSHI (100_000)
+    let (_dir, st, db_path, account) = seed_wallet(&[SELF_FUNDING_NOTE, RESIDUAL_NOTE], 10);
+    let usk = st.get_account().usk().clone();
+    drop(st);
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    assert_eq!(
+        ctx.residual_after_migration().unwrap(),
+        Some(Zatoshis::const_from_u64(RESIDUAL_NOTE)),
+        "the residual is reported since it clears the dust threshold"
+    );
+
+    // Default (opted out): only the round-number crossing is scheduled.
+    let without_residual = ctx.propose_migration_transfers(false).unwrap();
+    assert_eq!(
+        without_residual.transfers().len(),
+        1,
+        "just the 10-ZEC crossing"
+    );
+    assert_eq!(
+        u64::from(without_residual.transfers()[0].amount()),
+        1_000_000_000
+    );
+
+    // Opted in: the residual is appended as one extra, non-round transfer, net of an estimated fee
+    // (a residual has no self-funding buffer to pay its own fee from, unlike a split note).
+    let with_residual = ctx.propose_migration_transfers(true).unwrap();
+    let mut amounts: Vec<u64> = with_residual
+        .transfers()
+        .iter()
+        .map(|t| u64::from(t.amount()))
+        .collect();
+    amounts.sort_unstable();
+    assert_eq!(
+        amounts,
+        vec![RESIDUAL_NOTE - 20_000, 1_000_000_000],
+        "the residual (net of the fee estimate) is scheduled alongside the round crossing"
+    );
+
+    // The round crossing spends the self-funding note directly (no change); the residual transfer
+    // doesn't match any self-funding note, so it spends the separate residual note via the
+    // ordinary input-selection pipeline instead.
+    ctx.sign_and_store_migration_schedule(&with_residual, &usk)
+        .unwrap();
+    let conn = Connection::open(&db_path).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT value_zatoshi, fee_zatoshi FROM ext_ironwood_migration_pending_txs")
+        .unwrap();
+    let rows: Vec<(i64, i64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    let residual_row = rows
+        .iter()
+        .find(|(value, _)| *value != 1_000_000_000)
+        .expect("the residual transfer's pending row");
+    assert_eq!(residual_row.0, (RESIDUAL_NOTE - 20_000) as i64);
+    assert_eq!(
+        residual_row.1, 20_000,
+        "the fallback pipeline's own ZIP-317 computation pads to the same 2 Orchard + 2 Ironwood \
+         actions as the direct-builder path, landing on the same fee here — but it was computed \
+         independently by the wallet's own fee rule, not copied from TRANSFER_FEE_BUFFER_ZATOSHI"
+    );
+}
+
 // ======================================================================================
 // Test 4: transfer execution is height-gated.
 // ======================================================================================
@@ -726,7 +806,7 @@ fn next_due_transfer_is_height_gated() {
 
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
 
-    let schedule = ctx.propose_migration_transfers().unwrap();
+    let schedule = ctx.propose_migration_transfers(false).unwrap();
     assert_eq!(schedule.transfers().len(), 2, "two 1-ZEC crossings");
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
