@@ -288,11 +288,33 @@ pub struct PutBlocksRows {
 /// - `blocks`: The scanned block data to be added to the data store. This vector must contain
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
+/// - `nullifier_tracking_floor`: If `Some`, blocks with height strictly below the floor do not
+///   have their nullifiers inserted into the nullifier map. Pass `None` (as [`put_blocks`]
+///   does) to track the nullifiers of every block.
+///
+///   # Soundness
+///
+///   A `Some` floor is sound **only** when every block from the wallet birthday through the end
+///   of the previous batch has already been scanned (i.e. this batch extends the contiguous
+///   fully-scanned frontier, `WalletRead::block_fully_scanned() == from_state.block_height()`),
+///   and the floor is far enough below the batch end that the retained trailing window matches
+///   what the wallet's nullifier-map maintenance prune would keep. Under that precondition,
+///   every skipped entry is provably unobservable: any wallet note spendable in a skipped block
+///   was either received in an already-scanned block (so its spend is detected directly against
+///   the wallet's own nullifiers, not the map) or is received later in this same ascending
+///   batch (so the spend is linked when the receiving transaction is processed), and the
+///   immediately following prune would have deleted the skipped rows unconsulted.
+///
+///   Skipping in any other circumstance — in particular, when scanning a range **after a gap**
+///   of unscanned history — is unsound: a discarded nullifier may belong to a note received in
+///   the unscanned gap, and when that note is later scanned its spentness can no longer be
+///   detected. Wallets that scan out of order must pass `None` for all such ranges.
 pub fn put_blocks_rows<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
+    nullifier_tracking_floor: Option<BlockHeight>,
 ) -> Result<PutBlocksRows, PutBlocksError<SE, TE>>
 where
     DbT: PutBlocksRowsDbT<SE, <DbT as LowLevelWalletRead>::AccountRef>,
@@ -479,20 +501,23 @@ where
             .map_err(PutBlocksError::Storage)?;
         }
 
-        // Insert the new nullifiers from this block into the nullifier map.
-        wallet_db
-            .track_block_sapling_nullifiers(block.height(), block.sapling().nullifier_map())
-            .map_err(PutBlocksError::Storage)?;
+        // Insert the new nullifiers from this block into the nullifier map, unless the caller
+        // has excluded this height from nullifier tracking.
+        if should_track_nullifiers(nullifier_tracking_floor, block.height()) {
+            wallet_db
+                .track_block_sapling_nullifiers(block.height(), block.sapling().nullifier_map())
+                .map_err(PutBlocksError::Storage)?;
 
-        #[cfg(feature = "orchard")]
-        wallet_db
-            .track_block_orchard_nullifiers(block.height(), block.orchard().nullifier_map())
-            .map_err(PutBlocksError::Storage)?;
+            #[cfg(feature = "orchard")]
+            wallet_db
+                .track_block_orchard_nullifiers(block.height(), block.orchard().nullifier_map())
+                .map_err(PutBlocksError::Storage)?;
 
-        #[cfg(feature = "orchard")]
-        wallet_db
-            .track_block_ironwood_nullifiers(block.height(), block.ironwood().nullifier_map())
-            .map_err(PutBlocksError::Storage)?;
+            #[cfg(feature = "orchard")]
+            wallet_db
+                .track_block_ironwood_nullifiers(block.height(), block.ironwood().nullifier_map())
+                .map_err(PutBlocksError::Storage)?;
+        }
 
         note_positions.extend(block.transactions().iter().flat_map(|wtx| {
             let iter = wtx
@@ -611,6 +636,7 @@ where
         gap_limits,
         from_state,
         blocks,
+        None,
     )?;
 
     let mut sapling_commitments = rows.sapling_commitments;
@@ -1532,6 +1558,20 @@ pub fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPT
         .collect::<Vec<_>>()
 }
 
+/// Returns whether the nullifiers of a block at `block_height` should be inserted into the
+/// nullifier map.
+///
+/// Tracking is skipped only when a `nullifier_tracking_floor` is provided and `block_height`
+/// lies strictly below it; with no floor, every block's nullifiers are tracked. See the
+/// `nullifier_tracking_floor` parameter of [`put_blocks_rows`] for the caller's obligations
+/// when providing a floor.
+fn should_track_nullifiers(
+    nullifier_tracking_floor: Option<BlockHeight>,
+    block_height: BlockHeight,
+) -> bool {
+    nullifier_tracking_floor.is_none_or(|floor| block_height >= floor)
+}
+
 /// The interval, in blocks, at which checkpoints are retained as durable "anchors" once anchor
 /// retention is active. At 75-second blocks this is roughly every 6 hours (4 per day).
 const ANCHOR_RETENTION_INTERVAL: u32 = 288;
@@ -1673,7 +1713,33 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use super::cross_pool_ensure_heights;
-    use super::{ANCHOR_RETENTION_INTERVAL, should_retain_anchor};
+    use super::{ANCHOR_RETENTION_INTERVAL, should_retain_anchor, should_track_nullifiers};
+
+    #[test]
+    fn nullifier_tracking_floor_gating() {
+        let floor = BlockHeight::from(1000);
+
+        // With no floor, every block's nullifiers are tracked.
+        assert!(should_track_nullifiers(None, BlockHeight::from(0)));
+        assert!(should_track_nullifiers(None, BlockHeight::from(999)));
+
+        // At or above the floor: tracked.
+        assert!(should_track_nullifiers(
+            Some(floor),
+            BlockHeight::from(1000)
+        ));
+        assert!(should_track_nullifiers(
+            Some(floor),
+            BlockHeight::from(1001)
+        ));
+
+        // Strictly below the floor: skipped.
+        assert!(!should_track_nullifiers(
+            Some(floor),
+            BlockHeight::from(999)
+        ));
+        assert!(!should_track_nullifiers(Some(floor), BlockHeight::from(0)));
+    }
 
     #[test]
     fn anchor_retention_gating() {

@@ -18,7 +18,11 @@ workspace.
   commitment trees by other means can reuse it without also implementing
   `WalletCommitmentTrees`. `put_blocks` itself is unchanged in behavior; it is
   now expressed as `put_blocks_rows` followed by the note commitment tree
-  updates.
+  updates. `put_blocks_rows` takes a `nullifier_tracking_floor: Option<BlockHeight>`
+  argument that lets callers skip nullifier-map insertion for blocks below the
+  floor when they can prove the skipped entries are unobservable (for example,
+  because an immediately following maintenance prune would delete them);
+  `put_blocks` passes `None`, tracking every block as before.
 - The helper functions used by the note commitment tree stage of `put_blocks`
   are now `pub`, so that alternative `ShardStore`-backed stores can reuse the
   exact tree-update logic: `zcash_client_backend::data_api::ll::wallet::`
