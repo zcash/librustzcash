@@ -3398,6 +3398,28 @@ pub trait WalletWrite: WalletRead {
         )
     }
 
+    /// Imports a batch of standalone transparent pubkeys into the account, adding the associated
+    /// transparent p2pkh addresses. See [`import_standalone_transparent_pubkey`] for the semantics
+    /// and spending limitations that apply to each imported pubkey.
+    ///
+    /// This is equivalent to calling [`import_standalone_transparent_pubkey`] once per pubkey, but
+    /// implementations may validate the target account a single time for the whole batch. The
+    /// default implementation calls [`import_standalone_transparent_pubkey`] for each pubkey; a
+    /// pubkey whose receiver address is already known to the wallet is skipped.
+    ///
+    /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys(
+        &mut self,
+        account: Self::AccountId,
+        pubkeys: &[secp256k1::PublicKey],
+    ) -> Result<(), Self::Error> {
+        for pubkey in pubkeys {
+            self.import_standalone_transparent_pubkey(account, *pubkey)?;
+        }
+        Ok(())
+    }
+
     /// Imports the given redeem script into the account without key derivation information, and
     /// adds the associated transparent p2sh address.
     ///

@@ -768,13 +768,82 @@ pub(crate) fn delete_account(
     Ok(())
 }
 
+/// Returns `true` if `address` (an encoded transparent receiver address) is already recorded
+/// in the `addresses` table, whether as a derived account receiver or as a prior standalone
+/// import.
+///
+/// A transparent receiver appears at most once in `addresses`, enforced by the UNIQUE index on
+/// `cached_transparent_receiver_address`. Callers that would otherwise insert a fresh row for a
+/// receiver can use this to detect an existing row and avoid violating that constraint.
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn transparent_receiver_address_exists(
+    conn: &rusqlite::Connection,
+    address: &str,
+) -> Result<bool, SqliteClientError> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM addresses WHERE cached_transparent_receiver_address = :address",
+            named_params![":address": address],
+            |_row| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+/// Imports a standalone transparent P2PKH receiver by its pubkey into the given account.
+///
+/// Returns the number of address rows inserted: `1` when a new receiver row was added, or `0`
+/// when nothing was inserted because the receiver address was already present in the wallet.
 #[cfg(feature = "transparent-key-import")]
 pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_uuid: AccountUuid,
     pubkey: secp256k1::PublicKey,
-) -> Result<(), SqliteClientError> {
+) -> Result<usize, SqliteClientError> {
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // inferred from a zero-row INSERT.
+    let account_id = get_account_ref(conn, account_uuid)?;
+    import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)
+}
+
+/// Imports a batch of standalone transparent P2PKH receivers by their pubkeys into the given
+/// account, resolving the account a single time for the whole batch (rather than once per
+/// pubkey). Returns the total number of address rows inserted.
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    pubkeys: &[secp256k1::PublicKey],
+) -> Result<usize, SqliteClientError> {
+    let account_id = get_account_ref(conn, account_uuid)?;
+    let mut inserted = 0;
+    for pubkey in pubkeys {
+        inserted += import_standalone_transparent_pubkey_inner(
+            conn,
+            params,
+            account_uuid,
+            account_id,
+            *pubkey,
+        )?;
+    }
+    Ok(inserted)
+}
+
+/// Imports a single standalone transparent P2PKH receiver into the account identified by both
+/// `account_uuid` (for the cross-account conflict check) and its already-resolved `account_id`.
+///
+/// Returns the number of address rows inserted (`1` when a new receiver row was added, `0` when
+/// nothing was inserted because the receiver address was already present).
+#[cfg(feature = "transparent-key-import")]
+fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    account_id: AccountRef,
+    pubkey: secp256k1::PublicKey,
+) -> Result<usize, SqliteClientError> {
     use ::transparent::address::TransparentAddress;
 
     let existing_import_account = conn
@@ -793,27 +862,38 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     if let Some(current) = existing_import_account {
         if current == account_uuid.expose_uuid() {
             // The key has already been imported; nothing to do.
-            return Ok(());
+            return Ok(0);
         } else {
             return Err(SqliteClientError::StandaloneImportConflict(current));
         }
     }
 
     let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
+
+    // If this transparent receiver is already recorded (for example it was derived as an
+    // account receiver, so its row carries a NULL `imported_transparent_receiver_pubkey` and is
+    // therefore not matched by the pubkey lookup above), do not insert a second row for the same
+    // `cached_transparent_receiver_address`: the UNIQUE index on that column forbids it, and the
+    // existing representation already covers the address. This is the import-direction
+    // counterpart of the resolution in `store_address_range`, which upgrades an imported receiver
+    // in place when the same address is later derived.
+    if transparent_receiver_address_exists(conn, &addr_str)? {
+        return Ok(0);
+    }
+
     let rows_affected = conn.execute(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
           receiver_flags, imported_transparent_receiver_pubkey
         )
-        SELECT
-          id, :key_scope, :address, :address,
+        VALUES (
+          :account_id, :key_scope, :address, :address,
           :receiver_flags, :imported_transparent_receiver_pubkey
-          FROM accounts
-          WHERE accounts.uuid = :account_uuid
+        )
         "#,
         named_params![
-            ":account_uuid": account_uuid.0,
+            ":account_id": account_id.0,
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2PKH.bits(),
@@ -821,11 +901,9 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
         ],
     )?;
 
-    if rows_affected == 0 {
-        return Err(SqliteClientError::AccountUnknown);
-    }
-
-    Ok(())
+    // The account is known (resolved above) and the receiver is not already recorded (checked
+    // above), so exactly one row is inserted.
+    Ok(rows_affected)
 }
 
 #[cfg(feature = "transparent-key-import")]
@@ -838,6 +916,10 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     use ::transparent::address::TransparentAddress;
     use zcash_script::descriptor::sh;
     use zcash_script::script::Evaluable;
+
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // inferred from a zero-row INSERT below.
+    let account_id = get_account_ref(conn, account_uuid)?;
 
     // This mirrors `zcash_script::opcode::push_value::LargeValue::MAX_SIZE`, which is
     // currently `pub(crate)`. Replace with a direct reference if it becomes public.
@@ -892,30 +974,25 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     }
 
     let addr_str = Address::Transparent(addr).encode(params);
-    let rows_affected = conn.execute(
+    conn.execute(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
           receiver_flags, imported_transparent_receiver_script
         )
-        SELECT
-          id, :key_scope, :address, :address,
+        VALUES (
+          :account_id, :key_scope, :address, :address,
           :receiver_flags, :imported_transparent_receiver_script
-          FROM accounts
-          WHERE accounts.uuid = :account_uuid
+        )
         "#,
         named_params![
-            ":account_uuid": account_uuid.0,
+            ":account_id": account_id.0,
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2SH.bits(),
             ":imported_transparent_receiver_script": &rs_bytes[..]
         ],
     )?;
-
-    if rows_affected == 0 {
-        return Err(SqliteClientError::AccountUnknown);
-    }
 
     Ok(())
 }

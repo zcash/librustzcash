@@ -24,6 +24,11 @@ workspace.
   exact tree-update logic: `zcash_client_backend::data_api::ll::wallet::`
   `{build_subtrees, checkpoint_positions, ensure_checkpoints,
   cross_pool_ensure_heights, update_tree}`.
+- `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_pubkeys`
+  (behind the `transparent-key-import` feature flag), a batch variant of
+  `import_standalone_transparent_pubkey` that lets implementations validate the
+  target account once for the whole batch. The default implementation imports
+  each pubkey individually.
 - `zcash_client_backend::proposal::Proposal::proposed_version` and
   `with_proposed_version`. The transaction version requested when a proposal is
   constructed is now recorded on the proposal (and preserved across

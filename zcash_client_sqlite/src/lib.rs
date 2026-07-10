@@ -1391,6 +1391,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     }
 
     #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys(
+        &mut self,
+        account: Self::AccountId,
+        pubkeys: &[secp256k1::PublicKey],
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkeys(account, pubkeys))
+    }
+
+    #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_script(
         &mut self,
         account: Self::AccountId,
@@ -1686,6 +1695,17 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), Self::Error> {
         wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
+            .map(|_inserted| ())
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys(
+        &mut self,
+        account: Self::AccountId,
+        pubkeys: &[secp256k1::PublicKey],
+    ) -> Result<(), Self::Error> {
+        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
+            .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
