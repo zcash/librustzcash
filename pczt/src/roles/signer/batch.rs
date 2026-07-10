@@ -1,10 +1,14 @@
 //! Postcard-encoded messages for batched external PCZT signing.
+//!
+//! Responses only represent Orchard-protocol spend authorization signatures for the
+//! Orchard and Ironwood value pools. Sapling spend authorization signatures are not
+//! represented.
 
 use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 
-use super::OrchardSpendAuthSignature;
+use super::SpendAuthSignature;
 
 /// The current batched PCZT signing wire version.
 pub const VERSION: u32 = 1;
@@ -50,15 +54,18 @@ impl BatchSignRequest {
 
 /// The signatures produced for a [`BatchSignRequest`], in request order.
 /// Entry `i` contains the signatures produced for PCZT `i` in the request.
+///
+/// Only Orchard and Ironwood spend authorization signatures are represented; Sapling
+/// spend authorization signatures are not supported by this response format.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BatchSignResponse {
     request_id: Vec<u8>,
-    signatures: Vec<Vec<OrchardSpendAuthSignature>>,
+    signatures: Vec<Vec<SpendAuthSignature>>,
 }
 
 impl BatchSignResponse {
     /// Constructs a batched PCZT signing response.
-    pub fn new(request_id: Vec<u8>, signatures: Vec<Vec<OrchardSpendAuthSignature>>) -> Self {
+    pub fn new(request_id: Vec<u8>, signatures: Vec<Vec<SpendAuthSignature>>) -> Self {
         Self {
             request_id,
             signatures,
@@ -70,8 +77,9 @@ impl BatchSignResponse {
         &self.request_id
     }
 
-    /// Returns the signatures produced for each request PCZT, in request order.
-    pub fn signatures(&self) -> &[Vec<OrchardSpendAuthSignature>] {
+    /// Returns the Orchard and Ironwood signatures produced for each request PCZT, in
+    /// request order.
+    pub fn signatures(&self) -> &[Vec<SpendAuthSignature>] {
         &self.signatures
     }
 
@@ -144,7 +152,7 @@ mod v1 {
     #[derive(Deserialize, Serialize)]
     pub(super) struct BatchSignResponse {
         pub(super) request_id: Vec<u8>,
-        pub(super) signatures: Vec<Vec<OrchardSpendAuthSignature>>,
+        pub(super) signatures: Vec<Vec<SpendAuthSignature>>,
     }
 
     #[derive(Deserialize, Serialize)]
@@ -155,7 +163,7 @@ mod v1 {
 
     #[serde_as]
     #[derive(Deserialize, Serialize)]
-    pub(super) struct OrchardSpendAuthSignature {
+    pub(super) struct SpendAuthSignature {
         pub(super) value_pool: ValuePool,
         pub(super) action_index: u32,
         #[serde_as(as = "[_; 64]")]
@@ -192,7 +200,7 @@ mod v1 {
                     .map(|signatures| {
                         signatures
                             .iter()
-                            .map(OrchardSpendAuthSignature::try_from)
+                            .map(SpendAuthSignature::try_from)
                             .collect::<Result<_, _>>()
                     })
                     .collect::<Result<_, EncodingError>>()?,
@@ -212,7 +220,7 @@ mod v1 {
                     .map(|signatures| {
                         signatures
                             .into_iter()
-                            .map(super::OrchardSpendAuthSignature::try_from)
+                            .map(super::SpendAuthSignature::try_from)
                             .collect::<Result<_, _>>()
                     })
                     .collect::<Result<_, ParseError>>()?,
@@ -220,10 +228,10 @@ mod v1 {
         }
     }
 
-    impl TryFrom<&super::OrchardSpendAuthSignature> for OrchardSpendAuthSignature {
+    impl TryFrom<&super::SpendAuthSignature> for SpendAuthSignature {
         type Error = EncodingError;
 
-        fn try_from(signature: &super::OrchardSpendAuthSignature) -> Result<Self, Self::Error> {
+        fn try_from(signature: &super::SpendAuthSignature) -> Result<Self, Self::Error> {
             Ok(Self {
                 value_pool: match signature.value_pool() {
                     orchard::ValuePool::Orchard => ValuePool::Orchard,
@@ -236,10 +244,10 @@ mod v1 {
         }
     }
 
-    impl TryFrom<OrchardSpendAuthSignature> for super::OrchardSpendAuthSignature {
+    impl TryFrom<SpendAuthSignature> for super::SpendAuthSignature {
         type Error = ParseError;
 
-        fn try_from(signature: OrchardSpendAuthSignature) -> Result<Self, Self::Error> {
+        fn try_from(signature: SpendAuthSignature) -> Result<Self, Self::Error> {
             let value_pool = match signature.value_pool {
                 ValuePool::Orchard => orchard::ValuePool::Orchard,
                 ValuePool::Ironwood => orchard::ValuePool::Ironwood,
@@ -280,12 +288,12 @@ mod tests {
         let response = BatchSignResponse::new(
             b"request".to_vec(),
             vec![
-                vec![OrchardSpendAuthSignature::from_parts(
+                vec![SpendAuthSignature::from_parts(
                     orchard::ValuePool::Orchard,
                     0,
                     [0x11; 64],
                 )],
-                vec![OrchardSpendAuthSignature::from_parts(
+                vec![SpendAuthSignature::from_parts(
                     orchard::ValuePool::Ironwood,
                     12,
                     [0x22; 64],
@@ -320,12 +328,12 @@ mod tests {
         #[derive(Serialize)]
         struct RawBatchSignResponse {
             request_id: Vec<u8>,
-            signatures: Vec<Vec<SpendAuthSignature>>,
+            signatures: Vec<Vec<RawSpendAuthSignature>>,
         }
 
         #[serde_as]
         #[derive(Serialize)]
-        struct SpendAuthSignature {
+        struct RawSpendAuthSignature {
             value_pool: u8,
             action_index: u32,
             #[serde_as(as = "[_; 64]")]
@@ -334,7 +342,7 @@ mod tests {
 
         let wire = RawBatchSignResponse {
             request_id: vec![],
-            signatures: vec![vec![SpendAuthSignature {
+            signatures: vec![vec![RawSpendAuthSignature {
                 value_pool: 2,
                 action_index: 0,
                 signature: [0; 64],

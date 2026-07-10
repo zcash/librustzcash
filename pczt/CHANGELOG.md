@@ -127,12 +127,13 @@ workspace.
 - `pczt::roles::creator::Creator::{with_ironwood_anchor, with_ironwood_flags}`
 - `pczt::roles::signer::Signer::{sign_ironwood, apply_ironwood_signature}`
 - `pczt::roles::signer::Error::{IronwoodSign, IronwoodVerify}`
-- `pczt::roles::signer::OrchardSpendAuthSignature`,
+- `pczt::roles::signer::SpendAuthSignature`,
   `pczt::roles::signer::extract_orchard_spend_auth_signatures`, and
   `pczt::roles::signer::Signer::apply_orchard_spend_auth_signature` for transporting
   Orchard and Ironwood spend authorization signatures separately from a PCZT.
 - `pczt::roles::signer::batch` request and response types for transporting batches
-  of PCZTs to an external signer and returning their spend authorization signatures.
+  of PCZTs to an external signer and returning their Orchard and Ironwood spend
+  authorization signatures. Sapling spend authorization signatures are not represented.
   Both directions use ordered vectors in a versioned Postcard wire format.
 - `pczt::roles::verifier::Verifier::with_ironwood`
 - `pczt::roles::updater::Updater::update_ironwood_with`

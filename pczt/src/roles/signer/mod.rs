@@ -37,20 +37,21 @@ use crate::sighash;
 
 pub mod batch;
 
-/// A spend authorization signature for an action in one of the Orchard-protocol
-/// value pools.
+/// A spend authorization signature for an action in an Orchard-protocol value pool.
 ///
-/// This type can be used by external signers that return signatures separately from
-/// a PCZT. The value pool and action index identify where the signature belongs when
-/// it is later applied with [`Signer::apply_orchard_spend_auth_signature`].
+/// This type only represents signatures for the Orchard and Ironwood value pools; it
+/// does not represent Sapling spend authorization signatures. It can be used by external
+/// signers that return signatures separately from a PCZT. The value pool and action index
+/// identify where the signature belongs when it is later applied with
+/// [`Signer::apply_orchard_spend_auth_signature`].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OrchardSpendAuthSignature {
+pub struct SpendAuthSignature {
     value_pool: orchard::ValuePool,
     action_index: usize,
     signature: [u8; 64],
 }
 
-impl OrchardSpendAuthSignature {
+impl SpendAuthSignature {
     /// Constructs a spend authorization signature for the action at `action_index`
     /// in `value_pool`.
     pub fn from_parts(
@@ -87,15 +88,15 @@ impl OrchardSpendAuthSignature {
 /// action index, so they can be transported independently and later applied to a
 /// corresponding PCZT with [`Signer::apply_orchard_spend_auth_signature`]. Actions
 /// without a spend authorization signature are omitted.
-pub fn extract_orchard_spend_auth_signatures(pczt: &Pczt) -> Vec<OrchardSpendAuthSignature> {
+pub fn extract_orchard_spend_auth_signatures(pczt: &Pczt) -> Vec<SpendAuthSignature> {
     fn extract_from_bundle(
-        signatures: &mut Vec<OrchardSpendAuthSignature>,
+        signatures: &mut Vec<SpendAuthSignature>,
         value_pool: orchard::ValuePool,
         bundle: &crate::orchard::Bundle,
     ) {
         for (action_index, action) in bundle.actions().iter().enumerate() {
             if let Some(signature) = action.spend().spend_auth_sig() {
-                signatures.push(OrchardSpendAuthSignature::from_parts(
+                signatures.push(SpendAuthSignature::from_parts(
                     value_pool,
                     action_index,
                     *signature,
@@ -399,7 +400,7 @@ impl Signer {
     /// inconsistent, or the signature does not verify.
     pub fn apply_orchard_spend_auth_signature(
         &mut self,
-        signature: &OrchardSpendAuthSignature,
+        signature: &SpendAuthSignature,
     ) -> Result<(), Error> {
         let spend_auth_sig =
             redpallas::Signature::<redpallas::SpendAuth>::from(*signature.signature());
