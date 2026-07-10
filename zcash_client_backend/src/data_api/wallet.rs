@@ -196,31 +196,43 @@ enum PcztRecipient<AccountId> {
 
 #[cfg(feature = "pczt")]
 impl<AccountId: Copy> PcztRecipient<AccountId> {
-    fn from_recipient(recipient: BuildRecipient<AccountId>) -> (Self, Option<ZcashAddress>) {
+    fn from_shielded_recipient(
+        recipient: ShieldedBuildRecipient<AccountId>,
+    ) -> (Self, Option<ZcashAddress>) {
         match recipient {
-            BuildRecipient::External {
+            ShieldedBuildRecipient::External {
+                recipient_address, ..
+            } => (PcztRecipient::External, Some(recipient_address)),
+            ShieldedBuildRecipient::InternalShielded {
+                receiving_account,
+                external_address,
+            } => (
+                PcztRecipient::InternalShielded { receiving_account },
+                external_address,
+            ),
+        }
+    }
+
+    fn from_transparent_recipient(
+        recipient: TransparentBuildRecipient<AccountId>,
+    ) -> (Self, Option<ZcashAddress>) {
+        match recipient {
+            TransparentBuildRecipient::External {
                 recipient_address, ..
             } => (PcztRecipient::External, Some(recipient_address)),
             #[cfg(feature = "transparent-inputs")]
-            BuildRecipient::EphemeralTransparent {
+            TransparentBuildRecipient::EphemeralTransparent {
                 receiving_account, ..
             } => (
                 PcztRecipient::EphemeralTransparent { receiving_account },
                 None,
             ),
             #[cfg(feature = "transparent-inputs")]
-            BuildRecipient::InternalTransparent {
+            TransparentBuildRecipient::InternalTransparent {
                 receiving_account, ..
             } => (
                 PcztRecipient::InternalTransparent { receiving_account },
                 None,
-            ),
-            BuildRecipient::InternalShielded {
-                receiving_account,
-                external_address,
-            } => (
-                PcztRecipient::InternalShielded { receiving_account },
-                external_address,
             ),
         }
     }
@@ -1135,8 +1147,47 @@ where
     Ok(NonEmpty::from_vec(txids).expect("proposal.steps is NonEmpty"))
 }
 
+/// A recipient of a shielded output under construction, awaiting the decrypted [`Note`]
+/// that [`ShieldedBuildRecipient::into_recipient`] will attach to produce a [`Recipient`].
 #[derive(Debug, Clone)]
-enum BuildRecipient<AccountId> {
+enum ShieldedBuildRecipient<AccountId> {
+    External {
+        recipient_address: ZcashAddress,
+        output_pool: PoolType,
+    },
+    InternalShielded {
+        receiving_account: AccountId,
+        external_address: Option<ZcashAddress>,
+    },
+}
+
+impl<AccountId> ShieldedBuildRecipient<AccountId> {
+    fn into_recipient(self, note: impl FnOnce() -> Note) -> Recipient<AccountId> {
+        match self {
+            ShieldedBuildRecipient::External {
+                recipient_address,
+                output_pool,
+            } => Recipient::External {
+                recipient_address,
+                output_pool,
+            },
+            ShieldedBuildRecipient::InternalShielded {
+                receiving_account,
+                external_address,
+            } => Recipient::InternalShielded {
+                receiving_account,
+                external_address,
+                note: Box::new(note()),
+            },
+        }
+    }
+}
+
+/// A recipient of a transparent output under construction, awaiting the [`OutPoint`] (for
+/// ephemeral outputs only) that [`TransparentBuildRecipient::into_recipient`] will attach
+/// to produce a [`Recipient`].
+#[derive(Debug, Clone)]
+enum TransparentBuildRecipient<AccountId> {
     External {
         recipient_address: ZcashAddress,
         output_pool: PoolType,
@@ -1151,43 +1202,27 @@ enum BuildRecipient<AccountId> {
         receiving_account: AccountId,
         recipient_address: TransparentAddress,
     },
-    InternalShielded {
-        receiving_account: AccountId,
-        external_address: Option<ZcashAddress>,
-    },
+    /// Never constructed. Present only so that `AccountId` remains a used type parameter
+    /// when `transparent-inputs` is disabled, in which case the two variants above (the
+    /// only ones that otherwise reference it) do not exist. The uninhabited
+    /// [`core::convert::Infallible`] field lets every match on this type prove, rather than
+    /// assert, that this arm is unreachable.
+    #[cfg(not(feature = "transparent-inputs"))]
+    #[doc(hidden)]
+    #[allow(dead_code)]
+    Unconstructible(
+        core::marker::PhantomData<AccountId>,
+        core::convert::Infallible,
+    ),
 }
 
-impl<AccountId> BuildRecipient<AccountId> {
-    fn into_recipient_with_note(self, note: impl FnOnce() -> Note) -> Recipient<AccountId> {
-        match self {
-            BuildRecipient::External {
-                recipient_address,
-                output_pool,
-            } => Recipient::External {
-                recipient_address,
-                output_pool,
-            },
-            #[cfg(feature = "transparent-inputs")]
-            BuildRecipient::EphemeralTransparent { .. } => unreachable!(),
-            #[cfg(feature = "transparent-inputs")]
-            BuildRecipient::InternalTransparent { .. } => unreachable!(),
-            BuildRecipient::InternalShielded {
-                receiving_account,
-                external_address,
-            } => Recipient::InternalShielded {
-                receiving_account,
-                external_address,
-                note: Box::new(note()),
-            },
-        }
-    }
-
-    fn into_recipient_with_outpoint(
+impl<AccountId> TransparentBuildRecipient<AccountId> {
+    fn into_recipient(
         self,
         #[cfg(feature = "transparent-inputs")] outpoint: OutPoint,
     ) -> Recipient<AccountId> {
         match self {
-            BuildRecipient::External {
+            TransparentBuildRecipient::External {
                 recipient_address,
                 output_pool,
             } => Recipient::External {
@@ -1195,7 +1230,7 @@ impl<AccountId> BuildRecipient<AccountId> {
                 output_pool,
             },
             #[cfg(feature = "transparent-inputs")]
-            BuildRecipient::EphemeralTransparent {
+            TransparentBuildRecipient::EphemeralTransparent {
                 receiving_account,
                 ephemeral_address,
             } => Recipient::EphemeralTransparent {
@@ -1204,14 +1239,15 @@ impl<AccountId> BuildRecipient<AccountId> {
                 outpoint,
             },
             #[cfg(feature = "transparent-inputs")]
-            BuildRecipient::InternalTransparent {
+            TransparentBuildRecipient::InternalTransparent {
                 receiving_account,
                 recipient_address,
             } => Recipient::InternalTransparent {
                 receiving_account,
                 recipient_address,
             },
-            BuildRecipient::InternalShielded { .. } => unreachable!(),
+            #[cfg(not(feature = "transparent-inputs"))]
+            TransparentBuildRecipient::Unconstructible(_, absurd) => match absurd {},
         }
     }
 }
@@ -1224,12 +1260,24 @@ struct BuildState<P, AccountId> {
     #[cfg(feature = "transparent-inputs")]
     transparent_input_addresses: HashMap<TransparentAddress, TransparentAddressMetadata>,
     #[cfg(feature = "orchard")]
-    orchard_output_meta: Vec<(BuildRecipient<AccountId>, Zatoshis, Option<MemoBytes>)>,
+    orchard_output_meta: Vec<(
+        ShieldedBuildRecipient<AccountId>,
+        Zatoshis,
+        Option<MemoBytes>,
+    )>,
     #[cfg(feature = "orchard")]
-    ironwood_output_meta: Vec<(BuildRecipient<AccountId>, Zatoshis, Option<MemoBytes>)>,
-    sapling_output_meta: Vec<(BuildRecipient<AccountId>, Zatoshis, Option<MemoBytes>)>,
+    ironwood_output_meta: Vec<(
+        ShieldedBuildRecipient<AccountId>,
+        Zatoshis,
+        Option<MemoBytes>,
+    )>,
+    sapling_output_meta: Vec<(
+        ShieldedBuildRecipient<AccountId>,
+        Zatoshis,
+        Option<MemoBytes>,
+    )>,
     transparent_output_meta: Vec<(
-        BuildRecipient<AccountId>,
+        TransparentBuildRecipient<AccountId>,
         TransparentAddress,
         Zatoshis,
         StepOutputIndex,
@@ -1662,12 +1710,18 @@ where
     };
 
     #[cfg(feature = "orchard")]
-    let mut orchard_output_meta: Vec<(BuildRecipient<_>, Zatoshis, Option<MemoBytes>)> = vec![];
+    let mut orchard_output_meta: Vec<(ShieldedBuildRecipient<_>, Zatoshis, Option<MemoBytes>)> =
+        vec![];
     #[cfg(feature = "orchard")]
-    let mut ironwood_output_meta: Vec<(BuildRecipient<_>, Zatoshis, Option<MemoBytes>)> = vec![];
-    let mut sapling_output_meta: Vec<(BuildRecipient<_>, Zatoshis, Option<MemoBytes>)> = vec![];
+    let mut ironwood_output_meta: Vec<(
+        ShieldedBuildRecipient<_>,
+        Zatoshis,
+        Option<MemoBytes>,
+    )> = vec![];
+    let mut sapling_output_meta: Vec<(ShieldedBuildRecipient<_>, Zatoshis, Option<MemoBytes>)> =
+        vec![];
     let mut transparent_output_meta: Vec<(
-        BuildRecipient<_>,
+        TransparentBuildRecipient<_>,
         TransparentAddress,
         Zatoshis,
         StepOutputIndex,
@@ -1699,7 +1753,7 @@ where
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
-                    BuildRecipient::External {
+                    ShieldedBuildRecipient::External {
                         recipient_address: recipient_address.clone(),
                         output_pool: PoolType::SAPLING,
                     },
@@ -1723,7 +1777,7 @@ where
                     memo.clone(),
                 )?;
                 orchard_output_meta.push((
-                    BuildRecipient::External {
+                    ShieldedBuildRecipient::External {
                         recipient_address: recipient_address.clone(),
                         output_pool: PoolType::ORCHARD,
                     },
@@ -1747,7 +1801,7 @@ where
                     memo.clone(),
                 )?;
                 ironwood_output_meta.push((
-                    BuildRecipient::External {
+                    ShieldedBuildRecipient::External {
                         recipient_address: recipient_address.clone(),
                         // The payment is built into the Ironwood bundle, so its sent-note record
                         // belongs to the Ironwood pool. (Post-NU6.3 an Orchard-pool payment output
@@ -1770,7 +1824,7 @@ where
                 }
                 builder.add_transparent_output(&to, payment_amount)?;
                 transparent_output_meta.push((
-                    BuildRecipient::External {
+                    TransparentBuildRecipient::External {
                         recipient_address: recipient_address.clone(),
                         output_pool: PoolType::TRANSPARENT,
                     },
@@ -1856,7 +1910,7 @@ where
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
-                    BuildRecipient::InternalShielded {
+                    ShieldedBuildRecipient::InternalShielded {
                         receiving_account: account_id,
                         external_address: None,
                     },
@@ -1891,7 +1945,7 @@ where
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            BuildRecipient::InternalShielded {
+                            ShieldedBuildRecipient::InternalShielded {
                                 receiving_account: account_id,
                                 external_address: None,
                             },
@@ -1906,7 +1960,7 @@ where
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            BuildRecipient::InternalShielded {
+                            ShieldedBuildRecipient::InternalShielded {
                                 receiving_account: account_id,
                                 external_address: None,
                             },
@@ -1943,7 +1997,7 @@ where
                         memo.clone(),
                     )?;
                     ironwood_output_meta.push((
-                        BuildRecipient::InternalShielded {
+                        ShieldedBuildRecipient::InternalShielded {
                             receiving_account: account_id,
                             external_address: None,
                         },
@@ -1983,7 +2037,7 @@ where
             // if a later step does not consume it.
             builder.add_transparent_output(&ephemeral_address, change_value.value())?;
             transparent_output_meta.push((
-                BuildRecipient::EphemeralTransparent {
+                TransparentBuildRecipient::EphemeralTransparent {
                     receiving_account: account_id,
                     ephemeral_address,
                 },
@@ -2024,7 +2078,7 @@ where
             {
                 builder.add_transparent_output(&change_address, change_value.value())?;
                 transparent_output_meta.push((
-                    BuildRecipient::InternalTransparent {
+                    TransparentBuildRecipient::InternalTransparent {
                         receiving_account: account_id,
                         recipient_address: change_address,
                     },
@@ -2168,7 +2222,7 @@ where
                 .output_action_index(i)
                 .expect("An action should exist in the transaction for each Orchard output.");
 
-            let recipient = recipient.into_recipient_with_note(|| {
+            let recipient = recipient.into_recipient(|| {
                 build_result
                     .transaction()
                     .orchard_bundle()
@@ -2207,7 +2261,7 @@ where
                 .output_action_index(i)
                 .expect("An action should exist in the transaction for each Ironwood output.");
 
-            let recipient = recipient.into_recipient_with_note(|| {
+            let recipient = recipient.into_recipient(|| {
                 build_result
                     .transaction()
                     .ironwood_bundle()
@@ -2247,7 +2301,7 @@ where
                 .output_index(i)
                 .expect("An output should exist in the transaction for each Sapling payment.");
 
-            let recipient = recipient.into_recipient_with_note(|| {
+            let recipient = recipient.into_recipient(|| {
                 build_result
                     .transaction()
                     .sapling_bundle()
@@ -2293,7 +2347,7 @@ where
             // would not usefully improve privacy.
             let outpoint = OutPoint::new(txid, n as u32);
 
-            let recipient = recipient.into_recipient_with_outpoint(
+            let recipient = recipient.into_recipient(
                 #[cfg(feature = "transparent-inputs")]
                 outpoint.clone(),
             );
@@ -2443,7 +2497,10 @@ where
                 .output_action_index(i)
                 .expect("An action should exist in the transaction for each Orchard output.");
 
-            (output_index, PcztRecipient::from_recipient(recipient))
+            (
+                output_index,
+                PcztRecipient::from_shielded_recipient(recipient),
+            )
         })
         .collect::<HashMap<_, _>>();
 
@@ -2465,7 +2522,10 @@ where
                 .output_action_index(i)
                 .expect("An action should exist in the transaction for each Ironwood output.");
 
-            (output_index, PcztRecipient::from_recipient(recipient))
+            (
+                output_index,
+                PcztRecipient::from_shielded_recipient(recipient),
+            )
         })
         .collect::<HashMap<_, _>>();
 
@@ -2486,7 +2546,10 @@ where
                 .output_index(i)
                 .expect("An output should exist in the transaction for each Sapling output.");
 
-            (output_index, PcztRecipient::from_recipient(recipient))
+            (
+                output_index,
+                PcztRecipient::from_shielded_recipient(recipient),
+            )
         })
         .collect::<HashMap<_, _>>();
 
@@ -2716,7 +2779,7 @@ where
             {
                 updater.update_output_with(index, |mut output_updater| {
                     let (pczt_recipient, external_address) =
-                        PcztRecipient::from_recipient(recipient);
+                        PcztRecipient::from_transparent_recipient(recipient);
                     if let Some(user_address) = external_address {
                         output_updater.set_user_address(user_address.encode());
                     }
