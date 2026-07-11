@@ -28,7 +28,8 @@ workspace.
   shard_completeness_derives_from_scan_queue,
   stabilized_note_rewind_above_shard_end,
   stabilized_note_rewind_un_mines_shard_completion,
-  stabilized_note_settled_height_invalidated_by_reorg}`
+  stabilized_note_settled_height_invalidated_by_reorg,
+  stabilized_note_spendable_across_small_tip_advance}`
 
 ### Changed
 - `zcash_client_backend::data_api::scanning::ScanPriority` has a new variant,
