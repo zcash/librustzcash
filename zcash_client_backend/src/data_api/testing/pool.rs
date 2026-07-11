@@ -6284,6 +6284,82 @@ pub fn stabilized_note_rewind_un_mines_shard_completion<T, Dsf>(
     );
 }
 
+/// A stabilized note must remain spendable across a chain-tip advance smaller than the
+/// trusted anchor depth, and must stop being spendable once the advance reaches that
+/// depth.
+///
+/// `update_chain_tip` stamps the unscanned extension `(max_scanned, new_tip]` with
+/// `ChainTip` priority. The anchor the wallet will select for a spend is derived from
+/// the *new* tip (`target - min_confirmations(trusted)`); while the tip has advanced by
+/// fewer than `min_confirmations` blocks, that anchor still lies within scanned history:
+/// the tree structure between the note's anchor-stable height and the anchor is fully
+/// known and a witness against exactly that anchor's root is constructable, so the
+/// unscanned extension — which lies entirely *above* the anchor and cannot participate
+/// in the witness — must not veto spendability.
+///
+/// Once the advance reaches the anchor depth, the policy anchor lies in unscanned
+/// territory. The only anchor the wallet could construct a witness against is a stale,
+/// checkpoint-clamped one; spending against it would reveal the wallet's lagging view
+/// of the chain to a network observer, so the wallet must instead report zero spendable
+/// value until it has scanned forward.
+pub fn stabilized_note_spendable_across_small_tip_advance<T, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    let (mut st, account_id, _usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+
+    let policy = ConfirmationsPolicy::default();
+    let anchor_depth = u32::from(policy.trusted());
+    assert!(
+        anchor_depth > 1,
+        "this test requires a trusted anchor depth of at least 2 so that a nonzero tip \
+         advance can stay below it",
+    );
+
+    // Baseline: the wallet is fully scanned and the stabilized note is spendable.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "fixture must report the stabilized note as spendable under the default policy",
+    );
+
+    let scanned_tip = st
+        .wallet()
+        .chain_height()
+        .unwrap()
+        .expect("chain tip is known");
+
+    // Advance the chain tip by one block fewer than the trusted anchor depth, without
+    // scanning. The policy anchor against the new tip
+    // (`new_tip + 1 - anchor_depth = scanned_tip - 1`) is still within scanned history,
+    // so the note must remain spendable.
+    st.wallet_mut()
+        .update_chain_tip(scanned_tip + (anchor_depth - 1))
+        .unwrap();
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "a tip advance smaller than the anchor depth must not suspend spendability",
+    );
+
+    // Advance the tip by exactly the anchor depth. The policy anchor
+    // (`new_tip + 1 - anchor_depth = scanned_tip + 1`) now lies in the unscanned
+    // extension, so nothing may be reported spendable until the wallet scans forward.
+    st.wallet_mut()
+        .update_chain_tip(scanned_tip + anchor_depth)
+        .unwrap();
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "a tip advance reaching the anchor depth must suspend spendability until the \
+         wallet has scanned to the new anchor",
+    );
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,

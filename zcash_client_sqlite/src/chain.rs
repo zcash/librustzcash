@@ -501,6 +501,17 @@ mod tests {
     }
 
     #[test]
+    fn stabilized_note_spendable_across_small_tip_advance_sapling() {
+        testing::pool::stabilized_note_spendable_across_small_tip_advance::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_spendable_across_small_tip_advance_orchard() {
+        testing::pool::stabilized_note_spendable_across_small_tip_advance::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }
