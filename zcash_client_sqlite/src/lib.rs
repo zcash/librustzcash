@@ -2026,6 +2026,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     type Error = SqliteClientError;
     type TxRef = TxRef;
 
+    fn block_fully_scanned_height(
+        &self,
+    ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error> {
+        Ok(
+            wallet::block_fully_scanned(self.conn.borrow(), &self.params)?
+                .map(|meta| meta.block_height()),
+        )
+    }
+
     fn select_receiving_address(
         &self,
         account: Self::AccountId,
