@@ -2778,7 +2778,8 @@ pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
         let trusted_height =
             target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
 
-        let prunable_window_scanned = scanning::prunable_window_fully_scanned(tx, chain_tip)?;
+        let prunable_window_scanned =
+            scanning::prunable_window_fully_scanned(tx, chain_tip, trusted_height)?;
 
         let anchor_available = anchor_height.map_or(Ok(false), |h| {
             common::anchor_frontier_available(tx, h, protocol)
