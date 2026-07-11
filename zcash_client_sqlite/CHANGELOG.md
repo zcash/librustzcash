@@ -55,11 +55,13 @@ workspace.
   boolean `witness_stabilized` flag). The stored value is the note's settled
   height: every block from the note's own block through it has been scanned. A
   note is spendable when it has a settled height; no `scan_queue` range above
-  `Scanned` priority overlaps the chain-tip pruning window; no such range
-  overlaps the blocks above the settled height, through the earlier of the
-  chosen anchor height and the end of the note's shard; the chosen anchor's tree
-  root is constructable; and the note has met its confirmations-policy
-  threshold. A truncation of wallet data (`rewind_to_chain_state`,
+  `Scanned` priority overlaps the portion of the chain-tip pruning window at or
+  below the anchor height the confirmations policy implies at the current chain
+  tip (a not-yet-scanned tip extension strictly above that anchor does not
+  suspend spendability); no such range overlaps the blocks above the settled
+  height, through the earlier of the chosen anchor height and the end of the
+  note's shard; the chosen anchor's tree root is constructable; and the note has
+  met its confirmations-policy threshold. A truncation of wallet data (`rewind_to_chain_state`,
   `truncate_to_height`, or `truncate_to_chain_state`) clears any settled height
   above the truncation height; affected notes become spendable again once the
   wallet rescans the blocks above their remaining settled height.
