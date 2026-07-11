@@ -16,9 +16,24 @@ workspace.
   row-writing stage of `put_blocks`, extracted as a public function over
   `LowLevelWalletWrite` so that wallet stores that maintain their note
   commitment trees by other means can reuse it without also implementing
-  `WalletCommitmentTrees`. `put_blocks` itself is unchanged in behavior; it is
-  now expressed as `put_blocks_rows` followed by the note commitment tree
-  updates.
+  `WalletCommitmentTrees`. `put_blocks` is now expressed as `put_blocks_rows`
+  followed by the note commitment tree updates.
+- `zcash_client_backend::data_api::ll::wallet::NULLIFIER_MAP_RETENTION_BLOCKS`, the
+  trailing window of blocks whose nullifier-map entries `put_blocks_rows` always
+  inserts.
+
+### Changed
+- `zcash_client_backend::data_api::ll::LowLevelWalletRead` has an added
+  `block_fully_scanned_height` method, returning the height to which the wallet
+  has been fully scanned.
+- `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (and therefore
+  `put_blocks`) now skips nullifier-map insertion for entries it can prove are
+  unobservable: when a batch extends the wallet's contiguous fully-scanned
+  frontier, only the trailing `NULLIFIER_MAP_RETENTION_BLOCKS` blocks' nullifiers
+  are inserted. The nullifier map exists to detect spends observed before the
+  corresponding note's block has been scanned, which cannot occur below a
+  contiguous frontier; out-of-order scan ranges are unaffected and continue to
+  track the nullifiers of every block.
 - The helper functions used by the note commitment tree stage of `put_blocks`
   are now `pub`, so that alternative `ShardStore`-backed stores can reuse the
   exact tree-update logic: `zcash_client_backend::data_api::ll::wallet::`

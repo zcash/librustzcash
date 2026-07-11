@@ -152,6 +152,13 @@ pub trait LowLevelWalletRead {
     /// A wallet-internal transaction identifier.
     type TxRef: Copy + Eq + Hash;
 
+    /// Returns the height to which the wallet has been fully scanned: the greatest height
+    /// for which the wallet has trial-decrypted this and all preceding blocks above the
+    /// wallet's birthday height, or `Ok(None)` if no such height exists.
+    fn block_fully_scanned_height(
+        &self,
+    ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error>;
+
     /// Returns the set of account identifiers for accounts that spent notes and/or UTXOs in the
     /// construction of the given transaction.
     fn get_funding_accounts<T: TxMeta>(
