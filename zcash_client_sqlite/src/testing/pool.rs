@@ -815,6 +815,13 @@ pub(crate) fn stabilized_note_rewind_un_mines_shard_completion<T: ShieldedPoolTe
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn stabilized_note_spendable_across_small_tip_advance<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_spendable_across_small_tip_advance::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::shard_completeness_derives_from_scan_queue::<T, _>(
         TestDbFactory::default(),
