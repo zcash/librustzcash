@@ -329,11 +329,16 @@ pub(crate) fn anchor_frontier_available(
 /// 1. **Stored floor at or below the chosen anchor.** `witness_anchor_stable` (the note's
 ///    *anchor floor* — the lowest anchor height for which the wallet has the data needed to
 ///    construct this note's witness) must be set, and must lie at or below the chosen anchor.
-/// 2. **Pruning window fully scanned.** No `scan_queue` range above `Scanned` priority overlaps
-///    the chain-tip pruning window. The window is at most `PRUNING_DEPTH` blocks and is scanned
-///    at [`ScanPriority::Anchor`] (so ahead of everything else); verifying it is fully scanned
-///    proves the hash chain is intact from the bottom of the window through the anchor. The
-///    caller computes this wallet-state-wide predicate once per call.
+/// 2. **Pruning window fully scanned through the policy anchor.** No `scan_queue` range above
+///    `Scanned` priority overlaps the portion of the chain-tip pruning window at or below the
+///    anchor height the confirmations policy implies at the current chain tip
+///    (`target - min_confirmations`). The window is at most `PRUNING_DEPTH` blocks and is
+///    scanned at [`ScanPriority::Anchor`] (so ahead of everything else); verifying it is fully
+///    scanned proves the hash chain is intact from the bottom of the window through the anchor.
+///    A not-yet-scanned tip extension strictly above the policy anchor (the routine state
+///    between `update_chain_tip` and the next scan, when the tip has advanced by fewer than
+///    `min_confirmations` blocks) cannot participate in a witness against the anchor's root and
+///    does not block. The caller computes this wallet-state-wide predicate once per call.
 /// 3. **Witness region below the window is durable.** Either the note's shard is complete — so
 ///    it is witnessable from that shard's server-supplied subtree root regardless of gaps below
 ///    the window — or its stored floor reaches the bottom of the window: no `scan_queue` range
@@ -562,8 +567,12 @@ where
     )?;
 
     let chain_tip = super::chain_tip_height(conn)?;
+    // The anchor height the confirmations policy implies at the current chain tip; the
+    // window check is bounded here rather than at the tip, so that a not-yet-scanned tip
+    // extension lying entirely above the anchor does not suspend spendability.
+    let policy_anchor = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
     let prunable_window_scanned = match chain_tip {
-        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h)?,
+        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h, policy_anchor)?,
         None => false,
     };
     // The top of the highest unscanned region at or below the pruning floor; bounds check 3
@@ -658,14 +667,17 @@ where
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
 
-    // The chain-tip pruning window must be fully scanned for any stabilized note to be
-    // selectable; otherwise the anchor that note selection is about to use sits inside a
-    // window with non-`Scanned` overlap, and witness construction can't reliably trust
-    // its cap state. If `chain_tip_height` is unset there's no spendable balance anyway,
-    // so treat the predicate as false.
+    // The chain-tip pruning window must be fully scanned up to the policy anchor for any
+    // stabilized note to be selectable; otherwise witness construction against the anchor
+    // can't reliably trust its cap state. The check is bounded at the policy anchor
+    // (`target - min_confirmations`) rather than the chain tip, so that a not-yet-scanned
+    // tip extension lying entirely above the anchor does not suspend spendability. If
+    // `chain_tip_height` is unset there's no spendable balance anyway, so treat the
+    // predicate as false.
     let chain_tip = super::chain_tip_height(conn)?;
+    let policy_anchor = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
     let prunable_window_scanned = match chain_tip {
-        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h)?,
+        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h, policy_anchor)?,
         None => false,
     };
     // The top of the highest unscanned region at or below the pruning floor (see check 3 of

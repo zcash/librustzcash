@@ -133,11 +133,14 @@ workspace.
   needed to construct this note's witness for any anchor at or above that
   height. (It is a block height, not itself an anchor height.) A note is
   spendable when this floor lies at or below the chosen anchor; no
-  `scan_queue` range above `Scanned` priority overlaps the chain-tip pruning
-  window; the note's witness region below that window is durable (its shard is
-  complete, or its floor reaches the bottom of the window with no unscanned
-  range in between); the chosen anchor's tree root is constructable; and the
-  note has met its confirmations-policy threshold. Migration to this schema is
+  `scan_queue` range above `Scanned` priority overlaps the portion of the
+  chain-tip pruning window at or below the anchor height the confirmations
+  policy implies at the current chain tip (a not-yet-scanned tip extension
+  strictly above that anchor does not suspend spendability); the note's
+  witness region below the window is durable (its shard is complete, or its
+  floor reaches the bottom of the window with no unscanned range in between);
+  the chosen anchor's tree root is constructable; and the note has met its
+  confirmations-policy threshold. Migration to this schema is
   automatic.
 - After any operation that disturbs the wallet's anchor —
   `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,

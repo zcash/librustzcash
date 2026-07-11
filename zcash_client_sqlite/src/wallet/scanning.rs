@@ -69,33 +69,46 @@ pub(crate) fn pruning_floor(chain_tip: BlockHeight) -> BlockHeight {
     BlockHeight::from(u32::from(chain_tip).saturating_sub(PRUNING_DEPTH))
 }
 
-/// Returns true when every `scan_queue` range overlapping the chain-tip pruning window has
-/// `Scanned` priority (or `Ignored`, for pre-birthday gaps). This is the wallet-level
-/// precondition for treating any stabilized note as spendable: as long as a range above
-/// `Scanned` remains in the window, the cap state needed to witness stabilized notes can't
-/// be reliably reconstructed.
+/// Returns true when every `scan_queue` range overlapping the portion of the chain-tip
+/// pruning window at or below `policy_anchor` has `Scanned` priority (or `Ignored`, for
+/// pre-birthday gaps). This is the wallet-level precondition for treating any stabilized
+/// note as spendable: as long as a range above `Scanned` remains in that region, the cap
+/// state needed to witness stabilized notes against the anchor can't be reliably
+/// reconstructed.
+///
+/// `policy_anchor` is the anchor height the confirmations policy implies at the current
+/// chain tip (`target_height - min_confirmations`), regardless of whether the wallet has
+/// scanned to that height yet. Not-yet-scanned ranges strictly *above* the policy anchor
+/// — such as the `ChainTip` range that `update_chain_tip` stamps over
+/// `(max_scanned, new_tip]` when the tip advances by fewer than `min_confirmations`
+/// blocks — cannot participate in a witness against the anchor's root, so they do not
+/// gate spendability. Once the tip has advanced far enough that the policy anchor itself
+/// lies in unscanned territory, the overlap check fails and the wallet reports zero
+/// spendable value rather than falling back to a stale, checkpoint-clamped anchor (which
+/// would reveal the wallet's lagging view of the chain to a network observer).
 pub(crate) fn prunable_window_fully_scanned(
     conn: &rusqlite::Connection,
     chain_tip: BlockHeight,
+    policy_anchor: BlockHeight,
 ) -> Result<bool, SqliteClientError> {
-    // The pruning window is the half-open range `(pruning_floor, chain_tip]`, i.e. heights
-    // `pruning_floor + 1 ..= chain_tip`. A `scan_queue` range `[start, end)` overlaps the
-    // window iff `start <= chain_tip` and `end >= pruning_floor + 2` (equivalently,
-    // `end > pruning_floor + 1`). Without the `+ 1` we'd match a range whose `end` is
-    // exactly `pruning_floor + 1` — that range covers only `pruning_floor`, which is *not*
-    // in the window.
+    // The gated region is the half-open range `(pruning_floor, upper]` with
+    // `upper = min(policy_anchor, chain_tip)`, i.e. heights `pruning_floor + 1 ..= upper`.
+    // A `scan_queue` range `[start, end)` overlaps the region iff `start <= upper` and
+    // `end >= pruning_floor + 2` (equivalently, `end > pruning_floor + 1`). Without the
+    // `+ 1` we'd match a range whose `end` is exactly `pruning_floor + 1` — that range
+    // covers only `pruning_floor`, which is *not* in the region.
     let window_lower_inclusive = u32::from(pruning_floor(chain_tip)) + 1;
-    let chain_end = u32::from(chain_tip) + 1;
+    let upper_end = u32::from(std::cmp::min(policy_anchor, chain_tip)) + 1;
     let scanned_code = priority_code(&ScanPriority::Scanned);
     conn.query_row(
         "SELECT NOT EXISTS(
              SELECT 1 FROM scan_queue
-             WHERE block_range_start < :chain_end
+             WHERE block_range_start < :upper_end
                AND block_range_end > :window_lower_inclusive
                AND priority > :scanned_priority
          )",
         named_params![
-            ":chain_end": chain_end,
+            ":upper_end": upper_end,
             ":window_lower_inclusive": window_lower_inclusive,
             ":scanned_priority": scanned_code,
         ],
