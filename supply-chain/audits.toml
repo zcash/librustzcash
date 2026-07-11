@@ -2406,6 +2406,12 @@ user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-12-17"
 end = "2026-12-18"
 
+[[trusted.zewif]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2025-05-30"
+end = "2027-07-11"
+
 [[trusted.zip32]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
