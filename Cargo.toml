@@ -183,7 +183,7 @@ fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 zip32 = { version = "0.2", default-features = false }
 
 # ZeWIF wallet interchange
-zewif = "0.1.0"
+zewif = "1.0.0-rc.2"
 
 [workspace.metadata.release]
 consolidate-commits = false
@@ -227,6 +227,3 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("nu7"))',
   'cfg(live_network_tests)',
 ] }
-
-[patch.crates-io]
-zewif = { git = "https://github.com/zcash/zewif.git", branch = "main" }
