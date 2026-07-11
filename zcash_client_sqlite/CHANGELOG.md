@@ -37,15 +37,18 @@ workspace.
   the last scan that reached the tip, never below the note's own height. (It is
   a block height, not itself an anchor height.) A note is spendable when this
   floor lies at or below the chosen anchor; no `scan_queue` range above
-  `Scanned` priority overlaps the chain-tip pruning window; the note's witness
-  region below that window is durable (every block in its shard's range has been
-  scanned, or its floor reaches the bottom of the window with no unscanned range
-  in between); the chosen anchor's tree root is constructable; and the note has
-  met its confirmations-policy threshold. A truncation of wallet data
-  (`rewind_to_chain_state`, `truncate_to_height`, or `truncate_to_chain_state`)
-  clears any stored floor above the truncation height; affected notes
-  re-stabilize from post-truncation chain data once their shards are again free
-  of unscanned ranges. Migration to this schema is automatic.
+  `Scanned` priority overlaps the portion of the chain-tip pruning window at or
+  below the anchor height the confirmations policy implies at the current chain
+  tip (a not-yet-scanned tip extension strictly above that anchor does not
+  suspend spendability); the note's witness region below the window is durable
+  (every block in its shard's range has been scanned, or its floor reaches the
+  bottom of the window with no unscanned range in between); the chosen anchor's
+  tree root is constructable; and the note has met its confirmations-policy
+  threshold. A truncation of wallet data (`rewind_to_chain_state`,
+  `truncate_to_height`, or `truncate_to_chain_state`) clears any stored floor
+  above the truncation height; affected notes re-stabilize from post-truncation
+  chain data once their shards are again free of unscanned ranges. Migration to
+  this schema is automatic.
 
 ### Fixed
 - Unified addresses that the wallet generates to fill its transparent gap limit
