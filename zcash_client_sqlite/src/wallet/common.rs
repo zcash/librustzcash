@@ -350,11 +350,17 @@ pub(crate) fn anchor_frontier_available(
 ///    been scanned. For a note in a completed shard it is the shard's end height; for a note in
 ///    the open shard it is the pruning floor as of the last scan that reached the tip, never
 ///    below the note's own height.
-/// 2. **Pruning window fully scanned.** No `scan_queue` range above `Scanned` priority overlaps
-///    the chain-tip pruning window. The window is at most `PRUNING_DEPTH` blocks and is scanned
-///    at [`ScanPriority::Anchor`], ahead of every range except `Verify` ranges; verifying it is
-///    fully scanned proves the hash chain is intact from the bottom of the window through the
-///    anchor. The caller computes this wallet-state-wide predicate once per call.
+/// 2. **Pruning window fully scanned through the policy anchor.** No `scan_queue` range above
+///    `Scanned` priority overlaps the portion of the chain-tip pruning window at or below the
+///    anchor height the confirmations policy implies at the current chain tip
+///    (`target - min_confirmations`). The window is at most `PRUNING_DEPTH` blocks and is
+///    scanned at [`ScanPriority::Anchor`], ahead of every range except `Verify` ranges;
+///    verifying it is fully scanned proves the hash chain is intact from the bottom of the
+///    window through the anchor. A not-yet-scanned tip extension strictly above the policy
+///    anchor (the routine state between `update_chain_tip` and the next scan, when the tip has
+///    advanced by fewer than `min_confirmations` blocks) cannot participate in a witness against
+///    the anchor's root and does not block. The caller computes this wallet-state-wide
+///    predicate once per call.
 /// 3. **Witness region scanned.** The note's witness at `a` needs every leaf to the note's right
 ///    within its shard, up to the end of block `min(a, E)`, where `E` is the shard's end height
 ///    (unbounded while the shard is open). The frontier inserted when the note's block was
@@ -637,8 +643,12 @@ where
     )?;
 
     let chain_tip = super::chain_tip_height(conn)?;
+    // The anchor height the confirmations policy implies at the current chain tip; the
+    // window check is bounded here rather than at the tip, so that a not-yet-scanned tip
+    // extension lying entirely above the anchor does not suspend spendability.
+    let policy_anchor = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
     let prunable_window_scanned = match chain_tip {
-        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h)?,
+        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h, policy_anchor)?,
         None => false,
     };
     // Compute anchor_available once per call: it's a per-pool, per-anchor-height check.
@@ -741,14 +751,17 @@ where
         ..
     } = table_constants::<SqliteClientError>(protocol)?;
 
-    // The chain-tip pruning window must be fully scanned for any stabilized note to be
-    // selectable; otherwise the anchor that note selection is about to use sits inside a
-    // window with non-`Scanned` overlap, and witness construction can't reliably trust
-    // its cap state. If `chain_tip_height` is unset there's no spendable balance anyway,
-    // so treat the predicate as false.
+    // The chain-tip pruning window must be fully scanned up to the policy anchor for any
+    // stabilized note to be selectable; otherwise witness construction against the anchor
+    // can't reliably trust its cap state. The check is bounded at the policy anchor
+    // (`target - min_confirmations`) rather than the chain tip, so that a not-yet-scanned
+    // tip extension lying entirely above the anchor does not suspend spendability. If
+    // `chain_tip_height` is unset there's no spendable balance anyway, so treat the
+    // predicate as false.
     let chain_tip = super::chain_tip_height(conn)?;
+    let policy_anchor = target_height.saturating_sub(u32::from(confirmations_policy.trusted()));
     let prunable_window_scanned = match chain_tip {
-        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h)?,
+        Some(h) => super::scanning::prunable_window_fully_scanned(conn, h, policy_anchor)?,
         None => false,
     };
     // Compute anchor_available once per call: a per-pool, per-anchor-height check on the
