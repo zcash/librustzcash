@@ -537,10 +537,21 @@ mod tests {
     }
 
     #[test]
+    fn stabilized_note_spendable_across_small_tip_advance_sapling() {
+        testing::pool::stabilized_note_spendable_across_small_tip_advance::<SaplingPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "orchard")]
     fn note_in_recently_completed_shard_spendable_once_confirmed_orchard() {
         testing::pool::note_in_recently_completed_shard_spendable_once_confirmed::<OrchardPoolTester>(
         )
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_spendable_across_small_tip_advance_orchard() {
+        testing::pool::stabilized_note_spendable_across_small_tip_advance::<OrchardPoolTester>()
     }
 
     #[test]
