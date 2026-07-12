@@ -13,6 +13,7 @@
 // dead code until then; the allowance is removed in the commit that wires up `MigrationContext`.
 #![allow(dead_code)]
 
+mod backend;
 mod denominations;
 mod reserved_source;
 mod scheduling;

@@ -22,8 +22,11 @@ zcash_client_backend = { workspace = true, features = ["orchard", "pczt"] }
 # enables serialization of an upstream id type; this crate itself derives no serde and hand-rolls
 # its own storage encodings (spec D3).
 zcash_client_sqlite = { workspace = true, features = ["orchard", "serde", "transparent-inputs"] }
+zcash_address.workspace = true
+zcash_keys = { workspace = true, features = ["orchard"] }
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
+zip321.workspace = true
 transparent.workspace = true
 
 orchard.workspace = true
