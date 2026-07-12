@@ -6,13 +6,19 @@
 
 use std::collections::HashSet;
 
+use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_protocol::{ShieldedPool, consensus};
+use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+use zcash_protocol::consensus;
+
+#[cfg(feature = "orchard")]
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 use super::{account_delete_cascade, ironwood_shardtree};
+use crate::PRUNING_DEPTH;
+use crate::wallet::block_max_scanned;
 use crate::wallet::init::WalletMigrationError;
-use crate::wallet::scanning::mark_stabilized_notes;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x64925567_65ae_495e_b6cf_d5f56e99e422);
 
@@ -63,17 +69,45 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         // Backfill: Identify any notes which have stable witness data, and mark them as such.
         // Only the Sapling and Orchard received-note tables exist at this point in the migration
-        // DAG; the Ironwood table is introduced by a later migration (already stabilization-aware),
-        // so it is intentionally excluded from this backfill.
-        mark_stabilized_notes(
-            transaction,
-            &self.params,
-            &[
-                ShieldedPool::Sapling,
+        // DAG; the Ironwood table is introduced by a later migration, so it is intentionally
+        // excluded from this backfill. The SQL is inlined here so this migration remains stable
+        // even if `crate::wallet::scanning::mark_stabilized_notes` later evolves to write a
+        // different column.
+        if let Some(max_scanned_height) =
+            block_max_scanned(transaction, &self.params)?.map(|m| m.block_height())
+        {
+            let pruning_floor: u32 =
+                u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
+            for (pool, shard_height) in [
+                ("sapling", SAPLING_SHARD_HEIGHT),
                 #[cfg(feature = "orchard")]
-                ShieldedPool::Orchard,
-            ],
-        )?;
+                ("orchard", ORCHARD_SHARD_HEIGHT),
+            ] {
+                let sql = format!(
+                    "UPDATE {pool}_received_notes
+                     SET witness_stabilized = 1
+                     WHERE witness_stabilized = 0
+                       AND commitment_tree_position IS NOT NULL
+                       AND EXISTS (
+                           SELECT 1 FROM {pool}_tree_shards shard
+                           WHERE shard.subtree_end_height IS NOT NULL
+                             AND shard.subtree_end_height <= :pruning_floor
+                             AND (commitment_tree_position >> :shard_height)
+                                 = shard.shard_index
+                             AND shard.shard_index NOT IN (
+                                 SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
+                             )
+                       )"
+                );
+                transaction.execute(
+                    &sql,
+                    named_params![
+                        ":pruning_floor": pruning_floor,
+                        ":shard_height": shard_height,
+                    ],
+                )?;
+            }
+        }
 
         Ok(())
     }
@@ -419,269 +453,6 @@ mod tests {
         assert_eq!(
             stabilized, 0,
             "absent scan state must cause the backfill to be a no-op",
-        );
-    }
-
-    /// Regression test: a note whose containing shard's `subtree_end_height` is known
-    /// (e.g. populated by `put_shard_roots`) and lies at or below the pruning floor must
-    /// NOT be treated as stabilized if any block inside the shard's extent is covered by
-    /// a non-Scanned `scan_queue` range. An earlier criterion that only required
-    /// `subtree_end_height <= last_scanned - (PRUNING_DEPTH - 1)` could spuriously
-    /// stabilize such a note even though the wallet was missing the intra-shard
-    /// commitments inside the unscanned gap, stranding the note at spend time. The fix is
-    /// the per-shard view-based check in `mark_stabilized_notes`.
-    #[test]
-    fn gap_in_scanned_coverage_prevents_stabilization() {
-        use zcash_client_backend::data_api::scanning::ScanPriority;
-        use zcash_protocol::ShieldedPool;
-
-        use crate::wallet::scanning::{mark_stabilized_notes, priority_code};
-
-        let network = Network::TestNetwork;
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data =
-            WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
-
-        let seed_bytes = vec![0xab; 32];
-
-        // Migrate through `witness_stabilized_notes` so the schema is in its final state.
-        // Because there is no scan_queue / blocks / shards seeded yet, the migration's
-        // backfill is a no-op and the column default (0) applies to all rows we're about
-        // to insert.
-        WalletMigrator::new()
-            .with_seed(Secret::new(seed_bytes.clone()))
-            .ignore_seed_relevance()
-            .init_or_migrate_to(&mut db_data, &[MIGRATION_ID])
-            .unwrap();
-
-        // Scenario: the `scan_queue` partition covers `[birthday, chain_tip_exclusive)`
-        // with a non-Scanned (here: Historic) gap `[low_end, high_start)` in the middle.
-        // Shard 0's block extent is `(birthday, shard_end_height]`, which overlaps that
-        // gap. The shard's end lies below the pruning floor, so the only remaining
-        // barrier to stabilization is the view-based unscanned-range check.
-        //
-        //   birthday          low_end  gap    high_start           shard_end         max_scanned
-        //   |--- Scanned --------|---Historic---|--------- Scanned -------|-- Scanned -----|
-        //                                                 ^
-        //                                   shard 0's extent covers (birthday, shard_end],
-        //                                   which straddles the non-Scanned gap.
-        // All heights sit above the NU5 testnet activation height (1,842,420) so that each
-        // pool's shard scan-range view actually joins the shard to the scan_queue rows
-        // below — otherwise the shard's view-frame extent would be empty and the gap
-        // couldn't overlap.
-        let base: u32 = 2_000_000;
-        let birthday_height: u32 = base + 1;
-        let low_end: u32 = base + 150; // exclusive upper bound of the low Scanned range
-        let high_start: u32 = base + 200;
-        let shard_end_height: u32 = base + 250;
-        let max_scanned: u32 = shard_end_height + PRUNING_DEPTH + 50;
-        let chain_tip_exclusive: u32 = max_scanned + 1;
-        let pruning_floor: u32 = max_scanned - (PRUNING_DEPTH - 1);
-        assert!(
-            shard_end_height <= pruning_floor,
-            "test invariant: shard end must lie at or below the pruning floor so the \
-             only remaining barrier to stabilization is the unscanned-range check",
-        );
-        assert!(
-            low_end < high_start && high_start < shard_end_height,
-            "test invariant: non-Scanned gap must lie inside shard 0's extent",
-        );
-
-        // Seed a minimal account so `wallet_birthday(conn)` returns `Some(birthday_height)`.
-        let usk =
-            UnifiedSpendingKey::from_seed(&network, &seed_bytes, zip32::AccountId::ZERO).unwrap();
-        let ufvk = usk.to_unified_full_viewing_key();
-        let ufvk_str = ufvk.encode(&network);
-        let uivk_str = ufvk.to_unified_incoming_viewing_key().encode(&network);
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO accounts (id, uuid, account_kind,
-                 hd_seed_fingerprint, hd_account_index,
-                 ufvk, uivk, has_spend_key, birthday_height)
-                 VALUES (1, X'0000000000000000000000000000AAAA', 0,
-                 X'00000000000000000000000000000000000000000000000000000000000000AB',
-                 0, :ufvk, :uivk, 1, :birthday_height)",
-                named_params![
-                    ":ufvk": ufvk_str,
-                    ":uivk": uivk_str,
-                    ":birthday_height": birthday_height,
-                ],
-            )
-            .unwrap();
-
-        // Seed a single transaction; the note rows need an `id_tx` to reference.
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO transactions (id_tx, txid, min_observed_height)
-                 VALUES (1, X'00', 1)",
-                [],
-            )
-            .unwrap();
-
-        // `scan_queue` is a partition of `[birthday, chain_tip_exclusive)`:
-        //   [birthday, low_end)       priority Scanned
-        //   [low_end, high_start)     priority Historic  <-- the non-Scanned gap
-        //   [high_start, chain_tip)   priority Scanned
-        let scanned = priority_code(&ScanPriority::Scanned);
-        let historic = priority_code(&ScanPriority::Historic);
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
-                 VALUES
-                    (:start1, :end1, :scanned),
-                    (:start2, :end2, :historic),
-                    (:start3, :end3, :scanned)",
-                named_params![
-                    ":start1": birthday_height,
-                    ":end1": low_end,
-                    ":start2": low_end,
-                    ":end2": high_start,
-                    ":start3": high_start,
-                    ":end3": chain_tip_exclusive,
-                    ":scanned": scanned,
-                    ":historic": historic,
-                ],
-            )
-            .unwrap();
-
-        // A `blocks` row at `max_scanned` so `block_max_scanned` reflects the high range's
-        // tip and the helper can compute the pruning floor.
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO blocks (
-                     height, hash, time,
-                     sapling_tree, sapling_commitment_tree_size
-                 ) VALUES
-                     (:max_scanned, X'0000000000000000000000000000000000000000000000000000000000000000', 0, X'', 0)",
-                named_params![":max_scanned": max_scanned],
-            )
-            .unwrap();
-
-        // Shard 0 with `subtree_end_height = shard_end_height`. Its block extent is
-        // `(birthday, shard_end_height]`, which overlaps the non-Scanned gap. Its end
-        // lies below the pruning floor, so the criterion's only remaining barrier is the
-        // view-based unscanned-range check.
-        for pool in ["sapling", "orchard"] {
-            db_data
-                .conn
-                .execute(
-                    &format!(
-                        "INSERT INTO {pool}_tree_shards (shard_index, subtree_end_height)
-                         VALUES (0, :end)"
-                    ),
-                    named_params![":end": shard_end_height],
-                )
-                .unwrap();
-        }
-
-        // One note per pool in shard 0. `commitment_tree_position = 1` places each note
-        // inside shard index 0 for both SAPLING_SHARD_HEIGHT and ORCHARD_SHARD_HEIGHT.
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO sapling_received_notes (
-                     transaction_id, output_index, account_id,
-                     diversifier, value, rcm, is_change,
-                     commitment_tree_position
-                 ) VALUES (1, 0, 1, X'00', 0, X'00', 0, 1)",
-                [],
-            )
-            .unwrap();
-        #[cfg(feature = "orchard")]
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO orchard_received_notes (
-                     transaction_id, action_index, account_id,
-                     diversifier, value, rho, rseed, is_change,
-                     commitment_tree_position
-                 ) VALUES (1, 0, 1, X'00', 0, X'00', X'00', 0, 1)",
-                [],
-            )
-            .unwrap();
-
-        let read_stabilized = |conn: &rusqlite::Connection, table: &str, pk_col: &str| -> i64 {
-            conn.query_row(
-                &format!("SELECT witness_stabilized FROM {table} WHERE {pk_col} = 0"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap()
-        };
-
-        // First call: the non-Scanned gap lies inside shard 0's extent, so the note must
-        // NOT stabilize.
-        let tx = db_data.conn.transaction().unwrap();
-        mark_stabilized_notes(
-            &tx,
-            &network,
-            &[
-                ShieldedPool::Sapling,
-                #[cfg(feature = "orchard")]
-                ShieldedPool::Orchard,
-            ],
-        )
-        .unwrap();
-        tx.commit().unwrap();
-
-        assert_eq!(
-            read_stabilized(&db_data.conn, "sapling_received_notes", "output_index"),
-            0,
-            "sapling note must not be stabilized while a non-Scanned scan_queue \
-             range overlaps its containing shard's extent",
-        );
-        #[cfg(feature = "orchard")]
-        assert_eq!(
-            read_stabilized(&db_data.conn, "orchard_received_notes", "action_index"),
-            0,
-            "orchard note must not be stabilized while a non-Scanned scan_queue \
-             range overlaps its containing shard's extent",
-        );
-
-        // Replace the three ranges with a single contiguous Scanned range
-        // `[birthday, chain_tip_exclusive)`. The view should now return no rows for
-        // shard 0, so the note stabilizes.
-        db_data.conn.execute("DELETE FROM scan_queue", []).unwrap();
-        db_data
-            .conn
-            .execute(
-                "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
-                 VALUES (:start, :end, :priority)",
-                named_params![
-                    ":start": birthday_height,
-                    ":end": chain_tip_exclusive,
-                    ":priority": scanned,
-                ],
-            )
-            .unwrap();
-
-        let tx = db_data.conn.transaction().unwrap();
-        mark_stabilized_notes(
-            &tx,
-            &network,
-            &[
-                ShieldedPool::Sapling,
-                #[cfg(feature = "orchard")]
-                ShieldedPool::Orchard,
-            ],
-        )
-        .unwrap();
-        tx.commit().unwrap();
-
-        assert_eq!(
-            read_stabilized(&db_data.conn, "sapling_received_notes", "output_index"),
-            1,
-            "sapling note must be stabilized once the gap is filled",
-        );
-        #[cfg(feature = "orchard")]
-        assert_eq!(
-            read_stabilized(&db_data.conn, "orchard_received_notes", "action_index"),
-            1,
-            "orchard note must be stabilized once the gap is filled",
         );
     }
 }

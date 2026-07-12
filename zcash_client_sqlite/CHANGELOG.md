@@ -126,6 +126,31 @@ workspace.
   A cross-account duplicate for which no unique record can be verified by derivation causes
   the migration to abort.
 
+- The spendability rule for shielded notes now uses a per-note
+  `witness_anchor_stable` column on `*_received_notes` (replacing the prior
+  boolean `witness_stabilized` flag). The stored value is a block-height
+  *floor* on the anchors that can witness the note: the wallet has the data
+  needed to construct this note's witness for any anchor at or above that
+  height. (It is a block height, not itself an anchor height.) A note is
+  spendable when this floor lies at or below the chosen anchor; no
+  `scan_queue` range above `Scanned` priority overlaps the portion of the
+  chain-tip pruning window at or below the anchor height the confirmations
+  policy implies at the current chain tip (a not-yet-scanned tip extension
+  strictly above that anchor does not suspend spendability); the note's
+  witness region below the window is durable (its shard is complete, or its
+  floor reaches the bottom of the window with no unscanned range in between);
+  the chosen anchor's tree root is constructable; and the note has met its
+  confirmations-policy threshold. Migration to this schema is
+  automatic.
+- After any operation that disturbs the wallet's anchor —
+  `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
+  or importing an account whose birthday is below the prior wallet
+  birthday — the chain-tip pruning window is stamped with
+  `ScanPriority::Anchor`. The spendability rule reports zero spendable
+  balance until the wallet has scanned through the affected range; the
+  serve-`Anchor`-first ordering on `scan_queue` makes this happen
+  automatically under `suggest_scan_ranges`.
+
 ### Fixed
 - Deriving a transparent address that was previously imported as a standalone receiver now
   upgrades the existing address record in place to its derived form, instead of failing on the

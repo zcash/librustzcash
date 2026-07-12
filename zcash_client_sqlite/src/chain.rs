@@ -457,25 +457,58 @@ mod tests {
     }
 
     #[test]
-    fn stabilized_note_spendable_after_deep_rewind_sapling() {
-        testing::pool::stabilized_note_spendable_after_deep_rewind::<SaplingPoolTester>()
+    fn b_note_stable_across_rewind_below_birthday_sapling() {
+        testing::pool::b_note_stable_across_rewind_below_birthday::<SaplingPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn stabilized_note_spendable_after_deep_rewind_orchard() {
-        testing::pool::stabilized_note_spendable_after_deep_rewind::<OrchardPoolTester>()
+    fn b_note_stable_across_rewind_below_birthday_orchard() {
+        testing::pool::b_note_stable_across_rewind_below_birthday::<OrchardPoolTester>()
     }
 
     #[test]
-    fn newly_discovered_notes_become_stabilized_sapling() {
-        testing::pool::newly_discovered_notes_become_stabilized::<SaplingPoolTester>()
+    fn a_note_requires_full_birthday_shard_scan_sapling() {
+        testing::pool::a_note_requires_full_birthday_shard_scan::<SaplingPoolTester>()
     }
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn newly_discovered_notes_become_stabilized_orchard() {
-        testing::pool::newly_discovered_notes_become_stabilized::<OrchardPoolTester>()
+    fn a_note_requires_full_birthday_shard_scan_orchard() {
+        testing::pool::a_note_requires_full_birthday_shard_scan::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn stabilized_note_rewind_above_shard_end_sapling() {
+        testing::pool::stabilized_note_rewind_above_shard_end::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_rewind_above_shard_end_orchard() {
+        testing::pool::stabilized_note_rewind_above_shard_end::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn stabilized_note_rewind_un_mines_shard_completion_sapling() {
+        testing::pool::stabilized_note_rewind_un_mines_shard_completion::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_rewind_un_mines_shard_completion_orchard() {
+        testing::pool::stabilized_note_rewind_un_mines_shard_completion::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn stabilized_note_spendable_across_small_tip_advance_sapling() {
+        testing::pool::stabilized_note_spendable_across_small_tip_advance::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_spendable_across_small_tip_advance_orchard() {
+        testing::pool::stabilized_note_spendable_across_small_tip_advance::<OrchardPoolTester>()
     }
 
     #[test]

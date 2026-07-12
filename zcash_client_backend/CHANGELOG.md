@@ -309,6 +309,24 @@ workspace.
   calculation count Orchard and Ironwood bundles without the 2-action padding
   minimum. The default behavior is unchanged (padded). Proposals created with
   this option must be executed with a matching unpadded builder configuration.
+- `zcash_client_backend::data_api::scanning::ScanPriority::Anchor`, slotted
+  between `ChainTip` and `Verify`. Backends stamp `scan_queue` ranges with
+  this priority after operations that disturb the wallet's anchor; the
+  spendability rule treats any not-yet-scanned range overlapping the portion
+  of the chain-tip pruning window at or below the policy anchor as blocking.
+- The following utilities for fake note commitment tree construction have been
+  added under the `test-dependencies` feature:
+  - `zcash_client_backend::data_api::testing::pool::ShieldedPoolTester::`
+    - `SHARD_HEIGHT`
+    - `insert_subtree_stub`,
+    - `random_subtree_hash`,
+    - `read_tree_root`,
+    - `insert_frontier_into_tree`,
+    - `pool_frontier_in_chain_state`,
+    - `build_chain_state_with_pool_frontier`
+  - `zcash_client_backend::data_api::testing::shard_stub`
+    - `level_index_decomposition{start, end, max_level}`
+    - `fake_advance_to{st, advance_height, advance_block_hash, target_position, rng}`
 
 ### Changed
 - `zcash_client_backend::wallet::Recipient::InternalAccount` has been renamed
