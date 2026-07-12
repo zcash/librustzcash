@@ -772,8 +772,8 @@ pub(crate) fn propose_shielding_coinbase_succeeds<T: ShieldedPoolTester>() {
 }
 
 #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
-pub(crate) fn legacy_proposal_without_confirmations_policy_builds<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::legacy_proposal_without_confirmations_policy_builds::<
+pub(crate) fn proposal_without_confirmations_policy_builds<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::proposal_without_confirmations_policy_builds::<
         T,
         _,
     >(TestDbFactory::default(), BlockCache::new());
