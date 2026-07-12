@@ -1,4 +1,4 @@
-use crate::Pczt;
+use crate::{Pczt, common::AnchorRequirement};
 
 impl super::Verifier {
     /// Parses the Orchard bundle and then verifies it in the given closure.
@@ -13,23 +13,24 @@ impl super::Verifier {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor_requirement = AnchorRequirement::for_pre_authorization(global.tx_version);
 
-        let bundle = orchard
+        let parsed = orchard
             .into_parsed_with_version(
                 crate::orchard::orchard_bundle_version(&global)
                     .ok_or(OrchardError::UnsupportedConsensusBranchId)?,
-                global.tx_version,
+                anchor_requirement,
             )
             .map_err(OrchardError::Parse)?;
 
-        f(&bundle)?;
+        f(&parsed.bundle)?;
 
         Ok(Self {
             pczt: Pczt {
                 global,
                 transparent,
                 sapling,
-                orchard: crate::orchard::Bundle::serialize_from(bundle),
+                orchard: parsed.reserialize(),
                 ironwood,
             },
         })
@@ -47,12 +48,13 @@ impl super::Verifier {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor_requirement = AnchorRequirement::for_pre_authorization(global.tx_version);
 
-        let bundle = ironwood
-            .into_ironwood_parsed()
+        let parsed = ironwood
+            .into_ironwood_parsed(anchor_requirement)
             .map_err(OrchardError::Parse)?;
 
-        f(&bundle)?;
+        f(&parsed.bundle)?;
 
         Ok(Self {
             pczt: Pczt {
@@ -60,7 +62,7 @@ impl super::Verifier {
                 transparent,
                 sapling,
                 orchard,
-                ironwood: crate::orchard::Bundle::serialize_from(bundle),
+                ironwood: parsed.reserialize(),
             },
         })
     }
@@ -69,7 +71,7 @@ impl super::Verifier {
 /// Errors that can occur while verifying the Orchard bundle of a PCZT.
 #[derive(Debug)]
 pub enum OrchardError<E> {
-    Parse(orchard::pczt::ParseError),
+    Parse(crate::orchard::ParseError),
     /// The PCZT's consensus branch ID is unrecognized, or predates NU5 (under which
     /// the Orchard protocol is not supported).
     UnsupportedConsensusBranchId,

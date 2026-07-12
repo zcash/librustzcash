@@ -1,6 +1,6 @@
-use sapling::pczt::{ParseError, Updater, UpdaterError};
+use sapling::pczt::{Updater, UpdaterError};
 
-use crate::Pczt;
+use crate::{Pczt, common::AnchorRequirement, sapling::ParseError};
 
 impl super::Updater {
     /// Updates the Sapling bundle with information in the given closure.
@@ -15,16 +15,22 @@ impl super::Updater {
             orchard,
             ironwood,
         } = self.pczt;
+        let anchor_requirement = AnchorRequirement::for_pre_authorization(global.tx_version);
 
-        let mut bundle = sapling.into_parsed().map_err(SaplingError::Parser)?;
+        let mut parsed = sapling
+            .into_parsed(anchor_requirement)
+            .map_err(SaplingError::Parser)?;
 
-        bundle.update_with(f).map_err(SaplingError::Updater)?;
+        parsed
+            .bundle
+            .update_with(f)
+            .map_err(SaplingError::Updater)?;
 
         Ok(Self {
             pczt: Pczt {
                 global,
                 transparent,
-                sapling: crate::sapling::Bundle::serialize_from(bundle),
+                sapling: parsed.reserialize(),
                 orchard,
                 ironwood,
             },

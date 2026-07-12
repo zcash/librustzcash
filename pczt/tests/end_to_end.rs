@@ -2196,7 +2196,8 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
         resolved.ironwood().actions()[index].cv_net(),
         pczt.ironwood().actions()[index].cv_net()
     );
-    assert!(IoFinalizer::new(redacted.clone()).finalize_io().is_err());
+    let finalized = IoFinalizer::new(redacted.clone()).finalize_io().unwrap();
+    assert!(finalized.ironwood().anchor().is_none());
     assert!(
         Prover::new(redacted.clone())
             .create_ironwood_proof(orchard_proving_key())
