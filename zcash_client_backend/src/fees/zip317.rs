@@ -387,7 +387,9 @@ mod tests {
     use super::SingleOutputChangeStrategy;
     use crate::{
         data_api::{
-            AccountMeta, PoolMeta, testing::MockWalletDb, wallet::input_selection::SaplingPayment,
+            AccountMeta, PoolMeta,
+            testing::MockWalletDb,
+            wallet::{TargetHeight, input_selection::SaplingPayment},
         },
         fees::{
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
@@ -768,6 +770,127 @@ mod tests {
             result,
             Ok(balance) if
                 balance.proposed_change() == [ChangeValue::orchard(Zatoshis::const_from_u64(35000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(15000)
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    fn orchard_fallback_change_pool_is_promoted_to_ironwood_after_nu6_3() {
+        use crate::fees::sapling as sapling_fees;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        // A caller that names Orchard as its fallback change pool.
+        let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+            SplitPolicy::with_min_output_value(
+                NonZeroUsize::new(2).unwrap(),
+                Zatoshis::const_from_u64(100_0000),
+            ),
+        );
+
+        // A single transparent UTXO, shielded to the change pool. The fallback pool only
+        // decides where change goes for a transaction whose flows are fully transparent: one
+        // with shielded flows infers its change pool from the pool it already uses. So this
+        // is the case in which naming Orchard as the fallback can actually direct change
+        // into the Orchard pool.
+        let transparent_inputs = [TestTransparentInput {
+            outpoint: OutPoint::fake(),
+            coin: TxOut::new(
+                Zatoshis::const_from_u64(63000),
+                TransparentAddress::PublicKeyHash([0u8; 20]).script().into(),
+            ),
+        }];
+        let transparent_outputs = [TxOut::new(
+            Zatoshis::const_from_u64(40000),
+            Script::default(),
+        )];
+
+        // The shielded views are empty: the transaction has no shielded flows, so the change
+        // output the strategy proposes is the only thing that will populate one of them.
+        let sapling_view = sapling_fees::EmptyBundleView;
+        let ironwood_view = (
+            ::orchard::bundle::BundleVersion::ironwood_v3(),
+            &[] as &[Infallible],
+            &[] as &[Infallible],
+        );
+
+        // This transaction is not one half of a ZIP 320 pair, so it has no ephemeral balance.
+        let ephemeral_balance = None;
+
+        // No note counts are known for the account, so the split policy proposes a single
+        // change output: the assertions below are about the pool it lands in, not the split.
+        let wallet_meta = AccountMeta::new(None, None, None);
+
+        // The Orchard bundle version whose action-count policy applies at each height. The
+        // Orchard view is empty in both cases and so contributes no actions, but the version
+        // is what the transaction builder will be configured with.
+        let pre_nu6_3_orchard_view = (
+            ::orchard::bundle::BundleVersion::orchard_v2(),
+            &[] as &[Infallible],
+            &[] as &[Infallible],
+        );
+        let post_nu6_3_orchard_view = (
+            ::orchard::bundle::BundleVersion::orchard_v3(),
+            &[] as &[Infallible],
+            &[] as &[Infallible],
+        );
+
+        let pre_nu6_3_height: TargetHeight = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu5)
+            .unwrap()
+            .into();
+        let post_nu6_3_height: TargetHeight = Network::TestNetwork
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .unwrap()
+            .into();
+
+        // Before NU6.3, value may freely enter the Orchard pool, so the fallback is honoured
+        // as given and the change is returned to Orchard.
+        let pre_nu6_3_balance = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            pre_nu6_3_height,
+            &transparent_inputs,
+            &transparent_outputs,
+            &sapling_view,
+            &pre_nu6_3_orchard_view,
+            &ironwood_view,
+            ephemeral_balance,
+            &wallet_meta,
+        );
+
+        assert_matches!(
+            pre_nu6_3_balance,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::orchard(Zatoshis::const_from_u64(8000), None)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(15000)
+        );
+
+        // After NU6.3, the Orchard turnstile forbids value from entering the Orchard pool.
+        // This transaction spends no Orchard notes, so no amount of change may return to
+        // Orchard; the strategy promotes the Orchard fallback to Ironwood rather than
+        // proposing change that consensus would reject. The fee is unchanged: the change
+        // output is charged to the Ironwood bundle instead of the Orchard one, and each pads
+        // to the same two-action floor.
+        let post_nu6_3_balance = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            post_nu6_3_height,
+            &transparent_inputs,
+            &transparent_outputs,
+            &sapling_view,
+            &post_nu6_3_orchard_view,
+            &ironwood_view,
+            ephemeral_balance,
+            &wallet_meta,
+        );
+
+        assert_matches!(
+            post_nu6_3_balance,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::ironwood(Zatoshis::const_from_u64(8000), None)] &&
                 balance.fee_required() == Zatoshis::const_from_u64(15000)
         );
     }
