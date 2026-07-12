@@ -896,8 +896,8 @@ pub(crate) mod tests {
 
     #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
     #[test]
-    fn legacy_proposal_without_confirmations_policy_builds() {
-        testing::pool::legacy_proposal_without_confirmations_policy_builds::<OrchardPoolTester>();
+    fn proposal_without_confirmations_policy_builds() {
+        testing::pool::proposal_without_confirmations_policy_builds::<OrchardPoolTester>();
     }
 
     #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]

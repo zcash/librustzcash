@@ -8,12 +8,14 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.8.0] - PLANNED
+## [Unreleased]
+
+## [0.8.0-rc.1] - 2026-07-12
 
 ### Changed
 - MSRV is now 1.88
 - Migrated to `zcash_protocol 0.10.0`, `zcash_transparent 0.9.0`,
-  `zcash_primitives 0.29.0`, `zcash_proofs 0.29.0`
+  `zcash_primitives 0.29.0`, `zcash_proofs 0.29.0`,
   `orchard 0.15`, `shardtree 0.7`.
 - The empty states of the transparent, Sapling, Orchard, and Ironwood bundles
   now have a single canonical representation, produced consistently by the
@@ -61,10 +63,6 @@ workspace.
   and the flags are validated against it.
 - PCZT version 1 is now treated as a serialization format for the logical
   `pczt::Pczt` type.
-- The Orchard PCZT logical model now tracks the Orchard bundle's note plaintext
-  version separately from the version 1 serialization format.
-- PCZT version 2 serialization now omits empty Transparent, Sapling, and
-  Orchard bundles.
 - The Orchard PCZT logical model now represents the bundle anchor and per-action
   `cv_net` as optional fields, matching the version 2 encoding. The logical
   Orchard output model now similarly represents `cmx` as optional. Parsing
@@ -75,9 +73,6 @@ workspace.
   as `pczt::orchard::EncCiphertext`, allowing v2 serialization to carry either
   encrypted ciphertext or a trailing-zero-stripped
   `pczt::orchard::MemoPlaintext`.
-- PCZT version 2 Orchard action serialization now represents spend nullifiers
-  and `rk` values as optional fields, while parsing rejects encodings that omit
-  either field until the logical Orchard spend model supports their absence.
 - Direct `serde` serialization implementations have been removed from the
   logical `pczt::orchard::{Bundle, Action, Spend, Output}` types.
 - `pczt::Pczt::serialize` now consumes `self` and returns
@@ -85,13 +80,21 @@ workspace.
   returning `Vec<u8>`.
 - The low-level Signer's `sign_orchard_with` and `sign_ironwood_with` now parse
   the bundle with a preverified signing parse that skips deriving each spend's
-  full viewing key, driven by a bounded loop that keeps parsing stack usage flat
-  on constrained devices. These methods no longer validate the wire `fvk` bytes
+  full viewing key. These methods no longer validate the wire `fvk` bytes
   (callers must first run the full Verifier checks over the identical PCZT bytes)
   but preserve them unchanged in the returned PCZT. The signing closure must not
   add, remove, or reorder actions; doing so now returns the new
   `pczt::roles::low_level_signer::OrchardParseError::SigningClosureModifiedActions`
   error and leaves the PCZT unmodified.
+- PCZT roles that do not consume shielded anchors now preserve absent Sapling,
+  Orchard, and Ironwood anchors while parsing v6 transactions. Proving and
+  transaction extraction still require anchors for non-empty Sapling, Orchard,
+  and Ironwood bundles.
+- The Sapling, Orchard, and Ironwood Provers now reject non-zero-valued spends
+  whose witnesses do not root to the bundle anchor before creating proofs.
+- PCZT parse errors surfaced by Sapling and Orchard role APIs now use
+  `pczt::sapling::ParseError` and `pczt::orchard::ParseError`, so callers can
+  distinguish missing anchors from other malformed bundle data.
 
 ### Added
 - `pczt::roles::creator::Error`, the error type returned by the now-fallible
@@ -107,19 +110,20 @@ workspace.
   represent v2-only logical PCZT data.
 - `pczt::ParseError::MissingRequiredField`, returned when the PCZT encoding
   omits a field that the logical PCZT type still requires.
-- `pczt::orchard::{EncCiphertext, MEMO_SIZE, MemoPlaintext,
-  MemoPlaintextError}` for representing encrypted note plaintext data in the
-  logical Orchard output model.
+- `pczt::orchard::{EncCiphertext, MemoPlaintext}` for representing encrypted note
+  plaintext data in the logical Orchard output model.
 - `pczt::Pczt::resolve_fields`,
   `pczt::orchard::Bundle::{resolve_fields, resolve_memo_plaintexts}`, and
-  `pczt::roles::redactor::orchard::ActionRedactor::replace_enc_ciphertext_with_memo_plaintext`.
-- `pczt::roles::redactor::orchard::OrchardRedactor::clear_anchor` and
+  `pczt::roles::redactor::orchard::ActionRedactor::{replace_enc_ciphertext_with_memo_plaintext, replace_enc_ciphertext_with_decrypted_memo_plaintext}`.
+- `pczt::roles::redactor::orchard::OrchardRedactor::clear_anchor`,
+  `pczt::roles::redactor::sapling::SaplingRedactor::clear_anchor`, and
   `pczt::roles::redactor::orchard::ActionRedactor::clear_cv_net`.
 - `pczt::roles::redactor::orchard::ActionRedactor::clear_cmx`.
 - `pczt::v1`, a module providing the version 1 PCZT serialization format via
   `pczt::v1::Pczt`.
-- PCZT version 2 serialization, which encodes the Orchard note plaintext
-  version at the Orchard bundle level.
+- `pczt::v2`, a module providing the version 2 PCZT serialization format via
+  `pczt::v2::Pczt`, which encodes the Orchard note plaintext version at the
+  Orchard bundle level and omits empty Transparent, Sapling, and Orchard bundles.
 - `PartialEq` is now derived for the logical `pczt::transparent::{Bundle, Input,
   Output}`, `pczt::sapling::{Bundle, Spend, Output}`, and
   `pczt::orchard::{Bundle, Action, Spend, Output}` types (used to detect empty
@@ -156,6 +160,11 @@ workspace.
 - `pczt::roles::low_level_signer::OrchardParseError`
 - `UnsupportedConsensusBranchId` variants of `pczt::roles::updater::OrchardError`,
   `pczt::roles::verifier::OrchardError`, and `pczt::roles::prover::OrchardError`.
+- `pczt::sapling::ParseError`, `pczt::sapling::AnchorConsistencyError`
+- `pczt::orchard::ParseError`, `pczt::orchard::AnchorConsistencyError`
+- `pczt::roles::prover::SaplingError::InconsistentWitness`
+- `pczt::roles::prover::OrchardError::InconsistentWitness`
+- `pczt::roles::prover::IronwoodError::InconsistentWitness`
 
 ## [0.7.0] - 2026-06-02
 

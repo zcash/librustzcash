@@ -6897,13 +6897,14 @@ pub fn propose_shielding_coinbase_succeeds<T: ShieldedPoolTester, Dsf>(
     );
 }
 
-/// A shielding proposal spends no shielded notes, so its step defers the choice of anchor and
-/// serializes it as the zero sentinel. A proposal produced by an older library version also omits
-/// the confirmations policy field entirely. Decoding such a proposal must interpret the zero anchor
-/// as deferred and fall back to the default confirmations policy, and building it must resolve the
-/// anchor from that policy rather than failing with `AnchorNotFound(0)`.
+/// A newly constructed shielding proposal preserves the checkpoint selected by the wallet, even
+/// though it spends no shielded notes. A proposal serialized without the confirmations-policy
+/// field (as an older library version would have produced) decodes using the default policy and,
+/// because it still carries that real anchor, builds. Separately, a shielding step produces a
+/// shielded bundle, so a proposal that encodes such a step with the zero anchor sentinel is
+/// rejected at the parse boundary.
 #[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-pub fn legacy_proposal_without_confirmations_policy_builds<T: ShieldedPoolTester, Dsf>(
+pub fn proposal_without_confirmations_policy_builds<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) where
@@ -6943,42 +6944,56 @@ pub fn legacy_proposal_without_confirmations_policy_builds<T: ShieldedPoolTester
         )
         .expect("coinbase shielding proposal should succeed");
 
-    // The shielding step spends no shielded notes, so it carries no explicit anchor.
+    // The shielding step keeps the checkpoint selected by input selection.
+    let selected_anchor = proposal
+        .steps()
+        .first()
+        .anchor_height()
+        .expect("a shielding step must preserve its selected checkpoint");
+
+    let proto = crate::proto::proposal::Proposal::from_standard_proposal(&proposal);
     assert_eq!(
-        proposal.steps().first().anchor_height(),
-        None,
-        "an input-less shielding step must defer its anchor",
+        proto.steps[0].anchor_height,
+        u32::from(selected_anchor),
+        "a shielding step must serialize its selected checkpoint",
     );
 
-    // Serialize, then downgrade to a proposal as an older version would have produced it: drop the
-    // confirmations policy field, and confirm the deferred anchor encodes as the zero sentinel.
-    let mut proto = crate::proto::proposal::Proposal::from_standard_proposal(&proposal);
-    proto.confirmations_policy = None;
-    assert_eq!(
-        proto.steps[0].anchor_height, 0,
-        "a deferred anchor must encode as the zero sentinel",
+    // The zero anchor is the wire sentinel for "no anchor". A shielding step produces a shielded
+    // bundle, so decoding must reject a zero anchor at the parse boundary rather than accepting a
+    // step whose dummy spends would commit to no real anchor. (Checked before building below, which
+    // spends the input the proposal decodes against.)
+    let mut zero_anchor = proto.clone();
+    zero_anchor.steps[0].anchor_height = 0;
+    assert_matches!(
+        zero_anchor.try_into_standard_proposal(&params, st.wallet()),
+        Err(crate::proto::ProposalDecodingError::MissingShieldedAnchor)
     );
 
-    // Decoding must fall back to the default policy and keep the anchor deferred.
-    let decoded = proto
+    // A proposal serialized before the confirmations-policy field existed omits it, so decoding
+    // must fall back to the default policy. The real anchor is preserved, so the step still builds.
+    let mut without_policy = proto;
+    without_policy.confirmations_policy = None;
+    let decoded = without_policy
         .try_into_standard_proposal(&params, st.wallet())
-        .expect("a legacy proposal without a confirmations policy must decode");
+        .expect("a proposal without a confirmations policy must decode");
     assert_eq!(
         decoded.confirmations_policy(),
         ConfirmationsPolicy::default(),
         "a missing confirmations policy must decode as the default",
     );
-    assert_eq!(decoded.steps().first().anchor_height(), None);
+    assert_eq!(
+        decoded.steps().first().anchor_height(),
+        Some(selected_anchor),
+        "decoding must preserve the serialized anchor",
+    );
 
-    // Building must resolve the deferred anchor from the default policy and target height rather
-    // than looking up a checkpoint at height zero.
     let usk = st.get_account().usk().clone();
     st.create_proposed_transactions::<Infallible, _, Infallible, _>(
         &usk,
         OvkPolicy::Sender,
         &decoded,
     )
-    .expect("a legacy input-less proposal must build via the resolved anchor");
+    .expect("a proposal that carries its selected anchor must build");
 }
 
 /// Verifies that `propose_shielding_coinbase` rejects a transparent destination

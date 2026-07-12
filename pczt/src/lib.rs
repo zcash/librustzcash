@@ -452,6 +452,7 @@ impl Pczt {
     #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
     pub(crate) fn extract_tx_data<A, E>(
         self,
+        anchor_requirement: common::AnchorRequirement,
         extract_transparent: impl FnOnce(
             &::transparent::pczt::Bundle,
         ) -> Result<
@@ -525,26 +526,28 @@ impl Pczt {
         let transparent = transparent
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
-        let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
+        let sapling = sapling
+            .into_parsed(anchor_requirement)
+            .map_err(ExtractError::SaplingParse)?;
         let orchard_bundle_version = crate::orchard::bundle_version_for_revision(
             orchard_protocol_revision,
             ::orchard::ValuePool::Orchard,
         )
         .expect("the Orchard pool is supported under every protocol revision");
         let orchard = orchard
-            .into_parsed_with_version(orchard_bundle_version, global.tx_version)
+            .into_parsed_with_version(orchard_bundle_version, anchor_requirement)
             .map_err(ExtractError::OrchardParse)?;
         let ironwood = ironwood
-            .into_ironwood_parsed()
+            .into_ironwood_parsed(anchor_requirement)
             .map_err(ExtractError::IronwoodParse)?;
 
         let lock_time = determine_lock_time(&global, transparent.inputs())
             .ok_or(ExtractError::IncompatibleLockTimes)?;
 
         let transparent_bundle = extract_transparent(&transparent)?;
-        let sapling_bundle = extract_sapling(&sapling)?;
-        let orchard_bundle = extract_orchard(&orchard)?;
-        let ironwood_bundle = extract_ironwood(&ironwood)?;
+        let sapling_bundle = extract_sapling(&sapling.bundle)?;
+        let orchard_bundle = extract_orchard(&orchard.bundle)?;
+        let ironwood_bundle = extract_ironwood(&ironwood.bundle)?;
 
         let tx_data = match version {
             TxVersion::V6 => TransactionData::from_parts_v6(
@@ -585,7 +588,11 @@ impl Pczt {
     /// Gets the effects of this transaction.
     #[cfg(any(feature = "io-finalizer", feature = "signer"))]
     pub fn into_effects(self) -> Result<TransactionData<EffectsOnly>, ExtractError> {
+        let anchor_requirement =
+            common::AnchorRequirement::for_pre_authorization(self.global.tx_version);
+
         self.extract_tx_data(
+            anchor_requirement,
             |t| {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
@@ -607,9 +614,9 @@ impl Pczt {
 pub(crate) struct ParsedPczt<A: Authorization> {
     pub(crate) global: Global,
     pub(crate) transparent: ::transparent::pczt::Bundle,
-    pub(crate) sapling: ::sapling::pczt::Bundle,
-    pub(crate) orchard: ::orchard::pczt::Bundle,
-    pub(crate) ironwood: ::orchard::pczt::Bundle,
+    pub(crate) sapling: crate::sapling::Parsed,
+    pub(crate) orchard: crate::orchard::Parsed,
+    pub(crate) ironwood: crate::orchard::Parsed,
     pub(crate) tx_data: TransactionData<A>,
 }
 
@@ -653,15 +660,15 @@ pub enum ExtractError {
     /// support an Ironwood bundle.
     IronwoodNotSupported,
     /// An error occurred parsing the Ironwood PCZT bundle from the PCZT data.
-    IronwoodParse(::orchard::pczt::ParseError),
+    IronwoodParse(crate::orchard::ParseError),
     /// An error occurred extracting the Orchard protocol bundle from the Orchard PCZT bundle.
     OrchardExtract(::orchard::pczt::TxExtractorError),
     /// An error occurred parsing the Orchard PCZT bundle from the PCZT data.
-    OrchardParse(::orchard::pczt::ParseError),
+    OrchardParse(crate::orchard::ParseError),
     /// An error occurred extracting the Sapling protocol bundle from the Sapling PCZT bundle.
     SaplingExtract(::sapling::pczt::TxExtractorError),
     /// An error occurred parsing the Sapling PCZT bundle from the PCZT data.
-    SaplingParse(::sapling::pczt::ParseError),
+    SaplingParse(crate::sapling::ParseError),
     /// An error occurred extracting the transparent protocol bundle from the
     /// transparent PCZT bundle.
     TransparentExtract(::transparent::pczt::TxExtractorError),
