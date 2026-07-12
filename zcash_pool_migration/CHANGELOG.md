@@ -16,3 +16,7 @@ and this library adheres to Rust's notion of
 - Self-funding power-of-ten denomination planning: decomposes a spendable Orchard balance into
   notes each holding a power-of-ten crossing value plus a fixed fee buffer, leaving any residual
   (including dust) as Orchard change rather than folding it into a fee.
+- Height-based transfer scheduling: assigns each crossing value a send window and expiry, sharing
+  the wallet's natural anchor across a schedule and sampling the gap between successive transfers
+  from an exponential distribution (floored at one block) so a wallet's own transfers are neither
+  uniformly spaced nor correlated.

@@ -24,8 +24,16 @@ zcash_client_sqlite = { workspace = true, features = ["orchard", "serde", "trans
 zcash_protocol.workspace = true
 
 pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "signer", "spend-finalizer", "tx-extractor", "zcp-builder"] }
+rand.workspace = true
+rand_distr.workspace = true
 rusqlite.workspace = true
 shardtree.workspace = true
+
+[dev-dependencies]
+# Deterministic seeding for the scheduling tests: transfer cadence is sampled from an exponential
+# distribution (see `scheduling::sample_cadence_blocks`), so tests need a reproducible RNG rather
+# than `OsRng`.
+rand_chacha.workspace = true
 
 [features]
 expensive-tests = []
