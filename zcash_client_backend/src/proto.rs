@@ -33,7 +33,10 @@ use crate::{
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
-    proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
+    proposal::{
+        Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex,
+        produces_shielded_bundle,
+    },
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -510,6 +513,12 @@ pub enum ProposalDecodingError<DbError> {
     /// height. Once Ironwood is active, Orchard-receiver payments target the Ironwood pool and only
     /// change may return to Orchard, so such a payment cannot appear in a well-formed proposal.
     OrchardPaymentProhibited,
+    /// A proposal step produces a shielded bundle (it spends shielded notes, pays to a shielded
+    /// pool, or returns shielded change) but its encoded anchor height is the zero sentinel. Every
+    /// shielded-tree lookup the step performs — including the dummy spends that pad an output-only
+    /// bundle — must be bound to a real anchor, so this combination cannot appear in a well-formed
+    /// proposal.
+    MissingShieldedAnchor,
     /// The proposal specified an explicit transaction version header that the wallet does not
     /// recognize.
     ProposedVersionInvalid(u32),
@@ -578,6 +587,10 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::OrchardPaymentProhibited => write!(
                 f,
                 "A payment may not be directed to the Orchard pool once Ironwood is active."
+            ),
+            ProposalDecodingError::MissingShieldedAnchor => write!(
+                f,
+                "A proposal step that produces a shielded bundle must specify an anchor height."
             ),
             ProposalDecodingError::ProposedVersionInvalid(header) => write!(
                 f,
@@ -990,13 +1003,32 @@ impl proposal::Proposal {
                     )
                     .map_err(|_| ProposalDecodingError::BalanceInvalid)?;
 
+                    // The `anchorHeight` field's zero value is the wire sentinel for a step that
+                    // carries no anchor. Only a purely transparent step may lack one: any step that
+                    // produces a shielded bundle binds every shielded-tree lookup — including the
+                    // dummy spends that pad an output-only bundle — to a real anchor. Reject the
+                    // invalid combination here at the parse boundary rather than letting it reach
+                    // `Step::from_parts`.
+                    let anchor_height = match step.anchor_height {
+                        0 if produces_shielded_bundle(
+                            shielded_inputs.is_some(),
+                            &payment_pools,
+                            &balance,
+                        ) =>
+                        {
+                            return Err(ProposalDecodingError::MissingShieldedAnchor);
+                        }
+                        0 => None,
+                        h => Some(BlockHeight::from_u32(h)),
+                    };
+
                     let step = Step::from_parts(
                         &steps,
                         transaction_request,
                         payment_pools,
                         transparent_inputs,
                         shielded_inputs,
-                        step.anchor_height.into(),
+                        anchor_height,
                         prior_step_inputs,
                         balance,
                         step.is_shielding,

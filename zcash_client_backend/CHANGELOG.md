@@ -287,6 +287,16 @@ workspace.
   this option must be executed with a matching unpadded builder configuration.
 
 ### Changed
+- `zcash_client_backend::proposal::Step::from_parts` now takes its `anchor_height`
+  as `Option<BlockHeight>` instead of `BlockHeight`. Any step that produces a
+  shielded bundle — it spends shielded notes, pays to a shielded pool, or returns
+  shielded change — must provide `Some` (the checkpoint selected during input
+  selection); only a purely transparent step may pass `None`. A `None` anchor on a
+  step that produces a shielded bundle is rejected with a new
+  `ProposalError::MissingShieldedAnchor` variant, and the protobuf decoder rejects
+  the equivalent zero-anchor encoding at parse time with a new
+  `zcash_client_backend::proto::ProposalDecodingError::MissingShieldedAnchor`
+  variant.
 - `zcash_client_backend::wallet::Recipient::InternalAccount` has been renamed
   to `Recipient::InternalShielded`, for symmetry with `Recipient::InternalTransparent`
   and to clarify that the distinguishing feature of this variant is that its
