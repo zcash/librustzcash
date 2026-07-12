@@ -512,6 +512,17 @@ mod tests {
     }
 
     #[test]
+    fn stabilized_note_floor_invalidated_by_reorg_sapling() {
+        testing::pool::stabilized_note_floor_invalidated_by_reorg::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn stabilized_note_floor_invalidated_by_reorg_orchard() {
+        testing::pool::stabilized_note_floor_invalidated_by_reorg::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn reorg_to_checkpoint_sapling() {
         testing::pool::reorg_to_checkpoint::<SaplingPoolTester>()
     }

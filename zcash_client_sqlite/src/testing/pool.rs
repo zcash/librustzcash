@@ -672,6 +672,13 @@ pub(crate) fn stabilized_note_spendable_across_small_tip_advance<T: ShieldedPool
     >(TestDbFactory::default(), BlockCache::new())
 }
 
+pub(crate) fn stabilized_note_floor_invalidated_by_reorg<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_floor_invalidated_by_reorg::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),

@@ -6360,6 +6360,185 @@ pub fn stabilized_note_spendable_across_small_tip_advance<T, Dsf>(
     );
 }
 
+/// A note's stored anchor floor (`witness_anchor_stable`) is a claim about the chain the
+/// wallet was observing when the floor was written: every block bearing on the note's
+/// witness context up to that height has been scanned, so the wallet's determination of
+/// witness constructability is grounded in chain data it has verified. A rewind that
+/// truncates wallet state below a stored floor discards the scanned blocks and tree data
+/// backing that claim, so the claim must not survive the truncation.
+///
+/// This test drives the false positive that arises if it does. A change note is mined at
+/// the chain tip and stabilizes with its floor at its own mined height. A reorg then
+/// rewinds the wallet three blocks below that height, and the same transaction is
+/// re-mined two blocks lower on the new chain, with a non-wallet output in the block
+/// directly above it that the wallet does not (yet) scan. Once the new chain advances far
+/// enough that the unscanned block falls below the chain-tip pruning window, the
+/// window-scanned check no longer sees the gap, and the stale floor — sitting exactly at
+/// the gap's upper boundary — vouches that the region between the note and the window is
+/// durably scanned. Every spendability check then passes and the wallet reports the note
+/// spendable, even though that determination rests on blocks that exist only on the
+/// reorged-away chain: the unscanned gap on the new chain has been neither
+/// hash-chain-verified nor checked for spends of the wallet's notes.
+///
+/// The truncation must instead invalidate the stored floor. The note then re-stabilizes
+/// from new-chain data only once its shard is scan-clean, so the wallet reports zero
+/// spendable value while the gap remains, and the note becomes spendable when the gap is
+/// scanned.
+pub fn stabilized_note_floor_invalidated_by_reorg<T, Dsf>(ds_factory: Dsf, cache: impl TestCache)
+where
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+    <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
+{
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let (mut st, account_id, usk) = build_stable_shard_fixture::<T, Dsf>(ds_factory, cache);
+    let policy = ConfirmationsPolicy::default();
+
+    // Baseline: the fixture note is stabilized and spendable.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        SHARD_1_NOTE_VALUE,
+        "fixture must report the stabilized note as spendable under the default policy",
+    );
+
+    // Spend the fixture note, producing a wallet transaction whose change note carries
+    // the stability floor under test. (A received note cannot be used here: re-mining
+    // the *same* transaction at a different height is what lets the note row keep its
+    // stored floor across the reorg, and only wallet-created transactions can be mined
+    // into the fake chain twice.) The proposal is created against the fixture chain
+    // state, before the additional blocks below are generated, so input selection can
+    // only see the fixture note.
+    let to = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+    let proposal = st
+        .propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            policy,
+        )
+        .unwrap();
+    let txid = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            &usk,
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .unwrap()[0];
+
+    // Extend the old chain by three scanned blocks: a second wallet note, a non-wallet
+    // filler, and the transaction created above. The second wallet note is structural:
+    // it occupies the first note-commitment-tree position that the upcoming rewind
+    // truncates away. A marked (wallet-note) leaf keeps its pruned sibling's hash stored
+    // explicitly, so truncating at its boundary cleanly splits the pair; were the leaf a
+    // pruned non-wallet commitment, truncation would leave behind a merged hash node
+    // spanning the boundary, and re-scanning the divergent chain would hit a note
+    // commitment tree insertion conflict instead of exercising the spendability rule.
+    let dfvk = T::sk_to_fvk(T::usk_to_sk(&usk));
+    let extra_note_value = Zatoshis::const_from_u64(25000);
+    let (extra_height, _, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, extra_note_value);
+
+    let not_our_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_value = Zatoshis::const_from_u64(1000);
+    st.generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value);
+
+    let (tx_height, _) = st.generate_next_block_including(txid);
+
+    // Scan all three blocks in a single batch. This matters for the tree surgery below:
+    // scanning in one batch writes no batch-boundary frontier (and thus no cached
+    // interior-node hash annotations) above the rewind target, so truncating there and
+    // re-scanning the divergent chain does not conflict with stale annotations. The
+    // change note lands in the open chain-tip shard, which is scan-clean after the
+    // batch, so it stabilizes immediately with its floor at its own mined height (above
+    // the pruning floor).
+    st.scan_cached_blocks(extra_height, 3);
+
+    // The wallet's whole balance is now the change note plus the second wallet note (the
+    // fixture note is spent). The reorg below permanently un-mines the second note, so
+    // the recovered balance at the end of the test is the change value alone.
+    let change_value = (st.get_total_balance(account_id) - extra_note_value)
+        .expect("balance covers the extra note value");
+    assert!(change_value > Zatoshis::ZERO);
+
+    // Reorg: rewind the wallet to three blocks below the transaction's mined height —
+    // just below the second wallet note. This truncates the tree data above the rewind
+    // target, including everything the change note's stored floor vouches for, and
+    // un-mines both the transaction and the second note. The block cache is truncated
+    // separately so that the chain regenerated below diverges from the reorged-away one.
+    let rewind_target = tx_height - 3;
+    st.wallet_mut()
+        .rewind_to_chain_state(
+            ChainState::empty(rewind_target, BlockHash([0; 32])),
+            HashSet::new(),
+        )
+        .expect("rewind_to_chain_state should succeed");
+    st.truncate_cache_to_height(rewind_target);
+
+    // On the new chain, the same transaction is re-mined two blocks lower than before
+    // (the second wallet note is not re-mined at all)...
+    let (remine_height, _) = st.generate_next_block_including(txid);
+    assert_eq!(remine_height, tx_height - 2);
+
+    // ...with a non-wallet output in the block directly above it. The output makes the
+    // gap material: the wallet can obtain that commitment's value only by scanning the
+    // gap block or by trusting a server-supplied frontier, and until the block is
+    // scanned it may conceal spends of the wallet's notes.
+    let (gap_height, _, _) =
+        st.generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value);
+    assert_eq!(gap_height, tx_height - 1);
+
+    // Extend the new chain with single-output filler blocks (empty blocks would leave
+    // the note commitment tree without checkpoints at the new heights, clamping the
+    // wallet's anchor selection below the region under test) until the gap block sits
+    // just below the pruning window of the new tip
+    // (`new_tip - PRUNING_DEPTH = gap_height + 1`).
+    let mut new_tip = gap_height;
+    for _ in 0..(PRUNING_DEPTH + 1) {
+        new_tip = st
+            .generate_next_block(&not_our_fvk, AddressType::DefaultExternal, filler_value)
+            .0;
+    }
+
+    // Scan the re-mined transaction's block, then everything above the gap block, which
+    // is deliberately left unscanned: it is the only hole in the wallet's view of the
+    // new chain, and it lies below the pruning window, where only the note's stability
+    // floor guards against it.
+    st.scan_cached_blocks(remine_height, 1);
+    st.wallet_mut().update_chain_tip(new_tip).unwrap();
+    st.scan_cached_blocks(gap_height + 1, (PRUNING_DEPTH + 1) as usize);
+
+    // The change note's old floor (its old-chain mined height) sits exactly at the top
+    // of the unscanned gap; were it to survive the truncation, it would vouch that the
+    // gap does not matter and the note would be reported spendable. The truncation must
+    // instead have invalidated the floor, and the note — whose shard is not scan-clean
+    // while the gap remains — must not have re-stabilized.
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        Zatoshis::ZERO,
+        "a stability floor written on the reorged-away chain must not vouch for \
+         spendability while the new chain has an unscanned gap below the pruning window",
+    );
+
+    // Scanning the gap block closes the hole: the change note re-stabilizes from
+    // new-chain data and becomes spendable.
+    st.scan_cached_blocks(gap_height, 1);
+    assert_eq!(
+        st.get_spendable_balance(account_id, policy),
+        change_value,
+        "closing the gap must restore spendability of the change note",
+    );
+}
+
 pub fn reorg_to_checkpoint<T: ShieldedPoolTester, Dsf, C>(ds_factory: Dsf, cache: C)
 where
     Dsf: DataStoreFactory,
