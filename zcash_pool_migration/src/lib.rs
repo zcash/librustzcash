@@ -14,6 +14,7 @@
 #![allow(dead_code)]
 
 mod denominations;
+mod scheduling;
 
 pub mod error;
 pub mod types;

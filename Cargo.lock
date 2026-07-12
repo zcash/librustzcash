@@ -7262,6 +7262,9 @@ name = "zcash_pool_migration"
 version = "0.1.0"
 dependencies = [
  "pczt",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rand_distr",
  "rusqlite",
  "shardtree",
  "zcash_client_sqlite",
