@@ -13,6 +13,8 @@
 // dead code until then; the allowance is removed in the commit that wires up `MigrationContext`.
 #![allow(dead_code)]
 
+mod denominations;
+
 pub mod error;
 pub mod types;
 

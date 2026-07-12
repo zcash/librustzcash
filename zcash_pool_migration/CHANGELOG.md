@@ -13,3 +13,6 @@ and this library adheres to Rust's notion of
   engine's API: `TransferId`, `NoteSplitProposal`, `TransferProposal`, `MigrationSchedule`,
   `MigrationProgress`, `PreparedTransfer`, `UnsignedTransferPczt`, `SignedTransferPczt`,
   `MigrationState`, `AttentionReason`, and `TransferResult`.
+- Self-funding power-of-ten denomination planning: decomposes a spendable Orchard balance into
+  notes each holding a power-of-ten crossing value plus a fixed fee buffer, leaving any residual
+  (including dust) as Orchard change rather than folding it into a fee.
