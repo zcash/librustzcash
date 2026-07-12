@@ -20,3 +20,7 @@ and this library adheres to Rust's notion of
   the wallet's natural anchor across a schedule and sampling the gap between successive transfers
   from an exponential distribution (floored at one block) so a wallet's own transfers are neither
   uniformly spaced nor correlated.
+- Migration run state machine (`state`) and its SQLite persistence layer (`store`): five additive
+  `ext_ironwood_migration_*` tables recording runs, prepared notes, the note-split transaction,
+  scheduled transfers, and staged external-signer PCZTs, plus the phase-string model that
+  `MigrationState` is derived from.
