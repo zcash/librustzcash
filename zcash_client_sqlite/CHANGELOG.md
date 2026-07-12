@@ -8,7 +8,9 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## Unreleased
+## [Unreleased]
+
+## [0.22.0-rc.1] - 2026-07-12
 
 ### Added
 - `WalletDb` implements the new
@@ -97,13 +99,21 @@ workspace.
 - `WalletDb::generate_ironwood_witnesses_at_historical_height`, which mirrors
   the existing Orchard historical witness helper over the wallet's Ironwood
   commitment tree shard tables.
+- A new `zewif` feature flag adds the `zcash_client_sqlite::zewif` module for
+  importing wallets from the Zcash Wallet Interchange Format (ZeWIF).
+  `zewif::import_wallet` ingests a ZeWIF document into an already-initialized
+  `WalletDb` within a single transaction, delivering any encountered spending-key
+  material to a caller-supplied `zewif::SecretSink` (use `zewif::DiscardSecrets`
+  to drop it, e.g. for a view-only import) and returning a
+  `zewif::ZewifImportReport` describing the imported and skipped items. Import
+  failures are reported via `zewif::ZewifImportError`.
 
 ### Changed
 - MSRV is now 1.88
 - Migrated to `zcash_protocol 0.10.0`, `zcash_address 0.13.0`,
-  `zcash_transparent 0.9.0`, `zcash_keys 0.15.0`,
+  `zcash_transparent 0.9.0`, `zip321 0.9.0-rc.1`, `zcash_keys 0.15.0`,
   `zcash_primitives 0.29.0`, `zcash_proofs 0.29.0`,
-  `orchard 0.15`, `shardtree 0.7`.
+  `orchard 0.15`, `shardtree 0.7`, `zcash_client_backend-0.24.0-rc.1`.
 - (behind the new `spend-index` feature) `WalletRead::transaction_data_requests`
   emits `TransactionDataRequest::GetSpendingTx` for transparent spend
   detection instead of `TransactionDataRequest::TransactionsInvolvingAddress`.
@@ -125,19 +135,6 @@ workspace.
   including under the ZIP 32 account index 0x7FFFFFFF used for the `zcashd` legacy account).
   A cross-account duplicate for which no unique record can be verified by derivation causes
   the migration to abort.
-
-### Fixed
-- Deriving a transparent address that was previously imported as a standalone receiver now
-  upgrades the existing address record in place to its derived form, instead of failing on the
-  transparent-receiver uniqueness invariant added in this release. If the import was recorded
-  under a different account, the record's account attribution — and that of any outputs
-  received at the address — moves to the deriving account, since successful derivation
-  establishes that account's ownership of the address. Funds received at such an address
-  become spendable once the account derives it.
-- Importing a standalone transparent pubkey whose receiver address is already recorded (for
-  example because it was derived as an account receiver) is now a no-op instead of failing on
-  the transparent-receiver uniqueness invariant added in this release. This is the
-  import-direction counterpart of the derivation-side fix above.
 
 ## [0.21.1] - 2026-06-19
 

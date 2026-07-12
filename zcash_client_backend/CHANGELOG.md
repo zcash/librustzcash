@@ -306,7 +306,7 @@ workspace.
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
   `zcash_address 0.13.0`, `zcash_transparent 0.9.0`, `zip321 0.9.0-rc.1`,
   `zcash_keys 0.15.0`, `orchard 0.15`, `zcash_primitives 0.29.0`,
-  `zcash_proofs 0.29.0`, `shardtree 0.7`. 
+  `zcash_proofs 0.29.0`, `zip321 0.9.0-rc.1`, `pczt 0.8.0-rc.1`, `shardtree 0.7`. 
 - `zcash_client_backend::data_api::ll::LowLevelWalletRead` has an added
   `block_fully_scanned_height` method, returning the height to which the wallet
   has been fully scanned.
