@@ -29,3 +29,9 @@ and this library adheres to Rust's notion of
   balance into the planned self-funding notes, keeping any residual as a plain Orchard change
   output (never folded into a migration note), and excludes reserved / migration-locked notes
   from selection.
+- Wallet-backend transaction pipeline (`backend`): reads pool balances and chain heights, resolves
+  the account's self-send address, builds each migration transfer directly on the transaction
+  builder (a self-funding note pays its own fee, bypassing the wallet's fee/change selection),
+  falling back to the high-level input-selection path for the immediate/sweep case, and drives the
+  shared PCZT prove/sign/finalize pipeline (one `PostNu6_3` Orchard-family proving key serving both
+  the Orchard and Ironwood bundles).
