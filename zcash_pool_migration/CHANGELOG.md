@@ -24,3 +24,8 @@ and this library adheres to Rust's notion of
   `ext_ironwood_migration_*` tables recording runs, prepared notes, the note-split transaction,
   scheduled transfers, and staged external-signer PCZTs, plus the phase-string model that
   `MigrationState` is derived from.
+- Note-split PCZT construction (`split`) and a reserving `InputSource` adapter
+  (`reserved_source`): builds the denomination-prep transaction that fans a consolidated Orchard
+  balance into the planned self-funding notes, keeping any residual as a plain Orchard change
+  output (never folded into a migration note), and excludes reserved / migration-locked notes
+  from selection.
