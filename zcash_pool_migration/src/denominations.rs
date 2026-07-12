@@ -22,7 +22,7 @@ pub(crate) const TRANSFER_FEE_BUFFER_ZATOSHI: u64 = 20_000;
 /// worth, so it is never offered to the user as an optional migration, only ever left in the
 /// wallet. At or above it, a leftover is a genuine *residual* — too small to form a whole
 /// self-funding note, but large enough to be worth an opt-in "migrate the rest too" transfer (see
-/// `MigrationContext::propose_migration_transfers`).
+/// [`crate::context::MigrationContext::propose_migration_transfers`]).
 pub(crate) const RESIDUAL_MIGRATION_MIN_ZATOSHI: u64 = 100_000;
 
 /// The outcome of planning a note split.

@@ -95,7 +95,7 @@ pub(crate) struct SplitOutputs {
 /// Returns [`MigrationError::Pipeline`] if there are no planned outputs, or if the real fee is
 /// higher than planned by more than the selected total (net of the planned migration outputs) can
 /// cover — the split must be re-planned with a fee estimate that reserves enough headroom (see
-/// `MigrationContext::prepare_note_split`) rather than shrinking a migration
+/// [`crate::context::MigrationContext::prepare_note_split`]) rather than shrinking a migration
 /// note to make up the difference.
 pub(crate) fn finalize_split_outputs(
     n_spends: usize,

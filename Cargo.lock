@@ -7261,6 +7261,7 @@ dependencies = [
 name = "zcash_pool_migration"
 version = "0.1.0"
 dependencies = [
+ "incrementalmerkletree",
  "orchard",
  "pczt",
  "rand 0.8.5",
@@ -7269,6 +7270,7 @@ dependencies = [
  "rusqlite",
  "shardtree",
  "tempfile",
+ "uuid",
  "zcash_address",
  "zcash_client_backend",
  "zcash_client_sqlite",
@@ -7276,6 +7278,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_protocol",
  "zcash_transparent",
+ "zip32",
  "zip321",
 ]
 
