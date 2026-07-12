@@ -323,7 +323,10 @@ impl BuildConfig {
     }
 
     /// Returns the Ironwood builder for this configuration.
-    fn ironwood_builder(&self) -> Option<orchard::builder::Builder> {
+    fn ironwood_builder(
+        &self,
+        bundle_type_override: Option<orchard::builder::BundleType>,
+    ) -> Option<orchard::builder::Builder> {
         let bundle_version = orchard::bundle::BundleVersion::ironwood_v3();
         match self {
             BuildConfig::Standard {
@@ -332,7 +335,7 @@ impl BuildConfig {
                 ..
             } => ironwood_anchor.as_ref().map(|a| {
                 orchard::builder::Builder::new(
-                    *orchard_pool_bundle_type,
+                    bundle_type_override.unwrap_or(*orchard_pool_bundle_type),
                     bundle_version,
                     bundle_version.default_flags(),
                     *a,
@@ -600,6 +603,39 @@ impl<P: consensus::Parameters> Builder<P, ()> {
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
+        Self::new_internal(params, target_height, build_config, None)
+    }
+
+    /// Creates a new `Builder` with a distinct bundle type for the Ironwood bundle.
+    ///
+    /// The `orchard_pool_bundle_type` in [`BuildConfig::Standard`] continues to
+    /// control the Orchard bundle. For a standard transaction at a height where
+    /// Ironwood is active, `ironwood_bundle_type` overrides that shared default for
+    /// the Ironwood bundle only. This allows a caller to use, for example, a padded
+    /// Orchard bundle together with an unpadded Ironwood bundle.
+    ///
+    /// The override has no effect when the target height does not support Ironwood,
+    /// or when `build_config` is [`BuildConfig::Coinbase`].
+    pub fn new_with_ironwood_bundle_type(
+        params: P,
+        target_height: BlockHeight,
+        build_config: BuildConfig,
+        ironwood_bundle_type: orchard::builder::BundleType,
+    ) -> Self {
+        Self::new_internal(
+            params,
+            target_height,
+            build_config,
+            Some(ironwood_bundle_type),
+        )
+    }
+
+    fn new_internal(
+        params: P,
+        target_height: BlockHeight,
+        build_config: BuildConfig,
+        ironwood_bundle_type: Option<orchard::builder::BundleType>,
+    ) -> Self {
         let consensus_branch_id = BranchId::for_height(&params, target_height);
         // `bundle_version_for_branch` returns `Some` exactly for the branches in
         // which the Orchard pool is supported (NU5 onward), so this also gates
@@ -615,7 +651,7 @@ impl<P: consensus::Parameters> Builder<P, ()> {
         // The Ironwood builder exists exactly when the branch's transaction version
         // carries an Ironwood bundle (V6, i.e. NU6.3 onward).
         let ironwood_builder = if tx_version.has_ironwood() {
-            build_config.ironwood_builder()
+            build_config.ironwood_builder(ironwood_bundle_type)
         } else {
             None
         };
@@ -2035,6 +2071,63 @@ mod tests {
 
         assert_eq!(count_for(orchard::builder::BundleType::DEFAULT), 2);
         assert_eq!(count_for(orchard::builder::BundleType::UNPADDED), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "circuits")]
+    fn ironwood_bundle_type_override_preserves_orchard_padding() {
+        let fvk = orchard::keys::FullViewingKey::from(
+            &orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap(),
+        );
+        let recipient = fvk.address_at(0u32, orchard::keys::Scope::Internal);
+        let mut builder = Builder::new_with_ironwood_bundle_type(
+            nu6_3_test_network(),
+            10u32.into(),
+            BuildConfig::Standard {
+                sapling_anchor: None,
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
+                ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+                orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
+            },
+            orchard::builder::BundleType::UNPADDED,
+        );
+
+        builder
+            .add_orchard_change_output::<Infallible>(
+                fvk,
+                None,
+                recipient,
+                Zatoshis::const_from_u64(5_000),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+        builder
+            .add_ironwood_output::<Infallible>(
+                None,
+                recipient,
+                Zatoshis::const_from_u64(5_000),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            super::orchard_action_count(
+                builder.orchard_builder.as_ref().unwrap(),
+                false,
+                orchard::bundle::BundleVersion::orchard_v3(),
+            )
+            .unwrap(),
+            2,
+        );
+        assert_eq!(
+            super::orchard_action_count(
+                builder.ironwood_builder.as_ref().unwrap(),
+                false,
+                orchard::bundle::BundleVersion::ironwood_v3(),
+            )
+            .unwrap(),
+            1,
+        );
     }
 
     #[test]

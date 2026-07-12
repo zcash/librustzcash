@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder::Builder::new_with_ironwood_bundle_type`,
+  for selecting an Ironwood bundle type independently of the Orchard bundle type.
+
 ## [0.29.0] - 2026-07-09
 
 ### Added
