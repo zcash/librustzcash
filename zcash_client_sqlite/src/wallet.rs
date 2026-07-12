@@ -3945,6 +3945,30 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         )?;
     }
 
+    // A stored stability floor above the truncation height is a claim about chain state
+    // that this truncation discards; if it survived, it would continue to vouch for the
+    // note's witness context after the wallet has re-scanned a (possibly divergent)
+    // chain over those heights. Clear such floors so that affected notes re-stabilize
+    // from post-truncation chain data once their shards are scan-clean again.
+    {
+        let clear_stale_floors = |table_prefix: &str| {
+            conn.execute(
+                &format!(
+                    "UPDATE {table_prefix}_received_notes
+                     SET witness_anchor_stable = NULL
+                     WHERE witness_anchor_stable > :truncation_height"
+                ),
+                named_params![":truncation_height": u32::from(truncation_height)],
+            )
+        };
+        clear_stale_floors(crate::SAPLING_TABLES_PREFIX)?;
+        #[cfg(feature = "orchard")]
+        {
+            clear_stale_floors(crate::ORCHARD_TABLES_PREFIX)?;
+            clear_stale_floors(crate::IRONWOOD_TABLES_PREFIX)?;
+        }
+    }
+
     // After truncation the chain-tip pruning window may contain ranges whose priority is
     // no longer `Scanned`. Stamp the window with `Anchor` priority so that re-establishing
     // a usable anchor takes precedence over normal forward sync. If the window is fully
@@ -3956,12 +3980,6 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
     // active→completed promotion (because the post-truncate `pruning_floor` now sits at
     // or above its `subtree_end_height`) gets its notes' floors advanced. The function
     // is also a safe no-op for unaffected rows under the floor-based design.
-    //
-    // TODO: a stored floor that exceeds the new `truncation_height` refers to data the
-    // truncation discarded; the spendability rule incidentally excludes such rows
-    // (`stored ≤ chosen_anchor` fails when `chosen_anchor ≤ truncation_height < stored`),
-    // but a dedicated invalidation step here would NULL them out so they re-stabilize
-    // cleanly the next time their shard becomes scan-clean.
     scanning::mark_stabilized_notes(conn)?;
 
     Ok(truncation_height)

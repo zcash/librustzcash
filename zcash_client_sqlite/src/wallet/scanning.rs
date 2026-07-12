@@ -514,9 +514,12 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
 /// Records each note's **anchor-stable height** in `witness_anchor_stable`: the lowest
 /// anchor at which the wallet has the data needed to construct the note's witness. Once
-/// written it is monotonically non-decreasing, except that chain reorgs or explicit rewinds
-/// in the chain-tip shard may decrease it. Invalidation is not done here — only explicit
-/// truncation clears stored values.
+/// written it is monotonically non-decreasing, except that a truncation of wallet data
+/// (a chain reorg or explicit rewind) clears any stored value above the truncation
+/// height. Invalidation is not done here — [`truncate_to_height_internal`] clears stale
+/// values before re-invoking this function.
+///
+/// [`truncate_to_height_internal`]: super::truncate_to_height_internal
 ///
 /// Three arms:
 ///

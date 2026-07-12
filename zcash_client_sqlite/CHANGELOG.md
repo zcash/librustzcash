@@ -140,7 +140,12 @@ workspace.
   witness region below the window is durable (its shard is complete, or its
   floor reaches the bottom of the window with no unscanned range in between);
   the chosen anchor's tree root is constructable; and the note has met its
-  confirmations-policy threshold. Migration to this schema is
+  confirmations-policy threshold. A truncation of wallet data
+  (`rewind_to_chain_state`, `truncate_to_height`, or
+  `truncate_to_chain_state`) clears any stored floor above the truncation
+  height, since such a floor refers to chain state the truncation discards;
+  affected notes re-stabilize from post-truncation chain data once their
+  shards are again free of unscanned ranges. Migration to this schema is
   automatic.
 - After any operation that disturbs the wallet's anchor —
   `rewind_to_chain_state`, `truncate_to_height`, `truncate_to_chain_state`,
