@@ -161,6 +161,9 @@ workspace.
   such a change value is represented by the existing transparent `valuePool`
   with `isEphemeral` unset; decoding this combination previously returned
   `ProposalDecodingError::InvalidChangeRecipient`.
+- `zcash_client_backend::fees::ChangeValue::ironwood` (behind `orchard`):
+  constructs an Ironwood change value, parallel to `ChangeValue::sapling` and
+  `ChangeValue::orchard`.
 - `zcash_client_backend::data_api::WalletWrite::reserve_next_n_internal_addresses`
   (behind `transparent-inputs`): reserves the next `n` available
   internal-scope (change) transparent addresses for an account, parallel to

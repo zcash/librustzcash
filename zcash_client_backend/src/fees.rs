@@ -154,6 +154,12 @@ impl ChangeValue {
         Self::shielded(ShieldedPool::Orchard, value, memo)
     }
 
+    /// Constructs a new change value that will be created as an Ironwood output.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
+        Self::shielded(ShieldedPool::Ironwood, value, memo)
+    }
+
     /// Returns the pool to which the change or ephemeral output should be sent.
     pub fn output_pool(&self) -> PoolType {
         match &self.0 {
