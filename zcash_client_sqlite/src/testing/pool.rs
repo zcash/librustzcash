@@ -829,6 +829,13 @@ pub(crate) fn shard_completeness_derives_from_scan_queue<T: ShieldedPoolTester>(
     )
 }
 
+pub(crate) fn stabilized_note_floor_invalidated_by_reorg<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::stabilized_note_floor_invalidated_by_reorg::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn reorg_to_checkpoint<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::reorg_to_checkpoint::<T, _, _>(
         TestDbFactory::default(),
