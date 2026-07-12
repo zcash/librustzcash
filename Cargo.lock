@@ -3180,7 +3180,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.7.0"
+version = "0.8.0-rc.1"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
