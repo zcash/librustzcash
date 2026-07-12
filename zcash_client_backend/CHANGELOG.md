@@ -8,12 +8,9 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.24.0] - PLANNED
+## [Unreleased]
 
-### Fixed
-- Transparent-to-shielded proposals now preserve the wallet checkpoint selected during proposal
-  construction. This prevents output-only Orchard and Ironwood bundles from attempting to use an
-  unrecorded anchor when a wallet has no shielded inputs.
+## [0.24.0-rc.1] - 2026-07-12
 
 ### Added
 - `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (with the
@@ -26,19 +23,6 @@ workspace.
 - `zcash_client_backend::data_api::ll::wallet::NULLIFIER_MAP_RETENTION_BLOCKS`, the
   trailing window of blocks whose nullifier-map entries `put_blocks_rows` always
   inserts.
-
-### Changed
-- `zcash_client_backend::data_api::ll::LowLevelWalletRead` has an added
-  `block_fully_scanned_height` method, returning the height to which the wallet
-  has been fully scanned.
-- `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (and therefore
-  `put_blocks`) now skips nullifier-map insertion for entries it can prove are
-  unobservable: when a batch extends the wallet's contiguous fully-scanned
-  frontier, only the trailing `NULLIFIER_MAP_RETENTION_BLOCKS` blocks' nullifiers
-  are inserted. The nullifier map exists to detect spends observed before the
-  corresponding note's block has been scanned, which cannot occur below a
-  contiguous frontier; out-of-order scan ranges are unaffected and continue to
-  track the nullifiers of every block.
 - The helper functions used by the note commitment tree stage of `put_blocks`
   are now `pub`, so that alternative `ShardStore`-backed stores can reuse the
   exact tree-update logic: `zcash_client_backend::data_api::ll::wallet::`
@@ -93,8 +77,8 @@ workspace.
   the total number of inputs from a given pool across all steps of the proposal.
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::anchor_height`,
   which returns the shielded anchor height for a given target height under the
-  policy. It is used to resolve the anchor of a proposal step that spends no
-  shielded notes and therefore defers its anchor choice.
+  policy. It is used to resolve the anchor of a purely transparent proposal step,
+  which produces no shielded bundle and therefore defers its anchor choice.
 - `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
   `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
   funds in an account. Received Ironwood notes are now included in the account's
@@ -319,6 +303,19 @@ workspace.
   this option must be executed with a matching unpadded builder configuration.
 
 ### Changed
+- Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
+  `zcash_address 0.13.0`, `zcash_transparent 0.9.0`, `zip321 0.9.0-rc.1`,
+  `zcash_keys 0.15.0`, `orchard 0.15`, `zcash_primitives 0.29.0`,
+  `zcash_proofs 0.29.0`, `zip321 0.9.0-rc.1`, `pczt 0.8.0-rc.1`, `shardtree 0.7`. 
+- `zcash_client_backend::data_api::ll::LowLevelWalletRead` has an added
+  `block_fully_scanned_height` method, returning the height to which the wallet
+  has been fully scanned.
+- `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (and therefore
+  `put_blocks`) now skips nullifier-map insertion for entries it can prove are
+  unobservable: when a batch extends the wallet's contiguous fully-scanned
+  frontier, only the trailing `NULLIFIER_MAP_RETENTION_BLOCKS` blocks' nullifiers
+  are inserted. Out-of-order scan ranges are unaffected and continue to track
+  the nullifiers of every block.
 - `zcash_client_backend::proposal::Step::from_parts` now takes its `anchor_height`
   as `Option<BlockHeight>` instead of `BlockHeight`. Any step that produces a
   shielded bundle — it spends shielded notes, pays to a shielded pool, or returns
@@ -342,26 +339,13 @@ workspace.
   `orchard::builder::BundleType::DEFAULT` for the previous (padded) behavior.
 - The `proposed_version: Option<TxVersion>` parameter of
   `zcash_client_backend::data_api::wallet::propose_transfer`,
-  `propose_standard_transfer_to_address`, and `create_proposed_transactions`, along
-  with `input_selection::InputSelector::propose_transaction` and the
-  `ProposalError::IncompatibleTxVersion` variant, are no longer gated behind the
+  `propose_standard_transfer_to_address`, and
+  `input_selection::InputSelector::propose_transaction`, along with the
+  `ProposalError::IncompatibleTxVersion` variant, is no longer gated behind the
   `unstable` feature flag. Callers that did not previously enable `unstable` must now
   pass this argument explicitly; pass `None` to retain the previous behavior of
   selecting the transaction version from the target height.
-- When a transaction spends Orchard notes once the Ironwood pool is active, its
-  Orchard-pool change now stays in the Orchard pool instead of being routed into
-  the Ironwood bundle. The change is returned to a spent note's own address,
-  which the Orchard V3 cross-address restriction permits (via the builder's
-  dedicated change entry point), so only the payment crosses the turnstile into
-  Ironwood. Orchard-pool change is still routed into the Ironwood bundle when the
-  transaction spends no Orchard notes (e.g. an Orchard-receiver payment funded
-  from the Sapling and Ironwood pools).
-- Migrated to `orchard 0.15`, `shardtree 0.7`.
-- Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
-  `zcash_address 0.13.0`, `zcash_transparent 0.9.0`,
-  `zcash_keys 0.15.0`, `zcash_primitives 0.29.0`,
-  `zcash_proofs 0.29.0`. The `lightwallet-protocol v0.5.0` migration
-  changes `zcash_client_backend::proto`:
+- The migration to `lightwallet-protocol v0.5.0` changes `zcash_client_backend::proto`:
   - Adds the `service::PoolType::Ironwood` and `service::ShieldedProtocol::Ironwood`
     variants.
   - Adds the `compact_formats::ChainMetadata::ironwood_commitment_tree_size` and
@@ -452,8 +436,7 @@ workspace.
   both behind the `orchard` feature flag.
 - `zcash_client_backend::proposal`:
   - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
-    as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID), and
-    take the step's anchor height as an explicit `BlockHeight` argument.
+    as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
   - `Proposal::single_step` and `Step::from_parts` also take an
     `ironwood_active` flag (behind the `orchard` feature flag) indicating
     whether the Ironwood pool is active at the target height; when set, the
@@ -465,10 +448,11 @@ workspace.
     anchor of a step that defers its anchor choice (see `Step::anchor_height`).
   - The shielded anchor height has moved from `ShieldedInputs` to `Step`:
     `Step::anchor_height` is new and returns `Option<BlockHeight>`. It is `Some`
-    only for a step that spends shielded notes; a step with no shielded inputs
-    returns `None`, deferring its anchor to interpretation time where it is
-    resolved from the proposal's confirmations policy and target height.
-    `ShieldedInputs::from_parts` no longer takes an anchor height, and
+    for any step that produces a shielded bundle (one that spends shielded notes,
+    pays to a shielded pool, or returns shielded change); only a purely
+    transparent step returns `None`, deferring its anchor to interpretation time
+    where it is resolved from the proposal's confirmations policy and target
+    height. `ShieldedInputs::from_parts` no longer takes an anchor height, and
     `ShieldedInputs::anchor_height` has been removed.
 - `zcash_client_backend::proto::proposal::Proposal::try_into_standard_proposal`
   now takes the network parameters as an additional argument, in order to
