@@ -34,6 +34,8 @@ shardtree.workspace = true
 # distribution (see `scheduling::sample_cadence_blocks`), so tests need a reproducible RNG rather
 # than `OsRng`.
 rand_chacha.workspace = true
+# The store tests open a real SQLite database at a throwaway path.
+tempfile = "3"
 
 [features]
 expensive-tests = []
