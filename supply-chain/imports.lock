@@ -5,6 +5,10 @@
 version = "0.8.0-rc.1"
 audited_as = "0.7.0"
 
+[[unpublished.zcash_client_backend]]
+version = "0.24.0-rc.1"
+audited_as = "0.23.0"
+
 [[unpublished.zip321]]
 version = "0.9.0-rc.1"
 audited_as = "0.8.0"

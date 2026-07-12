@@ -7052,7 +7052,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.23.0"
+version = "0.24.0-rc.1"
 dependencies = [
  "ambassador",
  "arti-client",
