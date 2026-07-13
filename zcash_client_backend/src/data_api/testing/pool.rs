@@ -1048,6 +1048,67 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
     assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
 }
 
+/// Tests that a send-max proposal whose total required fee overflows the maximum
+/// monetary amount fails with a balance error rather than panicking.
+#[cfg(feature = "transparent-inputs")]
+pub fn send_max_fee_overflow_is_an_error<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize};
+    use zcash_protocol::value::{BalanceError, MAX_MONEY};
+
+    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
+
+    /// A fee rule that requires the maximum monetary amount for every transaction.
+    #[derive(Clone, Debug)]
+    struct MaxMoneyFeeRule;
+
+    impl FeeRule for MaxMoneyFeeRule {
+        type Error = Infallible;
+
+        fn fee_required<P: consensus::Parameters>(
+            &self,
+            _params: &P,
+            _target_height: BlockHeight,
+            _transparent_input_sizes: impl IntoIterator<Item = InputSize>,
+            _transparent_output_sizes: impl IntoIterator<Item = usize>,
+            _sapling_input_count: usize,
+            _sapling_output_count: usize,
+            _orchard_action_count: usize,
+            _ironwood_action_count: usize,
+        ) -> Result<Zatoshis, Self::Error> {
+            Ok(Zatoshis::const_from_u64(MAX_MONEY))
+        }
+    }
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+
+    let account = st.test_account().cloned().unwrap();
+
+    // A TEX recipient requires a second transaction, so the total required fee is the
+    // sum of two per-transaction fees, which overflows the maximum monetary amount.
+    let tex_addr = Address::Tex([0x4; 20]);
+    let addy = tex_addr.to_zcash_address(st.network());
+
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &MaxMoneyFeeRule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        ),
+        Err(data_api::error::Error::NoteSelection(
+            GreedyInputSelectorError::Balance(BalanceError::Overflow)
+        ))
+    );
+}
+
 /// Tests that proposing a send-max transfer to a TEX recipient fails with a meaningful
 /// error when the `transparent-inputs` feature is not enabled.
 #[cfg(not(feature = "transparent-inputs"))]

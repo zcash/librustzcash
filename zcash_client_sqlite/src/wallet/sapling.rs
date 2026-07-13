@@ -462,6 +462,12 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_max_fee_overflow_is_an_error() {
+        testing::pool::send_max_fee_overflow_is_an_error::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn send_max_fails_when_balance_is_consumed_by_fees() {
         testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<SaplingPoolTester>()
     }

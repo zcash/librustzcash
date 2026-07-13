@@ -1693,9 +1693,11 @@ where
     // the total fee required for the all the involved transactions. For the case
     // of TEX it means the fee requied to send the max value to the ephemeral
     // address + the fee to send the value in that ephemeral change address to
-    // the TEX address.
-    let total_fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO))
-        .expect("fee value addition does not overflow");
+    // the TEX address. The sum can only exceed the maximum monetary amount for a
+    // fee rule that produces fees outside that amount's intended bounds.
+    let total_fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO)).ok_or(
+        InputSelectorError::Selection(GreedyInputSelectorError::Balance(BalanceError::Overflow)),
+    )?;
 
     // the total amount involved in the "send max" operation. This is the total
     // spendable value present in the wallet minus the fees required to perform

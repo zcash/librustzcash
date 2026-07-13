@@ -57,6 +57,14 @@ pub(crate) fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTest
     )
 }
 
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_max_fee_overflow_is_an_error<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_fee_overflow_is_an_error::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 #[cfg(not(feature = "transparent-inputs"))]
 pub(crate) fn send_max_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_max_to_tex_fails_without_transparent_inputs::<

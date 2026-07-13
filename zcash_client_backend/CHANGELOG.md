@@ -47,6 +47,10 @@ workspace.
   receiver that the build is able to pay is now rejected with
   `GreedyInputSelectorError::UnsupportedAddress` instead of the same misleading
   error.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `GreedyInputSelectorError::Balance` instead of panicking when a
+  custom fee rule produces per-transaction fees whose sum exceeds the maximum
+  monetary amount.
 
 ## [0.24.0-rc.1] - 2026-07-12
 
