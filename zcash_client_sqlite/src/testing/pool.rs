@@ -80,6 +80,20 @@ pub(crate) fn fails_to_send_max_to_transparent_with_memo<T: ShieldedPoolTester>(
     )
 }
 
+#[cfg(not(feature = "orchard"))]
+pub(crate) fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_delivers_via_sapling_when_orchard_is_unavailable::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+#[cfg(not(feature = "orchard"))]
+pub(crate) fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_to_orchard_only_ua_fails_without_orchard::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<
         T,

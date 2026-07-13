@@ -39,6 +39,14 @@ workspace.
   zero value to a shielded recipient (spending the whole balance as fee), and
   reported `PaymentError::ZeroValuedTransparentOutput` for transparent
   recipients.
+- When the `orchard` feature is not enabled,
+  `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  delivers a payment to a unified address having both Sapling and Orchard
+  receivers via the Sapling receiver, instead of failing with
+  `ProposalError::PaymentPoolsMismatch`. A unified address containing no
+  receiver that the build is able to pay is now rejected with
+  `GreedyInputSelectorError::UnsupportedAddress` instead of the same misleading
+  error.
 
 ## [0.24.0-rc.1] - 2026-07-12
 

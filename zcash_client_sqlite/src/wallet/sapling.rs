@@ -467,6 +467,19 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_delivers_via_sapling_when_orchard_is_unavailable() {
+        testing::pool::send_max_delivers_via_sapling_when_orchard_is_unavailable::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_to_orchard_only_ua_fails_without_orchard() {
+        testing::pool::send_max_to_orchard_only_ua_fails_without_orchard::<SaplingPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn fails_to_send_max_to_transparent_with_memo() {
         testing::pool::fails_to_send_max_to_transparent_with_memo::<SaplingPoolTester>()

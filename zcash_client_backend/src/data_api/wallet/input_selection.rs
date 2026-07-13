@@ -1504,17 +1504,25 @@ where
 
     let mut payment_pools = BTreeMap::new();
 
+    // An Orchard receiver takes delivery precedence over a Sapling receiver only when
+    // this build is able to produce Orchard-family outputs; without the `orchard`
+    // feature, a payment to a recipient having both receivers is delivered via the
+    // Sapling receiver.
+    #[cfg(feature = "orchard")]
+    let orchard_receiver_payable = recipient.can_receive_as(PoolType::ORCHARD);
+    #[cfg(not(feature = "orchard"))]
+    let orchard_receiver_payable = false;
+
     let sapling_output_count = {
-        // we require a sapling output if the recipient has a Sapling receiver but not an Orchard
-        // receiver.
-        let requested_sapling_outputs: usize = if recipient.can_receive_as(PoolType::SAPLING)
-            && !recipient.can_receive_as(PoolType::ORCHARD)
-        {
-            payment_pools.insert(0, PoolType::SAPLING);
-            1
-        } else {
-            0
-        };
+        // we require a sapling output if the recipient has a Sapling receiver and its
+        // payment is not deliverable via an Orchard receiver.
+        let requested_sapling_outputs: usize =
+            if recipient.can_receive_as(PoolType::SAPLING) && !orchard_receiver_payable {
+                payment_pools.insert(0, PoolType::SAPLING);
+                1
+            } else {
+                0
+            };
 
         ::sapling::builder::BundleType::DEFAULT
             .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
@@ -1527,11 +1535,9 @@ where
     // once Ironwood is active (delivered to the Orchard receiver via the Ironwood bundle), and as
     // an Orchard-pool output otherwise. The per-bundle action counts below reflect that split.
     #[cfg(feature = "orchard")]
-    let orchard_receiver_present = recipient.can_receive_as(PoolType::ORCHARD);
-    #[cfg(feature = "orchard")]
     let orchard_receivers_fill_ironwood = ironwood_active_at(params, target_height);
     #[cfg(feature = "orchard")]
-    if orchard_receiver_present {
+    if orchard_receiver_payable {
         payment_pools.insert(
             0,
             if orchard_receivers_fill_ironwood {
@@ -1549,7 +1555,7 @@ where
         ::orchard::builder::BundleType::DEFAULT,
         orchard_bundle_version_for_height(params, target_height),
         spendable_notes.orchard.len(),
-        usize::from(orchard_receiver_present && !orchard_receivers_fill_ironwood),
+        usize::from(orchard_receiver_payable && !orchard_receivers_fill_ironwood),
     )
     .map_err(|e| InputSelectorError::Change(ChangeError::BundleError(e)))?;
     #[cfg(not(feature = "orchard"))]
@@ -1563,7 +1569,7 @@ where
         .num_actions(
             orchard::bundle::Flags::ENABLED,
             spendable_notes.ironwood.len(),
-            usize::from(orchard_receiver_present && orchard_receivers_fill_ironwood),
+            usize::from(orchard_receiver_payable && orchard_receivers_fill_ironwood),
         )
         .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
     #[cfg(not(feature = "orchard"))]
@@ -1590,6 +1596,19 @@ where
     };
     if pays_transparent_directly {
         payment_pools.insert(0, PoolType::Transparent);
+    }
+
+    // A unified address that has been assigned no payment pool by this point contains
+    // no receiver that this build is able to pay (for example, an address containing
+    // only an Orchard receiver, in a build made without the `orchard` feature). Other
+    // recipient kinds always receive an assignment above, except for TEX addresses,
+    // whose payment is delivered by the ephemeral second step.
+    if payment_pools.is_empty() {
+        if let Address::Unified(addr) = &recipient_address {
+            return Err(InputSelectorError::Selection(
+                GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+            ));
+        }
     }
 
     let (tr0_fee, tr1_fee) = match recipient_address {
