@@ -983,6 +983,418 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
     );
 }
 
+/// Tests that sending all the spendable funds within the given shielded pool to a
+/// transparent (non-TEX) recipient succeeds.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a send-max transaction to a transparent address, without a memo.
+/// - Verifies that the proposal consists of a single step paying the whole balance,
+///   less the fee, to the transparent recipient.
+/// - Builds the transaction.
+#[cfg(feature = "transparent-inputs")]
+pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use zcash_protocol::PoolType;
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(60000);
+    st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let to: Address = Address::Transparent(TransparentAddress::PublicKeyHash([0x7f; 20]));
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // The proposed transaction carries one shielded spend (padded to two shielded
+    // outputs) and one transparent output.
+    let expected_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
+    let expected_payment = (value - expected_fee).unwrap();
+
+    let addy = to.to_zcash_address(st.network());
+    let proposal = st
+        .propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let steps: Vec<_> = proposal.steps().iter().cloned().collect();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].balance().fee_required(), expected_fee);
+    assert_eq!(steps[0].balance().proposed_change(), []);
+    assert_eq!(
+        steps[0].payment_pools(),
+        &std::collections::BTreeMap::from([(0, PoolType::TRANSPARENT)])
+    );
+    assert_matches!(
+        steps[0].transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+}
+
+/// Tests that a send-max proposal whose total required fee overflows the maximum
+/// monetary amount fails with a balance error rather than panicking.
+#[cfg(feature = "transparent-inputs")]
+pub fn send_max_fee_overflow_is_an_error<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize};
+    use zcash_protocol::value::{BalanceError, MAX_MONEY};
+
+    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
+
+    /// A fee rule that requires the maximum monetary amount for every transaction.
+    #[derive(Clone, Debug)]
+    struct MaxMoneyFeeRule;
+
+    impl FeeRule for MaxMoneyFeeRule {
+        type Error = Infallible;
+
+        fn fee_required<P: consensus::Parameters>(
+            &self,
+            _params: &P,
+            _target_height: BlockHeight,
+            _transparent_input_sizes: impl IntoIterator<Item = InputSize>,
+            _transparent_output_sizes: impl IntoIterator<Item = usize>,
+            _sapling_input_count: usize,
+            _sapling_output_count: usize,
+            _orchard_action_count: usize,
+            _ironwood_action_count: usize,
+        ) -> Result<Zatoshis, Self::Error> {
+            Ok(Zatoshis::const_from_u64(MAX_MONEY))
+        }
+    }
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+
+    let account = st.test_account().cloned().unwrap();
+
+    // A TEX recipient requires a second transaction, so the total required fee is the
+    // sum of two per-transaction fees, which overflows the maximum monetary amount.
+    let tex_addr = Address::Tex([0x4; 20]);
+    let addy = tex_addr.to_zcash_address(st.network());
+
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &MaxMoneyFeeRule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        ),
+        Err(data_api::error::Error::NoteSelection(
+            GreedyInputSelectorError::Balance(BalanceError::Overflow)
+        ))
+    );
+}
+
+/// Tests that a send-max proposal spends notes from multiple shielded pools in a single
+/// transaction when the wallet's funds are split across pools.
+///
+/// The test:
+/// - Adds one note in each of the `P0` and `P1` pools.
+/// - Proposes a send-max transaction to an external `P1` recipient, so that the value of
+///   the `P0` note crosses pools.
+/// - Verifies that the proposal consists of a single step spending both notes and paying
+///   the whole balance, less the fee, to the recipient.
+/// - Builds the transaction, mines it, and verifies that the wallet is left empty.
+#[cfg(feature = "orchard")]
+pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
+    let account = st.test_account().cloned().unwrap();
+
+    // Add one note in each of the P0 and P1 pools.
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let note_value = Zatoshis::const_from_u64(350000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+
+    let total = (note_value * 2u64).unwrap();
+    assert_eq!(
+        st.get_spendable_balance(account.id(), ConfirmationsPolicy::MIN),
+        total
+    );
+
+    let to: Address = P1::sk_default_address(&P1::sk(&[0xf5; 32]));
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // The proposed transaction spends one note in each pool and pays a single shielded
+    // output; under ZIP 317, each of the two shielded bundles is padded to two logical
+    // actions.
+    let expected_fee = (MARGINAL_FEE * 4u64).unwrap();
+    let expected_payment = (total - expected_fee).unwrap();
+
+    let addy = to.to_zcash_address(st.network());
+    let proposal = st
+        .propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let steps: Vec<_> = proposal.steps().iter().cloned().collect();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].balance().fee_required(), expected_fee);
+    assert_eq!(steps[0].balance().proposed_change(), []);
+    assert_eq!(
+        steps[0].payment_pools(),
+        &BTreeMap::from([(0, PoolType::Shielded(P1::SHIELDED_PROTOCOL))])
+    );
+    assert_matches!(
+        steps[0].transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+
+    // The proposal spends both notes, one from each pool.
+    let input_notes = steps[0]
+        .shielded_inputs()
+        .expect("the proposal has shielded inputs")
+        .notes();
+    assert_eq!(input_notes.len(), 2);
+    let input_pools = input_notes
+        .iter()
+        .map(|n| match n.note() {
+            Note::Sapling(_) => ShieldedPool::Sapling,
+            Note::Orchard { pool, .. } => match pool {
+                ::orchard::ValuePool::Orchard => ShieldedPool::Orchard,
+                ::orchard::ValuePool::Ironwood => ShieldedPool::Ironwood,
+            },
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        input_pools,
+        BTreeSet::from([P0::SHIELDED_PROTOCOL, P1::SHIELDED_PROTOCOL])
+    );
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+
+    // Mine the transaction and verify that the entire balance has been spent.
+    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
+}
+
+/// Tests that proposing a send-max transfer to a TEX recipient fails with a meaningful
+/// error when the `transparent-inputs` feature is not enabled.
+#[cfg(not(feature = "transparent-inputs"))]
+pub fn send_max_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+
+    let account = st.test_account().cloned().unwrap();
+    let tex_addr = Address::Tex([0x4; 20]);
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let addy = tex_addr.to_zcash_address(st.network());
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        ),
+        Err(data_api::error::Error::NoteSelection(
+            GreedyInputSelectorError::UnsupportedTexAddress
+        ))
+    );
+}
+
+/// Tests that a send-max proposal to a unified address having both Sapling and Orchard
+/// receivers is delivered via the Sapling receiver when the `orchard` feature is not
+/// enabled, rather than failing.
+#[cfg(not(feature = "orchard"))]
+pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use zcash_address::{
+        ZcashAddress,
+        unified::{self, Encoding as _, Receiver},
+    };
+    use zcash_protocol::PoolType;
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(60000);
+    st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+
+    // Construct a unified address carrying both a Sapling receiver and an Orchard
+    // receiver. Without the `orchard` feature, the Orchard receiver's contents are
+    // not parsed, so arbitrary receiver bytes suffice.
+    let sapling_receiver = match T::sk_default_address(&T::sk(&[0xf5; 32])) {
+        Address::Sapling(addr) => addr.to_bytes(),
+        _ => panic!("expected a Sapling address"),
+    };
+    let ua = unified::Address::try_from_items(vec![
+        Receiver::Sapling(sapling_receiver),
+        Receiver::Orchard([0xab; 43]),
+    ])
+    .unwrap();
+    let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // The proposed transaction carries one Sapling spend and one requested Sapling
+    // output (padded to two logical actions under ZIP 317).
+    let expected_fee = MINIMUM_FEE;
+    let expected_payment = (value - expected_fee).unwrap();
+
+    let proposal = st
+        .propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let steps: Vec<_> = proposal.steps().iter().cloned().collect();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].balance().fee_required(), expected_fee);
+    assert_eq!(
+        steps[0].payment_pools(),
+        &std::collections::BTreeMap::from([(0, PoolType::SAPLING)])
+    );
+    assert_matches!(
+        steps[0].transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+}
+
+/// Tests that a send-max proposal to a unified address whose only receiver cannot be
+/// paid by this build (an Orchard-only address, without the `orchard` feature) fails
+/// with `GreedyInputSelectorError::UnsupportedAddress`.
+#[cfg(not(feature = "orchard"))]
+pub fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
+    use zcash_address::{
+        ZcashAddress,
+        unified::{self, Encoding as _, Receiver},
+    };
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+
+    let account = st.test_account().cloned().unwrap();
+
+    // Without the `orchard` feature, the Orchard receiver's contents are not parsed,
+    // so arbitrary receiver bytes suffice.
+    let ua = unified::Address::try_from_items(vec![Receiver::Orchard([0xab; 43])]).unwrap();
+    let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        ),
+        Err(data_api::error::Error::NoteSelection(
+            GreedyInputSelectorError::UnsupportedAddress(_)
+        ))
+    );
+}
+
+/// Tests that a send-max proposal fails with `InsufficientFunds` when the entire wallet
+/// balance would be consumed by fees, rather than proposing a transaction that delivers
+/// nothing to the recipient.
+pub fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds equal to the exact fee of a send-max transaction spending a single note
+    // to a same-pool recipient (two logical actions under ZIP 317).
+    let value = MINIMUM_FEE;
+    st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let addy = to.to_zcash_address(st.network());
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        ),
+        Err(data_api::error::Error::InsufficientFunds { available, required })
+            if available == value && required > value
+    );
+}
+
 /// Tests that attempting to send all the spendable funds within the given shielded pool in a
 /// single transaction fail if there are funds that are not yet confirmed.
 ///

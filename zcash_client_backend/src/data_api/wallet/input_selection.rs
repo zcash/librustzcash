@@ -10,16 +10,12 @@ use std::{
 use transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
-use zcash_primitives::transaction::fees::{
-    FeeRule,
-    transparent::InputSize,
-    zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
-};
+use zcash_primitives::transaction::fees::{FeeRule, zip317::P2PKH_STANDARD_OUTPUT_SIZE};
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, MAX_MONEY, Zatoshis},
 };
 use zip321::TransactionRequest;
 
@@ -44,7 +40,9 @@ use {
     },
     std::convert::Infallible,
     transparent::{address::TransparentAddress, bundle::OutPoint},
-    zcash_primitives::transaction::fees::transparent as transparent_fees,
+    zcash_primitives::transaction::fees::{
+        transparent as transparent_fees, transparent::InputSize, zip317::P2PKH_STANDARD_INPUT_SIZE,
+    },
     zip321::Payment,
 };
 
@@ -1477,7 +1475,12 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     memo: Option<MemoBytes>,
 ) -> Result<
     Proposal<FeeRuleT, InputSourceT::NoteRef>,
-    InputSelectorError<InputSourceT::Error, BalanceError, FeeRuleT::Error, InputSourceT::NoteRef>,
+    InputSelectorError<
+        InputSourceT::Error,
+        GreedyInputSelectorError,
+        FeeRuleT::Error,
+        InputSourceT::NoteRef,
+    >,
 >
 where
     ParamsT: consensus::Parameters,
@@ -1497,21 +1500,29 @@ where
 
     let input_total = spendable_notes
         .total_value()
-        .map_err(InputSelectorError::Selection)?;
+        .map_err(|e| InputSelectorError::Selection(GreedyInputSelectorError::Balance(e)))?;
 
     let mut payment_pools = BTreeMap::new();
 
+    // An Orchard receiver takes delivery precedence over a Sapling receiver only when
+    // this build is able to produce Orchard-family outputs; without the `orchard`
+    // feature, a payment to a recipient having both receivers is delivered via the
+    // Sapling receiver.
+    #[cfg(feature = "orchard")]
+    let orchard_receiver_payable = recipient.can_receive_as(PoolType::ORCHARD);
+    #[cfg(not(feature = "orchard"))]
+    let orchard_receiver_payable = false;
+
     let sapling_output_count = {
-        // we require a sapling output if the recipient has a Sapling receiver but not an Orchard
-        // receiver.
-        let requested_sapling_outputs: usize = if recipient.can_receive_as(PoolType::SAPLING)
-            && !recipient.can_receive_as(PoolType::ORCHARD)
-        {
-            payment_pools.insert(0, PoolType::SAPLING);
-            1
-        } else {
-            0
-        };
+        // we require a sapling output if the recipient has a Sapling receiver and its
+        // payment is not deliverable via an Orchard receiver.
+        let requested_sapling_outputs: usize =
+            if recipient.can_receive_as(PoolType::SAPLING) && !orchard_receiver_payable {
+                payment_pools.insert(0, PoolType::SAPLING);
+                1
+            } else {
+                0
+            };
 
         ::sapling::builder::BundleType::DEFAULT
             .num_outputs(spendable_notes.sapling.len(), requested_sapling_outputs)
@@ -1524,11 +1535,9 @@ where
     // once Ironwood is active (delivered to the Orchard receiver via the Ironwood bundle), and as
     // an Orchard-pool output otherwise. The per-bundle action counts below reflect that split.
     #[cfg(feature = "orchard")]
-    let orchard_receiver_present = recipient.can_receive_as(PoolType::ORCHARD);
-    #[cfg(feature = "orchard")]
     let orchard_receivers_fill_ironwood = ironwood_active_at(params, target_height);
     #[cfg(feature = "orchard")]
-    if orchard_receiver_present {
+    if orchard_receiver_payable {
         payment_pools.insert(
             0,
             if orchard_receivers_fill_ironwood {
@@ -1546,7 +1555,7 @@ where
         ::orchard::builder::BundleType::DEFAULT,
         orchard_bundle_version_for_height(params, target_height),
         spendable_notes.orchard.len(),
-        usize::from(orchard_receiver_present && !orchard_receivers_fill_ironwood),
+        usize::from(orchard_receiver_payable && !orchard_receivers_fill_ironwood),
     )
     .map_err(|e| InputSelectorError::Change(ChangeError::BundleError(e)))?;
     #[cfg(not(feature = "orchard"))]
@@ -1556,13 +1565,13 @@ where
     let orchard_bundle_required = orchard_action_count > 0;
 
     #[cfg(feature = "orchard")]
-    let ironwood_action_count = orchard::builder::BundleType::DEFAULT
-        .num_actions(
-            orchard::bundle::Flags::ENABLED,
-            spendable_notes.ironwood.len(),
-            usize::from(orchard_receiver_present && orchard_receivers_fill_ironwood),
-        )
-        .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
+    let ironwood_action_count = orchard_fees::transactional_action_count(
+        ::orchard::builder::BundleType::DEFAULT,
+        ironwood_bundle_version_for_height(params, target_height),
+        spendable_notes.ironwood.len(),
+        usize::from(orchard_receiver_payable && orchard_receivers_fill_ironwood),
+    )
+    .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
     #[cfg(not(feature = "orchard"))]
     let ironwood_action_count: usize = 0;
 
@@ -1572,6 +1581,35 @@ where
     let recipient_address: Address = recipient
         .clone()
         .convert_if_network(params.network_type())?;
+
+    // A recipient that can only receive funds via a transparent output — a bare
+    // transparent address, or a unified address with no shielded receiver — is paid
+    // directly from the proposed transaction. TEX recipients are excluded: their
+    // payment is delivered by the ephemeral second step, which carries its own
+    // payment pool assignment.
+    let pays_transparent_directly = match &recipient_address {
+        Address::Transparent(_) => true,
+        Address::Unified(addr) => {
+            addr.has_transparent() && !(addr.has_sapling() || addr.has_orchard())
+        }
+        _ => false,
+    };
+    if pays_transparent_directly {
+        payment_pools.insert(0, PoolType::Transparent);
+    }
+
+    // A unified address that has been assigned no payment pool by this point contains
+    // no receiver that this build is able to pay (for example, an address containing
+    // only an Orchard receiver, in a build made without the `orchard` feature). Other
+    // recipient kinds always receive an assignment above, except for TEX addresses,
+    // whose payment is delivered by the ephemeral second step.
+    if payment_pools.is_empty() {
+        if let Address::Unified(addr) = &recipient_address {
+            return Err(InputSelectorError::Selection(
+                GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+            ));
+        }
+    }
 
     let (tr0_fee, tr1_fee) = match recipient_address {
         Address::Sapling(_) => fee_rule
@@ -1598,12 +1636,12 @@ where
                 ironwood_action_count,
             )
             .map(|fee| (fee, None)),
-        Address::Unified(addr) => fee_rule
+        Address::Unified(_) => fee_rule
             .fee_required(
                 params,
                 BlockHeight::from(target_height),
                 [],
-                if addr.has_transparent() && !(addr.has_sapling() || addr.has_orchard()) {
+                if pays_transparent_directly {
                     vec![P2PKH_STANDARD_OUTPUT_SIZE]
                 } else {
                     vec![]
@@ -1614,6 +1652,16 @@ where
                 ironwood_action_count,
             )
             .map(|fee| (fee, None)),
+        // Paying a TEX recipient requires a second, purely transparent transaction that
+        // spends an ephemeral output of the first; constructing that ZIP 320 pair is
+        // only supported when the `transparent-inputs` feature is enabled.
+        #[cfg(not(feature = "transparent-inputs"))]
+        Address::Tex(_) => {
+            return Err(InputSelectorError::Selection(
+                GreedyInputSelectorError::UnsupportedTexAddress,
+            ));
+        }
+        #[cfg(feature = "transparent-inputs")]
         Address::Tex(_) => fee_rule
             .fee_required(
                 params,
@@ -1645,17 +1693,24 @@ where
     // the total fee required for the all the involved transactions. For the case
     // of TEX it means the fee requied to send the max value to the ephemeral
     // address + the fee to send the value in that ephemeral change address to
-    // the TEX address.
-    let total_fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO))
-        .expect("fee value addition does not overflow");
+    // the TEX address. The sum can only exceed the maximum monetary amount for a
+    // fee rule that produces fees outside that amount's intended bounds.
+    let total_fee_required = (tr0_fee + tr1_fee.unwrap_or(Zatoshis::ZERO)).ok_or(
+        InputSelectorError::Selection(GreedyInputSelectorError::Balance(BalanceError::Overflow)),
+    )?;
 
     // the total amount involved in the "send max" operation. This is the total
     // spendable value present in the wallet minus the fees required to perform
-    // the send max operation.
-    let total_to_recipient =
-        (input_total - total_fee_required).ok_or(InputSelectorError::InsufficientFunds {
+    // the send max operation. The proposal must deliver a nonzero amount to the
+    // recipient: a send-max operation on a wallet whose entire balance would be
+    // consumed by fees is reported as insufficient funds rather than proposed as
+    // a fee-only transaction.
+    let total_to_recipient = (input_total - total_fee_required)
+        .filter(|amount| *amount > Zatoshis::ZERO)
+        .ok_or(InputSelectorError::InsufficientFunds {
             available: input_total,
-            required: total_fee_required,
+            required: (total_fee_required + Zatoshis::const_from_u64(1))
+                .unwrap_or(Zatoshis::const_from_u64(MAX_MONEY)),
         })?;
 
     // when the recipient of the send max operation is a TEX address this is the

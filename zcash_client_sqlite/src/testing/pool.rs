@@ -57,12 +57,66 @@ pub(crate) fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTest
     )
 }
 
+#[cfg(feature = "orchard")]
+pub(crate) fn send_max_spends_inputs_across_pools<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::send_max_spends_inputs_across_pools::<P0, P1>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_max_fee_overflow_is_an_error<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_fee_overflow_is_an_error::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+pub(crate) fn send_max_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_to_tex_fails_without_transparent_inputs::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn send_max_spendable_to_transparent<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_spendable_to_transparent::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn fails_to_send_max_to_transparent_with_memo<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::fails_to_send_max_spendable_to_transparent_with_memo::<T>(
         TestDbFactory::default(),
         BlockCache::new(),
     )
+}
+
+#[cfg(not(feature = "orchard"))]
+pub(crate) fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_delivers_via_sapling_when_orchard_is_unavailable::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+#[cfg(not(feature = "orchard"))]
+pub(crate) fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_to_orchard_only_ua_fails_without_orchard::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
+pub(crate) fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
 }
 
 pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>() {

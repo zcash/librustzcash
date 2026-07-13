@@ -10,6 +10,48 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
+  `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
+  error type, so that `propose_send_max_transfer` can report
+  `GreedyInputSelectorError::UnsupportedTexAddress` — consistent with
+  `propose_transfer` — when a TEX recipient is requested and the
+  `transparent-inputs` feature is not enabled. Balance errors encountered
+  during send-max input selection are now wrapped in
+  `GreedyInputSelectorError::Balance`.
+
+### Fixed
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  correctly constructs proposals paying a transparent (non-TEX) recipient — a
+  bare transparent address, or a unified address having no shielded receiver.
+  Previously, such proposals failed validation with
+  `ProposalError::PaymentPoolsMismatch` because no output pool was assigned to
+  the payment.
+- When the `transparent-inputs` feature is not enabled,
+  `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  rejects TEX recipients up front with
+  `GreedyInputSelectorError::UnsupportedTexAddress` instead of constructing an
+  internally inconsistent proposal that failed validation with a misleading
+  error.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `Error::InsufficientFunds` when the wallet's entire spendable balance
+  would be consumed by fees. Previously it proposed a transaction delivering
+  zero value to a shielded recipient (spending the whole balance as fee), and
+  reported `PaymentError::ZeroValuedTransparentOutput` for transparent
+  recipients.
+- When the `orchard` feature is not enabled,
+  `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  delivers a payment to a unified address having both Sapling and Orchard
+  receivers via the Sapling receiver, instead of failing with
+  `ProposalError::PaymentPoolsMismatch`. A unified address containing no
+  receiver that the build is able to pay is now rejected with
+  `GreedyInputSelectorError::UnsupportedAddress` instead of the same misleading
+  error.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `GreedyInputSelectorError::Balance` instead of panicking when a
+  custom fee rule produces per-transaction fees whose sum exceeds the maximum
+  monetary amount.
+
 ## [0.24.0-rc.1] - 2026-07-12
 
 ### Added
