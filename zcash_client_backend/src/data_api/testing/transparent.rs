@@ -2557,7 +2557,7 @@ where
     use std::convert::Infallible;
 
     use crate::{
-        fees::{ChangeValue, TransparentChangePolicy},
+        fees::{ChangeValue, TransparentChangeDestination, TransparentChangePolicy},
         wallet::{Exposure, OvkPolicy},
     };
 
@@ -2602,7 +2602,10 @@ where
     assert_eq!(step.balance().fee_required(), expected_fee);
     assert_eq!(
         step.balance().proposed_change(),
-        [ChangeValue::transparent(expected_change)],
+        [ChangeValue::transparent(
+            expected_change,
+            TransparentChangeDestination::InternalP2pkh,
+        )],
     );
     assert!(!step.balance().proposed_change()[0].is_ephemeral());
 

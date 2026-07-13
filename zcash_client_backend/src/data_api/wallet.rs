@@ -87,7 +87,7 @@ use orchard::builder::BundleType;
 use {
     super::CoinbaseFilter,
     crate::{
-        fees::ChangeValue,
+        fees::{ChangeValue, TransparentChangeDestination},
         proposal::StepOutput,
         wallet::{TransparentAddressMetadata, TransparentAddressSource},
     },
@@ -2046,9 +2046,11 @@ where
         }
     }
 
-    // Add any transparent change outputs, sending them to the next available internal-scope
-    // (change) transparent addresses of the account. As with ephemeral addresses above, this
-    // reserves the internal addresses even if transaction construction subsequently fails.
+    // Add any transparent change outputs. Non-ephemeral transparent change is sent either to
+    // the next available internal-scope (change) transparent address of the account, or
+    // directly to the originating address of the selected transparent inputs, depending on the
+    // destination proposed by the change strategy. As with ephemeral addresses above, internal
+    // addresses are reserved even if transaction construction subsequently fails.
     #[cfg(feature = "transparent-inputs")]
     {
         let transparent_change_outputs: Vec<(usize, &ChangeValue)> = proposal_step
@@ -2061,18 +2063,27 @@ where
             })
             .collect();
 
-        if !transparent_change_outputs.is_empty() {
-            let addresses_and_metadata = wallet_db
-                .reserve_next_n_internal_addresses(account_id, transparent_change_outputs.len())
-                .map_err(Error::DataSource)?;
-            assert_eq!(
-                addresses_and_metadata.len(),
-                transparent_change_outputs.len()
-            );
+        // Change destined for an internal-scope address must be assigned a freshly reserved
+        // address; change destined for the originating address of the selected inputs is sent
+        // there directly, without any reservation.
+        let (internal_change_outputs, originating_change_outputs): (Vec<_>, Vec<_>) =
+            transparent_change_outputs
+                .into_iter()
+                .partition(|(_, change_value)| {
+                    matches!(
+                        change_value.transparent_change_destination(),
+                        Some(TransparentChangeDestination::InternalP2pkh)
+                    )
+                });
 
-            for ((change_index, change_value), (change_address, _)) in transparent_change_outputs
-                .iter()
-                .zip(addresses_and_metadata)
+        if !internal_change_outputs.is_empty() {
+            let addresses_and_metadata = wallet_db
+                .reserve_next_n_internal_addresses(account_id, internal_change_outputs.len())
+                .map_err(Error::DataSource)?;
+            assert_eq!(addresses_and_metadata.len(), internal_change_outputs.len());
+
+            for ((change_index, change_value), (change_address, _)) in
+                internal_change_outputs.iter().zip(addresses_and_metadata)
             {
                 builder.add_transparent_output(&change_address, change_value.value())?;
                 transparent_output_meta.push((
@@ -2085,6 +2096,26 @@ where
                     StepOutputIndex::Change(*change_index),
                 ))
             }
+        }
+
+        for (change_index, change_value) in originating_change_outputs {
+            let change_address = match change_value.transparent_change_destination() {
+                Some(TransparentChangeDestination::OriginatingAddress(addr)) => *addr,
+                _ => unreachable!(
+                    "originating_change_outputs was partitioned to contain only \
+                     OriginatingAddress destinations"
+                ),
+            };
+            builder.add_transparent_output(&change_address, change_value.value())?;
+            transparent_output_meta.push((
+                TransparentBuildRecipient::InternalTransparent {
+                    receiving_account: account_id,
+                    recipient_address: change_address,
+                },
+                change_address,
+                change_value.value(),
+                StepOutputIndex::Change(change_index),
+            ))
         }
     }
 

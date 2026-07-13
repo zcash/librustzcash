@@ -1271,7 +1271,9 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_with_transparent_change() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::fees::{
+            TransparentChangeDestination, TransparentChangePolicy, sapling as sapling_fees,
+        };
         use ::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
@@ -1315,7 +1317,69 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::transparent(Zatoshis::const_from_u64(13000))] &&
+                balance.proposed_change() == [ChangeValue::transparent(
+                    Zatoshis::const_from_u64(13000),
+                    TransparentChangeDestination::InternalP2pkh,
+                )] &&
+                balance.fee_required() == Zatoshis::const_from_u64(10000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_returns_p2sh_change_to_originating_address() {
+        use crate::fees::{
+            TransparentChangeDestination, TransparentChangePolicy, sapling as sapling_fees,
+        };
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::ReturnToOriginatingAddress);
+
+        let originating_address = TransparentAddress::ScriptHash([11u8; 20]);
+
+        // Spend a single P2SH UTXO (e.g. a multisig address) that is sufficient to pay the
+        // fee. Because the change strategy is configured to return change to the originating
+        // address rather than an internal-scope P2PKH address, the change output is sized and
+        // sent as a P2SH output (32 bytes) rather than a P2PKH output (34 bytes).
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &[TestTransparentInput {
+                outpoint: OutPoint::fake(),
+                coin: TxOut::new(
+                    Zatoshis::const_from_u64(100000),
+                    originating_address.script().into(),
+                ),
+            }],
+            &[TxOut::new(
+                Zatoshis::const_from_u64(40000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::transparent(
+                    Zatoshis::const_from_u64(50000),
+                    TransparentChangeDestination::OriginatingAddress(originating_address),
+                )] &&
                 balance.fee_required() == Zatoshis::const_from_u64(10000)
         );
     }
@@ -1420,7 +1484,9 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_is_not_split() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::fees::{
+            TransparentChangeDestination, TransparentChangePolicy, sapling as sapling_fees,
+        };
         use ::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
@@ -1467,7 +1533,10 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::transparent(Zatoshis::const_from_u64(649_0000))] &&
+                balance.proposed_change() == [ChangeValue::transparent(
+                    Zatoshis::const_from_u64(649_0000),
+                    TransparentChangeDestination::InternalP2pkh,
+                )] &&
                 balance.fee_required() == Zatoshis::const_from_u64(10000)
         );
     }
@@ -1527,7 +1596,9 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_allows_dust() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::fees::{
+            TransparentChangeDestination, TransparentChangePolicy, sapling as sapling_fees,
+        };
         use ::transparent::{address::TransparentAddress, bundle::OutPoint};
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
@@ -1573,7 +1644,10 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if
-                balance.proposed_change() == [ChangeValue::transparent(Zatoshis::const_from_u64(100))] &&
+                balance.proposed_change() == [ChangeValue::transparent(
+                    Zatoshis::const_from_u64(100),
+                    TransparentChangeDestination::InternalP2pkh,
+                )] &&
                 balance.fee_required() == Zatoshis::const_from_u64(10000)
         );
     }

@@ -33,6 +33,13 @@ pub const P2PKH_STANDARD_INPUT_SIZE: usize = 150;
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 pub const P2PKH_STANDARD_OUTPUT_SIZE: usize = 34;
 
+/// The standard size of a P2SH output, in bytes.
+///
+/// This is `8` bytes of value, plus `1` byte for the CompactSize length prefix of the
+/// `scriptPubKey`, plus `23` bytes for the `scriptPubKey` itself (`OP_HASH160
+/// <20-byte script hash> OP_EQUAL`), for a total of `32` bytes.
+pub const P2SH_STANDARD_OUTPUT_SIZE: usize = 32;
+
 /// The minimum conventional fee computed from the standard [ZIP 317] constants. Equivalent to
 /// `MARGINAL_FEE * GRACE_ACTIONS`.
 ///

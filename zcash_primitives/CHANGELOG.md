@@ -10,6 +10,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::fees::zip317::P2SH_STANDARD_OUTPUT_SIZE`
+
 ## [0.29.0] - 2026-07-09
 
 ### Added

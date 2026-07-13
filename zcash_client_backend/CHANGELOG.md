@@ -10,6 +10,43 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::fees::TransparentChangePolicy::ReturnToOriginatingAddress`
+  (behind the `transparent-inputs` feature flag): when the net flows of a
+  transaction are fully transparent, returns change to the transparent
+  address that originated the value being spent (selecting the address
+  controlling the largest total input value when the selected inputs are
+  controlled by more than one address), instead of an internal-scope P2PKH
+  address of the wallet. This is the appropriate policy when spending from a
+  P2SH (e.g. multisig) address, where change sent to an internal-scope P2PKH
+  address would not be spendable under the same multisig arrangement.
+- `zcash_client_backend::fees::TransparentChangeDestination` (behind
+  `transparent-inputs`): distinguishes the two possible destinations of a
+  non-ephemeral transparent change output, `InternalP2pkh` and
+  `OriginatingAddress`.
+- `zcash_client_backend::fees::ChangeValue::transparent_change_destination`
+  (behind `transparent-inputs`): returns the `TransparentChangeDestination`
+  for a non-ephemeral transparent change value.
+
+### Changed
+- `zcash_client_backend::fees::ChangeValue::transparent` (behind
+  `transparent-inputs`) now takes an additional
+  `TransparentChangeDestination` argument.
+- The proposal protobuf encoding of `ChangeValue` has a new optional
+  `transparentChangeAddress` field, used to encode the destination address
+  when non-ephemeral transparent change is proposed by
+  `TransparentChangePolicy::ReturnToOriginatingAddress`. Proposals encoded
+  by previous versions of this crate (in which the field is absent) continue
+  to decode as `TransparentChangeDestination::InternalP2pkh`.
+- `zcash_client_backend::proto::ProposalDecodingError` has a new
+  `TransparentChangeAddressInvalid` variant (behind `transparent-inputs`),
+  returned when the new `transparentChangeAddress` field is malformed or is
+  present on a change value other than non-ephemeral transparent change.
+- `create_proposed_transactions` now sends non-ephemeral transparent change
+  destined for a `TransparentChangeDestination::OriginatingAddress` directly
+  to that address, without reserving an internal-scope address via
+  `WalletWrite::reserve_next_n_internal_addresses`.
+
 ## [0.24.0-rc.1] - 2026-07-12
 
 ### Added

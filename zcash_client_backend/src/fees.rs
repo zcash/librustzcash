@@ -4,6 +4,8 @@ use std::{
     num::{NonZeroU64, NonZeroUsize},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::address::TransparentAddress;
 use ::transparent::bundle::OutPoint;
 use zcash_primitives::transaction::fees::{
     FeeRule,
@@ -74,12 +76,6 @@ impl FeeRule for StandardFeeRule {
 /// transaction; returning the change to the transparent pool matches the behavior of
 /// transparent-only wallets (including `zcashd`) at the cost of the change remaining unshielded.
 ///
-/// Transparent change is currently always sent to a P2PKH address derived under the wallet
-/// account's internal scope; returning change to the originating address when spending from a
-/// P2SH (e.g. multisig) address is not yet supported. See [zcash/librustzcash#2570] for
-/// details.
-///
-/// [zcash/librustzcash#2570]: https://github.com/zcash/librustzcash/issues/2570
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransparentChangePolicy {
@@ -95,13 +91,42 @@ pub enum TransparentChangePolicy {
     ///
     /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
     TransparentChangeAllowed,
+    /// When the net flows of the transaction are fully transparent, change is returned to the
+    /// transparent pool at the originating address of the selected transparent inputs, instead
+    /// of an internal-scope address of the wallet.
+    ///
+    /// This is the appropriate policy when spending from a P2SH (e.g. multisig) address: change
+    /// sent to an internal-scope P2PKH address would not be spendable under the same multisig
+    /// arrangement, so it must instead be returned to the address that funded the transaction.
+    ///
+    /// If the selected inputs are controlled by more than one transparent address, change is
+    /// returned to the single address controlling the largest total input value, with ties
+    /// broken deterministically. If no originating address can be determined (for example,
+    /// because the selected inputs do not use a standard script), change is instead shielded, as
+    /// with [`Self::ShieldChange`].
+    ReturnToOriginatingAddress,
+}
+
+/// The destination to which a non-ephemeral transparent change output should be sent.
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransparentChangeDestination {
+    /// Change is to be sent to an internal-scope (change) transparent address of the wallet,
+    /// to be reserved at transaction-construction time. Produced by
+    /// [`TransparentChangePolicy::TransparentChangeAllowed`].
+    InternalP2pkh,
+    /// Change is to be sent to the given transparent address, which originated the transparent
+    /// value being spent by the transaction. Produced by
+    /// [`TransparentChangePolicy::ReturnToOriginatingAddress`].
+    OriginatingAddress(TransparentAddress),
 }
 
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is
 /// enabled, an output to the transparent pool: either an ephemeral output as
-/// part of a [ZIP 320] transaction pair, or a change output to an
-/// internal-scope (change) transparent address of the wallet.
+/// part of a [ZIP 320] transaction pair, or a non-ephemeral change output to
+/// the transparent pool (see [`TransparentChangeDestination`] for the possible
+/// destinations of such an output).
 ///
 /// [ZIP 320]: https://zips.z.cash/zip-0320
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,7 +142,10 @@ enum ChangeValueInner {
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent { value: Zatoshis },
     #[cfg(feature = "transparent-inputs")]
-    Transparent { value: Zatoshis },
+    Transparent {
+        value: Zatoshis,
+        destination: TransparentChangeDestination,
+    },
 }
 
 impl ChangeValue {
@@ -128,10 +156,10 @@ impl ChangeValue {
     }
 
     /// Constructs a new change value that will be created as a non-ephemeral transparent output
-    /// sent to an internal-scope (change) transparent address of the wallet.
+    /// sent to the given [`TransparentChangeDestination`].
     #[cfg(feature = "transparent-inputs")]
-    pub fn transparent(value: Zatoshis) -> Self {
-        Self(ChangeValueInner::Transparent { value })
+    pub fn transparent(value: Zatoshis, destination: TransparentChangeDestination) -> Self {
+        Self(ChangeValueInner::Transparent { value, destination })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
@@ -178,7 +206,7 @@ impl ChangeValue {
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { value } => *value,
             #[cfg(feature = "transparent-inputs")]
-            ChangeValueInner::Transparent { value } => *value,
+            ChangeValueInner::Transparent { value, .. } => *value,
         }
     }
 
@@ -206,6 +234,16 @@ impl ChangeValue {
             ChangeValueInner::EphemeralTransparent { .. } => true,
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::Transparent { .. } => false,
+        }
+    }
+
+    /// Returns the destination for a non-ephemeral transparent change output, or `None` for any
+    /// other kind of change value.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_change_destination(&self) -> Option<&TransparentChangeDestination> {
+        match &self.0 {
+            ChangeValueInner::Transparent { destination, .. } => Some(destination),
+            _ => None,
         }
     }
 }
@@ -655,11 +693,17 @@ pub trait ChangeStrategy {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use ::transparent::address::TransparentAddress;
     use ::transparent::bundle::{OutPoint, TxOut};
     use zcash_primitives::transaction::fees::transparent;
     use zcash_protocol::value::Zatoshis;
 
     use super::sapling;
+
+    /// An arbitrary stand-in for the serialized size of a P2SH input with a known redeem
+    /// script, used so that tests can exercise P2SH inputs without the ZIP 317 fee rule
+    /// rejecting them as having an unknown size.
+    pub(crate) const TEST_P2SH_INPUT_SIZE: usize = 300;
 
     #[derive(Debug)]
     pub(crate) struct TestTransparentInput {
@@ -673,6 +717,17 @@ pub(crate) mod tests {
         }
         fn coin(&self) -> &TxOut {
             &self.coin
+        }
+        fn serialized_size(&self) -> transparent::InputSize {
+            match self.coin.recipient_address() {
+                Some(TransparentAddress::PublicKeyHash(_)) => {
+                    transparent::InputSize::STANDARD_P2PKH
+                }
+                Some(TransparentAddress::ScriptHash(_)) => {
+                    transparent::InputSize::Known(TEST_P2SH_INPUT_SIZE)
+                }
+                None => transparent::InputSize::Unknown(self.outpoint.clone()),
+            }
         }
     }
 

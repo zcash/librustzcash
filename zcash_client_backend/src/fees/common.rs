@@ -1,6 +1,12 @@
 use core::cmp::{Ordering, max, min};
+#[cfg(feature = "transparent-inputs")]
+use std::collections::BTreeMap;
 use std::num::{NonZeroU64, NonZeroUsize};
 
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::address::TransparentAddress;
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::transaction::fees::zip317::P2SH_STANDARD_OUTPUT_SIZE;
 use zcash_primitives::transaction::fees::{
     FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
 };
@@ -18,10 +24,10 @@ use super::{
     TransactionBalance, sapling as sapling_fees,
 };
 
-#[cfg(feature = "transparent-inputs")]
-use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
+#[cfg(feature = "transparent-inputs")]
+use super::{TransparentChangeDestination, TransparentChangePolicy};
 
 pub(crate) struct NetFlows {
     t_in: Zatoshis,
@@ -204,6 +210,59 @@ pub(crate) fn select_change_pool(
     ShieldedPool::Sapling
 }
 
+/// Determines the destination and standard output size of the transparent change output that
+/// should be produced for the given policy and selected transparent inputs, or `None` if no
+/// transparent change output should be produced (either because the policy does not permit
+/// transparent change, or because no suitable originating address could be determined).
+///
+/// When [`TransparentChangePolicy::ReturnToOriginatingAddress`] is in effect and the selected
+/// inputs are controlled by more than one transparent address, change is returned to the
+/// address controlling the largest total input value; ties are broken deterministically by
+/// address ordering.
+#[cfg(feature = "transparent-inputs")]
+fn resolve_transparent_change(
+    policy: TransparentChangePolicy,
+    transparent_inputs: &[impl transparent::InputView],
+) -> Option<(TransparentChangeDestination, usize)> {
+    match policy {
+        TransparentChangePolicy::ShieldChange => None,
+        TransparentChangePolicy::TransparentChangeAllowed => Some((
+            TransparentChangeDestination::InternalP2pkh,
+            P2PKH_STANDARD_OUTPUT_SIZE,
+        )),
+        TransparentChangePolicy::ReturnToOriginatingAddress => {
+            // Each per-address partial sum computed here is bounded by the total transparent
+            // input value, which the caller has already established does not overflow (via
+            // `calculate_net_flows`); the `unwrap_or` fallback here is unreachable in practice
+            // and simply preserves the running total rather than panicking.
+            let mut totals: BTreeMap<TransparentAddress, Zatoshis> = BTreeMap::new();
+            for input in transparent_inputs {
+                if let Some(addr) = input.coin().recipient_address() {
+                    let value = input.coin().value();
+                    totals
+                        .entry(addr)
+                        .and_modify(|total| *total = (*total + value).unwrap_or(*total))
+                        .or_insert(value);
+                }
+            }
+
+            totals
+                .into_iter()
+                .max_by_key(|(_, total)| *total)
+                .map(|(address, _)| {
+                    let output_size = match address {
+                        TransparentAddress::PublicKeyHash(_) => P2PKH_STANDARD_OUTPUT_SIZE,
+                        TransparentAddress::ScriptHash(_) => P2SH_STANDARD_OUTPUT_SIZE,
+                    };
+                    (
+                        TransparentChangeDestination::OriginatingAddress(address),
+                        output_size,
+                    )
+                })
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OutputManifest {
     transparent: usize,
@@ -321,15 +380,22 @@ where
     // We don't create a fully-transparent transaction if a change memo is used.
     let fully_transparent = net_flows.is_transparent() && change_memo.is_none();
 
-    // Whether change should be returned to the transparent pool instead of being shielded.
-    // Transparent change is only ever produced when the flows of the transaction are fully
-    // transparent, so that shielded flows never leak change information to the transparent
-    // pool.
+    // The destination and standard output size of the transparent change output, if change
+    // should be returned to the transparent pool instead of being shielded. Transparent change
+    // is only ever produced when the flows of the transaction are fully transparent, so that
+    // shielded flows never leak change information to the transparent pool.
     #[cfg(feature = "transparent-inputs")]
-    let wants_transparent_change = fully_transparent
-        && cfg.transparent_change_policy == TransparentChangePolicy::TransparentChangeAllowed;
+    let transparent_change = fully_transparent
+        .then(|| resolve_transparent_change(cfg.transparent_change_policy, transparent_inputs))
+        .flatten();
+    #[cfg(feature = "transparent-inputs")]
+    let wants_transparent_change = transparent_change.is_some();
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_change_output_size = transparent_change.as_ref().map(|(_, size)| *size);
     #[cfg(not(feature = "transparent-inputs"))]
     let wants_transparent_change = false;
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_change_output_size: Option<usize> = None;
 
     let total_in = net_flows
         .total_in()
@@ -565,9 +631,10 @@ where
                         transparent_input_sizes.clone(),
                         transparent_output_sizes
                             .clone()
-                            // Count the standard size of the P2PKH change output when change is
-                            // to be returned to the transparent pool.
-                            .chain(wants_transparent_change.then_some(P2PKH_STANDARD_OUTPUT_SIZE)),
+                            // Count the standard size of the transparent change output (P2PKH
+                            // or P2SH, depending on its destination) when change is to be
+                            // returned to the transparent pool.
+                            .chain(transparent_change_output_size),
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
@@ -639,7 +706,7 @@ where
             );
             let simple_case = || {
                 #[cfg(feature = "transparent-inputs")]
-                if wants_transparent_change {
+                if let Some((destination, _)) = transparent_change {
                     return (
                         if total_change.is_zero() {
                             // A zero-valued transparent output would be unspendable, so we omit
@@ -648,7 +715,7 @@ where
                             // are already publicly visible.
                             vec![]
                         } else {
-                            vec![ChangeValue::transparent(total_change)]
+                            vec![ChangeValue::transparent(total_change, destination)]
                         },
                         total_fee,
                     );
@@ -1134,6 +1201,138 @@ mod tests {
                 Zatoshis::const_from_u64(10_000)
             ),
             ShieldedPool::Ironwood
+        );
+    }
+}
+
+#[cfg(all(test, feature = "transparent-inputs"))]
+mod transparent_change_destination_tests {
+    use ::transparent::{
+        address::TransparentAddress,
+        bundle::{OutPoint, TxOut},
+    };
+    use zcash_protocol::value::Zatoshis;
+
+    use super::{
+        P2PKH_STANDARD_OUTPUT_SIZE, P2SH_STANDARD_OUTPUT_SIZE, TransparentChangeDestination,
+        TransparentChangePolicy, resolve_transparent_change,
+    };
+    use crate::fees::tests::TestTransparentInput;
+
+    fn input_from(value: u64, addr: TransparentAddress) -> TestTransparentInput {
+        TestTransparentInput {
+            outpoint: OutPoint::fake(),
+            coin: TxOut::new(Zatoshis::const_from_u64(value), addr.script().into()),
+        }
+    }
+
+    #[test]
+    fn shield_change_never_produces_transparent_change() {
+        let inputs = [input_from(
+            50_000,
+            TransparentAddress::PublicKeyHash([0u8; 20]),
+        )];
+
+        assert_eq!(
+            resolve_transparent_change(TransparentChangePolicy::ShieldChange, &inputs),
+            None
+        );
+    }
+
+    #[test]
+    fn transparent_change_allowed_always_targets_internal_p2pkh() {
+        // Even when the selected input is controlled by a P2SH address, the
+        // `TransparentChangeAllowed` policy (as opposed to `ReturnToOriginatingAddress`)
+        // always returns change to an internal-scope P2PKH address.
+        let inputs = [input_from(
+            50_000,
+            TransparentAddress::ScriptHash([7u8; 20]),
+        )];
+
+        assert_eq!(
+            resolve_transparent_change(TransparentChangePolicy::TransparentChangeAllowed, &inputs),
+            Some((
+                TransparentChangeDestination::InternalP2pkh,
+                P2PKH_STANDARD_OUTPUT_SIZE
+            ))
+        );
+    }
+
+    #[test]
+    fn originating_address_p2sh_input_sizes_p2sh_output() {
+        let addr = TransparentAddress::ScriptHash([9u8; 20]);
+        let inputs = [input_from(50_000, addr)];
+
+        assert_eq!(
+            resolve_transparent_change(
+                TransparentChangePolicy::ReturnToOriginatingAddress,
+                &inputs
+            ),
+            Some((
+                TransparentChangeDestination::OriginatingAddress(addr),
+                P2SH_STANDARD_OUTPUT_SIZE
+            ))
+        );
+    }
+
+    #[test]
+    fn originating_address_p2pkh_input_sizes_p2pkh_output() {
+        let addr = TransparentAddress::PublicKeyHash([3u8; 20]);
+        let inputs = [input_from(50_000, addr)];
+
+        assert_eq!(
+            resolve_transparent_change(
+                TransparentChangePolicy::ReturnToOriginatingAddress,
+                &inputs
+            ),
+            Some((
+                TransparentChangeDestination::OriginatingAddress(addr),
+                P2PKH_STANDARD_OUTPUT_SIZE
+            ))
+        );
+    }
+
+    #[test]
+    fn originating_address_picks_largest_total_value() {
+        let minority_addr = TransparentAddress::PublicKeyHash([1u8; 20]);
+        let majority_addr = TransparentAddress::ScriptHash([2u8; 20]);
+        let inputs = [
+            input_from(10_000, minority_addr),
+            input_from(5_000, majority_addr),
+            input_from(6_000, majority_addr),
+        ];
+
+        // majority_addr's total (11_000) exceeds minority_addr's total (10_000), even though
+        // no single input to majority_addr is as large as the single input to minority_addr.
+        assert_eq!(
+            resolve_transparent_change(
+                TransparentChangePolicy::ReturnToOriginatingAddress,
+                &inputs
+            ),
+            Some((
+                TransparentChangeDestination::OriginatingAddress(majority_addr),
+                P2SH_STANDARD_OUTPUT_SIZE
+            ))
+        );
+    }
+
+    #[test]
+    fn originating_address_falls_back_to_none_without_a_standard_address() {
+        use ::transparent::address::Script;
+
+        // A non-standard script does not correspond to any `TransparentAddress`, so no
+        // originating address can be determined.
+        let inputs = [TestTransparentInput {
+            outpoint: OutPoint::fake(),
+            coin: TxOut::new(Zatoshis::const_from_u64(50_000), Script::default()),
+        }];
+
+        assert_eq!(
+            resolve_transparent_change(
+                TransparentChangePolicy::ReturnToOriginatingAddress,
+                &inputs
+            ),
+            None
         );
     }
 }

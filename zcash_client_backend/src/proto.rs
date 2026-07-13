@@ -26,6 +26,9 @@ use zcash_protocol::{
 };
 use zip321::{TransactionRequest, Zip321Error};
 
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::address::TransparentAddress;
+
 use crate::{
     data_api::{
         InputSource,
@@ -38,6 +41,9 @@ use crate::{
         produces_shielded_bundle,
     },
 };
+
+#[cfg(feature = "transparent-inputs")]
+use crate::fees::TransparentChangeDestination;
 
 #[cfg(feature = "transparent-inputs")]
 use transparent::bundle::OutPoint;
@@ -522,6 +528,10 @@ pub enum ProposalDecodingError<DbError> {
     /// The proposal specified an explicit transaction version header that the wallet does not
     /// recognize.
     ProposedVersionInvalid(u32),
+    /// The encoded transparent change address was malformed, or was present for a change value
+    /// that is not non-ephemeral transparent change.
+    #[cfg(feature = "transparent-inputs")]
+    TransparentChangeAddressInvalid,
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -596,6 +606,12 @@ impl<E: Display> Display for ProposalDecodingError<E> {
                 f,
                 "The proposal specified an unrecognized transaction version header {header:#x}."
             ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalDecodingError::TransparentChangeAddressInvalid => write!(
+                f,
+                "The encoded transparent change address was malformed, or was present for a \
+                 change value other than non-ephemeral transparent change."
+            ),
         }
     }
 }
@@ -618,6 +634,37 @@ fn pool_type<T>(pool_id: i32) -> Result<PoolType, ProposalDecodingError<T>> {
         Ok(proposal::ValuePool::Orchard) => Ok(PoolType::ORCHARD),
         Ok(proposal::ValuePool::Ironwood) => Ok(PoolType::IRONWOOD),
         _ => Err(ProposalDecodingError::ValuePoolNotSupported(pool_id)),
+    }
+}
+
+/// Encodes a transparent change destination address as 21 bytes: a 1-byte script type
+/// (`0x00` for P2PKH, `0x01` for P2SH) followed by the 20-byte hash.
+#[cfg(feature = "transparent-inputs")]
+fn encode_transparent_change_address(addr: &TransparentAddress) -> Vec<u8> {
+    let (script_type, hash): (u8, &[u8; 20]) = match addr {
+        TransparentAddress::PublicKeyHash(hash) => (0x00, hash),
+        TransparentAddress::ScriptHash(hash) => (0x01, hash),
+    };
+    let mut bytes = Vec::with_capacity(21);
+    bytes.push(script_type);
+    bytes.extend_from_slice(hash);
+    bytes
+}
+
+/// Decodes a transparent change destination address from the 21-byte encoding produced by
+/// [`encode_transparent_change_address`].
+#[cfg(feature = "transparent-inputs")]
+fn decode_transparent_change_address<T>(
+    bytes: &[u8],
+) -> Result<TransparentAddress, ProposalDecodingError<T>> {
+    match bytes {
+        [0x00, hash @ ..] if hash.len() == 20 => Ok(TransparentAddress::PublicKeyHash(
+            hash.try_into().expect("length checked above"),
+        )),
+        [0x01, hash @ ..] if hash.len() == 20 => Ok(TransparentAddress::ScriptHash(
+            hash.try_into().expect("length checked above"),
+        )),
+        _ => Err(ProposalDecodingError::TransparentChangeAddressInvalid),
     }
 }
 
@@ -746,6 +793,17 @@ impl proposal::Proposal {
                                 value: memo_bytes.as_slice().to_vec(),
                             }),
                             is_ephemeral: change.is_ephemeral(),
+                            #[cfg(feature = "transparent-inputs")]
+                            transparent_change_address: match change
+                                .transparent_change_destination()
+                            {
+                                Some(TransparentChangeDestination::OriginatingAddress(addr)) => {
+                                    Some(encode_transparent_change_address(addr))
+                                }
+                                _ => None,
+                            },
+                            #[cfg(not(feature = "transparent-inputs"))]
+                            transparent_change_address: None,
                         })
                         .collect(),
                     fee_required: step.balance().fee_required().into(),
@@ -979,11 +1037,24 @@ impl proposal::Proposal {
                                     }
                                     #[cfg(feature = "transparent-inputs")]
                                     (PoolType::Transparent, true) => {
+                                        if cv.transparent_change_address.is_some() {
+                                            return Err(
+                                                ProposalDecodingError::TransparentChangeAddressInvalid,
+                                            );
+                                        }
                                         Ok(ChangeValue::ephemeral_transparent(value))
                                     }
                                     #[cfg(feature = "transparent-inputs")]
                                     (PoolType::Transparent, false) => {
-                                        Ok(ChangeValue::transparent(value))
+                                        let destination = match &cv.transparent_change_address {
+                                            None => TransparentChangeDestination::InternalP2pkh,
+                                            Some(bytes) => {
+                                                TransparentChangeDestination::OriginatingAddress(
+                                                    decode_transparent_change_address(bytes)?,
+                                                )
+                                            }
+                                        };
+                                        Ok(ChangeValue::transparent(value, destination))
                                     }
                                     // When all pool features are enabled, the explicit arms above
                                     // are exhaustive over the non-ephemeral cases; this fallback
@@ -1096,5 +1167,47 @@ impl service::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transpo
     {
         let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
         Ok(Self::new(conn))
+    }
+}
+
+#[cfg(all(test, feature = "transparent-inputs"))]
+mod transparent_change_address_tests {
+    use ::transparent::address::TransparentAddress;
+
+    use super::{
+        ProposalDecodingError, decode_transparent_change_address, encode_transparent_change_address,
+    };
+
+    #[test]
+    fn round_trips_p2pkh() {
+        let addr = TransparentAddress::PublicKeyHash([7u8; 20]);
+        let encoded = encode_transparent_change_address(&addr);
+        assert_eq!(encoded.len(), 21);
+        assert_matches!(decode_transparent_change_address::<()>(&encoded), Ok(a) if a == addr);
+    }
+
+    #[test]
+    fn round_trips_p2sh() {
+        let addr = TransparentAddress::ScriptHash([9u8; 20]);
+        let encoded = encode_transparent_change_address(&addr);
+        assert_eq!(encoded.len(), 21);
+        assert_matches!(decode_transparent_change_address::<()>(&encoded), Ok(a) if a == addr);
+    }
+
+    #[test]
+    fn rejects_unrecognized_script_type() {
+        // `0x02` is not a recognized script type discriminant.
+        assert_matches!(
+            decode_transparent_change_address::<()>(&[0x02; 21]),
+            Err(ProposalDecodingError::TransparentChangeAddressInvalid)
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_length() {
+        assert_matches!(
+            decode_transparent_change_address::<()>(&[0x00; 5]),
+            Err(ProposalDecodingError::TransparentChangeAddressInvalid)
+        );
     }
 }
