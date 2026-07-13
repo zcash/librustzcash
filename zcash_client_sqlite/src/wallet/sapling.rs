@@ -451,6 +451,12 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn send_max_spendable_to_transparent() {
+        testing::pool::send_max_spendable_to_transparent::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn fails_to_send_max_to_transparent_with_memo() {
         testing::pool::fails_to_send_max_to_transparent_with_memo::<SaplingPoolTester>()
     }

@@ -983,6 +983,71 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
     );
 }
 
+/// Tests that sending all the spendable funds within the given shielded pool to a
+/// transparent (non-TEX) recipient succeeds.
+///
+/// The test:
+/// - Adds funds to the wallet in a single note.
+/// - Proposes a send-max transaction to a transparent address, without a memo.
+/// - Verifies that the proposal consists of a single step paying the whole balance,
+///   less the fee, to the transparent recipient.
+/// - Builds the transaction.
+#[cfg(feature = "transparent-inputs")]
+pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use zcash_protocol::PoolType;
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(60000);
+    st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let to: Address = Address::Transparent(TransparentAddress::PublicKeyHash([0x7f; 20]));
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // The proposed transaction carries one shielded spend (padded to two shielded
+    // outputs) and one transparent output.
+    let expected_fee = (zip317::MARGINAL_FEE * 3u64).unwrap();
+    let expected_payment = (value - expected_fee).unwrap();
+
+    let addy = to.to_zcash_address(st.network());
+    let proposal = st
+        .propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let steps: Vec<_> = proposal.steps().iter().cloned().collect();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].balance().fee_required(), expected_fee);
+    assert_eq!(steps[0].balance().proposed_change(), []);
+    assert_eq!(
+        steps[0].payment_pools(),
+        &std::collections::BTreeMap::from([(0, PoolType::TRANSPARENT)])
+    );
+    assert_matches!(
+        steps[0].transaction_request().payments().get(&0),
+        Some(payment) if payment.amount() == Some(expected_payment)
+    );
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+}
+
 /// Tests that attempting to send all the spendable funds within the given shielded pool in a
 /// single transaction fail if there are funds that are not yet confirmed.
 ///

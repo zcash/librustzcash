@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  correctly constructs proposals paying a transparent (non-TEX) recipient — a
+  bare transparent address, or a unified address having no shielded receiver.
+  Previously, such proposals failed validation with
+  `ProposalError::PaymentPoolsMismatch` because no output pool was assigned to
+  the payment.
+
 ## [0.24.0-rc.1] - 2026-07-12
 
 ### Added

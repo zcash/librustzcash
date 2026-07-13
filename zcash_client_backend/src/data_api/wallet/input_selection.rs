@@ -1573,6 +1573,22 @@ where
         .clone()
         .convert_if_network(params.network_type())?;
 
+    // A recipient that can only receive funds via a transparent output — a bare
+    // transparent address, or a unified address with no shielded receiver — is paid
+    // directly from the proposed transaction. TEX recipients are excluded: their
+    // payment is delivered by the ephemeral second step, which carries its own
+    // payment pool assignment.
+    let pays_transparent_directly = match &recipient_address {
+        Address::Transparent(_) => true,
+        Address::Unified(addr) => {
+            addr.has_transparent() && !(addr.has_sapling() || addr.has_orchard())
+        }
+        _ => false,
+    };
+    if pays_transparent_directly {
+        payment_pools.insert(0, PoolType::Transparent);
+    }
+
     let (tr0_fee, tr1_fee) = match recipient_address {
         Address::Sapling(_) => fee_rule
             .fee_required(
@@ -1598,12 +1614,12 @@ where
                 ironwood_action_count,
             )
             .map(|fee| (fee, None)),
-        Address::Unified(addr) => fee_rule
+        Address::Unified(_) => fee_rule
             .fee_required(
                 params,
                 BlockHeight::from(target_height),
                 [],
-                if addr.has_transparent() && !(addr.has_sapling() || addr.has_orchard()) {
+                if pays_transparent_directly {
                     vec![P2PKH_STANDARD_OUTPUT_SIZE]
                 } else {
                     vec![]
