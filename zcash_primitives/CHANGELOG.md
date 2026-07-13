@@ -10,9 +10,12 @@ workspace.
 
 ## [Unreleased]
 
-### Added
-- `zcash_primitives::transaction::builder::Builder::new_with_orchard_pool_bundle_type`,
-  for selecting a bundle type independently for either Orchard protocol value pool.
+### Changed
+- `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries
+  separate `orchard_bundle_type` and `ironwood_bundle_type` fields in place of
+  `orchard_pool_bundle_type`, selecting the transactional bundle type
+  independently for each Orchard protocol value pool. Set both fields to the
+  same value to keep the previous behavior.
 
 ## [0.29.0] - 2026-07-09
 
