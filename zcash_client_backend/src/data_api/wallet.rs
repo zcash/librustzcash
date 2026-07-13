@@ -1514,7 +1514,8 @@ where
             sapling_anchor,
             orchard_anchor,
             ironwood_anchor,
-            orchard_pool_bundle_type,
+            orchard_bundle_type: orchard_pool_bundle_type,
+            ironwood_bundle_type: orchard_pool_bundle_type,
         },
     );
 
