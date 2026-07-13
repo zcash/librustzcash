@@ -10,11 +10,7 @@ use std::{
 use transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
-use zcash_primitives::transaction::fees::{
-    FeeRule,
-    transparent::InputSize,
-    zip317::{P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
-};
+use zcash_primitives::transaction::fees::{FeeRule, zip317::P2PKH_STANDARD_OUTPUT_SIZE};
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
@@ -44,7 +40,9 @@ use {
     },
     std::convert::Infallible,
     transparent::{address::TransparentAddress, bundle::OutPoint},
-    zcash_primitives::transaction::fees::transparent as transparent_fees,
+    zcash_primitives::transaction::fees::{
+        transparent as transparent_fees, transparent::InputSize, zip317::P2PKH_STANDARD_INPUT_SIZE,
+    },
     zip321::Payment,
 };
 
@@ -1477,7 +1475,12 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     memo: Option<MemoBytes>,
 ) -> Result<
     Proposal<FeeRuleT, InputSourceT::NoteRef>,
-    InputSelectorError<InputSourceT::Error, BalanceError, FeeRuleT::Error, InputSourceT::NoteRef>,
+    InputSelectorError<
+        InputSourceT::Error,
+        GreedyInputSelectorError,
+        FeeRuleT::Error,
+        InputSourceT::NoteRef,
+    >,
 >
 where
     ParamsT: consensus::Parameters,
@@ -1497,7 +1500,7 @@ where
 
     let input_total = spendable_notes
         .total_value()
-        .map_err(InputSelectorError::Selection)?;
+        .map_err(|e| InputSelectorError::Selection(GreedyInputSelectorError::Balance(e)))?;
 
     let mut payment_pools = BTreeMap::new();
 
@@ -1630,6 +1633,16 @@ where
                 ironwood_action_count,
             )
             .map(|fee| (fee, None)),
+        // Paying a TEX recipient requires a second, purely transparent transaction that
+        // spends an ephemeral output of the first; constructing that ZIP 320 pair is
+        // only supported when the `transparent-inputs` feature is enabled.
+        #[cfg(not(feature = "transparent-inputs"))]
+        Address::Tex(_) => {
+            return Err(InputSelectorError::Selection(
+                GreedyInputSelectorError::UnsupportedTexAddress,
+            ));
+        }
+        #[cfg(feature = "transparent-inputs")]
         Address::Tex(_) => fee_rule
             .fee_required(
                 params,

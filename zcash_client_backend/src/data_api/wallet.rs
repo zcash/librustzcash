@@ -77,7 +77,7 @@ use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::{BalanceError, Zatoshis},
+    value::Zatoshis,
 };
 use zip32::Scope;
 use zip321::Payment;
@@ -116,13 +116,15 @@ use {
     serde::{Deserialize, Serialize},
     transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
-    zcash_protocol::consensus::NetworkConstants,
+    zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
 };
 
 use zcash_primitives::transaction::TxVersion;
 
 pub mod input_selection;
-use input_selection::{GreedyInputSelector, InputSelector, InputSelectorError};
+use input_selection::{
+    GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
+};
 
 #[cfg(feature = "pczt")]
 const PROPRIETARY_PROPOSAL_INFO: &str = "zcash_client_backend:proposal_info";
@@ -281,7 +283,7 @@ pub type ProposeTransferErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT> = Error<
 pub type ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT> = Error<
     <DbT as WalletRead>::Error,
     CommitmentTreeErrT,
-    BalanceError,
+    GreedyInputSelectorError,
     <FeeRuleT as FeeRule>::Error,
     <FeeRuleT as FeeRule>::Error,
     <DbT as InputSource>::NoteRef,

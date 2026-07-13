@@ -1048,6 +1048,40 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
     assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
 }
 
+/// Tests that proposing a send-max transfer to a TEX recipient fails with a meaningful
+/// error when the `transparent-inputs` feature is not enabled.
+#[cfg(not(feature = "transparent-inputs"))]
+pub fn send_max_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+
+    let account = st.test_account().cloned().unwrap();
+    let tex_addr = Address::Tex([0x4; 20]);
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let addy = tex_addr.to_zcash_address(st.network());
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        ),
+        Err(data_api::error::Error::NoteSelection(
+            GreedyInputSelectorError::UnsupportedTexAddress
+        ))
+    );
+}
+
 /// Tests that attempting to send all the spendable funds within the given shielded pool in a
 /// single transaction fail if there are funds that are not yet confirmed.
 ///
