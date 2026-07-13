@@ -80,6 +80,12 @@ pub(crate) fn fails_to_send_max_to_transparent_with_memo<T: ShieldedPoolTester>(
     )
 }
 
+pub(crate) fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<
+        T,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 pub(crate) fn send_max_proposal_fails_when_unconfirmed_funds_present<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::spend_everything_proposal_fails_when_unconfirmed_funds_present::<T>(
         TestDbFactory::default(),

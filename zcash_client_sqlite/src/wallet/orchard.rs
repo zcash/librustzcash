@@ -670,6 +670,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_max_fails_when_balance_is_consumed_by_fees() {
+        testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<OrchardPoolTester>()
+    }
+
+    #[test]
     #[cfg(feature = "transparent-inputs")]
     fn fails_to_send_max_to_transparent_with_memo() {
         testing::pool::fails_to_send_max_to_transparent_with_memo::<OrchardPoolTester>()

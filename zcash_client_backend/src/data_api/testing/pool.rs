@@ -1082,6 +1082,39 @@ pub fn send_max_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>(
     );
 }
 
+/// Tests that a send-max proposal fails with `InsufficientFunds` when the entire wallet
+/// balance would be consumed by fees, rather than proposing a transaction that delivers
+/// nothing to the recipient.
+pub fn send_max_fails_when_balance_is_consumed_by_fees<T: ShieldedPoolTester>(
+    dsf: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds equal to the exact fee of a send-max transaction spending a single note
+    // to a same-pool recipient (two logical actions under ZIP 317).
+    let value = MINIMUM_FEE;
+    st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let to: Address = T::sk_default_address(&T::sk(&[0xf5; 32]));
+    let fee_rule = StandardFeeRule::Zip317;
+
+    let addy = to.to_zcash_address(st.network());
+    assert_matches!(
+        st.propose_send_max_transfer(
+            account.id(),
+            &fee_rule,
+            addy,
+            None,
+            MaxSpendMode::Everything,
+            ConfirmationsPolicy::MIN,
+        ),
+        Err(data_api::error::Error::InsufficientFunds { available, required })
+            if available == value && required > value
+    );
+}
+
 /// Tests that attempting to send all the spendable funds within the given shielded pool in a
 /// single transaction fail if there are funds that are not yet confirmed.
 ///

@@ -15,7 +15,7 @@ use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, MAX_MONEY, Zatoshis},
 };
 use zip321::TransactionRequest;
 
@@ -1680,11 +1680,16 @@ where
 
     // the total amount involved in the "send max" operation. This is the total
     // spendable value present in the wallet minus the fees required to perform
-    // the send max operation.
-    let total_to_recipient =
-        (input_total - total_fee_required).ok_or(InputSelectorError::InsufficientFunds {
+    // the send max operation. The proposal must deliver a nonzero amount to the
+    // recipient: a send-max operation on a wallet whose entire balance would be
+    // consumed by fees is reported as insufficient funds rather than proposed as
+    // a fee-only transaction.
+    let total_to_recipient = (input_total - total_fee_required)
+        .filter(|amount| *amount > Zatoshis::ZERO)
+        .ok_or(InputSelectorError::InsufficientFunds {
             available: input_total,
-            required: total_fee_required,
+            required: (total_fee_required + Zatoshis::const_from_u64(1))
+                .unwrap_or(Zatoshis::const_from_u64(MAX_MONEY)),
         })?;
 
     // when the recipient of the send max operation is a TEX address this is the

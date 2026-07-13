@@ -33,6 +33,12 @@ workspace.
   `GreedyInputSelectorError::UnsupportedTexAddress` instead of constructing an
   internally inconsistent proposal that failed validation with a misleading
   error.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `Error::InsufficientFunds` when the wallet's entire spendable balance
+  would be consumed by fees. Previously it proposed a transaction delivering
+  zero value to a shielded recipient (spending the whole balance as fee), and
+  reported `PaymentError::ZeroValuedTransparentOutput` for transparent
+  recipients.
 
 ## [0.24.0-rc.1] - 2026-07-12
 
