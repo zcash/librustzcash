@@ -1565,13 +1565,13 @@ where
     let orchard_bundle_required = orchard_action_count > 0;
 
     #[cfg(feature = "orchard")]
-    let ironwood_action_count = orchard::builder::BundleType::DEFAULT
-        .num_actions(
-            orchard::bundle::Flags::ENABLED,
-            spendable_notes.ironwood.len(),
-            usize::from(orchard_receiver_payable && orchard_receivers_fill_ironwood),
-        )
-        .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
+    let ironwood_action_count = orchard_fees::transactional_action_count(
+        ::orchard::builder::BundleType::DEFAULT,
+        ironwood_bundle_version_for_height(params, target_height),
+        spendable_notes.ironwood.len(),
+        usize::from(orchard_receiver_payable && orchard_receivers_fill_ironwood),
+    )
+    .map_err(|s| InputSelectorError::Change(ChangeError::BundleError(s)))?;
     #[cfg(not(feature = "orchard"))]
     let ironwood_action_count: usize = 0;
 
