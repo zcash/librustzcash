@@ -676,6 +676,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn send_max_spends_inputs_across_pools() {
+        testing::pool::send_max_spends_inputs_across_pools::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
     fn send_max_fails_when_balance_is_consumed_by_fees() {
         testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<OrchardPoolTester>()
     }
