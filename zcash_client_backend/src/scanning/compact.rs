@@ -132,7 +132,7 @@ where
                 block_hash,
                 txid,
                 |_| SaplingDomain::new(zip212_enforcement),
-                &tx.outputs
+                tx.outputs
                     .iter()
                     .enumerate()
                     .map(|(i, output)| {
@@ -153,7 +153,7 @@ where
                 block_hash,
                 txid,
                 OrchardDomain::for_compact_action,
-                &tx.actions
+                tx.actions
                     .iter()
                     .enumerate()
                     .map(|(i, action)| {
@@ -363,6 +363,9 @@ where
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index,
+                // TODO: Scan transparent data in CompactTx if present.
+                // https://github.com/zcash/librustzcash/issues/2187
+                vec![],
                 sapling_spends,
                 sapling_outputs,
                 #[cfg(feature = "orchard")]

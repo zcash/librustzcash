@@ -9,7 +9,7 @@ use nonempty::NonEmpty;
 
 use orchard::{
     Action, Anchor,
-    bundle::{Authorization, Authorized, Flags},
+    bundle::{Authorization, Authorized, Flags, ProofSizeEnforcement},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
@@ -50,6 +50,7 @@ impl MapAuth<Authorized, Authorized> for () {
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(
     mut reader: R,
+    proof_size_enforcement: ProofSizeEnforcement,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
@@ -74,21 +75,26 @@ pub fn read_v5_bundle<R: Read>(
             binding_signature,
         );
 
-        Ok(Some(orchard::Bundle::from_parts(
+        // `try_from_parts` rejects a proof whose length is not the canonical size for the
+        // number of actions, preventing a proof padded with arbitrary data (GHSA-2x4w-pxqw-58v9).
+        orchard::Bundle::try_from_parts(
             actions,
             flags,
             value_balance,
             anchor,
             authorization,
-        )))
+            proof_size_enforcement,
+        )
+        .map(Some)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn read_v6_bundle<R: Read>(
     reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance>>> {
-    read_v5_bundle(reader)
+    read_v5_bundle(reader, ProofSizeEnforcement::Strict)
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -160,10 +166,8 @@ pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>
     let cmx = read_cmx(&mut reader)?;
     let encrypted_note = read_note_ciphertext(&mut reader)?;
 
-    Action::from_parts(nf_old, rk, cmx, encrypted_note, cv_net, ()).ok_or(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "One or more of the inputs to Orchard action creation were consensus-invalid.",
-    ))
+    Action::from_parts(nf_old, rk, cmx, encrypted_note, cv_net, ())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
@@ -219,7 +223,7 @@ pub fn write_v5_bundle<W: Write>(
     Ok(())
 }
 
-#[cfg(any(zcash_unstable = "zfuture", zcash_unstable = "nu7"))]
+#[cfg(zcash_unstable = "nu7")]
 pub fn write_v6_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, ZatBalance>>,
     writer: W,

@@ -7,6 +7,7 @@ use incrementalmerkletree::Position;
 use ::transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
+    keys::TransparentKeyScope,
 };
 use zcash_address::ZcashAddress;
 use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
@@ -21,16 +22,13 @@ use zcash_protocol::{
 use zcash_script::script;
 use zip32::Scope;
 
-use crate::fees::sapling as sapling_fees;
+use crate::{TransferType, fees::sapling as sapling_fees};
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
-    std::time::SystemTime,
-};
+use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -76,16 +74,40 @@ impl NoteId {
 ///   internal account ID and metadata about the outpoint;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient<AccountId> {
+    /// An output sent to a recipient external to the wallet.
     External {
         recipient_address: ZcashAddress,
         output_pool: PoolType,
     },
+    /// A transparent output sent to an ephemeral address of a wallet account
+    /// (e.g. the middle hop of a ZIP 320 / TEX flow). The `outpoint` is
+    /// recorded so the wallet can later detect when this output is spent
+    /// without relying on a continuous address watch.
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent {
         receiving_account: AccountId,
         ephemeral_address: TransparentAddress,
         outpoint: OutPoint,
     },
+    /// A transparent output sent to a non-ephemeral transparent address belonging to
+    /// a wallet account. Used to record the send side of a transparent output that
+    /// the wallet both funded and received.
+    ///
+    /// Distinct from [`Self::InternalAccount`] because for transparent outputs
+    /// the recipient address is observable on chain and must be recorded;
+    /// additionally, the receiving account may not be known at the point the
+    /// send is recorded. For shielded outputs the recipient address is not
+    /// externally meaningful, so wallet-internal sends are recorded against
+    /// the receiving account alone.
+    #[cfg(feature = "transparent-inputs")]
+    InternalTransparent {
+        receiving_account: AccountId,
+        recipient_address: TransparentAddress,
+    },
+    /// A shielded output recorded against a wallet account. Used for
+    /// same-account outputs such as change (`external_address` is `None`) and
+    /// for outputs received via an external IVK but funded by another wallet
+    /// account, in which case `external_address` is the address that was paid.
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
@@ -100,6 +122,7 @@ pub enum Recipient<AccountId> {
 pub struct WalletTx<AccountId> {
     txid: TxId,
     block_index: TxIndex,
+    transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
     sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
     sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
     #[cfg(feature = "orchard")]
@@ -113,6 +136,7 @@ impl<AccountId> WalletTx<AccountId> {
     pub fn new(
         txid: TxId,
         block_index: TxIndex,
+        transparent_outputs: Vec<WalletTransparentOutput<AccountId>>,
         sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
         sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
         #[cfg(feature = "orchard")] orchard_spends: Vec<
@@ -123,6 +147,7 @@ impl<AccountId> WalletTx<AccountId> {
         Self {
             txid,
             block_index,
+            transparent_outputs,
             sapling_spends,
             sapling_outputs,
             #[cfg(feature = "orchard")]
@@ -142,6 +167,11 @@ impl<AccountId> WalletTx<AccountId> {
     /// Returns the index of the transaction in the containing block.
     pub fn block_index(&self) -> TxIndex {
         self.block_index
+    }
+
+    /// Returns a record for each transparent coin received or produced by the wallet.
+    pub fn transparent_outputs(&self) -> &[WalletTransparentOutput<AccountId>] {
+        &self.transparent_outputs
     }
 
     /// Returns a record for each Sapling note belonging to the wallet that was spent in the
@@ -173,17 +203,20 @@ impl<AccountId> WalletTx<AccountId> {
 
 /// A transparent output controlled by the wallet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WalletTransparentOutput {
+pub struct WalletTransparentOutput<AccountId> {
     outpoint: OutPoint,
     txout: TxOut,
     mined_height: Option<BlockHeight>,
+    recipient_account: Option<AccountId>,
+    recipient_key_scope: Option<TransparentKeyScope>,
     recipient_address: TransparentAddress,
+    funding_account: Option<AccountId>,
     /// The known serialized input size for this output, if available.
     /// This is set for P2SH outputs where the redeem script is known.
     known_input_size: Option<usize>,
 }
 
-impl WalletTransparentOutput {
+impl<AccountId> WalletTransparentOutput<AccountId> {
     /// Constructs a new [`WalletTransparentOutput`] from its constituent parts.
     ///
     /// Returns `None` if the recipient address for the provided [`TxOut`] cannot be
@@ -192,16 +225,52 @@ impl WalletTransparentOutput {
         outpoint: OutPoint,
         txout: TxOut,
         mined_height: Option<BlockHeight>,
-    ) -> Option<WalletTransparentOutput> {
+        recipient_account: Option<AccountId>,
+        recipient_key_scope: Option<TransparentKeyScope>,
+        funding_account: Option<AccountId>,
+    ) -> Option<Self> {
         txout
             .recipient_address()
             .map(|recipient_address| WalletTransparentOutput {
                 outpoint,
                 txout,
                 mined_height,
+                recipient_account,
+                recipient_key_scope,
                 recipient_address,
+                funding_account,
                 known_input_size: None,
             })
+    }
+
+    /// Returns a copy of this output with account-identifying data redacted,
+    /// for inclusion in a [`Proposal`].
+    ///
+    /// Specifically:
+    /// - The `AccountId` type parameter is replaced with `()`, erasing the value
+    ///   of `recipient_account` while preserving whether the output is
+    ///   wallet-owned (the `Some` / `None` distinction is retained).
+    /// - `funding_account` is cleared to `None`, since a proposal does not
+    ///   carry information about which account funded prior outputs.
+    ///
+    /// Used when constructing or reconstructing a [`Proposal`], whose
+    /// transparent inputs are deliberately account-agnostic so that proposals
+    /// can be wire-encoded and shared without revealing wallet account
+    /// structure.
+    ///
+    /// [`Proposal`]: crate::proposal::Proposal
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn redact_account_data(self) -> WalletTransparentOutput<()> {
+        WalletTransparentOutput {
+            outpoint: self.outpoint,
+            txout: self.txout,
+            mined_height: self.mined_height,
+            recipient_account: self.recipient_account.map(|_| ()),
+            recipient_key_scope: self.recipient_key_scope,
+            recipient_address: self.recipient_address,
+            funding_account: None,
+            known_input_size: self.known_input_size,
+        }
     }
 
     /// Sets the known serialized input size for this output.
@@ -218,6 +287,11 @@ impl WalletTransparentOutput {
         &self.outpoint
     }
 
+    /// The index of the output in the transaction that created this output.
+    pub fn index(&self) -> usize {
+        self.outpoint.n() as usize
+    }
+
     /// Returns the transaction output itself.
     pub fn txout(&self) -> &TxOut {
         &self.txout
@@ -228,9 +302,73 @@ impl WalletTransparentOutput {
         self.mined_height
     }
 
+    /// Returns the transparent key scope at which this address was derived, if known.
+    ///
+    /// This metadata MUST be returned for any transparent address derived by the wallet;
+    /// this metadata is used by `propose_shielding` to ensure that shielding transactions
+    /// do not inadvertently link ephemeral addresses to other wallet activity on-chain.
+    pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
+        self.recipient_key_scope
+    }
+
+    /// Returns the [`TransferType`] for this output, derived from the recipient,
+    /// recipient-key-scope, and funding-account information stored on the output:
+    ///
+    /// - [`TransferType::Outgoing`] when [`recipient_account`](Self::recipient_account)
+    ///   is `None` (the recipient is external to the wallet).
+    /// - [`TransferType::AccountInternal`] when the recipient is a wallet account and
+    ///   the output is a same-account self-transfer. This is detected either
+    ///   structurally, when [`recipient_key_scope`](Self::recipient_key_scope) is
+    ///   `INTERNAL` or `EPHEMERAL` (those key scopes exist only within a single
+    ///   account), or by observation, when the recipient account is also the
+    ///   [`funding_account`](Self::funding_account). The latter case also covers
+    ///   standalone addresses, which have no key scope.
+    /// - [`TransferType::WalletInternal`] when the recipient is a wallet account and
+    ///   the [`funding_account`](Self::funding_account) is a different wallet account
+    ///   (a cross-account transfer within the wallet).
+    /// - [`TransferType::Incoming`] when the recipient is a wallet account and no
+    ///   wallet funding account is known.
+    pub fn transfer_type(&self) -> TransferType
+    where
+        AccountId: PartialEq,
+    {
+        match (
+            self.recipient_account.as_ref(),
+            self.recipient_key_scope,
+            self.funding_account.as_ref(),
+        ) {
+            (None, _, _) => TransferType::Outgoing,
+            (Some(_), Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL), _) => {
+                TransferType::AccountInternal
+            }
+            (Some(r), _, Some(r0)) if r == r0 => TransferType::AccountInternal,
+            (Some(_), _, Some(_)) => TransferType::WalletInternal,
+            (Some(_), _, _) => TransferType::Incoming,
+        }
+    }
+
+    /// The identifier for the account that received this output, if known to belong to the
+    /// wallet. Returns `None` for outputs sent to addresses outside the wallet.
+    pub fn recipient_account(&self) -> Option<&AccountId> {
+        self.recipient_account.as_ref()
+    }
+
     /// Returns the wallet address that received the UTXO.
     pub fn recipient_address(&self) -> &TransparentAddress {
         &self.recipient_address
+    }
+
+    /// The identifier for the wallet account that provided funds in the transaction
+    /// that created the output, if known.
+    ///
+    /// Note: the Zcash protocol permits construction of transactions where multiple distinct
+    /// accounts provide funds; however, `zcash_client_backend` does not currently support the
+    /// construction of transactions of this form. In cases where multiple funding accounts are
+    /// detected, the account that provided the most significant source of funds should be selected
+    /// if possible; in the future, this should be either expanded to support a set of funding
+    /// accounts (which will require potentially invasive storage backend changes).
+    pub fn funding_account(&self) -> Option<&AccountId> {
+        self.funding_account.as_ref()
     }
 
     /// Returns the value of the UTXO
@@ -239,7 +377,7 @@ impl WalletTransparentOutput {
     }
 }
 
-impl transparent_fees::InputView for WalletTransparentOutput {
+impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<AccountId> {
     fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }

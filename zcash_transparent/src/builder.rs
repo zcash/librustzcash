@@ -822,18 +822,17 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
             let sighash_msg = secp256k1::Message::from_digest(self.sighashes[input_idx]);
 
             // We only support external signatures for P2PKH inputs.
-            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info {
-                if self
+            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info
+                && self
                     .secp_ctx
                     .verify_ecdsa(&sighash_msg, signature, pubkey)
                     .is_ok()
-                {
-                    if matched_input_idx.is_some() {
-                        // This signature was already valid for a different input.
-                        return Err(Error::DuplicateSignature);
-                    }
-                    matched_input_idx = Some((input_idx, pubkey));
+            {
+                if matched_input_idx.is_some() {
+                    // This signature was already valid for a different input.
+                    return Err(Error::DuplicateSignature);
                 }
+                matched_input_idx = Some((input_idx, pubkey));
             }
         }
 
@@ -888,7 +887,7 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(all(test, feature = "std", feature = "transparent-inputs"))]
 mod tests {
     use std::vec::Vec;
 

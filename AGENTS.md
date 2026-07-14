@@ -101,7 +101,6 @@ since LLMs cannot render diagrams.
 | `pczt` | Partially Constructed Zcash Transaction types and role interfaces |
 | `zcash_client_backend` | Wallet framework: storage APIs, chain scanning, light client protocol, fee calculation, transaction proposals |
 | `zcash_client_sqlite` | SQLite-based implementation of `zcash_client_backend` storage APIs |
-| `zcash_client_memory` | In-memory implementation of `zcash_client_backend` storage APIs |
 
 ### Utilities & Standalone Components
 
@@ -213,7 +212,6 @@ These feature flags are used consistently across crates in the repository:
 These are `cfg` flags (not Cargo feature flags) that enable unstable or
 in-development functionality:
 
-- `zcash_unstable="zfuture"`
 - `zcash_unstable="nu7"`
 
 ## Code Style

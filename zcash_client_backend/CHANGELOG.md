@@ -8,6 +8,113 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
+## [0.24.0] - PLANNED
+
+### Added
+- A new `spend-index` feature flag, for consumers whose chain-data source can
+  resolve the spend of an individual transparent output (e.g. a full node with a
+  spent-outpoint index). It gates:
+  - `zcash_client_backend::data_api::TransactionDataRequest::GetSpendingTx`,
+    a per-outpoint request to detect the spend of a specific transparent output.
+  - `zcash_client_backend::data_api::WalletWrite::notify_output_verified_unspent`,
+    which records that a transparent outpoint was confirmed unspent as of a given
+    height.
+- `zcash_client_backend::data_api::error::RewindError`
+- `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
+  a new variant that wraps a `shardtree` insertion error together with the
+  shielded pool whose note commitment tree was being updated and the range of
+  block heights that were being added to the wallet when the error occurred.
+  This makes it possible to identify which pool and which scanned blocks
+  triggered a note commitment tree conflict during `put_blocks`.
+- `zcash_client_backend::wallet::WalletTransparentOutput`:
+  - `recipient_account`
+  - `recipient_key_scope`
+  - `funding_account`
+- `zcash_client_backend::wallet::Recipient::InternalTransparent` (behind
+  the `transparent-inputs` feature flag): a new variant for recording the
+  send side of a transparent output whose recipient address belongs to a
+  wallet account (i.e., the wallet both funded and received the output).
+- `zcash_client_backend::TransferType::AccountInternal`: indicates an output
+  whose recipient and funder are the same wallet account (e.g. change). This
+  has the semantics previously carried by `TransferType::WalletInternal`.
+- `zcash_client_backend::data_api::wallet::propose_shielding_coinbase` and
+  `zcash_client_backend::data_api::wallet::input_selection::ShieldingSelector::propose_shielding_coinbase`,
+  which propose a transaction that shields one or more coinbase transparent
+  outputs to an arbitrary shielded recipient.
+- `zcash_client_backend::proposal::ProposalError::ShieldingRequiresShieldedRecipient`,
+  returned by `propose_shielding_coinbase` when the supplied `to_address` is
+  a transparent or TEX address.
+- `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
+  alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
+  instead of a `ChangeStrategy`.
+- `zcash_client_backend::wallet::WalletTx::transparent_outputs`
+- `zcash_client_backend::scanning`:
+  - `full` module, providing full-block scanning.
+  - `Nullifiers::unspent` and `Nullifiers::update_with` are now public, for use
+    when driving block scanning via the `full` module.
+  - `ScanError::TreeSizeOverflow`
+  - `impl std::error::Error for ScanError`
+- `zcash_client_backend::sync`:
+  - `decryptor` module, behind the `sync-decryptor` feature flag, providing a
+    Tokio-based batch decryption engine for full blocks and transactions.
+
+### Changed
+- During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
+  unspendable data outputs and skipped silently, instead of being logged as
+  unsupported script kinds. Other unrecognized transparent script kinds continue to
+  be logged.
+- `zcash_client_backend::data_api`:
+  - Changes to the `InputSource` trait:
+    - The result types of `InputSource::get_unspent_transparent_output` and
+      `InputSource::get_unspent_transparent_outputs` have each changed; these
+      have reverted to returning `WalletTransparentOutput`.
+- `zcash_client_backend::data_api::SentTransaction`: the `account_id` field
+  and accessor have been renamed to `funding_account`, to disambiguate from
+  the recipient-account terminology now used by `WalletTransparentOutput`.
+- `zcash_client_backend::data_api::WalletWrite`:
+  - `rewind_to_height` has been replaced by `rewind_to_chain_state`. Callers
+    that previously passed a `BlockHeight` should now construct a
+    `ChainState` for the rewind target. The new method returns `Result<(),
+    RewindError<Self::AccountId, Self::Error>>`. If the rewind target is
+    below the birthday height of any account in the wallet, the call will
+    fail with `RewindError::RewindBeyondBirthdays`; the caller should re-try
+    with the affected account ids included in the `reset_account_birthdays`
+    argument to acknowledge that those birthdays will be lowered.
+- `zcash_client_backend::proposal`:
+  - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
+    as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
+- `zcash_client_backend::TransferType::WalletInternal` semantics have
+  narrowed: it now specifically indicates a cross-account internal transfer
+  (recipient and funder are distinct wallet accounts). Code that previously
+  used `WalletInternal` for same-account self-transfers should switch to the
+  new `AccountInternal` variant.
+- `zcash_client_backend::wallet::WalletTransparentOutput` has been refactored
+  to convey information equivalent to `WalletOutput`:
+    - It now has an `AccountId` generic parameter,
+    - `from_parts` now takes additional `recipient_account`,
+      `recipient_key_scope`, and `funding_account` parameters.
+- `zcash_client_backend::data_api::wallet::input_selection::ShieldingSelector`
+  now requires implementors to provide `propose_shielding_coinbase` in
+  addition to `propose_shielding`.
+- `zcash_client_backend::wallet::WalletTx::new` now takes a `transparent_outputs`
+  argument.
+
+### Removed
+- `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`
+  instead).
+
+## [0.23.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`,
+  `zcash_transparent 0.8.0`, `zip321 0.8.0`, `zcash_keys 0.14.0`,
+  `zcash_primitives 0.28.0`, `zcash_proofs 0.28.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
 ## [0.22.0] - 2026-04-27
 
 ### Added

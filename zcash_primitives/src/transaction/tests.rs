@@ -17,9 +17,6 @@ use {
     zcash_script::script,
 };
 
-#[cfg(all(test, zcash_unstable = "zfuture"))]
-use super::components::tze;
-
 #[cfg(all(test, zcash_unstable = "nu7", feature = "zip-233"))]
 use super::sighash_v6::v6_signature_hash;
 
@@ -50,8 +47,6 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
     prop_assert_eq!(tx.version, txo.version);
-    #[cfg(zcash_unstable = "zfuture")]
-    prop_assert_eq!(tx.tze_bundle.as_ref(), txo.tze_bundle.as_ref());
     prop_assert_eq!(tx.lock_time, txo.lock_time);
     prop_assert_eq!(
         tx.transparent_bundle.as_ref(),
@@ -130,15 +125,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_nu7(tx in arb_tx(BranchId::Nu7)) {
-        check_roundtrip(tx)?;
-    }
-}
-
-#[cfg(zcash_unstable = "zfuture")]
-proptest! {
-    #[test]
-    #[cfg(all(feature = "expensive-tests", not(feature = "no-expensive-tests")))]
-    fn tx_serialization_roundtrip_future(tx in arb_tx(BranchId::ZFuture)) {
         check_roundtrip(tx)?;
     }
 }
@@ -226,9 +212,6 @@ impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
-
-    #[cfg(zcash_unstable = "zfuture")]
-    type TzeAuth = tze::Authorized;
 }
 
 #[test]
@@ -281,7 +264,6 @@ fn zip_0244() {
                 },
             });
 
-        #[cfg(not(zcash_unstable = "zfuture"))]
         let tdata = TransactionData::from_parts(
             txdata.version(),
             txdata.consensus_branch_id(),
@@ -293,20 +275,6 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
-        );
-        #[cfg(zcash_unstable = "zfuture")]
-        let tdata = TransactionData::from_parts_zfuture(
-            txdata.version(),
-            txdata.consensus_branch_id(),
-            txdata.lock_time(),
-            txdata.expiry_height(),
-            #[cfg(feature = "zip-233")]
-            txdata.zip233_amount,
-            test_bundle,
-            txdata.sprout_bundle().cloned(),
-            txdata.sapling_bundle().cloned(),
-            txdata.orchard_bundle().cloned(),
-            txdata.tze_bundle().cloned(),
         );
         (tdata, txdata.digest(TxIdDigester))
     }
@@ -442,8 +410,8 @@ fn tachyon_v6_test_vectors() {
         let tx = read_and_roundtrip(&V6_TX_TACHYON_STRIPPED);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stripped = match bundle {
-            zcash_tachyon::TachyonBundle::Stripped(s) => s,
-            zcash_tachyon::TachyonBundle::Stamped(_) => panic!("expected Stripped variant"),
+            zcash_tachyon::TachyonBundle::Adjunct(s) => s,
+            zcash_tachyon::TachyonBundle::Stamped(_) => panic!("expected Adjunct variant"),
         };
         assert_eq!(stripped.actions.len(), 1);
         assert_eq!(stripped.value_balance, 0);
@@ -454,8 +422,8 @@ fn tachyon_v6_test_vectors() {
         assert_eq!(<[u8; 32]>::from(action.rk), EXPECTED_RK_42);
         assert_eq!(<[u8; 64]>::from(action.sig), [0x01u8; 64]);
         assert_eq!(<[u8; 64]>::from(stripped.binding_sig), [0x02u8; 64]);
-        // Adjunct.wtxid set to [0xEE; 64] in zebra fixture.
-        assert_eq!(stripped.stamp.wtxid, [0xEEu8; 64]);
+        // Adjunct's covering aggregate wtxid set to [0xEE; 64] in zebra fixture.
+        assert_eq!(<[u8; 64]>::from(stripped.stamp), [0xEEu8; 64]);
     }
 
     // V6_TX_TACHYON_STAMPED: 1 action, stamp with 1 tachygram, value_balance = 100
@@ -464,7 +432,7 @@ fn tachyon_v6_test_vectors() {
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stamped = match bundle {
             zcash_tachyon::TachyonBundle::Stamped(s) => s,
-            zcash_tachyon::TachyonBundle::Stripped(_) => panic!("expected Stamped variant"),
+            zcash_tachyon::TachyonBundle::Adjunct(_) => panic!("expected Stamped variant"),
         };
         assert_eq!(stamped.actions.len(), 1);
         assert_eq!(stamped.value_balance, 100);
@@ -477,7 +445,7 @@ fn tachyon_v6_test_vectors() {
         assert_eq!(<[u8; 64]>::from(stamped.binding_sig), [0x02u8; 64]);
 
         assert_eq!(stamped.stamp.tachygrams.len(), 1);
-        let tg_fp: Fp = (&stamped.stamp.tachygrams[0]).into();
+        let tg_fp: Fp = stamped.stamp.tachygrams[0].into();
         assert_eq!(tg_fp, Fp::from_uniform_bytes(&[0xAAu8; 64]));
         // Zebra fixture builds the anchor by reading 64 zero bytes through
         // tachyon's wire format (height 0, commitment from [0; 32]).
@@ -491,7 +459,7 @@ fn tachyon_v6_test_vectors() {
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stamped = match bundle {
             zcash_tachyon::TachyonBundle::Stamped(s) => s,
-            zcash_tachyon::TachyonBundle::Stripped(_) => panic!("expected Stamped variant"),
+            zcash_tachyon::TachyonBundle::Adjunct(_) => panic!("expected Stamped variant"),
         };
         assert_eq!(stamped.actions.len(), 2);
         assert_eq!(stamped.value_balance, 300);
@@ -511,9 +479,9 @@ fn tachyon_v6_test_vectors() {
         assert_eq!(<[u8; 64]>::from(stamped.binding_sig), [0x02u8; 64]);
 
         assert_eq!(stamped.stamp.tachygrams.len(), 3);
-        let tg1: Fp = (&stamped.stamp.tachygrams[0]).into();
-        let tg2: Fp = (&stamped.stamp.tachygrams[1]).into();
-        let tg3: Fp = (&stamped.stamp.tachygrams[2]).into();
+        let tg1: Fp = stamped.stamp.tachygrams[0].into();
+        let tg2: Fp = stamped.stamp.tachygrams[1].into();
+        let tg3: Fp = stamped.stamp.tachygrams[2].into();
         assert_eq!(tg1, Fp::from_uniform_bytes(&[0xAAu8; 64]));
         assert_eq!(tg2, Fp::from_uniform_bytes(&[0xCCu8; 64]));
         assert_eq!(tg3, Fp::from_uniform_bytes(&[0xDDu8; 64]));
@@ -528,7 +496,7 @@ fn zip_0233() {
     fn to_test_txdata(
         tv: &self::data::zip_0233::TestVector,
     ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
-        let tx = Transaction::read(&tv.tx[..], BranchId::Nu7).unwrap();
+        let tx = Transaction::read(tv.tx, BranchId::Nu7).unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);
         assert_eq!(tx.auth_commitment().as_ref(), &tv.auth_digest);
@@ -543,7 +511,7 @@ fn zip_0233() {
         let input_scriptpubkeys = tv
             .script_pubkeys
             .iter()
-            .map(|s| Script(script::Code(s.clone())))
+            .map(|s| Script(script::Code(s.to_vec())))
             .collect();
 
         let test_bundle = txdata
@@ -586,8 +554,8 @@ fn zip_0233() {
         (tdata, txdata.digest(TxIdDigester))
     }
 
-    for tv in self::data::zip_0233::make_test_vectors() {
-        let (txdata, txid_parts) = to_test_txdata(&tv);
+    for tv in self::data::zip_0233::TEST_VECTORS {
+        let (txdata, txid_parts) = to_test_txdata(tv);
 
         assert_eq!(
             v6_signature_hash(&txdata, &SignableInput::Shielded, &txid_parts).as_ref(),

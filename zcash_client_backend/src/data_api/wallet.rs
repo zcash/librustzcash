@@ -859,6 +859,89 @@ where
         .map_err(Error::from)
 }
 
+/// Errors that may be generated in construction of proposals for shielding coinbase
+/// transparent outputs to an arbitrary shielded recipient via
+/// [`propose_shielding_coinbase`].
+#[cfg(feature = "transparent-inputs")]
+pub type ProposeShieldingCoinbaseErrT<DbT, CommitmentTreeErrT, InputsT, FeeRuleT> = Error<
+    <DbT as WalletRead>::Error,
+    CommitmentTreeErrT,
+    <InputsT as ShieldingSelector>::Error,
+    <FeeRuleT as FeeRule>::Error,
+    <FeeRuleT as FeeRule>::Error,
+    Infallible,
+>;
+
+/// Constructs a proposal to shield one or more coinbase transparent outputs to an
+/// arbitrary shielded recipient.
+///
+/// Unlike [`propose_shielding`], this method:
+///
+/// - Restricts input selection to coinbase outputs only. The restriction is enforced
+///   at the API boundary; it cannot be overridden by callers. Coinbase outputs have
+///   no prior transparent transaction graph, which is what makes it acceptable to
+///   send them to an arbitrary shielded recipient.
+/// - Requires `to_address` to be a shielded address (Sapling, or a Unified Address
+///   with a shielded receiver). Transparent and TEX destinations are rejected with
+///   [`ProposalError::ShieldingRequiresShieldedRecipient`]. The address may belong
+///   to an account outside the caller's wallet.
+/// - Accepts an optional `memo` to be attached to the shielded payment.
+/// - Accepts an optional `limit` capping the number of transparent inputs to at
+///   most `n`, keeping the highest-value UTXOs (with a stable tiebreaker by
+///   outpoint). `Some(0)` selects no inputs and therefore returns
+///   [`InputSelectorError::InsufficientFunds`].
+///
+/// The resulting proposal carries an explicit ZIP-321 payment to `to_address` for
+/// `input_total - fee`. **No change is produced**, in either the transparent or any
+/// shielded pool: a shielded change output would let the recipient (or any chain
+/// observer) learn the sender's total selected-coinbase value by summing the public
+/// transparent input values and subtracting the visible payment amount.
+///
+/// [`InputSelectorError::InsufficientFunds`]: crate::data_api::wallet::input_selection::InputSelectorError::InsufficientFunds
+/// [`ProposalError::ShieldingRequiresShieldedRecipient`]: crate::proposal::ProposalError::ShieldingRequiresShieldedRecipient
+#[cfg(feature = "transparent-inputs")]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_shielding_coinbase<DbT, ParamsT, InputsT, FeeRuleT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    input_selector: &InputsT,
+    fee_rule: &FeeRuleT,
+    shielding_threshold: Zatoshis,
+    from_addrs: &[TransparentAddress],
+    to_address: ZcashAddress,
+    memo: Option<MemoBytes>,
+    limit: Option<usize>,
+) -> Result<
+    Proposal<FeeRuleT, Infallible>,
+    ProposeShieldingCoinbaseErrT<DbT, CommitmentTreeErrT, InputsT, FeeRuleT>,
+>
+where
+    ParamsT: consensus::Parameters,
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    InputsT: ShieldingSelector<InputSource = DbT>,
+    FeeRuleT: FeeRule + Clone,
+{
+    let chain_tip_height = wallet_db
+        .chain_height()
+        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+
+    input_selector
+        .propose_shielding_coinbase(
+            params,
+            wallet_db,
+            fee_rule,
+            shielding_threshold,
+            from_addrs,
+            to_address,
+            memo,
+            limit,
+            (chain_tip_height + 1).into(),
+        )
+        .map_err(Error::from)
+}
+
 struct StepResult<AccountId> {
     build_result: BuildResult,
     outputs: Vec<SentTransactionOutput<AccountId>>,
@@ -1076,10 +1159,10 @@ impl<AccountId> BuildRecipient<AccountId> {
 }
 
 #[allow(clippy::type_complexity)]
-struct BuildState<'a, P, AccountId> {
+struct BuildState<P, AccountId> {
     #[cfg(feature = "transparent-inputs")]
     step_index: usize,
-    builder: Builder<'a, P, ()>,
+    builder: Builder<P, ()>,
     #[cfg(feature = "transparent-inputs")]
     transparent_input_addresses: HashMap<TransparentAddress, TransparentAddressMetadata>,
     #[cfg(feature = "orchard")]
@@ -1114,10 +1197,7 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
         (TransparentAddress, OutPoint),
     >,
     #[cfg(feature = "unstable")] proposed_version: Option<TxVersion>,
-) -> Result<
-    BuildState<'static, ParamsT, DbT::AccountId>,
-    CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
->
+) -> Result<BuildState<ParamsT, DbT::AccountId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,

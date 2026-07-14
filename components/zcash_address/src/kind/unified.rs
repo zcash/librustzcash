@@ -90,7 +90,7 @@ impl TryFrom<u32> for Typecode {
             0x02 => Ok(Typecode::Sapling),
             0x03 => Ok(Typecode::Orchard),
             0x04..=0x02000000 => Ok(Typecode::Unknown(typecode)),
-            0x02000001..=u32::MAX => Err(ParseError::InvalidTypecodeValue(typecode as u64)),
+            0x02000001..=u32::MAX => Err(ParseError::InvalidTypecodeValue(u64::from(typecode))),
         }
     }
 }

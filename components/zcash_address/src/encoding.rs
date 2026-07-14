@@ -117,34 +117,34 @@ impl FromStr for ZcashAddress {
         }
 
         // The rest use Base58Check.
-        if let Ok(decoded) = bs58::decode(s).with_check(None).into_vec() {
-            if decoded.len() >= 2 {
-                let (prefix, net) = match decoded[..2].try_into().unwrap() {
-                    prefix @ (mainnet::B58_PUBKEY_ADDRESS_PREFIX
-                    | mainnet::B58_SCRIPT_ADDRESS_PREFIX
-                    | mainnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Main),
-                    prefix @ (testnet::B58_PUBKEY_ADDRESS_PREFIX
-                    | testnet::B58_SCRIPT_ADDRESS_PREFIX
-                    | testnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Test),
-                    // We will not define new Base58Check address encodings.
-                    _ => return Err(ParseError::NotZcash),
-                };
+        if let Ok(decoded) = bs58::decode(s).with_check(None).into_vec()
+            && decoded.len() >= 2
+        {
+            let (prefix, net) = match decoded[..2].try_into().unwrap() {
+                prefix @ (mainnet::B58_PUBKEY_ADDRESS_PREFIX
+                | mainnet::B58_SCRIPT_ADDRESS_PREFIX
+                | mainnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Main),
+                prefix @ (testnet::B58_PUBKEY_ADDRESS_PREFIX
+                | testnet::B58_SCRIPT_ADDRESS_PREFIX
+                | testnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Test),
+                // We will not define new Base58Check address encodings.
+                _ => return Err(ParseError::NotZcash),
+            };
 
-                return match prefix {
-                    mainnet::B58_SPROUT_ADDRESS_PREFIX | testnet::B58_SPROUT_ADDRESS_PREFIX => {
-                        decoded[2..].try_into().map(AddressKind::Sprout)
-                    }
-                    mainnet::B58_PUBKEY_ADDRESS_PREFIX | testnet::B58_PUBKEY_ADDRESS_PREFIX => {
-                        decoded[2..].try_into().map(AddressKind::P2pkh)
-                    }
-                    mainnet::B58_SCRIPT_ADDRESS_PREFIX | testnet::B58_SCRIPT_ADDRESS_PREFIX => {
-                        decoded[2..].try_into().map(AddressKind::P2sh)
-                    }
-                    _ => unreachable!(),
+            return match prefix {
+                mainnet::B58_SPROUT_ADDRESS_PREFIX | testnet::B58_SPROUT_ADDRESS_PREFIX => {
+                    decoded[2..].try_into().map(AddressKind::Sprout)
                 }
-                .map_err(|_| ParseError::InvalidEncoding)
-                .map(|kind| ZcashAddress { kind, net });
+                mainnet::B58_PUBKEY_ADDRESS_PREFIX | testnet::B58_PUBKEY_ADDRESS_PREFIX => {
+                    decoded[2..].try_into().map(AddressKind::P2pkh)
+                }
+                mainnet::B58_SCRIPT_ADDRESS_PREFIX | testnet::B58_SCRIPT_ADDRESS_PREFIX => {
+                    decoded[2..].try_into().map(AddressKind::P2sh)
+                }
+                _ => unreachable!(),
             }
+            .map_err(|_| ParseError::InvalidEncoding)
+            .map(|kind| ZcashAddress { kind, net });
         };
 
         // If it's not valid Bech32, Bech32m, or Base58Check, it's not a Zcash address.

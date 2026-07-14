@@ -112,8 +112,6 @@ impl<'a> TransactionExtractor<'a> {
                 })
                 .transpose()
             },
-            #[cfg(zcash_unstable = "zfuture")]
-            |_| unimplemented!("PCZT support for TZEs is not implemented."),
         )?;
 
         let tx = tx_data.freeze().expect("v5 tx can't fail here");
@@ -140,8 +138,6 @@ impl Authorization for Unbound {
     type TransparentAuth = ::transparent::pczt::Unbound;
     type SaplingAuth = ::sapling::pczt::Unbound;
     type OrchardAuth = ::orchard::pczt::Unbound;
-    #[cfg(zcash_unstable = "zfuture")]
-    type TzeAuth = core::convert::Infallible;
 }
 
 /// Errors that can occur while extracting a transaction from a PCZT.

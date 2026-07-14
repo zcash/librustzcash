@@ -199,6 +199,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::TableNotEmpty => unreachable!("wallet already initialized"),
         SqliteClientError::BlockConflict(_)
         | SqliteClientError::NonSequentialBlocks
+        | SqliteClientError::PutBlocksCommitmentTree { .. }
+        | SqliteClientError::TruncateCommitmentTree { .. }
         | SqliteClientError::RequestedRewindInvalid { .. }
         | SqliteClientError::KeyDerivationError(_)
         | SqliteClientError::Zip32AccountIndexOutOfRange
@@ -635,20 +637,18 @@ fn init_wallet_db_internal<
     // but unfortunately `schemer` does not currently expose its DAG of migrations. As a
     // consequence, the caller has to choose whether or not this check should be performed
     // based upon which migrations they're asking to apply.
-    if verify_seed_relevance {
-        if let Some(seed) = seed {
-            match wdb
-                .seed_relevance_to_derived_accounts(&seed)
-                .map_err(sqlite_client_error_to_wallet_migration_error)?
-            {
-                SeedRelevance::Relevant { .. } => (),
-                // Every seed is relevant to a wallet with no accounts; this is most likely a
-                // new wallet database being initialized for the first time.
-                SeedRelevance::NoAccounts => (),
-                // No seed is relevant to a wallet that only has imported accounts.
-                SeedRelevance::NotRelevant | SeedRelevance::NoDerivedAccounts => {
-                    return Err(WalletMigrationError::SeedNotRelevant.into());
-                }
+    if verify_seed_relevance && let Some(seed) = seed {
+        match wdb
+            .seed_relevance_to_derived_accounts(&seed)
+            .map_err(sqlite_client_error_to_wallet_migration_error)?
+        {
+            SeedRelevance::Relevant { .. } => (),
+            // Every seed is relevant to a wallet with no accounts; this is most likely a
+            // new wallet database being initialized for the first time.
+            SeedRelevance::NoAccounts => (),
+            // No seed is relevant to a wallet that only has imported accounts.
+            SeedRelevance::NotRelevant | SeedRelevance::NoDerivedAccounts => {
+                return Err(WalletMigrationError::SeedNotRelevant.into());
             }
         }
     }
@@ -753,10 +753,7 @@ mod tests {
         zip32::DiversifierIndex,
     };
 
-    #[cfg(all(
-        any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-        feature = "zip-233"
-    ))]
+    #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     use zcash_protocol::value::Zatoshis;
 
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
@@ -1186,10 +1183,7 @@ mod tests {
                 BranchId::Canopy,
                 0,
                 BlockHeight::from(0),
-                #[cfg(all(
-                    any(zcash_unstable = "nu7", zcash_unstable = "zfuture"),
-                    feature = "zip-233"
-                ))]
+                #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
                 Zatoshis::ZERO,
                 None,
                 None,

@@ -328,7 +328,7 @@ impl Bundle {
 
         // Leverage the early-exit behaviour of zip to confirm that the remaining data in
         // the other bundle matches this one.
-        for (lhs, rhs) in self.actions.iter_mut().zip(actions.into_iter()) {
+        for (lhs, rhs) in self.actions.iter_mut().zip(actions) {
             // Destructure `rhs` to ensure we handle everything.
             let Action {
                 cv_net,
