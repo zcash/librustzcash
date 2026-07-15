@@ -4,6 +4,8 @@ use std::{
     num::{NonZeroU64, NonZeroUsize},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::address::TransparentAddress;
 use ::transparent::bundle::OutPoint;
 use zcash_primitives::transaction::fees::{
     FeeRule,
@@ -100,8 +102,11 @@ pub enum TransparentChangePolicy {
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is
 /// enabled, an output to the transparent pool: either an ephemeral output as
-/// part of a [ZIP 320] transaction pair, or a change output to an
-/// internal-scope (change) transparent address of the wallet.
+/// part of a [ZIP 320] transaction pair, or a change output to the transparent
+/// pool. A transparent change output is ordinarily sent to an internal-scope
+/// (change) transparent address of the wallet, but it may instead carry an
+/// explicit recipient address, e.g. to return change to the P2SH address that
+/// funded the transaction's transparent inputs.
 ///
 /// [ZIP 320]: https://zips.z.cash/zip-0320
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,7 +122,10 @@ enum ChangeValueInner {
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent { value: Zatoshis },
     #[cfg(feature = "transparent-inputs")]
-    Transparent { value: Zatoshis },
+    Transparent {
+        value: Zatoshis,
+        recipient: Option<TransparentAddress>,
+    },
 }
 
 impl ChangeValue {
@@ -131,7 +139,26 @@ impl ChangeValue {
     /// sent to an internal-scope (change) transparent address of the wallet.
     #[cfg(feature = "transparent-inputs")]
     pub fn transparent(value: Zatoshis) -> Self {
-        Self(ChangeValueInner::Transparent { value })
+        Self(ChangeValueInner::Transparent {
+            value,
+            recipient: None,
+        })
+    }
+
+    /// Constructs a new change value that will be created as a non-ephemeral transparent output
+    /// sent to the given transparent address.
+    ///
+    /// This is used to return change to the address that funded the transparent inputs of a
+    /// transaction (e.g. the originating P2SH address when spending P2SH inputs), instead of
+    /// sending it to an internal-scope (change) address of the wallet. Proposal validation
+    /// requires that the recipient address match the address of at least one of the transparent
+    /// inputs of the same proposal step.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_to_address(value: Zatoshis, recipient: TransparentAddress) -> Self {
+        Self(ChangeValueInner::Transparent {
+            value,
+            recipient: Some(recipient),
+        })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
@@ -178,7 +205,19 @@ impl ChangeValue {
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { value } => *value,
             #[cfg(feature = "transparent-inputs")]
-            ChangeValueInner::Transparent { value } => *value,
+            ChangeValueInner::Transparent { value, .. } => *value,
+        }
+    }
+
+    /// Returns the explicit transparent address to which this change output is to be sent, or
+    /// `None` if this is not a transparent change output with an explicit recipient (in which
+    /// case a non-ephemeral transparent change output is sent to an internal-scope (change)
+    /// address of the wallet).
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_recipient(&self) -> Option<&TransparentAddress> {
+        match &self.0 {
+            ChangeValueInner::Transparent { recipient, .. } => recipient.as_ref(),
+            _ => None,
         }
     }
 
