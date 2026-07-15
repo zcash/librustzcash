@@ -131,8 +131,8 @@ pub(super) fn all_migrations<
     //                        \      ensure_default_transparent_address    /                                 \
     //                         \                     |                    /                                   \
     //                          `---- fix_transparent_received_outputs --'                                     \
-    //                                    /         /           \    \                                         |
-    //                                   /         /             \   add_transparent_value_index               |
+    //                                    /         /           \                                              |
+    //                                   /         /             \                                             |
     //                                  /         /               \                                            |
     //           support_zcashd_wallet_import    /             fix_v_transactions_expired_unmined              |
     //                \                         /                    /        |         \                      |
@@ -143,8 +143,8 @@ pub(super) fn all_migrations<
     //                     \                       \         v_received_output_spends_account      /        /
     //                      \                       \               /                             /        /
     //                       `------------------- account_delete_cascade ---------------------------------'
-    //                                        /               |              \
-    //                       v_tx_outputs_key_scopes    standalone_p2sh    witness_stabilized_notes
+    //                              /               /                  |              \
+    //     add_transparent_value_index  v_tx_outputs_key_scopes  standalone_p2sh    witness_stabilized_notes
     //                                                    /          \         \
     //                                                   /            \      orchard_note_version
     //                                                  /              \         \
