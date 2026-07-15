@@ -60,9 +60,38 @@ pub mod orchard;
 pub mod sapling;
 pub mod transparent;
 
-pub(crate) const MAGIC_BYTES: &[u8] = b"PCZT";
+pub(crate) const MAGIC_BYTES: &[u8; 4] = b"PCZT";
 pub(crate) const PCZT_VERSION_1: u32 = 1;
 pub(crate) const PCZT_VERSION_2: u32 = 2;
+
+const VERSIONED_HEADER_LEN: usize = 8;
+
+pub(crate) enum HeaderParseError {
+    InvalidMagic,
+    TooShort,
+}
+
+pub(crate) fn parse_header<'a>(
+    bytes: &'a [u8],
+    magic: &[u8; 4],
+) -> Result<(u32, &'a [u8]), HeaderParseError> {
+    if bytes.len() < VERSIONED_HEADER_LEN {
+        return Err(HeaderParseError::TooShort);
+    }
+    if &bytes[..4] != magic {
+        return Err(HeaderParseError::InvalidMagic);
+    }
+
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    Ok((version, &bytes[VERSIONED_HEADER_LEN..]))
+}
+
+pub(crate) fn serialize_header(magic: &[u8; 4], version: u32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(VERSIONED_HEADER_LEN);
+    bytes.extend_from_slice(magic);
+    bytes.extend_from_slice(&version.to_le_bytes());
+    bytes
+}
 
 /// Parses a PCZT from its encoding.
 pub fn parse(bytes: &[u8]) -> Result<Pczt, ParseError> {
@@ -112,9 +141,7 @@ pub mod v1 {
 
     impl Pczt {
         pub fn serialize(&self) -> Vec<u8> {
-            let mut bytes = vec![];
-            bytes.extend_from_slice(crate::MAGIC_BYTES);
-            bytes.extend_from_slice(&crate::PCZT_VERSION_1.to_le_bytes());
+            let bytes = crate::serialize_header(crate::MAGIC_BYTES, crate::PCZT_VERSION_1);
             postcard::to_extend(&self, bytes).expect("can serialize into memory")
         }
     }
@@ -168,9 +195,16 @@ pub mod v1 {
         fn v1_refuses_v6_pczts_and_non_canonical_ironwood_bundles() {
             // A v6 tx cannot be encoded as a v1 PCZT, even when its Ironwood bundle is
             // canonically empty.
-            let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let pczt = Creator::new(
+                BranchId::Nu6_3.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             assert!(matches!(
                 super::Pczt::try_from(pczt),
                 Err(crate::EncodingError::UnsupportedTxVersion)
@@ -178,9 +212,16 @@ pub mod v1 {
 
             // A v5 tx carrying non-canonical Ironwood bundle data cannot be encoded
             // as a v1 PCZT, because the data would be dropped.
-            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let mut pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             pczt.ironwood.bsk = Some([1; 32]);
             assert!(matches!(
                 super::Pczt::try_from(pczt),
@@ -217,9 +258,7 @@ pub mod v2 {
 
     impl Pczt {
         pub fn serialize(&self) -> Vec<u8> {
-            let mut bytes = vec![];
-            bytes.extend_from_slice(crate::MAGIC_BYTES);
-            bytes.extend_from_slice(&crate::PCZT_VERSION_2.to_le_bytes());
+            let bytes = crate::serialize_header(crate::MAGIC_BYTES, crate::PCZT_VERSION_2);
             postcard::to_extend(&self, bytes).expect("can serialize into memory")
         }
     }
@@ -270,11 +309,12 @@ pub mod v2 {
 
         #[test]
         fn empty_bundles_encode_as_none_and_decode_as_empty() {
-            // Zero anchors: the shielded bundles carry no anchor and no
+            // Absent anchors: the shielded bundles carry no anchor and no
             // spends/actions, so they are fully empty and omitted.
-            let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
+            let pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, None, None)
                 .unwrap()
-                .build();
+                .build()
+                .unwrap();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -303,9 +343,16 @@ pub mod v2 {
             // A Sapling/Orchard bundle with a non-empty anchor differs from its
             // empty form, so it must not be omitted even with no spends/actions,
             // and the anchor must survive the v2 round-trip.
-            let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [1; 32], [2; 32])
-                .unwrap()
-                .build();
+            let pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([1; 32]),
+                Some([2; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
 
             let encoded = Pczt::try_from(pczt).unwrap();
 
@@ -321,9 +368,16 @@ pub mod v2 {
 
         #[test]
         fn non_canonical_orchard_flags_and_note_version_prevent_omission() {
-            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let mut pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             pczt.orchard.flags = 0;
             pczt.orchard.note_version = NoteVersion::V3;
 
@@ -356,19 +410,15 @@ pub enum EncodingError {
 impl Pczt {
     /// Parses a PCZT from its encoding.
     pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
-        if bytes.len() < 8 {
-            return Err(ParseError::TooShort);
-        }
-        if &bytes[..4] != MAGIC_BYTES {
-            return Err(ParseError::NotPczt);
-        }
-
-        let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        let (version, body) = parse_header(bytes, MAGIC_BYTES).map_err(|e| match e {
+            HeaderParseError::InvalidMagic => ParseError::NotPczt,
+            HeaderParseError::TooShort => ParseError::TooShort,
+        })?;
         match version {
-            PCZT_VERSION_1 => postcard::from_bytes::<v1::Pczt>(&bytes[8..])
+            PCZT_VERSION_1 => postcard::from_bytes::<v1::Pczt>(body)
                 .map(Pczt::from)
                 .map_err(ParseError::Invalid),
-            PCZT_VERSION_2 => postcard::from_bytes::<v2::Pczt>(&bytes[8..])
+            PCZT_VERSION_2 => postcard::from_bytes::<v2::Pczt>(body)
                 .map_err(ParseError::Invalid)
                 .and_then(v2::Pczt::into_logical),
             _ => Err(ParseError::UnknownVersion(version)),
@@ -402,6 +452,7 @@ impl Pczt {
     #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
     pub(crate) fn extract_tx_data<A, E>(
         self,
+        anchor_requirement: common::AnchorRequirement,
         extract_transparent: impl FnOnce(
             &::transparent::pczt::Bundle,
         ) -> Result<
@@ -475,26 +526,28 @@ impl Pczt {
         let transparent = transparent
             .into_parsed()
             .map_err(ExtractError::TransparentParse)?;
-        let sapling = sapling.into_parsed().map_err(ExtractError::SaplingParse)?;
+        let sapling = sapling
+            .into_parsed(anchor_requirement)
+            .map_err(ExtractError::SaplingParse)?;
         let orchard_bundle_version = crate::orchard::bundle_version_for_revision(
             orchard_protocol_revision,
             ::orchard::ValuePool::Orchard,
         )
         .expect("the Orchard pool is supported under every protocol revision");
         let orchard = orchard
-            .into_parsed_with_version(orchard_bundle_version, global.tx_version)
+            .into_parsed_with_version(orchard_bundle_version, anchor_requirement)
             .map_err(ExtractError::OrchardParse)?;
         let ironwood = ironwood
-            .into_ironwood_parsed()
+            .into_ironwood_parsed(anchor_requirement)
             .map_err(ExtractError::IronwoodParse)?;
 
         let lock_time = determine_lock_time(&global, transparent.inputs())
             .ok_or(ExtractError::IncompatibleLockTimes)?;
 
         let transparent_bundle = extract_transparent(&transparent)?;
-        let sapling_bundle = extract_sapling(&sapling)?;
-        let orchard_bundle = extract_orchard(&orchard)?;
-        let ironwood_bundle = extract_ironwood(&ironwood)?;
+        let sapling_bundle = extract_sapling(&sapling.bundle)?;
+        let orchard_bundle = extract_orchard(&orchard.bundle)?;
+        let ironwood_bundle = extract_ironwood(&ironwood.bundle)?;
 
         let tx_data = match version {
             TxVersion::V6 => TransactionData::from_parts_v6(
@@ -535,7 +588,11 @@ impl Pczt {
     /// Gets the effects of this transaction.
     #[cfg(any(feature = "io-finalizer", feature = "signer"))]
     pub fn into_effects(self) -> Result<TransactionData<EffectsOnly>, ExtractError> {
+        let anchor_requirement =
+            common::AnchorRequirement::for_pre_authorization(self.global.tx_version);
+
         self.extract_tx_data(
+            anchor_requirement,
             |t| {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
@@ -557,9 +614,9 @@ impl Pczt {
 pub(crate) struct ParsedPczt<A: Authorization> {
     pub(crate) global: Global,
     pub(crate) transparent: ::transparent::pczt::Bundle,
-    pub(crate) sapling: ::sapling::pczt::Bundle,
-    pub(crate) orchard: ::orchard::pczt::Bundle,
-    pub(crate) ironwood: ::orchard::pczt::Bundle,
+    pub(crate) sapling: crate::sapling::Parsed,
+    pub(crate) orchard: crate::orchard::Parsed,
+    pub(crate) ironwood: crate::orchard::Parsed,
     pub(crate) tx_data: TransactionData<A>,
 }
 
@@ -603,15 +660,15 @@ pub enum ExtractError {
     /// support an Ironwood bundle.
     IronwoodNotSupported,
     /// An error occurred parsing the Ironwood PCZT bundle from the PCZT data.
-    IronwoodParse(::orchard::pczt::ParseError),
+    IronwoodParse(crate::orchard::ParseError),
     /// An error occurred extracting the Orchard protocol bundle from the Orchard PCZT bundle.
     OrchardExtract(::orchard::pczt::TxExtractorError),
     /// An error occurred parsing the Orchard PCZT bundle from the PCZT data.
-    OrchardParse(::orchard::pczt::ParseError),
+    OrchardParse(crate::orchard::ParseError),
     /// An error occurred extracting the Sapling protocol bundle from the Sapling PCZT bundle.
     SaplingExtract(::sapling::pczt::TxExtractorError),
     /// An error occurred parsing the Sapling PCZT bundle from the PCZT data.
-    SaplingParse(::sapling::pczt::ParseError),
+    SaplingParse(crate::sapling::ParseError),
     /// An error occurred extracting the transparent protocol bundle from the
     /// transparent PCZT bundle.
     TransparentExtract(::transparent::pczt::TxExtractorError),
@@ -651,9 +708,16 @@ mod extraction_tests {
 
     #[test]
     fn v5_pczt_with_ironwood_data_does_not_extract() {
-        let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-            .unwrap()
-            .build();
+        let mut pczt = Creator::new(
+            BranchId::Nu6.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         pczt.ironwood.bsk = Some([1; 32]);
         assert!(matches!(
             pczt.into_effects(),
@@ -663,9 +727,16 @@ mod extraction_tests {
 
     #[test]
     fn v6_pczt_with_pre_nu6_3_branch_does_not_extract() {
-        let mut pczt = Creator::new(BranchId::Nu6_3.into(), 10_000_000, 133, [0; 32], [0; 32])
-            .unwrap()
-            .build();
+        let mut pczt = Creator::new(
+            BranchId::Nu6_3.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
         pczt.global.consensus_branch_id = BranchId::Nu6_2.into();
         assert!(matches!(
             pczt.into_effects(),

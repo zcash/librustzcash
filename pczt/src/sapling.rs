@@ -531,8 +531,26 @@ pub(crate) mod v2 {
 
 #[cfg(feature = "sapling")]
 impl Bundle {
-    pub(crate) fn into_parsed(self) -> Result<sapling::pczt::Bundle, sapling::pczt::ParseError> {
-        let has_spends = !self.spends.is_empty();
+    /// Parses this bundle into the form used by the `sapling` crate.
+    ///
+    /// If the bundle's `anchor` is absent and `anchor_requirement` is
+    /// [`AnchorRequirement::Required`], returns [`ParseError::MissingAnchor`] unless the
+    /// bundle has no spends or outputs (in which case there is nothing to prove or
+    /// extract).
+    ///
+    /// [`AnchorRequirement::Required`]: crate::common::AnchorRequirement::Required
+    pub(crate) fn into_parsed(
+        self,
+        anchor_requirement: crate::common::AnchorRequirement,
+    ) -> Result<Parsed, ParseError> {
+        let wire_anchor = self.anchor;
+        let anchor = anchor_requirement
+            .resolve(
+                wire_anchor,
+                self.spends.is_empty() && self.outputs.is_empty(),
+            )
+            .ok_or(ParseError::MissingAnchor)?;
+
         let spends = self
             .spends
             .into_iter()
@@ -597,13 +615,13 @@ impl Bundle {
             })
             .collect::<Result<_, _>>()?;
 
-        let anchor = match self.anchor {
-            Some(anchor) => anchor,
-            None if !has_spends => DEFAULT_ANCHOR,
-            None => return Err(sapling::pczt::ParseError::InvalidAnchor),
-        };
+        let bundle =
+            sapling::pczt::Bundle::parse(spends, outputs, self.value_sum, anchor, self.bsk)?;
 
-        sapling::pczt::Bundle::parse(spends, outputs, self.value_sum, anchor, self.bsk)
+        Ok(Parsed {
+            bundle,
+            wire_anchor,
+        })
     }
 
     pub(crate) fn serialize_from(bundle: sapling::pczt::Bundle) -> Self {
@@ -687,9 +705,167 @@ impl Bundle {
             spends,
             outputs,
             value_sum: bundle.value_sum().to_raw(),
-            anchor: (bundle.anchor().to_bytes() != DEFAULT_ANCHOR)
-                .then_some(bundle.anchor().to_bytes()),
+            anchor: Some(bundle.anchor().to_bytes()),
             bsk: bundle.bsk().map(|bsk| bsk.into()),
         }
+    }
+}
+
+/// Errors that can occur while parsing a Sapling bundle into the form used by
+/// the `sapling` crate.
+#[cfg(feature = "sapling")]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ParseError {
+    /// The operation requires the bundle's `anchor` to be set, but it was absent.
+    ///
+    /// For a v6 transaction, an Updater can resolve this by setting the anchor; see
+    /// [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchors-and-pre-authorization).
+    MissingAnchor,
+    /// The bundle's remaining fields were structurally invalid.
+    Bundle(sapling::pczt::ParseError),
+}
+
+#[cfg(feature = "sapling")]
+impl From<sapling::pczt::ParseError> for ParseError {
+    fn from(e: sapling::pczt::ParseError) -> Self {
+        ParseError::Bundle(e)
+    }
+}
+
+/// Errors that can occur while checking that a Sapling bundle's spend witnesses are
+/// consistent with its anchor.
+#[cfg(feature = "sapling")]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum AnchorConsistencyError {
+    /// A non-zero-valued spend has a `witness` but is missing other note data required
+    /// to compute its Merkle path root.
+    IncompleteSpendData,
+    /// A non-zero-valued spend's `witness` does not root to the given anchor.
+    WitnessDoesNotRootToAnchor,
+}
+
+/// Checks that every non-zero-valued spend in `bundle` whose `witness` is present has a
+/// Merkle path that roots to `anchor` (\[ZIP 374\] "Anchors and pre-authorization").
+///
+/// Zero-valued spends are skipped, as their Merkle paths are not checked by the Sapling
+/// circuit.
+///
+/// [ZIP 374]: https://zips.z.cash/zip-0374#anchors-and-pre-authorization
+#[cfg(feature = "sapling")]
+pub(crate) fn verify_witnesses_root_to_anchor(
+    bundle: &sapling::pczt::Bundle,
+    anchor: sapling::Anchor,
+) -> Result<(), AnchorConsistencyError> {
+    for spend in bundle.spends() {
+        let Some(witness) = spend.witness() else {
+            continue;
+        };
+        let Some(value) = spend.value() else {
+            continue;
+        };
+        if value.inner() == 0 {
+            continue;
+        }
+
+        let recipient = spend
+            .recipient()
+            .ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+        let rseed = (*spend.rseed()).ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+
+        let note = sapling::Note::from_parts(recipient, *value, rseed);
+        let leaf = sapling::Node::from_cmu(&note.cmu());
+        let computed_anchor: sapling::Anchor = witness.root(leaf).into();
+
+        if computed_anchor != anchor {
+            return Err(AnchorConsistencyError::WitnessDoesNotRootToAnchor);
+        }
+    }
+
+    Ok(())
+}
+
+/// The result of parsing a Sapling bundle via [`Bundle::into_parsed`].
+///
+/// Carries the bundle's original wire `anchor` alongside the parsed form, so that
+/// [`Parsed::reserialize`] can restore it after an operation that does not itself
+/// change the anchor, even though parsing may have substituted a placeholder for it
+/// (see [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchors-and-pre-authorization)).
+#[cfg(feature = "sapling")]
+pub(crate) struct Parsed {
+    pub(crate) bundle: sapling::pczt::Bundle,
+    pub(crate) wire_anchor: Option<[u8; 32]>,
+}
+
+#[cfg(feature = "sapling")]
+impl Parsed {
+    /// Serializes the parsed bundle back into its wire representation, using
+    /// [`Self::wire_anchor`] as the result's `anchor` in place of any placeholder
+    /// substituted while parsing.
+    ///
+    /// Must not be used after an operation that legitimately changes the anchor;
+    /// such operations should set `wire_anchor` to the new value first.
+    pub(crate) fn reserialize(self) -> Bundle {
+        Bundle {
+            anchor: self.wire_anchor,
+            ..Bundle::serialize_from(self.bundle)
+        }
+    }
+}
+
+#[cfg(all(test, feature = "sapling"))]
+mod tests {
+    use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+
+    use super::{Bundle, ParseError};
+    use crate::common::AnchorRequirement;
+
+    fn output_only_bundle() -> Bundle {
+        let recipient = sapling::zip32::ExtendedSpendingKey::master(&[0; 32])
+            .to_diversifiable_full_viewing_key()
+            .default_address()
+            .1;
+        let mut builder = sapling::builder::Builder::new(
+            sapling::note_encryption::Zip212Enforcement::On,
+            sapling::builder::BundleType::DEFAULT,
+            sapling::Anchor::empty_tree(),
+        );
+        builder
+            .add_output(
+                None,
+                recipient,
+                sapling::value::NoteValue::from_raw(1),
+                [0; 512],
+            )
+            .unwrap();
+        let (bundle, _) = builder
+            .build_for_pczt(ChaCha20Rng::from_seed([0; 32]))
+            .unwrap();
+        let mut bundle = Bundle::serialize_from(bundle);
+        bundle.anchor = None;
+        bundle
+    }
+
+    #[test]
+    fn output_only_bundle_requires_anchor_when_required() {
+        assert!(matches!(
+            output_only_bundle().into_parsed(AnchorRequirement::Required),
+            Err(ParseError::MissingAnchor)
+        ));
+    }
+
+    #[test]
+    fn output_only_bundle_preserves_absent_anchor_when_not_required() {
+        let bundle = output_only_bundle();
+        let output_count = bundle.outputs.len();
+
+        let parsed = bundle.into_parsed(AnchorRequirement::NotRequired).unwrap();
+        assert!(parsed.bundle.spends().is_empty());
+        assert_eq!(parsed.bundle.outputs().len(), output_count);
+
+        let reserialized = parsed.reserialize();
+        assert!(reserialized.anchor.is_none());
+        assert_eq!(reserialized.outputs.len(), output_count);
     }
 }

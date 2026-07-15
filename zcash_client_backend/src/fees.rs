@@ -64,9 +64,46 @@ impl FeeRule for StandardFeeRule {
     }
 }
 
+/// A policy that determines how change should be returned to the wallet when the net flows of a
+/// transaction under construction are fully transparent.
+///
+/// This policy has no effect on transactions that have any shielded inputs or outputs; change
+/// for such transactions is always returned to a shielded pool, irrespective of the policy in
+/// use. When the flows of a transaction are fully transparent, shielding change (the default)
+/// reveals the change amount as the value of the shielded output(s) in an otherwise-transparent
+/// transaction; returning the change to the transparent pool matches the behavior of
+/// transparent-only wallets (including `zcashd`) at the cost of the change remaining unshielded.
+///
+/// Transparent change is currently always sent to a P2PKH address derived under the wallet
+/// account's internal scope; returning change to the originating address when spending from a
+/// P2SH (e.g. multisig) address is not yet supported. See [zcash/librustzcash#2570] for
+/// details.
+///
+/// [zcash/librustzcash#2570]: https://github.com/zcash/librustzcash/issues/2570
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TransparentChangePolicy {
+    /// Change is always returned to a shielded pool, even when the net flows of the transaction
+    /// are fully transparent.
+    ///
+    /// This is the default policy.
+    #[default]
+    ShieldChange,
+    /// When the net flows of the transaction are fully transparent, change is returned to the
+    /// transparent pool at an internal-scope (change) transparent address of the wallet, as
+    /// described in [BIP 44].
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+    TransparentChangeAllowed,
+}
+
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is
-/// enabled, an ephemeral output to the transparent pool.
+/// enabled, an output to the transparent pool: either an ephemeral output as
+/// part of a [ZIP 320] transaction pair, or a change output to an
+/// internal-scope (change) transparent address of the wallet.
+///
+/// [ZIP 320]: https://zips.z.cash/zip-0320
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeValue(ChangeValueInner);
 
@@ -79,6 +116,8 @@ enum ChangeValueInner {
     },
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent { value: Zatoshis },
+    #[cfg(feature = "transparent-inputs")]
+    Transparent { value: Zatoshis },
 }
 
 impl ChangeValue {
@@ -86,6 +125,13 @@ impl ChangeValue {
     #[cfg(feature = "transparent-inputs")]
     pub fn ephemeral_transparent(value: Zatoshis) -> Self {
         Self(ChangeValueInner::EphemeralTransparent { value })
+    }
+
+    /// Constructs a new change value that will be created as a non-ephemeral transparent output
+    /// sent to an internal-scope (change) transparent address of the wallet.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(value: Zatoshis) -> Self {
+        Self(ChangeValueInner::Transparent { value })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
@@ -108,12 +154,20 @@ impl ChangeValue {
         Self::shielded(ShieldedPool::Orchard, value, memo)
     }
 
+    /// Constructs a new change value that will be created as an Ironwood output.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
+        Self::shielded(ShieldedPool::Ironwood, value, memo)
+    }
+
     /// Returns the pool to which the change or ephemeral output should be sent.
     pub fn output_pool(&self) -> PoolType {
         match &self.0 {
             ChangeValueInner::Shielded { protocol, .. } => PoolType::Shielded(*protocol),
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => PoolType::Transparent,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => PoolType::Transparent,
         }
     }
 
@@ -123,6 +177,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { value, .. } => *value,
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { value } => *value,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { value } => *value,
         }
     }
 
@@ -132,6 +188,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { memo, .. } => memo.as_ref(),
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => None,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => None,
         }
     }
 
@@ -146,6 +204,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { .. } => false,
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => true,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => false,
         }
     }
 }

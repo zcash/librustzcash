@@ -18,6 +18,8 @@ use super::{
     sapling as sapling_fees,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
@@ -30,6 +32,8 @@ pub struct SingleOutputChangeStrategy<I> {
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_change_policy: TransparentChangePolicy,
     meta_source: PhantomData<I>,
 }
 
@@ -50,8 +54,25 @@ impl<I> SingleOutputChangeStrategy<I> {
             change_memo,
             fallback_change_pool,
             dust_output_policy,
+            #[cfg(feature = "transparent-inputs")]
+            transparent_change_policy: TransparentChangePolicy::ShieldChange,
             meta_source: PhantomData,
         }
+    }
+
+    /// Sets the [`TransparentChangePolicy`] to be used by this change strategy, determining
+    /// whether change may be returned to the transparent pool when the flows of the transaction
+    /// under construction are fully transparent.
+    ///
+    /// The default is [`TransparentChangePolicy::ShieldChange`]. This policy has no effect on
+    /// transactions that involve any shielded flows.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_transparent_change_policy(
+        mut self,
+        transparent_change_policy: TransparentChangePolicy,
+    ) -> Self {
+        self.transparent_change_policy = transparent_change_policy;
+        self
     }
 }
 
@@ -95,6 +116,8 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             self.fee_rule.fixed_fee(),
             &split_policy,
             self.fallback_change_pool,
+            #[cfg(feature = "transparent-inputs")]
+            self.transparent_change_policy,
             Zatoshis::ZERO,
             0,
         );

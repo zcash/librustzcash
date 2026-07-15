@@ -110,7 +110,7 @@ use zcash_keys::{
 };
 use zcash_primitives::{
     block::BlockHash,
-    merkle_tree::read_commitment_tree,
+    merkle_tree::{HashSer, read_commitment_tree},
     transaction::{Transaction, TransactionData, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317},
 };
 use zcash_protocol::{
@@ -768,13 +768,82 @@ pub(crate) fn delete_account(
     Ok(())
 }
 
+/// Returns `true` if `address` (an encoded transparent receiver address) is already recorded
+/// in the `addresses` table, whether as a derived account receiver or as a prior standalone
+/// import.
+///
+/// A transparent receiver appears at most once in `addresses`, enforced by the UNIQUE index on
+/// `cached_transparent_receiver_address`. Callers that would otherwise insert a fresh row for a
+/// receiver can use this to detect an existing row and avoid violating that constraint.
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn transparent_receiver_address_exists(
+    conn: &rusqlite::Connection,
+    address: &str,
+) -> Result<bool, SqliteClientError> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM addresses WHERE cached_transparent_receiver_address = :address",
+            named_params![":address": address],
+            |_row| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+/// Imports a standalone transparent P2PKH receiver by its pubkey into the given account.
+///
+/// Returns the number of address rows inserted: `1` when a new receiver row was added, or `0`
+/// when nothing was inserted because the receiver address was already present in the wallet.
 #[cfg(feature = "transparent-key-import")]
 pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     account_uuid: AccountUuid,
     pubkey: secp256k1::PublicKey,
-) -> Result<(), SqliteClientError> {
+) -> Result<usize, SqliteClientError> {
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // inferred from a zero-row INSERT.
+    let account_id = get_account_ref(conn, account_uuid)?;
+    import_standalone_transparent_pubkey_inner(conn, params, account_uuid, account_id, pubkey)
+}
+
+/// Imports a batch of standalone transparent P2PKH receivers by their pubkeys into the given
+/// account, resolving the account a single time for the whole batch (rather than once per
+/// pubkey). Returns the total number of address rows inserted.
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn import_standalone_transparent_pubkeys<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    pubkeys: &[secp256k1::PublicKey],
+) -> Result<usize, SqliteClientError> {
+    let account_id = get_account_ref(conn, account_uuid)?;
+    let mut inserted = 0;
+    for pubkey in pubkeys {
+        inserted += import_standalone_transparent_pubkey_inner(
+            conn,
+            params,
+            account_uuid,
+            account_id,
+            *pubkey,
+        )?;
+    }
+    Ok(inserted)
+}
+
+/// Imports a single standalone transparent P2PKH receiver into the account identified by both
+/// `account_uuid` (for the cross-account conflict check) and its already-resolved `account_id`.
+///
+/// Returns the number of address rows inserted (`1` when a new receiver row was added, `0` when
+/// nothing was inserted because the receiver address was already present).
+#[cfg(feature = "transparent-key-import")]
+fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    account_id: AccountRef,
+    pubkey: secp256k1::PublicKey,
+) -> Result<usize, SqliteClientError> {
     use ::transparent::address::TransparentAddress;
 
     let existing_import_account = conn
@@ -793,27 +862,38 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
     if let Some(current) = existing_import_account {
         if current == account_uuid.expose_uuid() {
             // The key has already been imported; nothing to do.
-            return Ok(());
+            return Ok(0);
         } else {
             return Err(SqliteClientError::StandaloneImportConflict(current));
         }
     }
 
     let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
+
+    // If this transparent receiver is already recorded (for example it was derived as an
+    // account receiver, so its row carries a NULL `imported_transparent_receiver_pubkey` and is
+    // therefore not matched by the pubkey lookup above), do not insert a second row for the same
+    // `cached_transparent_receiver_address`: the UNIQUE index on that column forbids it, and the
+    // existing representation already covers the address. This is the import-direction
+    // counterpart of the resolution in `store_address_range`, which upgrades an imported receiver
+    // in place when the same address is later derived.
+    if transparent_receiver_address_exists(conn, &addr_str)? {
+        return Ok(0);
+    }
+
     let rows_affected = conn.execute(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
           receiver_flags, imported_transparent_receiver_pubkey
         )
-        SELECT
-          id, :key_scope, :address, :address,
+        VALUES (
+          :account_id, :key_scope, :address, :address,
           :receiver_flags, :imported_transparent_receiver_pubkey
-          FROM accounts
-          WHERE accounts.uuid = :account_uuid
+        )
         "#,
         named_params![
-            ":account_uuid": account_uuid.0,
+            ":account_id": account_id.0,
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2PKH.bits(),
@@ -821,11 +901,9 @@ pub(crate) fn import_standalone_transparent_pubkey<P: consensus::Parameters>(
         ],
     )?;
 
-    if rows_affected == 0 {
-        return Err(SqliteClientError::AccountUnknown);
-    }
-
-    Ok(())
+    // The account is known (resolved above) and the receiver is not already recorded (checked
+    // above), so exactly one row is inserted.
+    Ok(rows_affected)
 }
 
 #[cfg(feature = "transparent-key-import")]
@@ -838,6 +916,10 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     use ::transparent::address::TransparentAddress;
     use zcash_script::descriptor::sh;
     use zcash_script::script::Evaluable;
+
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // inferred from a zero-row INSERT below.
+    let account_id = get_account_ref(conn, account_uuid)?;
 
     // This mirrors `zcash_script::opcode::push_value::LargeValue::MAX_SIZE`, which is
     // currently `pub(crate)`. Replace with a direct reference if it becomes public.
@@ -892,30 +974,25 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     }
 
     let addr_str = Address::Transparent(addr).encode(params);
-    let rows_affected = conn.execute(
+    conn.execute(
         r#"
         INSERT INTO addresses (
           account_id, key_scope, address, cached_transparent_receiver_address,
           receiver_flags, imported_transparent_receiver_script
         )
-        SELECT
-          id, :key_scope, :address, :address,
+        VALUES (
+          :account_id, :key_scope, :address, :address,
           :receiver_flags, :imported_transparent_receiver_script
-          FROM accounts
-          WHERE accounts.uuid = :account_uuid
+        )
         "#,
         named_params![
-            ":account_uuid": account_uuid.0,
+            ":account_id": account_id.0,
             ":key_scope": KeyScope::Foreign.encode(),
             ":address": addr_str,
             ":receiver_flags": ReceiverFlags::P2SH.bits(),
             ":imported_transparent_receiver_script": &rs_bytes[..]
         ],
     )?;
-
-    if rows_affected == 0 {
-        return Err(SqliteClientError::AccountUnknown);
-    }
 
     Ok(())
 }
@@ -1242,10 +1319,10 @@ fn find_account_for_shielded_address<P: consensus::Parameters>(
                 "Not a valid Zcash recipient address".to_owned(),
             ))
         })?;
-        if let Address::Unified(stored_ua) = stored {
-            if address_receiver_matches_ua(address, &stored_ua, params) {
-                return Ok(Some(AccountUuid::from_uuid(row_uuid)));
-            }
+        if let Address::Unified(stored_ua) = stored
+            && address_receiver_matches_ua(address, &stored_ua, params)
+        {
+            return Ok(Some(AccountUuid::from_uuid(row_uuid)));
         }
     }
 
@@ -2403,6 +2480,25 @@ impl ProgressEstimator for SubtreeProgressEstimator {
     }
 }
 
+fn next_subtree_index<H: HashSer, const SHARD_HEIGHT: u8>(
+    tx: &rusqlite::Transaction,
+    table_prefix: &'static str,
+) -> Result<u64, SqliteClientError> {
+    let shard_store = SqliteShardStore::<_, H, SHARD_HEIGHT>::from_connection(tx, table_prefix)?;
+
+    // The last shard will be incomplete, and we want the next range to overlap with
+    // the last complete shard, so return the index of the second-to-last shard root.
+    let roots = shard_store
+        .get_shard_roots()
+        .map_err(ShardTreeError::Storage)?;
+    Ok(roots
+        .iter()
+        .rev()
+        .nth(1)
+        .map(|addr| addr.index())
+        .unwrap_or(0))
+}
+
 /// Returns the spendable balance for the account at the specified height.
 ///
 /// This may be used to obtain a balance that ignores notes that have been detected so recently
@@ -2757,47 +2853,25 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         &mut account_balances,
     )?;
 
-    // The approach used here for Sapling and Orchard subtree indexing was a quick hack
+    // The approach used here for shielded subtree indexing was a quick hack
     // that has not yet been replaced. TODO: Make less hacky.
     // https://github.com/zcash/librustzcash/issues/1249
-    let next_sapling_subtree_index = {
-        let shard_store =
-            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
-                tx,
-                crate::SAPLING_TABLES_PREFIX,
-            )?;
-
-        // The last shard will be incomplete, and we want the next range to overlap with
-        // the last complete shard, so return the index of the second-to-last shard root.
-        shard_store
-            .get_shard_roots()
-            .map_err(ShardTreeError::Storage)?
-            .iter()
-            .rev()
-            .nth(1)
-            .map(|addr| addr.index())
-            .unwrap_or(0)
-    };
+    let next_sapling_subtree_index = next_subtree_index::<::sapling::Node, SAPLING_SHARD_HEIGHT>(
+        tx,
+        crate::SAPLING_TABLES_PREFIX,
+    )?;
 
     #[cfg(feature = "orchard")]
-    let next_orchard_subtree_index = {
-        let shard_store = SqliteShardStore::<
-            _,
-            ::orchard::tree::MerkleHashOrchard,
-            ORCHARD_SHARD_HEIGHT,
-        >::from_connection(tx, crate::ORCHARD_TABLES_PREFIX)?;
+    let next_orchard_subtree_index = next_subtree_index::<
+        ::orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >(tx, crate::ORCHARD_TABLES_PREFIX)?;
 
-        // The last shard will be incomplete, and we want the next range to overlap with
-        // the last complete shard, so return the index of the second-to-last shard root.
-        shard_store
-            .get_shard_roots()
-            .map_err(ShardTreeError::Storage)?
-            .iter()
-            .rev()
-            .nth(1)
-            .map(|addr| addr.index())
-            .unwrap_or(0)
-    };
+    #[cfg(feature = "orchard")]
+    let next_ironwood_subtree_index = next_subtree_index::<
+        ::orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >(tx, crate::IRONWOOD_TABLES_PREFIX)?;
 
     let summary = WalletSummary::new(
         account_balances,
@@ -2807,6 +2881,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         next_sapling_subtree_index,
         #[cfg(feature = "orchard")]
         next_orchard_subtree_index,
+        #[cfg(feature = "orchard")]
+        next_ironwood_subtree_index,
     );
 
     Ok(Some(summary))
@@ -3438,39 +3514,38 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
                 if _pool == &PoolType::Transparent {
                     let address = Address::try_from_zcash_address(params, _zaddr.clone())
                         .expect("recipient is an understood Zcash address.");
-                    if let Some(taddr) = address.to_transparent_address() {
-                        if transparent::find_account_uuid_for_transparent_address(
+                    if let Some(taddr) = address.to_transparent_address()
+                        && transparent::find_account_uuid_for_transparent_address(
                             conn, params, &taddr,
                         )?
                         .is_some()
-                        {
-                            transparent::put_transparent_output(
-                                conn,
-                                params,
-                                gap_limits,
-                                &WalletTransparentOutput::from_parts(
-                                    OutPoint::new(
-                                        sent_tx.tx().txid().into(),
-                                        u32::try_from(output.output_index())
-                                            .expect("output index fits into a u32")
-                                    ),
-                                    TxOut::new(output.value(), taddr.script().into()),
-                                    None,
-                                    None,
-                                    Some(TransparentKeyScope::EXTERNAL),
-                                    Some(*sent_tx.funding_account()),
-                                )
-                                .expect(
-                                    "can extract a recipient address from an internal address script",
+                    {
+                        transparent::put_transparent_output(
+                            conn,
+                            params,
+                            gap_limits,
+                            &WalletTransparentOutput::from_parts(
+                                OutPoint::new(
+                                    sent_tx.tx().txid().into(),
+                                    u32::try_from(output.output_index())
+                                        .expect("output index fits into a u32"),
                                 ),
-                                sent_tx.target_height().into(),
-                                true,
-                            )?;
-                        }
+                                TxOut::new(output.value(), taddr.script().into()),
+                                None,
+                                None,
+                                Some(TransparentKeyScope::EXTERNAL),
+                                Some(*sent_tx.funding_account()),
+                            )
+                            .expect(
+                                "can extract a recipient address from an internal address script",
+                            ),
+                            sent_tx.target_height().into(),
+                            true,
+                        )?;
                     }
                 }
             }
-            Recipient::InternalAccount {
+            Recipient::InternalShielded {
                 receiving_account,
                 note,
                 ..
@@ -3676,28 +3751,26 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
 }
 
 /// Returns the minimum checkpoint height that exists in all note commitment trees that contain
-/// data. When both trees have checkpoints, returns the minimum of their intersection. When only
-/// one tree has checkpoints, returns that tree's minimum. Returns `None` when both are empty.
+/// data. A height qualifies when every tree that has any checkpoints has a checkpoint at that
+/// height. Returns `None` when all trees are empty.
 fn min_shared_checkpoint_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     Ok(conn
         .query_row(
             "SELECT MIN(checkpoint_id) FROM (
-                -- When both trees have checkpoints, returns the minimum of their intersection.
-                SELECT MIN(sc.checkpoint_id) AS checkpoint_id
-                    FROM sapling_tree_checkpoints sc
-                    JOIN orchard_tree_checkpoints oc ON oc.checkpoint_id = sc.checkpoint_id
-                -- When only one tree has checkpoints, returns that tree's minimum.
-                UNION ALL
-                    SELECT MIN(sc.checkpoint_id) AS checkpoint_id
-                    FROM sapling_tree_checkpoints sc
-                    WHERE NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints)
-                UNION ALL
-                    SELECT MIN(oc.checkpoint_id) AS checkpoint_id
-                    FROM orchard_tree_checkpoints oc
-                    WHERE NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints)
-             )",
+                SELECT checkpoint_id FROM sapling_tree_checkpoints
+                UNION
+                SELECT checkpoint_id FROM orchard_tree_checkpoints
+                UNION
+                SELECT checkpoint_id FROM ironwood_tree_checkpoints
+             )
+             WHERE (checkpoint_id IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
+                    OR NOT EXISTS (SELECT 1 FROM sapling_tree_checkpoints))
+             AND (checkpoint_id IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
+                  OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+             AND (checkpoint_id IN (SELECT checkpoint_id FROM ironwood_tree_checkpoints)
+                  OR NOT EXISTS (SELECT 1 FROM ironwood_tree_checkpoints))",
             [],
             |row| row.get::<_, Option<u32>>(0),
         )
@@ -3713,7 +3786,7 @@ fn min_shared_checkpoint_height(
 /// "active" is defined according to the features enabled on this crate.
 ///
 /// This will return the height that has a checkpoint in every tree that contains data. The orchard
-/// table exists unconditionally but is empty when the orchard feature is not active.
+/// and ironwood tables exist unconditionally but are empty when the orchard feature is not active.
 fn select_truncation_height(
     conn: &rusqlite::Transaction,
     requested_height: BlockHeight,
@@ -3725,6 +3798,8 @@ fn select_truncation_height(
             AND height IN (SELECT checkpoint_id FROM sapling_tree_checkpoints)
             AND (height IN (SELECT checkpoint_id FROM orchard_tree_checkpoints)
                  OR NOT EXISTS (SELECT 1 FROM orchard_tree_checkpoints))
+            AND (height IN (SELECT checkpoint_id FROM ironwood_tree_checkpoints)
+                 OR NOT EXISTS (SELECT 1 FROM ironwood_tree_checkpoints))
             "#,
         named_params! {":requested_height": u32::from(requested_height)},
         |row| row.get::<_, Option<u32>>(0),
@@ -4150,55 +4225,68 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     if let Some(max_scanned_height) = block_max_scanned(conn, params)
         .map_err(RewindError::DataSource)?
         .map(|m| m.block_height())
+        && target_height < max_scanned_height
     {
-        if target_height < max_scanned_height {
-            // Compute the floor height of the pruning window.
-            let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
-            let truncation_target = target_height.max(pruning_floor);
+        // Compute the floor height of the pruning window.
+        let pruning_floor = max_scanned_height.saturating_sub(PRUNING_DEPTH - 1);
+        let truncation_target = target_height.max(pruning_floor);
 
-            // Determine the minimum sapling and orchard checkpoints within the pruning window.
-            let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+        // Determine the minimum Sapling checkpoint within the pruning window.
+        let sapling_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
+            conn,
+            crate::SAPLING_TABLES_PREFIX,
+            truncation_target,
+        )
+        .map_err(ShardTreeError::Storage)
+        .map_err(SqliteClientError::from)
+        .map_err(RewindError::DataSource)?;
+
+        #[cfg(feature = "orchard")]
+        {
+            // Check that the Orchard and Ironwood checkpoints match the Sapling checkpoint.
+            // These should always match unless the database is corrupted.
+            let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
                 conn,
-                crate::SAPLING_TABLES_PREFIX,
+                crate::ORCHARD_TABLES_PREFIX,
                 truncation_target,
             )
             .map_err(ShardTreeError::Storage)
             .map_err(SqliteClientError::from)
             .map_err(RewindError::DataSource)?;
-
-            #[cfg(feature = "orchard")]
-            {
-                // Check that Orchard checkpoint matches the Sapling checkpoint. These should
-                // always match unless the database is corrupted.
-                let orchard_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
-                    conn,
-                    crate::ORCHARD_TABLES_PREFIX,
-                    truncation_target,
-                )
-                .map_err(ShardTreeError::Storage)
-                .map_err(SqliteClientError::from)
-                .map_err(RewindError::DataSource)?;
-                if orchard_window_floor != sapling_window_floor {
-                    return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
-                        "Sapling and Orchard should have the same checkpoints".into(),
-                    )));
-                }
+            if orchard_window_floor != sapling_window_floor {
+                return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
+                    "Sapling and Orchard should have the same checkpoints".into(),
+                )));
             }
 
-            // Combine the per-pool floors by taking the shallower (larger height).
-            let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
-
-            // Use `truncate_to_height_internal` to perform full truncation of data within the
-            // pruning window.
-            truncate_to_height_internal(
+            let ironwood_window_floor = commitment_tree::min_checkpoint_id_at_or_above(
                 conn,
-                params,
-                #[cfg(feature = "transparent-inputs")]
-                gap_limits,
-                truncation_height,
+                crate::IRONWOOD_TABLES_PREFIX,
+                truncation_target,
             )
+            .map_err(ShardTreeError::Storage)
+            .map_err(SqliteClientError::from)
             .map_err(RewindError::DataSource)?;
+            if ironwood_window_floor != sapling_window_floor {
+                return Err(RewindError::DataSource(SqliteClientError::CorruptedData(
+                    "Sapling and Ironwood should have the same checkpoints".into(),
+                )));
+            }
         }
+
+        // Combine the per-pool floors by taking the shallower (larger height).
+        let truncation_height = sapling_window_floor.unwrap_or(pruning_floor);
+
+        // Use `truncate_to_height_internal` to perform full truncation of data within the
+        // pruning window.
+        truncate_to_height_internal(
+            conn,
+            params,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits,
+            truncation_height,
+        )
+        .map_err(RewindError::DataSource)?;
     }
 
     // Overwrite the scan-queue range above the rewind target with a `Historic` rescan range,
@@ -4210,20 +4298,20 @@ pub(crate) fn rewind_to_chain_state<P: consensus::Parameters>(
     // those whose priority would dominate `Historic` even under a forced rescan
     // (`ChainTip`, `OpenAdjacent`, `FoundNote`, `Verify`); `Ignored` is the lowest priority
     // and cannot overwrite anything.
-    if let Some(t) = chain_tip {
-        if target_height < t {
-            let rescan_range = (target_height + 1)..(t + 1);
-            replace_queue_entries::<SqliteClientError>(
-                conn,
-                &rescan_range,
-                std::iter::once(ScanRange::from_parts(
-                    rescan_range.clone(),
-                    ScanPriority::Historic,
-                )),
-                true,
-            )
-            .map_err(RewindError::DataSource)?;
-        }
+    if let Some(t) = chain_tip
+        && target_height < t
+    {
+        let rescan_range = (target_height + 1)..(t + 1);
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &rescan_range,
+            std::iter::once(ScanRange::from_parts(
+                rescan_range.clone(),
+                ScanPriority::Historic,
+            )),
+            true,
+        )
+        .map_err(RewindError::DataSource)?;
     }
 
     let new_sapling_tree_size: u64 = chain_state.final_sapling_tree().tree_size();
@@ -4642,15 +4730,15 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     tx_ref: TxRef,
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
-    if let Some(b) = d_tx.tx().transparent_bundle() {
-        if !b.is_coinbase() {
-            // queue the transparent inputs for enhancement
-            queue_tx_retrieval(
-                conn,
-                b.vin.iter().map(|txin| *txin.prevout().txid()),
-                Some(tx_ref),
-            )?;
-        }
+    if let Some(b) = d_tx.tx().transparent_bundle()
+        && !b.is_coinbase()
+    {
+        // queue the transparent inputs for enhancement
+        queue_tx_retrieval(
+            conn,
+            b.vin.iter().map(|txin| *txin.prevout().txid()),
+            Some(tx_ref),
+        )?;
     }
 
     Ok(())
@@ -4814,7 +4902,7 @@ fn recipient_params<P: consensus::Parameters>(
                 PoolType::TRANSPARENT,
             ))
         }
-        Recipient::InternalAccount {
+        Recipient::InternalShielded {
             receiving_account,
             external_address,
             note,
@@ -5330,6 +5418,7 @@ pub mod testing {
 mod tests {
     use std::num::NonZeroU32;
 
+    use rusqlite::Connection;
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, SecretVec};
     use uuid::Uuid;
@@ -5340,7 +5429,7 @@ mod tests {
     };
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::value::Zatoshis;
+    use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
     use crate::{
         AccountUuid,
@@ -5348,7 +5437,50 @@ mod tests {
         testing::{BlockCache, db::TestDbFactory},
     };
 
-    use super::account_birthday;
+    use super::{account_birthday, min_shared_checkpoint_height, select_truncation_height};
+
+    fn connection_with_checkpoint_tables() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE blocks (height INTEGER PRIMARY KEY);
+             CREATE TABLE sapling_tree_checkpoints (checkpoint_id INTEGER PRIMARY KEY);
+             CREATE TABLE orchard_tree_checkpoints (checkpoint_id INTEGER PRIMARY KEY);
+             CREATE TABLE ironwood_tree_checkpoints (checkpoint_id INTEGER PRIMARY KEY);",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn truncation_height_requires_an_ironwood_checkpoint() {
+        let mut conn = connection_with_checkpoint_tables();
+        conn.execute_batch(
+            "INSERT INTO blocks (height) VALUES (10), (11);
+             INSERT INTO sapling_tree_checkpoints (checkpoint_id) VALUES (10), (11);
+             INSERT INTO orchard_tree_checkpoints (checkpoint_id) VALUES (10), (11);
+             INSERT INTO ironwood_tree_checkpoints (checkpoint_id) VALUES (10);",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        assert_eq!(
+            select_truncation_height(&tx, BlockHeight::from_u32(11)).unwrap(),
+            BlockHeight::from_u32(10),
+        );
+    }
+
+    #[test]
+    fn safe_rewind_height_requires_an_ironwood_checkpoint() {
+        let conn = connection_with_checkpoint_tables();
+        conn.execute_batch(
+            "INSERT INTO sapling_tree_checkpoints (checkpoint_id) VALUES (10);
+             INSERT INTO orchard_tree_checkpoints (checkpoint_id) VALUES (10);
+             INSERT INTO ironwood_tree_checkpoints (checkpoint_id) VALUES (11);",
+        )
+        .unwrap();
+
+        assert_eq!(min_shared_checkpoint_height(&conn).unwrap(), None);
+    }
 
     #[test]
     fn empty_database_has_no_balance() {

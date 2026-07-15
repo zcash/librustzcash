@@ -2430,7 +2430,7 @@ mod tests {
     fn usk_debug_redaction() {
         let seed = [0u8; 64];
         let usk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
-        assert!(format!("{:?}", usk).contains("\"...\""));
+        assert!(format!("{usk:?}").contains("\"...\""));
     }
 
     #[test]
@@ -2466,7 +2466,7 @@ mod tests {
         )
         .unwrap();
 
-        let debug_str = format!("{:?}", ufvk);
+        let debug_str = format!("{ufvk:?}");
         #[cfg(feature = "transparent-inputs")]
         assert!(debug_str.contains("transparent: Some(\"...\")"));
         #[cfg(feature = "sapling")]
@@ -2507,7 +2507,7 @@ mod tests {
             orchard,
         );
 
-        let debug_str = format!("{:?}", uivk);
+        let debug_str = format!("{uivk:?}");
         #[cfg(feature = "sapling")]
         assert!(debug_str.contains("sapling: Some(\"...\")"));
         #[cfg(feature = "orchard")]

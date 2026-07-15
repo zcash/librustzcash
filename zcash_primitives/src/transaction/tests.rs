@@ -291,10 +291,10 @@ fn test_sapling_bundle(
         crate::transaction::components::sapling::testing::arb_bundle_for_version(TxVersion::V6);
 
     for _ in 0..100 {
-        if let Some(bundle) = bundle_strategy.new_tree(runner).unwrap().current() {
-            if !bundle.shielded_spends().is_empty() {
-                return bundle;
-            }
+        if let Some(bundle) = bundle_strategy.new_tree(runner).unwrap().current()
+            && !bundle.shielded_spends().is_empty()
+        {
+            return bundle;
         }
     }
 
@@ -311,10 +311,11 @@ fn test_sapling_output_only_bundle(
         crate::transaction::components::sapling::testing::arb_bundle_for_version(TxVersion::V6);
 
     for _ in 0..1000 {
-        if let Some(bundle) = bundle_strategy.new_tree(runner).unwrap().current() {
-            if bundle.shielded_spends().is_empty() && !bundle.shielded_outputs().is_empty() {
-                return bundle;
-            }
+        if let Some(bundle) = bundle_strategy.new_tree(runner).unwrap().current()
+            && bundle.shielded_spends().is_empty()
+            && !bundle.shielded_outputs().is_empty()
+        {
+            return bundle;
         }
     }
 

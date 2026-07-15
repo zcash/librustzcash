@@ -10,10 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries
+  separate `orchard_bundle_type` and `ironwood_bundle_type` fields in place of
+  `orchard_pool_bundle_type`, selecting the transactional bundle type
+  independently for each Orchard protocol value pool. Set both fields to the
+  same value to keep the previous behavior.
+
+## [0.29.0] - 2026-07-09
+
 ### Added
 - `zcash_primitives::transaction::components::orchard::bundle_version_for_branch`
 
 ### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.0`, `zcash_transparent 0.9.0`.
+- Migrated to `orchard 0.15`.
 - `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
   the consensus branch ID under which the transaction was constructed instead of
   an `orchard::bundle::BundleVersion`; the Orchard bundle version is derived

@@ -42,6 +42,10 @@ pub enum ProposalError {
     ShieldingInvalid,
     /// No anchor information could be obtained for the specified block height.
     AnchorNotFound(BlockHeight),
+    /// A proposal step produces a shielded bundle — it spends shielded notes, pays to a shielded
+    /// pool, or returns shielded change — but does not specify an anchor height against which its
+    /// shielded-tree lookups are performed. Only a purely transparent step may omit its anchor.
+    MissingShieldedAnchor,
     /// A reference to the output of a prior step is invalid.
     ReferenceError(StepOutput),
     /// An attempted double-spend of a prior step output was detected.
@@ -126,6 +130,10 @@ impl Display for ProposalError {
             ProposalError::AnchorNotFound(h) => {
                 write!(f, "Unable to compute anchor for block height {h:?}")
             }
+            ProposalError::MissingShieldedAnchor => write!(
+                f,
+                "A proposal step that produces a shielded bundle must specify an anchor height."
+            ),
             ProposalError::ReferenceError(r) => {
                 write!(f, "No prior step output found for reference {r:?}")
             }
@@ -231,8 +239,8 @@ pub struct Proposal<FeeRuleT, NoteRef> {
     fee_rule: FeeRuleT,
     min_target_height: TargetHeight,
     /// The confirmations policy under which the proposal was constructed. It is used to resolve
-    /// the anchor for any step that defers its anchor choice (a step with no shielded inputs; see
-    /// [`Step::anchor_height`]).
+    /// the anchor for a step that carries no explicit anchor height (a purely transparent step;
+    /// see [`Step::anchor_height`]).
     confirmations_policy: ConfirmationsPolicy,
     steps: NonEmpty<Step<NoteRef>>,
     /// The transaction version explicitly requested when the proposal was constructed, if any.
@@ -362,7 +370,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                 payment_pools,
                 transparent_inputs,
                 shielded_inputs,
-                anchor_height,
+                Some(anchor_height),
                 vec![],
                 balance,
                 is_shielding,
@@ -386,8 +394,8 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     }
 
     /// Returns the confirmations policy under which the proposal was constructed. It is used to
-    /// resolve the anchor for any step that defers its anchor choice (a step with no shielded
-    /// inputs; see [`Step::anchor_height`]).
+    /// resolve the anchor for a step that carries no explicit anchor height (a purely transparent
+    /// step; see [`Step::anchor_height`]).
     pub fn confirmations_policy(&self) -> ConfirmationsPolicy {
         self.confirmations_policy
     }
@@ -485,17 +493,35 @@ pub struct Step<NoteRef> {
     /// The anchor height that binds every shielded-tree lookup performed while building this
     /// step's transaction — both shielded-input witnesses and shielded-output anchors.
     ///
-    /// This is `Some` only when the step spends shielded notes, which must be witnessed against a
-    /// specific anchor. A step with no shielded inputs carries `None` and defers the choice of
-    /// anchor to interpretation time, where it is derived from the proposal's confirmations policy
-    /// and target height; such a step witnesses no notes, so any recent valid anchor is sound. The
-    /// resolved anchor is still applied to every shielded-output bundle, so a transaction with only
-    /// routed shielded outputs (for example an Orchard-receiver payment routed into the Ironwood
-    /// bundle post-NU6.3) remains indistinguishable from one that spends real shielded notes.
+    /// This is `Some` for any step that produces a shielded bundle — one that spends shielded
+    /// notes, pays to a shielded pool, or returns shielded change. The anchor is selected from the
+    /// wallet's checkpoints at proposal construction time and applied to every shielded-tree
+    /// lookup, so a transaction with only routed shielded outputs (for example an Orchard-receiver
+    /// payment routed into the Ironwood bundle post-NU6.3) remains indistinguishable from one that
+    /// spends real shielded notes. Only a purely transparent step may carry `None`.
     anchor_height: Option<BlockHeight>,
     prior_step_inputs: Vec<StepOutput>,
     balance: TransactionBalance,
     is_shielding: bool,
+}
+
+/// Returns whether a step produces any shielded bundle — it spends shielded notes, pays to a
+/// shielded pool, or returns change to a shielded pool. Such a step performs shielded-tree lookups
+/// (including the dummy spends that pad an output-only bundle so it is indistinguishable from one
+/// that spends real notes), so it must bind a concrete anchor against which those lookups are made.
+pub(crate) fn produces_shielded_bundle(
+    has_shielded_inputs: bool,
+    payment_pools: &BTreeMap<usize, PoolType>,
+    balance: &TransactionBalance,
+) -> bool {
+    has_shielded_inputs
+        || payment_pools
+            .values()
+            .any(|pool| matches!(pool, PoolType::Shielded(_)))
+        || balance
+            .proposed_change()
+            .iter()
+            .any(|change| matches!(change.output_pool(), PoolType::Shielded(_)))
 }
 
 impl<NoteRef> Step<NoteRef> {
@@ -516,7 +542,9 @@ impl<NoteRef> Step<NoteRef> {
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
     /// * `anchor_height`: The anchor height that binds every shielded-tree lookup performed
     ///   while building this step's transaction — both shielded-input witnesses and
-    ///   shielded-output anchors.
+    ///   shielded-output anchors. A step that produces a shielded bundle (spends shielded notes,
+    ///   pays to a shielded pool, or returns shielded change) must provide `Some`; only a purely
+    ///   transparent step may pass `None`.
     /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
     /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
     ///   transaction.
@@ -532,7 +560,7 @@ impl<NoteRef> Step<NoteRef> {
         payment_pools: BTreeMap<usize, PoolType>,
         transparent_inputs: Vec<WalletTransparentOutput<()>>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
-        anchor_height: BlockHeight,
+        anchor_height: Option<BlockHeight>,
         prior_step_inputs: Vec<StepOutput>,
         balance: TransactionBalance,
         is_shielding: bool,
@@ -665,10 +693,16 @@ impl<NoteRef> Step<NoteRef> {
             }
         }
 
-        // Only a step that spends shielded notes binds a concrete anchor (needed to witness those
-        // notes). An input-less step defers to interpretation time, so its stored anchor is `None`
-        // regardless of the value passed here.
-        let anchor_height = shielded_inputs.as_ref().map(|_| anchor_height);
+        // A step that produces any shielded bundle must bind a concrete anchor: every shielded-tree
+        // lookup it performs — including the dummy spends that pad an output-only bundle so it is
+        // indistinguishable from one that spends real notes — is made against that anchor. Only a
+        // purely transparent step may omit it. The untrusted decode path rejects this same
+        // combination at the parse boundary (see `try_into_standard_proposal`).
+        if anchor_height.is_none()
+            && produces_shielded_bundle(shielded_inputs.is_some(), &payment_pools, &balance)
+        {
+            return Err(ProposalError::MissingShieldedAnchor);
+        }
 
         if input_total == output_total {
             Ok(Self {
@@ -707,8 +741,8 @@ impl<NoteRef> Step<NoteRef> {
         self.shielded_inputs.as_ref()
     }
     /// Returns the anchor height that binds every shielded-tree lookup performed while building
-    /// this step's transaction, or `None` if the step spends no shielded notes and therefore
-    /// defers the choice of anchor to interpretation time.
+    /// this step's transaction, or `None` for a purely transparent step that performs no such
+    /// lookup.
     pub fn anchor_height(&self) -> Option<BlockHeight> {
         self.anchor_height
     }
@@ -941,7 +975,7 @@ mod tests {
             BTreeMap::new(),
             vec![],
             shielded_inputs_for(notes),
-            BlockHeight::from_u32(100),
+            Some(BlockHeight::from_u32(100)),
             vec![],
             balance,
             false,
@@ -951,6 +985,69 @@ mod tests {
 
     fn shielded_change(pool: ShieldedPool, value: u64) -> ChangeValue {
         ChangeValue::shielded(pool, Zatoshis::const_from_u64(value), None)
+    }
+
+    /// A step that produces any shielded bundle must bind a concrete anchor. Passing `None` (the
+    /// decoded state of the wire-format zero sentinel) for such a step is rejected, whether the
+    /// shielded bundle comes from spent notes or from shielded outputs. Only a purely transparent
+    /// step may carry `None`.
+    #[test]
+    fn shielded_step_requires_anchor() {
+        // A step that spends shielded notes with no anchor is rejected.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![],
+                shielded_inputs_for(orchard_and_ironwood_notes(1, 0)),
+                None,
+                vec![],
+                TransactionBalance::new(vec![], Zatoshis::const_from_u64(10_000)).unwrap(),
+                false,
+                false,
+            ),
+            Err(ProposalError::MissingShieldedAnchor)
+        );
+
+        // A step with a shielded output but no shielded inputs must also bind an anchor: the dummy
+        // spends padding the output bundle commit to it.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(
+                    vec![shielded_change(ShieldedPool::Orchard, 10_000)],
+                    Zatoshis::ZERO,
+                )
+                .unwrap(),
+                false,
+                false,
+            ),
+            Err(ProposalError::MissingShieldedAnchor)
+        );
+
+        // A purely transparent step may carry no anchor.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(vec![], Zatoshis::ZERO).unwrap(),
+                false,
+                false,
+            ),
+            Ok(step) if step.anchor_height().is_none()
+        );
     }
 
     /// Proposal construction conserves value: the total output value of a step (payments +
@@ -1104,7 +1201,7 @@ mod tests {
             BTreeMap::from([(0usize, pool)]),
             vec![],
             shielded_inputs_for(orchard_and_ironwood_notes(1, 0)),
-            BlockHeight::from_u32(100),
+            Some(BlockHeight::from_u32(100)),
             vec![],
             TransactionBalance::new(vec![], Zatoshis::const_from_u64(4_000)).unwrap(),
             false,

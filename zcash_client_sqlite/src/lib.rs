@@ -158,6 +158,8 @@ pub mod chain;
 pub mod error;
 pub mod util;
 pub mod wallet;
+#[cfg(feature = "zewif")]
+pub mod zewif;
 
 #[cfg(test)]
 mod testing;
@@ -1390,6 +1392,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     }
 
     #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys(
+        &mut self,
+        account: Self::AccountId,
+        pubkeys: &[secp256k1::PublicKey],
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkeys(account, pubkeys))
+    }
+
+    #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_script(
         &mut self,
         account: Self::AccountId,
@@ -1500,6 +1511,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         self.transactionally(|wdb| wdb.reserve_next_n_ephemeral_addresses(account_id, n))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| wdb.reserve_next_n_internal_addresses(account_id, n))
     }
 
     fn set_transaction_status(
@@ -1676,6 +1696,17 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), Self::Error> {
         wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
+            .map(|_inserted| ())
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys(
+        &mut self,
+        account: Self::AccountId,
+        pubkeys: &[secp256k1::PublicKey],
+    ) -> Result<(), Self::Error> {
+        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
+            .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -1887,6 +1918,25 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
+        let reserved = wallet::transparent::reserve_next_n_addresses(
+            self.conn.0,
+            &self.params,
+            account_id,
+            TransparentKeyScope::INTERNAL,
+            self.gap_limits.internal(),
+            n,
+        )?;
+
+        Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
+    }
+
     fn set_transaction_status(
         &mut self,
         txid: TxId,
@@ -1976,6 +2026,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     type Account = wallet::Account;
     type Error = SqliteClientError;
     type TxRef = TxRef;
+
+    fn block_fully_scanned_height(
+        &self,
+    ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error> {
+        Ok(
+            wallet::block_fully_scanned(self.conn.borrow(), &self.params)?
+                .map(|meta| meta.block_height()),
+        )
+    }
 
     fn select_receiving_address(
         &self,
@@ -2864,6 +2923,53 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
         SqliteClientError,
     > {
         wallet::commitment_tree::generate_orchard_witnesses_at_historical_height(
+            self.conn.borrow(),
+            note_positions,
+            frontier_at_height,
+            height,
+        )
+    }
+
+    /// Generates Ironwood Merkle witnesses at a historical height.
+    ///
+    /// Loads the wallet's Ironwood shard data into an ephemeral in-memory
+    /// `ShardStore`, inserts the provided frontier at `height` as a checkpoint,
+    /// and generates a witness for each of the given note positions.
+    ///
+    /// The caller must provide the valid frontier at the given height. The wallet DB
+    /// is strictly read-only; shard data is read but not modified.
+    ///
+    /// # Errors
+    ///
+    /// Returns:
+    /// - [`SqliteClientError::CommitmentTree`] if reading the wallet's shard
+    ///   or cap data fails, or if the shard data reconstructed from the
+    ///   wallet is internally inconsistent at a node the computation
+    ///   requires.
+    /// - [`SqliteClientError::HistoricalFrontierInvalid`] if
+    ///   `frontier_at_height` is inconsistent with the shard data
+    ///   reconstructed from the wallet at `height`.
+    /// - [`SqliteClientError::HistoricalWitnessUnavailable`] if a witness
+    ///   cannot be generated for one of `note_positions` at `height` (most
+    ///   commonly because the wallet has not yet synced through that
+    ///   height).
+    pub fn generate_ironwood_witnesses_at_historical_height(
+        &self,
+        note_positions: &[Position],
+        frontier_at_height: incrementalmerkletree::frontier::NonEmptyFrontier<
+            orchard::tree::MerkleHashOrchard,
+        >,
+        height: BlockHeight,
+    ) -> Result<
+        Vec<
+            incrementalmerkletree::MerklePath<
+                orchard::tree::MerkleHashOrchard,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >,
+        >,
+        SqliteClientError,
+    > {
+        wallet::commitment_tree::generate_ironwood_witnesses_at_historical_height(
             self.conn.borrow(),
             note_positions,
             frontier_at_height,

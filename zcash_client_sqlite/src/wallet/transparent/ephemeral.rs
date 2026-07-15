@@ -11,13 +11,8 @@ use crate::{
     },
 };
 
-use super::next_check_time;
-
-// The imports below back only this module's test / test-dependencies surface (`metadata`,
-// `get_known_ephemeral_addresses`, `find_account_for_ephemeral_address_str`), which is compiled
-// out of ordinary builds. Each is gated to exactly the configurations that use it — rather than
-// blanket-`allow`ing unused imports — so the unused-import lint stays active in every feature
-// combination.
+// Imports used only by the address-metadata helpers, which are compiled only
+// for tests and the `test-dependencies` feature.
 #[cfg(any(test, feature = "test-dependencies"))]
 use crate::{AccountRef, GapLimits};
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -34,9 +29,8 @@ use zcash_keys::encoding::AddressCodec;
 #[cfg(any(test, feature = "test-dependencies"))]
 use zcash_protocol::consensus::{self, BlockHeight};
 
-// `find_account_for_ephemeral_address_str` (and hence `AccountUuid` and the `.optional()` extension
-// here) is reachable only through the `transparent-inputs` `WalletTest` methods, so it additionally
-// requires that feature.
+// Imports used only by `find_account_for_ephemeral_address_str`, which is
+// compiled only for the transparent-inputs test surface.
 #[cfg(all(
     any(test, feature = "test-dependencies"),
     feature = "transparent-inputs"
@@ -47,6 +41,8 @@ use crate::AccountUuid;
     feature = "transparent-inputs"
 ))]
 use rusqlite::OptionalExtension;
+
+use super::next_check_time;
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.

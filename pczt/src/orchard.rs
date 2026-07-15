@@ -143,6 +143,109 @@ impl fmt::Display for MemoPlaintextError {
     }
 }
 
+/// The result of parsing a logical Orchard-protocol bundle (Orchard or Ironwood) via
+/// [`Bundle::into_parsed_with_version`] or one of its siblings.
+///
+/// Carries the bundle's original wire `anchor` alongside the parsed form, so that
+/// [`Parsed::reserialize`] can restore it after an operation that does not itself
+/// change the anchor, even though parsing may have substituted a placeholder for it
+/// (see [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchors-and-pre-authorization)).
+#[cfg(feature = "orchard")]
+pub(crate) struct Parsed {
+    pub(crate) bundle: orchard::pczt::Bundle,
+    pub(crate) wire_anchor: Option<[u8; 32]>,
+}
+
+#[cfg(feature = "orchard")]
+impl Parsed {
+    /// Serializes the parsed bundle back into its wire representation, using
+    /// [`Self::wire_anchor`] as the result's `anchor` in place of any placeholder
+    /// substituted while parsing.
+    ///
+    /// Must not be used after an operation that legitimately changes the anchor;
+    /// such operations should set `wire_anchor` to the new value first.
+    pub(crate) fn reserialize(self) -> Bundle {
+        Bundle {
+            anchor: self.wire_anchor,
+            ..Bundle::serialize_from(self.bundle)
+        }
+    }
+}
+
+/// Shared fixtures for hand-crafting Orchard-protocol PCZT test data.
+#[cfg(all(test, feature = "orchard"))]
+pub(crate) mod testing {
+    use alloc::collections::BTreeMap;
+
+    use pasta_curves::pallas;
+
+    use super::{Action, EncCiphertext, Output, Spend};
+
+    /// Derives a valid Orchard value commitment encoding for the given value and
+    /// trapdoor, so that hand-crafted `Action`s pass the structural validity check
+    /// applied when parsing (regardless of anchor consistency, which is unrelated).
+    pub(crate) fn value_commitment(value: u64, rcv: [u8; 32]) -> [u8; 32] {
+        let rcv = orchard::value::ValueCommitTrapdoor::from_bytes(rcv)
+            .into_option()
+            .unwrap();
+        let value_sum =
+            orchard::value::NoteValue::from_raw(value) - orchard::value::NoteValue::from_raw(0);
+        orchard::value::ValueCommitment::derive(value_sum, rcv).to_bytes()
+    }
+
+    /// Derives a valid, randomized `rk` encoding (a curve point, unlike an arbitrary
+    /// byte string) so that hand-crafted `Spend`s pass the structural validity check
+    /// applied when parsing.
+    pub(crate) fn randomized_verification_key() -> [u8; 32] {
+        use ff::Field;
+
+        let sk = orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap();
+        let ask = orchard::keys::SpendAuthorizingKey::from(&sk);
+        let randomized_signing_key = ask.randomize(&pallas::Scalar::ONE);
+        let rk: orchard::primitives::redpallas::VerificationKey<
+            orchard::primitives::redpallas::SpendAuth,
+        > = (&randomized_signing_key).into();
+        (&rk).into()
+    }
+
+    /// A structurally valid dummy Orchard action with no witness (so it is exempt
+    /// from anchor-consistency checks), for use as a base in hand-crafted test PCZTs.
+    pub(crate) fn dummy_action() -> Action {
+        Action {
+            cv_net: Some(value_commitment(0, [3; 32])),
+            spend: Spend {
+                nullifier: [2; 32],
+                rk: randomized_verification_key(),
+                spend_auth_sig: None,
+                recipient: None,
+                value: None,
+                rho: None,
+                rseed: None,
+                fvk: None,
+                witness: None,
+                alpha: None,
+                zip32_derivation: None,
+                dummy_sk: None,
+                proprietary: BTreeMap::new(),
+            },
+            output: Output {
+                cmx: Some([4; 32]),
+                ephemeral_key: [5; 32],
+                enc_ciphertext: EncCiphertext::Encrypted(alloc::vec![6; 580]),
+                out_ciphertext: alloc::vec![7; 80],
+                recipient: None,
+                value: None,
+                rseed: None,
+                ock: None,
+                zip32_derivation: None,
+                user_address: None,
+                proprietary: BTreeMap::new(),
+            },
+            rcv: None,
+        }
+    }
+}
+
 /// A memo plaintext with all trailing zero bytes stripped.
 ///
 /// This is the memo portion of an Orchard note plaintext, not the full note
@@ -286,12 +389,6 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
         // we return None here to avoid excess sets or clone operations, as the caller need not do anything in this case.
         EncCiphertext::MemoPlaintext(_) => return None,
     };
-    let output = OutputRecoveryData {
-        cmx: action.output.cmx,
-        ephemeral_key: action.output.ephemeral_key,
-        enc_ciphertext,
-    };
-
     let recipient = Option::from(Address::from_raw_address_bytes(
         action.output.recipient.as_ref()?,
     ))?;
@@ -306,7 +403,15 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
     ))?;
 
     let nullifier = Option::from(Nullifier::from_bytes(&action.spend.nullifier))?;
-    let cmx = Option::from(ExtractedNoteCommitment::from_bytes(&action.output.cmx))?;
+    // Memo recovery is best-effort and should not resolve redacted fields.
+    // Callers that want redacted `cmx` restored should use `resolve_fields`.
+    let cmx_bytes = action.output.cmx?;
+    let cmx = Option::from(ExtractedNoteCommitment::from_bytes(&cmx_bytes))?;
+    let output = OutputRecoveryData {
+        cmx: cmx_bytes,
+        ephemeral_key: action.output.ephemeral_key,
+        enc_ciphertext,
+    };
     let compact_action = CompactAction::from_parts(
         nullifier,
         cmx,
@@ -465,7 +570,7 @@ pub struct Output {
     // by the Constructor when adding an output.
     //
     #[getset(get = "pub")]
-    pub(crate) cmx: [u8; 32],
+    pub(crate) cmx: Option<[u8; 32]>,
     #[getset(get = "pub")]
     pub(crate) ephemeral_key: [u8; 32],
     /// The encrypted note plaintext for the output, or the memo plaintext
@@ -716,7 +821,7 @@ pub mod v1 {
                 .ok_or(crate::EncodingError::RequiresV2)?;
 
             Ok(Self {
-                cmx: output.cmx,
+                cmx: output.cmx.ok_or(crate::EncodingError::RequiresV2)?,
                 ephemeral_key: output.ephemeral_key,
                 enc_ciphertext,
                 out_ciphertext: output.out_ciphertext,
@@ -734,7 +839,7 @@ pub mod v1 {
     impl From<Output> for super::Output {
         fn from(output: Output) -> Self {
             Self {
-                cmx: output.cmx,
+                cmx: Some(output.cmx),
                 ephemeral_key: output.ephemeral_key,
                 enc_ciphertext: super::EncCiphertext::Encrypted(output.enc_ciphertext),
                 out_ciphertext: output.out_ciphertext,
@@ -834,7 +939,7 @@ pub(crate) mod v2 {
     #[serde_as]
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub(crate) struct Output {
-        cmx: [u8; 32],
+        cmx: Option<[u8; 32]>,
         ephemeral_key: [u8; 32],
         enc_ciphertext: super::EncCiphertext,
         out_ciphertext: Vec<u8>,
@@ -1025,7 +1130,7 @@ pub(crate) mod v2 {
             MemoPlaintext, NoteVersion, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED, Output, Spend,
         };
 
-        fn logical_action(cv_net: Option<[u8; 32]>) -> LogicalAction {
+        fn logical_action(cv_net: Option<[u8; 32]>, cmx: Option<[u8; 32]>) -> LogicalAction {
             LogicalAction {
                 cv_net,
                 spend: Spend {
@@ -1044,7 +1149,7 @@ pub(crate) mod v2 {
                     proprietary: BTreeMap::new(),
                 },
                 output: Output {
-                    cmx: [3; 32],
+                    cmx,
                     ephemeral_key: [4; 32],
                     enc_ciphertext: EncCiphertext::Encrypted(Vec::new()),
                     out_ciphertext: Vec::new(),
@@ -1061,8 +1166,16 @@ pub(crate) mod v2 {
         }
 
         fn logical_bundle(anchor: Option<[u8; 32]>, cv_net: Option<[u8; 32]>) -> LogicalBundle {
+            logical_bundle_with_cmx(anchor, cv_net, Some([3; 32]))
+        }
+
+        fn logical_bundle_with_cmx(
+            anchor: Option<[u8; 32]>,
+            cv_net: Option<[u8; 32]>,
+            cmx: Option<[u8; 32]>,
+        ) -> LogicalBundle {
             LogicalBundle {
-                actions: vec![logical_action(cv_net)],
+                actions: vec![logical_action(cv_net, cmx)],
                 flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
                 value_sum: (0, false),
                 anchor,
@@ -1073,13 +1186,17 @@ pub(crate) mod v2 {
         }
 
         #[test]
-        fn anchor_and_cv_net_round_trip_optional_encoding() {
-            for (anchor, cv_net) in [(None, None), (Some([5; 32]), Some([6; 32]))] {
-                let bundle = logical_bundle(anchor, cv_net);
+        fn anchor_cv_net_and_cmx_round_trip_optional_encoding() {
+            for (anchor, cv_net, cmx) in [
+                (None, None, None),
+                (Some([5; 32]), Some([6; 32]), Some([7; 32])),
+            ] {
+                let bundle = logical_bundle_with_cmx(anchor, cv_net, cmx);
 
                 let encoded = super::Bundle::try_from(bundle.clone()).unwrap();
                 assert_eq!(encoded.anchor, anchor);
                 assert_eq!(encoded.actions[0].cv_net, cv_net);
+                assert_eq!(encoded.actions[0].output.cmx, cmx);
 
                 let decoded = encoded.into_logical().unwrap();
                 assert_eq!(decoded, bundle);
@@ -1177,7 +1294,7 @@ pub(crate) mod v2 {
                     proprietary: BTreeMap::new(),
                 },
                 output: Output {
-                    cmx: ExtractedNoteCommitment::from(note.commitment()).to_bytes(),
+                    cmx: Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes()),
                     ephemeral_key: OrchardDomain::epk_bytes(encryptor.epk()).0,
                     enc_ciphertext: EncCiphertext::Encrypted(
                         encryptor.encrypt_note_plaintext().to_vec(),
@@ -1211,9 +1328,16 @@ pub(crate) mod v2 {
             let mut memo = [0; MEMO_SIZE];
             memo[..5].copy_from_slice(b"hello");
 
-            let mut pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32])
-                .unwrap()
-                .build();
+            let mut pczt = Creator::new(
+                BranchId::Nu6.into(),
+                10_000_000,
+                133,
+                Some([0; 32]),
+                Some([0; 32]),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
             pczt.orchard
                 .actions
                 .push(decryptable_action_with_memo(memo));
@@ -1244,6 +1368,27 @@ pub(crate) mod v2 {
                 decoded.orchard.actions[0].output.enc_ciphertext,
                 EncCiphertext::MemoPlaintext(MemoPlaintext::from_memo(memo))
             );
+        }
+
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn resolve_fields_recomputes_cmx() {
+            let action = decryptable_action_with_memo([0; MEMO_SIZE]);
+            let expected_cmx = action.output.cmx;
+            let mut bundle = LogicalBundle {
+                actions: vec![action],
+                flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+                value_sum: (0, false),
+                anchor: None,
+                note_version: NoteVersion::V2,
+                zkproof: None,
+                bsk: None,
+            };
+            bundle.actions[0].output.cmx = None;
+
+            bundle.resolve_fields().unwrap();
+
+            assert_eq!(bundle.actions[0].output.cmx, expected_cmx);
         }
 
         #[cfg(feature = "orchard")]
@@ -1287,6 +1432,15 @@ pub(crate) mod v2 {
 
             assert!(matches!(
                 crate::orchard::v1::Bundle::try_from(logical_bundle(Some([5; 32]), None)),
+                Err(crate::EncodingError::RequiresV2)
+            ));
+
+            assert!(matches!(
+                crate::orchard::v1::Bundle::try_from(logical_bundle_with_cmx(
+                    Some([5; 32]),
+                    Some([6; 32]),
+                    None
+                )),
                 Err(crate::EncodingError::RequiresV2)
             ));
         }
@@ -1400,7 +1554,6 @@ impl Bundle {
 
             if lhs.spend.nullifier != nullifier
                 || lhs.spend.rk != rk
-                || lhs.output.cmx != cmx
                 || lhs.output.ephemeral_key != ephemeral_key
                 || lhs.output.enc_ciphertext != enc_ciphertext
                 || lhs.output.out_ciphertext != out_ciphertext
@@ -1420,6 +1573,7 @@ impl Bundle {
                 && merge_optional(&mut lhs.spend.zip32_derivation, spend_zip32_derivation)
                 && merge_optional(&mut lhs.spend.dummy_sk, dummy_sk)
                 && merge_map(&mut lhs.spend.proprietary, spend_proprietary)
+                && merge_optional(&mut lhs.output.cmx, cmx)
                 && merge_optional(&mut lhs.output.recipient, output_recipient)
                 && merge_optional(&mut lhs.output.value, output_value)
                 && merge_optional(&mut lhs.output.rseed, output_rseed)
@@ -1474,8 +1628,145 @@ pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<B
         .and_then(|revision| bundle_version_for_revision(revision, orchard::ValuePool::Orchard))
 }
 
+/// Errors that can occur while parsing a logical Orchard-protocol bundle (Orchard or
+/// Ironwood) into the form used by the `orchard` crate.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ParseError {
+    /// The operation requires the bundle's `anchor` to be set, but it was absent.
+    ///
+    /// For a v6 transaction, an Updater can resolve this by setting the anchor; see
+    /// [ZIP 374: Anchors and pre-authorization](https://zips.z.cash/zip-0374#anchors-and-pre-authorization).
+    MissingAnchor,
+    /// The bundle's remaining fields were structurally invalid.
+    Bundle(orchard::pczt::ParseError),
+}
+
+#[cfg(feature = "orchard")]
+impl From<orchard::pczt::ParseError> for ParseError {
+    fn from(e: orchard::pczt::ParseError) -> Self {
+        ParseError::Bundle(e)
+    }
+}
+
+/// Errors that can occur while checking that an Orchard-protocol bundle's spend
+/// witnesses are consistent with its anchor.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum AnchorConsistencyError {
+    /// A non-zero-valued spend has a `witness` but is missing other note data required
+    /// to compute its Merkle path root.
+    IncompleteSpendData,
+    /// A non-zero-valued spend's `witness` does not root to the given anchor.
+    WitnessDoesNotRootToAnchor,
+}
+
+/// Checks that every non-zero-valued spend in `bundle` whose `witness` is present has a
+/// Merkle path that roots to `anchor` (\[ZIP 374\] "Anchors and pre-authorization").
+///
+/// Zero-valued spends are skipped, as their Merkle paths are not checked by the Orchard
+/// circuit.
+///
+/// [ZIP 374]: https://zips.z.cash/zip-0374#anchors-and-pre-authorization
+#[cfg(feature = "orchard")]
+pub(crate) fn verify_witnesses_root_to_anchor(
+    bundle: &orchard::pczt::Bundle,
+    anchor: orchard::Anchor,
+) -> Result<(), AnchorConsistencyError> {
+    for action in bundle.actions() {
+        let spend = action.spend();
+
+        let Some(witness) = spend.witness() else {
+            continue;
+        };
+        let Some(value) = spend.value() else {
+            continue;
+        };
+        if value.inner() == 0 {
+            continue;
+        }
+
+        let recipient = spend
+            .recipient()
+            .ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+        let rho = spend
+            .rho()
+            .ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+        let rseed = spend
+            .rseed()
+            .ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+
+        let note = orchard::Note::from_parts(recipient, *value, rho, rseed, *spend.note_version())
+            .into_option()
+            .ok_or(AnchorConsistencyError::IncompleteSpendData)?;
+        let cmx = orchard::note::ExtractedNoteCommitment::from(note.commitment());
+        let computed_anchor = witness.root(cmx);
+
+        if computed_anchor != anchor {
+            return Err(AnchorConsistencyError::WitnessDoesNotRootToAnchor);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(feature = "orchard")]
 impl Output {
+    /// Recomputes `cmx`, if this output carries it as an omitted field.
+    fn resolve_cmx(
+        &mut self,
+        note_version: NoteVersion,
+        spend_nullifier: [u8; 32],
+    ) -> Result<(), ::orchard::pczt::ParseError> {
+        use ::orchard::{
+            Address, Note,
+            note::{ExtractedNoteCommitment, RandomSeed, Rho},
+            pczt::ParseError,
+            value::NoteValue,
+        };
+
+        if self.cmx.is_some() {
+            return Ok(());
+        }
+
+        let recipient = Address::from_raw_address_bytes(
+            self.recipient
+                .as_ref()
+                .ok_or(ParseError::InvalidExtractedNoteCommitment)?,
+        )
+        .into_option()
+        .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+        let rho = Rho::from_bytes(&spend_nullifier)
+            .into_option()
+            .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+        let rseed = RandomSeed::from_bytes(
+            *self
+                .rseed
+                .as_ref()
+                .ok_or(ParseError::InvalidExtractedNoteCommitment)?,
+            &rho,
+        )
+        .into_option()
+        .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+        let note = Note::from_parts(
+            recipient,
+            NoteValue::from_raw(
+                self.value
+                    .ok_or(ParseError::InvalidExtractedNoteCommitment)?,
+            ),
+            rho,
+            rseed,
+            note_version,
+        )
+        .into_option()
+        .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+
+        self.cmx = Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes());
+        Ok(())
+    }
+
     /// Recomputes [`Self::enc_ciphertext`] from memo plaintext, if present.
     ///
     /// If [`Self::enc_ciphertext`] is [`EncCiphertext::MemoPlaintext`], this
@@ -1573,29 +1864,13 @@ impl Action {
 }
 
 #[cfg(feature = "orchard")]
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-enum AnchorParseMode {
-    Strict,
-    AllowMissing,
-}
-
-#[cfg(feature = "orchard")]
-fn anchor_parse_mode(tx_version: u32, has_actions: bool) -> AnchorParseMode {
-    if tx_version == zcash_protocol::constants::V6_TX_VERSION || !has_actions {
-        AnchorParseMode::AllowMissing
-    } else {
-        AnchorParseMode::Strict
-    }
-}
-
-#[cfg(feature = "orchard")]
 impl Bundle {
     /// Resolves fields that are optionally redacted in the PCZT but implied by
     /// other known fields.
     ///
     /// This currently recomputes:
     /// - [`Action::cv_net`] if it is redacted.
+    /// - [`Output::cmx`] if it is redacted.
     /// - [`Output::enc_ciphertext`] if it is represented by memo plaintext.
     ///
     /// For improved efficiency, callers that will pass the same bundle through
@@ -1604,6 +1879,9 @@ impl Bundle {
     pub fn resolve_fields(&mut self) -> Result<(), ::orchard::pczt::ParseError> {
         for action in &mut self.actions {
             action.resolve_cv_net()?;
+            action
+                .output
+                .resolve_cmx(self.note_version, action.spend.nullifier)?;
             action
                 .output
                 .encrypt_ciphertext_from_memo(self.note_version, action.spend.nullifier)?;
@@ -1616,25 +1894,22 @@ impl Bundle {
     /// `FullViewingKey` from its wire `fvk` bytes.
     pub(crate) fn into_ironwood_parsed(
         self,
-    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        self.into_parsed_inner(
-            BundleVersion::ironwood_v3(),
-            false,
-            AnchorParseMode::AllowMissing,
-        )
+        anchor_requirement: crate::common::AnchorRequirement,
+    ) -> Result<Parsed, ParseError> {
+        self.into_parsed_with_version(BundleVersion::ironwood_v3(), anchor_requirement)
     }
 
     /// Parses this bundle as an Ironwood-pool bundle for a preverified signing
-    /// pass, using a parse-only placeholder if the anchor has been redacted.
-    ///
-    /// [`Bundle::serialize_from`] encodes the placeholder as a redacted anchor.
+    /// pass, skipping each spend's `FullViewingKey` derivation. See
+    /// [`Bundle::into_parsed_with_version_preverified_for_signing`] for the invariant
+    /// callers must uphold.
     pub(crate) fn into_ironwood_parsed_preverified_for_signing(
         self,
-    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        self.into_parsed_inner(
+        anchor_requirement: crate::common::AnchorRequirement,
+    ) -> Result<Parsed, ParseError> {
+        self.into_parsed_with_version_preverified_for_signing(
             BundleVersion::ironwood_v3(),
-            true,
-            AnchorParseMode::AllowMissing,
+            anchor_requirement,
         )
     }
 
@@ -1648,10 +1923,9 @@ impl Bundle {
     pub(crate) fn into_parsed_with_version(
         self,
         bundle_version: BundleVersion,
-        tx_version: u32,
-    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        let anchor_parse_mode = anchor_parse_mode(tx_version, !self.actions.is_empty());
-        self.into_parsed_inner(bundle_version, false, anchor_parse_mode)
+        anchor_requirement: crate::common::AnchorRequirement,
+    ) -> Result<Parsed, ParseError> {
+        self.into_parsed_inner(bundle_version, anchor_requirement, false)
     }
 
     /// Parses this bundle with the given bundle version for a preverified signing
@@ -1671,10 +1945,9 @@ impl Bundle {
     pub(crate) fn into_parsed_with_version_preverified_for_signing(
         self,
         bundle_version: BundleVersion,
-        tx_version: u32,
-    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
-        let anchor_parse_mode = anchor_parse_mode(tx_version, !self.actions.is_empty());
-        self.into_parsed_inner(bundle_version, true, anchor_parse_mode)
+        anchor_requirement: crate::common::AnchorRequirement,
+    ) -> Result<Parsed, ParseError> {
+        self.into_parsed_inner(bundle_version, anchor_requirement, true)
     }
 
     /// The shared body of [`Bundle::into_parsed_with_version`] and
@@ -1683,10 +1956,14 @@ impl Bundle {
     fn into_parsed_inner(
         mut self,
         bundle_version: BundleVersion,
+        anchor_requirement: crate::common::AnchorRequirement,
         preverified: bool,
-        anchor_parse_mode: AnchorParseMode,
-    ) -> Result<orchard::pczt::Bundle, orchard::pczt::ParseError> {
+    ) -> Result<Parsed, ParseError> {
         self.resolve_fields()?;
+        let wire_anchor = self.anchor;
+        let anchor = anchor_requirement
+            .resolve(wire_anchor, self.actions.is_empty())
+            .ok_or(ParseError::MissingAnchor)?;
 
         // We parse actions through a helper that is specifically `#[inline(never)]`.
         // This is because if this gets inlined in a loop (e.g. `.map(..).collect()`),
@@ -1759,7 +2036,10 @@ impl Bundle {
 
             let output = orchard::pczt::Output::parse(
                 *spend.nullifier(),
-                action.output.cmx,
+                action
+                    .output
+                    .cmx
+                    .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?,
                 action.output.ephemeral_key,
                 enc_ciphertext,
                 action.output.out_ciphertext,
@@ -1787,15 +2067,8 @@ impl Bundle {
         for action in self.actions {
             actions.push(parse_action_inner(action, note_version, preverified)?);
         }
-        let anchor = match (self.anchor, anchor_parse_mode) {
-            (Some(anchor), _) => anchor,
-            (None, AnchorParseMode::Strict) => {
-                return Err(orchard::pczt::ParseError::InvalidAnchor);
-            }
-            (None, AnchorParseMode::AllowMissing) => DEFAULT_ANCHOR,
-        };
 
-        orchard::pczt::Bundle::parse(
+        let bundle = orchard::pczt::Bundle::parse(
             actions,
             self.flags,
             bundle_version,
@@ -1803,7 +2076,12 @@ impl Bundle {
             anchor,
             self.zkproof,
             self.bsk,
-        )
+        )?;
+
+        Ok(Parsed {
+            bundle,
+            wire_anchor,
+        })
     }
 
     #[allow(dead_code)]
@@ -1870,7 +2148,7 @@ impl Bundle {
                         proprietary: spend.proprietary().clone(),
                     },
                     output: Output {
-                        cmx: output.cmx().to_bytes(),
+                        cmx: Some(output.cmx().to_bytes()),
                         ephemeral_key: output.encrypted_note().epk_bytes,
                         enc_ciphertext: EncCiphertext::Encrypted(
                             output.encrypted_note().enc_ciphertext.to_vec(),
@@ -1911,7 +2189,7 @@ impl Bundle {
             actions,
             flags: bundle.flag_byte(),
             value_sum,
-            anchor: (anchor != DEFAULT_ANCHOR).then_some(anchor),
+            anchor: Some(anchor),
             note_version,
             zkproof: bundle
                 .zkproof()

@@ -465,7 +465,7 @@ mod tests {
             secret,
             compressed: true,
         };
-        let debug_str = format!("{:?}", key);
+        let debug_str = format!("{key:?}");
         assert!(debug_str.contains("secret: \"...\""));
         assert!(debug_str.contains("compressed: true"));
     }

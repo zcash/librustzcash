@@ -87,8 +87,7 @@ impl fmt::Display for Error {
             Error::MissingSigningKey => write!(f, "Missing signing key"),
             Error::NullDataTooLong { actual, limit } => write!(
                 f,
-                "Provided null data is longer than the maximum supported length (actual: {}, limit: {})",
-                actual, limit
+                "Provided null data is longer than the maximum supported length (actual: {actual}, limit: {limit})"
             ),
             Error::InputCountMismatch => write!(
                 f,
@@ -96,8 +95,7 @@ impl fmt::Display for Error {
             ),
             Error::InvalidExternalSignature { sig_index } => write!(
                 f,
-                "A provided external signature at index {} was not valid for any transparent input",
-                sig_index
+                "A provided external signature at index {sig_index} was not valid for any transparent input"
             ),
             Error::DuplicateSignature => write!(
                 f,
@@ -822,18 +820,17 @@ impl TransparentSignatureContext<'_, secp256k1::VerifyOnly> {
             let sighash_msg = secp256k1::Message::from_digest(self.sighashes[input_idx]);
 
             // We only support external signatures for P2PKH inputs.
-            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info {
-                if self
+            if let SpendInfo::P2pkh { pubkey } = &input_info.spend_info
+                && self
                     .secp_ctx
                     .verify_ecdsa(&sighash_msg, signature, pubkey)
                     .is_ok()
-                {
-                    if matched_input_idx.is_some() {
-                        // This signature was already valid for a different input.
-                        return Err(Error::DuplicateSignature);
-                    }
-                    matched_input_idx = Some((input_idx, pubkey));
+            {
+                if matched_input_idx.is_some() {
+                    // This signature was already valid for a different input.
+                    return Err(Error::DuplicateSignature);
                 }
+                matched_input_idx = Some((input_idx, pubkey));
             }
         }
 
@@ -1086,8 +1083,7 @@ mod tests {
         let final_bundle_result = partially_signed_context.finalize_signatures();
         assert!(
             matches!(final_bundle_result, Err(Error::MissingSignatures)),
-            "Should fail with MissingSignatures, but got: {:?}",
-            final_bundle_result
+            "Should fail with MissingSignatures, but got: {final_bundle_result:?}"
         );
     }
 
@@ -1156,7 +1152,7 @@ mod tests {
         };
 
         let result = bundle.apply_signatures(calculate_sighash, &signing_set);
-        assert!(result.is_ok(), "P2SH apply_signatures failed: {:?}", result);
+        assert!(result.is_ok(), "P2SH apply_signatures failed: {result:?}");
     }
 
     #[test]

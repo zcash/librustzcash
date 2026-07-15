@@ -221,13 +221,13 @@ impl Client {
         };
         match trusted_res {
             Ok(trusted) => {
-                if rates.len() % 2 != 0 {
+                if !rates.len().is_multiple_of(2) {
                     evict_random(&mut rates);
                 }
                 rates.push(trusted.exchange_rate());
             }
             Err(e) => {
-                if rates.len() % 2 == 0 {
+                if rates.len().is_multiple_of(2) {
                     evict_random(&mut rates);
                 }
                 errors.push(e);
@@ -240,7 +240,7 @@ impl Client {
             Err(errors.into_iter().next().expect("All requests failed"))
         } else {
             // We have an odd number of rates; take the median.
-            assert!(rates.len() % 2 != 0);
+            assert!(!rates.len().is_multiple_of(2));
             rates.sort();
             let median = rates.len() / 2;
             Ok(rates[median])

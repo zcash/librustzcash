@@ -72,7 +72,7 @@ impl TryFrom<(u32, &[u8])> for Fvk {
             Typecode::Unknown(_) => Ok(Fvk::Unknown { typecode, data }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid fvk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!("Invalid fvk for typecode {typecode}: {e:?}"))
         })
     }
 }
@@ -434,7 +434,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            format!("{:?}", ufvk),
+            format!("{ufvk:?}"),
             "Ufvk([Fvk::P2pkh(\"...\"), Fvk::Unknown { typecode: 7, data: \"...\" }])"
         );
     }

@@ -77,7 +77,7 @@ impl TryFrom<(u32, &[u8])> for Ivk {
             Typecode::Unknown(_) => Ok(Ivk::Unknown { typecode, data }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid ivk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!("Invalid ivk for typecode {typecode}: {e:?}"))
         })
     }
 }
@@ -412,7 +412,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            format!("{:?}", uivk),
+            format!("{uivk:?}"),
             "Uivk([Ivk::Sapling(\"...\"), Ivk::Unknown { typecode: 9, data: \"...\" }])"
         );
     }

@@ -451,6 +451,48 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn send_max_spendable_to_transparent() {
+        testing::pool::send_max_spendable_to_transparent::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(not(feature = "transparent-inputs"))]
+    fn send_max_to_tex_fails_without_transparent_inputs() {
+        testing::pool::send_max_to_tex_fails_without_transparent_inputs::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_max_fee_overflow_is_an_error() {
+        testing::pool::send_max_fee_overflow_is_an_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn send_max_spends_inputs_across_pools() {
+        testing::pool::send_max_spends_inputs_across_pools::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    fn send_max_fails_when_balance_is_consumed_by_fees() {
+        testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_delivers_via_sapling_when_orchard_is_unavailable() {
+        testing::pool::send_max_delivers_via_sapling_when_orchard_is_unavailable::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_to_orchard_only_ua_fails_without_orchard() {
+        testing::pool::send_max_to_orchard_only_ua_fails_without_orchard::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn fails_to_send_max_to_transparent_with_memo() {
         testing::pool::fails_to_send_max_to_transparent_with_memo::<SaplingPoolTester>()
     }

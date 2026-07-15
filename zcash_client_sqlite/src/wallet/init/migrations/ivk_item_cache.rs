@@ -60,8 +60,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let uivk = if let Some(ufvk_str) = ufvk_str {
                 let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
                     WalletMigrationError::CorruptedData(format!(
-                        "Unable to parse UFVK for account {}: {}",
-                        account_id, e
+                        "Unable to parse UFVK for account {account_id}: {e}"
                     ))
                 })?;
                 ufvk.to_unified_incoming_viewing_key()
@@ -69,8 +68,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 zcash_keys::keys::UnifiedIncomingViewingKey::decode(&self.params, &uivk_str)
                     .map_err(|e| {
                         WalletMigrationError::CorruptedData(format!(
-                            "Unable to parse UIVK for account {}: {}",
-                            account_id, e
+                            "Unable to parse UIVK for account {account_id}: {e}"
                         ))
                     })?
             };
