@@ -1620,7 +1620,7 @@ where
     use crate::{
         data_api::wallet::{self, SpendingKeys},
         fees::{ChangeValue, TransparentChangePolicy},
-        wallet::OvkPolicy,
+        wallet::{Exposure, OvkPolicy, TransparentAddressMetadata},
     };
 
     let mut st = TestBuilder::new()
@@ -1735,12 +1735,24 @@ where
     // A proposal carrying a P2SH change recipient must survive a serialization round trip.
     super::check_proposal_serialization_roundtrip(&network, st.wallet(), &proposal);
 
-    // Snapshot the account's internal-scope (change) receivers so we can prove that creating the
-    // transaction does not reserve a fresh internal change address.
-    let internal_before = st
-        .wallet()
-        .get_transparent_receivers(account_id, true, false)
-        .unwrap();
+    // Snapshot the account's EXPOSED (change-inclusive) receivers so we can prove that creating
+    // the transaction does not reserve a fresh internal change address. Reserving an internal
+    // address does not add rows to the receiver set (the gap-limit rows pre-exist); it marks a
+    // previously-unexposed address as exposed. The exposed subset is therefore the reservation-
+    // sensitive observable.
+    let exposed_receivers = |receivers: HashMap<TransparentAddress, TransparentAddressMetadata>|
+     -> std::collections::BTreeSet<TransparentAddress> {
+        receivers
+            .into_iter()
+            .filter(|(_, meta)| matches!(meta.exposure(), Exposure::Exposed { .. }))
+            .map(|(addr, _)| addr)
+            .collect()
+    };
+    let exposed_before = exposed_receivers(
+        st.wallet()
+            .get_transparent_receivers(account_id, true, false)
+            .unwrap(),
+    );
 
     // Build the transaction, signing the P2SH input with the standalone multisig key.
     let mut standalone_keys = HashMap::new();
@@ -1798,17 +1810,16 @@ where
                 && out.value() == transfer_amount),
     );
 
-    // No internal-scope change address was reserved: the set of change receivers is unchanged.
-    let internal_after = st
-        .wallet()
-        .get_transparent_receivers(account_id, true, false)
-        .unwrap();
-    assert_eq!(internal_before.len(), internal_after.len());
-    assert!(
-        internal_after
-            .keys()
-            .all(|addr| internal_before.contains_key(addr)),
-        "creating the transaction must not reserve a new internal change address",
+    // No internal-scope change address was reserved: the set of exposed receivers is unchanged.
+    // (A reservation would newly expose the next internal-scope gap address, growing this set.)
+    let exposed_after = exposed_receivers(
+        st.wallet()
+            .get_transparent_receivers(account_id, true, false)
+            .unwrap(),
+    );
+    assert_eq!(
+        exposed_before, exposed_after,
+        "creating the transaction must not reserve (newly expose) an internal change address",
     );
 
     // Mine and scan the transaction; the change output becomes spendable at the P2SH address.
