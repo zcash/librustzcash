@@ -76,12 +76,14 @@ impl FeeRule for StandardFeeRule {
 /// transaction; returning the change to the transparent pool matches the behavior of
 /// transparent-only wallets (including `zcashd`) at the cost of the change remaining unshielded.
 ///
-/// Transparent change is currently always sent to a P2PKH address derived under the wallet
-/// account's internal scope; returning change to the originating address when spending from a
-/// P2SH (e.g. multisig) address is not yet supported. See [zcash/librustzcash#2570] for
-/// details.
-///
-/// [zcash/librustzcash#2570]: https://github.com/zcash/librustzcash/issues/2570
+/// Under [`TransparentChangePolicy::TransparentChangeAllowed`], transparent change is ordinarily
+/// sent to a P2PKH address derived under the wallet account's internal scope. However, when the
+/// transparent inputs to the transaction include coins funded via a P2SH (e.g. multisig) address,
+/// change is instead returned to that originating address, provided that all of the transaction's
+/// transparent inputs were funded by that single common address. If the transparent inputs were
+/// funded by more than one such address, change computation will fail with
+/// [`ChangeError::TransparentChangeDestinationAmbiguous`] whenever the transaction requires
+/// nonzero transparent change.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransparentChangePolicy {
@@ -92,8 +94,11 @@ pub enum TransparentChangePolicy {
     #[default]
     ShieldChange,
     /// When the net flows of the transaction are fully transparent, change is returned to the
-    /// transparent pool at an internal-scope (change) transparent address of the wallet, as
-    /// described in [BIP 44].
+    /// transparent pool. Ordinarily this change is sent to an internal-scope (change)
+    /// transparent address of the wallet, as described in [BIP 44]; however, when the
+    /// transaction's transparent inputs are all funded by a single P2SH (e.g. multisig) address,
+    /// change is instead returned to that originating address. See the documentation of
+    /// [`TransparentChangePolicy`] for details.
     ///
     /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
     TransparentChangeAllowed,

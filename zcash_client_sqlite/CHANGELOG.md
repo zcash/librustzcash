@@ -24,6 +24,17 @@ workspace.
   names begin with the `ext_` prefix reserved for external migrations, and denies
   everything else (DDL, `PRAGMA`, `ATTACH`/`DETACH`, and transaction control).
 
+### Fixed
+- `select_spendable_transparent_outputs` and `get_wallet_transparent_output` now
+  attach the known input size to spendable outputs received at a P2SH address
+  imported via `WalletWrite::import_standalone_transparent_script` (behind the
+  `transparent-key-import` feature flag). Previously, only
+  `get_spendable_transparent_outputs` did so; the other two query paths left the
+  input size unknown, which could cause P2SH spend proposals to fail with
+  `zcash_primitives::transaction::fees::zip317::FeeError::UnknownP2shInputs` or,
+  when treated as an ordinary P2PKH-sized input, understate the required
+  ZIP 317 fee.
+
 ## [0.22.0-rc.1] - 2026-07-12
 
 ### Added
