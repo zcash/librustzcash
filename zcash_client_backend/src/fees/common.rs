@@ -476,6 +476,8 @@ where
     #[cfg(feature = "transparent-inputs")]
     let transparent_change_output_size =
         wants_transparent_change.then(|| match &change_destination {
+            // The serialized size of a `TxOut` is the 8-byte value field plus the
+            // serialized size of the script pubkey.
             Ok(Some(addr)) => 8 + Script::from(addr.script()).serialized_size(),
             _ => P2PKH_STANDARD_OUTPUT_SIZE,
         });

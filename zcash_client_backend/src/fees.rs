@@ -346,7 +346,8 @@ pub enum ChangeError<E, NoteRefT> {
     #[cfg(feature = "transparent-inputs")]
     TransparentChangeDestinationAmbiguous {
         /// The distinct addresses that funded the transparent inputs provided to change
-        /// selection.
+        /// selection. Inputs whose funding address could not be determined from their
+        /// script are not represented here.
         input_addresses: Vec<TransparentAddress>,
     },
     /// An error occurred that was specific to the change selection strategy in use.
@@ -395,8 +396,8 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                 write!(
                     f,
                     "Transparent change cannot be returned to a single originating address: \
-                     the transparent inputs were funded by {} distinct addresses ({input_addresses:?}).",
-                    input_addresses.len(),
+                     the transparent inputs were not all funded by a single common address. \
+                     Distinct resolvable funding addresses: {input_addresses:?}",
                 )
             }
             ChangeError::StrategyError(err) => {
