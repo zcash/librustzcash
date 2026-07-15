@@ -210,14 +210,16 @@ impl ChangeValue {
     }
 
     /// Returns the explicit transparent address to which this change output is to be sent, or
-    /// `None` if this is not a transparent change output with an explicit recipient (in which
-    /// case a non-ephemeral transparent change output is sent to an internal-scope (change)
-    /// address of the wallet).
+    /// `None` if this is not a transparent change output with an explicit recipient.
+    ///
+    /// A non-ephemeral transparent change output having no explicit recipient is sent to an
+    /// internal-scope (change) transparent address of the wallet.
     #[cfg(feature = "transparent-inputs")]
     pub fn transparent_recipient(&self) -> Option<&TransparentAddress> {
         match &self.0 {
+            ChangeValueInner::Shielded { .. } => None,
+            ChangeValueInner::EphemeralTransparent { .. } => None,
             ChangeValueInner::Transparent { recipient, .. } => recipient.as_ref(),
-            _ => None,
         }
     }
 
