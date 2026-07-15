@@ -40,13 +40,10 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::{
-    address::{Script, TransparentAddress},
-    bundle::OutPoint,
-};
+use transparent::{address::TransparentAddress, bundle::OutPoint};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_script::script;
+use zcash_script::script::{self, Evaluable};
 
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
@@ -766,7 +763,7 @@ impl proposal::Proposal {
                             #[cfg(feature = "transparent-inputs")]
                             transparent_change_recipient_script: change
                                 .transparent_recipient()
-                                .map(|addr| Script::from(addr.script()).0.0),
+                                .map(|addr| addr.script().to_bytes()),
                             #[cfg(not(feature = "transparent-inputs"))]
                             transparent_change_recipient_script: None,
                         })
@@ -986,21 +983,22 @@ impl proposal::Proposal {
                                     })
                                     .transpose()?;
 
+                                let pool = cv.pool_type()?;
+
                                 // A `transparentChangeRecipientScript` may only be set on a
                                 // non-ephemeral transparent change value; reject it up front for
                                 // every other combination so that the match below only needs to
                                 // handle it for `(Transparent, false)`.
                                 #[cfg(feature = "transparent-inputs")]
                                 if cv.transparent_change_recipient_script.is_some()
-                                    && !(cv.pool_type()? == PoolType::Transparent
-                                        && !cv.is_ephemeral)
+                                    && (pool != PoolType::Transparent || cv.is_ephemeral)
                                 {
                                     return Err(
                                         ProposalDecodingError::TransparentChangeRecipientInvalid,
                                     );
                                 }
 
-                                match (cv.pool_type()?, cv.is_ephemeral) {
+                                match (pool, cv.is_ephemeral) {
                                     (PoolType::Shielded(ShieldedPool::Sapling), false) => {
                                         Ok(ChangeValue::sapling(value, memo))
                                     }
@@ -1383,6 +1381,26 @@ mod tests {
                 TransparentAddress::ScriptHash([7u8; 20]),
             ));
         proto.steps[0].balance.as_mut().unwrap().proposed_change[0].is_ephemeral = true;
+
+        assert_matches!(
+            proto.try_into_standard_proposal(&network, &wallet_data),
+            Err(ProposalDecodingError::TransparentChangeRecipientInvalid)
+        );
+    }
+
+    /// A `transparentChangeRecipientScript` set on a shielded change value is rejected: an
+    /// explicit transparent recipient is only meaningful for transparent change.
+    #[test]
+    fn transparent_change_recipient_script_with_shielded_pool_rejected() {
+        let (mut proto, _, network, wallet_data) =
+            proto_with_transparent_change(ChangeValue::transparent_to_address(
+                Zatoshis::const_from_u64(50_000),
+                TransparentAddress::ScriptHash([7u8; 20]),
+            ));
+        // Rewrite the change value's pool to Sapling while leaving the recipient script set;
+        // with no memo present, decoding reaches the recipient-script validity check.
+        proto.steps[0].balance.as_mut().unwrap().proposed_change[0].value_pool =
+            proposal::ValuePool::Sapling.into();
 
         assert_matches!(
             proto.try_into_standard_proposal(&network, &wallet_data),
