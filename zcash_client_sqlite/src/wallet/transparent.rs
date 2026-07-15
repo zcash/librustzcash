@@ -1144,13 +1144,24 @@ fn to_unspent_transparent_output(
     // If the address has a recorded redeem script, compute the known input size so that the
     // ZIP 317 fee calculator can size P2SH inputs. The `imported_transparent_receiver_script`
     // column must be present in the caller's query for this to take effect; callers that do not
-    // select it (or rows without a redeem script) leave the size unknown, falling back to the
-    // standard P2PKH estimate.
+    // select it (an `Err` from `row.get`) or rows without a redeem script leave the size
+    // unknown, falling back to the standard P2PKH estimate. However, a recorded redeem script
+    // that cannot be parsed or sized indicates database corruption (import validation only
+    // permits standard, sizeable scripts to be stored): silently falling back would under-size
+    // the input and could produce an under-fee'd transaction, so it is an error instead.
     if let Ok(Some(rs_bytes)) =
         row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
-        && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
-        && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
     {
+        let input_size = script::FromChain::parse(&script::Code(rs_bytes))
+            .ok()
+            .as_ref()
+            .and_then(transparent::builder::p2sh_input_serialized_len)
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Recorded redeem script could not be parsed or sized as a standard P2SH input"
+                        .to_string(),
+                )
+            })?;
         output = output.with_known_input_size(input_size);
     }
 
