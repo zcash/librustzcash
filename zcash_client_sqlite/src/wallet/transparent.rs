@@ -1127,7 +1127,7 @@ fn to_unspent_transparent_output(
         .map(|(account, _)| account);
 
     let outpoint = OutPoint::new(txid_bytes, index);
-    WalletTransparentOutput::from_parts(
+    let mut output = WalletTransparentOutput::from_parts(
         outpoint,
         TxOut::new(value, script_pubkey),
         height.map(BlockHeight::from),
@@ -1139,7 +1139,22 @@ fn to_unspent_transparent_output(
         SqliteClientError::CorruptedData(
             "Txout script_pubkey value did not correspond to a P2PKH or P2SH address".to_string(),
         )
-    })
+    })?;
+
+    // If the address has a recorded redeem script, compute the known input size so that the
+    // ZIP 317 fee calculator can size P2SH inputs. The `imported_transparent_receiver_script`
+    // column must be present in the caller's query for this to take effect; callers that do not
+    // select it (or rows without a redeem script) leave the size unknown, falling back to the
+    // standard P2PKH estimate.
+    if let Ok(Some(rs_bytes)) =
+        row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
+        && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
+        && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
+    {
+        output = output.with_known_input_size(input_size);
+    }
+
+    Ok(output)
 }
 
 // Generates a SQL expression that returns the identifiers of all spent UTXOS in the wallet.
@@ -1282,6 +1297,7 @@ pub(crate) fn get_wallet_transparent_output(
                 u.value_zat, addresses.key_scope,
                 accounts.uuid AS account_uuid,
                 u.transaction_id AS creating_tx_id,
+                addresses.imported_transparent_receiver_script,
                 t.mined_height AS received_height
          FROM transparent_received_outputs u
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1463,17 +1479,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     while let Some(row) = rows.next()? {
-        let mut output = to_unspent_transparent_output(conn, row)?;
-        // If the address has a redeem script, compute the known input size for fee
-        // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
-        if let Ok(Some(rs_bytes)) =
-            row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
-            && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
-            && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
-        {
-            output = output.with_known_input_size(input_size);
-        }
-        utxos.push(output);
+        utxos.push(to_unspent_transparent_output(conn, row)?);
     }
 
     Ok(utxos)
@@ -3623,6 +3629,15 @@ mod tests {
     #[cfg(feature = "transparent-key-import")]
     fn test_spend_from_standalone_p2sh() {
         zcash_client_backend::data_api::testing::transparent::spend_from_standalone_p2sh(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_transparent_change_returned_to_p2sh_source() {
+        zcash_client_backend::data_api::testing::transparent::transparent_change_returned_to_p2sh_source(
             TestDbFactory::default(),
             BlockCache::new(),
         );
