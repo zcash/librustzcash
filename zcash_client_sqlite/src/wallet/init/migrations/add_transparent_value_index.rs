@@ -20,18 +20,20 @@ use rusqlite::params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use super::fix_transparent_received_outputs;
+use super::account_delete_cascade;
 use crate::wallet::init::WalletMigrationError;
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x47c0e9c2_2eda_4b9c_be15_63c636c0e1c7);
 
-// `fix_transparent_received_outputs` drops and recreates the `transparent_received_outputs`
-// table (via `DROP TABLE` + `ALTER TABLE ... RENAME TO`), which destroys any index that was
-// created on the old table. Depending on it here (rather than on `utxos_to_txos`, which only
-// creates the table initially) guarantees this migration always runs after that rebuild, so
-// the index is created on the table that will actually persist. `utxos_to_txos` does not need
-// to be listed explicitly: `fix_transparent_received_outputs` transitively depends on it.
-const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
+// `account_delete_cascade` is the topologically-latest migration that rebuilds the
+// `transparent_received_outputs` table (via `CREATE TABLE` + `INSERT INTO ... SELECT` +
+// `DROP TABLE` + `ALTER TABLE ... RENAME TO`), which destroys any index that was created
+// on the old table. Depending on it here guarantees this migration always runs after that
+// rebuild, so the index is created on the table that will actually persist. The earlier
+// rebuilds (`fix_transparent_received_outputs`, and `utxos_to_txos` which creates the
+// table initially) do not need to be listed explicitly: `account_delete_cascade`
+// transitively depends on both.
+const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 pub(super) struct Migration;
 
