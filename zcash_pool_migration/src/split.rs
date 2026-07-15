@@ -249,7 +249,8 @@ pub(crate) fn build_split_pczt<P: Parameters + Clone>(
             ironwood_anchor: None,
             // The padded default preserves the pre-configurability behavior; the note split's
             // action count (and thus `split_fee`) depends on it.
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
+            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     );
     for (note, merkle_path) in spends {

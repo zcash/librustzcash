@@ -312,7 +312,8 @@ pub(crate) fn build_self_funding_transfer_pczt<P: Parameters + Clone>(
             ironwood_anchor: Some(orchard::Anchor::empty_tree()),
             // The padded default is what the self-funding buffer (TRANSFER_FEE_BUFFER_ZATOSHI)
             // is sized for: 2 Orchard + 2 Ironwood actions.
-            orchard_pool_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
+            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
         },
     )
     .with_expiry_height(BlockHeight::from_u32(expiry_height));
