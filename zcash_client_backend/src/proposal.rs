@@ -5,6 +5,8 @@ use std::{
     fmt::{self, Debug, Display},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::address::TransparentAddress;
 use nonempty::NonEmpty;
 use zcash_primitives::transaction::{TxId, TxVersion};
 use zcash_protocol::{
@@ -79,6 +81,10 @@ pub enum ProposalError {
     /// receiver. Shielding requires the destination to be able to receive shielded value.
     #[cfg(feature = "transparent-inputs")]
     ShieldingRequiresShieldedRecipient,
+    /// A transparent change output carries an explicit recipient address that is not the
+    /// address of any of the transparent inputs of the same proposal step.
+    #[cfg(feature = "transparent-inputs")]
+    TransparentChangeRecipientMismatch(TransparentAddress),
     /// The transaction version requested is not compatible with the consensus branch for which the
     /// transaction is intended.
     IncompatibleTxVersion(BranchId),
@@ -186,6 +192,11 @@ impl Display for ProposalError {
             ProposalError::ShieldingRequiresShieldedRecipient => write!(
                 f,
                 "A shielding proposal's destination must have a shielded receiver."
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalError::TransparentChangeRecipientMismatch(addr) => write!(
+                f,
+                "Transparent change may only be returned to an address that funds the transparent inputs of the same step (got {addr:?})."
             ),
             #[cfg(feature = "orchard")]
             ProposalError::OrchardPoolValueCreation {
@@ -647,6 +658,19 @@ impl<NoteRef> Step<NoteRef> {
                 || request_total > Zatoshis::ZERO)
         {
             return Err(ProposalError::ShieldingInvalid);
+        }
+
+        // Transparent change carrying an explicit recipient may only be returned to an
+        // address that funded the transparent inputs of this step.
+        #[cfg(feature = "transparent-inputs")]
+        for cv in balance.proposed_change() {
+            if let Some(addr) = cv.transparent_recipient()
+                && !transparent_inputs
+                    .iter()
+                    .any(|i| i.recipient_address() == addr)
+            {
+                return Err(ProposalError::TransparentChangeRecipientMismatch(*addr));
+            }
         }
 
         // After Ironwood activation, the Orchard turnstile only permits value to leave
@@ -1119,6 +1143,88 @@ mod tests {
                 false,
             ),
             Ok(step) if step.anchor_height().is_none()
+        );
+    }
+
+    /// A transparent change output carrying an explicit recipient address (e.g. to return
+    /// change to the P2SH address that funded a step's transparent inputs) may only name an
+    /// address that actually funds one of that step's transparent inputs. This is a safety
+    /// property: proposals may arrive via untrusted deserialization, and change must never be
+    /// redirected to an arbitrary address.
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn transparent_change_recipient_must_fund_step_inputs() {
+        use ::transparent::{
+            address::TransparentAddress,
+            bundle::{OutPoint, TxOut},
+        };
+
+        use crate::wallet::WalletTransparentOutput;
+
+        let funding_addr = TransparentAddress::ScriptHash([7u8; 20]);
+        let other_addr = TransparentAddress::ScriptHash([9u8; 20]);
+
+        let input = WalletTransparentOutput::<()>::from_parts(
+            OutPoint::fake(),
+            TxOut::new(
+                Zatoshis::const_from_u64(60_000),
+                funding_addr.script().into(),
+            ),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("valid P2SH output");
+
+        // Negative case: the change recipient does not match the funding address of any
+        // transparent input of the step.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![input.clone()],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(
+                    vec![ChangeValue::transparent_to_address(
+                        Zatoshis::const_from_u64(50_000),
+                        other_addr,
+                    )],
+                    Zatoshis::const_from_u64(10_000),
+                )
+                .unwrap(),
+                false,
+                false,
+            ),
+            Err(ProposalError::TransparentChangeRecipientMismatch(a)) if a == other_addr
+        );
+
+        // Positive case: the same setup, but the change recipient matches the funding
+        // address of the step's transparent input, so construction succeeds.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![input],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(
+                    vec![ChangeValue::transparent_to_address(
+                        Zatoshis::const_from_u64(50_000),
+                        funding_addr,
+                    )],
+                    Zatoshis::const_from_u64(10_000),
+                )
+                .unwrap(),
+                false,
+                false,
+            ),
+            Ok(_)
         );
     }
 
