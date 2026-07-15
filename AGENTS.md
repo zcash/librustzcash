@@ -78,8 +78,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## Crate Architecture
 
-See `README.md` for the full dependency graph (Mermaid diagram). Below is a text summary
-since LLMs cannot render diagrams.
+See `README.md` for the full dependency graph (Mermaid diagram). Below is a text summary,
+since Mermaid layout is hard to reason about in plain text.
 
 ### Zcash Protocol
 
@@ -124,7 +124,9 @@ since LLMs cannot render diagrams.
 
 - Dependencies flow **downward**: higher-level crates depend on lower-level ones, never
   the reverse.
-- `zcash_protocol` is the lowest layer in this repo — most crates depend on it.
+- `zcash_protocol` is the lowest layer with Zcash-domain semantics — most crates depend
+  on it. The standalone utility crates (`zcash_encoding`, `equihash`, `f4jumble`) sit
+  below it, and `eip681` stands alone with no in-repo dependencies.
 - `zcash_client_sqlite` sits at the top, depending on `zcash_client_backend`.
 
 ## Build & Test Commands
