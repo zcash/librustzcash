@@ -1,0 +1,31 @@
+[package]
+name = "zcash_ironwood_migration_backend"
+description = "Backend-agnostic Orchard to Ironwood value-pool migration engine for Zcash wallets"
+version = "0.1.0"
+authors = [
+    "Danny Willems <be.danny.willems@gmail.com>",
+    "John Boyd <john@coldnoise.net>",
+    "Michal Fousek <michal.fousek@chlup.info>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+zcash_protocol.workspace = true
+
+proptest = { workspace = true, optional = true }
+
+[features]
+## Exposes the `types::testing` proptest strategies.
+test-dependencies = ["dep:proptest", "zcash_protocol/test-dependencies"]
+
+[lints]
+workspace = true
