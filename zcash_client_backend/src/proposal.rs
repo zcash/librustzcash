@@ -1146,88 +1146,6 @@ mod tests {
         );
     }
 
-    /// A transparent change output carrying an explicit recipient address (e.g. to return
-    /// change to the P2SH address that funded a step's transparent inputs) may only name an
-    /// address that actually funds one of that step's transparent inputs. This is a safety
-    /// property: proposals may arrive via untrusted deserialization, and change must never be
-    /// redirected to an arbitrary address.
-    #[test]
-    #[cfg(feature = "transparent-inputs")]
-    fn transparent_change_recipient_must_fund_step_inputs() {
-        use ::transparent::{
-            address::TransparentAddress,
-            bundle::{OutPoint, TxOut},
-        };
-
-        use crate::wallet::WalletTransparentOutput;
-
-        let funding_addr = TransparentAddress::ScriptHash([7u8; 20]);
-        let other_addr = TransparentAddress::ScriptHash([9u8; 20]);
-
-        let input = WalletTransparentOutput::<()>::from_parts(
-            OutPoint::fake(),
-            TxOut::new(
-                Zatoshis::const_from_u64(60_000),
-                funding_addr.script().into(),
-            ),
-            None,
-            None,
-            None,
-            None,
-        )
-        .expect("valid P2SH output");
-
-        // Negative case: the change recipient does not match the funding address of any
-        // transparent input of the step.
-        assert_matches!(
-            Step::from_parts(
-                &[],
-                TransactionRequest::empty(),
-                BTreeMap::new(),
-                vec![input.clone()],
-                None::<ShieldedInputs<u32>>,
-                None,
-                vec![],
-                TransactionBalance::new(
-                    vec![ChangeValue::transparent_to_address(
-                        Zatoshis::const_from_u64(50_000),
-                        other_addr,
-                    )],
-                    Zatoshis::const_from_u64(10_000),
-                )
-                .unwrap(),
-                false,
-                false,
-            ),
-            Err(ProposalError::TransparentChangeRecipientMismatch(a)) if a == other_addr
-        );
-
-        // Positive case: the same setup, but the change recipient matches the funding
-        // address of the step's transparent input, so construction succeeds.
-        assert_matches!(
-            Step::from_parts(
-                &[],
-                TransactionRequest::empty(),
-                BTreeMap::new(),
-                vec![input],
-                None::<ShieldedInputs<u32>>,
-                None,
-                vec![],
-                TransactionBalance::new(
-                    vec![ChangeValue::transparent_to_address(
-                        Zatoshis::const_from_u64(50_000),
-                        funding_addr,
-                    )],
-                    Zatoshis::const_from_u64(10_000),
-                )
-                .unwrap(),
-                false,
-                false,
-            ),
-            Ok(_)
-        );
-    }
-
     /// Proposal construction conserves value: the total output value of a step (payments +
     /// change + fee) may never exceed its total input value. A step whose outputs exceed its
     /// inputs is rejected with [`ProposalError::BalanceError`] rather than being constructed.
@@ -1909,5 +1827,99 @@ mod tests {
                 n_ironwood + m_ironwood
             );
         }
+    }
+}
+
+#[cfg(all(test, feature = "transparent-inputs"))]
+mod transparent_tests {
+    use std::collections::BTreeMap;
+
+    use ::transparent::{
+        address::TransparentAddress,
+        bundle::{OutPoint, TxOut},
+    };
+    use zcash_protocol::value::Zatoshis;
+    use zip321::TransactionRequest;
+
+    use super::{ProposalError, ShieldedInputs, Step};
+    use crate::{
+        fees::{ChangeValue, TransactionBalance},
+        wallet::WalletTransparentOutput,
+    };
+
+    /// A transparent change output carrying an explicit recipient address (e.g. to return
+    /// change to the P2SH address that funded a step's transparent inputs) may only name an
+    /// address that actually funds one of that step's transparent inputs. This is a safety
+    /// property: proposals may arrive via untrusted deserialization, and change must never be
+    /// redirected to an arbitrary address.
+    #[test]
+    fn transparent_change_recipient_must_fund_step_inputs() {
+        let funding_addr = TransparentAddress::ScriptHash([7u8; 20]);
+        let other_addr = TransparentAddress::ScriptHash([9u8; 20]);
+
+        let input = WalletTransparentOutput::<()>::from_parts(
+            OutPoint::fake(),
+            TxOut::new(
+                Zatoshis::const_from_u64(60_000),
+                funding_addr.script().into(),
+            ),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("valid P2SH output");
+
+        // Negative case: the change recipient does not match the funding address of any
+        // transparent input of the step.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![input.clone()],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(
+                    vec![ChangeValue::transparent_to_address(
+                        Zatoshis::const_from_u64(50_000),
+                        other_addr,
+                    )],
+                    Zatoshis::const_from_u64(10_000),
+                )
+                .unwrap(),
+                false,
+                #[cfg(feature = "orchard")]
+                false,
+            ),
+            Err(ProposalError::TransparentChangeRecipientMismatch(a)) if a == other_addr
+        );
+
+        // Positive case: the same setup, but the change recipient matches the funding
+        // address of the step's transparent input, so construction succeeds.
+        assert_matches!(
+            Step::from_parts(
+                &[],
+                TransactionRequest::empty(),
+                BTreeMap::new(),
+                vec![input],
+                None::<ShieldedInputs<u32>>,
+                None,
+                vec![],
+                TransactionBalance::new(
+                    vec![ChangeValue::transparent_to_address(
+                        Zatoshis::const_from_u64(50_000),
+                        funding_addr,
+                    )],
+                    Zatoshis::const_from_u64(10_000),
+                )
+                .unwrap(),
+                false,
+                #[cfg(feature = "orchard")]
+                false,
+            ),
+            Ok(_)
+        );
     }
 }
