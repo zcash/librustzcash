@@ -1975,9 +1975,10 @@ where
                 }
             }
             PoolType::Transparent => {
-                // Transparent change outputs (both ephemeral outputs used in multi-step
-                // proposals and non-ephemeral change sent to internal-scope addresses)
-                // are added to the transaction below, after address reservation.
+                // Transparent change outputs (ephemeral outputs used in multi-step
+                // proposals, non-ephemeral change sent to freshly-reserved internal-scope
+                // addresses, and non-ephemeral change returned to an explicit recipient
+                // address) are added to the transaction below.
                 #[cfg(not(feature = "transparent-inputs"))]
                 return Err(Error::UnsupportedChangeType(output_pool));
             }
