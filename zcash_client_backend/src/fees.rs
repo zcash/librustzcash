@@ -339,6 +339,16 @@ pub enum ChangeError<E, NoteRefT> {
         #[cfg(feature = "orchard")]
         ironwood: Vec<NoteRefT>,
     },
+    /// The change strategy is configured to return transparent change to the transparent pool,
+    /// but the transparent inputs of the transaction include coins funded via P2SH and do not
+    /// all share a single originating address, so no unambiguous address exists to which the
+    /// change may be returned.
+    #[cfg(feature = "transparent-inputs")]
+    TransparentChangeDestinationAmbiguous {
+        /// The distinct addresses that funded the transparent inputs provided to change
+        /// selection.
+        input_addresses: Vec<TransparentAddress>,
+    },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
     /// The proposed bundle structure would violate bundle type construction rules.
@@ -376,6 +386,17 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                     f,
                     "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.",
                     transparent.len() + sapling.len() + orchard_len,
+                )
+            }
+            #[cfg(feature = "transparent-inputs")]
+            ChangeError::TransparentChangeDestinationAmbiguous { input_addresses } => {
+                // We can't render the addresses to their string representations because we
+                // don't have network parameters here, so we use their `Debug` formatting.
+                write!(
+                    f,
+                    "Transparent change cannot be returned to a single originating address: \
+                     the transparent inputs were funded by {} distinct addresses ({input_addresses:?}).",
+                    input_addresses.len(),
                 )
             }
             ChangeError::StrategyError(err) => {

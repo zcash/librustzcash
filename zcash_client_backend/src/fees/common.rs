@@ -22,6 +22,10 @@ use super::{
 use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::address::{Script, TransparentAddress};
+#[cfg(feature = "transparent-inputs")]
+use zcash_script::script;
 
 pub(crate) struct NetFlows {
     t_in: Zatoshis,
@@ -278,6 +282,42 @@ impl<'a, P, F> SinglePoolBalanceConfig<'a, P, F> {
     }
 }
 
+/// Determines the destination for transparent change, when transparent change is to be
+/// produced.
+///
+/// Returns `Ok(None)` if no transparent input was funded via P2SH (change should be sent to
+/// an internal-scope address of the wallet), `Ok(Some(addr))` if every transparent input was
+/// funded by the single P2SH address `addr` (change should be returned to that address), and
+/// `Err(input_addresses)` if P2SH-funded inputs are present but the inputs do not all share a
+/// single originating address.
+#[cfg(feature = "transparent-inputs")]
+fn transparent_change_destination(
+    transparent_inputs: &[impl transparent::InputView],
+) -> Result<Option<TransparentAddress>, Vec<TransparentAddress>> {
+    let mut input_addresses: Vec<Option<TransparentAddress>> = vec![];
+    for i in transparent_inputs {
+        let addr = script::PubKey::parse(&i.coin().script_pubkey().0)
+            .ok()
+            .as_ref()
+            .and_then(TransparentAddress::from_script_pubkey);
+        if !input_addresses.contains(&addr) {
+            input_addresses.push(addr);
+        }
+    }
+
+    let has_p2sh = input_addresses
+        .iter()
+        .any(|a| matches!(a, Some(TransparentAddress::ScriptHash(_))));
+    if !has_p2sh {
+        Ok(None)
+    } else {
+        match &input_addresses[..] {
+            [Some(addr)] => Ok(Some(*addr)),
+            _ => Err(input_addresses.iter().flatten().copied().collect()),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clone, F: FeeRule, E>(
     cfg: SinglePoolBalanceConfig<P, F>,
@@ -330,6 +370,17 @@ where
         && cfg.transparent_change_policy == TransparentChangePolicy::TransparentChangeAllowed;
     #[cfg(not(feature = "transparent-inputs"))]
     let wants_transparent_change = false;
+
+    // When transparent change is to be produced, determine the address to which it should be
+    // returned. Resolution failure (ambiguous P2SH sources) is deferred: it only matters if a
+    // non-zero change output actually has to be emitted, so the error is raised lazily at
+    // emission rather than here.
+    #[cfg(feature = "transparent-inputs")]
+    let change_destination = if wants_transparent_change {
+        transparent_change_destination(transparent_inputs)
+    } else {
+        Ok(None)
+    };
 
     let total_in = net_flows
         .total_in()
@@ -415,6 +466,21 @@ where
                 .and_then(|b| b.ephemeral_output_amount())
                 .map(|_| P2PKH_STANDARD_OUTPUT_SIZE),
         );
+
+    // The serialized size of the transparent change output, when change is to be returned to
+    // the transparent pool. When the change destination resolves to a single P2SH source
+    // address, the true `TxOut` size for that address's script is used; otherwise (an
+    // internal-scope P2PKH change address, or an unresolved/ambiguous destination) the
+    // standard P2PKH size is used. The P2PKH size is an upper bound on the size of any change
+    // output this function will produce, so the fee computed with it remains valid.
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_change_output_size =
+        wants_transparent_change.then(|| match &change_destination {
+            Ok(Some(addr)) => 8 + Script::from(addr.script()).serialized_size(),
+            _ => P2PKH_STANDARD_OUTPUT_SIZE,
+        });
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_change_output_size: Option<usize> = None;
 
     // Once we calculate the balance with minimum fee (i.e. with no change),
     // there are three cases:
@@ -565,9 +631,9 @@ where
                         transparent_input_sizes.clone(),
                         transparent_output_sizes
                             .clone()
-                            // Count the standard size of the P2PKH change output when change is
-                            // to be returned to the transparent pool.
-                            .chain(wants_transparent_change.then_some(P2PKH_STANDARD_OUTPUT_SIZE)),
+                            // Count the size of the transparent change output when change is to
+                            // be returned to the transparent pool.
+                            .chain(transparent_change_output_size),
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
@@ -640,7 +706,7 @@ where
             let simple_case = || {
                 #[cfg(feature = "transparent-inputs")]
                 if wants_transparent_change {
-                    return (
+                    return Ok((
                         if total_change.is_zero() {
                             // A zero-valued transparent output would be unspendable, so we omit
                             // it. Unlike the shielded change case, omitting the output does not
@@ -648,13 +714,30 @@ where
                             // are already publicly visible.
                             vec![]
                         } else {
-                            vec![ChangeValue::transparent(total_change)]
+                            // A non-zero transparent change output must be emitted; the change
+                            // destination must therefore be unambiguous. This is where a failure
+                            // to resolve a single originating address becomes an error, so that
+                            // exact-match (changeless) spends from ambiguous P2SH sources still
+                            // succeed.
+                            let recipient = change_destination.as_ref().map_err(|addrs| {
+                                ChangeError::TransparentChangeDestinationAmbiguous {
+                                    input_addresses: addrs.clone(),
+                                }
+                            })?;
+                            vec![match recipient {
+                                // Return the change to the originating P2SH address.
+                                Some(addr) => {
+                                    ChangeValue::transparent_to_address(total_change, *addr)
+                                }
+                                // Send the change to an internal-scope address of the wallet.
+                                None => ChangeValue::transparent(total_change),
+                            }]
                         },
                         total_fee,
-                    );
+                    ));
                 }
 
-                (
+                Ok((
                     (0usize..split_count)
                         .map(|i| {
                             ChangeValue::shielded(
@@ -673,7 +756,7 @@ where
                         })
                         .collect(),
                     total_fee,
-                )
+                ))
             };
 
             let change_dust_threshold = cfg
@@ -691,7 +774,7 @@ where
                         // * zero-valued notes do not require witness tracking;
                         // * the effect on trial decryption overhead is small.
                         if total_change.is_zero() {
-                            simple_case()
+                            simple_case()?
                         } else {
                             let shortfall =
                                 (change_dust_threshold - total_change).ok_or_else(underflow)?;
@@ -702,7 +785,7 @@ where
                             });
                         }
                     }
-                    DustAction::AllowDustChange => simple_case(),
+                    DustAction::AllowDustChange => simple_case()?,
                     DustAction::AddDustToFee => {
                         // Zero-valued change is also always allowed for this policy, but when
                         // no change memo is given, we might omit the change output instead.
@@ -714,7 +797,7 @@ where
                         if fee_with_dust > reasonable_fee {
                             // Defend against losing money by using AddDustToFee with a too-high
                             // dust threshold.
-                            simple_case()
+                            simple_case()?
                         } else if change_memo.is_some() {
                             (
                                 vec![ChangeValue::shielded(
@@ -730,7 +813,7 @@ where
                     }
                 }
             } else {
-                simple_case()
+                simple_case()?
             }
         }
     };
