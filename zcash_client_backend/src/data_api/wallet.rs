@@ -1198,6 +1198,9 @@ enum TransparentBuildRecipient<AccountId> {
         receiving_account: AccountId,
         ephemeral_address: TransparentAddress,
     },
+    /// Wallet-owned transparent change sent to a wallet-known transparent address: either an
+    /// internal-scope (change) address derived for the account, or the originating address of
+    /// the step's transparent inputs (to which returned-to-source change is sent).
     #[cfg(feature = "transparent-inputs")]
     InternalTransparent {
         receiving_account: AccountId,
@@ -2049,9 +2052,12 @@ where
         }
     }
 
-    // Add any transparent change outputs, sending them to the next available internal-scope
-    // (change) transparent addresses of the account. As with ephemeral addresses above, this
-    // reserves the internal addresses even if transaction construction subsequently fails.
+    // Add any transparent change outputs. Change that carries an explicit recipient is
+    // returned to that address (the originating address of the step's transparent inputs,
+    // validated by `Step::from_parts`); all other transparent change outputs are sent to the
+    // next available internal-scope (change) transparent addresses of the account. As with
+    // ephemeral addresses above, reserving an internal address reserves it even if transaction
+    // construction subsequently fails; returned-to-source change reserves nothing.
     #[cfg(feature = "transparent-inputs")]
     {
         let transparent_change_outputs: Vec<(usize, &ChangeValue)> = proposal_step
@@ -2064,18 +2070,37 @@ where
             })
             .collect();
 
-        if !transparent_change_outputs.is_empty() {
-            let addresses_and_metadata = wallet_db
-                .reserve_next_n_internal_addresses(account_id, transparent_change_outputs.len())
-                .map_err(Error::DataSource)?;
-            assert_eq!(
-                addresses_and_metadata.len(),
-                transparent_change_outputs.len()
-            );
+        let (sourced_change, derived_change): (Vec<_>, Vec<_>) = transparent_change_outputs
+            .into_iter()
+            .partition(|(_, change_value)| change_value.transparent_recipient().is_some());
 
-            for ((change_index, change_value), (change_address, _)) in transparent_change_outputs
-                .iter()
-                .zip(addresses_and_metadata)
+        // Change that carries an explicit recipient is returned directly to that address,
+        // without reserving an internal address.
+        for (change_index, change_value) in sourced_change {
+            let change_address = *change_value
+                .transparent_recipient()
+                .expect("partitioned on transparent_recipient().is_some()");
+            builder.add_transparent_output(&change_address, change_value.value())?;
+            transparent_output_meta.push((
+                TransparentBuildRecipient::InternalTransparent {
+                    receiving_account: account_id,
+                    recipient_address: change_address,
+                },
+                change_address,
+                change_value.value(),
+                StepOutputIndex::Change(change_index),
+            ))
+        }
+
+        // All remaining transparent change is sent to freshly reserved internal-scope addresses.
+        if !derived_change.is_empty() {
+            let addresses_and_metadata = wallet_db
+                .reserve_next_n_internal_addresses(account_id, derived_change.len())
+                .map_err(Error::DataSource)?;
+            assert_eq!(addresses_and_metadata.len(), derived_change.len());
+
+            for ((change_index, change_value), (change_address, _)) in
+                derived_change.iter().zip(addresses_and_metadata)
             {
                 builder.add_transparent_output(&change_address, change_value.value())?;
                 transparent_output_meta.push((
