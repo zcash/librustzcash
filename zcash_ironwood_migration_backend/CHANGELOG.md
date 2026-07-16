@@ -40,3 +40,5 @@ and this library adheres to Rust's notion of
   operations; the engine performs the pure PCZT steps itself. Note references cross the boundary as
   `NoteRef` pairs and builds return an unproven `pczt::Pczt`, so no backend-specific type appears in
   the interface.
+- `state::Phase`, a migration run's fine-grained 14-value phase, with its stable persisted string
+  form (`Phase::as_str` / `Phase::parse`).
