@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::components::orchard::ACTION_SIZE`, the size in
+  bytes of an Orchard action description as encoded in a transaction. It excludes
+  the action's spend authorization signature and its share of the bundle's proof,
+  which are encoded separately, so dividing a size budget by it yields an upper
+  bound on the number of actions that fit within that budget.
+
 ### Changed
 - `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries
   separate `orchard_bundle_type` and `ironwood_bundle_type` fields in place of
