@@ -48,3 +48,10 @@ and this library adheres to Rust's notion of
   return owned rows, single writes mutate one row group, and multi-write operations that must be
   durable all-or-nothing are exposed as `commit_*` methods so each backend makes them atomic itself;
   no storage-backend-specific type appears in the interface.
+- The `MigrationContext<W, S>` engine: the backend-agnostic orchestration the crate is built around,
+  generic over a `WalletMigrationBackend` and a `MigrationStore`. It drives the full migration flow
+  using only the two traits and the pure PCZT pipeline (deciding whether a note split is needed,
+  preparing and staging the note-split PCZT, scheduling and staging the transfer PCZTs, tracking
+  phase and progress, surfacing the next due transfer, refreshing stale or invalid transfers, and
+  recording results), so no wallet- or storage-backend-specific type appears in it. Adds a `uuid`
+  dependency for run identifiers.
