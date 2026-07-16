@@ -47,14 +47,25 @@ runs:
       run: echo "feature=test-dependencies" >> $GITHUB_OUTPUT
       if: inputs.test-dependencies == 'true'
 
-    # `steps.pools.outputs.features` and `steps.test.outputs.feature` cannot
-    # expand into attacker-controllable code because the previous steps only
-    # enable them to have one of two fixed values.
+    # The Ironwood migration engine crate requires the Orchard pool (it migrates
+    # Orchard notes), so it hard-enables `zcash_keys/orchard`. Building it in an
+    # Orchard-disabled configuration forces `zcash_keys/orchard` on while
+    # `zcash_client_backend` is built Orchard-off, which does not compile. Exclude
+    # it from the workspace build whenever Orchard is not enabled.
+    - id: orchard-only-exclude
+      shell: bash
+      run: echo "flag=--exclude zcash_ironwood_migration_backend" >> $GITHUB_OUTPUT
+      if: inputs.orchard-pool != 'true' && inputs.all-pools != 'true' && inputs.all-features != 'true'
+
+    # `steps.pools.outputs.features`, `steps.test.outputs.feature`, and
+    # `steps.orchard-only-exclude.outputs.flag` cannot expand into
+    # attacker-controllable code because the previous steps only enable them to
+    # have one of two fixed values.
     - name: Prepare feature flags # zizmor: ignore[template-injection]
       id: prepare
       shell: bash
       run: >
-        echo "flags=--features '
+        echo "flags=${{ steps.orchard-only-exclude.outputs.flag }} --features '
         bundled-prover
         download-params
         lightwalletd-tonic
