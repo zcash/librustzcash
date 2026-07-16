@@ -11,6 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `WalletDb::get_unspent_ironwood_notes_at_historical_height` returns all Ironwood
+  notes that existed and were unspent at a given height.
 - `WalletDb::transactionally_with_extension` performs wallet operations and writes to
   application-owned extension tables (created via
   `WalletMigrator::with_external_migrations`) atomically within a single database
