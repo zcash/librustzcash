@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `WalletDb::transactionally_with_extension` performs wallet operations and writes to
+  application-owned extension tables (created via
+  `WalletMigrator::with_external_migrations`) atomically within a single database
+  transaction. It provides the closure with an `ExtensionTransaction` handle sharing that
+  transaction.
+- `ExtensionTransaction` is a restricted statement executor whose `execute` and
+  `query_row` methods run each statement under a SQLite authorizer. The authorizer allows
+  reads against any table, allows `INSERT`/`UPDATE`/`DELETE` only against tables whose
+  names begin with the `ext_` prefix reserved for external migrations, and denies
+  everything else (DDL, `PRAGMA`, `ATTACH`/`DETACH`, and transaction control).
+
 ## [0.22.0-rc.1] - 2026-07-12
 
 ### Added
