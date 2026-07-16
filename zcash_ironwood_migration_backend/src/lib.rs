@@ -24,10 +24,12 @@ mod scheduling;
 mod pipeline;
 
 pub mod error;
+pub mod state;
 pub mod types;
 pub mod wallet;
 
 pub use error::{InvalidStateError, MigrationError};
+pub use state::Phase;
 pub use types::{
     AttentionReason, MigrationProgress, MigrationSchedule, MigrationState, NoteSplitProposal,
     PreparedTransfer, Signed, SignedTransferPczt, TransferId, TransferPczt, TransferProposal,
