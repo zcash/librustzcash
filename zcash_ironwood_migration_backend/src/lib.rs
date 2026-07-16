@@ -25,11 +25,16 @@ mod pipeline;
 
 pub mod error;
 pub mod state;
+pub mod store;
 pub mod types;
 pub mod wallet;
 
 pub use error::{InvalidStateError, MigrationError};
 pub use state::Phase;
+pub use store::{
+    MigrationStore, NewRun, NoteSplitTxRow, PreparedNote, RunRow, ScheduledTransferRow, StagedKind,
+    StagedPczt, TransferTotals,
+};
 pub use types::{
     AttentionReason, MigrationProgress, MigrationSchedule, MigrationState, NoteSplitProposal,
     PreparedTransfer, Signed, SignedTransferPczt, TransferId, TransferPczt, TransferProposal,
