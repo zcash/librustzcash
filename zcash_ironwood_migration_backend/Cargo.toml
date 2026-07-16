@@ -32,6 +32,7 @@ pczt = { workspace = true, features = [
 ] }
 rand.workspace = true
 rand_distr.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 
 proptest = { workspace = true, optional = true }
 

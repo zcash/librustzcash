@@ -12,23 +12,21 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 
-// Internal note-split planner, consumed by the note-split and context modules in later slices.
-// Remove the `allow` once a consumer is added.
-#[allow(dead_code)]
+// Internal note-split planner, consumed by the context module.
 mod denominations;
-// Internal transfer scheduler, consumed by the context module in a later slice.
-#[allow(dead_code)]
+// Internal transfer scheduler, consumed by the context module.
 mod scheduling;
-// The pure PCZT pipeline, consumed by the context module in a later slice.
-#[allow(dead_code)]
+// The pure PCZT pipeline, consumed by the context module.
 mod pipeline;
 
+pub mod context;
 pub mod error;
 pub mod state;
 pub mod store;
 pub mod types;
 pub mod wallet;
 
+pub use context::MigrationContext;
 pub use error::{InvalidStateError, MigrationError};
 pub use state::Phase;
 pub use store::{

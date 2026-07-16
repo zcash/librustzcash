@@ -54,16 +54,21 @@ impl DenominationPlan {
     }
 
     /// The fee (in zatoshi) reserved for the note-split ("prep") transaction before decomposition.
+    // Rounds out the plan's read API; the engine does not consume these three yet. Remove the
+    // `allow` once a consumer is added.
+    #[allow(dead_code)]
     pub(crate) fn prep_fee_zatoshi(&self) -> u64 {
         self.prep_fee_zatoshi
     }
 
     /// The total spendable Orchard balance (in zatoshi) this plan decomposes.
+    #[allow(dead_code)]
     pub(crate) fn total_input_zatoshi(&self) -> u64 {
         self.total_input_zatoshi
     }
 
     /// The total value (in zatoshi) that will migrate to Ironwood: the sum of the crossing values.
+    #[allow(dead_code)]
     pub(crate) fn total_migratable_zatoshi(&self) -> u64 {
         self.total_migratable_zatoshi
     }

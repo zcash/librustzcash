@@ -7214,6 +7214,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "rand_distr",
+ "uuid",
  "zcash_keys",
  "zcash_protocol",
 ]

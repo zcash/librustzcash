@@ -4,6 +4,8 @@
 //! ([`Phase::as_str`]), and the 6-value public `MigrationState` is derived from it. The string
 //! values are a stable persisted format.
 
+use crate::types::{AttentionReason, MigrationProgress, MigrationState};
+
 /// A migration run's fine-grained phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -80,5 +82,33 @@ impl Phase {
             "abandoned" => Phase::Abandoned,
             _ => return None,
         })
+    }
+}
+
+/// Maps a run's `phase` to the public [`MigrationState`]. `progress` is carried by the in-progress
+/// phases; `attention` overrides the reason for the attention-requiring phases (defaulting to
+/// [`AttentionReason::TransferExpired`], the common recoverable case).
+pub(crate) fn to_state(
+    phase: Phase,
+    progress: MigrationProgress,
+    attention: Option<AttentionReason>,
+) -> MigrationState {
+    match phase {
+        Phase::NoOrchardFunds
+        | Phase::WaitingForSpendableOrchard
+        | Phase::ReadyToPrepare
+        | Phase::Abandoned => MigrationState::NotStarted,
+        Phase::PreparingDenominations | Phase::WaitingDenomConfirmations => {
+            MigrationState::SplitPendingConfirmation
+        }
+        Phase::ReadyToMigrate => MigrationState::ReadyToPropose,
+        Phase::BroadcastScheduled
+        | Phase::Broadcasting
+        | Phase::WaitingMigrationConfirmations
+        | Phase::Paused => MigrationState::InProgress(progress),
+        Phase::Complete => MigrationState::Complete,
+        Phase::FailedRecoverable | Phase::FailedTerminal => {
+            MigrationState::RequiresAttention(attention.unwrap_or(AttentionReason::TransferExpired))
+        }
     }
 }

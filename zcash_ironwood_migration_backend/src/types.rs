@@ -34,9 +34,20 @@ impl TransferId {
         TransferId(format!("prep:{run_id}"))
     }
 
+    /// Wraps a raw stored id string verbatim (round-tripping a persisted transfer id).
+    pub(crate) fn from_raw(raw: String) -> Self {
+        TransferId(raw)
+    }
+
     /// The underlying id string.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Returns `true` if this is the note-split "prep" transaction's id (i.e. it was built by
+    /// `TransferId::for_prep`), as opposed to an ordinary per-transfer id.
+    pub(crate) fn is_prep(&self) -> bool {
+        self.0.starts_with("prep:")
     }
 }
 
