@@ -25,6 +25,12 @@ memuse::impl_no_dynamic_usage!(BlockHeight);
 /// The height of the genesis block on a network.
 pub const H0: BlockHeight = BlockHeight(0);
 
+/// The target time between blocks, in seconds (the post-Blossom target spacing).
+pub const SECONDS_PER_BLOCK: u32 = 75;
+
+/// The approximate number of blocks produced per hour at [`SECONDS_PER_BLOCK`].
+pub const BLOCKS_PER_HOUR: u32 = 3600 / SECONDS_PER_BLOCK;
+
 impl BlockHeight {
     pub const fn from_u32(v: u32) -> BlockHeight {
         BlockHeight(v)
