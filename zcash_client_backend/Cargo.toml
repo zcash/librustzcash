@@ -247,26 +247,37 @@ sync-decryptor = [
     "tokio?/tracing",
 ]
 
-## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
-## operations.
-tor = [
-    "dep:arti-client",
+## Exposes the backend-agnostic network-privacy layer (`zcash_client_backend::privacy`):
+## the `PrivateNetwork` trait, its object-safe `DynPrivateNetwork` mirror, and the HTTP,
+## gRPC, and exchange-rate helpers generalized over it. Backends (such as the `tor`
+## feature, or an out-of-tree dVPN or mixnet backend) build on this layer.
+lightwalletd-privacy = [
     "dep:dynosaur",
-    "dep:fs-mistrust",
     "dep:futures-util",
     "dep:http-body-util",
     "dep:hyper",
     "dep:hyper-util",
+    "hyper-util?/tokio",
     "dep:rand",
     "dep:rust_decimal",
     "dep:serde",
     "dep:serde_json",
     "dep:tokio",
+    "tokio?/rt",
     "dep:tokio-rustls",
-    "dep:tor-rtcompat",
-    "dep:trait-variant",
     "dep:tower",
+    "dep:trait-variant",
     "dep:webpki-roots",
+]
+
+## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
+## operations.
+tor = [
+    "lightwalletd-privacy",
+    "dep:arti-client",
+    "dep:fs-mistrust",
+    "dep:tor-rtcompat",
+    "tokio?/fs",
 ]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
