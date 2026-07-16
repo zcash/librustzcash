@@ -3074,25 +3074,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
         )
     }
 
-    /// Returns all Ironwood notes received at or before `height`
-    /// and unspent as of that height, for the given account.
+    /// Returns every Ironwood note received by `height` that was unspent at that height.
     ///
-    /// Unlike [`InputSource::select_unspent_notes`] (which applies confirmation,
-    /// dust, and expiry filters for transaction construction), this returns every
-    /// note that existed and was unspent at the given height.
-    ///
-    /// This function does not verify that a Merkle witness can be constructed
-    /// for each returned note at `height`. Witness construction is a separate
-    /// concern intended to be handled by the caller. The companion
-    /// [`Self::generate_ironwood_witnesses_at_historical_height`] method returns an
-    /// actionable error for any position the wallet cannot witness at `height`
-    /// (for example, because the wallet has not synced through `height`, the
-    /// checkpoint was pruned, or the position does not belong to the wallet).
+    /// This does not apply transaction construction filters or check witness availability.
+    /// Use [`Self::generate_ironwood_witnesses_at_historical_height`] to check the latter.
     ///
     /// # Errors
     ///
-    /// Returns an error if the database query fails or a selected note cannot be
-    /// reconstructed from the stored data.
+    /// Returns an error if the query fails or a note cannot be reconstructed.
     pub fn get_unspent_ironwood_notes_at_historical_height(
         &self,
         account: AccountUuid,

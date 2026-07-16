@@ -230,6 +230,29 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     )
 }
 
+/// Return all Orchard notes that were received at or before `height`
+/// and unspent as of `height`, for the given account.
+///
+/// Unlike `select_spendable_notes` (which applies confirmation, dust, and
+/// expiry filters for transaction construction), this returns every note
+/// that existed and was unspent at the given height.
+///
+/// Height filtering uses `transactions.mined_height`, not `transactions.block`.
+/// A transaction is considered to have occurred at its mined height as soon
+/// as the wallet learns of that height (for example, from transparent UTXO
+/// retrieval), even if the containing compact block has not been fully
+/// scanned. In practice the two columns are equivalent for the notes this
+/// query can return, because `nf IS NOT NULL` and
+/// `commitment_tree_position IS NOT NULL` already require a scan of the
+/// block that contains the receiving transaction.
+///
+/// This function does not verify that a Merkle witness can be constructed
+/// for each returned note at `height`. Witness construction is a separate
+/// concern intended to be handled by the callers. As an example, a companion
+/// `WalletDb::generate_orchard_witnesses_at_historical_height` returns an
+/// actionable error for any position the wallet cannot witness at `height`
+/// (for example, because the wallet has not synced through `height`, the checkpoint was pruned,
+/// or the position does not belong to the wallet).
 pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -260,22 +283,6 @@ pub(crate) fn get_unspent_ironwood_notes_at_historical_height<P: consensus::Para
     )
 }
 
-/// Returns all notes from the selected Orchard-shaped pool that were received at or before
-/// `height` and unspent as of `height`, for the given account.
-///
-/// Unlike `select_spendable_notes` (which applies confirmation, dust, and expiry filters for
-/// transaction construction), this returns every note that existed and was unspent at the given
-/// height.
-///
-/// Height filtering uses `transactions.mined_height`, not `transactions.block`. A transaction is
-/// considered to have occurred at its mined height as soon as the wallet learns of that height
-/// (for example, from transparent UTXO retrieval), even if the containing compact block has not
-/// been fully scanned. In practice the two columns are equivalent for the notes this query can
-/// return, because `nf IS NOT NULL` and `commitment_tree_position IS NOT NULL` already require a
-/// scan of the block that contains the receiving transaction.
-///
-/// This function does not verify that a Merkle witness can be constructed for each returned note
-/// at `height`. Witness construction is a separate concern intended to be handled by the caller.
 fn get_unspent_orchard_shaped_notes_at_historical_height<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -1597,20 +1604,18 @@ pub(crate) mod tests {
         let account = st.test_account().cloned().unwrap();
         let dfvk = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
 
-        // Receive an Ironwood note at h1.
         let value = Zatoshis::const_from_u64(50000);
         let (h1, _, nf) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         assert_eq!(h1, activation);
         st.scan_cached_blocks(h1, 1);
 
-        // Spend that note at h2, producing Ironwood change back to the account.
+        // Use Sapling so the only wallet-owned output is Ironwood change.
         let not_our_key = SaplingPoolTester::sk_to_fvk(&SaplingPoolTester::sk(&[0xf5; 32]));
         let to = SaplingPoolTester::fvk_default_address(&not_our_key);
         let spend_value = Zatoshis::const_from_u64(20000);
         let (h2, _) = st.generate_next_block_spending(&dfvk, (nf, value), to, spend_value);
         st.scan_cached_blocks(h2, 1);
 
-        // Receive another Ironwood note at h3.
         let value3 = Zatoshis::const_from_u64(70000);
         let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value3);
         st.scan_cached_blocks(h3, 1);
@@ -1654,7 +1659,6 @@ pub(crate) mod tests {
                 && note.note().version() == NoteVersion::V3
         }));
 
-        // The same account has no notes in the distinct Orchard pool.
         assert!(
             db.get_unspent_orchard_notes_at_historical_height(account.id(), h3)
                 .unwrap()
