@@ -19,6 +19,9 @@ mod scheduling;
 // The pure PCZT pipeline, consumed by the context module.
 mod pipeline;
 
+// Pure PCZT construction from plain-data ingredients; consumed by a wallet backend once it supplies
+// the notes, witnesses, anchor, and recipient (see the module docs).
+pub mod build;
 pub mod context;
 pub mod error;
 pub mod state;

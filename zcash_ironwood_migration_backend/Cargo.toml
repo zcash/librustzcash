@@ -25,11 +25,13 @@ zcash_protocol.workspace = true
 
 orchard.workspace = true
 pczt = { workspace = true, features = [
+    "io-finalizer",
     "orchard",
     "prover",
     "signer",
     "spend-finalizer",
     "tx-extractor",
+    "zcp-builder",
 ] }
 rand.workspace = true
 rand_core.workspace = true
