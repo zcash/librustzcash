@@ -957,10 +957,14 @@ mod tests {
         value::NoteValue,
     };
     use proptest::prelude::*;
-    use zcash_primitives::transaction::{TxId, components::orchard::bundle_version_for_branch};
+    use zcash_primitives::transaction::{
+        TxId,
+        components::orchard::{ACTION_SIZE, bundle_version_for_branch},
+    };
     use zcash_protocol::{
         PoolType, ShieldedPool,
         consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        constants::MAX_BLOCK_BYTES,
         value::Zatoshis,
     };
     use zip321::TransactionRequest;
@@ -1068,7 +1072,7 @@ mod tests {
                 TransactionRequest::empty(),
                 BTreeMap::new(),
                 vec![],
-                shielded_inputs_for(orchard_and_ironwood_notes(1, 0)),
+                shielded_inputs_for(orchard_and_ironwood_notes((1, 10_000), (0, 0))),
                 None,
                 vec![],
                 TransactionBalance::new(vec![], Zatoshis::const_from_u64(10_000)).unwrap(),
@@ -1130,7 +1134,7 @@ mod tests {
         // not the turnstile, is what rejects this.)
         assert_matches!(
             validated_step(
-                orchard_and_ironwood_notes(1, 0),
+                orchard_and_ironwood_notes((1, 10_000), (0, 0)),
                 TransactionBalance::new(
                     vec![shielded_change(ShieldedPool::Orchard, 8_000)],
                     Zatoshis::const_from_u64(4_000),
@@ -1150,7 +1154,7 @@ mod tests {
         // constraint.
         assert_matches!(
             validated_step(
-                orchard_and_ironwood_notes(1, 0),
+                orchard_and_ironwood_notes((1, 10_000), (0, 0)),
                 TransactionBalance::new(
                     vec![shielded_change(ShieldedPool::Orchard, 6_000)],
                     Zatoshis::const_from_u64(4_000),
@@ -1168,7 +1172,7 @@ mod tests {
         // than the step's Orchard inputs remove: 6_000 change < 10_000 input.
         assert_matches!(
             validated_step(
-                orchard_and_ironwood_notes(1, 0),
+                orchard_and_ironwood_notes((1, 10_000), (0, 0)),
                 TransactionBalance::new(
                     vec![shielded_change(ShieldedPool::Orchard, 6_000)],
                     Zatoshis::const_from_u64(4_000),
@@ -1183,7 +1187,7 @@ mod tests {
         // pool balance unchanged, which the turnstile forbids.
         assert_matches!(
             validated_step(
-                orchard_and_ironwood_notes(1, 1),
+                orchard_and_ironwood_notes((1, 10_000), (1, 20_000)),
                 TransactionBalance::new(
                     vec![
                         shielded_change(ShieldedPool::Orchard, 10_000),
@@ -1205,7 +1209,7 @@ mod tests {
         // change at all.
         assert_matches!(
             validated_step(
-                orchard_and_ironwood_notes(0, 1),
+                orchard_and_ironwood_notes((0, 0), (1, 20_000)),
                 TransactionBalance::new(
                     vec![shielded_change(ShieldedPool::Orchard, 16_000)],
                     Zatoshis::const_from_u64(4_000),
@@ -1224,7 +1228,7 @@ mod tests {
         // valid.
         assert_matches!(
             validated_step(
-                orchard_and_ironwood_notes(0, 1),
+                orchard_and_ironwood_notes((0, 0), (1, 20_000)),
                 TransactionBalance::new(
                     vec![shielded_change(ShieldedPool::Orchard, 16_000)],
                     Zatoshis::const_from_u64(4_000),
@@ -1268,7 +1272,7 @@ mod tests {
             request,
             BTreeMap::from([(0usize, pool)]),
             vec![],
-            shielded_inputs_for(orchard_and_ironwood_notes(1, 0)),
+            shielded_inputs_for(orchard_and_ironwood_notes((1, 10_000), (0, 0))),
             Some(BlockHeight::from_u32(100)),
             vec![],
             TransactionBalance::new(vec![], Zatoshis::const_from_u64(4_000)).unwrap(),
@@ -1295,22 +1299,64 @@ mod tests {
         let _ = orchard_payment_step(PoolType::ORCHARD, true);
     }
 
-    // Builds `n` version-2 (Orchard) notes followed by `m` version-3 (Ironwood) notes.
-    fn orchard_and_ironwood_notes(n: usize, m: usize) -> Vec<Note> {
+    // Builds `orchard.0` version-2 (Orchard) notes of value `orchard.1`, followed by `ironwood.0`
+    // version-3 (Ironwood) notes of value `ironwood.1`.
+    //
+    // Every note of a given pool is identical, so each is derived once and cloned: deriving a full
+    // viewing key per note makes the large-transaction cases below cost seconds rather than
+    // milliseconds. Only the count and the pool of each note matter to an action count.
+    fn orchard_and_ironwood_notes(
+        (n, orchard_value): (usize, u64),
+        (m, ironwood_value): (usize, u64),
+    ) -> Vec<Note> {
         let mut notes = Vec::with_capacity(n + m);
-        for _ in 0..n {
-            notes.push(Note::Orchard {
-                note: orchard_note(10_000, NoteVersion::V2).unwrap(),
+        if n > 0 {
+            let note = Note::Orchard {
+                note: orchard_note(orchard_value, NoteVersion::V2).unwrap(),
                 pool: ValuePool::Orchard,
-            });
+            };
+            notes.extend(std::iter::repeat_n(note, n));
         }
-        for _ in 0..m {
-            notes.push(Note::Orchard {
-                note: orchard_note(20_000, NoteVersion::V3).unwrap(),
+        if m > 0 {
+            let note = Note::Orchard {
+                note: orchard_note(ironwood_value, NoteVersion::V3).unwrap(),
                 pool: ValuePool::Ironwood,
-            });
+            };
+            notes.extend(std::iter::repeat_n(note, m));
         }
         notes
+    }
+
+    // Note and change values, spanning a zero-valued note through a large one. An action count is a
+    // function of how many notes and outputs a step has in each pool, never of what they are worth,
+    // so every value here must give the same answer. The upper bound keeps the total value of even
+    // the largest generated step well inside `MAX_MONEY`, so that `TransactionBalance` construction
+    // cannot fail for a reason these tests are not about.
+    fn arb_note_value() -> impl Strategy<Value = u64> {
+        prop_oneof![
+            1 => Just(0u64),
+            8 => 1u64..1_000_000_000,
+        ]
+    }
+
+    // An upper bound on the actions a single bundle can contain on-chain: a transaction may not
+    // exceed a block, and each action costs at least its action description. The true ceiling is
+    // lower, since `ACTION_SIZE` excludes each action's spend authorization signature and the
+    // bundle's proof, but an over-estimate is what these tests want: it exercises counts at least
+    // as large as anything buildable.
+    const MAX_ACTIONS_PER_BUNDLE: usize = MAX_BLOCK_BYTES / ACTION_SIZE;
+
+    // Spend and output counts spanning what a wallet can actually produce: ordinary payments, large
+    // note-consolidation transactions, and bundles at the block ceiling. Each side is capped at
+    // half the ceiling, because from NU6.3 an Orchard spend and an output no longer share an
+    // action, so `spends + outputs` must itself fit. Small counts are weighted heavily: that is
+    // where the padding floor binds, and where real transactions live.
+    fn arb_note_count() -> impl Strategy<Value = usize> {
+        prop_oneof![
+            6 => 0usize..8,
+            2 => 8usize..100,
+            1 => 100usize..=MAX_ACTIONS_PER_BUNDLE / 2,
+        ]
     }
 
     // The network upgrades at which the Orchard pool exists but still permits cross-address
@@ -1374,6 +1420,27 @@ mod tests {
             step.orchard_action_count(required_unpadded, BundleVersion::orchard_v3()),
             Ok(1)
         );
+
+        // A zero floor cannot suppress a required bundle: a bundle must contain at least one
+        // action to exist at all, so the required-but-unpadded-to-zero case still yields one.
+        let required_zero_floor = BundleType::Transactional {
+            bundle_required: true,
+            pad_to_minimum: Some(0),
+        };
+        assert_eq!(
+            step.orchard_action_count(required_zero_floor, BundleVersion::orchard_v3()),
+            Ok(1)
+        );
+
+        // Without `bundle_required`, a zero floor leaves an uninvolved pool with no bundle.
+        let zero_floor = BundleType::Transactional {
+            bundle_required: false,
+            pad_to_minimum: Some(0),
+        };
+        assert_eq!(
+            step.orchard_action_count(zero_floor, BundleVersion::orchard_v3()),
+            Ok(0)
+        );
     }
 
     // The documented error path. A coinbase bundle has spends disabled, so every spend in it must
@@ -1383,7 +1450,7 @@ mod tests {
     // enables both spends and outputs, so no transactional bundle type can reject a step's counts.
     #[test]
     fn spends_cannot_be_charged_to_a_coinbase_bundle() {
-        let step = step_with_notes(orchard_and_ironwood_notes(1, 1));
+        let step = step_with_notes(orchard_and_ironwood_notes((1, 10_000), (1, 20_000)));
         assert_matches!(
             step.orchard_action_count(BundleType::Coinbase, BundleVersion::orchard_v3()),
             Err(_)
@@ -1402,6 +1469,95 @@ mod tests {
         assert_eq!(
             step.ironwood_action_count(BundleType::Coinbase, BundleVersion::ironwood_v3()),
             Ok(1)
+        );
+    }
+
+    // What NU6.3 costs a large transaction depends on its shape, and a wallet estimating fees at
+    // scale has to get the difference right.
+    #[test]
+    fn nu6_3_action_growth_at_scale_depends_on_step_shape() {
+        let balanced = |n| {
+            step_with_notes_and_change(
+                orchard_and_ironwood_notes((n, 10_000), (0, 0)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), n).collect(),
+            )
+        };
+
+        // A consolidation -- sweeping many notes into a single change output -- pays for that
+        // output's fabricated spend and nothing else: one extra action, however large it is.
+        let consolidation = step_with_notes_and_change(
+            orchard_and_ironwood_notes((MAX_ACTIONS_PER_BUNDLE, 10_000), (0, 0)),
+            vec![shielded_change(ShieldedPool::Orchard, 10_000)],
+        );
+        // 2439 actions: the change output rides along in a spend's action, exactly filling a block.
+        assert_eq!(
+            consolidation.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(MAX_ACTIONS_PER_BUNDLE)
+        );
+        // 2440 from NU6.3: one action over the ceiling, so the same sweep no longer fits.
+        assert_eq!(
+            consolidation.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(MAX_ACTIONS_PER_BUNDLE + 1)
+        );
+
+        // A balanced step -- as many outputs as spends -- doubles instead, so the largest one that
+        // fits in a block halves at NU6.3: 2439 spends paired with 2439 outputs before, 1219 of
+        // each after. This is why `arb_note_count` caps each side at half the ceiling.
+        let half = MAX_ACTIONS_PER_BUNDLE / 2;
+        assert_eq!(
+            balanced(MAX_ACTIONS_PER_BUNDLE)
+                .orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(MAX_ACTIONS_PER_BUNDLE)
+        );
+        // 2438: the largest balanced step that still fits.
+        assert_eq!(
+            balanced(half).orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(2 * half)
+        );
+        // 2440: one note more on each side and it does not.
+        assert_eq!(
+            balanced(half + 1)
+                .orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(2 * half + 2)
+        );
+    }
+
+    // A `Step` does not necessarily come from this wallet's own input selection: a proposal crosses
+    // a trust boundary as a serialized message (see `proposal.proto` and
+    // `Proposal::try_into_standard_proposal`), so a step's output and change counts are
+    // attacker-influenced. A step claiming far more outputs than could ever fit on-chain must still
+    // be counted exactly, so that the fee rule is handed an unaffordable action count and rejects
+    // it, rather than a small wrapped-around one it would accept.
+    //
+    // The counts themselves cannot overflow `usize`: each is the length of an in-memory collection,
+    // so reaching `usize::MAX` would require more notes than could be addressed.
+    #[test]
+    fn counts_beyond_the_block_limit_are_counted_exactly() {
+        let spends = 4 * MAX_ACTIONS_PER_BUNDLE;
+        let change = 4 * MAX_ACTIONS_PER_BUNDLE;
+        let step = step_with_notes_and_change(
+            orchard_and_ironwood_notes((spends, 10_000), (0, 0)),
+            std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), change).collect(),
+        );
+
+        // Roughly eight times what a block can hold, reported exactly.
+        assert!(spends + change > 8 * MAX_ACTIONS_PER_BUNDLE - 1);
+        assert_eq!(
+            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(spends + change)
+        );
+
+        // Pre-NU6.3 the same step pairs, so it is charged half as much -- still far past the
+        // ceiling, and still counted exactly.
+        assert_eq!(
+            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(spends.max(change))
+        );
+
+        // Padding a step this size cannot reduce it, and the ZIP 317 floor is irrelevant here.
+        assert_eq!(
+            step.orchard_action_count(BundleType::DEFAULT, BundleVersion::orchard_v3()),
+            Ok(spends + change)
         );
     }
 
@@ -1444,17 +1600,20 @@ mod tests {
         // permits cross-address transfers at every version, so it always pairs.
         #[test]
         fn action_count_pairs_spends_and_outputs_only_when_cross_address_is_permitted(
-            orchard_spends in 0usize..4,
-            ironwood_spends in 0usize..4,
-            orchard_change in 0usize..4,
-            ironwood_change in 0usize..4,
+            orchard_spends in arb_note_count(),
+            ironwood_spends in arb_note_count(),
+            orchard_change in arb_note_count(),
+            ironwood_change in arb_note_count(),
+            orchard_value in arb_note_value(),
+            ironwood_value in arb_note_value(),
+            change_value in arb_note_value(),
         ) {
             let change = std::iter::repeat_n(ShieldedPool::Orchard, orchard_change)
                 .chain(std::iter::repeat_n(ShieldedPool::Ironwood, ironwood_change))
-                .map(|pool| shielded_change(pool, 10_000))
+                .map(|pool| shielded_change(pool, change_value))
                 .collect();
             let step = step_with_notes_and_change(
-                orchard_and_ironwood_notes(orchard_spends, ironwood_spends),
+                orchard_and_ironwood_notes((orchard_spends, orchard_value), (ironwood_spends, ironwood_value)),
                 change,
             );
 
@@ -1496,14 +1655,16 @@ mod tests {
         // whenever a step had both spends and outputs, and so understated the ZIP 317 fee.
         #[test]
         fn orchard_action_count_grows_at_nu6_3_activation_height(
-            spends in 1usize..4,
-            change in 1usize..4,
+            spends in arb_note_count(),
+            change in arb_note_count(),
+            note_value in arb_note_value(),
+            change_value in arb_note_value(),
             pre_nu6_3 in arb_pre_nu6_3_upgrade(),
             nu6_3_or_later in arb_nu6_3_or_later_upgrade(),
         ) {
             let orchard_step = step_with_notes_and_change(
-                orchard_and_ironwood_notes(spends, 0),
-                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), change)
+                orchard_and_ironwood_notes((spends, note_value), (0, 0)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, change_value), change)
                     .collect(),
             );
 
@@ -1531,8 +1692,8 @@ mod tests {
             // The Ironwood pool retains cross-address transfers, so an equivalent Ironwood step
             // still pairs at a post-NU6.3 height.
             let ironwood_step = step_with_notes_and_change(
-                orchard_and_ironwood_notes(0, spends),
-                std::iter::repeat_n(shielded_change(ShieldedPool::Ironwood, 10_000), change)
+                orchard_and_ironwood_notes((0, 0), (spends, note_value)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Ironwood, change_value), change)
                     .collect(),
             );
             prop_assert_eq!(
@@ -1546,17 +1707,21 @@ mod tests {
 
         // A non-empty bundle is charged the greater of the actions it requests and the bundle
         // type's padding floor: padding never reduces the count, and the floor is never
-        // undershot. `DEFAULT` (floor 2) and `UNPADDED` (floor 1) are the two floors the
-        // wallet itself uses; this covers the range.
+        // undershot. A bundle that requests nothing is not produced at all, so it is charged
+        // nothing however high the floor. `DEFAULT` (floor 2) and `UNPADDED` (floor 1) are the
+        // floors the wallet itself uses; the whole `u8` range is covered here, including the
+        // degenerate zero floor, since the bundle type is the caller's to choose.
         #[test]
         fn action_count_is_never_below_the_bundle_types_padding_floor(
-            spends in 1usize..4,
-            change in 1usize..4,
-            pad_to_minimum in 1u8..8,
+            spends in arb_note_count(),
+            change in arb_note_count(),
+            note_value in arb_note_value(),
+            change_value in arb_note_value(),
+            pad_to_minimum in 0u8..=u8::MAX,
         ) {
             let step = step_with_notes_and_change(
-                orchard_and_ironwood_notes(spends, 0),
-                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), change)
+                orchard_and_ironwood_notes((spends, note_value), (0, 0)),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, change_value), change)
                     .collect(),
             );
             let bundle_type = BundleType::Transactional {
@@ -1564,9 +1729,16 @@ mod tests {
                 pad_to_minimum: Some(pad_to_minimum),
             };
 
+            // Post-NU6.3, so the requested count is `spends + change`.
+            let requested = spends + change;
+            let expected = if requested == 0 {
+                0
+            } else {
+                requested.max(usize::from(pad_to_minimum))
+            };
             prop_assert_eq!(
                 step.orchard_action_count(bundle_type, BundleVersion::orchard_v3()),
-                Ok((spends + change).max(usize::from(pad_to_minimum)))
+                Ok(expected)
             );
         }
 
@@ -1600,7 +1772,7 @@ mod tests {
             m_orchard in 0usize..5,
             m_ironwood in 0usize..5,
         ) {
-            let step1 = step_with_notes(orchard_and_ironwood_notes(n_orchard, n_ironwood));
+            let step1 = step_with_notes(orchard_and_ironwood_notes((n_orchard, 10_000), (n_ironwood, 20_000)));
             prop_assert_eq!(step1.input_count_in_pool(PoolType::SAPLING), 0);
             prop_assert_eq!(step1.input_count_in_pool(PoolType::ORCHARD), n_orchard);
             prop_assert_eq!(step1.input_count_in_pool(PoolType::IRONWOOD), n_ironwood);
@@ -1613,7 +1785,7 @@ mod tests {
                 );
             }
 
-            let step2 = step_with_notes(orchard_and_ironwood_notes(m_orchard, m_ironwood));
+            let step2 = step_with_notes(orchard_and_ironwood_notes((m_orchard, 10_000), (m_ironwood, 20_000)));
             let proposal = Proposal::<(), u32> {
                 fee_rule: (),
                 min_target_height: TargetHeight::from(100u32),
