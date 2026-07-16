@@ -30,3 +30,15 @@ and this library adheres to Rust's notion of
   provided), and the maximum denomination, dust floor, and note cap are strategy parameters.
   `plan_note_split` is a convenience wrapper over the recommended `RandomizedOneTwoFive`. Depends on
   `zcash_protocol`, `zcash_primitives`, and `rand_core`.
+- The pure PCZT split builder (the `build` module, behind the `orchard` feature):
+  `build_split_pczt` (and `build_split_pczt_for_plan`, which reads a `NoteSplitPlan`'s
+  `migration_outputs`) turn the split plan plus the cryptographic ingredients a wallet supplies (the
+  spendable Orchard notes and their witnesses, the anchor, the full viewing key) into an unproven
+  `pczt::Pczt` for the same-pool send-to-self that mints the self-funding notes, plus a `SplitOutputs`
+  mapping each output to its real Orchard action index. It is pure (no database or wallet-backend
+  access) and takes the RNG as a parameter. `finalize_split_outputs` keeps each migration note at its
+  exact planned value and reconciles the real ZIP-317 fee against the plan by adding a plain change
+  output (or, for a sub-action-fee leftover, folding it into the fee). Only the note split (Phase 1)
+  is built here; the value crossing is left for later, and the shared transaction-builder plumbing is
+  factored so that phase can reuse it. Adds optional `orchard` and `pczt` dependencies, enabled only
+  by the feature.
