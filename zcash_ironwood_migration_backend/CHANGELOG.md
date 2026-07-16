@@ -34,3 +34,9 @@ and this library adheres to Rust's notion of
   proving key): the pure steps the engine drives a built PCZT through, needing only `pczt` /
   `orchard` / `zcash_keys` and no wallet backend. This adds those shielded-protocol dependencies to
   the crate.
+- The `wallet::WalletMigrationBackend` trait, the backend-agnostic wallet interface the migration
+  engine is generic over, plus its plain-data types (`PoolBalances`, `NoteRef`, `SpentNote`,
+  `SplitOutputs`, `TransferBuild`). A backend implements the wallet reads and PCZT-building
+  operations; the engine performs the pure PCZT steps itself. Note references cross the boundary as
+  `NoteRef` pairs and builds return an unproven `pczt::Pczt`, so no backend-specific type appears in
+  the interface.
