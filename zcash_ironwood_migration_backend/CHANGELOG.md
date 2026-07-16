@@ -30,3 +30,7 @@ and this library adheres to Rust's notion of
 - Height-based transfer scheduling (`build_schedule`): assigns each crossing value a send window
   and expiry, sharing the wallet's natural anchor across a schedule and sampling the gap between
   successive transfers from an exponential distribution (floored at one block).
+- The internal PCZT pipeline (prove / sign / finalize / combine / extract, plus the shared Orchard
+  proving key): the pure steps the engine drives a built PCZT through, needing only `pczt` /
+  `orchard` / `zcash_keys` and no wallet backend. This adds those shielded-protocol dependencies to
+  the crate.
