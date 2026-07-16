@@ -857,16 +857,71 @@ impl<NoteRef> Step<NoteRef> {
             .count()
     }
 
-    /// Returns the number of Orchard actions required by this step.
+    #[cfg(feature = "orchard")]
+    fn orchard_style_action_count(
+        &self,
+        pool_type: PoolType,
+        bundle_type: ::orchard::builder::BundleType,
+        bundle_version: ::orchard::bundle::BundleVersion,
+    ) -> Result<usize, &'static str> {
+        crate::fees::orchard::transactional_action_count(
+            bundle_type,
+            bundle_version,
+            self.input_count_in_pool(pool_type),
+            self.output_count_in_pool(pool_type) + self.change_count_in_pool(pool_type),
+        )
+    }
+
+    /// Returns the number of actions the transaction builder will produce for this step's
+    /// Orchard-pool bundle, given the bundle type and version it will be configured with.
     ///
-    /// Each Orchard action can carry both a spend and an output, so the number of actions is
-    /// the greater of the number of Orchard note spends and the number of Orchard outputs
-    /// (payments plus change) in this step.
-    pub fn orchard_action_count(&self) -> usize {
-        let spends = self.input_count_in_pool(PoolType::ORCHARD);
-        let outputs = self.output_count_in_pool(PoolType::ORCHARD)
-            + self.change_count_in_pool(PoolType::ORCHARD);
-        spends.max(outputs)
+    /// The count depends upon the bundle version: prior to NU6.3, an action may carry both a
+    /// spend and an output, so a bundle requires `max(spends, outputs)` actions; from NU6.3
+    /// onwards the Orchard pool disables cross-address transfers, and each requested spend and
+    /// output is instead paired with a fabricated zero-valued counterpart, so a bundle requires
+    /// `spends + outputs` actions. The bundle type determines the padding applied on top of
+    /// that count.
+    ///
+    /// The caller must pass the same bundle type and version the transaction builder will be
+    /// configured with, otherwise the count will not match the bundle that is built.
+    /// [`bundle_version_for_branch`] returns the version applicable to a given consensus branch
+    /// and pool; the bundle type is determined by the change strategy that produced the
+    /// proposal (see [`SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this step's Orchard spend and output counts are incompatible with
+    /// the given bundle type and version.
+    ///
+    /// [`bundle_version_for_branch`]: zcash_primitives::transaction::components::orchard::bundle_version_for_branch
+    /// [`SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`]: crate::fees::zip317::SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles
+    #[cfg(feature = "orchard")]
+    pub fn orchard_action_count(
+        &self,
+        bundle_type: ::orchard::builder::BundleType,
+        bundle_version: ::orchard::bundle::BundleVersion,
+    ) -> Result<usize, &'static str> {
+        self.orchard_style_action_count(PoolType::ORCHARD, bundle_type, bundle_version)
+    }
+
+    /// Returns the number of actions the transaction builder will produce for this step's
+    /// Ironwood-pool bundle, given the bundle type and version it will be configured with.
+    ///
+    /// See [`Step::orchard_action_count`] for how the count is determined; the Ironwood pool
+    /// permits cross-address transfers, so an Ironwood bundle requires
+    /// `max(spends, outputs)` actions before padding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this step's Ironwood spend and output counts are incompatible with
+    /// the given bundle type and version.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_action_count(
+        &self,
+        bundle_type: ::orchard::builder::BundleType,
+        bundle_version: ::orchard::bundle::BundleVersion,
+    ) -> Result<usize, &'static str> {
+        self.orchard_style_action_count(PoolType::IRONWOOD, bundle_type, bundle_version)
     }
 }
 
@@ -895,13 +950,19 @@ mod tests {
     use nonempty::NonEmpty;
     use orchard::{
         ValuePool,
+        builder::BundleType,
+        bundle::BundleVersion,
         keys::{FullViewingKey, SpendingKey},
         note::{Note as OrchardNote, NoteVersion, RandomSeed, Rho},
         value::NoteValue,
     };
     use proptest::prelude::*;
-    use zcash_primitives::transaction::TxId;
-    use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+    use zcash_primitives::transaction::{TxId, components::orchard::bundle_version_for_branch};
+    use zcash_protocol::{
+        PoolType, ShieldedPool,
+        consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        value::Zatoshis,
+    };
     use zip321::TransactionRequest;
 
     use super::{Proposal, ProposalError, ShieldedInputs, Step};
@@ -950,6 +1011,13 @@ mod tests {
 
     // Wraps a list of notes into a single `Step` whose only inputs are those shielded notes.
     fn step_with_notes(notes: Vec<Note>) -> Step<u32> {
+        step_with_notes_and_change(notes, vec![])
+    }
+
+    // Wraps a list of notes into a single `Step` spending those shielded notes and returning the
+    // given change outputs. The step is constructed directly rather than via `Step::from_parts`,
+    // so the change values need not be covered by the input values.
+    fn step_with_notes_and_change(notes: Vec<Note>, change: Vec<ChangeValue>) -> Step<u32> {
         let shielded_inputs = shielded_inputs_for(notes);
         Step {
             transaction_request: TransactionRequest::empty(),
@@ -958,7 +1026,7 @@ mod tests {
             shielded_inputs,
             anchor_height: Some(BlockHeight::from_u32(100)),
             prior_step_inputs: vec![],
-            balance: TransactionBalance::new(vec![], Zatoshis::ZERO).unwrap(),
+            balance: TransactionBalance::new(change, Zatoshis::ZERO).unwrap(),
             is_shielding: false,
         }
     }
@@ -1245,7 +1313,170 @@ mod tests {
         notes
     }
 
+    // The network upgrades at which the Orchard pool exists but still permits cross-address
+    // transfers, so that a requested spend and a requested output may share an action.
+    fn arb_pre_nu6_3_upgrade() -> impl Strategy<Value = NetworkUpgrade> {
+        prop::sample::select(vec![
+            NetworkUpgrade::Nu5,
+            NetworkUpgrade::Nu6,
+            NetworkUpgrade::Nu6_1,
+            NetworkUpgrade::Nu6_2,
+        ])
+    }
+
+    // The network upgrades from which the Orchard pool disables cross-address transfers. `Nu7` is
+    // excluded: it has no activation height on any network yet, so no bundle can be built for it.
+    fn arb_nu6_3_or_later_upgrade() -> impl Strategy<Value = NetworkUpgrade> {
+        prop::sample::select(vec![NetworkUpgrade::Nu6_3])
+    }
+
+    // Resolves the bundle version applicable to a pool at an upgrade's testnet activation height,
+    // the way the fee and builder paths do: height -> consensus branch -> `BundleVersion`.
+    fn bundle_version_at(upgrade: NetworkUpgrade, pool: ValuePool) -> BundleVersion {
+        let height = Network::TestNetwork.activation_height(upgrade).unwrap();
+        bundle_version_for_branch(BranchId::for_height(&Network::TestNetwork, height), pool)
+            .unwrap()
+    }
+
+    // A payment output counts towards the action count of the pool it is directed to, exactly as
+    // a change output does. `orchard_payment_step` spends one Orchard note to make one payment.
+    #[test]
+    fn action_count_includes_payment_outputs() {
+        // Pre-activation, the payment is an Orchard-pool output: one spend and one output share
+        // an action, because the pre-NU6.3 Orchard bundle version permits cross-address transfers.
+        let step = orchard_payment_step(PoolType::ORCHARD, false).unwrap();
+        assert_eq!(
+            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+            Ok(1)
+        );
+        assert_eq!(
+            step.ironwood_action_count(BundleType::UNPADDED, BundleVersion::ironwood_v3()),
+            Ok(0)
+        );
+
+        // Post-activation, the payment is routed to the Ironwood pool: the Orchard note spend is
+        // charged to the Orchard bundle and the payment output to the Ironwood bundle, so neither
+        // pool can pair them into one action.
+        let step = orchard_payment_step(PoolType::IRONWOOD, true).unwrap();
+        assert_eq!(
+            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            Ok(1)
+        );
+        assert_eq!(
+            step.ironwood_action_count(BundleType::UNPADDED, BundleVersion::ironwood_v3()),
+            Ok(1)
+        );
+    }
+
     proptest! {
+        // The number of actions a step's Orchard-pool bundle requires depends upon the bundle
+        // version: the pre-NU6.3 versions permit cross-address transfers, so a spend and an
+        // output may share an action (`max(spends, outputs)`), while from NU6.3 onwards the
+        // Orchard pool disables them, so each spend and output is paired with a fabricated
+        // counterpart and occupies its own action (`spends + outputs`). The Ironwood pool
+        // permits cross-address transfers at every version, so it always pairs.
+        #[test]
+        fn action_count_pairs_spends_and_outputs_only_when_cross_address_is_permitted(
+            orchard_spends in 0usize..4,
+            ironwood_spends in 0usize..4,
+            orchard_change in 0usize..4,
+            ironwood_change in 0usize..4,
+        ) {
+            let change = std::iter::repeat_n(ShieldedPool::Orchard, orchard_change)
+                .chain(std::iter::repeat_n(ShieldedPool::Ironwood, ironwood_change))
+                .map(|pool| shielded_change(pool, 10_000))
+                .collect();
+            let step = step_with_notes_and_change(
+                orchard_and_ironwood_notes(orchard_spends, ironwood_spends),
+                change,
+            );
+
+            // `UNPADDED` pads only to the one-action consensus minimum, so for a non-empty
+            // bundle its action count is exactly the number of requested actions.
+            for version in [BundleVersion::orchard_insecure_v1(), BundleVersion::orchard_v2()] {
+                prop_assert_eq!(
+                    step.orchard_action_count(BundleType::UNPADDED, version),
+                    Ok(orchard_spends.max(orchard_change))
+                );
+            }
+            prop_assert_eq!(
+                step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+                Ok(orchard_spends + orchard_change)
+            );
+            prop_assert_eq!(
+                step.ironwood_action_count(BundleType::UNPADDED, BundleVersion::ironwood_v3()),
+                Ok(ironwood_spends.max(ironwood_change))
+            );
+
+            // The bundle type governs padding on top of that count: `DEFAULT` pads a non-empty
+            // bundle up to the ZIP 317 two-action floor, and produces no bundle at all when the
+            // step requires no actions in that pool.
+            let pad = |requested: usize| if requested == 0 { 0 } else { requested.max(2) };
+            prop_assert_eq!(
+                step.orchard_action_count(BundleType::DEFAULT, BundleVersion::orchard_v3()),
+                Ok(pad(orchard_spends + orchard_change))
+            );
+            prop_assert_eq!(
+                step.ironwood_action_count(BundleType::DEFAULT, BundleVersion::ironwood_v3()),
+                Ok(pad(ironwood_spends.max(ironwood_change)))
+            );
+        }
+
+        // The action count a caller obtains for a real target height, resolving the bundle
+        // version the way the fee and builder paths do: height -> consensus branch ->
+        // `BundleVersion`. This is the scenario the legacy hardcoded `max(spends, outputs)`
+        // formula got wrong: at a post-NU6.3 height it understated the Orchard action count
+        // whenever a step had both spends and outputs, and so understated the ZIP 317 fee.
+        #[test]
+        fn orchard_action_count_grows_at_nu6_3_activation_height(
+            spends in 1usize..4,
+            change in 1usize..4,
+            pre_nu6_3 in arb_pre_nu6_3_upgrade(),
+            nu6_3_or_later in arb_nu6_3_or_later_upgrade(),
+        ) {
+            let orchard_step = step_with_notes_and_change(
+                orchard_and_ironwood_notes(spends, 0),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), change)
+                    .collect(),
+            );
+
+            // Pre-NU6.3, each change output shares an action with a spend: max(spends, change).
+            prop_assert_eq!(
+                orchard_step.orchard_action_count(
+                    BundleType::UNPADDED,
+                    bundle_version_at(pre_nu6_3, ValuePool::Orchard),
+                ),
+                Ok(spends.max(change))
+            );
+
+            // From NU6.3, the Orchard pool disables cross-address transfers: a change output's
+            // corresponding dummy input must be signed with the spending key for the internal
+            // IVK the change is sent to, so it cannot share an action with a spend of a note
+            // belonging to a different address. Hence spends + change actions.
+            prop_assert_eq!(
+                orchard_step.orchard_action_count(
+                    BundleType::UNPADDED,
+                    bundle_version_at(nu6_3_or_later, ValuePool::Orchard),
+                ),
+                Ok(spends + change)
+            );
+
+            // The Ironwood pool retains cross-address transfers, so an equivalent Ironwood step
+            // still pairs at a post-NU6.3 height.
+            let ironwood_step = step_with_notes_and_change(
+                orchard_and_ironwood_notes(0, spends),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Ironwood, 10_000), change)
+                    .collect(),
+            );
+            prop_assert_eq!(
+                ironwood_step.ironwood_action_count(
+                    BundleType::UNPADDED,
+                    bundle_version_at(nu6_3_or_later, ValuePool::Ironwood),
+                ),
+                Ok(spends.max(change))
+            );
+        }
+
         // `Note::pool` reports the `ValuePool` recorded alongside an Orchard note.
         #[test]
         fn note_pool_reports_stored_value_pool(
