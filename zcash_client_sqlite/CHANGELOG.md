@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `WalletDb::get_unspent_ironwood_notes_at_historical_height` returns all Ironwood
+  notes that existed and were unspent at a given height.
+
 ## [0.22.0-rc.1] - 2026-07-12
 
 ### Added
