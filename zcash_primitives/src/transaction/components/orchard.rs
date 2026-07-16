@@ -7,6 +7,7 @@ use corez::io::{self, Read, Write};
 
 use nonempty::NonEmpty;
 
+use core::mem::size_of;
 use orchard::{
     Action, Anchor, ValuePool,
     bundle::{Authorization, Authorized, BundleVersion, Flags},
@@ -15,6 +16,7 @@ use orchard::{
     value::ValueCommitment,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_note_encryption::{ENC_CIPHERTEXT_SIZE, EphemeralKeyBytes, OUT_CIPHERTEXT_SIZE};
 use zcash_protocol::{
     consensus::{BranchId, OrchardProtocolRevision},
     value::ZatBalance,
@@ -25,6 +27,29 @@ use crate::transaction::Transaction;
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
 pub const FLAGS_EXPECTED_UNSET: u8 = !(FLAG_SPENDS_ENABLED | FLAG_OUTPUTS_ENABLED);
+
+/// The size in bytes of the encoding of a Pallas group element or base field element.
+///
+/// Every such value in an Orchard action — the value commitment, nullifier, randomized
+/// verification key, note commitment, and ephemeral key — is encoded in this many bytes.
+/// [`EphemeralKeyBytes`] is the encoding of one of them (the ephemeral key, a group element),
+/// so its width is that of all of them; note that this is a property of the *encoding*, not of
+/// the in-memory representation, which differs between these types.
+const PALLAS_ENCODING_SIZE: usize = size_of::<EphemeralKeyBytes>();
+
+/// The number of Pallas encodings in an Orchard action description: the value commitment,
+/// nullifier, randomized verification key, note commitment, and ephemeral key.
+const PALLAS_ENCODINGS_PER_ACTION: usize = 5;
+
+/// The size in bytes of an Orchard action description, as written by
+/// [`write_action_without_auth`].
+///
+/// This does not include the action's spend authorization signature or its share of the bundle's
+/// proof, both of which are encoded separately from the action descriptions (see
+/// [`write_v5_bundle`]). Dividing a size budget by this constant therefore yields an upper bound
+/// on the number of actions that fit within it.
+pub const ACTION_SIZE: usize =
+    PALLAS_ENCODINGS_PER_ACTION * PALLAS_ENCODING_SIZE + ENC_CIPHERTEXT_SIZE + OUT_CIPHERTEXT_SIZE;
 
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_auth(&self, s: A::SpendAuth) -> B::SpendAuth;
@@ -472,5 +497,63 @@ pub mod testing {
             bundle_version,
         )
         .expect("flags are representable under the target version")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use orchard::{bundle::testing::arb_action, note::NoteVersion, value::NoteValue};
+    use proptest::prelude::*;
+
+    use super::{
+        ACTION_SIZE, PALLAS_ENCODING_SIZE, io, write_action_without_auth, write_cmx,
+        write_note_ciphertext, write_nullifier, write_value_commitment, write_verification_key,
+    };
+
+    // Returns the number of bytes `write` emits.
+    fn encoded_len(write: impl FnOnce(&mut Vec<u8>) -> io::Result<()>) -> usize {
+        let mut buf = Vec::new();
+        write(&mut buf).expect("writing to a Vec cannot fail");
+        buf.len()
+    }
+
+    proptest! {
+        /// `ACTION_SIZE` is what callers divide a size budget by to bound an action count, and so
+        /// feeds fee estimation: it must equal what the encoder actually writes, not merely what
+        /// the constant's own arithmetic says. Measure a real action rather than restating the
+        /// composition, so that a change to any encoding it is built from fails here.
+        #[test]
+        fn action_size_matches_the_encoding(
+            action in arb_action(
+                NoteVersion::V2,
+                NoteValue::from_raw(1),
+                NoteValue::from_raw(1),
+            ),
+        ) {
+            prop_assert_eq!(
+                encoded_len(|w| write_action_without_auth(w, &action)),
+                ACTION_SIZE
+            );
+
+            // Every Pallas encoding in an action is the same width, which is what lets
+            // `ACTION_SIZE` count them rather than name each one's size separately.
+            for encoded in [
+                encoded_len(|w| write_value_commitment(w, action.cv_net())),
+                encoded_len(|w| write_nullifier(w, action.nullifier())),
+                encoded_len(|w| write_verification_key(w, action.rk())),
+                encoded_len(|w| write_cmx(w, action.cmx())),
+            ] {
+                prop_assert_eq!(encoded, PALLAS_ENCODING_SIZE);
+            }
+
+            // The remainder is the note ciphertext: the ephemeral key (a fifth Pallas encoding)
+            // followed by the two ciphertexts.
+            prop_assert_eq!(
+                encoded_len(|w| write_note_ciphertext(w, action.encrypted_note())),
+                ACTION_SIZE - 4 * PALLAS_ENCODING_SIZE
+            );
+        }
     }
 }
