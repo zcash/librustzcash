@@ -27,3 +27,6 @@ and this library adheres to Rust's notion of
   into notes whose crossing values follow the `{1, 2, 5} * 10^k` ZEC series (1, 2, 5, 10, ... ZEC),
   each note holding its crossing value plus a fixed fee buffer, leaving any residual (including
   dust) as Orchard change rather than folding it into a fee.
+- Height-based transfer scheduling (`build_schedule`): assigns each crossing value a send window
+  and expiry, sharing the wallet's natural anchor across a schedule and sampling the gap between
+  successive transfers from an exponential distribution (floored at one block).
