@@ -19,8 +19,17 @@ categories.workspace = true
 all-features = true
 
 [dependencies]
+zcash_keys = { workspace = true, features = ["orchard"] }
 zcash_protocol.workspace = true
 
+orchard.workspace = true
+pczt = { workspace = true, features = [
+    "orchard",
+    "prover",
+    "signer",
+    "spend-finalizer",
+    "tx-extractor",
+] }
 rand.workspace = true
 rand_distr.workspace = true
 

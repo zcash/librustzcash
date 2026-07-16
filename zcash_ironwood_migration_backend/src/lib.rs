@@ -19,6 +19,9 @@ mod denominations;
 // Internal transfer scheduler, consumed by the context module in a later slice.
 #[allow(dead_code)]
 mod scheduling;
+// The pure PCZT pipeline, consumed by the context module in a later slice.
+#[allow(dead_code)]
+mod pipeline;
 
 pub mod error;
 pub mod types;
