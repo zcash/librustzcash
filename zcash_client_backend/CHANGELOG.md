@@ -10,7 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
+  counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
+
 ### Changed
+- `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
+  `orchard::builder::BundleType` and `orchard::bundle::BundleVersion` that the
+  transaction builder will be configured with, and returns a `Result`. It
+  previously hardcoded the pre-NU6.3 `max(spends, outputs)` formula, which
+  understates the action count for an Orchard-pool bundle constructed for a
+  target height at or after NU6.3: such a bundle disables cross-address
+  transfers, and so requires `spends + outputs` actions. The method now also
+  accounts for the bundle type's padding, and is gated on the `orchard`
+  feature.
 - `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
   `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
   error type, so that `propose_send_max_transfer` can report
