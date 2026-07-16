@@ -28,18 +28,27 @@ pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
 pub const FLAGS_EXPECTED_UNSET: u8 = !(FLAG_SPENDS_ENABLED | FLAG_OUTPUTS_ENABLED);
 
-/// The size in bytes of the encoding of a Pallas group element or base field element.
-///
-/// Every such value in an Orchard action — the value commitment, nullifier, randomized
-/// verification key, note commitment, and ephemeral key — is encoded in this many bytes.
-/// [`EphemeralKeyBytes`] is the encoding of one of them (the ephemeral key, a group element),
-/// so its width is that of all of them; note that this is a property of the *encoding*, not of
-/// the in-memory representation, which differs between these types.
-const PALLAS_ENCODING_SIZE: usize = size_of::<EphemeralKeyBytes>();
+// The encoded size of each element of an Orchard action. Each is a Pallas group element or base
+// field element, both of which encode to 32 bytes; note that this is a property of the *encoding*,
+// and unrelated to the in-memory representation, which differs between these types.
+//
+// These belong upstream in `orchard`, beside the types themselves: it defines each of these
+// elements but exposes no constant for the width of any of their encodings, so they are restated
+// here. Prefer upstream constants over these if `orchard` ever gains them. The
+// `action_size_matches_the_encoding` proptest holds each one to what the encoder actually writes.
 
-/// The number of Pallas encodings in an Orchard action description: the value commitment,
-/// nullifier, randomized verification key, note commitment, and ephemeral key.
-const PALLAS_ENCODINGS_PER_ACTION: usize = 5;
+/// The size in bytes of the encoding of an Orchard value commitment (a Pallas group element).
+const VALUE_COMMITMENT_BYTE_SIZE: usize = 32;
+/// The size in bytes of the encoding of an Orchard nullifier (a Pallas base field element).
+const NULLIFIER_BYTE_SIZE: usize = 32;
+/// The size in bytes of the encoding of a randomized spend validating key (a Pallas group element).
+const VERIFICATION_KEY_BYTE_SIZE: usize = 32;
+/// The size in bytes of the encoding of an extracted note commitment (a Pallas base field element).
+const NOTE_COMMITMENT_BYTE_SIZE: usize = 32;
+/// The size in bytes of the encoding of an ephemeral key (a Pallas group element).
+///
+/// Unlike the others, this one the note encryption layer does give a name to.
+const EPHEMERAL_KEY_BYTE_SIZE: usize = size_of::<EphemeralKeyBytes>();
 
 /// The size in bytes of an Orchard action description, as written by
 /// [`write_action_without_auth`].
@@ -48,8 +57,13 @@ const PALLAS_ENCODINGS_PER_ACTION: usize = 5;
 /// proof, both of which are encoded separately from the action descriptions (see
 /// [`write_v5_bundle`]). Dividing a size budget by this constant therefore yields an upper bound
 /// on the number of actions that fit within it.
-pub const ACTION_SIZE: usize =
-    PALLAS_ENCODINGS_PER_ACTION * PALLAS_ENCODING_SIZE + ENC_CIPHERTEXT_SIZE + OUT_CIPHERTEXT_SIZE;
+pub const ACTION_SIZE: usize = VALUE_COMMITMENT_BYTE_SIZE
+    + NULLIFIER_BYTE_SIZE
+    + VERIFICATION_KEY_BYTE_SIZE
+    + NOTE_COMMITMENT_BYTE_SIZE
+    + EPHEMERAL_KEY_BYTE_SIZE
+    + ENC_CIPHERTEXT_SIZE
+    + OUT_CIPHERTEXT_SIZE;
 
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_auth(&self, s: A::SpendAuth) -> B::SpendAuth;
@@ -508,7 +522,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{
-        ACTION_SIZE, PALLAS_ENCODING_SIZE, io, write_action_without_auth, write_cmx,
+        ACTION_SIZE, ENC_CIPHERTEXT_SIZE, EPHEMERAL_KEY_BYTE_SIZE, NOTE_COMMITMENT_BYTE_SIZE,
+        NULLIFIER_BYTE_SIZE, OUT_CIPHERTEXT_SIZE, VALUE_COMMITMENT_BYTE_SIZE,
+        VERIFICATION_KEY_BYTE_SIZE, io, write_action_without_auth, write_cmx,
         write_note_ciphertext, write_nullifier, write_value_commitment, write_verification_key,
     };
 
@@ -523,7 +539,10 @@ mod tests {
         /// `ACTION_SIZE` is what callers divide a size budget by to bound an action count, and so
         /// feeds fee estimation: it must equal what the encoder actually writes, not merely what
         /// the constant's own arithmetic says. Measure a real action rather than restating the
-        /// composition, so that a change to any encoding it is built from fails here.
+        /// composition, so that a change to any element's encoding fails here.
+        ///
+        /// This is also what keeps the per-element sizes honest while `orchard` exposes none of
+        /// them itself: each is checked against the encoding of the field it describes.
         #[test]
         fn action_size_matches_the_encoding(
             action in arb_action(
@@ -537,22 +556,29 @@ mod tests {
                 ACTION_SIZE
             );
 
-            // Every Pallas encoding in an action is the same width, which is what lets
-            // `ACTION_SIZE` count them rather than name each one's size separately.
-            for encoded in [
+            // Each element, against the constant that names it.
+            prop_assert_eq!(
                 encoded_len(|w| write_value_commitment(w, action.cv_net())),
+                VALUE_COMMITMENT_BYTE_SIZE
+            );
+            prop_assert_eq!(
                 encoded_len(|w| write_nullifier(w, action.nullifier())),
+                NULLIFIER_BYTE_SIZE
+            );
+            prop_assert_eq!(
                 encoded_len(|w| write_verification_key(w, action.rk())),
+                VERIFICATION_KEY_BYTE_SIZE
+            );
+            prop_assert_eq!(
                 encoded_len(|w| write_cmx(w, action.cmx())),
-            ] {
-                prop_assert_eq!(encoded, PALLAS_ENCODING_SIZE);
-            }
+                NOTE_COMMITMENT_BYTE_SIZE
+            );
 
-            // The remainder is the note ciphertext: the ephemeral key (a fifth Pallas encoding)
-            // followed by the two ciphertexts.
+            // The note ciphertext carries the remaining three: the ephemeral key, followed by the
+            // note and outgoing ciphertexts.
             prop_assert_eq!(
                 encoded_len(|w| write_note_ciphertext(w, action.encrypted_note())),
-                ACTION_SIZE - 4 * PALLAS_ENCODING_SIZE
+                EPHEMERAL_KEY_BYTE_SIZE + ENC_CIPHERTEXT_SIZE + OUT_CIPHERTEXT_SIZE
             );
         }
     }
