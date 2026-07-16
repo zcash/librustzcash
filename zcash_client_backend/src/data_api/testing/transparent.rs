@@ -59,7 +59,9 @@ fn check_balance<DSF>(
     #[allow(deprecated)]
     let old_unshielded_value = balance.unshielded();
     assert_eq!(old_unshielded_value, expected.total());
-    assert_eq!(balance.unshielded_balance(), expected);
+    assert_eq!(balance.unshielded_regular_balance(), expected);
+    assert_eq!(balance.unshielded_coinbase_balance(), &Balance::ZERO);
+    assert_eq!(balance.unshielded_balance(), *expected);
 
     // Check the older APIs for consistency.
     let target_height = TargetHeight::from(st.wallet().chain_height().unwrap().unwrap() + 1);

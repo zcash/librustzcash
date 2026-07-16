@@ -326,7 +326,8 @@ pub struct AccountBalance {
     sapling_balance: Balance,
     orchard_balance: Balance,
     ironwood_balance: Balance,
-    unshielded_balance: Balance,
+    unshielded_regular_balance: Balance,
+    unshielded_coinbase_balance: Balance,
 }
 
 impl AccountBalance {
@@ -335,14 +336,16 @@ impl AccountBalance {
         sapling_balance: Balance::ZERO,
         orchard_balance: Balance::ZERO,
         ironwood_balance: Balance::ZERO,
-        unshielded_balance: Balance::ZERO,
+        unshielded_regular_balance: Balance::ZERO,
+        unshielded_coinbase_balance: Balance::ZERO,
     };
 
     fn check_total(&self) -> Result<Zatoshis, BalanceError> {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
             + self.ironwood_balance.total()
-            + self.unshielded_balance.total())
+            + self.unshielded_regular_balance.total()
+            + self.unshielded_coinbase_balance.total())
         .ok_or(BalanceError::Overflow)
     }
 
@@ -399,33 +402,80 @@ impl AccountBalance {
 
     /// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
     #[deprecated(
-        note = "this function is deprecated. Please use [`AccountBalance::unshielded_balance`] instead."
+        note = "this function is deprecated. Please use [`AccountBalance::unshielded_regular_balance`] and [`AccountBalance::unshielded_coinbase_balance`] instead."
     )]
     pub fn unshielded(&self) -> Zatoshis {
-        self.unshielded_balance.total()
+        (self.unshielded_regular_balance.total() + self.unshielded_coinbase_balance.total())
+            .expect("Account balance cannot overflow MAX_MONEY")
     }
 
-    /// Returns the [`Balance`] of unshielded funds in the account.
+    /// Returns the combined [`Balance`] of unshielded funds in the account, computed as the sum
+    /// of the [`unshielded_regular_balance`] and the [`unshielded_coinbase_balance`].
     ///
-    /// Note that because transparent UTXOs may be shielded with zero confirmations and this crate
-    /// does not provide capabilities to directly spend transparent UTXOs in non-shielding
-    /// transactions, the [`change_pending_confirmation`] and [`value_pending_spendability`] fields
-    /// of the returned [`Balance`] will always be zero.
+    /// The [`spendable_value`] field of the returned [`Balance`] contains funds that may be spent
+    /// in a shielding transaction: transparent funds that satisfy the wallet's confirmation
+    /// policy, including coinbase funds that have reached maturity. The
+    /// [`value_pending_spendability`] field contains transparent funds that are not yet
+    /// spendable: funds that do not yet have the number of confirmations required by the
+    /// wallet's confirmation policy, and coinbase funds that have not yet reached maturity. The
+    /// [`change_pending_confirmation`] field is currently always zero, because this crate does
+    /// not yet distinguish transparent change from other transparent value awaiting
+    /// confirmation.
     ///
+    /// [`unshielded_regular_balance`]: AccountBalance::unshielded_regular_balance
+    /// [`unshielded_coinbase_balance`]: AccountBalance::unshielded_coinbase_balance
+    /// [`spendable_value`]: Balance::spendable_value
     /// [`change_pending_confirmation`]: Balance::change_pending_confirmation
     /// [`value_pending_spendability`]: Balance::value_pending_spendability
-    pub fn unshielded_balance(&self) -> &Balance {
-        &self.unshielded_balance
+    pub fn unshielded_balance(&self) -> Balance {
+        (self.unshielded_regular_balance + self.unshielded_coinbase_balance)
+            .expect("Account balance cannot overflow MAX_MONEY")
     }
 
-    /// Provides a mutable reference to the [`Balance`] of transparent funds in the account
-    /// to the specified callback, checking invariants after the callback's action has been
-    /// evaluated.
-    pub fn with_unshielded_balance_mut<A, E: From<BalanceError>>(
+    /// Returns the [`Balance`] of regular (non-coinbase) transparent funds in the account.
+    ///
+    /// Transparent outputs whose containing transaction's index within its block is unknown are
+    /// classified as regular (non-coinbase) funds, consistent with the treatment described for
+    /// `CoinbaseFilter`.
+    pub fn unshielded_regular_balance(&self) -> &Balance {
+        &self.unshielded_regular_balance
+    }
+
+    /// Provides a mutable reference to the [`Balance`] of regular (non-coinbase) transparent
+    /// funds in the account to the specified callback, checking invariants after the callback's
+    /// action has been evaluated.
+    pub fn with_unshielded_regular_balance_mut<A, E: From<BalanceError>>(
         &mut self,
         f: impl FnOnce(&mut Balance) -> Result<A, E>,
     ) -> Result<A, E> {
-        let result = f(&mut self.unshielded_balance)?;
+        let result = f(&mut self.unshielded_regular_balance)?;
+        self.check_total()?;
+        Ok(result)
+    }
+
+    /// Returns the [`Balance`] of funds in coinbase transparent outputs belonging to the
+    /// account.
+    ///
+    /// Coinbase outputs may only be spent by shielding them, and only once they have reached
+    /// coinbase maturity; immature coinbase funds are reported in the
+    /// [`value_pending_spendability`] field of the returned [`Balance`]. Outputs whose
+    /// containing transaction's index within its block is unknown are conservatively classified
+    /// as regular (non-coinbase) funds and do not contribute to this balance; see
+    /// `CoinbaseFilter`.
+    ///
+    /// [`value_pending_spendability`]: Balance::value_pending_spendability
+    pub fn unshielded_coinbase_balance(&self) -> &Balance {
+        &self.unshielded_coinbase_balance
+    }
+
+    /// Provides a mutable reference to the [`Balance`] of transparent coinbase funds in the
+    /// account to the specified callback, checking invariants after the callback's action has
+    /// been evaluated.
+    pub fn with_unshielded_coinbase_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.unshielded_coinbase_balance)?;
         self.check_total()?;
         Ok(result)
     }
@@ -435,7 +485,8 @@ impl AccountBalance {
         (self.sapling_balance.total()
             + self.orchard_balance.total()
             + self.ironwood_balance.total()
-            + self.unshielded_balance.total())
+            + self.unshielded_regular_balance.total()
+            + self.unshielded_coinbase_balance.total())
         .expect("Account balance cannot overflow MAX_MONEY")
     }
 
@@ -472,7 +523,8 @@ impl AccountBalance {
         (self.sapling_balance.uneconomic_value
             + self.orchard_balance.uneconomic_value
             + self.ironwood_balance.uneconomic_value
-            + self.unshielded_balance.uneconomic_value)
+            + self.unshielded_regular_balance.uneconomic_value
+            + self.unshielded_coinbase_balance.uneconomic_value)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 }
@@ -4547,5 +4599,143 @@ mod tests {
             result,
             Err(FindAccountForAddressError::UnifiedAddressConflict)
         ));
+    }
+
+    /// Each unshielded mutator updates only its own bucket, and transparent mutations leave the
+    /// shielded aggregates untouched.
+    #[test]
+    fn account_balance_unshielded_split_mutators() {
+        let mut balance = AccountBalance::ZERO;
+
+        let regular_value = Zatoshis::const_from_u64(100_000);
+        let coinbase_value = Zatoshis::const_from_u64(50_000);
+
+        balance
+            .with_unshielded_regular_balance_mut(|bal| bal.add_spendable_value(regular_value))
+            .unwrap();
+        balance
+            .with_unshielded_coinbase_balance_mut(|bal| {
+                bal.add_pending_spendable_value(coinbase_value)
+            })
+            .unwrap();
+
+        // The regular bucket contains only the regular value.
+        assert_eq!(
+            balance.unshielded_regular_balance().spendable_value(),
+            regular_value
+        );
+        assert_eq!(balance.unshielded_regular_balance().total(), regular_value);
+        assert_eq!(
+            balance
+                .unshielded_regular_balance()
+                .value_pending_spendability(),
+            Zatoshis::ZERO
+        );
+
+        // The coinbase bucket contains only the coinbase value, as pending.
+        assert_eq!(
+            balance.unshielded_coinbase_balance().spendable_value(),
+            Zatoshis::ZERO
+        );
+        assert_eq!(
+            balance
+                .unshielded_coinbase_balance()
+                .value_pending_spendability(),
+            coinbase_value
+        );
+        assert_eq!(
+            balance.unshielded_coinbase_balance().total(),
+            coinbase_value
+        );
+
+        // The shielded-only aggregates are unaffected by transparent mutations.
+        assert_eq!(balance.spendable_value(), Zatoshis::ZERO);
+        assert_eq!(balance.change_pending_confirmation(), Zatoshis::ZERO);
+        assert_eq!(balance.value_pending_spendability(), Zatoshis::ZERO);
+        assert_eq!(balance.sapling_balance(), &Balance::ZERO);
+        assert_eq!(balance.orchard_balance(), &Balance::ZERO);
+        assert_eq!(balance.ironwood_balance(), &Balance::ZERO);
+    }
+
+    /// `unshielded_balance` returns the sum of the regular and coinbase buckets, and the
+    /// account-level aggregates include both buckets.
+    #[test]
+    fn account_balance_unshielded_balance_is_sum() {
+        let mut balance = AccountBalance::ZERO;
+
+        let regular_spendable = Zatoshis::const_from_u64(100_000);
+        let regular_dust = Zatoshis::const_from_u64(100);
+        let coinbase_pending = Zatoshis::const_from_u64(625_000_000);
+        let coinbase_dust = Zatoshis::const_from_u64(42);
+
+        balance
+            .with_unshielded_regular_balance_mut(|bal| {
+                bal.add_spendable_value(regular_spendable)?;
+                bal.add_uneconomic_value(regular_dust)
+            })
+            .unwrap();
+        balance
+            .with_unshielded_coinbase_balance_mut(|bal| {
+                bal.add_pending_spendable_value(coinbase_pending)?;
+                bal.add_uneconomic_value(coinbase_dust)
+            })
+            .unwrap();
+
+        // The by-value combined balance is the field-wise sum of both buckets.
+        let combined = balance.unshielded_balance();
+        assert_eq!(
+            combined,
+            (*balance.unshielded_regular_balance() + *balance.unshielded_coinbase_balance())
+                .unwrap()
+        );
+        assert_eq!(combined.spendable_value(), regular_spendable);
+        assert_eq!(combined.value_pending_spendability(), coinbase_pending);
+        assert_eq!(
+            combined.uneconomic_value(),
+            (regular_dust + coinbase_dust).unwrap()
+        );
+
+        // The deprecated accessor reports the sum of both buckets' totals.
+        #[allow(deprecated)]
+        let unshielded = balance.unshielded();
+        assert_eq!(
+            unshielded,
+            (balance.unshielded_regular_balance().total()
+                + balance.unshielded_coinbase_balance().total())
+            .unwrap()
+        );
+
+        // The account total and uneconomic value include both buckets. (`Balance::total`
+        // excludes uneconomic value, so the dust does not appear in the account total.)
+        assert_eq!(
+            balance.total(),
+            (regular_spendable + coinbase_pending).unwrap()
+        );
+        assert_eq!(
+            balance.uneconomic_value(),
+            (regular_dust + coinbase_dust).unwrap()
+        );
+    }
+
+    /// The `check_total` invariant rejects mutations that would cause the sum of the regular and
+    /// coinbase transparent buckets to exceed `MAX_MONEY`.
+    #[test]
+    fn account_balance_unshielded_overflow_rejected() {
+        let max_money = Zatoshis::const_from_u64(zcash_protocol::value::MAX_MONEY);
+        let mut balance = AccountBalance::ZERO;
+
+        // Fill the regular bucket up to MAX_MONEY; this is fine on its own.
+        balance
+            .with_unshielded_regular_balance_mut(|bal| bal.add_spendable_value(max_money))
+            .unwrap();
+        assert_eq!(balance.total(), max_money);
+
+        // Any further value in the coinbase bucket must be rejected by the account-level
+        // invariant check, even though the coinbase bucket does not overflow on its own.
+        let result: Result<(), BalanceError> =
+            balance.with_unshielded_coinbase_balance_mut(|bal| {
+                bal.add_pending_spendable_value(Zatoshis::const_from_u64(1))
+            });
+        assert!(matches!(result, Err(BalanceError::Overflow)));
     }
 }
