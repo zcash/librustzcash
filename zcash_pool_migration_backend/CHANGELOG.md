@@ -27,3 +27,29 @@ and this library adheres to Rust's notion of
   strategy parameters. `plan_note_split` is a convenience wrapper over the recommended
   `CanonicalOneTwoFive`. The crate is `no_std` (it needs only `alloc`), depending on
   `zcash_protocol`, `zcash_primitives`, and `rand_core`.
+- The pure PCZT split builder (the `build` module, behind the `orchard` feature):
+  `build_split_pczt` (and `build_split_pczt_for_plan`, which reads a `NoteSplitPlan`'s
+  `migration_outputs`) turn the split plan plus the cryptographic ingredients a wallet supplies (the
+  spendable Orchard notes and their witnesses, the anchor, the full viewing key) into an unproven
+  `pczt::Pczt` for the same-pool send-to-self that mints the self-funding notes, plus a `SplitOutputs`
+  mapping each output to its real Orchard action index. It is pure (no database or wallet-backend
+  access) and takes the RNG as a parameter. `finalize_split_outputs` keeps each migration note at its
+  exact planned value and reconciles the real ZIP-317 fee against the plan by adding a plain change
+  output (or, for a sub-action-fee leftover, folding it into the fee). The shared transaction-builder
+  plumbing (build config, PCZT finalization, action-index mapping, fees) is factored into the module
+  root so the transfer builder reuses it. Adds optional `orchard` and `pczt` dependencies, enabled
+  only by the feature.
+- The pure PCZT transfer builder (`build::build_transfer_pczt`, behind the `orchard` feature): spends
+  one self-funding note the split minted and outputs its crossing value into the Ironwood pool as an
+  unproven `pczt::Pczt`, sent to the account's own internal Ironwood change address (derived inside the
+  builder, per ZIP 318). It has no change output; the note's fee buffer funds the transfer's fee
+  exactly (the Orchard spend and the Ironwood output each pad to the two-action minimum, so the
+  transfer is four logical actions, matching the buffer of `2 source + 2 destination` actions). It
+  runs post-NU6.3 (when the Ironwood pool is live), and like the split builder is pure (no database
+  or wallet-backend access) and takes the RNG as a parameter.
+- Pre-signing (`build::sign_pczt`, behind the `orchard` feature): adds the Orchard spend-authorization
+  signatures for a given `orchard::keys::SpendAuthorizingKey` to an assembled migration PCZT, leaving
+  the spends the key does not own (the builder's dummy spends, and any spend from another account)
+  unsigned. It signs a finalized but still UNPROVEN PCZT: the spend-authorization signature is over
+  the transaction's sighash, which is fixed independently of the zk proofs, so the migration signs up
+  front (capturing the account's authorization) and proves later, at scheduling time.
