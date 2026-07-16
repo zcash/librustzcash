@@ -12,8 +12,10 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 
+pub mod error;
 pub mod types;
 
+pub use error::{InvalidStateError, MigrationError};
 pub use types::{
     AttentionReason, MigrationProgress, MigrationSchedule, MigrationState, NoteSplitProposal,
     PreparedTransfer, Signed, SignedTransferPczt, TransferId, TransferPczt, TransferProposal,
