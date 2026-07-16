@@ -3074,6 +3074,27 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
         )
     }
 
+    /// Returns every Ironwood note received by `height` that was unspent at that height.
+    ///
+    /// This does not apply transaction construction filters or check witness availability.
+    /// Use [`Self::generate_ironwood_witnesses_at_historical_height`] to check the latter.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails or a note cannot be reconstructed.
+    pub fn get_unspent_ironwood_notes_at_historical_height(
+        &self,
+        account: AccountUuid,
+        height: BlockHeight,
+    ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, SqliteClientError> {
+        wallet::orchard::get_unspent_ironwood_notes_at_historical_height(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            height,
+        )
+    }
+
     /// Generates Orchard Merkle witnesses at a historical height.
     ///
     /// Loads the wallet's Orchard shard data into an ephemeral in-memory
