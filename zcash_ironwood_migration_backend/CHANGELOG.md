@@ -23,10 +23,15 @@ and this library adheres to Rust's notion of
   wallet-backend and storage failures are carried as opaque messages (`Backend(String)` /
   `Store(String)`), so it names no backend-specific type; it exposes a stable `error_code` for the
   FFI boundary and derives no `serde`.
-- Self-funding denomination planning (`plan_denominations`): decomposes a spendable Orchard balance
-  into notes whose crossing values follow the `{1, 2, 5} * 10^k` ZEC series (1, 2, 5, 10, ... ZEC),
-  each note holding its crossing value plus a fixed fee buffer, leaving any residual (including
-  dust) as Orchard change rather than folding it into a fee.
+- Note-split planning (the `note_splitting` module): decomposing a spendable balance into the
+  self-funding notes that cross the turnstile. The composition rule is abstracted behind the
+  `DenominationStrategy` trait, with two implementations: `RandomizedOneTwoFive` (samples a random
+  `{1, 2, 5} * 10^k` ZEC decomposition, keeping the best of several draws) and `CanonicalPowerOfTen`
+  (the deterministic power-of-ten digit expansion of the Ironwood migration ZIP draft). Every
+  strategy produces a `NoteSplitPlan` of self-funding notes (each holding its crossing value plus a
+  fee buffer), bounds each note by a maximum denomination, and leaves any residual as source-pool
+  change. The fee model is pluggable via the `FeePolicy` trait (`Zip317FeePolicy` provided). The code
+  is pool-agnostic; `plan_note_split` wraps the recommended `RandomizedOneTwoFive`.
 - Height-based transfer scheduling (`build_schedule`): assigns each crossing value a send window
   and expiry, sharing the wallet's natural anchor across a schedule and sampling the gap between
   successive transfers from an exponential distribution (floored at one block).
