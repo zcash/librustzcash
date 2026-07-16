@@ -2175,9 +2175,7 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
     let redacted = Redactor::new(pczt.clone())
         .redact_ironwood_with(|mut r| {
             r.clear_anchor();
-            r.redact_actions(|mut a| {
-                a.clear_cv_net();
-            });
+            r.redact_recomputable_fields();
         })
         .finish();
     assert!(redacted.ironwood().anchor().is_none());
@@ -2188,53 +2186,66 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
             .iter()
             .all(|action| action.cv_net().is_none())
     );
-    let verified = Verifier::new(redacted.clone())
+    assert!(
+        redacted
+            .ironwood()
+            .actions()
+            .iter()
+            .all(|action| action.output().cmx().is_none())
+    );
+    assert!(redacted.ironwood().actions().iter().any(|action| {
+        matches!(
+            action.output().enc_ciphertext(),
+            pczt::orchard::EncCiphertext::MemoPlaintext(_)
+        )
+    }));
+    let transported = Pczt::parse(&redacted.clone().serialize().unwrap()).unwrap();
+    let verified = Verifier::new(transported.clone())
         .with_ironwood::<std::convert::Infallible, _>(|_| {
             Ok::<(), pczt::roles::verifier::OrchardError<std::convert::Infallible>>(())
         })
         .unwrap()
         .finish();
     assert!(verified.ironwood().anchor().is_none());
-    let updated = Updater::new(redacted.clone())
+    let updated = Updater::new(transported.clone())
         .update_ironwood_with(|_| Ok(()))
         .unwrap()
         .finish();
     assert!(updated.ironwood().anchor().is_none());
 
-    let mut resolved = redacted.clone();
+    let mut resolved = transported.clone();
     resolved.resolve_fields().unwrap();
     assert!(resolved.ironwood().anchor().is_none());
     assert_eq!(
         resolved.ironwood().actions()[index].cv_net(),
         pczt.ironwood().actions()[index].cv_net()
     );
-    let finalized = IoFinalizer::new(redacted.clone()).finalize_io().unwrap();
+    for (resolved, original) in resolved
+        .ironwood()
+        .actions()
+        .iter()
+        .zip(pczt.ironwood().actions())
+    {
+        assert_eq!(resolved.cv_net(), original.cv_net());
+        assert_eq!(resolved.output().cmx(), original.output().cmx());
+        assert_eq!(
+            resolved.output().enc_ciphertext(),
+            original.output().enc_ciphertext()
+        );
+    }
+    let finalized = IoFinalizer::new(transported.clone()).finalize_io().unwrap();
     assert!(finalized.ironwood().anchor().is_none());
     assert!(
-        Prover::new(redacted.clone())
+        Prover::new(transported.clone())
             .create_ironwood_proof(orchard_proving_key())
             .is_err()
     );
     assert_eq!(
-        Signer::new(redacted.clone()).unwrap().shielded_sighash(),
+        Signer::new(transported.clone()).unwrap().shielded_sighash(),
         sighash
     );
 
-    let cv_net_redacted = Redactor::new(pczt.clone())
-        .redact_ironwood_with(|mut r| {
-            r.redact_actions(|mut a| {
-                a.clear_cv_net();
-            });
-        })
-        .finish();
-    assert_eq!(
-        Signer::new(cv_net_redacted.clone())
-            .unwrap()
-            .shielded_sighash(),
-        sighash
-    );
-
-    let signed_redacted = low_level_signer::Signer::new(cv_net_redacted)
+    let signed_redacted = low_level_signer::Signer::new(transported)
         .sign_ironwood_with::<low_level_signer::OrchardParseError, _>(|_, bundle, _| {
             bundle.actions_mut()[index]
                 .sign(sighash, &orchard_ask, ChaCha20Rng::from_seed(seed))
@@ -2251,6 +2262,31 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
         expected_sig
     );
     check_v2_round_trip(&signed_redacted);
+
+    let combined = Combiner::new(vec![pczt.clone(), signed_redacted])
+        .combine()
+        .unwrap();
+    assert_eq!(combined.ironwood().anchor(), pczt.ironwood().anchor());
+    for (combined, original) in combined
+        .ironwood()
+        .actions()
+        .iter()
+        .zip(pczt.ironwood().actions())
+    {
+        assert_eq!(combined.cv_net(), original.cv_net());
+        assert_eq!(combined.output().cmx(), original.output().cmx());
+        assert_eq!(
+            combined.output().enc_ciphertext(),
+            original.output().enc_ciphertext()
+        );
+    }
+    assert_eq!(
+        combined.ironwood().actions()[index]
+            .spend()
+            .spend_auth_sig()
+            .expect("combined action carries the Signer's contribution"),
+        expected_sig
+    );
 
     // Sign through the low-level Signer's preverified path with the same seed.
     let signed = low_level_signer::Signer::new(pczt.clone())

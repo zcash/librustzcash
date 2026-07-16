@@ -443,6 +443,41 @@ impl Action {
             self.output.enc_ciphertext = EncCiphertext::MemoPlaintext(memo);
         }
     }
+
+    pub(crate) fn redact_recomputable_fields(&mut self, note_version: NoteVersion) {
+        let original_enc_ciphertext = self.output.enc_ciphertext.clone();
+        self.replace_enc_ciphertext_with_decrypted_memo_plaintext(note_version);
+        if self.output.enc_ciphertext != original_enc_ciphertext {
+            let mut resolved = self.output.clone();
+            if resolved
+                .encrypt_ciphertext_from_memo(note_version, self.spend.nullifier)
+                .is_err()
+                || resolved.enc_ciphertext != original_enc_ciphertext
+            {
+                self.output.enc_ciphertext = original_enc_ciphertext;
+            }
+        }
+
+        if let Some(original_cv_net) = self.cv_net {
+            let mut resolved = self.clone();
+            resolved.cv_net = None;
+            if resolved.resolve_cv_net().is_ok() && resolved.cv_net == Some(original_cv_net) {
+                self.cv_net = None;
+            }
+        }
+
+        if let Some(original_cmx) = self.output.cmx {
+            let mut resolved = self.output.clone();
+            resolved.cmx = None;
+            if resolved
+                .resolve_cmx(note_version, self.spend.nullifier)
+                .is_ok()
+                && resolved.cmx == Some(original_cmx)
+            {
+                self.output.cmx = None;
+            }
+        }
+    }
 }
 
 /// Information about an Orchard action within a transaction.
@@ -1409,6 +1444,61 @@ pub(crate) mod v2 {
                 action.output.enc_ciphertext,
                 EncCiphertext::Encrypted(original_enc_ciphertext)
             );
+        }
+
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn recomputable_field_redaction_checks_derived_values() {
+            let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
+            action.spend.value = Some(200_000);
+            action.rcv = Some([3; 32]);
+            action.cv_net = Some(super::super::testing::value_commitment(100_000, [3; 32]));
+
+            action.redact_recomputable_fields(NoteVersion::V2);
+
+            assert_eq!(action.cv_net, None);
+            assert_eq!(action.output.cmx, None);
+            assert!(matches!(
+                action.output.enc_ciphertext,
+                EncCiphertext::MemoPlaintext(_)
+            ));
+        }
+
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn recomputable_field_redaction_retains_unverifiable_values() {
+            let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
+            let original_cv_net = action.cv_net;
+            let original_cmx = action.output.cmx;
+            let original_enc_ciphertext = action.output.enc_ciphertext.clone();
+            action.output.recipient = None;
+
+            action.redact_recomputable_fields(NoteVersion::V2);
+
+            assert_eq!(action.cv_net, original_cv_net);
+            assert_eq!(action.output.cmx, original_cmx);
+            assert_eq!(action.output.enc_ciphertext, original_enc_ciphertext);
+        }
+
+        #[cfg(feature = "orchard")]
+        #[test]
+        fn recomputable_field_redaction_retains_mismatched_values() {
+            let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
+            action.spend.value = Some(200_000);
+            action.rcv = Some([3; 32]);
+            let mut cv_net = super::super::testing::value_commitment(100_000, [3; 32]);
+            cv_net[0] ^= 1;
+            action.cv_net = Some(cv_net);
+            let mut cmx = action.output.cmx.unwrap();
+            cmx[0] ^= 1;
+            action.output.cmx = Some(cmx);
+            let original_enc_ciphertext = action.output.enc_ciphertext.clone();
+
+            action.redact_recomputable_fields(NoteVersion::V2);
+
+            assert_eq!(action.cv_net, Some(cv_net));
+            assert_eq!(action.output.cmx, Some(cmx));
+            assert_eq!(action.output.enc_ciphertext, original_enc_ciphertext);
         }
 
         #[test]

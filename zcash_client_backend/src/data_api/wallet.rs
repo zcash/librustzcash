@@ -109,8 +109,8 @@ use {
     bip32::ChildNumber,
     orchard::note_encryption::OrchardDomain,
     pczt::roles::{
-        creator::Creator, io_finalizer::IoFinalizer, spend_finalizer::SpendFinalizer,
-        tx_extractor::TransactionExtractor, updater::Updater,
+        creator::Creator, io_finalizer::IoFinalizer, redactor::Redactor,
+        spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor, updater::Updater,
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
@@ -2390,6 +2390,9 @@ where
 /// - [`pczt::roles::combiner::Combiner`] (if you create proofs and apply signatures in
 ///   parallel)
 ///
+/// Before sending the PCZT to an external Signer, create a signer view with
+/// [`redact_pczt_for_signer`] and retain the original for combination.
+///
 /// Once the PCZT fully authorized, call [`extract_and_store_transaction_from_pczt`] to
 /// finish transaction creation.
 ///
@@ -2798,6 +2801,80 @@ where
         .finish();
 
     Ok(pczt)
+}
+
+/// Creates a redacted copy of a wallet PCZT for an external Signer.
+///
+/// This is intended for PCZTs returned by [`create_pczt_from_proposal`]. It removes
+/// wallet metadata, proof data, binding and dummy signing keys, and Orchard-protocol
+/// spend witnesses that a Signer does not need. Sapling spend witnesses are retained
+/// because a Signer may use them to verify nullifiers. It also compacts Orchard and
+/// Ironwood fields that the receiver can restore with [`pczt::Pczt::resolve_fields`].
+/// For v6 transactions, it removes shielded anchors; v5 anchors are retained because
+/// signatures commit to them. The compact signer view requires the v2 PCZT encoding
+/// whenever it contains Orchard or Ironwood actions whose fields could be compacted.
+///
+/// The returned PCZT retains information that a general-purpose Signer may need,
+/// including full viewing keys, spend authorization randomizers, key derivation
+/// paths, output recovery keys, and user-facing addresses. Applications may apply
+/// additional redaction when they know their Signer's capabilities.
+///
+/// The caller must retain `pczt` and combine the Signer's contribution into that
+/// authoritative copy. The returned signer view omits wallet metadata and other
+/// fields that [`extract_and_store_transaction_from_pczt`] requires.
+#[cfg(feature = "pczt")]
+pub fn redact_pczt_for_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
+    let redact_v6_anchors = *pczt.global().tx_version() == zcash_protocol::constants::V6_TX_VERSION;
+
+    fn redact_orchard_bundle(
+        mut redactor: pczt::roles::redactor::orchard::OrchardRedactor<'_>,
+        redact_v6_anchor: bool,
+    ) {
+        redactor.clear_zkproof();
+        redactor.clear_bsk();
+        redactor.redact_actions(|mut action| {
+            action.clear_spend_witness();
+            action.clear_spend_dummy_sk();
+            action.redact_output_proprietary(PROPRIETARY_OUTPUT_INFO);
+        });
+
+        redactor.redact_recomputable_fields();
+
+        if redact_v6_anchor {
+            redactor.clear_anchor();
+        }
+    }
+
+    Redactor::new(pczt.clone())
+        .redact_global_with(|mut redactor| {
+            redactor.redact_proprietary(PROPRIETARY_PROPOSAL_INFO);
+        })
+        .redact_transparent_with(|mut redactor| {
+            redactor.redact_outputs(|mut output| {
+                output.redact_proprietary(PROPRIETARY_OUTPUT_INFO);
+            });
+        })
+        .redact_sapling_with(|mut redactor| {
+            redactor.clear_bsk();
+            redactor.redact_spends(|mut spend| {
+                spend.clear_zkproof();
+                spend.clear_dummy_ask();
+            });
+            redactor.redact_outputs(|mut output| {
+                output.clear_zkproof();
+                output.redact_proprietary(PROPRIETARY_OUTPUT_INFO);
+            });
+            if redact_v6_anchors {
+                redactor.clear_anchor();
+            }
+        })
+        .redact_orchard_with(|redactor| {
+            redact_orchard_bundle(redactor, redact_v6_anchors);
+        })
+        .redact_ironwood_with(|redactor| {
+            redact_orchard_bundle(redactor, redact_v6_anchors);
+        })
+        .finish()
 }
 
 /// Finalizes the given PCZT, and persists the transaction to the wallet database.
