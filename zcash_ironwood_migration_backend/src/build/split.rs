@@ -239,10 +239,10 @@ mod tests {
     use proptest::prelude::*;
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
-    use zcash_protocol::consensus::BlockHeight;
     use zcash_protocol::local_consensus::LocalNetwork;
     use zcash_protocol::value::COIN;
 
+    use crate::build::test_util::{account, regtest_network, single_note_witness};
     use crate::note_splitting::{
         CanonicalOneTwoFive, CanonicalPowerOfTen, DenominationStrategy, NoteSplitPlan,
         RESIDUAL_MIGRATION_MIN_ZATOSHI, RandomizedOneTwoFive,
@@ -352,72 +352,6 @@ mod tests {
         let result = build_split_pczt(&params, target_height, &fvk, anchor, spends, &outputs, rng);
         let err = result.unwrap_err();
         assert!(matches!(err, BuildError::Balance(_)));
-    }
-
-    /// An account's Orchard full viewing key, deterministic across the tests.
-    fn account() -> FullViewingKey {
-        let sk = orchard::keys::SpendingKey::from_bytes([7u8; 32]).unwrap();
-        FullViewingKey::from(&sk)
-    }
-
-    /// A regtest network with the pre-NU6.3 upgrades active, and NU6.3 active only when requested.
-    /// The migration must build on a network where NU6.3 (the Ironwood pool) is live, so the tests
-    /// exercise both.
-    fn regtest_network(nu6_3_active: bool) -> LocalNetwork {
-        let nu6_3 = if nu6_3_active {
-            Some(BlockHeight::from_u32(10))
-        } else {
-            None
-        };
-        LocalNetwork {
-            overwinter: Some(BlockHeight::from_u32(1)),
-            sapling: Some(BlockHeight::from_u32(2)),
-            blossom: Some(BlockHeight::from_u32(3)),
-            heartwood: Some(BlockHeight::from_u32(4)),
-            canopy: Some(BlockHeight::from_u32(5)),
-            nu5: Some(BlockHeight::from_u32(6)),
-            nu6: Some(BlockHeight::from_u32(7)),
-            nu6_1: Some(BlockHeight::from_u32(8)),
-            nu6_2: Some(BlockHeight::from_u32(9)),
-            nu6_3,
-            #[cfg(zcash_unstable = "nu7")]
-            nu7: None,
-        }
-    }
-
-    /// An Orchard note owned by `fvk`, with a valid witness placing it as the sole leaf of an
-    /// otherwise-empty note-commitment tree, and the matching anchor. The authentication path uses
-    /// the empty-subtree roots for a single leaf at position 0, so `add_orchard_spend`'s anchor
-    /// check (`path.root(cmx) == anchor`) accepts it.
-    fn single_note_witness(
-        fvk: &FullViewingKey,
-        value: u64,
-    ) -> (
-        orchard::note::Note,
-        orchard::tree::MerklePath,
-        orchard::Anchor,
-    ) {
-        use incrementalmerkletree::{Hashable, Level};
-        use orchard::note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho};
-        use orchard::tree::{MerkleHashOrchard, MerklePath};
-        use orchard::value::NoteValue;
-
-        let recipient = fvk.address_at(0u32, Scope::External);
-        let note_value = NoteValue::from_raw(value);
-        let rho = Rho::from_bytes(&[1u8; 32]).unwrap();
-        let rseed = RandomSeed::from_bytes([2u8; 32], &rho).unwrap();
-        let note = Note::from_parts(recipient, note_value, rho, rseed, NoteVersion::V2).unwrap();
-
-        let commitment = note.commitment();
-        let cmx = ExtractedNoteCommitment::from(commitment);
-        let auth_path = core::array::from_fn(|level| {
-            let level = Level::from(level as u8);
-            MerkleHashOrchard::empty_root(level)
-        });
-        let position = 0;
-        let path = MerklePath::from_parts(position, auth_path);
-        let anchor = path.root(cmx);
-        (note, path, anchor)
     }
 
     /// Plans a note split with one of the three note-splitting strategies (index `0..3`), the same
