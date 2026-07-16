@@ -23,3 +23,7 @@ and this library adheres to Rust's notion of
   wallet-backend and storage failures are carried as opaque messages (`Backend(String)` /
   `Store(String)`), so it names no backend-specific type; it exposes a stable `error_code` for the
   FFI boundary and derives no `serde`.
+- Self-funding denomination planning (`plan_denominations`): decomposes a spendable Orchard balance
+  into notes whose crossing values follow the `{1, 2, 5} * 10^k` ZEC series (1, 2, 5, 10, ... ZEC),
+  each note holding its crossing value plus a fixed fee buffer, leaving any residual (including
+  dust) as Orchard change rather than folding it into a fee.
