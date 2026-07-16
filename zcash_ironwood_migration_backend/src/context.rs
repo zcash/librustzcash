@@ -1,7 +1,7 @@
 //! The [`MigrationContext`] engine: the public, synchronous API the platform wraps, generic over a
 //! [`WalletMigrationBackend`] and a [`MigrationStore`].
 //!
-//! The engine ties the pure core (denominations, scheduling, state, the PCZT pipeline) to two
+//! The engine ties the pure core (note splitting, scheduling, state, the PCZT pipeline) to two
 //! backend traits: a wallet backend reads balances/heights and builds unproven PCZTs, and a store
 //! persists the engine's run/transaction/note state. All migration logic lives here; the backends
 //! supply only data and I/O. It covers the software-signing path, where the platform supplies a
@@ -17,11 +17,11 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 
-use crate::denominations::{
-    DenominationPlan, MIGRATION_MAX_PREPARED_NOTES_PER_RUN, RESIDUAL_MIGRATION_MIN_ZATOSHI,
-    TRANSFER_FEE_BUFFER_ZATOSHI, plan_denominations,
-};
 use crate::error::{InvalidStateError, MigrationError};
+use crate::note_splitting::{
+    CanonicalPowerOfTen, DenominationStrategy, FeePolicy, MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+    NoteSplitPlan, RESIDUAL_MIGRATION_MIN_ZATOSHI, Zip317FeePolicy, plan_note_split,
+};
 use crate::pipeline::{self, SignedPcztOutcome};
 use crate::scheduling;
 use crate::state::{self, Phase};
@@ -474,7 +474,7 @@ impl<W: WalletMigrationBackend, S: MigrationStore> MigrationContext<W, S> {
             .pool_balances()
             .map_err(backend_err)?
             .orchard_spendable();
-        let (plan, fee_estimate) = converge_denomination_plan(total, 1)?;
+        let (plan, fee_estimate) = converge_denomination_plan(total, 1);
         let output_values = plan
             .migration_outputs()
             .iter()
@@ -835,9 +835,11 @@ impl<W: WalletMigrationBackend, S: MigrationStore> MigrationContext<W, S> {
             .pool_balances()
             .map_err(backend_err)?
             .orchard_spendable();
-        let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
+        // Deterministic estimate: the canonical strategy keeps the reported residual stable across
+        // calls (the randomized split strategy would vary it).
+        let plan = CanonicalPowerOfTen::zip_draft().plan(total, 0, &mut OsRng);
         Ok(plan
-            .orchard_change()
+            .change()
             .filter(|&v| v >= RESIDUAL_MIGRATION_MIN_ZATOSHI)
             .map(Zatoshis::const_from_u64))
     }
@@ -860,24 +862,34 @@ impl<W: WalletMigrationBackend, S: MigrationStore> MigrationContext<W, S> {
             .wallet
             .target_and_anchor_heights()
             .map_err(backend_err)?;
-        let total = self
-            .wallet
-            .pool_balances()
-            .map_err(backend_err)?
-            .orchard_spendable();
-        // No fee reservation: by now the spendable balance is expected to consist of the split's
-        // self-funding notes (each already carrying its own transfer-fee buffer), so decomposing
-        // with a zero prep-fee reproduces those exact notes back as crossing values.
-        let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
-        let mut crossing_values = plan.crossing_values().to_vec();
+        let buffer = Zip317FeePolicy.transfer_fee_buffer_zatoshi();
+        // Read the crossing values from the split's actual, persisted prepared notes rather than
+        // re-planning: the randomized split strategy would not reproduce the same notes. Each stored
+        // `target_value` is a self-funding note (crossing value plus its transfer-fee buffer), so the
+        // crossing value is `target_value - buffer`. Before any run exists (rare pre-split path), fall
+        // back to planning the current spendable balance.
+        let mut crossing_values = match self.active_run()? {
+            Some(run) => run
+                .target_values()
+                .iter()
+                .map(|&v| v.saturating_sub(buffer))
+                .collect::<Vec<u64>>(),
+            None => {
+                let total = self
+                    .wallet
+                    .pool_balances()
+                    .map_err(backend_err)?
+                    .orchard_spendable();
+                plan_note_split(total, 0, &mut OsRng)
+                    .crossing_values()
+                    .to_vec()
+            }
+        };
         if include_residual {
-            if let Some(residual) = plan
-                .orchard_change()
-                .filter(|&v| v >= RESIDUAL_MIGRATION_MIN_ZATOSHI)
-            {
-                // Net out the fee buffer so the scheduled crossing value is what lands in Ironwood;
-                // this matches the residual self-funding note the split minted.
-                crossing_values.push(residual.saturating_sub(TRANSFER_FEE_BUFFER_ZATOSHI));
+            if let Some(residual) = self.residual_after_migration()? {
+                // Net out the fee buffer so the scheduled crossing value is what lands in the
+                // destination pool; this matches the residual self-funding note the split minted.
+                crossing_values.push(u64::from(residual).saturating_sub(buffer));
             }
         }
         let run_id = new_run_id();
@@ -1268,25 +1280,23 @@ fn split_fee(n_spends: usize, n_changes: usize) -> u64 {
 /// resulting output count so the split reserves enough headroom.
 ///
 /// The prep fee reserved while decomposing must cover the real split fee, which itself depends on
-/// the output count. Rather than requiring an exact fixed point (which the greedy decomposition does
-/// not always admit), this stops as soon as the reserved fee is sufficient (`real_fee <=
+/// the output count. Rather than requiring an exact fixed point (which the randomized decomposition
+/// does not admit), this stops as soon as the reserved fee is sufficient (`real_fee <=
 /// fee_estimate`); each non-terminating round strictly increases the estimate, bounded by the
 /// note-count cap, so it always terminates. Returns the plan and the converged fee estimate.
-fn converge_denomination_plan(
-    total: u64,
-    n_spends: usize,
-) -> Result<(DenominationPlan, u64), MigrationError> {
+fn converge_denomination_plan(total: u64, n_spends: usize) -> (NoteSplitPlan, u64) {
     let mut fee_estimate = FEE_ESTIMATE_ZATOSHI;
-    let mut plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+    let mut rng = OsRng;
+    let mut plan = plan_note_split(total, fee_estimate, &mut rng);
     for _ in 0..=MIGRATION_MAX_PREPARED_NOTES_PER_RUN {
         let real_fee = split_fee(n_spends, plan.migration_outputs().len().max(1));
         if real_fee <= fee_estimate {
             break;
         }
         fee_estimate = real_fee;
-        plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+        plan = plan_note_split(total, fee_estimate, &mut rng);
     }
-    Ok((plan, fee_estimate))
+    (plan, fee_estimate)
 }
 
 /// Classifies a recoverable failure's error message into an [`AttentionReason`].

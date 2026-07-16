@@ -20,6 +20,7 @@ all-features = true
 
 [dependencies]
 zcash_keys = { workspace = true, features = ["orchard"] }
+zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 
 orchard.workspace = true
@@ -31,6 +32,7 @@ pczt = { workspace = true, features = [
     "tx-extractor",
 ] }
 rand.workspace = true
+rand_core.workspace = true
 rand_distr.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 

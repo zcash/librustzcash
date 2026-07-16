@@ -13,7 +13,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 // Internal note-split planner, consumed by the context module.
-mod denominations;
+mod note_splitting;
 // Internal transfer scheduler, consumed by the context module.
 mod scheduling;
 // The pure PCZT pipeline, consumed by the context module.
