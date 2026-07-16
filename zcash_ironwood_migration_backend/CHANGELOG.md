@@ -42,3 +42,9 @@ and this library adheres to Rust's notion of
   the interface.
 - `state::Phase`, a migration run's fine-grained 14-value phase, with its stable persisted string
   form (`Phase::as_str` / `Phase::parse`).
+- The `store::MigrationStore` trait, the backend-agnostic persistence interface the migration engine
+  is generic over, plus its plain-data row types (`NewRun`, `RunRow`, `PreparedNote`,
+  `NoteSplitTxRow`, `ScheduledTransferRow`, `StagedPczt`, `TransferTotals`) and `StagedKind`. Reads
+  return owned rows, single writes mutate one row group, and multi-write operations that must be
+  durable all-or-nothing are exposed as `commit_*` methods so each backend makes them atomic itself;
+  no storage-backend-specific type appears in the interface.
