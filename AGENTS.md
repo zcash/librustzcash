@@ -253,6 +253,9 @@ Type safety is paramount. This is a security-critical codebase.
 - Prefer immutability. Only use `mut` when strictly needed for performance.
 - When structured enum variants are needed, wrap an immutable type rather than using
   inline fields, to ensure safe construction. This can be relaxed for error enum types.
+- No magic numbers: give every literal a named `const` with a documented meaning. Prefer an
+  existing protocol constant (e.g. `zcash_protocol::value::COIN` / `MAX_MONEY`,
+  `zip317::MARGINAL_FEE`) over redefining one.
 
 ### Naming — Project-Specific Conventions
 
