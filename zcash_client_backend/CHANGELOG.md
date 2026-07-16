@@ -16,6 +16,27 @@ workspace.
   address into an account as watch-only, without any associated key material.
 - `zcash_client_backend::wallet::TransparentAddressSource::StandaloneAddress`
 - `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_address`
+- `zcash_client_backend::privacy` (behind the new `lightwalletd-privacy` feature):
+  a backend-agnostic network-privacy layer generalizing the Tor transport.
+  - `privacy::PrivateNetwork`: a trait abstracting a connection-level privacy
+    transport (opening byte streams to a `host:port`, and supplying the
+    `Timeouts` applied to operations performed over it).
+  - `privacy::DynPrivateNetwork` and `privacy::BoxedStream`: an object-safe
+    mirror of `PrivateNetwork` (with a blanket implementation for every
+    `PrivateNetwork`) for use behind a pointer, e.g. `Arc<dyn DynPrivateNetwork>`
+    (which itself implements `PrivateNetwork`).
+  - `privacy::DormantMode`, `privacy::Error`, and `privacy::Timeouts`.
+  - `privacy::grpc::connect_to_lightwalletd` (feature-gated on
+    `lightwalletd-tonic-tls-webpki-roots`) and `privacy::http`
+    (`http_get`/`http_post`/`http_get_json`, `Retry`, `HttpError`,
+    `TimeoutPhase`, and the `cryptex` exchange-rate machinery), each generalized
+    over `PrivateNetwork`.
+- `zcash_client_backend::privacy::blocking` (behind the new
+  `lightwalletd-blocking` feature, which does not require the `tor` feature):
+  - `privacy::blocking::PrivacyRuntime`: a synchronous facade bundling a Tokio
+    runtime with a `PrivateNetwork` backend, with a `tor`-gated `create_tor`
+    convenience constructor.
+  - `privacy::blocking::LwdConn`: a blocking `lightwalletd` gRPC client.
 
 ### Changed
 - The `orchard` feature is now enabled by default. Consumers that require a
@@ -31,6 +52,28 @@ workspace.
   has this source cannot be spent:
   `zcash_client_backend::data_api::wallet::create_proposed_transactions`
   returns `Error::KeyNotAvailable` when a proposal includes one.
+- `zcash_client_backend::tor::DormantMode` is now a re-export of the crate-owned
+  `zcash_client_backend::privacy::DormantMode` (with the same `Normal` and `Soft`
+  variants) rather than a re-export of `arti_client::DormantMode`. `From`
+  conversions to and from `arti_client::DormantMode` are provided under the `tor`
+  feature. Code that constructs or matches `Normal`/`Soft` is unaffected.
+- `zcash_client_backend::tor::Timeouts`,
+  `zcash_client_backend::tor::http::{HttpError, Retry, TimeoutPhase}`, and
+  `zcash_client_backend::tor::http::cryptex` are now re-exports of the
+  corresponding items in `zcash_client_backend::privacy`. The existing `tor::*`
+  paths continue to resolve unchanged.
+- `zcash_client_backend::tor::Error` has a new `Backend` variant, carrying
+  privacy-layer transport errors that originate from a source other than
+  `arti_client`.
+- The `tor` feature now enables the `lightwalletd-privacy` feature.
+
+### Removed
+- `zcash_client_backend::tor::http::HttpError::Spawn` (also reachable as
+  `zcash_client_backend::privacy::http::HttpError`). HTTP connection tasks are
+  now spawned on the ambient Tokio runtime, which does not produce the
+  `futures`-based spawn error that this variant represented; the absence of an
+  ambient Tokio runtime is instead reported via the new `HttpError::Runtime`
+  variant.
 
 ## [0.24.0-rc.7] - 2026-08-03
 
