@@ -1338,6 +1338,73 @@ mod tests {
             .unwrap()
     }
 
+    // A step that requires no actions in a pool produces no bundle in that pool, so it is charged
+    // nothing — no matter how much padding the bundle type would otherwise apply. The exception is
+    // a bundle type that requires a bundle: the builder then produces one consisting entirely of
+    // dummy actions, padded to the type's minimum.
+    #[test]
+    fn uninvolved_pool_is_charged_nothing_unless_a_bundle_is_required() {
+        let step = step_with_notes(vec![]);
+        for bundle_type in [BundleType::DEFAULT, BundleType::UNPADDED] {
+            assert_eq!(
+                step.orchard_action_count(bundle_type, BundleVersion::orchard_v3()),
+                Ok(0)
+            );
+            assert_eq!(
+                step.ironwood_action_count(bundle_type, BundleVersion::ironwood_v3()),
+                Ok(0)
+            );
+        }
+
+        // `bundle_required` guarantees a bundle exists, padded to the type's minimum: two
+        // all-dummy actions by default, or one when the type opts out of the default padding.
+        let required = BundleType::Transactional {
+            bundle_required: true,
+            pad_to_minimum: None,
+        };
+        assert_eq!(
+            step.orchard_action_count(required, BundleVersion::orchard_v3()),
+            Ok(2)
+        );
+        let required_unpadded = BundleType::Transactional {
+            bundle_required: true,
+            pad_to_minimum: Some(1),
+        };
+        assert_eq!(
+            step.orchard_action_count(required_unpadded, BundleVersion::orchard_v3()),
+            Ok(1)
+        );
+    }
+
+    // The documented error path. A coinbase bundle has spends disabled, so every spend in it must
+    // be a dummy; a step that spends notes in a pool therefore cannot be built as a coinbase
+    // bundle of that pool, and the count is reported as an error rather than as a wrong number.
+    // This is the only error a step can currently provoke: `BundleVersion::default_flags` always
+    // enables both spends and outputs, so no transactional bundle type can reject a step's counts.
+    #[test]
+    fn spends_cannot_be_charged_to_a_coinbase_bundle() {
+        let step = step_with_notes(orchard_and_ironwood_notes(1, 1));
+        assert_matches!(
+            step.orchard_action_count(BundleType::Coinbase, BundleVersion::orchard_v3()),
+            Err(_)
+        );
+        assert_matches!(
+            step.ironwood_action_count(BundleType::Coinbase, BundleVersion::ironwood_v3()),
+            Err(_)
+        );
+
+        // A step that spends nothing in the pool is accepted: coinbase bundles create outputs,
+        // and are never padded.
+        let step = step_with_notes_and_change(
+            vec![],
+            vec![shielded_change(ShieldedPool::Ironwood, 10_000)],
+        );
+        assert_eq!(
+            step.ironwood_action_count(BundleType::Coinbase, BundleVersion::ironwood_v3()),
+            Ok(1)
+        );
+    }
+
     // A payment output counts towards the action count of the pool it is directed to, exactly as
     // a change output does. `orchard_payment_step` spends one Orchard note to make one payment.
     #[test]
@@ -1474,6 +1541,32 @@ mod tests {
                     bundle_version_at(nu6_3_or_later, ValuePool::Ironwood),
                 ),
                 Ok(spends.max(change))
+            );
+        }
+
+        // A non-empty bundle is charged the greater of the actions it requests and the bundle
+        // type's padding floor: padding never reduces the count, and the floor is never
+        // undershot. `DEFAULT` (floor 2) and `UNPADDED` (floor 1) are the two floors the
+        // wallet itself uses; this covers the range.
+        #[test]
+        fn action_count_is_never_below_the_bundle_types_padding_floor(
+            spends in 1usize..4,
+            change in 1usize..4,
+            pad_to_minimum in 1u8..8,
+        ) {
+            let step = step_with_notes_and_change(
+                orchard_and_ironwood_notes(spends, 0),
+                std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, 10_000), change)
+                    .collect(),
+            );
+            let bundle_type = BundleType::Transactional {
+                bundle_required: false,
+                pad_to_minimum: Some(pad_to_minimum),
+            };
+
+            prop_assert_eq!(
+                step.orchard_action_count(bundle_type, BundleVersion::orchard_v3()),
+                Ok((spends + change).max(usize::from(pad_to_minimum)))
             );
         }
 
