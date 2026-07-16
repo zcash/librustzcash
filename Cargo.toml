@@ -18,6 +18,15 @@ members = [
     "zcash_transparent",
 ]
 
+# The experimental Nym network-privacy crate is deliberately kept OUT of the workspace. It
+# pulls in an enormous dependency tree (nym-sdk is ~750 crates) with a higher MSRV than the
+# workspace (>= 1.89). Excluding it keeps that tree — and any MSRV bump it entails — out of
+# the workspace `Cargo.lock` and CI. It has its own `Cargo.lock` and depends on
+# `zcash_client_backend` by path.
+exclude = [
+    "zcash_client_privacy_nym",
+]
+
 resolver = "2"
 
 [workspace.package]
