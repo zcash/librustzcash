@@ -270,6 +270,18 @@ lightwalletd-privacy = [
     "dep:webpki-roots",
 ]
 
+## Exposes a blocking (synchronous) facade over the network-privacy layer
+## (`zcash_client_backend::privacy::blocking`): a `PrivacyRuntime` bundling a Tokio runtime
+## with a backend, and an `LwdConn` blocking `lightwalletd` client. Does not require the
+## `tor` feature; construct a runtime from any `PrivateNetwork` backend.
+lightwalletd-blocking = [
+    "lightwalletd-privacy",
+    "lightwalletd-tonic-tls-webpki-roots",
+    "tokio?/net",
+    "tokio?/rt-multi-thread",
+    "tokio?/time",
+]
+
 ## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
 ## operations.
 tor = [

@@ -22,6 +22,8 @@ use std::{fmt, future::Future, pin::Pin, sync::Arc};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
+#[cfg(feature = "lightwalletd-blocking")]
+pub mod blocking;
 #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
 pub mod grpc;
 pub mod http;
@@ -162,15 +164,17 @@ impl PrivateNetwork for Arc<dyn DynPrivateNetwork> {
     type Stream = BoxedStream;
 
     async fn connect(&self, host: &str, port: u16) -> Result<Self::Stream, Error> {
-        self.dyn_connect(host, port).await
+        // Dispatch to the inner trait object rather than back through this impl, which
+        // would otherwise recurse via the blanket `DynPrivateNetwork` implementation.
+        DynPrivateNetwork::dyn_connect(&**self, host, port).await
     }
 
     fn isolated_handle(&self) -> Self {
-        self.dyn_isolated_handle()
+        DynPrivateNetwork::dyn_isolated_handle(&**self)
     }
 
     fn set_dormant(&self, mode: DormantMode) {
-        self.dyn_set_dormant(mode);
+        DynPrivateNetwork::dyn_set_dormant(&**self, mode);
     }
 }
 
