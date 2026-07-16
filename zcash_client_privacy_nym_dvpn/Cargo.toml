@@ -1,0 +1,43 @@
+[package]
+name = "zcash_client_privacy_nym_dvpn"
+description = "Experimental Nym smol-dvpn network-privacy backend for Zcash lightwalletd clients"
+version = "0.0.0"
+authors = ["Kris Nuttycombe <kris@electriccoin.co>"]
+homepage = "https://github.com/zcash/librustzcash"
+repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+categories = ["cryptography::cryptocurrencies"]
+
+# This crate is intentionally NOT published to crates.io. Its backend depends on
+# `nym-smol-dvpn` / `nym-sdk-session`, which are only available as `git` dependencies
+# (crates.io rejects `git` dependencies, and `nym-smol-dvpn` is itself blocked on an
+# unpublished `nym-bridges` release).
+#
+# ⚠️ IMPORTANT: this crate does NOT currently build. The Nym `git` credential stack
+# requires `crypto-common >= 0.2.0-rc.5`, while `zcash_client_backend` (via
+# `zcash_primitives`) pins `crypto-common = "=0.2.0-rc.1"`. No single `crypto-common`
+# version satisfies both, so `cargo` cannot resolve a lockfile. See `README.md` for the
+# full dependency-conflict analysis. The source here is complete and reviewed against the
+# real Nym API, ready to build once the conflict is resolved upstream.
+publish = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+zcash_client_backend = { path = "../zcash_client_backend", default-features = false, features = [
+    "lightwalletd-privacy",
+    "lightwalletd-tonic-tls-webpki-roots",
+] }
+
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "macros"] }
+tokio-util = "0.7"
+tracing = "0.1"
+
+# The Nym `smol-dvpn` datapath and its (funded) registration path, pinned to the monorepo
+# revision studied when this crate was written. Both are `git`-only today.
+nym-smol-dvpn = { git = "https://github.com/nymtech/nym", rev = "1fd9ae8817b2c6e49283e8e5597f031ce7f6091c" }
+nym-sdk-session = { git = "https://github.com/nymtech/nym", rev = "1fd9ae8817b2c6e49283e8e5597f031ce7f6091c" }
