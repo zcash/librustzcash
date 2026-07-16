@@ -12,6 +12,11 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 
+// Internal note-split planner, consumed by the note-split and context modules in later slices.
+// Remove the `allow` once a consumer is added.
+#[allow(dead_code)]
+mod denominations;
+
 pub mod error;
 pub mod types;
 
