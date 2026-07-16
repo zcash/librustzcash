@@ -1385,7 +1385,7 @@ mod tests {
     }
 
     // A step that requires no actions in a pool produces no bundle in that pool, so it is charged
-    // nothing — no matter how much padding the bundle type would otherwise apply. The exception is
+    // nothing, no matter how much padding the bundle type would otherwise apply. The exception is
     // a bundle type that requires a bundle: the builder then produces one consisting entirely of
     // dummy actions, padded to the type's minimum.
     #[test]
