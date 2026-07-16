@@ -60,3 +60,10 @@ and this library adheres to Rust's notion of
   phase and progress, surfacing the next due transfer, refreshing stale or invalid transfers, and
   recording results), so no wallet- or storage-backend-specific type appears in it. Adds a `uuid`
   dependency for run identifiers.
+- The pure `build` module: `build_split_pczt` and `build_transfer_pczt` construct the note-split and
+  migration-transfer transactions as unproven PCZTs directly from plain-data ingredients (the full
+  viewing key, the Orchard anchor, the spendable notes with their witnesses, and the destination-pool
+  recipient) via the transaction `Builder` (`Creator` / `IoFinalizer`). They do no database or
+  wallet-backend access: selecting the notes and resolving their witnesses, the anchor, and the
+  recipient is the wallet backend's job, supplied here as inputs. Enables the `pczt` `io-finalizer`
+  and `zcp-builder` features.
