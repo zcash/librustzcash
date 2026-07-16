@@ -7206,6 +7206,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_ironwood_migration_backend"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "zcash_primitives",
+ "zcash_protocol",
+]
+
+[[package]]
 name = "zcash_keys"
 version = "0.15.0"
 dependencies = [
