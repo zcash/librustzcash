@@ -38,7 +38,14 @@ and this library adheres to Rust's notion of
   mapping each output to its real Orchard action index. It is pure (no database or wallet-backend
   access) and takes the RNG as a parameter. `finalize_split_outputs` keeps each migration note at its
   exact planned value and reconciles the real ZIP-317 fee against the plan by adding a plain change
-  output (or, for a sub-action-fee leftover, folding it into the fee). Only the note split (Phase 1)
-  is built here; the value crossing is left for later, and the shared transaction-builder plumbing is
-  factored so that phase can reuse it. Adds optional `orchard` and `pczt` dependencies, enabled only
-  by the feature.
+  output (or, for a sub-action-fee leftover, folding it into the fee). The shared transaction-builder
+  plumbing (build config, PCZT finalization, action-index mapping, fees) is factored into the module
+  root so the transfer builder reuses it. Adds optional `orchard` and `pczt` dependencies, enabled
+  only by the feature.
+- The pure PCZT transfer builder (`build::build_transfer_pczt`, behind the `orchard` feature): spends
+  one self-funding note the split minted and outputs its crossing value into the Ironwood pool as an
+  unproven `pczt::Pczt`. It has no change output; the note's fee buffer funds the transfer's fee
+  exactly (the Orchard spend and the Ironwood output each pad to the two-action minimum, so the
+  transfer is four logical actions, matching the buffer of `2 source + 2 destination` actions). It
+  runs post-NU6.3 (when the Ironwood pool is live), and like the split builder is pure (no database
+  or wallet-backend access) and takes the RNG as a parameter.
