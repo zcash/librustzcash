@@ -25,10 +25,14 @@ mod pipeline;
 
 pub mod error;
 pub mod types;
+pub mod wallet;
 
 pub use error::{InvalidStateError, MigrationError};
 pub use types::{
     AttentionReason, MigrationProgress, MigrationSchedule, MigrationState, NoteSplitProposal,
     PreparedTransfer, Signed, SignedTransferPczt, TransferId, TransferPczt, TransferProposal,
     TransferResult, Unsigned, UnsignedTransferPczt,
+};
+pub use wallet::{
+    NoteRef, PoolBalances, SpentNote, SplitOutputs, TransferBuild, WalletMigrationBackend,
 };
