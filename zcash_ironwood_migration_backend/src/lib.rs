@@ -16,6 +16,9 @@
 // Remove the `allow` once a consumer is added.
 #[allow(dead_code)]
 mod denominations;
+// Internal transfer scheduler, consumed by the context module in a later slice.
+#[allow(dead_code)]
+mod scheduling;
 
 pub mod error;
 pub mod types;

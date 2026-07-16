@@ -21,6 +21,9 @@ all-features = true
 [dependencies]
 zcash_protocol.workspace = true
 
+rand.workspace = true
+rand_distr.workspace = true
+
 proptest = { workspace = true, optional = true }
 
 [features]
