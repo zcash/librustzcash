@@ -11,4 +11,6 @@
 
 #![deny(rustdoc::broken_intra_doc_links)]
 
+#[cfg(feature = "orchard")]
+pub mod build;
 pub mod note_splitting;
