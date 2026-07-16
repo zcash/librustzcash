@@ -6,7 +6,7 @@ use rand::{seq::IteratorRandom, thread_rng};
 use rust_decimal::Decimal;
 use tracing::{error, trace};
 
-use crate::tor::{Client, Error};
+use crate::privacy::{DynPrivateNetwork, Error, PrivateNetwork};
 
 use super::Retry;
 
@@ -74,7 +74,7 @@ pub trait LocalExchange {
     ///
     /// The returned bid and ask data must be denominated in USD, i.e. the latest bid and
     /// ask for 1 ZEC.
-    async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error>;
+    async fn query_zec_to_usd(&self, net: &dyn DynPrivateNetwork) -> Result<ExchangeData, Error>;
 }
 
 /// Data queried from an [`Exchange`].
@@ -169,81 +169,80 @@ impl ExchangesBuilder {
     }
 }
 
-impl Client {
-    /// Fetches the latest USD/ZEC exchange rate, derived from the given exchanges.
-    ///
-    /// Returns:
-    /// - `Ok(rate)` if at least one exchange request succeeds.
-    /// - `Err(_)` if none of the exchange queries succeed.
-    pub async fn get_latest_zec_to_usd_rate(
-        &self,
-        exchanges: &Exchanges,
-    ) -> Result<Decimal, Error> {
-        self.ensure_bootstrapped().await?;
+/// Fetches the latest USD/ZEC exchange rate over the given [`PrivateNetwork`], derived
+/// from the given exchanges.
+///
+/// Returns:
+/// - `Ok(rate)` if at least one exchange request succeeds.
+/// - `Err(_)` if none of the exchange queries succeed.
+pub async fn get_latest_zec_to_usd_rate<N: PrivateNetwork + 'static>(
+    net: &N,
+    exchanges: &Exchanges,
+) -> Result<Decimal, Error> {
+    let net: &dyn DynPrivateNetwork = net;
 
-        // Fetch the data in parallel.
-        let res = join!(
-            DynExchange::query_zec_to_usd(&exchanges.trusted, self),
-            join_all(
-                exchanges
-                    .others
-                    .iter()
-                    .map(|e| DynExchange::query_zec_to_usd(e, self))
-            )
-        );
-        trace!(?res, "Data results");
-        let (trusted_res, other_res) = res;
+    // Fetch the data in parallel.
+    let res = join!(
+        DynExchange::query_zec_to_usd(&exchanges.trusted, net),
+        join_all(
+            exchanges
+                .others
+                .iter()
+                .map(|e| DynExchange::query_zec_to_usd(e, net))
+        )
+    );
+    trace!(?res, "Data results");
+    let (trusted_res, other_res) = res;
 
-        // Split into successful queries and errors.
-        let mut rates: Vec<Decimal> = vec![];
-        let mut errors = vec![];
-        for res in other_res {
-            match res {
-                Ok(d) => rates.push(d.exchange_rate()),
-                Err(e) => errors.push(e),
-            }
+    // Split into successful queries and errors.
+    let mut rates: Vec<Decimal> = vec![];
+    let mut errors = vec![];
+    for res in other_res {
+        match res {
+            Ok(d) => rates.push(d.exchange_rate()),
+            Err(e) => errors.push(e),
         }
+    }
 
-        // "Never go to sea with two chronometers; take one or three."
-        // Randomly drop one rate if necessary to have an odd number of rates, as long as
-        // we have either at least three rates, or fewer than three sources.
-        if exchanges.others.len() >= 2 && rates.len() + usize::from(trusted_res.is_ok()) < 3 {
-            error!("Too many exchange requests failed");
-            return Err(errors
-                .into_iter()
-                .next()
-                .expect("At least one request failed"));
+    // "Never go to sea with two chronometers; take one or three."
+    // Randomly drop one rate if necessary to have an odd number of rates, as long as
+    // we have either at least three rates, or fewer than three sources.
+    if exchanges.others.len() >= 2 && rates.len() + usize::from(trusted_res.is_ok()) < 3 {
+        error!("Too many exchange requests failed");
+        return Err(errors
+            .into_iter()
+            .next()
+            .expect("At least one request failed"));
+    }
+    let evict_random = |s: &mut Vec<Decimal>| {
+        if let Some(index) = (0..s.len()).choose(&mut thread_rng()) {
+            s.remove(index);
         }
-        let evict_random = |s: &mut Vec<Decimal>| {
-            if let Some(index) = (0..s.len()).choose(&mut thread_rng()) {
-                s.remove(index);
+    };
+    match trusted_res {
+        Ok(trusted) => {
+            if !rates.len().is_multiple_of(2) {
+                evict_random(&mut rates);
             }
-        };
-        match trusted_res {
-            Ok(trusted) => {
-                if !rates.len().is_multiple_of(2) {
-                    evict_random(&mut rates);
-                }
-                rates.push(trusted.exchange_rate());
-            }
-            Err(e) => {
-                if rates.len().is_multiple_of(2) {
-                    evict_random(&mut rates);
-                }
-                errors.push(e);
-            }
+            rates.push(trusted.exchange_rate());
         }
+        Err(e) => {
+            if rates.len().is_multiple_of(2) {
+                evict_random(&mut rates);
+            }
+            errors.push(e);
+        }
+    }
 
-        // If all of the requests failed, log all errors and return one of them.
-        if rates.is_empty() {
-            error!("All exchange requests failed");
-            Err(errors.into_iter().next().expect("All requests failed"))
-        } else {
-            // We have an odd number of rates; take the median.
-            assert!(!rates.len().is_multiple_of(2));
-            rates.sort();
-            let median = rates.len() / 2;
-            Ok(rates[median])
-        }
+    // If all of the requests failed, log all errors and return one of them.
+    if rates.is_empty() {
+        error!("All exchange requests failed");
+        Err(errors.into_iter().next().expect("All requests failed"))
+    } else {
+        // We have an odd number of rates; take the median.
+        assert!(!rates.len().is_multiple_of(2));
+        rates.sort();
+        let median = rates.len() / 2;
+        Ok(rates[median])
     }
 }

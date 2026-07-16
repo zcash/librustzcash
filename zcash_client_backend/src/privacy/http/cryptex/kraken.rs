@@ -4,7 +4,8 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use super::{Exchange, ExchangeData, RETRY_LIMIT, retry_filter};
-use crate::tor::{Client, Error};
+use crate::privacy::http::http_get_json_over;
+use crate::privacy::{DynPrivateNetwork, Error};
 
 /// Querier for the Kraken exchange.
 pub struct Kraken {
@@ -35,20 +36,20 @@ struct KrakenData {
 type KrakenResponse = Result<KrakenData, Vec<String>>;
 
 impl Exchange for Kraken {
-    async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error> {
+    async fn query_zec_to_usd(&self, net: &dyn DynPrivateNetwork) -> Result<ExchangeData, Error> {
         // API documentation:
         // https://docs.kraken.com/api/docs/rest-api/get-ticker-information
-        let res = client
-            .http_get_json::<KrakenResponse>(
-                "https://api.kraken.com/0/public/Ticker?pair=XZECZUSD"
-                    .parse()
-                    .unwrap(),
-                RETRY_LIMIT,
-                retry_filter,
-            )
-            .await?;
+        let res = http_get_json_over::<KrakenResponse>(
+            net,
+            "https://api.kraken.com/0/public/Ticker?pair=XZECZUSD"
+                .parse()
+                .unwrap(),
+            RETRY_LIMIT,
+            retry_filter,
+        )
+        .await?;
         let data = res.into_body().map_err(|e| {
-            Error::Io(io::Error::other(
+            Error::Backend(Box::new(io::Error::other(
                 e.into_iter()
                     .reduce(|mut acc, e| {
                         acc.push_str("; ");
@@ -56,7 +57,7 @@ impl Exchange for Kraken {
                         acc
                     })
                     .unwrap_or_default(),
-            ))
+            )))
         })?;
         Ok(ExchangeData {
             bid: data.b.0,

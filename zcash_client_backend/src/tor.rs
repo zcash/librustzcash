@@ -1,19 +1,23 @@
 //! Tor support for Zcash wallets.
+//!
+//! This module provides the Tor (via `arti`) implementation of the crate's
+//! backend-agnostic [`crate::privacy`] network-privacy layer. [`Client`] implements
+//! [`PrivateNetwork`], and its gRPC, HTTP, and exchange-rate methods delegate to the
+//! generic helpers in [`crate::privacy`].
 
 use std::{fmt, io, path::Path};
 
-use arti_client::{TorClient, config::TorClientConfigBuilder};
+use arti_client::{DataStream, TorClient, config::TorClientConfigBuilder};
 use tor_rtcompat::PreferredRuntime;
 use tracing::debug;
 
-#[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
-mod grpc;
+use crate::privacy::{Error as PrivacyError, PrivateNetwork};
 
 pub mod http;
 
-// Re-exported as this is currently the only `arti_client` type users would need to use
-// our minimal client API.
-pub use arti_client::DormantMode;
+// Re-exported so that `tor::DormantMode` continues to resolve for downstream users; it is
+// now the crate-owned [`crate::privacy::DormantMode`] rather than `arti_client`'s.
+pub use crate::privacy::DormantMode;
 
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 #[derive(Clone)]
@@ -112,7 +116,50 @@ impl Client {
     ///
     /// See the [`DormantMode`] documentation for more details.
     pub fn set_dormant(&self, mode: DormantMode) {
-        self.inner.set_dormant(mode);
+        self.inner.set_dormant(mode.into());
+    }
+
+    /// Connects to the `lightwalletd` server at the given endpoint.
+    #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+    pub async fn connect_to_lightwalletd(
+        &self,
+        endpoint: tonic::transport::Uri,
+    ) -> Result<
+        crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient<
+            tonic::transport::Channel,
+        >,
+        Error,
+    > {
+        self.ensure_bootstrapped().await?;
+        Ok(crate::privacy::grpc::connect_to_lightwalletd(self, endpoint).await?)
+    }
+}
+
+impl PrivateNetwork for Client {
+    type Stream = DataStream;
+
+    async fn connect(&self, host: &str, port: u16) -> Result<Self::Stream, PrivacyError> {
+        // Ensure the Tor client is bootstrapped before attempting to connect.
+        if !self.inner.bootstrap_status().ready_for_traffic() {
+            debug!("Re-bootstrapping Tor");
+            self.inner
+                .bootstrap()
+                .await
+                .map_err(|e| PrivacyError::Backend(Box::new(e)))?;
+            debug!("Tor re-bootstrapped");
+        }
+        self.inner
+            .connect((host, port))
+            .await
+            .map_err(|e| PrivacyError::Backend(Box::new(e)))
+    }
+
+    fn isolated_handle(&self) -> Self {
+        self.isolated_client()
+    }
+
+    fn set_dormant(&self, mode: DormantMode) {
+        self.inner.set_dormant(mode.into());
     }
 }
 
@@ -123,13 +170,15 @@ pub enum Error {
     MissingTorDirectory,
     #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
     /// An error occurred while using gRPC-over-Tor.
-    Grpc(self::grpc::GrpcError),
+    Grpc(crate::privacy::grpc::GrpcError),
     /// An error occurred while using HTTP-over-Tor.
-    Http(self::http::HttpError),
+    Http(crate::privacy::http::HttpError),
     /// An IO error occurred while interacting with the filesystem.
     Io(io::Error),
     /// A Tor-specific error.
     Tor(arti_client::Error),
+    /// A network-privacy backend error not covered by the more specific variants.
+    Backend(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl fmt::Display for Error {
@@ -141,6 +190,7 @@ impl fmt::Display for Error {
             Error::Http(e) => write!(f, "HTTP-over-Tor error: {e}"),
             Error::Io(e) => write!(f, "IO error: {e}"),
             Error::Tor(e) => write!(f, "Tor error: {e}"),
+            Error::Backend(e) => write!(f, "Network backend error: {e}"),
         }
     }
 }
@@ -154,19 +204,20 @@ impl std::error::Error for Error {
             Error::Http(e) => Some(e),
             Error::Io(e) => Some(e),
             Error::Tor(e) => Some(e),
+            Error::Backend(e) => Some(e.as_ref()),
         }
     }
 }
 
 #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
-impl From<self::grpc::GrpcError> for Error {
-    fn from(e: self::grpc::GrpcError) -> Self {
+impl From<crate::privacy::grpc::GrpcError> for Error {
+    fn from(e: crate::privacy::grpc::GrpcError) -> Self {
         Error::Grpc(e)
     }
 }
 
-impl From<self::http::HttpError> for Error {
-    fn from(e: self::http::HttpError) -> Self {
+impl From<crate::privacy::http::HttpError> for Error {
+    fn from(e: crate::privacy::http::HttpError) -> Self {
         Error::Http(e)
     }
 }
@@ -180,5 +231,24 @@ impl From<io::Error> for Error {
 impl From<arti_client::Error> for Error {
     fn from(e: arti_client::Error) -> Self {
         Error::Tor(e)
+    }
+}
+
+impl From<PrivacyError> for Error {
+    fn from(e: PrivacyError) -> Self {
+        match e {
+            #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+            PrivacyError::Grpc(e) => Error::Grpc(e),
+            PrivacyError::Http(e) => Error::Http(e),
+            PrivacyError::NoRoute { host, port } => {
+                Error::Backend(Box::new(PrivacyError::NoRoute { host, port }))
+            }
+            // The Tor backend nests its native errors as `arti_client::Error`; recover
+            // that specific type where possible for a more precise error.
+            PrivacyError::Backend(b) => match b.downcast::<arti_client::Error>() {
+                Ok(e) => Error::Tor(*e),
+                Err(b) => Error::Backend(b),
+            },
+        }
     }
 }

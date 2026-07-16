@@ -2,7 +2,8 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use super::{Exchange, ExchangeData, RETRY_LIMIT, retry_filter};
-use crate::tor::{Client, Error};
+use crate::privacy::http::http_get_json_over;
+use crate::privacy::{DynPrivateNetwork, Error};
 
 /// Querier for the DigiFinex exchange.
 pub struct DigiFinex {
@@ -39,18 +40,18 @@ struct DigiFinexResponse {
 }
 
 impl Exchange for DigiFinex {
-    async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error> {
+    async fn query_zec_to_usd(&self, net: &dyn DynPrivateNetwork) -> Result<ExchangeData, Error> {
         // API documentation:
         // https://docs.digifinex.com/en-ww/spot/v3/rest.html#ticker-price
-        let res = client
-            .http_get_json::<DigiFinexResponse>(
-                "https://openapi.digifinex.com/v3/ticker?symbol=zec_usdt"
-                    .parse()
-                    .unwrap(),
-                RETRY_LIMIT,
-                retry_filter,
-            )
-            .await?;
+        let res = http_get_json_over::<DigiFinexResponse>(
+            net,
+            "https://openapi.digifinex.com/v3/ticker?symbol=zec_usdt"
+                .parse()
+                .unwrap(),
+            RETRY_LIMIT,
+            retry_filter,
+        )
+        .await?;
         let data = res.into_body().ticker.0;
         Ok(ExchangeData {
             bid: data.buy,

@@ -22,6 +22,10 @@ use std::{fmt, future::Future, pin::Pin, sync::Arc};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
+#[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+pub mod grpc;
+pub mod http;
+
 /// The level of background activity a [`PrivateNetwork`] should maintain.
 ///
 /// This is a crate-owned generalization of `arti_client::DormantMode`; the [`crate::tor`]
@@ -157,12 +161,8 @@ impl<P: PrivateNetwork + 'static> DynPrivateNetwork for P {
 impl PrivateNetwork for Arc<dyn DynPrivateNetwork> {
     type Stream = BoxedStream;
 
-    fn connect(
-        &self,
-        host: &str,
-        port: u16,
-    ) -> impl Future<Output = Result<Self::Stream, Error>> + Send {
-        async move { self.dyn_connect(host, port).await }
+    async fn connect(&self, host: &str, port: u16) -> Result<Self::Stream, Error> {
+        self.dyn_connect(host, port).await
     }
 
     fn isolated_handle(&self) -> Self {
@@ -177,6 +177,11 @@ impl PrivateNetwork for Arc<dyn DynPrivateNetwork> {
 /// Errors that can occur while connecting or transferring data over a [`PrivateNetwork`].
 #[derive(Debug)]
 pub enum Error {
+    /// An error occurred while using gRPC over a [`PrivateNetwork`].
+    #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+    Grpc(self::grpc::GrpcError),
+    /// An error occurred while using HTTP over a [`PrivateNetwork`].
+    Http(self::http::HttpError),
     /// The backend cannot route to the requested `host:port`.
     ///
     /// This is returned by backends (such as a mixnet proxy) that can only reach a fixed
@@ -197,6 +202,9 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+            Error::Grpc(e) => write!(f, "gRPC-over-privacy error: {e}"),
+            Error::Http(e) => write!(f, "HTTP-over-privacy error: {e}"),
             Error::NoRoute { host, port } => {
                 write!(f, "No route to {host}:{port} via this network backend")
             }
@@ -208,8 +216,24 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            #[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+            Error::Grpc(e) => Some(e),
+            Error::Http(e) => Some(e),
             Error::NoRoute { .. } => None,
             Error::Backend(e) => Some(e.as_ref()),
         }
+    }
+}
+
+impl From<self::http::HttpError> for Error {
+    fn from(e: self::http::HttpError) -> Self {
+        Error::Http(e)
+    }
+}
+
+#[cfg(feature = "lightwalletd-tonic-tls-webpki-roots")]
+impl From<self::grpc::GrpcError> for Error {
+    fn from(e: self::grpc::GrpcError) -> Self {
+        Error::Grpc(e)
     }
 }
