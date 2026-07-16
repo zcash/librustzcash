@@ -963,7 +963,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
 
     /// The leftover Orchard balance that a migration schedule would *not* cross, reported only
     /// when it is large enough to be worth offering the user a choice about (see
-    /// [`crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI`]). Values below that threshold are
+    /// [`crate::denominations::MIGRATION_THRESHOLD_ZATOSHI`]). Values below that threshold are
     /// true dust — moving them would cost more in fees than they're worth — and are never
     /// reported; the caller should just leave them in the wallet.
     ///
@@ -984,7 +984,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
         Ok(plan
             .orchard_change
-            .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+            .filter(|&v| v >= crate::denominations::MIGRATION_THRESHOLD_ZATOSHI)
             .map(Zatoshis::const_from_u64))
     }
 
@@ -1024,7 +1024,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         if include_residual {
             if let Some(residual) = plan
                 .orchard_change
-                .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+                .filter(|&v| v >= crate::denominations::MIGRATION_THRESHOLD_ZATOSHI)
             {
                 // Unlike a planned self-funding note, the residual has no fee pre-reserved by a
                 // denomination plan — net out TRANSFER_FEE_BUFFER_ZATOSHI here so the scheduled
