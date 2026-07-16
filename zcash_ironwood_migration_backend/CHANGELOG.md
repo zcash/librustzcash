@@ -19,3 +19,7 @@ and this library adheres to Rust's notion of
   for the two states.
 - `types::testing` proptest strategies for every public type, behind the `test-dependencies`
   feature, for reuse by later modules and dependent crates.
+- The error types `MigrationError` and `InvalidStateError`. `MigrationError` is backend-agnostic:
+  wallet-backend and storage failures are carried as opaque messages (`Backend(String)` /
+  `Store(String)`), so it names no backend-specific type; it exposes a stable `error_code` for the
+  FFI boundary and derives no `serde`.
