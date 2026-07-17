@@ -144,8 +144,7 @@ spend" mode anywhere in the orchard crate's builder API — do not attempt `orch
    `Signer` step. All of this succeeds unmodified — signing genuinely does not depend on whether the
    anchor/witness are real, only on the note's own secrets and the spend authorizing key.
 3. **Redact** the synthetic anchor and witness back to absent, *after* signing, via
-   `pczt::roles::redactor::Redactor::redact_orchard_with(|mut o| { o.clear_anchor();
-   o.redact_actions(|mut a| a.clear_spend_witness()); }).finish()`. `Redactor` is not used
+   `pczt::roles::redactor::Redactor::redact_orchard_with(...).finish()`. `Redactor` is not used
    elsewhere in this crate and needs no new Cargo feature (`pczt/src/roles.rs` does not gate it
    behind a feature, unlike prover/signer). Verified directly via `Pczt`'s public accessors:
    `orchard().anchor()` is `None` after redaction (and survives a serialize/parse round trip), while
@@ -153,9 +152,19 @@ spend" mode anywhere in the orchard crate's builder API — do not attempt `orch
    confirming the ZIP 244 premise (anchor is authorizing data, not under the v6 sighash) holds in
    practice, not just in principle.
 
-The resulting PCZT — validly signed, with `anchor: None` and no spend witness — is persisted in the
-`SignedAwaitingProof` sub-state. §4.3's later `set_orchard_anchor`/`set_orchard_spend_witnesses`
-calls are unaffected by this correction: they still require the slot to be `None` first, which the
+   **Correction found during implementation (not caught by the spike, since the spike never ran
+   the Prover role on the redacted PCZT): redact only the real spend's own action, not every action
+   via `redact_actions` (all actions).** The Orchard bundle is padded to two actions
+   (`BundleType::DEFAULT`); the second, padded/dummy action also carries a witness. Clearing *that*
+   action's witness too makes the later `Prover` role fail with `Prover(MissingWitness)` once real
+   data is attached to the real spend and proving is attempted — the padded action's own witness
+   must survive untouched. Redact by action index (`clear_spend_witness()` on the specific action
+   that holds the real, not-yet-mined spend), not blanket over the whole bundle.
+
+The resulting PCZT — validly signed, with the real spend's `anchor: None` and no witness on that
+one action — is persisted in the `SignedAwaitingProof` sub-state. §4.3's later
+`set_orchard_anchor`/`set_orchard_spend_witnesses` calls are unaffected by this correction: they
+still require the slot to be `None` first, which the
 redaction step now provides (instead of the originally-planned "never set it in the first place").
 
 ### 4.3 Finalizing once the funding note is witnessed
@@ -189,6 +198,28 @@ pub fn sign_and_store_migration_schedule(&self, schedule: &MigrationSchedule, us
 // MigrationError::Pipeline; see §6).
 pub fn finalize_ready_transfers(&self) -> Result<u32, MigrationError>; // returns count finalized
 ```
+
+### 4.5 Implementation status (2026-07-18)
+
+§4 is implemented on this branch, commits `9c17301758`/`28af46c8da`/`769fc35dde`. Two real
+deviations from the letter of this section, both correctness-motivated, not shortcuts:
+
+- **`build_self_funding_transfer_pczt` (real-witness) was kept, unmodified, alongside a new
+  `sign_self_funding_transfer_awaiting_proof` (placeholder path).** The external-signer flow
+  (`create_unsigned_transfer_pczts`, Keystone/hardware-wallet staging) still proves *eagerly*
+  before staging a PCZT for an external signer — feeding it a synthetic anchor would silently bake
+  a permanently-invalid proof into what gets handed to the external signer. Only the
+  software-signing path (`sign_and_store_migration_schedule` → `sign_schedule`) moved to the
+  placeholder-then-redact approach. If the external-signer flow is ever changed to also defer
+  proving, it should reuse `sign_self_funding_transfer_awaiting_proof`'s pattern rather than
+  duplicating it a third time.
+- **Anchor reuse (§5) is scoped to one `finalize_ready_transfers()` call, not persisted across
+  calls.** One anchor is fetched per call and reused for every transfer finalized within it; a
+  later call fetches a fresh one. There is no "last anchor used" persistence spanning multiple
+  calls/background windows. This is intentionally narrower than §5's full framing (which describes
+  cross-session reuse tied to sync activity) because the boundary/cohort/`ANCHOR_AGE_CAP` bookkeeping
+  that would make cross-call reuse meaningful is Phase 2 background-scheduling machinery, explicitly
+  out of scope per §7's closing note. Revisit when that scheduling subsystem is built.
 
 ## 5. Anchor reuse across a schedule (multiplicity / cohorts)
 
