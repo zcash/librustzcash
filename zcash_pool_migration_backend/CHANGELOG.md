@@ -65,3 +65,12 @@ and this library adheres to Rust's notion of
   ZIP 318's "one note per part plus at most one residual note". A typical wallet needs one layer, and
   extra layers appear only for a lone large note fanning out into many funding notes or a dust-heavy
   balance. It is pure (no cryptography or I/O) and `no_std`.
+- The pure PCZT note-preparation builder (`build::build_prep_tx`, behind the `orchard` feature): turns
+  one `preparation::PrepTransaction`'s resolved input notes and its outputs into an unproven
+  `pczt::Pczt` for a same-pool Orchard send-to-self. Every output (funding, feeder, or residual) is a
+  wallet-controlled internal change note, and the Orchard bundle is built with `pad_to_minimum` set to
+  `PREP_TX_ACTIONS` (16), so orchard fills it to exactly that many actions with fabricated dummies and
+  no preparation transaction is distinguishable by its action count (ZIP 318). It returns each
+  output's real post-shuffle action
+  index so the caller can locate the notes (and spend the feeders in a later layer). Like the other
+  builders it is pure (no database or wallet-backend access) and takes the RNG as a parameter.
