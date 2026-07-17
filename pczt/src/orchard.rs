@@ -444,7 +444,7 @@ impl Action {
         }
     }
 
-    pub(crate) fn redact_recomputable_fields(&mut self, note_version: NoteVersion) {
+    pub(crate) fn compact_resolvable_fields(&mut self, note_version: NoteVersion) {
         let original_enc_ciphertext = self.output.enc_ciphertext.clone();
         self.replace_enc_ciphertext_with_decrypted_memo_plaintext(note_version);
         if self.output.enc_ciphertext != original_enc_ciphertext {
@@ -1428,7 +1428,7 @@ pub(crate) mod v2 {
 
         #[cfg(feature = "orchard")]
         #[test]
-        fn decrypted_memo_plaintext_redaction_skips_decryption_failure() {
+        fn decrypted_memo_plaintext_compaction_skips_decryption_failure() {
             let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
             let original_enc_ciphertext = match &mut action.output.enc_ciphertext {
                 EncCiphertext::Encrypted(enc_ciphertext) => {
@@ -1448,32 +1448,36 @@ pub(crate) mod v2 {
 
         #[cfg(feature = "orchard")]
         #[test]
-        fn recomputable_field_redaction_checks_derived_values() {
-            let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
+        fn resolvable_field_compaction_checks_derived_values() {
+            let mut memo = [0; MEMO_SIZE];
+            memo[..5].copy_from_slice(b"hello");
+            let mut action = decryptable_action_with_memo(memo);
             action.spend.value = Some(200_000);
             action.rcv = Some([3; 32]);
             action.cv_net = Some(super::super::testing::value_commitment(100_000, [3; 32]));
 
-            action.redact_recomputable_fields(NoteVersion::V2);
+            action.compact_resolvable_fields(NoteVersion::V2);
 
             assert_eq!(action.cv_net, None);
             assert_eq!(action.output.cmx, None);
-            assert!(matches!(
+            assert_eq!(
                 action.output.enc_ciphertext,
-                EncCiphertext::MemoPlaintext(_)
-            ));
+                EncCiphertext::MemoPlaintext(MemoPlaintext::from_memo(memo))
+            );
         }
 
         #[cfg(feature = "orchard")]
         #[test]
-        fn recomputable_field_redaction_retains_unverifiable_values() {
-            let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
+        fn resolvable_field_compaction_retains_unverifiable_values() {
+            let mut memo = [0; MEMO_SIZE];
+            memo[..5].copy_from_slice(b"hello");
+            let mut action = decryptable_action_with_memo(memo);
             let original_cv_net = action.cv_net;
             let original_cmx = action.output.cmx;
             let original_enc_ciphertext = action.output.enc_ciphertext.clone();
             action.output.recipient = None;
 
-            action.redact_recomputable_fields(NoteVersion::V2);
+            action.compact_resolvable_fields(NoteVersion::V2);
 
             assert_eq!(action.cv_net, original_cv_net);
             assert_eq!(action.output.cmx, original_cmx);
@@ -1482,8 +1486,10 @@ pub(crate) mod v2 {
 
         #[cfg(feature = "orchard")]
         #[test]
-        fn recomputable_field_redaction_retains_mismatched_values() {
-            let mut action = decryptable_action_with_memo([0; MEMO_SIZE]);
+        fn resolvable_field_compaction_retains_mismatched_values() {
+            let mut memo = [0; MEMO_SIZE];
+            memo[..5].copy_from_slice(b"hello");
+            let mut action = decryptable_action_with_memo(memo);
             action.spend.value = Some(200_000);
             action.rcv = Some([3; 32]);
             let mut cv_net = super::super::testing::value_commitment(100_000, [3; 32]);
@@ -1494,7 +1500,7 @@ pub(crate) mod v2 {
             action.output.cmx = Some(cmx);
             let original_enc_ciphertext = action.output.enc_ciphertext.clone();
 
-            action.redact_recomputable_fields(NoteVersion::V2);
+            action.compact_resolvable_fields(NoteVersion::V2);
 
             assert_eq!(action.cv_net, Some(cv_net));
             assert_eq!(action.output.cmx, Some(cmx));

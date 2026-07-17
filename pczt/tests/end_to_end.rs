@@ -2175,7 +2175,7 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
     let redacted = Redactor::new(pczt.clone())
         .redact_ironwood_with(|mut r| {
             r.clear_anchor();
-            r.redact_recomputable_fields();
+            r.compact_resolvable_fields();
         })
         .finish();
     assert!(redacted.ironwood().anchor().is_none());

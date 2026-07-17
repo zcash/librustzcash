@@ -81,7 +81,7 @@ use zcash_protocol::PoolType;
 
 #[cfg(feature = "pczt")]
 use {
-    crate::data_api::wallet::redact_pczt_for_signer,
+    crate::data_api::wallet::{redact_pczt_for_batch_signer, redact_pczt_for_signer},
     pczt::roles::{combiner::Combiner, prover::Prover, signer::Signer},
     rand_core::OsRng,
     transparent::builder::TransparentSigningSet,
@@ -8017,12 +8017,52 @@ where
         "the Ironwood output carries recipient metadata",
     );
 
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct SpendState {
+        has_fvk: bool,
+        has_signature: bool,
+        has_alpha: bool,
+        value: Option<u64>,
+    }
+
+    fn spend_states(pczt: pczt::Pczt) -> (Vec<SpendState>, Vec<SpendState>) {
+        fn for_bundle(bundle: &orchard::pczt::Bundle) -> Vec<SpendState> {
+            bundle
+                .actions()
+                .iter()
+                .map(|action| SpendState {
+                    has_fvk: action.spend().fvk().is_some(),
+                    has_signature: action.spend().spend_auth_sig().is_some(),
+                    has_alpha: action.spend().alpha().is_some(),
+                    value: action.spend().value().as_ref().map(|value| value.inner()),
+                })
+                .collect()
+        }
+
+        let mut orchard = vec![];
+        let mut ironwood = vec![];
+        pczt::roles::verifier::Verifier::new(pczt)
+            .with_orchard::<Infallible, _>(|bundle| {
+                orchard = for_bundle(bundle);
+                Ok(())
+            })
+            .unwrap()
+            .with_ironwood::<Infallible, _>(|bundle| {
+                ironwood = for_bundle(bundle);
+                Ok(())
+            })
+            .unwrap();
+        (orchard, ironwood)
+    }
+
     let original_sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
+    let original_spend_states = spend_states(pczt.clone());
     let original_len = pczt.clone().serialize().unwrap().len();
     let signer_view = redact_pczt_for_signer(&pczt);
     let signer_view_bytes = signer_view.serialize().unwrap();
     assert!(signer_view_bytes.len() < original_len);
     let signer_view = pczt::Pczt::parse(&signer_view_bytes).unwrap();
+    assert_eq!(spend_states(signer_view.clone()), original_spend_states);
 
     // The backend metadata belongs to the authoritative wallet copy, not the
     // external Signer.
@@ -8091,31 +8131,188 @@ where
         + assert_redacted_bundle(pczt.ironwood(), signer_view.ironwood());
     assert!(memo_plaintexts > 0);
 
-    // Resolving the compact representation restores byte-identical effecting
-    // fields and therefore the same shielded signature digest.
-    let mut resolved = signer_view.clone();
-    resolved.resolve_fields().unwrap();
-    for (resolved_bundle, original_bundle) in [
-        (resolved.orchard(), pczt.orchard()),
-        (resolved.ironwood(), pczt.ironwood()),
+    let batch_view = redact_pczt_for_batch_signer(&pczt);
+    let batch_view_bytes = batch_view.serialize().unwrap();
+    assert!(batch_view_bytes.len() < signer_view_bytes.len());
+    let batch_view = pczt::Pczt::parse(&batch_view_bytes).unwrap();
+    let batch_spend_states = spend_states(batch_view.clone());
+
+    let mut preauthorized_actions = 0;
+    let mut unsigned_zero_value_actions = 0;
+    for (original_bundle, batch_bundle) in [
+        (&original_spend_states.0, &batch_spend_states.0),
+        (&original_spend_states.1, &batch_spend_states.1),
     ] {
-        for (resolved, original) in resolved_bundle
-            .actions()
-            .iter()
-            .zip(original_bundle.actions())
-        {
-            assert_eq!(resolved.cv_net(), original.cv_net());
-            assert_eq!(resolved.output().cmx(), original.output().cmx());
+        assert_eq!(batch_bundle.len(), original_bundle.len());
+        for (original, batch) in original_bundle.iter().zip(batch_bundle) {
+            assert!(!batch.has_fvk);
+            assert!(!batch.has_signature);
             assert_eq!(
-                resolved.output().enc_ciphertext(),
-                original.output().enc_ciphertext()
+                batch.has_alpha,
+                original.has_alpha && !original.has_signature
             );
+
+            if original.has_signature {
+                preauthorized_actions += 1;
+            } else if original.value == Some(0) && original.has_alpha {
+                unsigned_zero_value_actions += 1;
+            }
         }
     }
-    assert_eq!(
-        Signer::new(signer_view.clone()).unwrap().shielded_sighash(),
-        original_sighash,
+    assert!(preauthorized_actions > 0);
+    assert!(unsigned_zero_value_actions > 0);
+
+    // Resolving either compact representation restores byte-identical effecting
+    // fields and therefore the same shielded signature digest.
+    for compact_view in [&signer_view, &batch_view] {
+        let mut resolved = (*compact_view).clone();
+        resolved.resolve_fields().unwrap();
+        for (resolved_bundle, original_bundle) in [
+            (resolved.orchard(), pczt.orchard()),
+            (resolved.ironwood(), pczt.ironwood()),
+        ] {
+            for (resolved, original) in resolved_bundle
+                .actions()
+                .iter()
+                .zip(original_bundle.actions())
+            {
+                assert_eq!(resolved.cv_net(), original.cv_net());
+                assert_eq!(resolved.output().cmx(), original.output().cmx());
+                assert_eq!(
+                    resolved.output().enc_ciphertext(),
+                    original.output().enc_ciphertext()
+                );
+            }
+        }
+        assert_eq!(
+            Signer::new((*compact_view).clone())
+                .unwrap()
+                .shielded_sighash(),
+            original_sighash,
+        );
+    }
+
+    let signable_indices = |states: &[SpendState]| {
+        states
+            .iter()
+            .enumerate()
+            .filter_map(|(index, state)| (!state.has_signature && state.has_alpha).then_some(index))
+            .collect::<Vec<_>>()
+    };
+    let orchard_signable = signable_indices(&original_spend_states.0);
+    let ironwood_signable = signable_indices(&original_spend_states.1);
+    assert!(
+        orchard_signable
+            .iter()
+            .any(|&index| original_spend_states.0[index].value == Some(0))
     );
+
+    // The transported request contains no existing signatures. The batch Signer
+    // contributes signatures for every unsigned action, including the wallet
+    // controlled zero value spend, and returns only those new signatures.
+    let request = pczt::roles::signer::batch::BatchSignRequest::new(vec![batch_view]);
+    let request =
+        pczt::roles::signer::batch::BatchSignRequest::parse(&request.serialize().unwrap()).unwrap();
+    assert_eq!(request.pczts().len(), 1);
+    let transported_view = request.pczts()[0].clone();
+    assert_eq!(spend_states(transported_view.clone()), batch_spend_states);
+
+    let usk = st.get_account().usk().clone();
+    let ask = orchard::keys::SpendAuthorizingKey::from(OrchardPoolTester::usk_to_sk(&usk));
+    let signed_view = pczt::roles::low_level_signer::Signer::new(transported_view)
+        .sign_orchard_with::<pczt::roles::low_level_signer::OrchardParseError, _>(|_, bundle, _| {
+            for &index in &orchard_signable {
+                bundle.actions_mut()[index]
+                    .sign(original_sighash, &ask, OsRng)
+                    .unwrap();
+            }
+            Ok(())
+        })
+        .unwrap()
+        .sign_ironwood_with::<pczt::roles::low_level_signer::OrchardParseError, _>(
+            |_, bundle, _| {
+                for &index in &ironwood_signable {
+                    bundle.actions_mut()[index]
+                        .sign(original_sighash, &ask, OsRng)
+                        .unwrap();
+                }
+                Ok(())
+            },
+        )
+        .unwrap()
+        .finish();
+
+    let signatures = pczt::roles::signer::extract_orchard_spend_auth_signatures(&signed_view);
+    let expected_signature_positions = orchard_signable
+        .iter()
+        .copied()
+        .map(|index| (orchard::ValuePool::Orchard, index))
+        .chain(
+            ironwood_signable
+                .iter()
+                .copied()
+                .map(|index| (orchard::ValuePool::Ironwood, index)),
+        )
+        .collect::<Vec<_>>();
+    let signature_positions = signatures
+        .iter()
+        .map(|signature| (signature.value_pool(), signature.action_index()))
+        .collect::<Vec<_>>();
+    assert_eq!(signature_positions, expected_signature_positions);
+
+    let response = pczt::roles::signer::batch::BatchSignResponse::new(vec![signatures]);
+    let response =
+        pczt::roles::signer::batch::BatchSignResponse::parse(&response.serialize().unwrap())
+            .unwrap();
+    assert_eq!(response.signatures().len(), 1);
+
+    let mut signer = Signer::new(pczt.clone()).unwrap();
+    for signature in &response.signatures()[0] {
+        signer
+            .apply_orchard_spend_auth_signature(signature)
+            .unwrap();
+    }
+    let authorized = signer.finish();
+    assert_eq!(
+        authorized.global().proprietary(),
+        pczt.global().proprietary()
+    );
+
+    let authorized_spend_states = spend_states(authorized.clone());
+    for (original_bundle, authorized_bundle) in [
+        (&original_spend_states.0, &authorized_spend_states.0),
+        (&original_spend_states.1, &authorized_spend_states.1),
+    ] {
+        for (original, authorized) in original_bundle.iter().zip(authorized_bundle) {
+            assert_eq!(authorized.has_fvk, original.has_fvk);
+            assert_eq!(authorized.has_alpha, original.has_alpha);
+            assert!(authorized.has_signature);
+        }
+    }
+    for (authorized, original) in authorized
+        .orchard()
+        .actions()
+        .iter()
+        .zip(pczt.orchard().actions())
+        .chain(
+            authorized
+                .ironwood()
+                .actions()
+                .iter()
+                .zip(pczt.ironwood().actions()),
+        )
+    {
+        if original.spend().spend_auth_sig().is_some() {
+            assert_eq!(
+                authorized.spend().spend_auth_sig(),
+                original.spend().spend_auth_sig()
+            );
+        }
+        assert_eq!(
+            authorized.output().proprietary(),
+            original.output().proprietary()
+        );
+    }
 }
 
 /// The transaction version requested at proposal time is recorded on the proposal and preserved

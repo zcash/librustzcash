@@ -23,7 +23,7 @@ impl super::Redactor {
 pub struct OrchardRedactor<'a>(&'a mut Bundle);
 
 impl OrchardRedactor<'_> {
-    /// Redacts fields that can be recomputed from the remaining action data.
+    /// Compacts fields that can be resolved from the remaining action data.
     ///
     /// For every action, this removes `cv_net` and `cmx` when the remaining
     /// fields derive the same values, and replaces a decryptable encrypted note
@@ -34,12 +34,12 @@ impl OrchardRedactor<'_> {
     /// Encrypted note plaintexts that cannot be decrypted from the remaining
     /// action data are left unchanged. Memo recovery runs before `cmx` is
     /// removed because it needs the original note commitment. A bundle with
-    /// these fields redacted requires the v2 PCZT encoding.
+    /// these fields compacted requires the v2 PCZT encoding.
     #[cfg(feature = "orchard")]
-    pub fn redact_recomputable_fields(&mut self) {
+    pub fn compact_resolvable_fields(&mut self) {
         let note_version = self.0.note_version;
         self.redact_actions(|mut action| {
-            action.redact(|action| action.redact_recomputable_fields(note_version));
+            action.redact(|action| action.compact_resolvable_fields(note_version));
         });
     }
 

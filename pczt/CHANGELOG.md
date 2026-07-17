@@ -11,8 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `pczt::roles::redactor::orchard::OrchardRedactor::redact_recomputable_fields`,
-  behind the `orchard` feature, which removes the Orchard-protocol (Orchard and
+- `pczt::roles::redactor::orchard::OrchardRedactor::compact_resolvable_fields`,
+  behind the `orchard` feature, which compacts the Orchard-protocol (Orchard and
   Ironwood) action fields that `pczt::orchard::Bundle::resolve_fields` can restore.
 
 ## [0.8.0-rc.1] - 2026-07-12

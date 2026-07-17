@@ -2420,6 +2420,9 @@ where
 ///
 /// Before sending the PCZT to an external Signer, create a signer view with
 /// [`redact_pczt_for_signer`] and retain the original for combination.
+/// A Signer that independently obtains the relevant full viewing keys and returns
+/// only Orchard-protocol signature contributions can instead use
+/// [`redact_pczt_for_batch_signer`].
 ///
 /// Once the PCZT fully authorized, call [`extract_and_store_transaction_from_pczt`] to
 /// finish transaction creation.
@@ -2869,7 +2872,7 @@ pub fn redact_pczt_for_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
             action.redact_output_proprietary(PROPRIETARY_OUTPUT_INFO);
         });
 
-        redactor.redact_recomputable_fields();
+        redactor.compact_resolvable_fields();
 
         if redact_v6_anchor {
             redactor.clear_anchor();
@@ -2904,6 +2907,61 @@ pub fn redact_pczt_for_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
         })
         .redact_ironwood_with(|redactor| {
             redact_orchard_bundle(redactor, redact_v6_anchors);
+        })
+        .finish()
+}
+
+/// Creates a compact wallet PCZT for a batch Signer that obtains its full viewing key
+/// independently and returns only new Orchard and Ironwood signatures.
+///
+/// In addition to [`redact_pczt_for_signer`], this removes spend full viewing keys and
+/// existing signatures. It also removes the randomizer from actions already authorized
+/// in `pczt`, while unsigned actions such as wallet controlled zero value spends retain
+/// theirs. Sapling signatures require a separate signing path.
+///
+/// The caller must retain the authoritative PCZT and apply the returned signature
+/// contributions to it. This function must run before its existing signatures are
+/// redacted. The returned view cannot be signed with the high level
+/// [`pczt::roles::signer::Signer`] because that role expects full viewing keys.
+#[cfg(feature = "pczt")]
+pub fn redact_pczt_for_batch_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
+    // Snapshot existing signature positions before the batch view clears them.
+    fn preauthorized_action_indices(bundle: &pczt::orchard::Bundle) -> Vec<usize> {
+        bundle
+            .actions()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| {
+                action.spend().spend_auth_sig().is_some().then_some(index)
+            })
+            .collect()
+    }
+
+    fn redact_orchard_bundle(
+        mut redactor: pczt::roles::redactor::orchard::OrchardRedactor<'_>,
+        preauthorized_action_indices: &[usize],
+    ) {
+        // The batch Signer derives its FVK and returns only new signatures.
+        redactor.redact_actions(|mut action| {
+            action.clear_spend_fvk();
+            action.clear_spend_auth_sig();
+        });
+        // Unsigned actions keep alpha, including wallet controlled zero value spends.
+        for &index in preauthorized_action_indices {
+            redactor.redact_action(index, |mut action| action.clear_spend_alpha());
+        }
+    }
+
+    let orchard_preauthorized = preauthorized_action_indices(pczt.orchard());
+    let ironwood_preauthorized = preauthorized_action_indices(pczt.ironwood());
+
+    // Apply the policy shared by every external Signer first.
+    Redactor::new(redact_pczt_for_signer(pczt))
+        .redact_orchard_with(|redactor| {
+            redact_orchard_bundle(redactor, &orchard_preauthorized);
+        })
+        .redact_ironwood_with(|redactor| {
+            redact_orchard_bundle(redactor, &ironwood_preauthorized);
         })
         .finish()
 }

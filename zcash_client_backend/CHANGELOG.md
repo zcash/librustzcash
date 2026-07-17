@@ -11,10 +11,12 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::wallet::redact_pczt_for_signer`, which
-  creates a compact signer view of a wallet-created PCZT while retaining the
-  information a general-purpose external signer may need. This is available
-  behind the `pczt` feature.
+- `zcash_client_backend::data_api::wallet::{redact_pczt_for_signer,
+  redact_pczt_for_batch_signer}`, which create compact signer views of a
+  wallet-created PCZT. The batch variant additionally removes fields that a
+  Signer that obtains its full viewing key independently and returns only new
+  Orchard-protocol signatures does not need. These are available behind the
+  `pczt` feature.
 - `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
   counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
 
