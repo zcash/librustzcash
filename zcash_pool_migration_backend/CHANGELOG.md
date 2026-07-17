@@ -81,3 +81,24 @@ and this library adheres to Rust's notion of
   engine-enforced MUSTs (sync/broadcast decoupling, and at most one overdue transfer at wallet open)
   are documented as out of scope for this pure module. The exponential draw's natural log uses `libm`,
   since the crate is `no_std` and `std`'s `f64::ln` is unavailable.
+- The migration engine (the `engine` module): orchestration of a pool migration through a
+  `MigrationBackend` trait. `plan_migration` reads the account's spendable note values and the chain
+  tip from the backend, decomposes the balance into denominations (`note_splitting`), plans the
+  preparation transactions (`preparation`), schedules the transfers (`scheduling`), and reconciles the
+  split against the preparation fees (dropping the smallest denominations when they do not fit the
+  balance), returning a `MigrationPlan` preview for user consent. It defines the persisted state model
+  - a `MigrationState` (status, the note split, the reconciled funding-note values, and the
+  transactions) of `MigrationTransaction`s (each a stable id, kind, the pre-signed PCZT as bytes or
+  `None` until built, dependencies, scheduled and expiry heights, drawn anchor boundary, and lifecycle
+  state) - and the `MigrationBackend` persistence methods (`store_migration` / `load_migration` /
+  `update_transaction`), so a committed migration is stored as the pre-signed PCZTs the consuming
+  application later proves and broadcasts, and resumes after a restart. Building and signing use the
+  `orchard`-gated `MigrationCrypto` trait (the account's viewing key, note witnesses, an anchor, and
+  signing) and follow ZIP 318's two-phase signing (more than one signing session is permitted):
+  `commit_preparation` builds and pre-signs the preparation transactions and records each transfer as a
+  planned placeholder carrying its schedule; `commit_transfers`, once the preparation is mined and the
+  funding notes are witnessable, builds and pre-signs the transfers into those placeholders.
+  `commit_preparation` handles single-layer preparation, the common case, and reports
+  `UnsupportedMultiLayer` for a plan whose later layers spend earlier, still unmined layers' outputs
+  (full one-session pre-signing awaits a public pczt output-recovery API). Planning is pure (`no_std`);
+  reconciliation-on-launch is added by a later slice.
