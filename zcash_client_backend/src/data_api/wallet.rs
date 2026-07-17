@@ -2841,7 +2841,7 @@ pub fn redact_pczt_for_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
             action.redact_output_proprietary(PROPRIETARY_OUTPUT_INFO);
         });
 
-        redactor.redact_recomputable_fields();
+        redactor.compact_resolvable_fields();
 
         if redact_v6_anchor {
             redactor.clear_anchor();
