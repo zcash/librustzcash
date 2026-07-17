@@ -1373,6 +1373,452 @@ mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_returned_to_p2sh_source() {
+        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::wallet::WalletTransparentOutput;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        let p2sh_addr = TransparentAddress::ScriptHash([7u8; 20]);
+
+        // A single P2SH input (100_000 zats) funds four transparent payments (10_000 zats
+        // each). The change is returned to the originating P2SH address. Sizing the change
+        // output as a P2SH `TxOut` (32 bytes) yields a total transparent output size of 68
+        // bytes => 2 logical actions => a 10_000 zat fee; mis-sizing it as a P2PKH output
+        // (34 bytes) would tip the total to 70 bytes => 3 actions => a 15_000 zat fee.
+        let inputs = [WalletTransparentOutput::<()>::from_parts(
+            OutPoint::fake(),
+            TxOut::new(Zatoshis::const_from_u64(100_000), p2sh_addr.script().into()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("valid P2SH output")
+        .with_known_input_size(150)];
+
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &inputs,
+            &[
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+            ],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change()
+                    == [ChangeValue::transparent_to_address(Zatoshis::const_from_u64(50_000), p2sh_addr)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(10_000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_returned_to_p2sh_source_multiple_inputs() {
+        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::wallet::WalletTransparentOutput;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        let p2sh_addr = TransparentAddress::ScriptHash([7u8; 20]);
+
+        // Two P2SH inputs (50_000 zats each) funded by the *same* P2SH address still resolve
+        // to that single originating address; change is returned to it and sized as a P2SH
+        // output (32 bytes).
+        let p2sh_input = |n: u8| {
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([n; 32], 0),
+                TxOut::new(Zatoshis::const_from_u64(50_000), p2sh_addr.script().into()),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2SH output")
+            .with_known_input_size(150)
+        };
+        let inputs = [p2sh_input(1), p2sh_input(2)];
+
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &inputs,
+            &[
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+                TxOut::new(Zatoshis::const_from_u64(10_000), Script::default()),
+            ],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change()
+                    == [ChangeValue::transparent_to_address(Zatoshis::const_from_u64(50_000), p2sh_addr)] &&
+                balance.fee_required() == Zatoshis::const_from_u64(10_000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_ambiguous_p2sh_sources() {
+        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::wallet::WalletTransparentOutput;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // A P2SH input and a P2PKH input have distinct originating addresses, so no single
+        // address exists to which change may be returned. Because the payment is small
+        // enough that a non-zero change output must be emitted, resolution fails.
+        let inputs = [
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([1u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(60_000),
+                    TransparentAddress::ScriptHash([7u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2SH output")
+            .with_known_input_size(150),
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([2u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(60_000),
+                    TransparentAddress::PublicKeyHash([9u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2PKH output"),
+        ];
+
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &inputs,
+            &[TxOut::new(
+                Zatoshis::const_from_u64(10_000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        );
+
+        assert_matches!(
+            result,
+            Err(ChangeError::TransparentChangeDestinationAmbiguous { input_addresses })
+                if input_addresses.len() == 2
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_distinct_p2pkh_sources_uses_internal_change() {
+        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::wallet::WalletTransparentOutput;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // Two P2PKH inputs with distinct originating addresses: no P2SH source is present,
+        // so change is returned to an internal-scope address of the wallet (recipient
+        // `None`) with the standard P2PKH sizing, exactly as before.
+        let inputs = [
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([1u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(50_000),
+                    TransparentAddress::PublicKeyHash([1u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2PKH output"),
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([2u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(50_000),
+                    TransparentAddress::PublicKeyHash([2u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2PKH output"),
+        ];
+
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &inputs,
+            &[TxOut::new(
+                Zatoshis::const_from_u64(40_000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change()
+                    == [ChangeValue::transparent(Zatoshis::const_from_u64(50_000))] &&
+                balance.fee_required() == Zatoshis::const_from_u64(10_000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn change_fully_transparent_exact_match_ambiguous_sources_ok() {
+        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
+        use crate::wallet::WalletTransparentOutput;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        )
+        .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+        // The inputs have ambiguous (P2SH + P2PKH) sources, but their total exactly covers
+        // the payment plus the minimum (changeless) fee. No change output is emitted, so the
+        // ambiguity never has to be resolved and the transaction is built successfully. This
+        // is the reason the ambiguity error is raised lazily at change emission rather than
+        // eagerly at destination resolution.
+        let inputs = [
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([1u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(10_000),
+                    TransparentAddress::ScriptHash([7u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2SH output")
+            .with_known_input_size(150),
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([2u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(10_000),
+                    TransparentAddress::PublicKeyHash([9u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2PKH output"),
+        ];
+
+        let result = change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &inputs,
+            &[TxOut::new(
+                Zatoshis::const_from_u64(10_000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change().is_empty() &&
+                balance.fee_required() == Zatoshis::const_from_u64(10_000)
+        );
+    }
+
+    /// Constructs two non-dust P2PKH inputs and one P2SH input with the given value and a
+    /// known 300-byte serialized size, paying a single 40_000-zat transparent output, and
+    /// returns the change computation result under the default (`ShieldChange`) policy.
+    #[cfg(feature = "transparent-inputs")]
+    fn compute_balance_with_p2sh_input_of_value(
+        p2sh_value: u64,
+    ) -> Result<
+        crate::fees::TransactionBalance,
+        ChangeError<zcash_primitives::transaction::fees::zip317::FeeError, Infallible>,
+    > {
+        use crate::fees::sapling as sapling_fees;
+        use crate::wallet::WalletTransparentOutput;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        let p2pkh_input = |txid_byte: u8| {
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([txid_byte; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(100_000),
+                    TransparentAddress::PublicKeyHash([1u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2PKH output")
+        };
+        let inputs = [
+            p2pkh_input(1),
+            p2pkh_input(2),
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([3u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::from_u64(p2sh_value).unwrap(),
+                    TransparentAddress::ScriptHash([7u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2SH output")
+            .with_known_input_size(300),
+        ];
+
+        change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &inputs,
+            &[TxOut::new(
+                Zatoshis::const_from_u64(40_000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn p2sh_input_dust_threshold_scales_with_input_size() {
+        use ::transparent::bundle::OutPoint;
+
+        // A P2SH input with a known 300-byte serialized size contributes
+        // `ceil(300 / 150) = 2` logical actions to a ZIP 317 fee, so its economic
+        // threshold is `2 * 5_000 = 10_000` zats. A 9_000-zat input is uneconomic even
+        // though its value exceeds the 5_000-zat marginal fee that bounds the threshold
+        // for a standard P2PKH input.
+        assert_matches!(
+            compute_balance_with_p2sh_input_of_value(9_000),
+            Err(ChangeError::DustInputs { transparent, .. })
+                if transparent == vec![OutPoint::new([3u8; 32], 0)]
+        );
+
+        // A value just above the size-scaled threshold is economic to spend.
+        assert_matches!(compute_balance_with_p2sh_input_of_value(10_001), Ok(_));
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn transparent_change_policy_has_no_effect_on_shielded_flows() {
         use crate::fees::TransparentChangePolicy;
 

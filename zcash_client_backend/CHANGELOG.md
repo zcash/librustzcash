@@ -17,6 +17,14 @@ workspace.
   behind the `pczt` feature.
 - `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
   counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
+- `zcash_client_backend::fees::ChangeValue::{transparent_to_address, transparent_recipient}`
+  (when the "transparent-inputs" feature is enabled)
+- `zcash_client_backend::fees::ChangeError::TransparentChangeDestinationAmbiguous`
+  (when the "transparent-inputs" feature is enabled)
+- `zcash_client_backend::proposal::ProposalError::TransparentChangeRecipientMismatch`
+  (when the "transparent-inputs" feature is enabled)
+- `zcash_client_backend::proto::ProposalDecodingError::TransparentChangeRecipientInvalid`
+  (when the "transparent-inputs" feature is enabled)
 
 ### Changed
 - `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
@@ -36,6 +44,18 @@ workspace.
   `transparent-inputs` feature is not enabled. Balance errors encountered
   during send-max input selection are now wrapped in
   `GreedyInputSelectorError::Balance`.
+- When the "transparent-inputs" feature is enabled and a change strategy is
+  configured with `TransparentChangePolicy::TransparentChangeAllowed`, if the
+  transaction's transparent inputs were all funded via a single P2SH address,
+  transparent change is now returned to that originating address (fee-sized
+  using the actual change output script) instead of to a newly-derived
+  internal-scope P2PKH address of the account. Spends of P2SH-funded coins
+  that are not all funded by a single common address now fail with
+  `ChangeError::TransparentChangeDestinationAmbiguous` when nonzero
+  transparent change is required. Serialized proposals carry the explicit
+  change recipient in a new optional `transparentChangeRecipientScript`
+  field; proposals serialized by older versions are interpreted as before
+  (change is sent to an internal-scope address of the wallet).
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now

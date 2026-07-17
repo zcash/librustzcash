@@ -148,7 +148,8 @@ pub struct TransactionBalance {
 ///
 /// When the transparent value pool is selected and the `isEphemeral` field
 /// is not set, the value represents transparent change, which will be sent
-/// to an internal-scope (change) transparent address of the wallet.
+/// to an internal-scope (change) transparent address of the wallet, unless
+/// `transparentChangeRecipientScript` is set.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ChangeValue {
     /// The value of a change or ephemeral output to be created, in zatoshis.
@@ -164,6 +165,17 @@ pub struct ChangeValue {
     /// Whether this is to be an ephemeral output.
     #[prost(bool, tag = "4")]
     pub is_ephemeral: bool,
+    /// The scriptPubKey of the transparent address to which this change output is to be
+    /// sent. This may only be set when `valuePool` is `Transparent` and `isEphemeral` is
+    /// false, and it must be the scriptPubKey of an address that funds one or more of the
+    /// transparent inputs of the same proposal step; it is used to return change to its
+    /// originating address (e.g. when spending P2SH inputs). When this field is omitted,
+    /// transparent change is sent to an internal-scope (change) transparent address of
+    /// the wallet. Proposals serialized by older versions omit this field.
+    #[prost(bytes = "vec", optional, tag = "5")]
+    pub transparent_change_recipient_script: ::core::option::Option<
+        ::prost::alloc::vec::Vec<u8>,
+    >,
 }
 /// An object wrapper for memo bytes, to facilitate representing the
 /// `change_memo == None` case.

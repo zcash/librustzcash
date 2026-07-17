@@ -1596,6 +1596,262 @@ where
     );
 }
 
+/// End-to-end test that a fully-transparent spend of UTXOs funded by a single imported P2SH
+/// (multisig) address returns its change directly to that originating P2SH address, records the
+/// change as wallet-owned, and does so without reserving any internal-scope (change) address.
+///
+/// This is the observable behavior of a ZIP 317 change strategy configured with
+/// [`TransparentChangePolicy::TransparentChangeAllowed`] when all transparent inputs of a step are
+/// funded by one P2SH source: the proposed change is a
+/// [`ChangeValue::transparent_to_address`](crate::fees::ChangeValue::transparent_to_address)
+/// paying that P2SH address (rather than a
+/// [`ChangeValue::transparent`](crate::fees::ChangeValue::transparent) sent to a freshly-reserved
+/// internal P2PKH address).
+///
+/// [`TransparentChangePolicy::TransparentChangeAllowed`]: crate::fees::TransparentChangePolicy::TransparentChangeAllowed
+#[cfg(feature = "transparent-key-import")]
+pub fn transparent_change_returned_to_p2sh_source<DSF>(dsf: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use std::collections::HashMap;
+    use std::convert::Infallible;
+
+    use crate::{
+        data_api::wallet::{self, SpendingKeys},
+        fees::{ChangeValue, TransparentChangePolicy},
+        wallet::{Exposure, OvkPolicy, TransparentAddressMetadata},
+    };
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    // Import a standalone 1-of-1 multisig P2SH address and derive its address.
+    let (redeem_script, secret_key) = build_test_redeem_script();
+    st.wallet_mut()
+        .import_standalone_transparent_script(account_id, redeem_script.clone())
+        .unwrap();
+    let script_pubkey = sh(&redeem_script);
+    let p2sh_addr =
+        TransparentAddress::from_script_pubkey(&script_pubkey).expect("valid P2SH address");
+
+    // Seed the chain with notes that do not belong to us so that heights resolve while the
+    // account holds no shielded notes.
+    let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+    let not_our_value = Zatoshis::const_from_u64(10_000);
+    let (start_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    for _ in 1..10 {
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+    }
+    st.scan_cached_blocks(start_height, 10);
+
+    // Fund the P2SH address with a single spendable UTXO.
+    let utxo_value = Zatoshis::const_from_u64(100_000);
+    let height = st.wallet().chain_height().unwrap().unwrap();
+    let outpoint = OutPoint::fake();
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint.clone(),
+        TxOut::new(utxo_value, p2sh_addr.script().into()),
+        Some(height),
+        Some(account_id),
+        None,
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Propose a fully-transparent payment to an external P2PKH recipient, spending only from the
+    // P2SH address, with transparent change allowed.
+    let transfer_amount = Zatoshis::const_from_u64(40_000);
+    let network = *st.network();
+    let request = t2t_request(&network, transfer_amount);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = standard::SingleOutputChangeStrategy::new(
+        StandardFeeRule::Zip317,
+        None,
+        ShieldedPool::Sapling,
+        DustOutputPolicy::default(),
+    )
+    .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+
+    let proposal = st
+        .propose_transfer_with_policy(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default()
+                .with_transparent(TransparentSpendPolicy::from_one_address(p2sh_addr)),
+        )
+        .expect("t->t proposal from a P2SH source with transparent change must succeed");
+
+    // The transfer is a single step spending the single P2SH UTXO, with no shielded inputs.
+    assert_eq!(proposal.steps().len(), 1);
+    let step = &proposal.steps().head;
+    assert_eq!(step.transparent_inputs().len(), 1);
+    assert_eq!(step.transparent_inputs()[0].outpoint(), &outpoint);
+    assert!(step.shielded_inputs().is_none());
+
+    // ZIP 317 fee for this fully-transparent, single-step spend:
+    //   * One P2SH (1-of-1 multisig) input. Its serialized input size is 154 bytes:
+    //       PREVOUT (36)
+    //       + scriptSig [ CompactSize(113) = 1
+    //                     + Component{ OP_0 (1),
+    //                                  73-byte sig push (1 + 73 = 74),
+    //                                  37-byte redeem-script push (1 + 37 = 38) } = 113 ] (= 114)
+    //       + SEQUENCE (4)
+    //     => input actions = ceil(154 / 150) = 2.
+    //   * Two transparent TxOuts: the 34-byte P2PKH payment output and the 32-byte P2SH change
+    //     output (8-byte value + 1-byte CompactSize + 23-byte P2SH script pubkey).
+    //     => output actions = ceil((34 + 32) / 34) = ceil(66 / 34) = 2.
+    //   fee = MARGINAL_FEE (5_000) * max(GRACE_ACTIONS (2), max(2, 2)) = 10_000.
+    let expected_fee = Zatoshis::const_from_u64(10_000);
+    let expected_change = ((utxo_value - transfer_amount).unwrap() - expected_fee).unwrap();
+    assert_eq!(expected_change, Zatoshis::const_from_u64(50_000));
+    assert_eq!(step.balance().fee_required(), expected_fee);
+
+    // The single proposed change output must be a non-ephemeral transparent output returned to
+    // the originating P2SH address (not an internal-scope change address).
+    assert_eq!(
+        step.balance().proposed_change(),
+        [ChangeValue::transparent_to_address(
+            expected_change,
+            p2sh_addr
+        )],
+    );
+    assert!(!step.balance().proposed_change()[0].is_ephemeral());
+
+    // A proposal carrying a P2SH change recipient must survive a serialization round trip.
+    super::check_proposal_serialization_roundtrip(&network, st.wallet(), &proposal);
+
+    // Snapshot the account's EXPOSED (change-inclusive) receivers so we can prove that creating
+    // the transaction does not reserve a fresh internal change address. Reserving an internal
+    // address does not add rows to the receiver set (the gap-limit rows pre-exist); it marks a
+    // previously-unexposed address as exposed. The exposed subset is therefore the reservation-
+    // sensitive observable.
+    let exposed_receivers = |receivers: HashMap<TransparentAddress, TransparentAddressMetadata>|
+     -> std::collections::BTreeSet<TransparentAddress> {
+        receivers
+            .into_iter()
+            .filter(|(_, meta)| matches!(meta.exposure(), Exposure::Exposed { .. }))
+            .map(|(addr, _)| addr)
+            .collect()
+    };
+    let exposed_before = exposed_receivers(
+        st.wallet()
+            .get_transparent_receivers(account_id, true, false)
+            .unwrap(),
+    );
+
+    // Build the transaction, signing the P2SH input with the standalone multisig key.
+    let mut standalone_keys = HashMap::new();
+    standalone_keys.insert(p2sh_addr, vec![secret_key]);
+    let spending_keys = SpendingKeys::new(
+        account.usk().clone(),
+        #[cfg(feature = "transparent-key-import")]
+        standalone_keys,
+    );
+
+    let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
+    let txids = wallet::create_proposed_transactions::<_, _, Infallible, _, Infallible, _>(
+        st.wallet_mut(),
+        &network,
+        &prover,
+        &prover,
+        &spending_keys,
+        OvkPolicy::Sender,
+        &proposal,
+    )
+    .expect("transaction creation from a P2SH source must succeed");
+    assert_eq!(txids.len(), 1);
+    let txid = txids.head;
+
+    // The transaction is fully transparent with exactly the payment and change outputs.
+    let tx = st
+        .wallet()
+        .get_transaction(txid)
+        .unwrap()
+        .expect("the created transaction is retrievable");
+    assert!(tx.sapling_bundle().is_none());
+    #[cfg(feature = "orchard")]
+    assert!(tx.orchard_bundle().is_none());
+    let bundle = tx
+        .transparent_bundle()
+        .expect("the transaction has a transparent bundle");
+    assert_eq!(bundle.vin.len(), 1);
+    assert_eq!(bundle.vout.len(), 2);
+
+    // Exactly one output pays the originating P2SH address, carrying the expected change value.
+    let payment_recipient = TransparentAddress::PublicKeyHash([7u8; 20]);
+    let change_outputs: Vec<_> = bundle
+        .vout
+        .iter()
+        .filter(|out| out.recipient_address() == Some(p2sh_addr))
+        .collect();
+    assert_eq!(change_outputs.len(), 1);
+    assert_eq!(change_outputs[0].value(), expected_change);
+    // The external payment output is present.
+    assert!(
+        bundle
+            .vout
+            .iter()
+            .any(|out| out.recipient_address() == Some(payment_recipient)
+                && out.value() == transfer_amount),
+    );
+
+    // No internal-scope change address was reserved: the set of exposed receivers is unchanged.
+    // (A reservation would newly expose the next internal-scope gap address, growing this set.)
+    let exposed_after = exposed_receivers(
+        st.wallet()
+            .get_transparent_receivers(account_id, true, false)
+            .unwrap(),
+    );
+    assert_eq!(
+        exposed_before, exposed_after,
+        "creating the transaction must not reserve (newly expose) an internal change address",
+    );
+
+    // Mine and scan the transaction; the change output becomes spendable at the P2SH address.
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
+
+    // The change UTXO is recorded at the P2SH address and is spendable.
+    let mut expected_balance = Balance::ZERO;
+    expected_balance
+        .add_spendable_value(expected_change)
+        .unwrap();
+    check_balance::<DSF>(
+        &st,
+        &account,
+        &p2sh_addr,
+        ConfirmationsPolicy::MIN,
+        &expected_balance,
+    );
+
+    // The account's total spendable transparent balance equals funding - payment - fee.
+    let summary = st
+        .wallet()
+        .get_wallet_summary(ConfirmationsPolicy::MIN)
+        .unwrap()
+        .unwrap();
+    let account_balance = summary.account_balances().get(&account_id).unwrap();
+    assert_eq!(
+        account_balance.unshielded_balance().spendable_value(),
+        expected_change,
+    );
+}
+
 /// Tests [`WalletWrite::mark_transparent_addresses_exposed`] by observing the effect on the
 /// address's exposure metadata via
 /// [`WalletRead::get_transparent_address_metadata`](crate::data_api::WalletRead::get_transparent_address_metadata).

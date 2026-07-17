@@ -3434,8 +3434,16 @@ pub trait WalletWrite: WalletRead {
     ///
     /// # Spending limitations
     ///
-    /// P2PKH-in-P2SH scripts are unsupported by PCZT at this time, so the only way to spend
-    /// from such an address is to use the [`create_proposed_transactions`] signing path.
+    /// Addresses imported via this method may also be spent from via the PCZT flow:
+    /// `create_pczt_from_proposal` (available under the `pczt` feature) includes the redeem
+    /// script in each such input, but does not populate any key-derivation metadata for it
+    /// (no derivation information is recorded for standalone imports). Spending via PCZT
+    /// therefore requires a subsequent updater to add the appropriate derivation or key
+    /// information to the PCZT before signing — for example, by matching a multisig redeem
+    /// script against ZIP 48 keys and setting the corresponding BIP 32 derivation on the
+    /// input. P2PKH-in-P2SH scripts are an exception: no PCZT updater tooling currently
+    /// exists for them, so the only way to spend from such an address is to use the
+    /// [`create_proposed_transactions`] signing path.
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_script(
         &mut self,

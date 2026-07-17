@@ -1127,7 +1127,7 @@ fn to_unspent_transparent_output(
         .map(|(account, _)| account);
 
     let outpoint = OutPoint::new(txid_bytes, index);
-    WalletTransparentOutput::from_parts(
+    let mut output = WalletTransparentOutput::from_parts(
         outpoint,
         TxOut::new(value, script_pubkey),
         height.map(BlockHeight::from),
@@ -1139,7 +1139,44 @@ fn to_unspent_transparent_output(
         SqliteClientError::CorruptedData(
             "Txout script_pubkey value did not correspond to a P2PKH or P2SH address".to_string(),
         )
-    })
+    })?;
+
+    // ZIP 317 fee computation sizes each transparent input from its script: for an output
+    // held at a P2SH address, the input size is derived from the redeem script recorded when
+    // the address was imported, and treating such an input as P2PKH-sized would understate
+    // the fee. A P2SH output whose row provides no parseable, sizeable redeem script —
+    // whether because the recorded value is `NULL`, because the script is malformed, or
+    // because the caller's query does not select the `imported_transparent_receiver_script`
+    // column — is therefore reported as corrupted data. P2PKH outputs carry no redeem script
+    // and use the standard P2PKH size estimate.
+    if matches!(
+        output.recipient_address(),
+        TransparentAddress::ScriptHash(_)
+    ) {
+        let rs_bytes: Vec<u8> = row
+            .get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
+            .ok()
+            .flatten()
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "No redeem script is recorded for the P2SH address receiving this output"
+                        .to_string(),
+                )
+            })?;
+        let input_size = script::FromChain::parse(&script::Code(rs_bytes))
+            .ok()
+            .as_ref()
+            .and_then(transparent::builder::p2sh_input_serialized_len)
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Recorded redeem script could not be parsed or sized as a standard P2SH input"
+                        .to_string(),
+                )
+            })?;
+        output = output.with_known_input_size(input_size);
+    }
+
+    Ok(output)
 }
 
 // Generates a SQL expression that returns the identifiers of all spent UTXOS in the wallet.
@@ -1282,6 +1319,7 @@ pub(crate) fn get_wallet_transparent_output(
                 u.value_zat, addresses.key_scope,
                 accounts.uuid AS account_uuid,
                 u.transaction_id AS creating_tx_id,
+                addresses.imported_transparent_receiver_script,
                 t.mined_height AS received_height
          FROM transparent_received_outputs u
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1463,17 +1501,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     while let Some(row) = rows.next()? {
-        let mut output = to_unspent_transparent_output(conn, row)?;
-        // If the address has a redeem script, compute the known input size for fee
-        // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
-        if let Ok(Some(rs_bytes)) =
-            row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
-            && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
-            && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
-        {
-            output = output.with_known_input_size(input_size);
-        }
-        utxos.push(output);
+        utxos.push(to_unspent_transparent_output(conn, row)?);
     }
 
     Ok(utxos)
@@ -3623,6 +3651,15 @@ mod tests {
     #[cfg(feature = "transparent-key-import")]
     fn test_spend_from_standalone_p2sh() {
         zcash_client_backend::data_api::testing::transparent::spend_from_standalone_p2sh(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn test_transparent_change_returned_to_p2sh_source() {
+        zcash_client_backend::data_api::testing::transparent::transparent_change_returned_to_p2sh_source(
             TestDbFactory::default(),
             BlockCache::new(),
         );

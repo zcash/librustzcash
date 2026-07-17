@@ -4,6 +4,8 @@ use std::{
     num::{NonZeroU64, NonZeroUsize},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use ::transparent::address::TransparentAddress;
 use ::transparent::bundle::OutPoint;
 use zcash_primitives::transaction::fees::{
     FeeRule,
@@ -74,12 +76,14 @@ impl FeeRule for StandardFeeRule {
 /// transaction; returning the change to the transparent pool matches the behavior of
 /// transparent-only wallets (including `zcashd`) at the cost of the change remaining unshielded.
 ///
-/// Transparent change is currently always sent to a P2PKH address derived under the wallet
-/// account's internal scope; returning change to the originating address when spending from a
-/// P2SH (e.g. multisig) address is not yet supported. See [zcash/librustzcash#2570] for
-/// details.
-///
-/// [zcash/librustzcash#2570]: https://github.com/zcash/librustzcash/issues/2570
+/// Under [`TransparentChangePolicy::TransparentChangeAllowed`], transparent change is ordinarily
+/// sent to a P2PKH address derived under the wallet account's internal scope. However, when the
+/// transparent inputs to the transaction include coins funded via a P2SH (e.g. multisig) address,
+/// change is instead returned to that originating address, provided that all of the transaction's
+/// transparent inputs were funded by that single common address. If the transparent inputs were
+/// funded by more than one such address, change computation will fail with
+/// [`ChangeError::TransparentChangeDestinationAmbiguous`] whenever the transaction requires
+/// nonzero transparent change.
 #[cfg(feature = "transparent-inputs")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransparentChangePolicy {
@@ -90,8 +94,11 @@ pub enum TransparentChangePolicy {
     #[default]
     ShieldChange,
     /// When the net flows of the transaction are fully transparent, change is returned to the
-    /// transparent pool at an internal-scope (change) transparent address of the wallet, as
-    /// described in [BIP 44].
+    /// transparent pool. Ordinarily this change is sent to an internal-scope (change)
+    /// transparent address of the wallet, as described in [BIP 44]; however, when the
+    /// transaction's transparent inputs are all funded by a single P2SH (e.g. multisig) address,
+    /// change is instead returned to that originating address. See the documentation of
+    /// [`TransparentChangePolicy`] for details.
     ///
     /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
     TransparentChangeAllowed,
@@ -100,8 +107,11 @@ pub enum TransparentChangePolicy {
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is
 /// enabled, an output to the transparent pool: either an ephemeral output as
-/// part of a [ZIP 320] transaction pair, or a change output to an
-/// internal-scope (change) transparent address of the wallet.
+/// part of a [ZIP 320] transaction pair, or a change output to the transparent
+/// pool. A transparent change output is ordinarily sent to an internal-scope
+/// (change) transparent address of the wallet, but it may instead carry an
+/// explicit recipient address, e.g. to return change to the P2SH address that
+/// funded the transaction's transparent inputs.
 ///
 /// [ZIP 320]: https://zips.z.cash/zip-0320
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,7 +127,10 @@ enum ChangeValueInner {
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent { value: Zatoshis },
     #[cfg(feature = "transparent-inputs")]
-    Transparent { value: Zatoshis },
+    Transparent {
+        value: Zatoshis,
+        recipient: Option<TransparentAddress>,
+    },
 }
 
 impl ChangeValue {
@@ -131,7 +144,26 @@ impl ChangeValue {
     /// sent to an internal-scope (change) transparent address of the wallet.
     #[cfg(feature = "transparent-inputs")]
     pub fn transparent(value: Zatoshis) -> Self {
-        Self(ChangeValueInner::Transparent { value })
+        Self(ChangeValueInner::Transparent {
+            value,
+            recipient: None,
+        })
+    }
+
+    /// Constructs a new change value that will be created as a non-ephemeral transparent output
+    /// sent to the given transparent address.
+    ///
+    /// This is used to return change to the address that funded the transparent inputs of a
+    /// transaction (e.g. the originating P2SH address when spending P2SH inputs), instead of
+    /// sending it to an internal-scope (change) address of the wallet. Proposal validation
+    /// requires that the recipient address match the address of at least one of the transparent
+    /// inputs of the same proposal step.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_to_address(value: Zatoshis, recipient: TransparentAddress) -> Self {
+        Self(ChangeValueInner::Transparent {
+            value,
+            recipient: Some(recipient),
+        })
     }
 
     /// Constructs a new change value that will be created as a shielded output.
@@ -178,7 +210,21 @@ impl ChangeValue {
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { value } => *value,
             #[cfg(feature = "transparent-inputs")]
-            ChangeValueInner::Transparent { value } => *value,
+            ChangeValueInner::Transparent { value, .. } => *value,
+        }
+    }
+
+    /// Returns the explicit transparent address to which this change output is to be sent, or
+    /// `None` if this is not a transparent change output with an explicit recipient.
+    ///
+    /// A non-ephemeral transparent change output having no explicit recipient is sent to an
+    /// internal-scope (change) transparent address of the wallet.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_recipient(&self) -> Option<&TransparentAddress> {
+        match &self.0 {
+            ChangeValueInner::Shielded { .. } => None,
+            ChangeValueInner::EphemeralTransparent { .. } => None,
+            ChangeValueInner::Transparent { recipient, .. } => recipient.as_ref(),
         }
     }
 
@@ -298,6 +344,17 @@ pub enum ChangeError<E, NoteRefT> {
         #[cfg(feature = "orchard")]
         ironwood: Vec<NoteRefT>,
     },
+    /// The change strategy is configured to return transparent change to the transparent pool,
+    /// but the transparent inputs of the transaction include coins funded via P2SH and do not
+    /// all share a single originating address, so no unambiguous address exists to which the
+    /// change may be returned.
+    #[cfg(feature = "transparent-inputs")]
+    TransparentChangeDestinationAmbiguous {
+        /// The distinct addresses that funded the transparent inputs provided to change
+        /// selection. Inputs whose funding address could not be determined from their
+        /// script are not represented here.
+        input_addresses: Vec<TransparentAddress>,
+    },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
     /// The proposed bundle structure would violate bundle type construction rules.
@@ -335,6 +392,17 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                     f,
                     "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.",
                     transparent.len() + sapling.len() + orchard_len,
+                )
+            }
+            #[cfg(feature = "transparent-inputs")]
+            ChangeError::TransparentChangeDestinationAmbiguous { input_addresses } => {
+                // We can't render the addresses to their string representations because we
+                // don't have network parameters here, so we use their `Debug` formatting.
+                write!(
+                    f,
+                    "Transparent change cannot be returned to a single originating address: \
+                     the transparent inputs were not all funded by a single common address. \
+                     Distinct resolvable funding addresses: {input_addresses:?}",
                 )
             }
             ChangeError::StrategyError(err) => {

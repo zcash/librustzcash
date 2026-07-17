@@ -40,7 +40,10 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use transparent::bundle::OutPoint;
+use transparent::{address::TransparentAddress, bundle::OutPoint};
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_script::script::{self, Evaluable};
 
 #[cfg(feature = "orchard")]
 use orchard::tree::MerkleHashOrchard;
@@ -522,6 +525,11 @@ pub enum ProposalDecodingError<DbError> {
     /// The proposal specified an explicit transaction version header that the wallet does not
     /// recognize.
     ProposedVersionInvalid(u32),
+    /// The `transparentChangeRecipientScript` field contained a script that is not the
+    /// scriptPubKey of a valid transparent address, or was set on a change value for which an
+    /// explicit transparent recipient is not permitted.
+    #[cfg(feature = "transparent-inputs")]
+    TransparentChangeRecipientInvalid,
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -595,6 +603,12 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::ProposedVersionInvalid(header) => write!(
                 f,
                 "The proposal specified an unrecognized transaction version header {header:#x}."
+            ),
+            #[cfg(feature = "transparent-inputs")]
+            ProposalDecodingError::TransparentChangeRecipientInvalid => write!(
+                f,
+                "The transparent change recipient script was invalid, or was set on a change \
+                 value that may not carry an explicit transparent recipient."
             ),
         }
     }
@@ -746,6 +760,12 @@ impl proposal::Proposal {
                                 value: memo_bytes.as_slice().to_vec(),
                             }),
                             is_ephemeral: change.is_ephemeral(),
+                            #[cfg(feature = "transparent-inputs")]
+                            transparent_change_recipient_script: change
+                                .transparent_recipient()
+                                .map(|addr| addr.script().to_bytes()),
+                            #[cfg(not(feature = "transparent-inputs"))]
+                            transparent_change_recipient_script: None,
                         })
                         .collect(),
                     fee_required: step.balance().fee_required().into(),
@@ -962,7 +982,23 @@ impl proposal::Proposal {
                                             .map_err(ProposalDecodingError::MemoInvalid)
                                     })
                                     .transpose()?;
-                                match (cv.pool_type()?, cv.is_ephemeral) {
+
+                                let pool = cv.pool_type()?;
+
+                                // A `transparentChangeRecipientScript` may only be set on a
+                                // non-ephemeral transparent change value; reject it up front for
+                                // every other combination so that the match below only needs to
+                                // handle it for `(Transparent, false)`.
+                                #[cfg(feature = "transparent-inputs")]
+                                if cv.transparent_change_recipient_script.is_some()
+                                    && (pool != PoolType::Transparent || cv.is_ephemeral)
+                                {
+                                    return Err(
+                                        ProposalDecodingError::TransparentChangeRecipientInvalid,
+                                    );
+                                }
+
+                                match (pool, cv.is_ephemeral) {
                                     (PoolType::Shielded(ShieldedPool::Sapling), false) => {
                                         Ok(ChangeValue::sapling(value, memo))
                                     }
@@ -983,7 +1019,25 @@ impl proposal::Proposal {
                                     }
                                     #[cfg(feature = "transparent-inputs")]
                                     (PoolType::Transparent, false) => {
-                                        Ok(ChangeValue::transparent(value))
+                                        match cv.transparent_change_recipient_script.as_deref() {
+                                            None => Ok(ChangeValue::transparent(value)),
+                                            Some(script_bytes) => {
+                                                script::PubKey::parse(&script::Code(
+                                                    script_bytes.to_vec(),
+                                                ))
+                                                .ok()
+                                                .as_ref()
+                                                .and_then(TransparentAddress::from_script_pubkey)
+                                                .map(|addr| {
+                                                    ChangeValue::transparent_to_address(
+                                                        value, addr,
+                                                    )
+                                                })
+                                                .ok_or(
+                                                    ProposalDecodingError::TransparentChangeRecipientInvalid,
+                                                )
+                                            }
+                                        }
                                     }
                                     // When all pool features are enabled, the explicit arms above
                                     // are exhaustive over the non-ephemeral cases; this fallback
@@ -1096,5 +1150,261 @@ impl service::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transpo
     {
         let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
         Ok(Self::new(conn))
+    }
+}
+
+// These tests exercise the serialization of `ChangeValue`'s explicit transparent change
+// recipient, which only exists when the `transparent-inputs` feature is enabled.
+#[cfg(all(test, feature = "transparent-inputs"))]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use nonempty::NonEmpty;
+    use zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis};
+    use zip321::TransactionRequest;
+
+    use super::{ProposalDecodingError, StandardFeeRule, proposal};
+    use crate::{
+        data_api::{
+            AccountMeta, InputSource, NoteFilter, ReceivedNotes, TargetValue,
+            wallet::{ConfirmationsPolicy, TargetHeight},
+        },
+        fees::{ChangeValue, TransactionBalance},
+        proposal::{Proposal, ShieldedInputs, Step},
+        wallet::{Note, ReceivedNote, WalletTransparentOutput},
+    };
+    use ::transparent::{
+        address::TransparentAddress,
+        bundle::{OutPoint, TxOut},
+    };
+
+    // A `LocalNetwork` value used to pin consensus state for these tests; Ironwood/NU6.3 is
+    // inactive, which is irrelevant to a purely transparent step.
+    fn test_network() -> LocalNetwork {
+        LocalNetwork {
+            overwinter: Some(BlockHeight::from_u32(1)),
+            sapling: Some(BlockHeight::from_u32(1)),
+            blossom: Some(BlockHeight::from_u32(1)),
+            heartwood: Some(BlockHeight::from_u32(1)),
+            canopy: Some(BlockHeight::from_u32(1)),
+            nu5: Some(BlockHeight::from_u32(1)),
+            nu6: None,
+            nu6_1: None,
+            nu6_2: None,
+            nu6_3: None,
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: None,
+        }
+    }
+
+    /// A minimal [`InputSource`] that resolves exactly one transparent UTXO, by outpoint; used to
+    /// decode a proposal whose only chain input is that UTXO.
+    struct FakeInputSource(WalletTransparentOutput<()>);
+
+    impl InputSource for FakeInputSource {
+        type Error = ();
+        type AccountId = ();
+        type NoteRef = u32;
+
+        fn get_spendable_note(
+            &self,
+            _txid: &zcash_primitives::transaction::TxId,
+            _protocol: zcash_protocol::ShieldedPool,
+            _index: u32,
+            _target_height: TargetHeight,
+        ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
+            Ok(None)
+        }
+
+        fn select_spendable_notes(
+            &self,
+            _account: Self::AccountId,
+            _target_value: TargetValue,
+            _sources: &[zcash_protocol::ShieldedPool],
+            _target_height: TargetHeight,
+            _confirmations_policy: ConfirmationsPolicy,
+            _exclude: &[Self::NoteRef],
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            Ok(ReceivedNotes::empty())
+        }
+
+        fn select_unspent_notes(
+            &self,
+            _account: Self::AccountId,
+            _sources: &[zcash_protocol::ShieldedPool],
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+        ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+            Ok(ReceivedNotes::empty())
+        }
+
+        fn get_account_metadata(
+            &self,
+            _account: Self::AccountId,
+            _selector: &NoteFilter,
+            _target_height: TargetHeight,
+            _exclude: &[Self::NoteRef],
+        ) -> Result<AccountMeta, Self::Error> {
+            Err(())
+        }
+
+        fn get_unspent_transparent_output(
+            &self,
+            outpoint: &OutPoint,
+            _target_height: TargetHeight,
+        ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+            Ok((*outpoint == *self.0.outpoint()).then(|| self.0.clone()))
+        }
+    }
+
+    /// Builds a single-step proposal with one P2SH transparent input and a transparent change
+    /// output, encodes it to its protobuf representation, and returns everything needed to decode
+    /// it again.
+    fn proto_with_transparent_change(
+        change: ChangeValue,
+    ) -> (
+        proposal::Proposal,
+        Proposal<StandardFeeRule, u32>,
+        LocalNetwork,
+        FakeInputSource,
+    ) {
+        let funding_addr = TransparentAddress::ScriptHash([7u8; 20]);
+
+        let input = WalletTransparentOutput::<()>::from_parts(
+            OutPoint::fake(),
+            TxOut::new(
+                Zatoshis::const_from_u64(60_000),
+                funding_addr.script().into(),
+            ),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("valid P2SH output");
+
+        let balance =
+            TransactionBalance::new(vec![change], Zatoshis::const_from_u64(10_000)).unwrap();
+
+        let step = Step::from_parts(
+            &[],
+            TransactionRequest::empty(),
+            BTreeMap::new(),
+            vec![input.clone()],
+            None::<ShieldedInputs<u32>>,
+            None,
+            vec![],
+            balance,
+            false,
+            #[cfg(feature = "orchard")]
+            false,
+        )
+        .expect("valid step");
+
+        let proposal = Proposal::multi_step(
+            StandardFeeRule::Zip317,
+            TargetHeight::from(100u32),
+            ConfirmationsPolicy::default(),
+            NonEmpty::singleton(step),
+        )
+        .expect("valid proposal");
+
+        let proto = proposal::Proposal::from_standard_proposal(&proposal);
+        let network = test_network();
+        let wallet_data = FakeInputSource(input);
+
+        (proto, proposal, network, wallet_data)
+    }
+
+    /// A proposal whose transparent change carries an explicit recipient matching the P2SH input
+    /// of the same step round-trips through protobuf encoding and decoding unchanged.
+    #[test]
+    fn transparent_change_recipient_round_trips_through_proposal_proto() {
+        let (proto, proposal, network, wallet_data) =
+            proto_with_transparent_change(ChangeValue::transparent_to_address(
+                Zatoshis::const_from_u64(50_000),
+                TransparentAddress::ScriptHash([7u8; 20]),
+            ));
+
+        let decoded = proto
+            .try_into_standard_proposal(&network, &wallet_data)
+            .expect("decodes successfully");
+        assert_eq!(decoded, proposal);
+    }
+
+    /// A legacy transparent change value, with no explicit recipient, round-trips to
+    /// `ChangeValue::transparent` (the absent-field, wallet-change-address semantics).
+    #[test]
+    fn legacy_transparent_change_round_trips_through_proposal_proto() {
+        let (proto, proposal, network, wallet_data) = proto_with_transparent_change(
+            ChangeValue::transparent(Zatoshis::const_from_u64(50_000)),
+        );
+
+        // The wire representation omits the new field entirely for legacy change values.
+        assert_eq!(
+            proto.steps[0].balance.as_ref().unwrap().proposed_change[0]
+                .transparent_change_recipient_script,
+            None
+        );
+
+        let decoded = proto
+            .try_into_standard_proposal(&network, &wallet_data)
+            .expect("decodes successfully");
+        assert_eq!(decoded, proposal);
+    }
+
+    /// A `transparentChangeRecipientScript` that does not parse to the scriptPubKey of a valid
+    /// transparent address is rejected.
+    #[test]
+    fn transparent_change_recipient_script_invalid_bytes_rejected() {
+        let (mut proto, _, network, wallet_data) =
+            proto_with_transparent_change(ChangeValue::transparent_to_address(
+                Zatoshis::const_from_u64(50_000),
+                TransparentAddress::ScriptHash([7u8; 20]),
+            ));
+        proto.steps[0].balance.as_mut().unwrap().proposed_change[0]
+            .transparent_change_recipient_script = Some(vec![0xff, 0x00]);
+
+        assert_matches!(
+            proto.try_into_standard_proposal(&network, &wallet_data),
+            Err(ProposalDecodingError::TransparentChangeRecipientInvalid)
+        );
+    }
+
+    /// A `transparentChangeRecipientScript` set together with `isEphemeral` is rejected: an
+    /// explicit recipient is only meaningful for non-ephemeral transparent change.
+    #[test]
+    fn transparent_change_recipient_script_with_ephemeral_rejected() {
+        let (mut proto, _, network, wallet_data) =
+            proto_with_transparent_change(ChangeValue::transparent_to_address(
+                Zatoshis::const_from_u64(50_000),
+                TransparentAddress::ScriptHash([7u8; 20]),
+            ));
+        proto.steps[0].balance.as_mut().unwrap().proposed_change[0].is_ephemeral = true;
+
+        assert_matches!(
+            proto.try_into_standard_proposal(&network, &wallet_data),
+            Err(ProposalDecodingError::TransparentChangeRecipientInvalid)
+        );
+    }
+
+    /// A `transparentChangeRecipientScript` set on a shielded change value is rejected: an
+    /// explicit transparent recipient is only meaningful for transparent change.
+    #[test]
+    fn transparent_change_recipient_script_with_shielded_pool_rejected() {
+        let (mut proto, _, network, wallet_data) =
+            proto_with_transparent_change(ChangeValue::transparent_to_address(
+                Zatoshis::const_from_u64(50_000),
+                TransparentAddress::ScriptHash([7u8; 20]),
+            ));
+        // Rewrite the change value's pool to Sapling while leaving the recipient script set;
+        // with no memo present, decoding reaches the recipient-script validity check.
+        proto.steps[0].balance.as_mut().unwrap().proposed_change[0].value_pool =
+            proposal::ValuePool::Sapling.into();
+
+        assert_matches!(
+            proto.try_into_standard_proposal(&network, &wallet_data),
+            Err(ProposalDecodingError::TransparentChangeRecipientInvalid)
+        );
     }
 }
