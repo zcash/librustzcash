@@ -13,6 +13,8 @@ workspace.
 ### Added
 - `zcash_protocol::consensus::SECONDS_PER_BLOCK`
 - `zcash_protocol::consensus::BLOCKS_PER_HOUR`
+- `zcash_protocol::constants::MAX_BLOCK_BYTES`, the Zcash consensus maximum
+  block size and therefore the maximum size of any single transaction.
 
 ## [0.10.0] - 2026-07-09
 

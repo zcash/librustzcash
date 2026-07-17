@@ -387,9 +387,7 @@ mod tests {
     use super::SingleOutputChangeStrategy;
     use crate::{
         data_api::{
-            AccountMeta, PoolMeta,
-            testing::MockWalletDb,
-            wallet::{TargetHeight, input_selection::SaplingPayment},
+            AccountMeta, PoolMeta, testing::MockWalletDb, wallet::input_selection::SaplingPayment,
         },
         fees::{
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
@@ -403,6 +401,9 @@ mod tests {
         crate::data_api::wallet::input_selection::OrchardPayment,
         crate::fees::orchard as orchard_fees,
     };
+
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    use crate::data_api::wallet::TargetHeight;
 
     #[test]
     fn change_without_dust() {

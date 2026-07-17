@@ -423,10 +423,6 @@ impl orchard_fees::OutputView for OrchardPayment {
     }
 }
 
-/// The Zcash consensus maximum block size, in bytes.
-#[cfg(feature = "transparent-inputs")]
-const MAX_BLOCK_BYTES: usize = 2_000_000;
-
 /// The default maximum fraction of a block's space, as an integer percentage, that a single
 /// shielding transaction's transparent inputs may occupy.
 #[cfg(feature = "transparent-inputs")]
@@ -774,6 +770,8 @@ impl<DbT> GreedyInputSelector<DbT> {
 /// for general (non-shielding) transfers.
 #[cfg(feature = "transparent-inputs")]
 fn shielding_max_inputs(block_space_percent: u32) -> usize {
+    use zcash_protocol::constants::MAX_BLOCK_BYTES;
+
     (MAX_BLOCK_BYTES.saturating_mul(block_space_percent as usize) / 100) / P2PKH_STANDARD_INPUT_SIZE
 }
 
