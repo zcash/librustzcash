@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 
+use incrementalmerkletree::Hashable;
 use rand::rngs::OsRng;
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -32,8 +33,10 @@ use zcash_client_backend::data_api::testing::pool::dsl::{TestDsl, TestScenario};
 use zcash_client_backend::data_api::testing::{
     CacheInsertionResult, DataStoreFactory, TestBuilder, TestCache,
 };
-use zcash_client_backend::data_api::wallet::ConfirmationsPolicy;
-use zcash_client_backend::data_api::{Account as _, WalletRead as _, WalletWrite as _};
+use zcash_client_backend::data_api::wallet::{ConfirmationsPolicy, TargetHeight};
+use zcash_client_backend::data_api::{
+    Account as _, InputSource, WalletRead as _, WalletWrite as _,
+};
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_client_sqlite::error::SqliteClientError;
 use zcash_client_sqlite::util::SystemClock;
@@ -42,11 +45,14 @@ use zcash_client_sqlite::wallet::init::WalletMigrator;
 use zcash_client_sqlite::{AccountUuid, WalletDb};
 use zcash_keys::keys::transparent::gap_limits::GapLimits;
 use zcash_primitives::block::BlockHash;
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+use zcash_primitives::transaction::builder::{BuildConfig, Builder, DEFAULT_TX_EXPIRY_DELTA};
+use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
 use zcash_primitives::transaction::{Transaction, TxVersion};
+use zcash_protocol::ShieldedPool;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::{BlockHeight, BranchId};
 use zcash_protocol::local_consensus::LocalNetwork;
+use zcash_protocol::memo::MemoBytes;
 use zcash_protocol::value::Zatoshis;
 
 use zcash_pool_migration::MigrationContext;
@@ -821,7 +827,11 @@ fn next_due_transfer_is_height_gated() {
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
 
     let schedule = ctx.propose_migration_transfers(false).unwrap();
-    assert_eq!(schedule.transfers().len(), 2, "two crossings: 1 ZEC and 0.5 ZEC");
+    assert_eq!(
+        schedule.transfers().len(),
+        2,
+        "two crossings: 1 ZEC and 0.5 ZEC"
+    );
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
 
@@ -850,7 +860,6 @@ fn next_due_transfer_is_height_gated() {
         "the newly-due transfer is the second one"
     );
 }
-
 
 /// Regression test for the root cause behind a live-device `InsufficientFunds` failure: a live
 /// wallet's `CompactBlockProcessor` calls `update_chain_tip` on every sync tick, even when zero new
@@ -893,14 +902,10 @@ fn steady_state_chain_tip_polling_does_not_block_deferred_witness_selection() {
     // Simulate a second live sync tick at the same chain tip (no new blocks found) — exactly what
     // `CompactBlockProcessor` does every ~20s per the observed device logcat cadence.
     {
-        let mut db = WalletDb::for_path(
-            &db_path,
-            ironwood_active_network(),
-            SystemClock,
-            OsRng,
-        )
-        .unwrap();
-        db.update_chain_tip(BlockHeight::from_u32(tip_height)).unwrap();
+        let mut db =
+            WalletDb::for_path(&db_path, ironwood_active_network(), SystemClock, OsRng).unwrap();
+        db.update_chain_tip(BlockHeight::from_u32(tip_height))
+            .unwrap();
     }
 
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
@@ -908,4 +913,319 @@ fn steady_state_chain_tip_polling_does_not_block_deferred_witness_selection() {
         .propose_migration_transfers(false)
         .expect("deferred-witness selection tolerates an extra steady-state chain-tip poll");
     assert_eq!(schedule.transfers().len(), 1);
+}
+
+// ======================================================================================
+// Spike (design spec `2026-07-17-migration-sign-now-prove-later-design.md`, §4.2's "Open
+// verification item"): can the `orchard` crate's own builder construct, finalize, and SIGN a
+// valid PCZT for a spend of a REAL note using a *placeholder* `MerklePath` (not the note's real
+// witness) while the enclosing `BuildConfig`'s `orchard_anchor` is left entirely `None` (not a
+// placeholder anchor value)? This must hold without ever touching the wallet's commitment tree
+// (no `witness_at_checkpoint_id_caching`, no `root_at_checkpoint_id` call anywhere in these
+// tests) — the whole point of §4.2 is that signing does not need real witness/anchor data at all.
+//
+// RESULT: the literal approach described in §4.2 does **not** work — see
+// `transaction_level_builder_rejects_orchard_anchor_none` below, which documents exactly where
+// and why it fails. A working alternative exists and is demonstrated by
+// `placeholder_witness_synthetic_anchor_then_redacted_signs_successfully`: build with a
+// *synthetic, self-consistent* anchor (the placeholder path's own root, not the note's real
+// anchor), sign, then use the (previously unused by this crate) `pczt::roles::redactor::Redactor`
+// role to erase the anchor and witness back down to `None` post-signing. The end state — a
+// validly SIGNED PCZT with `anchor: None` and no real witness, ready for a later
+// `set_orchard_anchor`/`set_orchard_spend_witnesses` call — is identical to what §4.2 wanted;
+// only the path to get there differs from what the spec assumed.
+//
+// Both tests deliberately stop after the Signer role: proving is explicitly out of scope (a
+// `None` anchor is meaningless to the Prover — that's expected and is not what's being verified
+// here).
+// ======================================================================================
+
+/// Documents the actual blocker: `zcash_primitives::transaction::builder::BuildConfig::Standard`'s
+/// `orchard_anchor: None` does not mean "defer the anchor for later PCZT-level filling" — it means
+/// "do not build an Orchard bundle at all". `BuildConfig::orchard_builder` (private to
+/// `zcash_primitives`, `zcash_primitives/src/transaction/builder.rs`'s
+/// `impl BuildConfig::orchard_builder`) only constructs the underlying `orchard::builder::Builder`
+/// when `orchard_anchor` is `Some`:
+///
+/// ```ignore
+/// BuildConfig::Standard { orchard_anchor, orchard_bundle_type, .. } => orchard_anchor
+///     .as_ref()
+///     .map(|a| orchard::builder::Builder::new(*orchard_bundle_type, bundle_version, ..., *a).expect(..)),
+/// ```
+///
+/// so with `orchard_anchor: None`, `Builder::new`'s `orchard_builder` field is `None`, and
+/// `add_orchard_spend` immediately returns `Error::OrchardBuilderNotAvailable` before even looking
+/// at the supplied `MerklePath` — the placeholder-witness content is never reached.
+///
+/// This is not merely a `zcash_primitives`-level wrapper limitation, either: even bypassing it and
+/// calling `orchard::builder::Builder::new` directly still requires a non-optional
+/// `anchor: orchard::Anchor` parameter, and `Builder::add_spend`
+/// (`orchard-0.15.0/src/builder.rs`) performs a live anchor/path consistency check —
+/// `SpendInfo::has_matching_anchor` — that rejects any `merkle_path` whose own computed root does
+/// not equal the builder's anchor. There is no "no anchor" mode at the orchard-crate builder level
+/// at all; every spend-adding API demands *some* anchor value that the supplied path is consistent
+/// with.
+#[test]
+fn transaction_level_builder_rejects_orchard_anchor_none() {
+    let (_dir, st, db_path, account) = seed_wallet(&[100_000_000], 10);
+    let usk = st.get_account().usk().clone();
+    drop(st);
+
+    let network = ironwood_active_network();
+    let db: FileWalletDb =
+        WalletDb::for_path(&db_path, network, SystemClock, OsRng).unwrap();
+    let (target, _unused_anchor): (TargetHeight, BlockHeight) = db
+        .get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted())
+        .unwrap()
+        .unwrap();
+    let note = db
+        .select_unspent_notes(account, &[ShieldedPool::Orchard], target, &[])
+        .unwrap()
+        .take_orchard()
+        .into_iter()
+        .next()
+        .expect("the seeded wallet has one spendable Orchard note");
+    let orchard_fvk = orchard::keys::FullViewingKey::from(usk.orchard());
+    let placeholder_path = orchard::tree::MerklePath::from_parts(
+        0,
+        [orchard::tree::MerkleHashOrchard::empty_leaf(); orchard::NOTE_COMMITMENT_TREE_DEPTH],
+    );
+
+    let mut builder = Builder::new(
+        network,
+        BlockHeight::from(target),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: None,
+            ironwood_anchor: None,
+            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
+            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+        },
+    );
+
+    let result =
+        builder.add_orchard_spend::<Infallible>(orchard_fvk, *note.note(), placeholder_path);
+    assert!(
+        matches!(
+            result,
+            Err(zcash_primitives::transaction::builder::Error::OrchardBuilderNotAvailable)
+        ),
+        "orchard_anchor: None means \"no Orchard bundle\", not \"defer the anchor\" — got {result:?}"
+    );
+}
+
+/// The working alternative: build the spend against a **synthetic, self-consistent** anchor (the
+/// placeholder `MerklePath`'s own computed root, not the note's real anchor — so
+/// `orchard::builder::Builder::add_spend`'s internal anchor/path consistency check is satisfied),
+/// sign normally, and then use `pczt::roles::redactor::Redactor::redact_orchard_with` to erase
+/// both the anchor and the spend witness back down to `None`/absent. `Redactor` is not currently
+/// used anywhere else in this crate (`zcash_pool_migration`) or referenced by the design spec, but
+/// requires no new Cargo feature — `pczt/src/roles.rs` gates it behind no `#[cfg(feature = ...)]`
+/// at all, unlike `prover`/`signer`/`spend-finalizer`/`tx-extractor`.
+///
+/// This produces exactly the end state design spec §4.2's `SignedAwaitingProof` sub-state wants:
+/// a fully, validly SIGNED PCZT (`spend_auth_sig` present) whose Orchard-bundle `anchor` is `None`
+/// and whose spend has no witness — ready for a later `set_orchard_anchor(real_anchor)` (a legal
+/// `None -> Some` transition) and `set_orchard_spend_witnesses` call, without ever having computed
+/// the note's real witness or anchor in this test.
+///
+/// Asserts:
+/// - Every step (build, `Creator`, `IoFinalizer`, `Signer`, `Redactor`) succeeds with no error.
+/// - Before redaction, the PCZT's anchor is `Some` (the synthetic value) — proving the anchor slot
+///   really was populated, not accidentally already `None` for some unrelated reason.
+/// - After redaction, `pczt.orchard().anchor()` is `None`, verified directly via `pczt::Pczt`'s
+///   public accessors, and this survives a serialize/parse round trip.
+/// - After redaction, at least one action's `spend_auth_sig` is STILL `Some` — proving redaction
+///   only cleared the anchor/witness fields and did not invalidate the signature (consistent with
+///   the design spec's ZIP 244 premise: the anchor is committed as authorizing data, not under the
+///   v6 signature hash, so clearing it post-signing does not touch `spend_auth_sig`).
+/// - This test never calls `WalletCommitmentTrees::with_orchard_tree_mut`,
+///   `witness_at_checkpoint_id_caching`, or `root_at_checkpoint_id` — the note's REAL witness and
+///   anchor are never computed anywhere in this test, only the synthetic placeholder's own
+///   self-consistent root.
+#[test]
+fn placeholder_witness_synthetic_anchor_then_redacted_signs_successfully() {
+    let (_dir, st, db_path, account) = seed_wallet(&[100_000_000], 10);
+    let usk = st.get_account().usk().clone();
+    // Release the harness's wallet connection before we re-open the same file directly (mirrors
+    // every other test in this file).
+    drop(st);
+
+    let network = ironwood_active_network();
+    let db: FileWalletDb =
+        WalletDb::for_path(&db_path, network, SystemClock, OsRng).unwrap();
+
+    // Only the target height is used — deliberately never touch `get_target_and_anchor_heights`'s
+    // anchor half, nor any commitment-tree accessor, anywhere in this test.
+    let (target, _unused_anchor): (TargetHeight, BlockHeight) = db
+        .get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted())
+        .unwrap()
+        .unwrap();
+
+    // A real, wallet-owned Orchard note — fetched via the note-selection API, never via the
+    // commitment tree.
+    let note = db
+        .select_unspent_notes(account, &[ShieldedPool::Orchard], target, &[])
+        .unwrap()
+        .take_orchard()
+        .into_iter()
+        .next()
+        .expect("the seeded wallet has one spendable Orchard note");
+    let note_value = note.note().value().inner();
+    assert_eq!(note_value, 100_000_000, "sanity: the seeded note's value");
+
+    let orchard_fvk = orchard::keys::FullViewingKey::from(usk.orchard());
+
+    // The placeholder witness (§4.2): a synthetic position/auth-path, NOT the note's real witness
+    // (which would require `db.with_orchard_tree_mut(..).witness_at_checkpoint_id_caching(..)` —
+    // never called in this test).
+    let placeholder_path = orchard::tree::MerklePath::from_parts(
+        0,
+        [orchard::tree::MerkleHashOrchard::empty_leaf(); orchard::NOTE_COMMITMENT_TREE_DEPTH],
+    );
+    // The synthetic anchor: this placeholder path's OWN computed root — not the note's real
+    // anchor (never computed anywhere in this test) and not `Anchor::empty_tree()` either (which
+    // would not match this path and would trip `add_spend`'s consistency check just the same).
+    // `orchard::builder::Builder::add_spend` requires `merkle_path.root(note.commitment()) ==
+    // builder.anchor`, so the two must be constructed together.
+    let synthetic_anchor = placeholder_path.root(note.note().commitment().into());
+
+    // ZIP-317: 1 spend + 1 (same-pool) change output = 2 actions, at/above the 2-action grace
+    // floor, so fee = 5_000 * 2 = 10_000 (matches `split.rs::split_fee(1, 1)`, which is
+    // `pub(crate)` and therefore not reusable from this external integration test).
+    const FEE: u64 = 10_000;
+    let change_value = note_value - FEE;
+
+    let mut builder = Builder::new(
+        network,
+        BlockHeight::from(target),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            // NOT `None` (see `transaction_level_builder_rejects_orchard_anchor_none`) — a
+            // synthetic anchor self-consistent with `placeholder_path`, so the orchard builder's
+            // own anchor/path check is satisfied without ever touching the note's real anchor.
+            orchard_anchor: Some(synthetic_anchor),
+            // No Ironwood actions exist in this bundle at all, so this bundle needs no anchor
+            // either.
+            ironwood_anchor: None,
+            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
+            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+        },
+    );
+
+    builder
+        .add_orchard_spend::<Infallible>(orchard_fvk.clone(), *note.note(), placeholder_path)
+        .expect("orchard builder accepts a placeholder MerklePath paired with its own root");
+
+    let change_address = orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
+    let internal_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::Internal);
+    builder
+        .add_orchard_change_output::<Infallible>(
+            orchard_fvk.clone(),
+            Some(internal_ovk),
+            change_address,
+            Zatoshis::const_from_u64(change_value),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+
+    let build_result = builder
+        .build_for_pczt(OsRng, &Zip317FeeRule::standard())
+        .expect("build_for_pczt succeeds with a placeholder witness and a synthetic anchor");
+
+    let created = pczt::roles::creator::Creator::build_from_parts(build_result.pczt_parts)
+        .expect("pczt creation succeeds");
+    let finalized = pczt::roles::io_finalizer::IoFinalizer::new(created)
+        .finalize_io()
+        .expect("io finalization succeeds with a synthetic anchor and a placeholder witness");
+
+    assert_eq!(
+        finalized.orchard().anchor(),
+        &Some(synthetic_anchor.to_bytes()),
+        "the anchor slot holds the synthetic anchor right after construction — proving it really \
+         was populated, not accidentally already None for some unrelated reason"
+    );
+    assert_eq!(
+        finalized.orchard().actions().len(),
+        2,
+        "one real spend plus the one change output — no padding needed at the 2-action default"
+    );
+
+    // Sign every Orchard spend belonging to the wallet (mirrors
+    // `backend.rs::sign_all_orchard_spends`'s index-probing loop, since that function is
+    // `pub(crate)` in `zcash_pool_migration` and unreachable here).
+    let mut signer = pczt::roles::signer::Signer::new(finalized)
+        .expect("pczt signer inits fine with a synthetic anchor and a placeholder witness");
+    let ask = orchard::keys::SpendAuthorizingKey::from(usk.orchard());
+    for index in 0.. {
+        match signer.sign_orchard(index, &ask) {
+            Err(pczt::roles::signer::Error::InvalidIndex) => break,
+            Ok(())
+            | Err(pczt::roles::signer::Error::OrchardSign(
+                orchard::pczt::SignerError::WrongSpendAuthorizingKey,
+            )) => {}
+            Err(e) => panic!("sign orchard: {e:?}"),
+        }
+    }
+    let signed = signer.finish();
+    assert!(
+        signed
+            .orchard()
+            .actions()
+            .iter()
+            .any(|a| a.spend().spend_auth_sig().is_some()),
+        "the Signer role actually produced a spend authorization signature for the real spend, \
+         proving signing succeeded — not just that the loop ran to completion"
+    );
+
+    // The redaction step (not currently used anywhere else in this crate): erase the anchor and
+    // the spend witness back down to None/absent, post-signing — the `SignedAwaitingProof` shape
+    // design spec §4.2 wants, reached via a different route than the spec assumed.
+    let redacted = pczt::roles::redactor::Redactor::new(signed)
+        .redact_orchard_with(|mut orchard| {
+            orchard.clear_anchor();
+            orchard.redact_actions(|mut action| {
+                action.clear_spend_witness();
+            });
+        })
+        .finish();
+
+    assert_eq!(
+        redacted.orchard().anchor(),
+        &None,
+        "post-redaction, the Orchard bundle's anchor is None — exactly the `SignedAwaitingProof` \
+         shape §4.2 wants, ready for a later `set_orchard_anchor` (a legal None -> Some \
+         transition)"
+    );
+    assert!(
+        redacted
+            .orchard()
+            .actions()
+            .iter()
+            .any(|a| a.spend().spend_auth_sig().is_some()),
+        "redaction cleared only the anchor/witness fields — the spend authorization signature \
+         survives untouched, consistent with the design spec's ZIP 244 premise that the anchor \
+         is committed as authorizing data, not under the v6 signature hash"
+    );
+
+    // Round-trip through serialization: the PCZT is genuinely, structurally anchor-less, not just
+    // in this process's in-memory `Bundle` value. (`Pczt::serialize` always emits the v2 wire
+    // format, whose `anchor` field is `Option<[u8; 32]>` — unlike v1, which requires `Some` — so
+    // this is not expected to fail.)
+    let bytes = redacted
+        .clone()
+        .serialize()
+        .expect("a signed, anchor-less, witness-redacted PCZT still serializes (v2 encoding)");
+    let reparsed = pczt::Pczt::parse(&bytes).expect("the serialized PCZT parses back");
+    assert_eq!(
+        reparsed.orchard().anchor(),
+        &None,
+        "anchor is still None after a full serialize/parse round trip"
+    );
+
+    // Deliberately NOT run: `pczt::roles::prover::Prover` (proving needs the real anchor and is
+    // out of scope for this spike — see the design spec's §4.2 open item), `SpendFinalizer`, and
+    // `TransactionExtractor` (both would require a proof to already exist). Construction through
+    // signing (and redaction back to the anchor-less/witness-less shape) succeeding is the entire
+    // claim this test verifies.
 }
