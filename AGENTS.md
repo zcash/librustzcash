@@ -256,6 +256,8 @@ Type safety is paramount. This is a security-critical codebase.
 - No magic numbers: give every literal a named `const` with a documented meaning. Prefer an
   existing protocol constant (e.g. `zcash_protocol::value::COIN` / `MAX_MONEY`,
   `zip317::MARGINAL_FEE`) over redefining one.
+- Make a library `no_std` (with `extern crate alloc`) whenever its dependencies allow it, keeping
+  `std` to `#[cfg(test)]` and dev-dependencies.
 
 ### Naming — Project-Specific Conventions
 
