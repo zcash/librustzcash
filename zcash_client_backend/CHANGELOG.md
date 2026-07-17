@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::wallet::redact_pczt_for_signer`, which
+  creates a compact signer view of a wallet-created PCZT while retaining the
+  information a general-purpose external signer may need. This is available
+  behind the `pczt` feature.
 - `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
   counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
 

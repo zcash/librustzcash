@@ -81,7 +81,8 @@ use zcash_protocol::PoolType;
 
 #[cfg(feature = "pczt")]
 use {
-    pczt::roles::{prover::Prover, signer::Signer},
+    crate::data_api::wallet::redact_pczt_for_signer,
+    pczt::roles::{combiner::Combiner, prover::Prover, signer::Signer},
     rand_core::OsRng,
     transparent::builder::TransparentSigningSet,
     zcash_primitives::transaction::builder::{BuildConfig, Builder},
@@ -6692,10 +6693,51 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         .unwrap()
         .finish();
 
-    // Apply signatures.
-    let mut signer = Signer::new(pczt_proven).unwrap();
+    // The signer view of a v5 PCZT commits to the same transaction effects. V5
+    // anchors are retained, while Orchard effecting fields are compacted using
+    // the v2 PCZT encoding. Passing the proof-bearing authoritative copy also
+    // exercises redaction of data that the external Signer does not need.
+    let original_sighash = Signer::new(pczt_proven.clone()).unwrap().shielded_sighash();
+    let original_len = pczt_proven.clone().serialize().unwrap().len();
+    let signer_view = redact_pczt_for_signer(&pczt_proven);
+    assert_eq!(
+        *signer_view.global().tx_version(),
+        zcash_protocol::constants::V5_TX_VERSION,
+    );
+    assert_eq!(
+        signer_view.sapling().anchor(),
+        pczt_proven.sapling().anchor()
+    );
+    assert_eq!(
+        signer_view.orchard().anchor(),
+        pczt_proven.orchard().anchor()
+    );
+    if !signer_view.orchard().actions().is_empty() {
+        assert!(pczt::v1::Pczt::try_from(signer_view.clone()).is_err());
+        assert!(
+            signer_view
+                .orchard()
+                .actions()
+                .iter()
+                .all(|action| action.cv_net().is_none() && action.output().cmx().is_none())
+        );
+    }
+
+    let signer_view_bytes = signer_view.serialize().unwrap();
+    assert!(signer_view_bytes.len() < original_len);
+    let signer_view = pczt::Pczt::parse(&signer_view_bytes).unwrap();
+    assert_eq!(
+        Signer::new(signer_view.clone()).unwrap().shielded_sighash(),
+        original_sighash,
+    );
+
+    // Apply signatures to the transported signer view, then combine the
+    // contribution with the proof-bearing authoritative copy.
+    let mut signer = Signer::new(signer_view).unwrap();
     P0::apply_signatures_to_pczt(&mut signer, account.usk()).unwrap();
-    let pczt_authorized = signer.finish();
+    let pczt_authorized = Combiner::new(vec![pczt_proven, signer.finish()])
+        .combine()
+        .unwrap();
 
     // Now we can extract the transaction.
     let extract_and_store_result = st.extract_and_store_transaction_from_pczt(pczt_authorized);
@@ -7973,6 +8015,106 @@ where
             .iter()
             .any(|action| !action.output().proprietary().is_empty()),
         "the Ironwood output carries recipient metadata",
+    );
+
+    let original_sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
+    let original_len = pczt.clone().serialize().unwrap().len();
+    let signer_view = redact_pczt_for_signer(&pczt);
+    let signer_view_bytes = signer_view.serialize().unwrap();
+    assert!(signer_view_bytes.len() < original_len);
+    let signer_view = pczt::Pczt::parse(&signer_view_bytes).unwrap();
+
+    // The backend metadata belongs to the authoritative wallet copy, not the
+    // external Signer.
+    assert!(
+        signer_view
+            .global()
+            .proprietary()
+            .get("zcash_client_backend:proposal_info")
+            .is_none()
+    );
+    assert!(
+        pczt.global()
+            .proprietary()
+            .contains_key("zcash_client_backend:proposal_info")
+    );
+
+    // V6 signatures do not commit to shielded anchors. Orchard action fields
+    // that resolve_fields can restore are omitted from the signer view.
+    assert!(signer_view.sapling().anchor().is_none());
+    assert!(signer_view.orchard().anchor().is_none());
+    assert!(signer_view.ironwood().anchor().is_none());
+
+    let assert_redacted_bundle =
+        |original: &pczt::orchard::Bundle, redacted: &pczt::orchard::Bundle| {
+            assert_eq!(redacted.actions().len(), original.actions().len());
+            let mut memo_plaintexts = 0;
+            for (redacted, original) in redacted.actions().iter().zip(original.actions()) {
+                assert!(redacted.cv_net().is_none());
+                assert!(redacted.output().cmx().is_none());
+                assert_eq!(redacted.spend().nullifier(), original.spend().nullifier());
+                assert_eq!(redacted.spend().rk(), original.spend().rk());
+                assert_eq!(
+                    redacted.spend().spend_auth_sig(),
+                    original.spend().spend_auth_sig()
+                );
+                assert_eq!(
+                    redacted.output().ephemeral_key(),
+                    original.output().ephemeral_key()
+                );
+                assert_eq!(
+                    redacted.output().out_ciphertext(),
+                    original.output().out_ciphertext()
+                );
+                assert_eq!(
+                    redacted.output().user_address(),
+                    original.output().user_address()
+                );
+                assert!(
+                    redacted
+                        .output()
+                        .proprietary()
+                        .get("zcash_client_backend:output_info")
+                        .is_none()
+                );
+                if matches!(
+                    redacted.output().enc_ciphertext(),
+                    pczt::orchard::EncCiphertext::MemoPlaintext(_)
+                ) {
+                    memo_plaintexts += 1;
+                }
+            }
+            memo_plaintexts
+        };
+
+    let memo_plaintexts = assert_redacted_bundle(pczt.orchard(), signer_view.orchard())
+        + assert_redacted_bundle(pczt.ironwood(), signer_view.ironwood());
+    assert!(memo_plaintexts > 0);
+
+    // Resolving the compact representation restores byte-identical effecting
+    // fields and therefore the same shielded signature digest.
+    let mut resolved = signer_view.clone();
+    resolved.resolve_fields().unwrap();
+    for (resolved_bundle, original_bundle) in [
+        (resolved.orchard(), pczt.orchard()),
+        (resolved.ironwood(), pczt.ironwood()),
+    ] {
+        for (resolved, original) in resolved_bundle
+            .actions()
+            .iter()
+            .zip(original_bundle.actions())
+        {
+            assert_eq!(resolved.cv_net(), original.cv_net());
+            assert_eq!(resolved.output().cmx(), original.output().cmx());
+            assert_eq!(
+                resolved.output().enc_ciphertext(),
+                original.output().enc_ciphertext()
+            );
+        }
+    }
+    assert_eq!(
+        Signer::new(signer_view.clone()).unwrap().shielded_sighash(),
+        original_sighash,
     );
 }
 
