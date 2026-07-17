@@ -1,0 +1,65 @@
+[package]
+name = "zcash_pool_migration"
+description = "Orchard to Ironwood value-pool migration engine for Zcash wallets"
+version = "0.1.0"
+authors = ["Michal Fousek <michal.fousek@chlup.info>"]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+zcash_address.workspace = true
+zcash_client_backend = { workspace = true, features = ["orchard", "pczt"] }
+# The `serde` feature is required transitively: the high-level `create_pczt_from_proposal`
+# (the mandated transfer-construction path, spec D4) has a `DbT::AccountId: serde::Serialize`
+# bound, and `AccountUuid` only implements `Serialize` under `zcash_client_sqlite/serde`. This
+# enables serialization of an upstream id type; this crate itself derives no serde and hand-rolls
+# its own storage encodings (spec D3).
+zcash_client_sqlite = { workspace = true, features = ["orchard", "serde", "transparent-inputs"] }
+zcash_keys = { workspace = true, features = ["orchard"] }
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+zip321.workspace = true
+transparent.workspace = true
+
+orchard.workspace = true
+pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "signer", "spend-finalizer", "tx-extractor", "zcp-builder"] }
+shardtree.workspace = true
+
+rand.workspace = true
+rusqlite.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+incrementalmerkletree.workspace = true
+tempfile = "3"
+# Only for constructing a throwaway `UnifiedSpendingKey` (via `AccountId`) in unit tests that
+# reject their input before the key is ever used; already an in-workspace crate.
+zip32.workspace = true
+# The end-to-end integration tests (tests/migration_e2e.rs) drive the real pipelines against a
+# seeded, scanned wallet. They reuse the upstream `data_api::testing` harness (TestBuilder/
+# TestState + the Orchard pool tester) to generate and scan blocks, so both crates need their
+# `test-dependencies` features; the sqlite one additionally provides the `WalletTest` impl on
+# `WalletDb` that the harness's `DataStoreFactory` requires, and `local-consensus` supplies the
+# `LocalNetwork` the harness builds on. No new external crates are introduced — only already-in-
+# workspace `test-dependencies` / `local-consensus` features are enabled.
+zcash_client_backend = { workspace = true, features = ["orchard", "pczt", "test-dependencies"] }
+zcash_client_sqlite = { workspace = true, features = ["orchard", "serde", "transparent-inputs", "test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
+
+[features]
+# This crate gates no code on `expensive-tests`, but the workspace CI "Run slow tests" job runs
+# `cargo test --workspace ... --features expensive-tests`, applying the feature across every
+# member; the feature is kept defined (empty) so that workspace-wide invocation is not perturbed.
+# The prototype's equally-inert `test-dependencies` feature was removed (nothing referenced it).
+expensive-tests = []
+
+[lints]
+workspace = true
