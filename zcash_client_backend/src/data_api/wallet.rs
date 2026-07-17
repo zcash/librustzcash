@@ -2421,13 +2421,13 @@ where
 /// Once the PCZT fully authorized, call [`extract_and_store_transaction_from_pczt`] to
 /// finish transaction creation.
 ///
-/// `target_expiry_height`, when set, replaces the builder-derived expiry before
+/// `expiry_height`, when set, replaces the builder-derived expiry before
 /// the PCZT is finalized. Applying this override after finalization can invalidate
 /// dummy spend signatures.
 ///
-/// A nonzero `target_expiry_height` below the proposal's
+/// A nonzero `expiry_height` below the proposal's
 /// [`min_target_height`](Proposal::min_target_height) is rejected with
-/// [`Error::ExpiryHeightBelowTargetHeight`]. A `target_expiry_height` of zero,
+/// [`Error::ExpiryHeightBelowTargetHeight`]. An `expiry_height` of zero,
 /// which disables expiry, is exempt from this check.
 ///
 /// `orchard_pool_bundle_type` selects the transactional bundle type for the Orchard
@@ -2444,7 +2444,7 @@ pub fn create_pczt_from_proposal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT,
     account_id: <DbT as WalletRead>::AccountId,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
-    target_expiry_height: Option<BlockHeight>,
+    expiry_height: Option<BlockHeight>,
     orchard_pool_bundle_type: BundleType,
 ) -> Result<pczt::Pczt, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
@@ -2469,7 +2469,7 @@ where
     let fee_rule = proposal.fee_rule();
     let min_target_height = proposal.min_target_height();
 
-    if let Some(expiry_height) = target_expiry_height {
+    if let Some(expiry_height) = expiry_height {
         let min_target_height = BlockHeight::from(min_target_height);
         if expiry_height != consensus::H0 && expiry_height < min_target_height {
             return Err(Error::ExpiryHeightBelowTargetHeight {
@@ -2502,7 +2502,7 @@ where
         unused_transparent_outputs,
         proposed_version,
         orchard_pool_bundle_type,
-        // This path applies `target_expiry_height` after the PCZT is built instead (below),
+        // This path applies `expiry_height` after the PCZT is built instead (below),
         // since overriding it via the builder would be redundant with that existing mechanism.
         None,
     )?;
@@ -2510,8 +2510,8 @@ where
     // Build the transaction with the specified fee rule
     let mut build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
 
-    if let Some(target) = target_expiry_height {
-        build_result.pczt_parts.expiry_height = target;
+    if let Some(expiry_height) = expiry_height {
+        build_result.pczt_parts.expiry_height = expiry_height;
     }
 
     let created = Creator::build_from_parts(build_result.pczt_parts).ok_or(PcztError::Build)?;

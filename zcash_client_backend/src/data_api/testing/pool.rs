@@ -6633,10 +6633,10 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     let min_target_height = proposal0.min_target_height();
     assert_eq!(proposal0.steps().len(), 1);
 
-    let target_expiry_height =
+    let expiry_height =
         pin_expiry_above_target.map(|delta| BlockHeight::from(min_target_height) + delta);
 
-    if target_expiry_height.is_some() {
+    if expiry_height.is_some() {
         // This is rejected before transaction building, so the successful call below
         // can reuse the same proposal.
         assert_matches!(
@@ -6654,7 +6654,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         account.id(),
         OvkPolicy::Sender,
         &proposal0,
-        target_expiry_height,
+        expiry_height,
     );
     assert_matches!(&create_proposed_result, Ok(_));
     let pczt_created = create_proposed_result.unwrap();
@@ -6702,7 +6702,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     assert_matches!(&extract_and_store_result, Ok(_));
     let txid = extract_and_store_result.unwrap();
 
-    if let Some(expiry_height) = target_expiry_height {
+    if let Some(expiry_height) = expiry_height {
         let tx = st.wallet().get_transaction(txid).unwrap().unwrap();
         assert_eq!(tx.expiry_height(), expiry_height);
     }
