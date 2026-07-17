@@ -1052,6 +1052,14 @@ impl SpendingKeys {
 /// step is not supported, because the ultimate positions of those notes in the global note
 /// commitment tree cannot be known until the transaction that produces those notes is mined,
 /// and therefore the required spend proofs for such notes cannot be constructed.
+///
+/// `expiry_height`, when set, replaces the builder-derived expiry for every step's
+/// transaction before it is built and signed.
+///
+/// A nonzero `expiry_height` below the proposal's
+/// [`min_target_height`](Proposal::min_target_height) is rejected with
+/// [`Error::ExpiryHeightBelowTargetHeight`]. An `expiry_height` of zero,
+/// which disables expiry, is exempt from this check.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>(
@@ -1062,6 +1070,7 @@ pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeEr
     spending_keys: &SpendingKeys,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
+    expiry_height: Option<BlockHeight>,
 ) -> Result<NonEmpty<TxId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -1071,6 +1080,16 @@ where
     // The transaction version is carried on the proposal, chosen when the proposal was
     // constructed; `None` builds at the version implied by the target height.
     let proposed_version = proposal.proposed_version();
+
+    if let Some(expiry_height) = expiry_height {
+        let min_target_height = BlockHeight::from(proposal.min_target_height());
+        if expiry_height != consensus::H0 && expiry_height < min_target_height {
+            return Err(Error::ExpiryHeightBelowTargetHeight {
+                expiry_height,
+                min_target_height,
+            });
+        }
+    }
 
     // The set of transparent `StepOutput`s available and unused from prior steps.
     // When a transparent `StepOutput` is created, it is added to the map. When it
@@ -1102,6 +1121,7 @@ where
             #[cfg(feature = "transparent-inputs")]
             &mut unused_transparent_outputs,
             proposed_version,
+            expiry_height,
         )?;
         step_results.push((step, step_result));
     }
@@ -1310,6 +1330,9 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
     // The transactional bundle type for the Orchard and Ironwood bundles; the PCZT path
     // threads the proposal's configured type here, other callers pass `BundleType::DEFAULT`.
     orchard_pool_bundle_type: BundleType,
+    // Overrides the builder-derived expiry height, when set. Applied immediately after
+    // `Builder::new` below, before any inputs are added or signatures/proofs are produced.
+    expiry_height: Option<BlockHeight>,
 ) -> Result<BuildState<ParamsT, DbT::AccountId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -1518,6 +1541,9 @@ where
             ironwood_bundle_type: orchard_pool_bundle_type,
         },
     );
+    if let Some(expiry_height) = expiry_height {
+        builder = builder.with_expiry_height(expiry_height);
+    }
 
     if let Some(version) = proposed_version {
         builder.propose_version(version)?;
@@ -2131,6 +2157,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N
         (TransparentAddress, OutPoint),
     >,
     proposed_version: Option<TxVersion>,
+    expiry_height: Option<BlockHeight>,
 ) -> Result<
     StepResult<<DbT as WalletRead>::AccountId>,
     CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
@@ -2155,6 +2182,7 @@ where
         proposed_version,
         // The non-PCZT path always builds padded Orchard-pool bundles.
         BundleType::DEFAULT,
+        expiry_height,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -2474,6 +2502,9 @@ where
         unused_transparent_outputs,
         proposed_version,
         orchard_pool_bundle_type,
+        // This path applies `target_expiry_height` after the PCZT is built instead (below),
+        // since overriding it via the builder would be redundant with that existing mechanism.
+        None,
     )?;
 
     // Build the transaction with the specified fee rule
@@ -3308,5 +3339,6 @@ where
         spending_keys,
         OvkPolicy::Sender,
         &proposal,
+        None,
     )
 }

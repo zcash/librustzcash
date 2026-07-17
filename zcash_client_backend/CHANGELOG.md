@@ -13,6 +13,13 @@ workspace.
 ### Added
 - `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
   counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
+  takes an `expiry_height: Option<BlockHeight>` parameter, mirroring the
+  one already accepted by `create_pczt_from_proposal`. This lets callers
+  override the builder-derived expiry height for non-PCZT transaction
+  construction too — useful when a caller's view of the chain tip used to
+  derive `min_target_height` may lag the real tip by more than the default
+  expiry buffer covers.
 
 ### Changed
 - `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
