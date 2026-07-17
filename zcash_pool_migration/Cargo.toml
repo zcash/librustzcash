@@ -32,6 +32,11 @@ transparent.workspace = true
 orchard.workspace = true
 pczt = { workspace = true, features = ["orchard", "io-finalizer", "prover", "signer", "spend-finalizer", "tx-extractor", "zcp-builder"] }
 shardtree.workspace = true
+# Only for `Hashable::empty_leaf()`, to build the placeholder `MerklePath` design spec §4.2's
+# sign-now/prove-later path signs against (`backend::sign_self_funding_transfer_awaiting_proof`).
+# Already an in-workspace dependency of `orchard`/`shardtree` above; this just promotes it from a
+# dev-dependency (previously used only by the e2e tests) to a real one.
+incrementalmerkletree.workspace = true
 
 rand.workspace = true
 rand_distr.workspace = true
@@ -39,7 +44,6 @@ rusqlite.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-incrementalmerkletree.workspace = true
 tempfile = "3"
 # Deterministic seeding for the scheduling tests: transfer cadence is sampled from an exponential
 # distribution (see `scheduling::sample_cadence_blocks`), so tests need a reproducible RNG rather

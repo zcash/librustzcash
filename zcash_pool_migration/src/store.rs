@@ -32,7 +32,8 @@ const RUN_COLUMNS: &str =
     "run_id, account_uuid, network, phase, prep_txid, target_values_json, last_error";
 const PENDING_COLUMNS: &str = "txid_hex, raw_pczt, anchor_height, target_height, \
     next_executable_after_height, expiry_height, value_zatoshi, fee_zatoshi, selected_note_txid, \
-    selected_note_output_index, selected_note_value, status, metadata_json";
+    selected_note_output_index, selected_note_value, status, metadata_json, proof_status, \
+    spend_action_index";
 
 /// Fields needed to create a new migration run.
 pub(crate) struct NewRun<'a> {
@@ -84,6 +85,18 @@ pub(crate) struct PendingTxRow {
     pub selected_note_value: u64,
     pub status: String,
     pub metadata_json: String,
+    /// Design spec §4.1's two-stage sub-state: `"ready"` (proven, immediately broadcastable — the
+    /// only value this column ever took before §4 landed) or `"awaiting_proof"` (validly SIGNED
+    /// but built against a placeholder witness/synthetic anchor — see
+    /// `backend::sign_self_funding_transfer_awaiting_proof` — not eligible for `next_due_transfer`
+    /// until `MigrationContext::finalize_ready_transfers` attaches the note's real witness/anchor,
+    /// proves it, and flips this to `"ready"`).
+    pub proof_status: String,
+    /// For an `"awaiting_proof"` row: the Orchard action index (within `raw_pczt`) of the real
+    /// spend, so `finalize_ready_transfers` knows which action `Updater::set_orchard_spend_witnesses`
+    /// must target (the padded bundle's real spend is not necessarily action 0 — its position is
+    /// shuffled at build time, spec §10). Meaningless (always `0`) for a `"ready"` row.
+    pub spend_action_index: u32,
 }
 
 /// The denomination prep (note-split) transaction for a run.
@@ -197,6 +210,8 @@ fn map_pending_row(row: &rusqlite::Row) -> rusqlite::Result<PendingTxRow> {
         selected_note_value: row.get::<_, i64>(10)? as u64,
         status: row.get(11)?,
         metadata_json: row.get(12)?,
+        proof_status: row.get(13)?,
+        spend_action_index: row.get(14)?,
     })
 }
 
@@ -247,7 +262,9 @@ pub(crate) fn init(conn: &Connection) -> rusqlite::Result<()> {
             selected_note_output_index INTEGER NOT NULL,
             selected_note_value INTEGER NOT NULL,
             status TEXT NOT NULL,
-            metadata_json TEXT NOT NULL
+            metadata_json TEXT NOT NULL,
+            proof_status TEXT NOT NULL DEFAULT 'ready',
+            spend_action_index INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ext_ironwood_migration_pending_due
             ON ext_ironwood_migration_pending_txs(run_id, status, next_executable_after_height);
@@ -389,8 +406,9 @@ pub(crate) fn insert_pending_txs(
             "INSERT OR REPLACE INTO ext_ironwood_migration_pending_txs
                 (run_id, txid_hex, raw_pczt, anchor_height, target_height, next_executable_after_height,
                  expiry_height, value_zatoshi, fee_zatoshi, selected_note_txid,
-                 selected_note_output_index, selected_note_value, status, metadata_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 selected_note_output_index, selected_note_value, status, metadata_json,
+                 proof_status, spend_action_index)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 run_id,
                 t.txid_hex,
@@ -406,10 +424,49 @@ pub(crate) fn insert_pending_txs(
                 t.selected_note_value as i64,
                 t.status,
                 t.metadata_json,
+                t.proof_status,
+                t.spend_action_index,
             ],
         )?;
     }
     Ok(())
+}
+
+/// Rows of `run_id` still awaiting a proof (design spec §4.1's `SignedAwaitingProof` sub-state):
+/// scheduled and signed, but built against a placeholder witness/synthetic anchor. Backs
+/// `MigrationContext::finalize_ready_transfers` (§4.3).
+pub(crate) fn awaiting_proof_pending_txs(
+    conn: &Connection,
+    run_id: &str,
+) -> rusqlite::Result<Vec<PendingTxRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {PENDING_COLUMNS} FROM ext_ironwood_migration_pending_txs
+         WHERE run_id = ?1 AND status = 'scheduled' AND proof_status = 'awaiting_proof'
+         ORDER BY txid_hex ASC"
+    ))?;
+    let rows = stmt.query_map(params![run_id], map_pending_row)?;
+    rows.collect()
+}
+
+/// Complete a `SignedAwaitingProof` row (§4.3): replace its placeholder key and unproven PCZT with
+/// the real, finalized txid and proven PCZT bytes, and flip `proof_status` to `"ready"` — making it
+/// eligible for `next_due_transfer`/`has_due_transfer`. `old_txid_hex` is the placeholder key
+/// [`crate::backend::self_funding_awaiting_proof_row`] persisted it under (the schedule transfer's
+/// own `TransferId`, not a real transaction id). Returns the number of rows updated (`0` if
+/// `old_txid_hex` no longer names an awaiting-proof row — e.g. a concurrent finalize already
+/// completed it).
+pub(crate) fn finalize_pending_tx(
+    conn: &Connection,
+    old_txid_hex: &str,
+    new_txid_hex: &str,
+    raw_pczt: &[u8],
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE ext_ironwood_migration_pending_txs
+         SET txid_hex = ?2, raw_pczt = ?3, proof_status = 'ready'
+         WHERE txid_hex = ?1 AND proof_status = 'awaiting_proof'",
+        params![old_txid_hex, new_txid_hex, raw_pczt],
+    )
 }
 
 pub(crate) fn next_due_transfer(
@@ -420,7 +477,8 @@ pub(crate) fn next_due_transfer(
     conn.query_row(
         &format!(
             "SELECT {PENDING_COLUMNS} FROM ext_ironwood_migration_pending_txs
-             WHERE run_id = ?1 AND status = 'scheduled' AND next_executable_after_height <= ?2
+             WHERE run_id = ?1 AND status = 'scheduled' AND proof_status = 'ready'
+               AND next_executable_after_height <= ?2
              ORDER BY next_executable_after_height ASC, txid_hex ASC LIMIT 1"
         ),
         params![run_id, tip_height],
@@ -609,7 +667,8 @@ pub(crate) fn has_due_transfer(
 ) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM ext_ironwood_migration_pending_txs
-             WHERE run_id = ?1 AND status = 'scheduled' AND next_executable_after_height <= ?2)",
+             WHERE run_id = ?1 AND status = 'scheduled' AND proof_status = 'ready'
+               AND next_executable_after_height <= ?2)",
         params![run_id, tip_height],
         |row| row.get::<_, bool>(0),
     )
@@ -683,6 +742,8 @@ mod tests {
             selected_note_value: 110,
             status: status.to_string(),
             metadata_json: "{}".to_string(),
+            proof_status: "ready".to_string(),
+            spend_action_index: 0,
         }
     }
 
@@ -1083,6 +1144,66 @@ mod tests {
         insert_pending_txs(&conn, "r1", &[pending("t1", 100, "scheduled")]).unwrap();
         assert!(!has_due_transfer(&conn, "r1", 99).unwrap());
         assert!(has_due_transfer(&conn, "r1", 100).unwrap());
+    }
+
+    /// An `awaiting_proof` row (design spec §4.1) has passed its send height, but must not read as
+    /// due or overdue via either `next_due_transfer` or `has_due_transfer` — signing does not make
+    /// it broadcastable, only `finalize_ready_transfers` (via `finalize_pending_tx`) does.
+    #[test]
+    fn next_due_and_has_due_exclude_awaiting_proof_rows() {
+        let (_dir, conn) = test_conn();
+        sample_run(&conn, "r1", Phase::BroadcastScheduled);
+        let mut awaiting = pending("run-1:0", 100, "scheduled");
+        awaiting.proof_status = "awaiting_proof".to_string();
+        insert_pending_txs(&conn, "r1", &[awaiting]).unwrap();
+        assert!(next_due_transfer(&conn, "r1", 9999).unwrap().is_none());
+        assert!(!has_due_transfer(&conn, "r1", 9999).unwrap());
+
+        assert_eq!(
+            finalize_pending_tx(&conn, "run-1:0", "t1", &[9, 9, 9]).unwrap(),
+            1,
+            "finalizing an awaiting-proof row succeeds"
+        );
+        let due = next_due_transfer(&conn, "r1", 9999).unwrap().unwrap();
+        assert_eq!(due.txid_hex, "t1");
+        assert_eq!(due.proof_status, "ready");
+        assert_eq!(due.raw_pczt, vec![9, 9, 9]);
+        assert!(has_due_transfer(&conn, "r1", 9999).unwrap());
+    }
+
+    #[test]
+    fn finalize_pending_tx_is_a_no_op_for_an_already_ready_or_unknown_row() {
+        let (_dir, conn) = test_conn();
+        sample_run(&conn, "r1", Phase::BroadcastScheduled);
+        insert_pending_txs(&conn, "r1", &[pending("t1", 100, "scheduled")]).unwrap();
+        // Already "ready" (the default `pending()` fixture): finalizing a second time is a no-op.
+        assert_eq!(
+            finalize_pending_tx(&conn, "t1", "t1-new", &[1]).unwrap(),
+            0
+        );
+        assert_eq!(next_due_transfer(&conn, "r1", 9999).unwrap().unwrap().txid_hex, "t1");
+        // An unknown placeholder key is also a no-op, not an error.
+        assert_eq!(
+            finalize_pending_tx(&conn, "no-such-key", "t2", &[1]).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn awaiting_proof_pending_txs_returns_only_awaiting_rows_of_the_run() {
+        let (_dir, conn) = test_conn();
+        sample_run(&conn, "r1", Phase::BroadcastScheduled);
+        let mut awaiting = pending("run-1:0", 100, "scheduled");
+        awaiting.proof_status = "awaiting_proof".to_string();
+        insert_pending_txs(
+            &conn,
+            "r1",
+            &[awaiting, pending("t-ready", 200, "scheduled")],
+        )
+        .unwrap();
+        let rows = awaiting_proof_pending_txs(&conn, "r1").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].txid_hex, "run-1:0");
     }
 
     #[test]

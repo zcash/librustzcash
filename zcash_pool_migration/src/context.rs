@@ -20,7 +20,6 @@ use rusqlite::Connection;
 use uuid::Uuid;
 use zcash_client_sqlite::{AccountUuid, ReceivedNoteId};
 use zcash_keys::keys::UnifiedSpendingKey;
-use zcash_protocol::TxId;
 use zcash_protocol::consensus::{BlockHeight, NetworkType, Parameters};
 use zcash_protocol::value::Zatoshis;
 
@@ -220,6 +219,11 @@ fn transfer_pending_row(
         selected_note_value: 0,
         status: "scheduled".to_string(),
         metadata_json: "{}".to_string(),
+        // The external-signer path proves eagerly (before staging, see
+        // `create_unsigned_transfer_pczts`) and is unaffected by design spec §4 — the combined
+        // PCZT handed back here already carries a real proof, so it is immediately broadcastable.
+        proof_status: "ready".to_string(),
+        spend_action_index: 0,
     }
 }
 
@@ -338,7 +342,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             if !broadcasted.is_empty() {
                 let db = self.open_wallet()?;
                 for txid_hex in broadcasted {
-                    let txid = parse_txid_hex(&txid_hex)?;
+                    let txid = backend::parse_txid_hex(&txid_hex)?;
                     if backend::is_tx_mined(&db, txid)? {
                         store::mark_pending_status(&conn, &txid_hex, "confirmed")?;
                     }
@@ -364,7 +368,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         ) {
             if let Some(prep) = store::prep_tx(&conn, &run.run_id)? {
                 let db = self.open_wallet()?;
-                let txid = parse_txid_hex(&prep.txid_hex)?;
+                let txid = backend::parse_txid_hex(&prep.txid_hex)?;
                 // Mined alone is not enough: the split's change notes must also be SPENDABLE
                 // (enough confirmations for the balance policy). Advancing on mined-only let the
                 // subsequent propose run against a still-zero balance and produce an empty
@@ -1140,6 +1144,65 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         Ok(())
     }
 
+    /// Complete every `SignedAwaitingProof` transfer of the active run whose funding note is now
+    /// witnessed (design spec §4.3): attach its real witness and anchor, prove it, and transition
+    /// it to `ReadyToBroadcast` (eligible for [`Self::next_due_transfer`] from then on). Intended
+    /// to be called by the platform's reconciliation hub whenever it observes new sync progress —
+    /// e.g. alongside [`Self::migration_state`] — though calling it redundantly is always safe.
+    ///
+    /// Idempotent and a no-op — returning `Ok(0)`, **not** an error — when there is no active run,
+    /// nothing is awaiting a proof yet, or every awaiting transfer's funding note is still not
+    /// witnessed: per spec §6, "not witnessed yet" is the ordinary, expected steady state while a
+    /// note-preparation output is still mining, not a failure.
+    ///
+    /// Anchor reuse (spec §5): every transfer finalized within a single call shares one anchor —
+    /// the wallet's current natural anchor, fetched once at the start of the call — rather than
+    /// drawing a fresh one per transfer. No new sync can happen between two transfers processed
+    /// within the same synchronous call, so nothing about the wallet's observation state changes
+    /// between them; reusing the anchor is exactly the "no new sync since the last draw" rule §5
+    /// describes, applied at the narrowest scope this crate can support without the boundary/cohort
+    /// bookkeeping ZIP 318's Phase 2 background scheduling would add (explicitly out of scope
+    /// here). A later call (e.g. after the next sync tick) fetches a fresh anchor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError::Db`] on an engine-table access error, and
+    /// [`MigrationError::Backend`]/[`MigrationError::Pipeline`] if a transfer whose note IS
+    /// witnessed fails to update, prove, or persist (a not-yet-witnessed note is never an error —
+    /// see above).
+    pub fn finalize_ready_transfers(&self) -> Result<u32, MigrationError> {
+        let conn = self.store_conn()?;
+        let Some(run) = self.active_run(&conn)? else {
+            return Ok(0);
+        };
+        let awaiting = store::awaiting_proof_pending_txs(&conn, &run.run_id)?;
+        if awaiting.is_empty() {
+            return Ok(0);
+        }
+        let mut db = self.open_wallet()?;
+        let (target, anchor_height) = backend::native_target_and_anchor(&db)?;
+        let Some(anchor) = backend::orchard_anchor_at(&mut db, anchor_height)? else {
+            // Not synced far enough yet to have a checkpoint at the natural anchor height — every
+            // awaiting transfer is transiently not-ready; nothing to finalize this call.
+            return Ok(0);
+        };
+        let mut finalized_count = 0u32;
+        for row in &awaiting {
+            let outcome =
+                backend::finalize_self_funding_transfer(&mut db, row, target, anchor_height, anchor)?;
+            if let Some(signed) = outcome {
+                let updated = store::finalize_pending_tx(
+                    &conn,
+                    &row.txid_hex,
+                    &signed.txid.to_string(),
+                    &signed.pczt_bytes,
+                )?;
+                finalized_count += updated as u32;
+            }
+        }
+        Ok(finalized_count)
+    }
+
     // ----- background execution -----
 
     /// Whether a sync is required before the next transfer (change returned to Orchard). With the
@@ -1170,7 +1233,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         // The note-split (prep) transaction must broadcast and confirm before any transfer.
         if let Some(prep) = store::prep_tx(&conn, &run.run_id)? {
             if prep.status == "pending" {
-                let txid = parse_txid_hex(&prep.txid_hex)?;
+                let txid = backend::parse_txid_hex(&prep.txid_hex)?;
                 return Ok(Some(PreparedTransfer::from_parts(
                     TransferId::for_prep(&run.run_id),
                     txid,
@@ -1183,7 +1246,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let Some(tx) = store::next_due_transfer(&conn, &run.run_id, target)? else {
             return Ok(None);
         };
-        let txid = parse_txid_hex(&tx.txid_hex)?;
+        let txid = backend::parse_txid_hex(&tx.txid_hex)?;
         Ok(Some(PreparedTransfer::from_parts(
             TransferId::from_raw(tx.txid_hex),
             txid,
@@ -1483,31 +1546,11 @@ fn attention_from_error(message: &str) -> AttentionReason {
     }
 }
 
-/// Parses the 64-character byte-reversed hex string produced by `TxId`'s `Display` impl — and
-/// stored verbatim as `txid_hex` by [`store`] — back into a [`TxId`]. `zcash_protocol::TxId` has
-/// no public hex parser of its own (only `Display`/`from_bytes`/`read`/`write`), and adding
-/// `zcash_encoding::ReverseHex` as a new direct dependency for this one decode is not worth it
-/// (this crate takes on no new dependencies), so this hand-rolls the inverse of `TxId`'s `Display`
-/// (reversing the byte order, matching the Bitcoin/Zcash block-explorer txid convention).
-fn parse_txid_hex(hex_str: &str) -> Result<TxId, MigrationError> {
-    if hex_str.len() != 64 || !hex_str.is_ascii() {
-        return Err(MigrationError::Pipeline(format!(
-            "invalid txid hex: {hex_str:?}"
-        )));
-    }
-    let mut bytes = [0u8; 32];
-    for (i, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&hex_str[2 * i..2 * i + 2], 16)
-            .map_err(|_| MigrationError::Pipeline(format!("invalid txid hex: {hex_str:?}")))?;
-    }
-    bytes.reverse();
-    Ok(TxId::from_bytes(bytes))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
+    use zcash_protocol::TxId;
     use zcash_protocol::consensus::Network;
 
     fn ctx() -> (NamedTempFile, MigrationContext<Network>) {
@@ -1629,6 +1672,8 @@ mod tests {
             selected_note_value: 110,
             status: "scheduled".to_string(),
             metadata_json: "{}".to_string(),
+            proof_status: "ready".to_string(),
+            spend_action_index: 0,
         }
     }
 

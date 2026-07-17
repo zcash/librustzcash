@@ -23,6 +23,7 @@ use std::convert::Infallible;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use incrementalmerkletree::Hashable;
 use rand::rngs::OsRng;
 use rusqlite::Connection;
 use zcash_address::ZcashAddress;
@@ -32,11 +33,11 @@ use zcash_client_backend::data_api::wallet::input_selection::{
 use zcash_client_backend::data_api::wallet::{
     ConfirmationsPolicy, TargetHeight, create_pczt_from_proposal,
 };
-use zcash_client_backend::data_api::{Account as _, WalletCommitmentTrees, WalletRead};
+use zcash_client_backend::data_api::{Account as _, InputSource, WalletCommitmentTrees, WalletRead};
 use zcash_client_backend::fees::zip317::MultiOutputChangeStrategy;
 use zcash_client_backend::fees::{DustOutputPolicy, SplitPolicy};
 use zcash_client_backend::proposal::Proposal;
-use zcash_client_backend::wallet::OvkPolicy;
+use zcash_client_backend::wallet::{OvkPolicy, ReceivedNote};
 use zcash_client_sqlite::util::SystemClock;
 use zcash_client_sqlite::{AccountUuid, ReceivedNoteId, WalletDb};
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
@@ -227,12 +228,69 @@ pub(crate) fn self_payment_request<P: Parameters>(
 
 /// The outcome of [`build_self_funding_transfer_pczt`]: the unproven PCZT plus everything needed
 /// to persist the pending row without re-querying the wallet.
+///
+/// Since design spec §4.2 moved the software-signing path onto
+/// [`sign_self_funding_transfer_awaiting_proof`] instead, this function's only remaining caller
+/// ([`crate::context::MigrationContext::create_unsigned_transfer_pczts`], the external-signer
+/// path) only reads `pczt` and `spent_note_id` — the selected-note triple below is not currently
+/// persisted for that path (see `TransferStagingMetadata`'s own doc comment on that pre-existing
+/// gap), but is kept here (not read, hence the `allow`) since it costs nothing to carry and a
+/// future external-signer enhancement recording the same selected-note fields the software path
+/// does would want it.
+#[allow(dead_code)]
 pub(crate) struct SelfFundingTransferOutcome {
     pub(crate) pczt: pczt::Pczt,
     pub(crate) spent_note_id: ReceivedNoteId,
     pub(crate) spent_note_txid: String,
     pub(crate) spent_note_output_index: u32,
     pub(crate) spent_note_value: u64,
+}
+
+/// Find a spendable Orchard note worth exactly `crossing_value + TRANSFER_FEE_BUFFER_ZATOSHI` (the
+/// shape a note split always mints) among notes not already `reserved` by an earlier transfer in
+/// the current signing loop or migration-locked by another run, plus the account's current
+/// Orchard/Ironwood receiver to pay the crossing into.
+///
+/// Shared by both self-funding transfer builders: [`build_self_funding_transfer_pczt`] (real
+/// witness, used by the external-signer path, which proves eagerly and so needs one at build time)
+/// and [`sign_self_funding_transfer_awaiting_proof`] (placeholder witness, design spec §4.2's
+/// sign-now/prove-later path).
+///
+/// Returns `Ok(None)` when no matching note exists.
+///
+/// # Errors
+///
+/// Returns [`MigrationError::InvalidState`] if the recipient address cannot be resolved, and
+/// [`MigrationError::NotSynced`]/[`MigrationError::Backend`] on a wallet access error.
+type SelfFundingCandidate = (ReceivedNote<ReceivedNoteId, orchard::note::Note>, orchard::Address);
+
+fn find_self_funding_candidate<P: Parameters + Clone>(
+    db: &Db<P>,
+    account: AccountUuid,
+    crossing_value: u64,
+    reserved: &BTreeSet<ReceivedNoteId>,
+    locks: &BTreeSet<(String, u32)>,
+) -> Result<Option<SelfFundingCandidate>, MigrationError> {
+    let target_note_value =
+        crossing_value.saturating_add(crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI);
+    let candidates = crate::split::select_spendable_orchard_notes(db, account, reserved, locks)?;
+    let Some(received) = candidates
+        .into_iter()
+        .find(|n| n.note().value().inner() == target_note_value)
+    else {
+        return Ok(None);
+    };
+
+    let recipient = db
+        .get_last_generated_address_matching(account, UnifiedAddressRequest::AllAvailableKeys)?
+        .and_then(|ua| ua.orchard().copied())
+        .ok_or(MigrationError::InvalidState(
+            crate::error::InvalidStateError::NotApplicable(
+                "account has no current Orchard/Ironwood receiver",
+            ),
+        ))?;
+
+    Ok(Some((received, recipient)))
 }
 
 /// Attempt to build a migration-transfer PCZT directly on the transaction builder, the way the
@@ -244,6 +302,13 @@ pub(crate) struct SelfFundingTransferOutcome {
 /// if found, spends it whole into a single Ironwood output of `crossing_value` — no Orchard change
 /// output, since a self-funding note's value covers the crossing plus the transfer's own fee
 /// exactly.
+///
+/// Uses the note's REAL witness/anchor (unlike [`sign_self_funding_transfer_awaiting_proof`]):
+/// this function is now used only by the external-signer path
+/// ([`crate::context::MigrationContext::create_unsigned_transfer_pczts`]), which proves eagerly and
+/// so needs one at build time. The software-signing path
+/// ([`crate::context::MigrationContext::sign_and_store_migration_schedule`]) uses
+/// [`sign_self_funding_transfer_awaiting_proof`] instead (design spec §4.2).
 ///
 /// Returns `Ok(None)` when no such note exists — the immediate/sweep migration path has no note
 /// split and must select from whatever notes make up an arbitrary-sized balance, so it always
@@ -268,24 +333,11 @@ pub(crate) fn build_self_funding_transfer_pczt<P: Parameters + Clone>(
     target_height: u32,
     expiry_height: u32,
 ) -> Result<Option<SelfFundingTransferOutcome>, MigrationError> {
-    let target_note_value =
-        crossing_value.saturating_add(crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI);
-    let candidates = crate::split::select_spendable_orchard_notes(db, account, reserved, locks)?;
-    let Some(received) = candidates
-        .into_iter()
-        .find(|n| n.note().value().inner() == target_note_value)
+    let Some((received, recipient)) =
+        find_self_funding_candidate(db, account, crossing_value, reserved, locks)?
     else {
         return Ok(None);
     };
-
-    let recipient = db
-        .get_last_generated_address_matching(account, UnifiedAddressRequest::AllAvailableKeys)?
-        .and_then(|ua| ua.orchard().copied())
-        .ok_or(MigrationError::InvalidState(
-            crate::error::InvalidStateError::NotApplicable(
-                "account has no current Orchard/Ironwood receiver",
-            ),
-        ))?;
 
     let (_target, anchor_height) = native_target_and_anchor(db)?;
     let (anchor, merkle_path) = db.with_orchard_tree_mut::<_, _, MigrationError>(|tree| {
@@ -363,6 +415,261 @@ pub(crate) fn build_self_funding_transfer_pczt<P: Parameters + Clone>(
         spent_note_txid: received.txid().to_string(),
         spent_note_output_index: received.output_index() as u32,
         spent_note_value: received.note().value().inner(),
+    }))
+}
+
+/// The outcome of [`sign_self_funding_transfer_awaiting_proof`]: a validly SIGNED PCZT, serialized,
+/// whose Orchard anchor and spend witness have been redacted back to absent (design spec §4.1's
+/// `SignedAwaitingProof` shape) — ready to persist under the schedule transfer's own id (a real
+/// consensus txid does not exist yet — no proof means no [`pczt::roles::tx_extractor`] can run), and
+/// to be completed later by [`finalize_self_funding_transfer`] (§4.3) once the funding note is
+/// witnessed.
+pub(crate) struct SelfFundingAwaitingProofOutcome {
+    pub(crate) raw_pczt: Vec<u8>,
+    /// The real spend's action index within `raw_pczt` (not necessarily `0` — the padded bundle's
+    /// action order is shuffled at build time), so [`finalize_self_funding_transfer`] knows which
+    /// action `Updater::set_orchard_spend_witnesses` must target.
+    pub(crate) spend_action_index: u32,
+    pub(crate) spent_note_id: ReceivedNoteId,
+    pub(crate) spent_note_txid: String,
+    pub(crate) spent_note_output_index: u32,
+    pub(crate) spent_note_value: u64,
+}
+
+/// Build, sign, and redact a migration-transfer PCZT for a self-funding note — design spec §4.2's
+/// sign-now/prove-later path, used by [`sign_schedule`] (the software-signing path).
+///
+/// Unlike [`build_self_funding_transfer_pczt`] (used only by the external-signer path, which
+/// proves *eagerly* and therefore needs a real anchor/witness at build time), this never touches
+/// the wallet's commitment tree, so it works identically whether or not the funding note's split
+/// output has been mined/witnessed yet. It builds against a placeholder
+/// [`orchard::tree::MerklePath`] and a synthetic anchor self-consistent with that placeholder path's
+/// own root (verified empirically not to require a real anchor/witness at all — see
+/// `zcash_pool_migration/tests/migration_e2e.rs`'s
+/// `placeholder_witness_synthetic_anchor_then_redacted_signs_successfully`), signs every
+/// wallet-owned Orchard spend exactly as [`sign_all_orchard_spends`] always has, and then redacts
+/// the synthetic anchor and placeholder witness back to `None`/absent via the
+/// [`pczt::roles::redactor::Redactor`] role — leaving both slots empty (a hard requirement for
+/// [`finalize_self_funding_transfer`]'s later `set_orchard_anchor`/`set_orchard_spend_witnesses`
+/// calls, which are only legal `None -> Some` transitions).
+///
+/// The result is a fully, validly signed PCZT that cannot yet be proved (its anchor is `None`) —
+/// persisted in the `SignedAwaitingProof` sub-state (spec §4.1) until
+/// [`finalize_self_funding_transfer`] attaches the note's real witness/anchor and proves it.
+///
+/// Returns `Ok(None)` when no matching self-funding note exists (mirrors
+/// [`build_self_funding_transfer_pczt`]'s fallback contract, so [`sign_schedule`]'s caller-side
+/// fallback logic is unchanged).
+///
+/// # Errors
+///
+/// Returns [`MigrationError::InvalidState`]/[`MigrationError::Backend`] if the recipient address
+/// cannot be resolved, and [`MigrationError::Pipeline`] if the
+/// build/sign/redact/serialize pipeline fails.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
+    db: &Db<P>,
+    network: &P,
+    account: AccountUuid,
+    orchard_fvk: &orchard::keys::FullViewingKey,
+    usk: &UnifiedSpendingKey,
+    crossing_value: u64,
+    reserved: &BTreeSet<ReceivedNoteId>,
+    locks: &BTreeSet<(String, u32)>,
+    target_height: u32,
+    expiry_height: u32,
+) -> Result<Option<SelfFundingAwaitingProofOutcome>, MigrationError> {
+    let Some((received, recipient)) =
+        find_self_funding_candidate(db, account, crossing_value, reserved, locks)?
+    else {
+        return Ok(None);
+    };
+
+    // §4.2: a placeholder witness paired with a SYNTHETIC anchor self-consistent with it — not
+    // `Anchor::empty_tree()` and not the note's real anchor (either would fail the orchard
+    // builder's own `has_matching_anchor` consistency check; the real anchor would also require
+    // touching the commitment tree, exactly what this path exists to avoid). Any
+    // position/auth-path works; both are discarded by the redaction step below.
+    let placeholder_path = orchard::tree::MerklePath::from_parts(
+        0,
+        [orchard::tree::MerkleHashOrchard::empty_leaf(); orchard::NOTE_COMMITMENT_TREE_DEPTH],
+    );
+    let synthetic_anchor = placeholder_path.root((*received.note()).commitment().into());
+
+    let mut builder = Builder::new(
+        network.clone(),
+        BlockHeight::from_u32(target_height),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(synthetic_anchor),
+            // No Ironwood spend exists to anchor against (output-only bundle); the empty-tree
+            // placeholder is upstream's own convention here (see `build_self_funding_transfer_pczt`).
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
+            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+        },
+    )
+    .with_expiry_height(BlockHeight::from_u32(expiry_height));
+
+    builder
+        .add_orchard_spend::<std::convert::Infallible>(
+            orchard_fvk.clone(),
+            *received.note(),
+            placeholder_path,
+        )
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: add spend: {e:?}")))?;
+    let external_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    builder
+        .add_ironwood_output::<std::convert::Infallible>(
+            Some(external_ovk),
+            recipient,
+            Zatoshis::const_from_u64(crossing_value),
+            MemoBytes::empty(),
+        )
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: add ironwood output: {e:?}")))?;
+
+    let build_result = builder
+        .build_for_pczt(OsRng, &Zip317FeeRule::standard())
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: build: {e:?}")))?;
+    let spend_action_index = build_result
+        .orchard_meta
+        .spend_action_index(0)
+        .ok_or_else(|| {
+            MigrationError::Pipeline("transfer: spend action index missing after build".into())
+        })? as u32;
+
+    let created = pczt::roles::creator::Creator::build_from_parts(build_result.pczt_parts)
+        .ok_or_else(|| MigrationError::Pipeline("transfer: pczt creation failed".into()))?;
+    let finalized = pczt::roles::io_finalizer::IoFinalizer::new(created)
+        .finalize_io()
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: io finalize: {e:?}")))?;
+
+    let signed = sign_all_orchard_spends(finalized, usk)?;
+    // Redact only the REAL spend's witness (by its actual action index, not `redact_actions`'s
+    // "every action" — the padded bundle's other action is a dummy/zero-value spend whose own
+    // witness the orchard builder already constructed to be self-consistent with the synthetic
+    // anchor; clearing it too would leave the Prover with a dummy action it cannot prove
+    // (`Prover(MissingWitness)`), discovered empirically wiring this into `finalize_ready_transfers`
+    // — the design spec's spike tests never ran the Prover role, so this case wasn't covered there).
+    let redacted = pczt::roles::redactor::Redactor::new(signed)
+        .redact_orchard_with(|mut o| {
+            o.clear_anchor();
+            o.redact_action(spend_action_index as usize, |mut a| a.clear_spend_witness());
+        })
+        .finish();
+    let raw_pczt = redacted.serialize().map_err(|e| {
+        MigrationError::Pipeline(format!("transfer: serialize awaiting-proof pczt: {e:?}"))
+    })?;
+
+    Ok(Some(SelfFundingAwaitingProofOutcome {
+        raw_pczt,
+        spend_action_index,
+        spent_note_id: *received.internal_note_id(),
+        spent_note_txid: received.txid().to_string(),
+        spent_note_output_index: received.output_index() as u32,
+        spent_note_value: received.note().value().inner(),
+    }))
+}
+
+/// Root of the Orchard commitment tree at `anchor_height`, or `None` if the wallet has not
+/// checkpointed that height yet — a transient "not synced far enough yet" state (design spec §6),
+/// not an error.
+///
+/// # Errors
+///
+/// Returns [`MigrationError::Pipeline`] if the commitment-tree access itself fails.
+pub(crate) fn orchard_anchor_at<P: Parameters>(
+    db: &mut Db<P>,
+    anchor_height: BlockHeight,
+) -> Result<Option<orchard::Anchor>, MigrationError> {
+    db.with_orchard_tree_mut::<_, _, MigrationError>(|tree| {
+        Ok(tree.root_at_checkpoint_id(&anchor_height)?.map(Into::into))
+    })
+}
+
+/// Attempt to complete one `SignedAwaitingProof` pending transfer (design spec §4.3) once its
+/// funding note is witnessed: fetch the note's real [`orchard::tree::MerklePath`], attach it and
+/// `anchor` to the persisted PCZT via the [`pczt::roles::updater::Updater`] role
+/// (`set_orchard_spend_witnesses` then `set_orchard_anchor` — both legal only because
+/// [`sign_self_funding_transfer_awaiting_proof`]'s redaction step left both slots `None`), run the
+/// [`Prover`](pczt::roles::prover::Prover), finalize spends, and extract.
+///
+/// Returns `Ok(None)` — not an error — when the funding note is not yet observed in the wallet
+/// database at all (its split output hasn't mined/scanned yet), or its witness at `anchor_height` is
+/// not yet available (checkpoint not reached or pruned): both are the ordinary, expected transient
+/// state design spec §6 describes, not a failure.
+///
+/// # Errors
+///
+/// Returns [`MigrationError::Backend`] on a database access error, and [`MigrationError::Pipeline`]
+/// if the persisted PCZT cannot be parsed, updated, proven, finalized, serialized, or extracted (a
+/// genuine pipeline failure — as opposed to "not witnessed yet" above, which is not an error).
+pub(crate) fn finalize_self_funding_transfer<P: Parameters + Clone>(
+    db: &mut Db<P>,
+    row: &store::PendingTxRow,
+    target: TargetHeight,
+    anchor_height: BlockHeight,
+    anchor: orchard::Anchor,
+) -> Result<Option<SignedPcztOutcome>, MigrationError> {
+    let txid = parse_txid_hex(&row.selected_note_txid)?;
+    let Some(received) = db.get_spendable_note(
+        &txid,
+        ShieldedPool::Orchard,
+        row.selected_note_output_index,
+        target,
+    )?
+    else {
+        return Ok(None);
+    };
+    // `NotContained`/`CheckpointPruned` both mean "not witnessable at this anchor yet" — e.g. the
+    // note's own leaf postdates the historical checkpoint at `anchor_height` (mined but not yet
+    // deep enough for the wallet's natural, untrusted-confirmation-depth anchor to include it).
+    // Both are the transient, expected steady state design spec §6 describes, not an error; any
+    // other `ShardTreeError` (a genuine storage/tree-integrity fault) still propagates.
+    let witness = db.with_orchard_tree_mut::<_, _, MigrationError>(|tree| {
+        match tree.witness_at_checkpoint_id_caching(
+            received.note_commitment_tree_position(),
+            &anchor_height,
+        ) {
+            Ok(path) => Ok(path),
+            Err(shardtree::error::ShardTreeError::Query(
+                shardtree::error::QueryError::NotContained(_)
+                | shardtree::error::QueryError::CheckpointPruned,
+            )) => Ok(None),
+            Err(e) => Err(MigrationError::from(e)),
+        }
+    })?;
+    let Some(merkle_path) = witness else {
+        return Ok(None);
+    };
+    let merkle_path: orchard::tree::MerklePath = merkle_path.into();
+
+    let pczt = pczt::Pczt::parse(&row.raw_pczt)
+        .map_err(|e| MigrationError::Pipeline(format!("finalize transfer: parse pczt: {e:?}")))?;
+    let updated = pczt::roles::updater::Updater::new(pczt)
+        .set_orchard_spend_witnesses([(row.spend_action_index as usize, merkle_path)])
+        .map_err(|e| {
+            MigrationError::Pipeline(format!("finalize transfer: set spend witness: {e:?}"))
+        })?
+        .set_orchard_anchor(anchor)
+        .map_err(|e| MigrationError::Pipeline(format!("finalize transfer: set anchor: {e:?}")))?
+        .finish();
+
+    let proven = prove_pczt(updated)?;
+    let finalized = pczt::roles::spend_finalizer::SpendFinalizer::new(proven)
+        .finalize_spends()
+        .map_err(|e| {
+            MigrationError::Pipeline(format!("finalize transfer: finalize spends: {e:?}"))
+        })?;
+    let pczt_bytes = finalized.clone().serialize().map_err(|e| {
+        MigrationError::Pipeline(format!("finalize transfer: serialize pczt: {e:?}"))
+    })?;
+    let tx = pczt::roles::tx_extractor::TransactionExtractor::new(finalized)
+        .extract()
+        .map_err(|e| MigrationError::Pipeline(format!("finalize transfer: extract tx: {e:?}")))?;
+    Ok(Some(SignedPcztOutcome {
+        txid: tx.txid(),
+        pczt_bytes,
     }))
 }
 
@@ -785,29 +1092,39 @@ pub(crate) fn pending_row(
         selected_note_value,
         status: "scheduled".to_string(),
         metadata_json: "{}".to_string(),
+        // The fallback (ordinary input-selection) path is unaffected by §4.2: it still proves
+        // eagerly, so its row is immediately broadcastable.
+        proof_status: "ready".to_string(),
+        spend_action_index: 0,
     }
 }
 
-/// The [`pending_row`] counterpart for the direct-builder ([`build_self_funding_transfer_pczt`])
-/// path: the fee is derived as `spent_note_value - crossing_value` (the note-matching predicate in
-/// `build_self_funding_transfer_pczt` guarantees this always equals `TRANSFER_FEE_BUFFER_ZATOSHI`
+/// The [`pending_row`] counterpart for the direct-builder
+/// ([`sign_self_funding_transfer_awaiting_proof`]) path (design spec §4.1/§4.2): persists the
+/// signed-but-unproven PCZT under the schedule transfer's own id (`t.id()`) rather than a real
+/// txid — extraction (and therefore a real txid) is impossible before the PCZT is proved, which
+/// only happens later, in [`finalize_self_funding_transfer`] — with `proof_status =
+/// "awaiting_proof"`, so it is invisible to `next_due_transfer`/`has_due_transfer` until
+/// [`finalize_self_funding_transfer`]'s outcome is persisted via `store::finalize_pending_tx`,
+/// which replaces this placeholder key with the real one.
+///
+/// The fee is derived as `spent_note_value - crossing_value` (the note-matching predicate in
+/// [`find_self_funding_candidate`] guarantees this always equals `TRANSFER_FEE_BUFFER_ZATOSHI`
 /// exactly, but computing it from the actual spent/crossing values — rather than assuming the
-/// constant — keeps this row self-consistent even if that invariant ever changes). The
-/// selected-note triple is passed straight through rather than read from a `Proposal`'s shielded
-/// inputs (the caller takes these fields by value out of a [`SelfFundingTransferOutcome`] before
-/// consuming its `pczt`, which is not `Clone`).
+/// constant — keeps this row self-consistent even if that invariant ever changes).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn self_funding_pending_row(
+pub(crate) fn self_funding_awaiting_proof_row(
     t: &TransferProposal,
     spent_note_txid: &str,
     spent_note_output_index: u32,
     spent_note_value: u64,
-    signed: &SignedPcztOutcome,
+    raw_pczt: Vec<u8>,
+    spend_action_index: u32,
 ) -> store::PendingTxRow {
     let crossing_value = u64::from(t.amount());
     store::PendingTxRow {
-        txid_hex: signed.txid.to_string(),
-        raw_pczt: signed.pczt_bytes.clone(),
+        txid_hex: t.id().as_str().to_string(),
+        raw_pczt,
         anchor_height: u32::from(t.anchor_height()),
         target_height: u32::from(t.next_executable_after_height()),
         next_executable_after_height: u32::from(t.next_executable_after_height()),
@@ -819,6 +1136,8 @@ pub(crate) fn self_funding_pending_row(
         selected_note_value: spent_note_value,
         status: "scheduled".to_string(),
         metadata_json: "{}".to_string(),
+        proof_status: "awaiting_proof".to_string(),
+        spend_action_index,
     }
 }
 
@@ -878,38 +1197,45 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
         let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
         let orchard_fvk = orchard::keys::FullViewingKey::from(usk.orchard());
         for t in schedule.transfers() {
-            // Direct-builder path: a self-funding note pays its own fee, no wallet fee/change
-            // logic needed. Falls back to the ordinary input-selection pipeline when no such note
-            // exists (the immediate/sweep migration path).
-            if let Some(outcome) = build_self_funding_transfer_pczt(
+            // Direct-builder path (design spec §4.2): a self-funding note pays its own fee, no
+            // wallet fee/change logic needed, and — unlike the pre-§4 pipeline — no real witness
+            // is fetched here either: the PCZT is built against a placeholder witness/synthetic
+            // anchor, signed, and redacted back to anchor-less, then persisted as
+            // `SignedAwaitingProof`. `MigrationContext::finalize_ready_transfers` completes it
+            // later, once the funding note is actually witnessed. Falls back to the ordinary
+            // input-selection pipeline when no self-funding note exists (the immediate/sweep
+            // migration path), which is unaffected by §4 and stays eagerly proven.
+            if let Some(outcome) = sign_self_funding_transfer_awaiting_proof(
                 db,
                 network,
                 account,
                 &orchard_fvk,
+                usk,
                 u64::from(t.amount()),
                 &reserved,
                 &locks,
                 target,
                 u32::from(t.expiry_height()),
             )? {
-                let SelfFundingTransferOutcome {
-                    pczt,
+                let SelfFundingAwaitingProofOutcome {
+                    raw_pczt,
+                    spend_action_index,
                     spent_note_id,
                     spent_note_txid,
                     spent_note_output_index,
                     spent_note_value,
                 } = outcome;
                 reserved.insert(spent_note_id);
-                let signed = prove_sign_finalize(pczt, usk)?;
                 store::insert_pending_txs(
                     conn,
                     run_id,
-                    &[self_funding_pending_row(
+                    &[self_funding_awaiting_proof_row(
                         t,
                         &spent_note_txid,
                         spent_note_output_index,
                         spent_note_value,
-                        &signed,
+                        raw_pczt,
+                        spend_action_index,
                     )],
                 )?;
                 continue;
@@ -991,6 +1317,33 @@ pub(crate) fn sign_split<P: Parameters + Clone>(
         crate::split::build_split_pczt(db, network, account, &orchard_fvk, &locks, &outputs)?;
     let signed = prove_sign_finalize(pczt, usk)?;
     Ok((signed, split_outputs))
+}
+
+/// Parses the 64-character byte-reversed hex string produced by `TxId`'s `Display` impl — and
+/// stored verbatim as `txid_hex`/`selected_note_txid` by [`store`] — back into a [`TxId`].
+/// `zcash_protocol::TxId` has no public hex parser of its own (only
+/// `Display`/`from_bytes`/`read`/`write`), and adding `zcash_encoding::ReverseHex` as a new direct
+/// dependency for this one decode is not worth it (this crate takes on no new dependencies), so
+/// this hand-rolls the inverse of `TxId`'s `Display` (reversing the byte order, matching the
+/// Bitcoin/Zcash block-explorer txid convention). Shared by [`crate::context`] (broadcast/prep
+/// txids) and [`finalize_self_funding_transfer`] (a pending row's `selected_note_txid`).
+///
+/// # Errors
+///
+/// Returns [`MigrationError::Pipeline`] if `hex_str` is not exactly 64 hex characters.
+pub(crate) fn parse_txid_hex(hex_str: &str) -> Result<TxId, MigrationError> {
+    if hex_str.len() != 64 || !hex_str.is_ascii() {
+        return Err(MigrationError::Pipeline(format!(
+            "invalid txid hex: {hex_str:?}"
+        )));
+    }
+    let mut bytes = [0u8; 32];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex_str[2 * i..2 * i + 2], 16)
+            .map_err(|_| MigrationError::Pipeline(format!("invalid txid hex: {hex_str:?}")))?;
+    }
+    bytes.reverse();
+    Ok(TxId::from_bytes(bytes))
 }
 
 #[cfg(test)]
