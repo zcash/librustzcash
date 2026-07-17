@@ -63,3 +63,21 @@ and this library adheres to Rust's notion of
   output's real post-shuffle action
   index so the caller can locate the notes (and spend the feeders in a later layer). Like the other
   builders it is pure (no database or wallet-backend access) and takes the RNG as a parameter.
+- Transfer scheduling and anchor selection (the `scheduling` module): a pure planner, per ZIP 318,
+  that decides WHEN each migration transfer is broadcast, WHICH Orchard boundary anchor it proves
+  against, and WHEN it expires. It works only in block heights and part indices (no cryptography, no
+  note tree, no I/O), takes the RNG as a parameter, and is `no_std`. It implements: `shuffle_indices`
+  / `shuffle_in_place` (a uniform Fisher-Yates shuffle so the broadcast order of denominations is
+  independent of the balance); `draw_delay` (a truncated exponential inter-arrival delay, mean
+  `MEAN_DELAY` = 144 blocks, discard-and-redraw above `MAX_DELAY` = 576, sampled by inverse-CDF);
+  `schedule_broadcast_heights` / `schedule` (cumulative per-part broadcast heights from the commit
+  height, paired with the canonical expiry); `draw_anchor_boundary` (a recency-weighted
+  `Geometric(1/2)` age draw over the candidate boundaries above NU6.3 activation, at/after the funding
+  note's creation, and below the most recent boundary, so transfers share common anchors in cohorts,
+  and age 0 is never used); `draw_anchor_boundary_bounded` with `BoundaryCounts` / `group_by_boundary`
+  (the provisional `K_MAX` per-wallet multiplicity cap, a SHOULD and still an open ZIP issue); and
+  `expiry_height` (the canonical rolling window anchored to `EXPIRY_MODULUS` = 34560 blocks plus
+  `EXPIRY_WINDOW` = 69120, giving 1 to 2 months of validity as a pure function of the height). The
+  engine-enforced MUSTs (sync/broadcast decoupling, and at most one overdue transfer at wallet open)
+  are documented as out of scope for this pure module. The exponential draw's natural log uses `libm`,
+  since the crate is `no_std` and `std`'s `f64::ln` is unavailable.
