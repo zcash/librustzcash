@@ -24,6 +24,13 @@ workspace.
   names begin with the `ext_` prefix reserved for external migrations, and denies
   everything else (DDL, `PRAGMA`, `ATTACH`/`DETACH`, and transaction control).
 
+### Fixed
+- Value in immature transparent coinbase outputs is now reported as pending
+  spendability (in the `value_pending_spendability` field of the coinbase
+  bucket) in wallet-summary account balances. Previously it was incorrectly
+  counted as spendable before the coinbase output reached maturity, even
+  though it could not be selected for shielding.
+
 ## [0.22.0-rc.1] - 2026-07-12
 
 ### Added
