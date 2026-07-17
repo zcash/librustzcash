@@ -1,10 +1,11 @@
-# zcash_ironwood_migration_backend
+# zcash_pool_migration_backend
 
-A backend-agnostic engine for migrating Zcash wallet funds from the Orchard
-value pool to the Ironwood value pool. The engine plans a note split into
-self-funding denominations, builds and signs migration transactions as PCZTs,
-schedules them by block height, and persists its state through a wallet backend;
-the consuming application broadcasts the transactions and reports results back.
+A backend-agnostic engine for migrating Zcash wallet funds between value pools
+(Zcash's first use is the Orchard to Ironwood migration). The engine plans a note
+split into self-funding denominations, builds and signs migration transactions as
+PCZTs, schedules them by block height, and persists its state through a wallet
+backend; the consuming application broadcasts the transactions and reports results
+back.
 
 ## License
 

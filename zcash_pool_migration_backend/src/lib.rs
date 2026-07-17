@@ -1,5 +1,5 @@
-//! An engine for migrating Zcash wallet funds from the Orchard value pool to the Ironwood value
-//! pool.
+//! A backend-agnostic engine for migrating Zcash wallet funds between value pools. Zcash's first use
+//! is the Orchard -> Ironwood migration enabled by NU6.3.
 //!
 //! The engine plans a note split into self-funding denominations, builds and signs migration
 //! transactions as PCZTs, schedules them by block height, and persists its state through a wallet

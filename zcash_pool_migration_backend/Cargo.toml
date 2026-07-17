@@ -1,6 +1,6 @@
 [package]
-name = "zcash_ironwood_migration_backend"
-description = "Backend-agnostic Orchard to Ironwood value-pool migration engine for Zcash wallets"
+name = "zcash_pool_migration_backend"
+description = "Backend-agnostic value-pool migration engine for Zcash wallets"
 version = "0.1.0"
 authors = [
     "Danny Willems <be.danny.willems@gmail.com>",
