@@ -411,17 +411,18 @@ fn transfer_pipeline_builds_self_funding_notes_directly_with_no_change() {
 // ======================================================================================
 
 /// The denomination note-split, end to end: plan the split for a seeded multi-ZEC balance, assert
-/// the plan matches the hand-computed power-of-ten decomposition, sign it (a real Orchard proof),
-/// and assert the extracted transaction is an Orchard-only split with one action per spend and per
-/// change output, and that the run is persisted in `preparing_denominations` and advances on a
-/// recorded broadcast.
+/// the plan matches the hand-computed `{1,2,5}x10^n` decomposition, sign it (a real Orchard proof),
+/// and assert the extracted transaction is an Orchard-only split with one action per spend, per
+/// migration note, and per genuine leftover change output, and that the run is persisted in
+/// `preparing_denominations` and advances on a recorded broadcast.
 #[test]
 fn note_split_plans_and_signs_against_a_seeded_wallet() {
-    // 12.0008 ZEC decomposes into exactly [10, 1, 1] ZEC crossings (three self-funding output
-    // notes) with zero leftover, once the plan reserves the *real* split fee for 1 spend + 3
-    // change outputs (20_000 zatoshi) rather than the flat prep-fee estimate — see
-    // `note_split_leaves_a_genuine_leftover_as_plain_change` for the (much more common) case where
-    // the balance does not divide evenly.
+    // 12.0008 ZEC decomposes into exactly [10, 2] ZEC crossings (two self-funding output notes,
+    // under the `{1,2,5}x10^n` denomination set) plus a small (25_000 zatoshi) genuine leftover,
+    // once the plan reserves the *real* split fee for 1 spend + 2 change outputs (15_000 zatoshi)
+    // rather than the flat prep-fee estimate — see
+    // `note_split_leaves_a_genuine_leftover_as_plain_change` for a case where the leftover is
+    // large enough to matter on its own.
     let seed_value = 1_200_080_000u64;
     let (_dir, st, db_path, account) = seed_wallet(&[seed_value], 10);
     let usk = st.get_account().usk().clone();
@@ -441,15 +442,15 @@ fn note_split_plans_and_signs_against_a_seeded_wallet() {
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
 
     let proposal = ctx.prepare_note_split().unwrap();
-    // Expected plan: each crossing power-of-ten + the 20_000 self-funding buffer.
-    let expected: Vec<Zatoshis> = [1_000_020_000u64, 100_020_000, 100_020_000]
+    // Expected plan: each `{1,2,5}x10^n` crossing + the 20_000 self-funding buffer.
+    let expected: Vec<Zatoshis> = [1_000_020_000u64, 200_020_000]
         .into_iter()
         .map(Zatoshis::const_from_u64)
         .collect();
     assert_eq!(
         proposal.output_values(),
         &expected[..],
-        "the split plan is the hand-computed power-of-ten decomposition"
+        "the split plan is the hand-computed [1,2,5]x10^n decomposition"
     );
     let n_denoms = proposal.output_values().len();
 
@@ -465,8 +466,9 @@ fn note_split_plans_and_signs_against_a_seeded_wallet() {
     let orchard = tx.orchard_bundle().expect("orchard bundle present");
     assert_eq!(
         orchard.actions().len(),
-        1 + n_denoms,
-        "one action per spend (1) plus one per change output (denominations)"
+        1 + n_denoms + 1,
+        "one action per spend (1), one per migration note (denominations), plus one for the \
+         genuine leftover change output"
     );
     assert!(
         tx.ironwood_bundle().is_none_or(|b| b.actions().is_empty()),
@@ -501,8 +503,9 @@ fn note_split_plans_and_signs_against_a_seeded_wallet() {
 /// isolation.
 #[test]
 fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
-    // Same seed as `note_split_plans_and_signs_against_a_seeded_wallet`: divides evenly into
-    // [10, 1, 1] ZEC crossings (three self-funding notes), zero leftover.
+    // Same seed as `note_split_plans_and_signs_against_a_seeded_wallet`: decomposes into
+    // [10, 2] ZEC crossings (two self-funding notes) plus a small genuine leftover, which stays
+    // below `MIGRATION_THRESHOLD_ZATOSHI` and is never scheduled for a transfer.
     let seed_value = 1_200_080_000u64;
     let (_dir, mut st, db_path, account) = seed_wallet(&[seed_value], 10);
     let usk = st.get_account().usk().clone();
@@ -545,7 +548,7 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
     crossings.sort_unstable();
     assert_eq!(
         crossings,
-        vec![100_000_000u64, 100_000_000, 1_000_000_000],
+        vec![200_000_000u64, 1_000_000_000],
         "propose_migration_transfers reproduces exactly the split's own crossing values"
     );
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
@@ -563,7 +566,7 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(rows.len(), 3, "one persisted transfer per crossing");
+    assert_eq!(rows.len(), 2, "one persisted transfer per crossing");
 
     let mut observed_crossings: Vec<i64> = Vec::new();
     for (raw_pczt, fee_zatoshi) in rows {
@@ -584,7 +587,7 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
     observed_crossings.sort_unstable();
     assert_eq!(
         observed_crossings,
-        vec![100_000_000i64, 100_000_000, 1_000_000_000],
+        vec![200_000_000i64, 1_000_000_000],
         "the same crossing values land in Ironwood as were scheduled"
     );
 }
@@ -597,10 +600,11 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
 /// for a scheduled transfer).
 #[test]
 fn note_split_leaves_a_genuine_leftover_as_plain_change() {
-    // 12.0007 ZEC: under the *real* fee for 1 spend + 3 change outputs (20_000 zatoshi), a third
-    // 1-ZEC denomination would need 100_020_000 zatoshi but only 100_010_000 remains once two
-    // notes are set aside — so the plan settles on two notes, and the ~1.0001 ZEC left over
-    // becomes a real (unlocked) change output at signing time.
+    // 12.0007 ZEC: under the *real* fee for 1 spend + 2 change outputs (15_000 zatoshi), the plan
+    // settles on a [10, 2] ZEC pair of self-funding notes (same denominations as
+    // `note_split_plans_and_signs_against_a_seeded_wallet`'s 12.0008 ZEC seed, since both budgets
+    // land in the same {1,2,5}x10^n bracket after the split fee is reserved), and the ~0.0001 ZEC
+    // left over becomes a real (unlocked) change output at signing time.
     let seed_value = 1_200_070_000u64;
     let (_dir, st, db_path, account) = seed_wallet(&[seed_value], 10);
     let usk = st.get_account().usk().clone();
@@ -609,7 +613,7 @@ fn note_split_leaves_a_genuine_leftover_as_plain_change() {
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
 
     let proposal = ctx.prepare_note_split().unwrap();
-    let expected: Vec<Zatoshis> = [1_000_020_000u64, 100_020_000]
+    let expected: Vec<Zatoshis> = [1_000_020_000u64, 200_020_000]
         .into_iter()
         .map(Zatoshis::const_from_u64)
         .collect();
@@ -718,7 +722,10 @@ fn record_transfer_result_advances_to_complete() {
 #[test]
 fn residual_after_migration_is_opt_in() {
     const SELF_FUNDING_NOTE: u64 = 1_000_020_000; // 10 ZEC crossing + TRANSFER_FEE_BUFFER_ZATOSHI
-    const RESIDUAL_NOTE: u64 = 130_000; // above RESIDUAL_MIGRATION_MIN_ZATOSHI (100_000)
+    // Above MIGRATION_THRESHOLD_ZATOSHI (1_000_000, so it clears the dust floor and is reported),
+    // but below MIGRATION_THRESHOLD_ZATOSHI + TRANSFER_FEE_BUFFER_ZATOSHI (1_020_000, so it can't
+    // self-fund its own {1,2,5}x10^n note and instead surfaces as plain leftover change).
+    const RESIDUAL_NOTE: u64 = 1_010_000;
     let (_dir, st, db_path, account) = seed_wallet(&[SELF_FUNDING_NOTE, RESIDUAL_NOTE], 10);
     let usk = st.get_account().usk().clone();
     drop(st);
@@ -800,15 +807,18 @@ fn residual_after_migration_is_opt_in() {
 /// `store::tests`.
 #[test]
 fn next_due_transfer_is_height_gated() {
-    // Two separate 1-ZEC-fundable notes so each transfer spends its own (a single large note would
-    // be reserved by the first transfer, starving the second).
-    let (_dir, mut st, db_path, account) = seed_wallet(&[100_030_000, 100_030_000], 10);
+    // Two separate self-funding notes at two *different* `{1,2,5}x10^n` denominations — 1 ZEC and
+    // 0.5 ZEC — so each transfer spends its own note directly (no wallet change/re-selection
+    // across the pair, which would otherwise let signing the first transfer starve the second).
+    // Two notes at the *same* denomination would instead collapse into a single, larger crossing
+    // under the greedy decomposition (e.g. two 1-ZEC notes summing to one 2-ZEC crossing).
+    let (_dir, mut st, db_path, account) = seed_wallet(&[100_020_000, 50_020_000], 10);
     let usk = st.get_account().usk().clone();
 
     let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
 
     let schedule = ctx.propose_migration_transfers(false).unwrap();
-    assert_eq!(schedule.transfers().len(), 2, "two 1-ZEC crossings");
+    assert_eq!(schedule.transfers().len(), 2, "two crossings: 1 ZEC and 0.5 ZEC");
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
 

@@ -33,7 +33,8 @@ use crate::state::{self, Phase};
 use crate::store;
 use crate::types::{
     AttentionReason, MigrationProgress, MigrationSchedule, MigrationState, NoteSplitProposal,
-    PreparedTransfer, SignedTransferPczt, TransferId, TransferResult, UnsignedTransferPczt,
+    PreparedTransfer, SignedTransferPczt, TransferId, TransferProposal, TransferResult,
+    UnsignedTransferPczt,
 };
 
 /// ZIP-317 single-action fee estimate (zatoshi) used by note-split / migration planning; this is
@@ -963,7 +964,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
 
     /// The leftover Orchard balance that a migration schedule would *not* cross, reported only
     /// when it is large enough to be worth offering the user a choice about (see
-    /// [`crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI`]). Values below that threshold are
+    /// [`crate::denominations::MIGRATION_THRESHOLD_ZATOSHI`]). Values below that threshold are
     /// true dust — moving them would cost more in fees than they're worth — and are never
     /// reported; the caller should just leave them in the wallet.
     ///
@@ -984,7 +985,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
         Ok(plan
             .orchard_change
-            .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+            .filter(|&v| v >= crate::denominations::MIGRATION_THRESHOLD_ZATOSHI)
             .map(Zatoshis::const_from_u64))
     }
 
@@ -1024,7 +1025,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         if include_residual {
             if let Some(residual) = plan
                 .orchard_change
-                .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+                .filter(|&v| v >= crate::denominations::MIGRATION_THRESHOLD_ZATOSHI)
             {
                 // Unlike a planned self-funding note, the residual has no fee pre-reserved by a
                 // denomination plan — net out TRANSFER_FEE_BUFFER_ZATOSHI here so the scheduled
@@ -1187,6 +1188,46 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             TransferId::from_raw(tx.txid_hex),
             txid,
             tx.raw_pczt,
+        )))
+    }
+
+    /// The next height-due scheduled transfer's full proposal (amount, anchor, timing), or `None`
+    /// if nothing is due, or the active run has no scheduled transfer yet (e.g. only the
+    /// note-split prep transaction is pending — the prep has no `TransferProposal` of its own).
+    ///
+    /// Unlike [`Self::next_due_transfer`]'s [`PreparedTransfer`] (an opaque, already-signed PCZT),
+    /// this exposes the same fields [`Self::propose_migration_transfers`] originally returned for
+    /// this transfer — e.g. so a platform can validate a proposed reschedule target against
+    /// [`TransferProposal::expiry_height`] without parsing the PCZT to recover it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError::NotSynced`]/[`MigrationError::Backend`] if the current target
+    /// height cannot be read, [`MigrationError::Db`] on an engine-table access error, and
+    /// [`MigrationError::Pipeline`] if the stored value is not a valid [`Zatoshis`] amount.
+    pub fn pending_transfer_proposal(&self) -> Result<Option<TransferProposal>, MigrationError> {
+        let conn = self.store_conn()?;
+        let Some(run) = self.active_run(&conn)? else {
+            return Ok(None);
+        };
+        if let Some(prep) = store::prep_tx(&conn, &run.run_id)? {
+            if prep.status == "pending" {
+                return Ok(None);
+            }
+        }
+        let db = self.open_wallet()?;
+        let (target, _anchor) = backend::target_and_anchor(&db)?;
+        let Some(tx) = store::next_due_transfer(&conn, &run.run_id, target)? else {
+            return Ok(None);
+        };
+        let amount = Zatoshis::from_u64(tx.value_zatoshi)
+            .map_err(|e| MigrationError::Pipeline(format!("Invalid transfer value: {e}")))?;
+        Ok(Some(TransferProposal::from_parts(
+            TransferId::from_raw(tx.txid_hex),
+            amount,
+            BlockHeight::from(tx.anchor_height),
+            BlockHeight::from(tx.next_executable_after_height),
+            BlockHeight::from(tx.expiry_height),
         )))
     }
 
