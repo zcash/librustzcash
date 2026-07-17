@@ -11,6 +11,11 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::wallet::redact_pczt_for_migration_signer`,
+  which creates a smaller signer contribution view for version 6 wallet
+  migration PCZTs when the signer derives the account viewing key and
+  reconstructs migration recipients itself, along with the
+  `MigrationSignerRedactionError` error type.
 - `zcash_client_backend::data_api::wallet::redact_pczt_for_signer`, which
   creates a compact signer view of a wallet-created PCZT while retaining the
   information a general-purpose external signer may need. This is available

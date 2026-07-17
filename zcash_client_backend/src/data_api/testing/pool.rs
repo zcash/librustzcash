@@ -81,7 +81,9 @@ use zcash_protocol::PoolType;
 
 #[cfg(feature = "pczt")]
 use {
-    crate::data_api::wallet::redact_pczt_for_signer,
+    crate::data_api::wallet::{
+        MigrationSignerRedactionError, redact_pczt_for_migration_signer, redact_pczt_for_signer,
+    },
     pczt::roles::{combiner::Combiner, prover::Prover, signer::Signer},
     rand_core::OsRng,
     transparent::builder::TransparentSigningSet,
@@ -6700,6 +6702,11 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     let original_sighash = Signer::new(pczt_proven.clone()).unwrap().shielded_sighash();
     let original_len = pczt_proven.clone().serialize().unwrap().len();
     let signer_view = redact_pczt_for_signer(&pczt_proven);
+    assert!(matches!(
+        redact_pczt_for_migration_signer(&pczt_proven, &[], &[]),
+        Err(MigrationSignerRedactionError::UnsupportedTransactionVersion(version))
+            if version == zcash_protocol::constants::V5_TX_VERSION
+    ));
     assert_eq!(
         *signer_view.global().tx_version(),
         zcash_protocol::constants::V5_TX_VERSION,
@@ -8091,31 +8098,214 @@ where
         + assert_redacted_bundle(pczt.ironwood(), signer_view.ironwood());
     assert!(memo_plaintexts > 0);
 
-    // Resolving the compact representation restores byte-identical effecting
-    // fields and therefore the same shielded signature digest.
-    let mut resolved = signer_view.clone();
-    resolved.resolve_fields().unwrap();
-    for (resolved_bundle, original_bundle) in [
-        (resolved.orchard(), pczt.orchard()),
-        (resolved.ironwood(), pczt.ironwood()),
-    ] {
-        for (resolved, original) in resolved_bundle
+    // The migration signer view has a narrower capability contract. Capture
+    // the IO-finalizer dummy actions from this controlled fixture, then verify
+    // that only those actions shed their spend randomizers.
+    let finalized_dummy_spend_action_indices = |bundle: &pczt::orchard::Bundle| {
+        bundle
             .actions()
             .iter()
-            .zip(original_bundle.actions())
-        {
-            assert_eq!(resolved.cv_net(), original.cv_net());
-            assert_eq!(resolved.output().cmx(), original.output().cmx());
-            assert_eq!(
-                resolved.output().enc_ciphertext(),
-                original.output().enc_ciphertext()
-            );
+            .enumerate()
+            .filter_map(|(index, action)| {
+                action.spend().spend_auth_sig().is_some().then_some(index)
+            })
+            .collect::<Vec<_>>()
+    };
+    let orchard_dummy_spends = finalized_dummy_spend_action_indices(pczt.orchard());
+    let ironwood_dummy_spends = finalized_dummy_spend_action_indices(pczt.ironwood());
+    assert!(!orchard_dummy_spends.is_empty() || !ironwood_dummy_spends.is_empty());
+
+    assert!(matches!(
+        redact_pczt_for_migration_signer(
+            &pczt,
+            &[pczt.orchard().actions().len()],
+            &ironwood_dummy_spends,
+        ),
+        Err(MigrationSignerRedactionError::OrchardDummySpendActionIndexOutOfRange { .. })
+    ));
+
+    let real_spend = (0..pczt.orchard().actions().len())
+        .find(|index| !orchard_dummy_spends.contains(index))
+        .expect("the migration fixture has a real Orchard spend");
+    assert!(matches!(
+        redact_pczt_for_migration_signer(&pczt, &[real_spend], &ironwood_dummy_spends),
+        Err(MigrationSignerRedactionError::OrchardDummySpendNotAuthorized(index))
+            if index == real_spend
+    ));
+
+    let migration_view =
+        redact_pczt_for_migration_signer(&pczt, &orchard_dummy_spends, &ironwood_dummy_spends)
+            .unwrap();
+    let migration_view_bytes = migration_view.clone().serialize().unwrap();
+    assert!(migration_view_bytes.len() < signer_view_bytes.len());
+    let migration_view = pczt::Pczt::parse(&migration_view_bytes).unwrap();
+
+    let clear_migration_fields =
+        |pczt: pczt::Pczt, orchard_dummy_spends: &[usize], ironwood_dummy_spends: &[usize]| {
+            let mut redactor =
+                pczt::roles::redactor::Redactor::new(pczt).redact_orchard_with(|mut redactor| {
+                    redactor.redact_actions(|mut action| {
+                        action.clear_spend_fvk();
+                        action.clear_spend_auth_sig();
+                        action.clear_output_ock();
+                        action.clear_output_zip32_derivation();
+                        action.clear_output_user_address();
+                    });
+                    for index in orchard_dummy_spends {
+                        redactor.redact_action(*index, |mut action| action.clear_spend_alpha());
+                    }
+                });
+            redactor = redactor.redact_ironwood_with(|mut redactor| {
+                redactor.redact_actions(|mut action| {
+                    action.clear_spend_fvk();
+                    action.clear_spend_auth_sig();
+                    action.clear_output_ock();
+                    action.clear_output_zip32_derivation();
+                    action.clear_output_user_address();
+                });
+                for index in ironwood_dummy_spends {
+                    redactor.redact_action(*index, |mut action| action.clear_spend_alpha());
+                }
+            });
+            redactor.finish().serialize().unwrap()
+        };
+    assert_eq!(
+        clear_migration_fields(
+            migration_view.clone(),
+            &orchard_dummy_spends,
+            &ironwood_dummy_spends,
+        ),
+        migration_view_bytes,
+    );
+    assert!(
+        migration_view
+            .orchard()
+            .actions()
+            .iter()
+            .chain(migration_view.ironwood().actions())
+            .all(|action| action.spend().spend_auth_sig().is_none()
+                && action.output().user_address().is_none())
+    );
+
+    // Re-clearing a real spend's alpha must change the migration view. The
+    // signer still needs that randomizer to create its contribution.
+    let mut signable_actions = 0;
+    for (bundle, dummy_spends, is_orchard) in [
+        (
+            migration_view.orchard(),
+            orchard_dummy_spends.as_slice(),
+            true,
+        ),
+        (
+            migration_view.ironwood(),
+            ironwood_dummy_spends.as_slice(),
+            false,
+        ),
+    ] {
+        for index in 0..bundle.actions().len() {
+            if !dummy_spends.contains(&index) {
+                signable_actions += 1;
+                let without_alpha = if is_orchard {
+                    pczt::roles::redactor::Redactor::new(migration_view.clone())
+                        .redact_orchard_with(|mut redactor| {
+                            redactor.redact_action(index, |mut action| action.clear_spend_alpha());
+                        })
+                        .finish()
+                } else {
+                    pczt::roles::redactor::Redactor::new(migration_view.clone())
+                        .redact_ironwood_with(|mut redactor| {
+                            redactor.redact_action(index, |mut action| action.clear_spend_alpha());
+                        })
+                        .finish()
+                };
+                assert_ne!(without_alpha.serialize().unwrap(), migration_view_bytes);
+            }
         }
     }
-    assert_eq!(
-        Signer::new(signer_view.clone()).unwrap().shielded_sighash(),
-        original_sighash,
+    assert!(signable_actions > 0);
+
+    // Resolving either compact representation restores byte-identical
+    // effecting fields and therefore the same shielded signature digest.
+    for compact_view in [&signer_view, &migration_view] {
+        let mut resolved = (*compact_view).clone();
+        resolved.resolve_fields().unwrap();
+        for (resolved_bundle, original_bundle) in [
+            (resolved.orchard(), pczt.orchard()),
+            (resolved.ironwood(), pczt.ironwood()),
+        ] {
+            for (resolved, original) in resolved_bundle
+                .actions()
+                .iter()
+                .zip(original_bundle.actions())
+            {
+                assert_eq!(resolved.cv_net(), original.cv_net());
+                assert_eq!(resolved.output().cmx(), original.output().cmx());
+                assert_eq!(
+                    resolved.output().enc_ciphertext(),
+                    original.output().enc_ciphertext()
+                );
+            }
+        }
+        assert_eq!(
+            Signer::new((*compact_view).clone())
+                .unwrap()
+                .shielded_sighash(),
+            original_sighash,
+        );
+    }
+
+    // The strict view can produce the real spend's signature contribution,
+    // which can be applied to the authoritative wallet PCZT.
+    let usk = st.get_account().usk().clone();
+    let ask = orchard::keys::SpendAuthorizingKey::from(OrchardPoolTester::usk_to_sk(&usk));
+    let signed_view = pczt::roles::low_level_signer::Signer::new(migration_view)
+        .sign_orchard_with::<pczt::roles::low_level_signer::OrchardParseError, _>(|_, bundle, _| {
+            bundle.actions_mut()[real_spend]
+                .sign(original_sighash, &ask, OsRng)
+                .unwrap();
+            Ok(())
+        })
+        .unwrap()
+        .finish();
+    let signatures = pczt::roles::signer::extract_orchard_spend_auth_signatures(&signed_view);
+    assert_eq!(signatures.len(), 1);
+    let mut signer = Signer::new(pczt.clone()).unwrap();
+    for signature in &signatures {
+        signer
+            .apply_orchard_spend_auth_signature(signature)
+            .unwrap();
+    }
+    let combined = signer.finish();
+    assert!(
+        combined.orchard().actions()[real_spend]
+            .spend()
+            .spend_auth_sig()
+            .is_some()
     );
+    for (combined, original) in combined
+        .orchard()
+        .actions()
+        .iter()
+        .zip(pczt.orchard().actions())
+        .chain(
+            combined
+                .ironwood()
+                .actions()
+                .iter()
+                .zip(pczt.ironwood().actions()),
+        )
+    {
+        assert_eq!(
+            combined.output().user_address(),
+            original.output().user_address()
+        );
+        assert_eq!(combined.cv_net(), original.cv_net());
+        assert_eq!(combined.output().cmx(), original.output().cmx());
+        assert_eq!(
+            combined.output().enc_ciphertext(),
+            original.output().enc_ciphertext()
+        );
+    }
 }
 
 /// The transaction version requested at proposal time is recorded on the proposal and preserved

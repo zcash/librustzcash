@@ -2392,6 +2392,8 @@ where
 ///
 /// Before sending the PCZT to an external Signer, create a signer view with
 /// [`redact_pczt_for_signer`] and retain the original for combination.
+/// Version 6 wallet migration flows whose Signer satisfies the narrower
+/// capability contract may instead use [`redact_pczt_for_migration_signer`].
 ///
 /// Once the PCZT fully authorized, call [`extract_and_store_transaction_from_pczt`] to
 /// finish transaction creation.
@@ -2875,6 +2877,170 @@ pub fn redact_pczt_for_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
             redact_orchard_bundle(redactor, redact_v6_anchors);
         })
         .finish()
+}
+
+/// Errors that can occur while creating a migration Signer view.
+#[cfg(feature = "pczt")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MigrationSignerRedactionError {
+    /// Migration Signer redaction requires a version 6 transaction.
+    UnsupportedTransactionVersion(u32),
+    /// An Orchard dummy spend action index was out of range.
+    OrchardDummySpendActionIndexOutOfRange {
+        /// The invalid action index.
+        index: usize,
+        /// The number of actions in the Orchard bundle.
+        action_count: usize,
+    },
+    /// An Ironwood dummy spend action index was out of range.
+    IronwoodDummySpendActionIndexOutOfRange {
+        /// The invalid action index.
+        index: usize,
+        /// The number of actions in the Ironwood bundle.
+        action_count: usize,
+    },
+    /// The Orchard action identified as a dummy spend was not already authorized.
+    OrchardDummySpendNotAuthorized(usize),
+    /// The Ironwood action identified as a dummy spend was not already authorized.
+    IronwoodDummySpendNotAuthorized(usize),
+}
+
+#[cfg(feature = "pczt")]
+impl core::fmt::Display for MigrationSignerRedactionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::UnsupportedTransactionVersion(version) => write!(
+                f,
+                "migration Signer redaction requires transaction version 6, found {version}"
+            ),
+            Self::OrchardDummySpendActionIndexOutOfRange {
+                index,
+                action_count,
+            } => write!(
+                f,
+                "Orchard dummy spend action index {index} is out of range for {action_count} actions"
+            ),
+            Self::IronwoodDummySpendActionIndexOutOfRange {
+                index,
+                action_count,
+            } => write!(
+                f,
+                "Ironwood dummy spend action index {index} is out of range for {action_count} actions"
+            ),
+            Self::OrchardDummySpendNotAuthorized(index) => write!(
+                f,
+                "Orchard dummy spend action {index} is not already authorized"
+            ),
+            Self::IronwoodDummySpendNotAuthorized(index) => write!(
+                f,
+                "Ironwood dummy spend action {index} is not already authorized"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "pczt")]
+impl std::error::Error for MigrationSignerRedactionError {}
+
+/// Creates a compact signer contribution view for a wallet migration PCZT.
+///
+/// This starts with [`redact_pczt_for_signer`] and additionally removes each
+/// Orchard and Ironwood spend's full viewing key and existing authorization
+/// signature, and each output's outgoing cipher key (`ock`), ZIP 32 derivation,
+/// and user-facing address. It also removes `alpha` from the
+/// constructor-created dummy spends identified by the caller.
+///
+/// This narrower view is intended for version 6 migration PCZTs encoded with
+/// the v2 PCZT format. It is only suitable for a Signer that:
+///
+/// - derives the relevant full viewing key from trusted account data and uses
+///   it to check the spend rather than trusting a wire `fvk`;
+/// - reconstructs wallet migration output recipients from the retained note
+///   fields instead of using output recovery or address metadata;
+/// - recognizes already-authorized constructor dummy spends without their
+///   randomizers and does not mistake wallet-controlled zero-valued spends for
+///   dummies;
+/// - resolves the fields compacted by [`redact_pczt_for_signer`]; and
+/// - returns only the new Orchard-protocol spend authorization signatures it
+///   contributes.
+///
+/// The dummy spend action indices must be captured from the constructor's
+/// Orchard and Ironwood PCZT bundles before
+/// [`pczt::roles::io_finalizer::IoFinalizer`] consumes their `dummy_sk` values.
+/// Wallet-controlled zero-valued spends are not dummy spends and must not be
+/// included. Every identified action must be in range and carry the
+/// authorization signature produced by the IO Finalizer.
+///
+/// The caller must retain `pczt` and combine the Signer's contribution into
+/// that authoritative copy. Do not use this view with a general-purpose Signer
+/// that relies on any of the additionally omitted fields.
+///
+/// Returns an error if the PCZT is not for a version 6 transaction, a dummy
+/// action index is out of range, or an identified dummy action is not already
+/// authorized.
+#[cfg(feature = "pczt")]
+pub fn redact_pczt_for_migration_signer(
+    pczt: &pczt::Pczt,
+    orchard_dummy_spend_action_indices: &[usize],
+    ironwood_dummy_spend_action_indices: &[usize],
+) -> Result<pczt::Pczt, MigrationSignerRedactionError> {
+    if *pczt.global().tx_version() != zcash_protocol::constants::V6_TX_VERSION {
+        return Err(
+            MigrationSignerRedactionError::UnsupportedTransactionVersion(
+                *pczt.global().tx_version(),
+            ),
+        );
+    }
+
+    for index in orchard_dummy_spend_action_indices {
+        let action = pczt.orchard().actions().get(*index).ok_or(
+            MigrationSignerRedactionError::OrchardDummySpendActionIndexOutOfRange {
+                index: *index,
+                action_count: pczt.orchard().actions().len(),
+            },
+        )?;
+        if action.spend().spend_auth_sig().is_none() {
+            return Err(MigrationSignerRedactionError::OrchardDummySpendNotAuthorized(*index));
+        }
+    }
+    for index in ironwood_dummy_spend_action_indices {
+        let action = pczt.ironwood().actions().get(*index).ok_or(
+            MigrationSignerRedactionError::IronwoodDummySpendActionIndexOutOfRange {
+                index: *index,
+                action_count: pczt.ironwood().actions().len(),
+            },
+        )?;
+        if action.spend().spend_auth_sig().is_none() {
+            return Err(MigrationSignerRedactionError::IronwoodDummySpendNotAuthorized(*index));
+        }
+    }
+
+    fn redact_orchard_bundle(
+        mut redactor: pczt::roles::redactor::orchard::OrchardRedactor<'_>,
+        dummy_spend_action_indices: &[usize],
+    ) {
+        redactor.redact_actions(|mut action| {
+            action.clear_spend_fvk();
+            action.clear_spend_auth_sig();
+            action.clear_output_ock();
+            action.clear_output_zip32_derivation();
+            action.clear_output_user_address();
+        });
+        for index in dummy_spend_action_indices {
+            redactor.redact_action(*index, |mut action| action.clear_spend_alpha());
+        }
+    }
+
+    let signer_view = redact_pczt_for_signer(pczt);
+    Ok(Redactor::new(signer_view)
+        .redact_orchard_with(|redactor| {
+            redact_orchard_bundle(redactor, orchard_dummy_spend_action_indices);
+        })
+        .redact_ironwood_with(|redactor| {
+            redact_orchard_bundle(redactor, ironwood_dummy_spend_action_indices);
+        })
+        .finish())
 }
 
 /// Finalizes the given PCZT, and persists the transaction to the wallet database.
