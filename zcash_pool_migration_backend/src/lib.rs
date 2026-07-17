@@ -22,3 +22,4 @@ extern crate std;
 #[cfg(feature = "orchard")]
 pub mod build;
 pub mod note_splitting;
+pub mod preparation;
