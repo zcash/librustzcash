@@ -1,37 +1,36 @@
 //! Note-split planning: how to break a wallet's spendable source-pool balance into the notes that
 //! will cross the turnstile into the destination pool during migration.
 //!
-//! The plan and the strategies are pool-agnostic (any source pool -> destination pool); the code
-//! names no specific pool. Zcash's first use is the Orchard -> Ironwood migration enabled by NU6.3,
-//! which the prose below uses as the running example.
+//! The plan and the strategy are pool-agnostic (any source pool -> destination pool); the code names
+//! no specific pool. Zcash's first use is the Orchard -> Ironwood migration enabled by NU6.3
+//! ([ZIP 318]), which the prose below uses as the running example.
 //!
 //! # The problem
 //!
 //! When a wallet migrates, every note it spends makes a value cross the turnstile in a transaction a
 //! chain observer can see. The rule that picks those crossing amounts is a privacy-critical choice:
 //! it decides whether an observer can recognise a specific balance, link all the crossings of one
-//! migration together, or single out large holders ("whales"). Two families of rules are in the
-//! literature, and they optimise for opposite things:
+//! migration together, or single out large holders ("whales").
 //!
-//! - *Sampling* a random decomposition per wallet, so no fixed pattern maps a sequence of amounts
-//!   back to a balance or a migration plan (privacy from unpredictability).
-//! - *Canonicalising* to a small shared set of standard amounts, so many wallets emit identical
-//!   values that collide and cannot be attributed (privacy from value collision / k-anonymity).
+//! [ZIP 318] settles this by *canonical quantization*: every crossing amount is drawn from the small,
+//! shared `{1, 2, 5} * 10^k` denomination set, so many wallets emit identical values that collide and
+//! cannot be attributed. Privacy rests on value collision (k-anonymity), explicitly not on
+//! unpredictability: a random or high-entropy amount would collide with no other wallet and become a
+//! near-unique fingerprint, which is why the ZIP rejects random or arbitrary sizing.
 //!
-//! Which family is preferable is a live design discussion. This module does not settle it: the
-//! composition rule is abstracted behind the [`DenominationStrategy`] trait, and three
-//! implementations (in [`strategies`]) are provided so the choice can be made (and reviewed) later by
-//! selecting a strategy rather than by rewriting code:
+//! The composition rule is abstracted behind the [`DenominationStrategy`] trait, with one
+//! implementation (in [`strategies`]):
 //!
-//! - [`RandomizedOneTwoFive`]: samples a random decomposition whose crossing values follow the
-//!   `{1, 2, 5} * 10^k` ZEC series (1, 2, 5, 10, 20, 50, ... ZEC).
-//! - [`CanonicalOneTwoFive`]: the deterministic, descending greedy decomposition over that same
-//!   `{1, 2, 5} * 10^k` ZEC series (e.g. 12,345 ZEC -> 10,000 + 2,000 + 200 + 100 + 20 + 20 + 5).
-//! - [`CanonicalPowerOfTen`]: the deterministic decimal-digit expansion into pure powers of ten
-//!   (`..., 100, 10, 1, 0.1, 0.01, ...` ZEC) described by the Ironwood migration ZIP draft.
+//! - [`CanonicalOneTwoFive`]: the ZIP 318 canonical quantization, a deterministic descending greedy
+//!   decomposition over the `{1, 2, 5} * 10^k` ZEC series (equivalently, decimal-digit expansion into
+//!   `{5, 2, 1}` times each place value), e.g. 12,345 ZEC -> 10,000 + 2,000 + 200 + 100 + 20 + 20 + 5.
+//!
+//! The trait is kept as the seam for a future variant, such as the ZIP's optional
+//! frequency-constrained randomized substitution (which only varies which canonical denomination is
+//! chosen, never the values themselves).
 //!
 //! The other tunables are pluggable too: the per-note fee comes from a [`FeePolicy`], and the
-//! maximum denomination, dust floor, and note cap are constructor parameters of each strategy.
+//! maximum denomination, dust floor, and note cap are constructor parameters of the strategy.
 //!
 //! # Common structure
 //!
@@ -76,10 +75,9 @@
 //!
 //! There is no cost function to minimise: any partition meeting principles 1 to 5 is admissible. The
 //! classical partition function counts the partitions of an integer; here the parts are restricted
-//! and their number bounded, and the two strategies differ only in which admissible partition they
-//! return. `CanonicalPowerOfTen` returns the single deterministic digit-expansion partition (its
-//! parts are additionally non-increasing); `RandomizedOneTwoFive` *samples* one, because for privacy
-//! the objective is a distribution over partitions, not a minimal or maximal one.
+//! (to the `{1, 2, 5} * 10^k` set) and their number bounded. [`CanonicalOneTwoFive`] returns the
+//! single deterministic, non-increasing digit-expansion partition that ZIP 318 prescribes; a future
+//! strategy could instead *sample* from a distribution over admissible partitions.
 //!
 //! The neighbouring problems below are worth knowing, both because a future strategy might implement
 //! one and because this crate is meant to be reusable. Each notes the usual solution approach and a
@@ -108,12 +106,14 @@
 //!   2004). A future strategy could sample from a principled distribution over partitions.
 //!   <https://en.wikipedia.org/wiki/Boltzmann_sampler>
 //! - Denomination design: the `{1, 2, 5} * 10^k` set is the "1-2-5" Renard preferred-number series
-//!   used for banknotes and measurement scales; the canonical strategy's powers of ten and the equal
-//!   outputs of privacy-coin mixing (CoinJoin) are related choices.
+//!   used for banknotes and measurement scales; pure powers of ten and the equal outputs of
+//!   privacy-coin mixing (CoinJoin) are related choices.
 //!   <https://en.wikipedia.org/wiki/Preferred_number>
 //!
-//! The two strategies here are a deterministic greedy expansion and a floor-biased random sampler;
-//! the list above sketches the space a reused version of this crate could grow into.
+//! The strategy here is a deterministic greedy expansion; the list above sketches the space a reused
+//! version of this crate could grow into.
+//!
+//! [ZIP 318]: https://zips.z.cash/zip-0318
 
 use rand_core::RngCore;
 
@@ -123,30 +123,26 @@ use zcash_protocol::value::COIN;
 pub mod strategies;
 mod utils;
 
-pub use strategies::{CanonicalOneTwoFive, CanonicalPowerOfTen, RandomizedOneTwoFive};
+pub use strategies::CanonicalOneTwoFive;
 
 /// The default cap on how many notes one migration run prepares. Bounding the note count keeps the
 /// decomposition a bounded problem and bounds each run's transaction and proving cost; a larger
 /// balance migrates over several runs.
 pub const MIGRATION_MAX_PREPARED_NOTES_PER_RUN: usize = 50;
 
-/// The default largest denomination (in whole ZEC) the `{1, 2, 5} * 10^k` strategies give a single
-/// note: `1 * 10^4 = 10_000` ZEC, itself a `{1, 2, 5} * 10^k` value. Capping the top denomination
-/// keeps even a whale's crossings within the shared denomination set, so no single crossing is a
-/// near-unique fingerprint. This is only a default: the actual cap is chosen per run by the caller
-/// (the wallet) and passed to the strategy constructor.
+/// The default largest denomination (in whole ZEC) the canonical `{1, 2, 5} * 10^k` strategy gives a
+/// single note: `1 * 10^4 = 10_000` ZEC, itself a `{1, 2, 5} * 10^k` value. This is ZIP 318's
+/// `DENOM_CAP`. Capping the top denomination keeps even a whale's crossings within the shared
+/// denomination set, so no single crossing is a near-unique fingerprint. This is only a default: the
+/// actual cap is chosen per run by the caller (the wallet) and passed to the strategy constructor.
 pub const MIGRATION_MAX_DENOMINATION_ZEC: u64 = 10_000;
-
-/// The maximum denomination (in whole ZEC) of the Ironwood migration ZIP draft's canonical
-/// power-of-ten scheme (`DENOM_CAP`), provisionally 100 ZEC. Default for [`CanonicalPowerOfTen`].
-pub const ZIP_DENOM_CAP_ZEC: u64 = 100;
 
 /// The sub-threshold (0.01 ZEC) below which a leftover source-pool balance is never migrated: it is
 /// left untouched in the wallet, preserving privacy. Once the main migration completes, a leftover
 /// at or above this threshold (but too small to form a whole self-funding note) is surfaced to the
 /// user as an opt-in choice: migrate the remainder too (which can compromise privacy, so it is shown
 /// with a disclaimer) or lock it to keep that privacy. Consumed by the context module in a later
-/// slice. Also the default dust floor of [`CanonicalPowerOfTen`] (the ZIP draft's `DUST_FLOOR`).
+/// slice. Also the default dust floor of [`CanonicalOneTwoFive`] (ZIP 318's `MAX_RESIDUAL_VALUE`).
 pub const RESIDUAL_MIGRATION_MIN_ZATOSHI: u64 = COIN / 100; // 0.01 ZEC
 
 /// Source-pool logical actions in a migration transfer (the spend and its change), each charged the
@@ -304,13 +300,14 @@ pub trait DenominationStrategy {
     ) -> NoteSplitPlan;
 }
 
-/// Convenience wrapper: plan with the recommended [`RandomizedOneTwoFive`] strategy.
+/// Convenience wrapper: plan with the recommended [`CanonicalOneTwoFive`] strategy (ZIP 318 canonical
+/// quantization).
 pub fn plan_note_split<R: RngCore>(
     total_input_zatoshi: u64,
     prep_fee_zatoshi: u64,
     rng: &mut R,
 ) -> NoteSplitPlan {
-    RandomizedOneTwoFive::recommended().plan(total_input_zatoshi, prep_fee_zatoshi, rng)
+    CanonicalOneTwoFive::recommended().plan(total_input_zatoshi, prep_fee_zatoshi, rng)
 }
 
 #[cfg(test)]
