@@ -23,9 +23,11 @@ use pczt::roles::{creator::Creator, io_finalizer::IoFinalizer};
 use zcash_primitives::transaction::builder::{BuildConfig, PcztParts};
 use zcash_protocol::consensus::Parameters;
 
+mod prep;
 mod sign;
 mod split;
 mod transfer;
+pub use prep::build_prep_tx;
 pub use sign::sign_pczt;
 pub use split::{SplitOutputs, build_split_pczt, build_split_pczt_for_plan};
 pub use transfer::build_transfer_pczt;
