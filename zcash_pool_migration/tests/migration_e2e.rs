@@ -371,6 +371,15 @@ fn transfer_pipeline_builds_self_funding_notes_directly_with_no_change() {
     );
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
+    // Design spec §4.2: the self-funding note is spent directly, but via the placeholder-witness
+    // path, so it is signed but not yet provable (`SignedAwaitingProof`) until
+    // `finalize_ready_transfers` attaches its (already-witnessed, since the fixture mined 10
+    // confirmations before the context ever opened the wallet) real witness/anchor and proves it.
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        1,
+        "the note is already witnessed, so finalize completes it in this same call"
+    );
 
     let due = ctx.next_due_transfer().unwrap().expect("a transfer is due");
     let raw_tx = ctx.extract_broadcast_tx(due.pczt_bytes()).unwrap();
@@ -562,6 +571,14 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
     );
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
+    // Design spec §4.2: both transfers are signed via the placeholder-witness path and start out
+    // `SignedAwaitingProof`; both funding notes are already mined/witnessed (Phase 1 above), so
+    // one `finalize_ready_transfers` call completes both, reusing the same anchor (§5).
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        2,
+        "both self-funding notes are already witnessed"
+    );
 
     // Every persisted transfer must have gone through the direct-builder path: exactly one real
     // spend plus the padded minimum, no Orchard change, and the self-funding fee — checked against
@@ -600,7 +617,6 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
         "the same crossing values land in Ironwood as were scheduled"
     );
 }
-
 /// The much more common case: the spendable balance does not divide evenly into self-funding
 /// notes plus the real split fee. The leftover must surface as its own plain, **unlocked** Orchard
 /// change output — never folded into the last migration note's value (which would leak the
@@ -683,6 +699,12 @@ fn record_transfer_result_advances_to_complete() {
     assert_eq!(schedule.transfers().len(), 1);
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
+    // Design spec §4.2: this sweep transfer's crossing happens to match a self-funding note's
+    // shape too (the whole balance minus the direct-builder's assumed fee), so it also signs via
+    // the placeholder-witness path and needs finalizing before it is due. The seeded note is
+    // already witnessed (10 confirmations mined before the context ever opened the wallet), so
+    // one call completes it.
+    assert_eq!(ctx.finalize_ready_transfers().unwrap(), 1);
 
     let due = ctx.next_due_transfer().unwrap().expect("a transfer is due");
     let raw_tx = ctx.extract_broadcast_tx(due.pczt_bytes()).unwrap();
@@ -834,6 +856,10 @@ fn next_due_transfer_is_height_gated() {
     );
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
+    // Design spec §4.2: both self-funding notes are signed via the placeholder-witness path; both
+    // are already witnessed (10 confirmations mined before the context ever opened the wallet), so
+    // finalize_ready_transfers completes both before either can be due.
+    assert_eq!(ctx.finalize_ready_transfers().unwrap(), 2);
 
     // Only the first transfer is due at the current tip.
     let first = ctx
