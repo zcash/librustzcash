@@ -115,9 +115,12 @@ pub struct MigrationTransaction {
     pub id: MigrationTxId,
     /// What it does (a preparation transaction or a transfer).
     pub kind: MigrationTxKind,
-    /// The pre-signed, unproven PCZT, serialized (`pczt::Pczt::serialize`). This is the durable
-    /// artifact: the application updates its proof against a fresh anchor and broadcasts it.
-    pub pczt: Vec<u8>,
+    /// The pre-signed, unproven PCZT, serialized (`pczt::Pczt::serialize`), or `None` until the
+    /// transaction is built and signed. A transfer is recorded as a `Planned` placeholder at commit
+    /// time and its PCZT is filled in once the preparation is mined (two-phase signing). When present
+    /// this is the durable artifact: the application updates its proof against a fresh anchor and
+    /// broadcasts it.
+    pub pczt: Option<Vec<u8>>,
     /// The transactions that must be mined before this one may be broadcast (the preparation layer
     /// dependency graph; empty for an independent transaction).
     pub depends_on: Vec<MigrationTxId>,
@@ -157,6 +160,10 @@ pub struct MigrationState {
     pub status: MigrationStatus,
     /// The note-split decomposition (the denominations and residual).
     pub note_split: NoteSplitPlan,
+    /// The reconciled self-funding note values (in zatoshi), one per crossing: a `Transfer { crossing }`
+    /// transaction spends `funding_notes[crossing]` and crosses `funding_notes[crossing]` minus the fee
+    /// buffer into the destination pool.
+    pub funding_notes: Vec<u64>,
     /// Every migration transaction, in dependency order.
     pub transactions: Vec<MigrationTransaction>,
 }
@@ -315,6 +322,17 @@ pub trait MigrationCrypto {
         anchor: orchard::Anchor,
     ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error>;
 
+    /// Resolve the self-funding notes minted by the preparation, one per requested value, each to its
+    /// note and a witness against `anchor`. Called after the preparation is mined, when these notes are
+    /// spendable: `values[crossing]` is the funding note for crossing `crossing`, and the backend
+    /// returns a DISTINCT note for each requested value (funding notes of equal value are
+    /// interchangeable).
+    fn resolve_funding_notes(
+        &self,
+        values: &[u64],
+        anchor: orchard::Anchor,
+    ) -> Result<Vec<(orchard::note::Note, orchard::tree::MerklePath)>, Self::Error>;
+
     /// Add the account's Orchard spend-authorization signatures to a finalized, unproven PCZT.
     fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
 }
@@ -332,6 +350,8 @@ pub enum CommitError<E> {
     /// commits only single-layer preparation. Full one-session pre-signing awaits a public pczt
     /// output-recovery API.
     UnsupportedMultiLayer,
+    /// No committed migration was found to build the transfers for (nothing was loaded from storage).
+    NoMigrationInProgress,
 }
 
 #[cfg(feature = "orchard")]
@@ -339,9 +359,12 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommitError::Backend(e) => write!(f, "wallet backend error: {e}"),
-            CommitError::Build(m) => write!(f, "building the preparation failed: {m}"),
+            CommitError::Build(m) => write!(f, "building the migration failed: {m}"),
             CommitError::UnsupportedMultiLayer => {
                 f.write_str("multi-layer preparation cannot yet be pre-signed (single-layer only)")
+            }
+            CommitError::NoMigrationInProgress => {
+                f.write_str("no committed migration is in progress")
             }
         }
     }
@@ -418,7 +441,7 @@ where
             transactions.push(MigrationTransaction {
                 id: MigrationTxId(next_id),
                 kind: MigrationTxKind::Preparation { layer, index },
-                pczt: bytes,
+                pczt: Some(bytes),
                 depends_on: Vec::new(),
                 scheduled_height: target_height,
                 expiry_height,
@@ -429,11 +452,120 @@ where
         }
     }
 
+    // Every transfer waits for the whole preparation to be mined, so its funding note exists on chain
+    // and can be witnessed before the transfer is built and broadcast.
+    let prep_ids: Vec<MigrationTxId> = transactions.iter().map(|tx| tx.id).collect();
+
+    // Record each transfer as a Planned placeholder carrying its schedule; its PCZT is built and
+    // signed later, once the preparation is mined (see `commit_transfers`). This persists the drawn
+    // schedule (which is not reproducible) as part of the committed migration.
+    let funding_notes = plan.funding_notes().to_vec();
+    for (crossing, schedule) in plan.schedule().iter().enumerate() {
+        transactions.push(MigrationTransaction {
+            id: MigrationTxId(next_id),
+            kind: MigrationTxKind::Transfer { crossing },
+            pczt: None,
+            depends_on: prep_ids.clone(),
+            scheduled_height: schedule.broadcast_height(),
+            expiry_height: schedule.expiry_height(),
+            anchor_boundary: None,
+            state: MigrationTxState::Planned,
+        });
+        next_id += 1;
+    }
+
     let state = MigrationState {
         status: MigrationStatus::Committed,
         note_split: plan.note_split().clone(),
+        funding_notes,
         transactions,
     };
+    backend
+        .store_migration(&state)
+        .map_err(CommitError::Backend)?;
+    Ok(state)
+}
+
+/// Commit a migration's TRANSFERS: the second phase of two-phase signing. Once the preparation has been
+/// mined and its self-funding notes are spendable, build each transfer transaction (spending one
+/// funding note and crossing its value into the destination pool), pre-sign it, and fill it into the
+/// migration's stored `Planned` transfer placeholders, persisting the result.
+///
+/// Loads the committed migration from the backend (the placeholders and their drawn schedule were
+/// stored by [`commit_preparation`]), resolves the funding notes, and builds only the transfers still
+/// `Planned`, so it is safe to call again after a partial failure. `params` is the network,
+/// `target_height` the height the transfers are built at, and `rng` a cryptographically secure RNG.
+#[cfg(feature = "orchard")]
+pub fn commit_transfers<P, B, R>(
+    params: &P,
+    target_height: u32,
+    backend: &mut B,
+    rng: &mut R,
+) -> Result<MigrationState, CommitError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+    R: RngCore + rand_core::CryptoRng,
+{
+    use crate::build::build_transfer_pczt;
+
+    let mut state = backend
+        .load_migration()
+        .map_err(CommitError::Backend)?
+        .ok_or(CommitError::NoMigrationInProgress)?;
+
+    let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
+    let anchor = backend.orchard_anchor().map_err(CommitError::Backend)?;
+    let witnesses = backend
+        .resolve_funding_notes(&state.funding_notes, anchor)
+        .map_err(CommitError::Backend)?;
+
+    // The fee buffer each self-funding note carries (its value minus the value that crosses) is constant
+    // across notes, so a funding note's crossing value is its value minus that buffer.
+    let buffer = match (
+        state.note_split.migration_outputs().first(),
+        state.note_split.crossing_values().first(),
+    ) {
+        (Some(funding), Some(crossing)) => funding.saturating_sub(*crossing),
+        _ => 0,
+    };
+
+    for tx in state.transactions.iter_mut() {
+        let crossing = match tx.kind {
+            MigrationTxKind::Transfer { crossing } => crossing,
+            MigrationTxKind::Preparation { .. } => continue,
+        };
+        if !matches!(tx.state, MigrationTxState::Planned) {
+            continue;
+        }
+
+        let (note, merkle_path) = witnesses.get(crossing).cloned().ok_or_else(|| {
+            CommitError::Build(format!("no funding note for crossing {crossing}"))
+        })?;
+        let crossing_value = state.funding_notes[crossing].saturating_sub(buffer);
+
+        let pczt = build_transfer_pczt(
+            params,
+            target_height,
+            tx.expiry_height,
+            &fvk,
+            anchor,
+            note,
+            merkle_path,
+            crossing_value,
+            &mut *rng,
+        )
+        .map_err(|e| CommitError::Build(format!("{e}")))?;
+
+        let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
+        let bytes = signed
+            .serialize()
+            .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
+
+        tx.pczt = Some(bytes);
+        tx.state = MigrationTxState::Signed;
+    }
+
     backend
         .store_migration(&state)
         .map_err(CommitError::Backend)?;
@@ -544,7 +676,7 @@ mod tests {
         let tx = MigrationTransaction {
             id: MigrationTxId(0),
             kind: MigrationTxKind::Transfer { crossing: 0 },
-            pczt: vec![1, 2, 3], // a stand-in for the serialized pre-signed PCZT
+            pczt: Some(vec![1, 2, 3]), // a stand-in for the serialized pre-signed PCZT
             depends_on: Vec::new(),
             scheduled_height: 2_000_100,
             expiry_height: 2_069_220,
@@ -554,6 +686,7 @@ mod tests {
         let state = MigrationState {
             status: MigrationStatus::Committed,
             note_split,
+            funding_notes: Vec::new(),
             transactions: vec![tx],
         };
         backend.store_migration(&state).unwrap();
@@ -591,7 +724,7 @@ mod commit_tests {
 
     use crate::build::sign_pczt;
     use crate::build::test_util::{
-        TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
+        TARGET_HEIGHT, regtest_network, shared_anchor_witnesses, single_note_witness, spending_key,
     };
     use crate::note_splitting::{FeePolicy, Zip317FeePolicy};
     use crate::preparation::PREP_TX_ACTIONS;
@@ -600,11 +733,12 @@ mod commit_tests {
         PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi()
     }
 
-    /// A wallet with a single spendable note, which resolves every preparation input to that note's
-    /// witness, signs with its own spend-authorizing key, and stores the migration in memory.
+    /// A wallet holding the account's key and a set of note witnesses against one anchor: index 0 is the
+    /// source note the preparation spends, and the rest are the funding notes the transfers spend. It
+    /// signs with its own spend-authorizing key and stores the migration in memory.
     struct CommitMock {
         notes: Vec<u64>,
-        witness: (orchard::note::Note, orchard::tree::MerklePath),
+        witnesses: Vec<(orchard::note::Note, orchard::tree::MerklePath)>,
         anchor: orchard::Anchor,
         fvk: FullViewingKey,
         ask: SpendAuthorizingKey,
@@ -653,10 +787,19 @@ mod commit_tests {
 
         fn resolve_wallet_note(
             &self,
-            _index: usize,
+            index: usize,
             _anchor: orchard::Anchor,
         ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error> {
-            Ok(self.witness.clone())
+            Ok(self.witnesses[index].clone())
+        }
+
+        fn resolve_funding_notes(
+            &self,
+            values: &[u64],
+            _anchor: orchard::Anchor,
+        ) -> Result<Vec<(orchard::note::Note, orchard::tree::MerklePath)>, Self::Error> {
+            // The funding notes are the witnesses after the source note (index 0).
+            Ok(self.witnesses[1..1 + values.len()].to_vec())
         }
 
         fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
@@ -665,45 +808,86 @@ mod commit_tests {
     }
 
     #[test]
-    fn commits_single_layer_preparation() {
+    fn commits_preparation_then_transfers() {
         let seed = 7u64;
         let sk = spending_key(seed);
         let fvk = FullViewingKey::from(&sk);
-        let ask = SpendAuthorizingKey::from(&sk);
         let balance = 78 * COIN;
-        let (note, path, anchor) = single_note_witness(&fvk, balance, seed);
+
+        // Plan the migration from the single source note.
+        let plan = {
+            let (note, path, anchor) = single_note_witness(&fvk, balance, seed);
+            let planner = CommitMock {
+                notes: vec![balance],
+                witnesses: vec![(note, path)],
+                anchor,
+                fvk: fvk.clone(),
+                ask: SpendAuthorizingKey::from(&sk),
+                stored: None,
+            };
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            plan_migration(&planner, prep_fee(), &mut rng).expect("plans a migration")
+        };
+        // A single note funding a handful of denominations needs one preparation layer.
+        assert_eq!(plan.preparation().layers().len(), 1);
+        let funding_notes = plan.funding_notes().to_vec();
+
+        // Witness the source note (index 0) and the funding notes against one shared anchor.
+        let mut values = vec![balance];
+        values.extend_from_slice(&funding_notes);
+        let (witnesses, anchor) = shared_anchor_witnesses(&fvk, &values, seed);
 
         let mut backend = CommitMock {
             notes: vec![balance],
-            witness: (note, path),
+            witnesses,
             anchor,
             fvk: fvk.clone(),
-            ask,
+            ask: SpendAuthorizingKey::from(&sk),
             stored: None,
         };
-
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let plan = plan_migration(&backend, prep_fee(), &mut rng).expect("plans a migration");
-        // A single note funding a handful of denominations needs one preparation layer.
-        assert_eq!(plan.preparation().layers().len(), 1);
-
         let params = regtest_network(true);
-        let mut build_rng = ChaCha8Rng::seed_from_u64(seed + 1);
-        let state = commit_preparation(&params, TARGET_HEIGHT, &mut backend, &plan, &mut build_rng)
-            .expect("commits the preparation");
-
-        // Every preparation transaction is built, pre-signed, and persisted as its PCZT bytes.
-        assert_eq!(state.status, MigrationStatus::Committed);
         let prep_count: usize = plan.preparation().layers().iter().map(|l| l.len()).sum();
-        assert_eq!(state.transactions.len(), prep_count);
+        let transfer_count = funding_notes.len();
+
+        // Phase 1: commit the preparation. It signs the preparation transactions and records the
+        // transfers as planned placeholders (no PCZT yet).
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(&params, TARGET_HEIGHT, &mut backend, &plan, &mut rng)
+            .expect("commits the preparation");
+        assert_eq!(state.status, MigrationStatus::Committed);
+        assert_eq!(state.transactions.len(), prep_count + transfer_count);
         for tx in &state.transactions {
-            assert!(matches!(tx.kind, MigrationTxKind::Preparation { .. }));
-            assert_eq!(tx.state, MigrationTxState::Signed);
-            assert!(!tx.pczt.is_empty(), "the pre-signed PCZT is stored");
+            match tx.kind {
+                MigrationTxKind::Preparation { .. } => {
+                    assert_eq!(tx.state, MigrationTxState::Signed);
+                    assert!(tx.pczt.is_some());
+                }
+                MigrationTxKind::Transfer { .. } => {
+                    assert_eq!(tx.state, MigrationTxState::Planned);
+                    assert!(tx.pczt.is_none());
+                    assert!(
+                        !tx.depends_on.is_empty(),
+                        "a transfer waits for the preparation to mine"
+                    );
+                }
+            }
         }
-        assert!(
-            backend.load_migration().unwrap().is_some(),
-            "the committed migration is persisted"
-        );
+
+        // Phase 2: once the preparation is mined, commit the transfers.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        let state = commit_transfers(&params, TARGET_HEIGHT, &mut backend, &mut rng)
+            .expect("commits the transfers");
+
+        // Every transaction is now built, pre-signed, and persisted.
+        assert_eq!(state.transactions.len(), prep_count + transfer_count);
+        for tx in &state.transactions {
+            assert_eq!(
+                tx.state,
+                MigrationTxState::Signed,
+                "every transaction is signed"
+            );
+            assert!(tx.pczt.as_ref().is_some_and(|b| !b.is_empty()));
+        }
+        assert!(backend.load_migration().unwrap().is_some());
     }
 }
