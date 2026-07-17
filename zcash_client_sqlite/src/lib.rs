@@ -126,8 +126,9 @@ use {
     zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
 };
 
-// `AddressCodec` is used only by `find_account_for_ephemeral_address`, which is
-// part of the `WalletTest` surface.
+// `AddressCodec` is used only by the `WalletTest` ephemeral-address helpers below, which are
+// themselves gated on both the test/test-dependencies surface and `transparent-inputs`; gate the
+// import to match exactly, rather than blanket-allowing it unused, so the lint stays active.
 #[cfg(all(
     any(test, feature = "test-dependencies"),
     feature = "transparent-inputs"
@@ -467,6 +468,67 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL: Clock, R: rand::RngCore> WalletD
     }
 }
 
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
+    #[allow(clippy::too_many_arguments)]
+    fn select_spendable_notes_inner(
+        &self,
+        account: AccountUuid,
+        target_value: TargetValue,
+        sources: &[ShieldedPool],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[ReceivedNoteId],
+        defer_witness: bool,
+    ) -> Result<ReceivedNotes<ReceivedNoteId>, SqliteClientError> {
+        Ok(ReceivedNotes::new(
+            if sources.contains(&ShieldedPool::Sapling) {
+                wallet::sapling::select_spendable_sapling_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    defer_witness,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Orchard) {
+                wallet::orchard::select_spendable_orchard_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    defer_witness,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::orchard::select_spendable_ironwood_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                    defer_witness,
+                )?
+            } else {
+                vec![]
+            },
+        ))
+    }
+}
+
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSource
     for WalletDb<C, P, CL, R>
 {
@@ -544,49 +606,35 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
-        Ok(ReceivedNotes::new(
-            if sources.contains(&ShieldedPool::Sapling) {
-                wallet::sapling::select_spendable_sapling_notes(
-                    self.conn.borrow(),
-                    &self.params,
-                    account,
-                    target_value,
-                    target_height,
-                    confirmations_policy,
-                    exclude,
-                )?
-            } else {
-                vec![]
-            },
-            #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedPool::Orchard) {
-                wallet::orchard::select_spendable_orchard_notes(
-                    self.conn.borrow(),
-                    &self.params,
-                    account,
-                    target_value,
-                    target_height,
-                    confirmations_policy,
-                    exclude,
-                )?
-            } else {
-                vec![]
-            },
-            #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedPool::Ironwood) {
-                wallet::orchard::select_spendable_ironwood_notes(
-                    self.conn.borrow(),
-                    &self.params,
-                    account,
-                    target_value,
-                    target_height,
-                    confirmations_policy,
-                    exclude,
-                )?
-            } else {
-                vec![]
-            },
-        ))
+        self.select_spendable_notes_inner(
+            account,
+            target_value,
+            sources,
+            target_height,
+            confirmations_policy,
+            exclude,
+            false,
+        )
+    }
+
+    fn select_spendable_notes_deferred_witness(
+        &self,
+        account: Self::AccountId,
+        target_value: TargetValue,
+        sources: &[ShieldedPool],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        self.select_spendable_notes_inner(
+            account,
+            target_value,
+            sources,
+            target_height,
+            confirmations_policy,
+            exclude,
+            true,
+        )
     }
 
     fn select_unspent_notes(

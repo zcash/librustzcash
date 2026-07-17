@@ -1630,6 +1630,40 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
+    /// Like [`Self::select_spendable_notes`], but for callers that do not need the returned notes'
+    /// witnesses to be final at selection time — only that each note is mined and confirmed to the
+    /// depth required by `confirmations_policy`.
+    ///
+    /// A note's witness can be *unstable* (its Merkle authentication path may still shift, because
+    /// the shard containing it has not finished filling or been pruning-confirmed) while still
+    /// being safely selectable by a caller that defers witness/anchor finalization to a later step
+    /// — for example, a proposal that will be re-anchored and proved just before broadcast, rather
+    /// than immediately built and submitted. [`Self::select_spendable_notes`] conservatively
+    /// excludes such notes (its witnesses must be usable immediately); this method relaxes that
+    /// requirement while preserving the same confirmation-depth and anchor checks.
+    ///
+    /// The default implementation simply delegates to [`Self::select_spendable_notes`], so any
+    /// implementor that does not override this method keeps the stricter, immediate-witness
+    /// behavior.
+    fn select_spendable_notes_deferred_witness(
+        &self,
+        account: Self::AccountId,
+        target_value: TargetValue,
+        sources: &[ShieldedPool],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        self.select_spendable_notes(
+            account,
+            target_value,
+            sources,
+            target_height,
+            confirmations_policy,
+            exclude,
+        )
+    }
+
     /// Returns the list of notes belonging to the wallet that are unspent as of the specified
     /// target height.
     fn select_unspent_notes(

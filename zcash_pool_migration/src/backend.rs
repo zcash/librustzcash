@@ -160,13 +160,25 @@ pub(crate) fn target_and_anchor<P: Parameters>(db: &Db<P>) -> Result<(u32, u32),
 /// [`target_and_anchor`] in the backend's native types, for callers that feed the proposal APIs
 /// directly.
 ///
+/// Uses the *untrusted* confirmation count (10, vs. 3 for trusted/wallet-produced outputs — see
+/// [`ConfirmationsPolicy`]) to pick the anchor, not the trusted one: the anchor this returns is
+/// later reused as a fixed, pinned height by [`propose_migration_transfer`] and
+/// [`build_self_funding_transfer_pczt`] to actually select and spend notes, via the *full*
+/// `ConfirmationsPolicy::default()` (both thresholds). An anchor picked only `trusted()` (3) blocks
+/// back is not necessarily far enough back for an untrusted-origin note (e.g. externally received
+/// funds, which need 10) to already satisfy its own confirmation requirement relative to that same
+/// anchor — even though the same note reads as spendable against the *current* tip via
+/// [`pool_balances`]/[`sweep_crossing_value`]'s own `ConfirmationsPolicy::default()` checks. Picking
+/// the anchor at the more conservative `untrusted()` depth keeps it consistent with what the
+/// spend-side selection actually requires for either kind of note.
+///
 /// # Errors
 ///
 /// Returns [`MigrationError::NotSynced`] if the wallet has no scanned block data yet.
 pub(crate) fn native_target_and_anchor<P: Parameters>(
     db: &Db<P>,
 ) -> Result<(TargetHeight, BlockHeight), MigrationError> {
-    db.get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted())?
+    db.get_target_and_anchor_heights(ConfirmationsPolicy::default().untrusted())?
         .ok_or(MigrationError::NotSynced)
 }
 

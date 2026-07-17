@@ -164,6 +164,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    defer_witness: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -175,6 +176,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Sapling,
         to_received_note,
+        defer_witness,
     )
 }
 

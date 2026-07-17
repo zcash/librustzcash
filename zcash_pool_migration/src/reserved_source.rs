@@ -95,7 +95,17 @@ impl<DbT: InputSource> InputSource for ReservedInputSource<'_, DbT> {
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
-        let selected = self.inner.select_spendable_notes(
+        // Migration transfers are proposed and signed as PCZTs whose anchor/proof are finalized
+        // later (just before broadcast, once the funding notes are mined) — see
+        // `native_target_and_anchor`/`retain_anchor`. They don't need a witness that is already
+        // final at proposal time, so this uses the deferred-witness selection: it still enforces
+        // `confirmations_policy`, but doesn't require the note's shard to be witness-stabilized or
+        // freshly re-scanned, which a still-open (not yet full) commitment tree shard can never
+        // satisfy on a live, continuously-polling wallet (see `update_chain_tip`, which re-marks
+        // the open shard's scanned range as `ScanPriority::ChainTip` on every sync tick once any
+        // earlier shard has completed — so `witness_stabilized`-or-"freshly scanned" is otherwise
+        // unsatisfiable for any note in the wallet's currently open shard).
+        let selected = self.inner.select_spendable_notes_deferred_witness(
             account,
             target_value,
             sources,

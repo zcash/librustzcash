@@ -329,6 +329,7 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     exclude: &[ReceivedNoteId],
     protocol: ShieldedPool,
     to_spendable_note: F,
+    defer_witness: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(
@@ -358,6 +359,7 @@ where
         TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
             conn,
             params,
+            defer_witness,
             account,
             zats,
             target_height,
@@ -545,6 +547,7 @@ where
 fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
+    defer_witness: bool,
     account: AccountUuid,
     target_value: Zatoshis,
     target_height: TargetHeight,
@@ -621,9 +624,13 @@ where
              -- frontier to witness it
              AND t.block <= :anchor_height
              -- A stabilized note's witness is durable across rewinds, so it bypasses
-             -- the scan-state gating
+             -- the scan-state gating. Callers that don't need a witness that is final as of
+             -- selection time (defer_witness — they re-anchor and prove later, e.g. a
+             -- schedule that is signed now and proved just before broadcast) skip this gate
+             -- entirely; the confirmations-policy check below still applies.
              AND (
-                 rn.witness_stabilized = 1
+                 :defer_witness = 1
+                 OR rn.witness_stabilized = 1
                  OR (
                      :tip_unscanned = 0 -- the tip shard has no unscanned ranges
                      AND scan_state.max_priority <= :scanned_priority -- the note shard is fully scanned or ignored
@@ -670,7 +677,8 @@ where
             ":exclude": &excluded_ptr,
             ":scanned_priority": priority_code(&ScanPriority::Scanned),
             ":tip_unscanned": i64::from(tip_unscanned),
-            ":min_value": u64::from(zip317::MARGINAL_FEE)
+            ":min_value": u64::from(zip317::MARGINAL_FEE),
+            ":defer_witness": i64::from(defer_witness)
         ],
         |row| {
             let tx_trust_status = row.get::<_, bool>("trust_status")?;

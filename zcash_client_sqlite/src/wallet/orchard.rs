@@ -193,6 +193,7 @@ pub(crate) fn select_spendable_ironwood_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    defer_witness: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -204,6 +205,7 @@ pub(crate) fn select_spendable_ironwood_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Ironwood,
         to_received_note,
+        defer_witness,
     )
 }
 
@@ -215,6 +217,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    defer_witness: bool,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -226,6 +229,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Orchard,
         to_received_note,
+        defer_witness,
     )
 }
 
@@ -1869,6 +1873,7 @@ pub(crate) mod tests {
                 target_height,
                 ConfirmationsPolicy::MIN,
                 &[],
+                false,
             )
             .unwrap();
             assert_eq!(notes.len(), 2, "both Ironwood notes are spendable");
@@ -1892,6 +1897,7 @@ pub(crate) mod tests {
                 target_height,
                 ConfirmationsPolicy::MIN,
                 &[excluded],
+                false,
             )
             .unwrap();
             assert!(
@@ -2080,6 +2086,7 @@ pub(crate) mod tests {
                 target_height,
                 ConfirmationsPolicy::MIN,
                 &[],
+                false,
             )
             .unwrap()
             .into_iter()

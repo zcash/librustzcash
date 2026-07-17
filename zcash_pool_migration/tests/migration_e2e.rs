@@ -33,7 +33,7 @@ use zcash_client_backend::data_api::testing::{
     CacheInsertionResult, DataStoreFactory, TestBuilder, TestCache,
 };
 use zcash_client_backend::data_api::wallet::ConfirmationsPolicy;
-use zcash_client_backend::data_api::{Account as _, WalletRead as _};
+use zcash_client_backend::data_api::{Account as _, WalletRead as _, WalletWrite as _};
 use zcash_client_backend::proto::compact_formats::CompactBlock;
 use zcash_client_sqlite::error::SqliteClientError;
 use zcash_client_sqlite::util::SystemClock;
@@ -527,10 +527,13 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
 
     let (h, _) = st.generate_next_block_from_tx(0, &split_tx);
     st.scan_cached_blocks(h, 1);
-    // The split's own change outputs are "trusted" (wallet-produced), needing
-    // `ConfirmationsPolicy::default()`'s 3 confirmations before they count as spendable — the
-    // mined block is the first, so five more blocks leaves a comfortable margin.
-    st.add_empty_blocks(5);
+    // The split's own change outputs are "trusted" (wallet-produced), needing only
+    // `ConfirmationsPolicy::default()`'s 3 confirmations to be spendable — but the anchor
+    // `native_target_and_anchor` picks is pinned at the more conservative `untrusted()` depth (10),
+    // since the same anchor is reused by the fallback ordinary-input-selection path, which may
+    // spend untrusted-origin notes. Mine enough blocks to comfortably clear that 10-confirmation
+    // anchor depth too, not just the trusted one.
+    st.add_empty_blocks(10);
 
     assert_eq!(
         ctx.migration_state().unwrap(),
@@ -846,4 +849,63 @@ fn next_due_transfer_is_height_gated() {
         second.txid(),
         "the newly-due transfer is the second one"
     );
+}
+
+
+/// Regression test for the root cause behind a live-device `InsufficientFunds` failure: a live
+/// wallet's `CompactBlockProcessor` calls `update_chain_tip` on every sync tick, even when zero new
+/// blocks arrived. `update_chain_tip` unconditionally re-marks the still-open shard's
+/// already-scanned range as `ScanPriority::ChainTip` (see
+/// `zcash_client_sqlite::wallet::scanning::update_chain_tip`) *whenever an earlier shard has
+/// already completed* (`min_shard_tip.is_some()`), overwriting whatever `Scanned` marking
+/// `scan_complete` had just set. On a real device this precondition holds (its own
+/// `WalletSummary` logged `nextOrchardSubtreeIndex=2`, i.e. two prior shards were already
+/// complete), so `select_spendable_notes`'s "fully scanned" branch could never observe `Scanned`
+/// for a note in the currently-open shard, and `witness_stabilized` is *by design* never true for
+/// an open shard either — every note there was permanently unselectable.
+///
+/// This fixture is a brand-new account whose only shard (index 0) is the first one ever, so
+/// `min_shard_tip` is `None` and the `update_chain_tip` downgrade this test simulates never
+/// actually fires here — faithfully reproducing the "prior complete shard" precondition would
+/// require genuinely filling a whole shard (65536 note commitments) or hand-editing
+/// `orchard_tree_shards`/shard-tree data, both too fragile/expensive for this test. So this does
+/// not prove the *original bug* reproduces; it proves the *fix* — routing migration's fallback
+/// input selection through `select_spendable_notes_deferred_witness` (`reserved_source.rs`)
+/// instead of the strict `select_spendable_notes` — tolerates an extra steady-state
+/// `update_chain_tip` call (a second poll tick at the same height, finding no new blocks, exactly
+/// what `CompactBlockProcessor` does every ~20s per the observed device logcat cadence) without
+/// regressing. The root-cause mechanism itself is confirmed by direct source inspection of
+/// `update_chain_tip`, not by this test.
+#[test]
+fn steady_state_chain_tip_polling_does_not_block_deferred_witness_selection() {
+    const D: u64 = 100_000_000;
+    let (_dir, st, db_path, account) = seed_wallet(&[D + 100_000], 10);
+
+    let tip_height = {
+        let conn = Connection::open(&db_path).unwrap();
+        conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
+            row.get::<_, u32>(0)
+        })
+        .unwrap()
+    };
+    drop(st);
+
+    // Simulate a second live sync tick at the same chain tip (no new blocks found) — exactly what
+    // `CompactBlockProcessor` does every ~20s per the observed device logcat cadence.
+    {
+        let mut db = WalletDb::for_path(
+            &db_path,
+            ironwood_active_network(),
+            SystemClock,
+            OsRng,
+        )
+        .unwrap();
+        db.update_chain_tip(BlockHeight::from_u32(tip_height)).unwrap();
+    }
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+    let schedule = ctx
+        .propose_migration_transfers(false)
+        .expect("deferred-witness selection tolerates an extra steady-state chain-tip poll");
+    assert_eq!(schedule.transfers().len(), 1);
 }
