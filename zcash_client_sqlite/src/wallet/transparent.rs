@@ -1141,17 +1141,28 @@ fn to_unspent_transparent_output(
         )
     })?;
 
-    // If the address has a recorded redeem script, compute the known input size so that the
-    // ZIP 317 fee calculator can size P2SH inputs. The `imported_transparent_receiver_script`
-    // column must be present in the caller's query for this to take effect; callers that do not
-    // select it (an `Err` from `row.get`) or rows without a redeem script leave the size
-    // unknown, falling back to the standard P2PKH estimate. However, a recorded redeem script
-    // that cannot be parsed or sized indicates database corruption (import validation only
-    // permits standard, sizeable scripts to be stored): silently falling back would under-size
-    // the input and could produce an under-fee'd transaction, so it is an error instead.
-    if let Ok(Some(rs_bytes)) =
-        row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
-    {
+    // ZIP 317 fee computation sizes each transparent input from its script: for an output
+    // held at a P2SH address, the input size is derived from the redeem script recorded when
+    // the address was imported, and treating such an input as P2PKH-sized would understate
+    // the fee. A P2SH output whose row provides no parseable, sizeable redeem script —
+    // whether because the recorded value is `NULL`, because the script is malformed, or
+    // because the caller's query does not select the `imported_transparent_receiver_script`
+    // column — is therefore reported as corrupted data. P2PKH outputs carry no redeem script
+    // and use the standard P2PKH size estimate.
+    if matches!(
+        output.recipient_address(),
+        TransparentAddress::ScriptHash(_)
+    ) {
+        let rs_bytes: Vec<u8> = row
+            .get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
+            .ok()
+            .flatten()
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "No redeem script is recorded for the P2SH address receiving this output"
+                        .to_string(),
+                )
+            })?;
         let input_size = script::FromChain::parse(&script::Code(rs_bytes))
             .ok()
             .as_ref()
