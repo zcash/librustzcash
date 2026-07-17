@@ -617,6 +617,163 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
         "the same crossing values land in Ironwood as were scheduled"
     );
 }
+
+// ======================================================================================
+// Test 5 (design spec `2026-07-17-migration-sign-now-prove-later-design.md`, §4): the two-stage
+// `SignedAwaitingProof` -> `ReadyToBroadcast` flow. Unlike
+// `split_then_transfer_pipeline_spends_self_funding_notes_directly` above (which mines a full 10
+// confirmations for the split's own notes *before* signing the transfer schedule, so every
+// self-funding note is already witnessed at sign time), this test signs the schedule while the
+// split's own notes have only 3 confirmations — enough for `pool_balances`/`select_unspent_notes`
+// to see them (their trusted-origin threshold), but nowhere near the untrusted 10-confirmation
+// depth `native_target_and_anchor` pins the wallet's natural anchor at. This is exactly the shape
+// of the live-device root cause spec §1 diagnoses: signing must not require the note to already be
+// witnessable at the (deeper, untrusted) anchor height.
+// ======================================================================================
+
+/// Signs a migration schedule against self-funding notes that are confirmed but not yet witnessed
+/// at the wallet's natural anchor, asserts the transfers are `SignedAwaitingProof` (not due, not
+/// broadcastable), mines the split's outputs the rest of the way to being witnessed, calls
+/// `finalize_ready_transfers`, and asserts the transfers are now `ReadyToBroadcast` and extract to
+/// valid, correctly-shaped transactions.
+#[test]
+fn sign_now_prove_later_transfer_awaits_proof_until_funding_note_is_witnessed() {
+    // Same seed as the note-split tests: decomposes into [10, 2] ZEC self-funding notes plus a
+    // small genuine leftover (below `MIGRATION_THRESHOLD_ZATOSHI`, never scheduled).
+    let seed_value = 1_200_080_000u64;
+    let (_dir, mut st, db_path, account) = seed_wallet(&[seed_value], 10);
+    let usk = st.get_account().usk().clone();
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    // --- Phase 1: split, then mine it only up to 3 confirmations (trusted-origin spendable, but
+    // far short of the untrusted 10-confirmation anchor depth) ---
+    let split_proposal = ctx.prepare_note_split().unwrap();
+    let prepared_split = ctx.sign_note_split(&split_proposal, &usk).unwrap();
+    let split_raw_tx = ctx
+        .extract_broadcast_tx(prepared_split.pczt_bytes())
+        .unwrap();
+    let split_tx = Transaction::read(&split_raw_tx[..], BranchId::Nu6_3).expect("split tx parses");
+    ctx.record_transfer_result(
+        prepared_split.id(),
+        TransferResult::Success(prepared_split.txid()),
+    )
+    .unwrap();
+
+    let (h, _) = st.generate_next_block_from_tx(0, &split_tx);
+    st.scan_cached_blocks(h, 1);
+    st.add_empty_blocks(2); // 3 confirmations total: enough for trusted-origin spendable balance.
+
+    // --- Phase 2: propose + sign the schedule while the notes are confirmed but not yet
+    // witnessable at the (deeper) natural anchor ---
+    let schedule = ctx.propose_migration_transfers(false).unwrap();
+    let mut crossings: Vec<u64> = schedule
+        .transfers()
+        .iter()
+        .map(|t| u64::from(t.amount()))
+        .collect();
+    crossings.sort_unstable();
+    assert_eq!(
+        crossings,
+        vec![200_000_000u64, 1_000_000_000],
+        "the schedule reproduces the split's own crossing values even though the notes are not \
+         witnessed at the natural anchor yet"
+    );
+    ctx.sign_and_store_migration_schedule(&schedule, &usk)
+        .unwrap();
+
+    // Both transfers are signed but must not be due yet: `SignedAwaitingProof`, not
+    // `ReadyToBroadcast`.
+    assert!(
+        ctx.next_due_transfer().unwrap().is_none(),
+        "a signed-but-unproven transfer is never due"
+    );
+    let conn = Connection::open(&db_path).unwrap();
+    let awaiting: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ext_ironwood_migration_pending_txs WHERE proof_status = 'awaiting_proof'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        awaiting, 2,
+        "both self-funding transfers are persisted as SignedAwaitingProof"
+    );
+
+    // Finalizing now is a no-op: the notes are confirmed but not yet witnessable at the natural
+    // (untrusted, 10-confirmation-deep) anchor.
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        0,
+        "not witnessed yet is a transient no-op, not an error (design spec §6)"
+    );
+    assert!(ctx.next_due_transfer().unwrap().is_none());
+
+    // --- Phase 3: mine the rest of the way to a witnessable anchor, then finalize for real ---
+    st.add_empty_blocks(10);
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        2,
+        "both notes are witnessed now, and finalizing reuses one anchor for both (design spec §5)"
+    );
+
+    // Every pending row is now ready, with a real (extractable, provable) PCZT.
+    let mut stmt = conn
+        .prepare("SELECT raw_pczt, proof_status FROM ext_ironwood_migration_pending_txs")
+        .unwrap();
+    let rows: Vec<(Vec<u8>, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+
+    let mut observed_crossings: Vec<i64> = Vec::new();
+    for (raw_pczt, proof_status) in rows {
+        assert_eq!(proof_status, "ready");
+        let raw_tx = ctx.extract_broadcast_tx(&raw_pczt).unwrap();
+        let tx = Transaction::read(&raw_tx[..], BranchId::Nu6_3).expect("finalized tx parses");
+        assert!(matches!(tx.version(), TxVersion::V6));
+        let orchard = tx.orchard_bundle().expect("orchard bundle present");
+        assert_eq!(
+            orchard.actions().len(),
+            2,
+            "direct-builder transfer: one real spend plus the padded minimum, no change"
+        );
+        assert!(
+            !tx.ironwood_bundle()
+                .expect("ironwood bundle present")
+                .actions()
+                .is_empty()
+        );
+        observed_crossings.push(ironwood_value_in(&tx));
+    }
+    observed_crossings.sort_unstable();
+    assert_eq!(
+        observed_crossings,
+        vec![200_000_000i64, 1_000_000_000],
+        "the finalized transactions carry exactly the scheduled crossings"
+    );
+
+    // And now due at the current tip (both transfers' send height is at-or-before the current
+    // target — first_delay is 0, and the second transfer's independently sampled gap is bounded
+    // by `scheduling::MAX_CADENCE_BLOCKS`; mine past it to be tip-independent of the exact draw).
+    const MAX_CADENCE_BLOCKS: usize = 1152;
+    st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
+    let first = ctx
+        .next_due_transfer()
+        .unwrap()
+        .expect("first transfer due");
+    ctx.record_transfer_result(first.id(), TransferResult::Success(first.txid()))
+        .unwrap();
+    let second = ctx
+        .next_due_transfer()
+        .unwrap()
+        .expect("second transfer due");
+    assert_ne!(first.txid(), second.txid());
+}
+
 /// The much more common case: the spendable balance does not divide evenly into self-funding
 /// notes plus the real split fee. The leftover must surface as its own plain, **unlocked** Orchard
 /// change output — never folded into the last migration note's value (which would leak the
