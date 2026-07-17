@@ -1,0 +1,6 @@
+# This crate is excluded from the librustzcash workspace and has a higher MSRV than the
+# workspace (1.88): its Nym dependency tree pulls `libcrux-psq 0.0.8`, which only compiles
+# on rustc >= 1.89. This override keeps `cargo` in this directory from inheriting the
+# repo-root 1.88 pin. See README.md.
+[toolchain]
+channel = "1.89.0"

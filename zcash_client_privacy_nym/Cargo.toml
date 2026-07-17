@@ -1,0 +1,49 @@
+[package]
+name = "zcash_client_privacy_nym"
+description = "Experimental Nym mixnet-proxy network-privacy backend for Zcash lightwalletd clients"
+version = "0.0.0"
+authors = ["Kris Nuttycombe <kris@electriccoin.co>"]
+homepage = "https://github.com/zcash/librustzcash"
+repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+# Higher than the librustzcash workspace MSRV (1.88): the Nym dependency tree pulls
+# `libcrux-psq 0.0.8`, which only compiles on rustc >= 1.89. See `rust-toolchain.toml`.
+rust-version = "1.89"
+categories = ["cryptography::cryptocurrencies"]
+
+# This crate is intentionally NOT published to crates.io. It is experimental, and its
+# sibling `dvpn` backend (see `../zcash_client_privacy_nym_dvpn`) can only be built from
+# `git` dependencies. Publish once the upstream Nym crates are on crates.io and the
+# dependency conflicts documented in the sibling crate's README are resolved.
+publish = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+## The Nym mixnet-proxy backend: a Sphinx-mixnet transport that can only reach
+## pre-configured endpoints fronted by a `proxy_listener`. Provides true mixnet privacy
+## (mixing + cover traffic) at the cost of proxy infrastructure. Currently free (no
+## credentials). Experimental.
+mixnet-proxy = ["dep:nym-sdk"]
+
+[dependencies]
+zcash_client_backend = { path = "../zcash_client_backend", default-features = false, features = [
+    "lightwalletd-privacy",
+    "lightwalletd-tonic-tls-webpki-roots",
+] }
+
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "macros"] }
+tracing = "0.1"
+
+# mixnet-proxy backend (crates.io).
+nym-sdk = { version = "1.21", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3"
