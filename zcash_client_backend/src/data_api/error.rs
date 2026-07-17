@@ -104,9 +104,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
-    /// The caller requested a nonzero PCZT expiry height below the proposal's
+    /// The caller requested a nonzero target expiry height below the proposal's
     /// minimum target height. Zero remains valid because it disables expiry.
-    #[cfg(feature = "pczt")]
     ExpiryHeightBelowTargetHeight {
         expiry_height: BlockHeight,
         min_target_height: BlockHeight,
@@ -315,13 +314,12 @@ where
                     "The specified transparent address was not recognized as belonging to the wallet."
                 )
             }
-            #[cfg(feature = "pczt")]
             Error::ExpiryHeightBelowTargetHeight {
                 expiry_height,
                 min_target_height,
             } => write!(
                 f,
-                "The requested PCZT expiry height {expiry_height} is below the proposal's \
+                "The requested expiry height {expiry_height} is below the proposal's \
                  minimum target height {min_target_height}; the transaction would already be \
                  expired at the earliest height at which it could be mined."
             ),

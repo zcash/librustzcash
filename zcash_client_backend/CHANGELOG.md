@@ -19,6 +19,13 @@ workspace.
   counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
 
 ### Changed
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
+  takes an `expiry_height: Option<BlockHeight>` parameter, mirroring the
+  one already accepted by `create_pczt_from_proposal`. This lets callers
+  override the builder-derived expiry height for non-PCZT transaction
+  construction too — useful when a caller's view of the chain tip used to
+  derive `min_target_height` may lag the real tip by more than the default
+  expiry buffer covers.
 - `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
   `orchard::builder::BundleType` and `orchard::bundle::BundleVersion` that the
   transaction builder will be configured with, and returns a `Result`. It
