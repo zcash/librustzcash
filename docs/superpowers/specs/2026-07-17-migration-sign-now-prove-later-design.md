@@ -221,6 +221,20 @@ deviations from the letter of this section, both correctness-motivated, not shor
   that would make cross-call reuse meaningful is Phase 2 background-scheduling machinery, explicitly
   out of scope per §7's closing note. Revisit when that scheduling subsystem is built.
 
+**Independently reviewed 2026-07-18 (no code changes needed) — one real gap flagged, not fixed
+here:** a `SignedAwaitingProof` transfer whose funding note becomes *permanently* invalid (spent
+elsewhere; its note-split parent never confirms) is indistinguishable, in
+`finalize_self_funding_transfer`, from one that is simply *not witnessed yet* — both currently
+return `Ok(None)`/a transient no-op per §6. Because such a row never reaches `proof_status =
+'ready'`, none of the crate's existing recovery surfaces see it: `has_invalid_transfers` only
+counts `status = 'scheduled'` rows with zero pending (an awaiting-proof row still counts as
+`scheduled`, masking it), and `expiry_height` is persisted but never compared against the current
+height for awaiting-proof rows anywhere. Net effect: a permanently stuck row retries as a silent
+no-op forever, with no path to `RequiresAttention`. Whoever builds the Phase 2
+background-scheduling subsystem (§7) should treat `expiry_height` as a hard cutoff for
+awaiting-proof rows too, surfaced via a new `AttentionReason` variant — do not assume this is
+already handled.
+
 ## 5. Anchor reuse across a schedule (multiplicity / cohorts)
 
 ZIP 318's "Anchor-height bucketing and cohorts": multiple transfers from the *same* wallet MAY
