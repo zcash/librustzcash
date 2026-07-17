@@ -7438,9 +7438,9 @@ dependencies = [
 
 [[package]]
 name = "zewif"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7abbade0d83234bfef4eeff61e115c667871dc164895209f30815bf301e5389b"
+checksum = "9b300001aff0db0e844ea42359640b6abe648776b055d7861fb7075782abb715"
 dependencies = [
  "hex",
  "minicbor",
