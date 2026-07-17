@@ -25,4 +25,5 @@ and this library adheres to Rust's notion of
   source-pool change rather than folded into a fee. The fee model is pluggable via the `FeePolicy`
   trait (`Zip317FeePolicy` provided), and the maximum denomination, dust floor, and note cap are
   strategy parameters. `plan_note_split` is a convenience wrapper over the recommended
-  `CanonicalOneTwoFive`. Depends on `zcash_protocol`, `zcash_primitives`, and `rand_core`.
+  `CanonicalOneTwoFive`. The crate is `no_std` (it needs only `alloc`), depending on
+  `zcash_protocol`, `zcash_primitives`, and `rand_core`.
