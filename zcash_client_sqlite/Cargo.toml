@@ -79,7 +79,7 @@ incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
-rusqlite = { workspace = true, features = ["time", "array", "uuid"] }
+rusqlite = { workspace = true, features = ["time", "array", "uuid", "hooks"] }
 schemerz.workspace = true
 schemerz-rusqlite.workspace = true
 time.workspace = true

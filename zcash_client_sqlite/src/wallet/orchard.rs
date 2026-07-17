@@ -2,6 +2,7 @@ use std::{collections::HashSet, rc::Rc};
 
 use incrementalmerkletree::Position;
 use orchard::{
+    ValuePool,
     keys::Diversifier,
     note::{Note, NoteVersion, Nullifier, RandomSeed, Rho},
 };
@@ -258,6 +259,42 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
     account: AccountUuid,
     height: BlockHeight,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    get_unspent_orchard_shaped_notes_at_historical_height(
+        conn,
+        params,
+        ValuePool::Orchard,
+        account,
+        height,
+    )
+}
+
+pub(crate) fn get_unspent_ironwood_notes_at_historical_height<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    height: BlockHeight,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    get_unspent_orchard_shaped_notes_at_historical_height(
+        conn,
+        params,
+        ValuePool::Ironwood,
+        account,
+        height,
+    )
+}
+
+fn get_unspent_orchard_shaped_notes_at_historical_height<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    pool: ValuePool,
+    account: AccountUuid,
+    height: BlockHeight,
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    let shielded_pool = match pool {
+        ValuePool::Orchard => ShieldedPool::Orchard,
+        ValuePool::Ironwood => ShieldedPool::Ironwood,
+    };
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(shielded_pool)?;
     let external_scope = KeyScope::EXTERNAL.encode();
     let internal_scope = KeyScope::INTERNAL.encode();
 
@@ -269,7 +306,7 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
              accounts.ufvk AS ufvk, rn.recipient_key_scope,
              t.mined_height,
              NULL AS max_shielding_input_height
-         FROM orchard_received_notes rn
+         FROM {table_prefix}_received_notes rn
          INNER JOIN accounts ON accounts.id = rn.account_id
          INNER JOIN transactions t ON t.id_tx = rn.transaction_id
          WHERE accounts.uuid = :account_uuid
@@ -279,8 +316,8 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
            AND rn.recipient_key_scope IN ({external_scope}, {internal_scope})
            AND accounts.ufvk IS NOT NULL
            AND rn.id NOT IN (
-               SELECT rns.orchard_received_note_id
-               FROM orchard_received_note_spends rns
+               SELECT rns.{table_prefix}_received_note_id
+               FROM {table_prefix}_received_note_spends rns
                JOIN transactions t_spend ON t_spend.id_tx = rns.transaction_id
                WHERE t_spend.mined_height <= :height
            )
@@ -292,7 +329,7 @@ pub(crate) fn get_unspent_orchard_notes_at_historical_height<P: consensus::Param
             ":account_uuid": account.0,
             ":height": u32::from(height),
         ],
-        |row| to_received_note(params, ShieldedPool::Orchard, row),
+        |row| to_received_note(params, shielded_pool, row),
     )?;
 
     rows.filter_map(|r| r.transpose()).collect()
@@ -1528,6 +1565,105 @@ pub(crate) mod tests {
             .sum::<Option<Zatoshis>>()
             .unwrap();
         assert_eq!(total, ((value - spend_value).unwrap() + value3).unwrap());
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn get_unspent_ironwood_notes_at_historical_height_boundary_heights() {
+        use orchard::note::NoteVersion;
+        use zcash_client_backend::data_api::{
+            Account,
+            testing::{
+                AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
+                pool::ShieldedPoolTester,
+            },
+        };
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::{
+            ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+        };
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        let activation = BlockHeight::from_u32(100_000);
+        let network = LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let dfvk = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+
+        let value = Zatoshis::const_from_u64(50000);
+        let (h1, _, nf) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        assert_eq!(h1, activation);
+        st.scan_cached_blocks(h1, 1);
+
+        // Use Sapling so the only wallet-owned output is Ironwood change.
+        let not_our_key = SaplingPoolTester::sk_to_fvk(&SaplingPoolTester::sk(&[0xf5; 32]));
+        let to = SaplingPoolTester::fvk_default_address(&not_our_key);
+        let spend_value = Zatoshis::const_from_u64(20000);
+        let (h2, _) = st.generate_next_block_spending(&dfvk, (nf, value), to, spend_value);
+        st.scan_cached_blocks(h2, 1);
+
+        let value3 = Zatoshis::const_from_u64(70000);
+        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value3);
+        st.scan_cached_blocks(h3, 1);
+
+        let db = st.wallet().db();
+
+        let notes = db
+            .get_unspent_ironwood_notes_at_historical_height(account.id(), h1 - 1)
+            .unwrap();
+        assert!(notes.is_empty());
+
+        let notes = db
+            .get_unspent_ironwood_notes_at_historical_height(account.id(), h1)
+            .unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].note_value().unwrap(), value);
+        assert_eq!(notes[0].internal_note_id().0, ShieldedPool::Ironwood);
+        assert_eq!(notes[0].note().version(), NoteVersion::V3);
+
+        let notes = db
+            .get_unspent_ironwood_notes_at_historical_height(account.id(), h2)
+            .unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(
+            notes[0].note_value().unwrap(),
+            (value - spend_value).unwrap()
+        );
+
+        let notes = db
+            .get_unspent_ironwood_notes_at_historical_height(account.id(), h3)
+            .unwrap();
+        assert_eq!(notes.len(), 2);
+        let total: Zatoshis = notes
+            .iter()
+            .map(|n| n.note_value().unwrap())
+            .sum::<Option<Zatoshis>>()
+            .unwrap();
+        assert_eq!(total, ((value - spend_value).unwrap() + value3).unwrap());
+        assert!(notes.iter().all(|note| {
+            note.internal_note_id().0 == ShieldedPool::Ironwood
+                && note.note().version() == NoteVersion::V3
+        }));
+
+        assert!(
+            db.get_unspent_orchard_notes_at_historical_height(account.id(), h3)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// Property tests for the Orchard-turnstile behavior of input selection and transaction

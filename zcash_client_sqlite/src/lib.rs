@@ -301,6 +301,139 @@ impl<'a> Borrow<rusqlite::Transaction<'a>> for SqlTransaction<'a> {
     }
 }
 
+/// The prefix reserved for schema (tables, indices, views, ...) created by external
+/// migrations.
+///
+/// The `zcash_client_sqlite` schema promises never to use this prefix for any of its own
+/// names, so any object whose name begins with it is owned by an application rather than
+/// by the wallet.
+const EXTENSION_SCHEMA_PREFIX: &str = "ext_";
+
+/// A restricted statement executor for writing to application-owned extension tables
+/// within a wallet database transaction.
+///
+/// A handle of this type is provided by [`WalletDb::transactionally_with_extension`]
+/// alongside the wallet handle, and shares the same database transaction: statements run
+/// through it either commit atomically with the wallet operations performed in the same
+/// closure, or are rolled back together with them.
+///
+/// # Authorization policy
+///
+/// Every statement executed through this type runs under a SQLite authorizer that is
+/// installed only for the duration of that single statement. The authorizer:
+///
+/// - **allows** reads (`SELECT`, and reads of individual rows and columns) against any
+///   table, so that extension statements may reference wallet data (for example, to
+///   satisfy a foreign key into an account row);
+/// - **allows** `INSERT`, `UPDATE`, and `DELETE` only against tables whose names begin
+///   with the `ext_` prefix reserved for external migrations (see
+///   [`WalletMigrator::with_external_migrations`]); and
+/// - **denies** everything else, including all schema changes (DDL), `PRAGMA`,
+///   `ATTACH`/`DETACH`, and transaction-control actions (`BEGIN`, `COMMIT`, `ROLLBACK`,
+///   `SAVEPOINT`, `RELEASE`), so that extension statements cannot alter the wallet schema
+///   or interfere with the enclosing transaction.
+///
+/// Because writes are restricted to the `ext_` prefix, a statement that inserts into an
+/// `AUTOINCREMENT` extension table is denied: SQLite services `AUTOINCREMENT` by writing
+/// to the internal `sqlite_sequence` table, which does not carry the prefix. Extension
+/// tables that must be written through this API should therefore avoid `AUTOINCREMENT`
+/// (an ordinary `INTEGER PRIMARY KEY` rowid, or an explicitly supplied key, works
+/// without it).
+///
+/// [`WalletMigrator::with_external_migrations`]: crate::wallet::init::WalletMigrator::with_external_migrations
+pub struct ExtensionTransaction<'conn> {
+    conn: &'conn rusqlite::Connection,
+}
+
+/// Removes the extension authorizer from a connection when dropped, ensuring the wallet's
+/// own statements are never subject to it (including when an extension statement fails).
+struct AuthorizerGuard<'conn> {
+    conn: &'conn rusqlite::Connection,
+}
+
+impl Drop for AuthorizerGuard<'_> {
+    fn drop(&mut self) {
+        self.conn.authorizer(
+            None::<fn(rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization>,
+        );
+    }
+}
+
+/// The authorizer callback enforcing the [`ExtensionTransaction`] policy.
+fn extension_authorizer(ctx: rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization {
+    use rusqlite::hooks::{AuthAction, Authorization};
+
+    let allow_if_extension = |table: &str| {
+        if table.starts_with(EXTENSION_SCHEMA_PREFIX) {
+            Authorization::Allow
+        } else {
+            Authorization::Deny
+        }
+    };
+
+    match ctx.action {
+        // Reads are permitted everywhere so that extension statements may reference wallet
+        // data (e.g. account foreign keys). `Function` and `Recursive` accompany read-only
+        // expression and CTE evaluation.
+        AuthAction::Select
+        | AuthAction::Read { .. }
+        | AuthAction::Function { .. }
+        | AuthAction::Recursive => Authorization::Allow,
+        // Writes are restricted to application-owned extension tables.
+        AuthAction::Insert { table_name } | AuthAction::Delete { table_name } => {
+            allow_if_extension(table_name)
+        }
+        AuthAction::Update { table_name, .. } => allow_if_extension(table_name),
+        // Everything else (DDL, PRAGMA, ATTACH/DETACH, transaction control, ...) is denied.
+        _ => Authorization::Deny,
+    }
+}
+
+impl<'conn> ExtensionTransaction<'conn> {
+    /// Runs `f` with the extension authorizer installed on the connection, removing it
+    /// again (even on error or panic) before returning.
+    fn with_authorizer<T>(
+        &self,
+        f: impl FnOnce() -> Result<T, rusqlite::Error>,
+    ) -> Result<T, rusqlite::Error> {
+        self.conn.authorizer(Some(extension_authorizer));
+        let _guard = AuthorizerGuard { conn: self.conn };
+        f()
+    }
+
+    /// Executes a single non-query SQL statement against an extension table, returning the
+    /// number of rows that were changed.
+    ///
+    /// The statement is subject to the authorization policy documented on
+    /// [`ExtensionTransaction`]; a statement that touches wallet-owned schema, or that
+    /// attempts a denied action, fails with an authorization error and makes no changes.
+    pub fn execute(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> Result<usize, rusqlite::Error> {
+        self.with_authorizer(|| self.conn.execute(sql, params))
+    }
+
+    /// Executes a SQL query that is expected to return a single row, and applies `f` to
+    /// that row to produce a result.
+    ///
+    /// The statement is subject to the authorization policy documented on
+    /// [`ExtensionTransaction`]. As with [`rusqlite::Connection::query_row`], this returns
+    /// [`rusqlite::Error::QueryReturnedNoRows`] if the query selects no rows.
+    pub fn query_row<T, F>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: F,
+    ) -> Result<T, rusqlite::Error>
+    where
+        F: FnOnce(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
+    {
+        self.with_authorizer(|| self.conn.query_row(sql, params, f))
+    }
+}
+
 impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     /// Returns the network parameters that this walletdb instance is bound to.
     pub fn params(&self) -> &P {
@@ -399,6 +532,65 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
             gap_limits: self.gap_limits,
         };
         let result = f(&mut wdb)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    /// Performs wallet database operations and writes to application-owned extension tables
+    /// atomically within a single database transaction.
+    ///
+    /// This behaves like [`WalletDb::transactionally`], but additionally provides an
+    /// [`ExtensionTransaction`] handle sharing the same transaction. This allows an
+    /// application to pair a wallet operation (such as importing an account) with writes to
+    /// its own tables created via [`WalletMigrator::with_external_migrations`], so that
+    /// either both take effect or neither does.
+    ///
+    /// The extension handle restricts the statements it will execute; see
+    /// [`ExtensionTransaction`] for the exact authorization policy. In particular, writes
+    /// are permitted only against tables whose names begin with the `ext_` prefix.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// wallet_db.transactionally_with_extension(|wdb, ext| {
+    ///     let account = wdb.import_account_ufvk(
+    ///         "external account",
+    ///         &ufvk,
+    ///         &birthday,
+    ///         AccountPurpose::ViewOnly,
+    ///         None,
+    ///     )?;
+    ///     ext.execute(
+    ///         "INSERT INTO ext_myapp_accounts (account_uuid, label) VALUES (?1, ?2)",
+    ///         (account.id().expose_uuid(), "external account"),
+    ///     )?;
+    ///     Ok::<_, SqliteClientError>(account)
+    /// })?;
+    /// ```
+    ///
+    /// [`WalletMigrator::with_external_migrations`]: crate::wallet::init::WalletMigrator::with_external_migrations
+    pub fn transactionally_with_extension<F, A, E: From<rusqlite::Error>>(
+        &mut self,
+        f: F,
+    ) -> Result<A, E>
+    where
+        F: FnOnce(
+            &mut WalletDb<SqlTransaction<'_>, &P, &CL, &mut R>,
+            &ExtensionTransaction<'_>,
+        ) -> Result<A, E>,
+    {
+        let tx = self.conn.borrow_mut().transaction()?;
+        let mut wdb = WalletDb {
+            conn: SqlTransaction(&tx),
+            params: &self.params,
+            clock: &self.clock,
+            rng: &mut self.rng,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: self.gap_limits,
+        };
+        // Both handles hold shared references to the same transaction, so aliasing is fine.
+        let ext = ExtensionTransaction { conn: &tx };
+        let result = f(&mut wdb, &ext)?;
         tx.commit()?;
         Ok(result)
     }
@@ -2882,6 +3074,27 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
         )
     }
 
+    /// Returns every Ironwood note received by `height` that was unspent at that height.
+    ///
+    /// This does not apply transaction construction filters or check witness availability.
+    /// Use [`Self::generate_ironwood_witnesses_at_historical_height`] to check the latter.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails or a note cannot be reconstructed.
+    pub fn get_unspent_ironwood_notes_at_historical_height(
+        &self,
+        account: AccountUuid,
+        height: BlockHeight,
+    ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, SqliteClientError> {
+        wallet::orchard::get_unspent_ironwood_notes_at_historical_height(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            height,
+        )
+    }
+
     /// Generates Orchard Merkle witnesses at a historical height.
     ///
     /// Loads the wallet's Orchard shard data into an ephemeral in-memory
@@ -3274,6 +3487,165 @@ mod tests {
     #[cfg(feature = "unstable")]
     use zcash_keys::keys::sapling;
     use zcash_protocol::local_consensus::LocalNetwork;
+
+    /// Builds a test wallet with a single account and an application-owned extension
+    /// table (`ext_test_notes`), simulating an external migration having created it.
+    fn ext_test_state() -> TestState<(), TestDb, LocalNetwork> {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        st.wallet_mut()
+            .conn_mut()
+            .execute_batch(
+                "CREATE TABLE ext_test_notes (account_uuid BLOB NOT NULL, note TEXT NOT NULL);",
+            )
+            .unwrap();
+        st
+    }
+
+    /// Returns an owned seed and birthday suitable for creating a second account, released
+    /// from any borrow of `st` so the wallet may be borrowed mutably afterwards.
+    fn account_creation_inputs(
+        st: &TestState<(), TestDb, LocalNetwork>,
+    ) -> (SecretVec<u8>, AccountBirthday) {
+        let birthday = st.test_account().unwrap().birthday().clone();
+        let seed = SecretVec::new(st.test_seed().unwrap().expose_secret().to_vec());
+        (seed, birthday)
+    }
+
+    #[test]
+    fn transactionally_with_extension_commits_both() {
+        let mut st = ext_test_state();
+        let (seed, birthday) = account_creation_inputs(&st);
+
+        let new_account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension::<_, _, SqliteClientError>(|wdb, ext| {
+                let (account_id, _usk) = wdb.create_account("second", &seed, &birthday, None)?;
+                ext.execute(
+                    "INSERT INTO ext_test_notes (account_uuid, note) VALUES (?1, ?2)",
+                    (account_id.expose_uuid(), "hello"),
+                )?;
+                Ok(account_id)
+            })
+            .unwrap();
+
+        // The wallet write persisted.
+        let account_exists: bool = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM accounts WHERE uuid = ?1)",
+                [new_account.expose_uuid()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(account_exists);
+
+        // The extension write persisted, in the same transaction.
+        let note: String = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT note FROM ext_test_notes WHERE account_uuid = ?1",
+                [new_account.expose_uuid()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(note, "hello");
+    }
+
+    #[test]
+    fn transactionally_with_extension_rolls_back_on_error() {
+        let mut st = ext_test_state();
+        let (seed, birthday) = account_creation_inputs(&st);
+
+        let accounts_before: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+
+        let result: Result<(), SqliteClientError> = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension(|wdb, ext| {
+                let (account_id, _usk) = wdb.create_account("second", &seed, &birthday, None)?;
+                ext.execute(
+                    "INSERT INTO ext_test_notes (account_uuid, note) VALUES (?1, ?2)",
+                    (account_id.expose_uuid(), "hello"),
+                )?;
+                // Fail after both writes; everything in this transaction must roll back.
+                Err(SqliteClientError::AccountUnknown)
+            });
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+
+        // Neither the wallet write nor the extension write persisted.
+        let accounts_after: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(accounts_before, accounts_after);
+        let ext_rows: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM ext_test_notes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(ext_rows, 0);
+    }
+
+    #[test]
+    fn transactionally_with_extension_denies_wallet_table_write() {
+        let mut st = ext_test_state();
+
+        let accounts_before: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+
+        let result: Result<(), SqliteClientError> = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension(|_wdb, ext| {
+                // Deleting from a wallet-owned table is denied by the authorizer.
+                ext.execute("DELETE FROM accounts", [])?;
+                Ok(())
+            });
+        assert!(result.is_err());
+
+        // The wallet handle remains usable, and the denied statement had no effect: the
+        // account is still present and a fresh wallet read succeeds.
+        let accounts_after: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(accounts_before, accounts_after);
+        assert!(!st.wallet().get_account_ids().unwrap().is_empty());
+    }
+
+    #[test]
+    fn transactionally_with_extension_denies_transaction_control() {
+        let mut st = ext_test_state();
+
+        let result: Result<(), SqliteClientError> = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension(|_wdb, ext| {
+                // Transaction-control statements are denied so extension SQL cannot break
+                // out of the enclosing transaction.
+                ext.execute("COMMIT", [])?;
+                Ok(())
+            });
+        assert!(result.is_err());
+
+        // The wallet handle remains usable afterwards.
+        assert!(!st.wallet().get_account_ids().unwrap().is_empty());
+    }
 
     #[test]
     fn validate_seed() {

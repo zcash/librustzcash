@@ -40,3 +40,12 @@ pub const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 pub const V6_TX_VERSION: u32 = 6;
 /// The version group ID for Zcash v6 transactions.
 pub const V6_VERSION_GROUP_ID: u32 = 0xD884B698;
+
+/// The maximum size in bytes of a Zcash block, and therefore the maximum size of any single
+/// transaction within one.
+///
+/// It is specified as `MAX_BLOCK_SIZE` in
+/// [§ 7.6 Block Header Encoding and Consensus](https://zips.z.cash/protocol/protocol.pdf#blockheader).
+///
+/// This constant is called `MAX_BLOCK_SIZE` in the zcashd source.
+pub const MAX_BLOCK_BYTES: usize = 2_000_000;
