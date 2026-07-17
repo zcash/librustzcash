@@ -9,6 +9,14 @@
 //! Inspired by an original implementation by Adam Tucker from ValarGroup, originally made
 //! available in [Vizor Wallet](https://github.com/chainapsis/vizor-wallet).
 
+#![no_std]
 #![deny(rustdoc::broken_intra_doc_links)]
+
+// The crate itself is `no_std` and needs only `alloc` (for `Vec`); `macro_use` under test brings the
+// `vec!` macro into scope, and the tests link `std` for `proptest`.
+#[cfg_attr(test, macro_use)]
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 pub mod note_splitting;

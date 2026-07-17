@@ -7,6 +7,8 @@
 //!
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
+use alloc::vec::Vec;
+
 use rand_core::RngCore;
 
 use zcash_protocol::value::COIN;

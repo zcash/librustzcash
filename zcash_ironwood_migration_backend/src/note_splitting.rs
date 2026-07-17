@@ -115,6 +115,8 @@
 //!
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
+use alloc::vec::Vec;
+
 use rand_core::RngCore;
 
 use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
@@ -285,9 +287,8 @@ impl NoteSplitPlan {
 }
 
 /// A rule for decomposing a spendable source-pool balance into the notes a migration run will prepare.
-/// Implementations differ in the denomination set they use and in whether the decomposition is
-/// random or deterministic; see the module docs. Object-safe, so a wallet can hold a selected
-/// `Box<dyn DenominationStrategy>`.
+/// See the module docs for the implementation and its denomination set. Object-safe, so a wallet can
+/// hold a selected `Box<dyn DenominationStrategy>` and a future variant can be added behind it.
 pub trait DenominationStrategy {
     /// Decompose `total_input_zatoshi`, after reserving `prep_fee_zatoshi` for the note-split
     /// transaction, into self-funding notes. `rng` is used by randomized strategies and ignored by
