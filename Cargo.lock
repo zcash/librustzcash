@@ -7262,6 +7262,7 @@ name = "zcash_pool_migration_backend"
 version = "0.1.0"
 dependencies = [
  "incrementalmerkletree",
+ "libm",
  "orchard",
  "pczt",
  "proptest",

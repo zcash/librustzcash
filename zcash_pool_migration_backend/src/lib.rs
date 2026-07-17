@@ -23,3 +23,4 @@ extern crate std;
 pub mod build;
 pub mod note_splitting;
 pub mod preparation;
+pub mod scheduling;
