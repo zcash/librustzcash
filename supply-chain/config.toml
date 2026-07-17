@@ -80,6 +80,8 @@ audit-as-crates-io = true
 [policy.zcash_transparent]
 audit-as-crates-io = true
 
+[policy.zewif]
+
 [policy.zip321]
 audit-as-crates-io = true
 

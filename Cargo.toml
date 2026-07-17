@@ -183,7 +183,7 @@ fpe = { version = "0.6", default-features = false, features = ["alloc"] }
 zip32 = { version = "0.2", default-features = false }
 
 # ZeWIF wallet interchange
-zewif = "1.0.0-rc.2"
+zewif = "1.0.0-rc.3"
 
 [workspace.metadata.release]
 consolidate-commits = false
