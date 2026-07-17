@@ -2724,6 +2724,7 @@ where
                     .iter()
                     .enumerate()
                     .filter_map(|(index, input)| {
+                        #[allow(clippy::bind_instead_of_map)]
                         build_state
                             .transparent_input_addresses
                             .get(

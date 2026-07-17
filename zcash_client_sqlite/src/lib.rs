@@ -126,8 +126,9 @@ use {
     zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
 };
 
-// `AddressCodec` is used only by `find_account_for_ephemeral_address`, which is
-// part of the `WalletTest` surface.
+// `AddressCodec` is used only by the `WalletTest` ephemeral-address helpers below, which are
+// themselves gated on both the test/test-dependencies surface and `transparent-inputs`; gate the
+// import to match exactly, rather than blanket-allowing it unused, so the lint stays active.
 #[cfg(all(
     any(test, feature = "test-dependencies"),
     feature = "transparent-inputs"
