@@ -2,7 +2,8 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use super::{Exchange, ExchangeData, RETRY_LIMIT, retry_filter};
-use crate::tor::{Client, Error};
+use crate::privacy::http::http_get_json_over;
+use crate::privacy::{DynPrivateNetwork, Error};
 
 /// Querier for the MEXC exchange.
 pub struct Mexc {
@@ -39,18 +40,18 @@ struct MexcData {
 }
 
 impl Exchange for Mexc {
-    async fn query_zec_to_usd(&self, client: &Client) -> Result<ExchangeData, Error> {
+    async fn query_zec_to_usd(&self, net: &dyn DynPrivateNetwork) -> Result<ExchangeData, Error> {
         // API documentation:
         // https://mexcdevelop.github.io/apidocs/spot_v3_en/#24hr-ticker-price-change-statistics
-        let res = client
-            .http_get_json::<MexcData>(
-                "https://api.mexc.com/api/v3/ticker/24hr?symbol=ZECUSDT"
-                    .parse()
-                    .unwrap(),
-                RETRY_LIMIT,
-                retry_filter,
-            )
-            .await?;
+        let res = http_get_json_over::<MexcData>(
+            net,
+            "https://api.mexc.com/api/v3/ticker/24hr?symbol=ZECUSDT"
+                .parse()
+                .unwrap(),
+            RETRY_LIMIT,
+            retry_filter,
+        )
+        .await?;
         let data = res.into_body();
         Ok(ExchangeData {
             bid: data.bidPrice,
