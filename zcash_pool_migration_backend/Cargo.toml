@@ -23,9 +23,29 @@ rand_core.workspace = true
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 
+# Enabled by the `orchard` feature.
+orchard = { workspace = true, optional = true }
+pczt = { workspace = true, optional = true, features = [
+    "io-finalizer",
+    "orchard",
+    "signer",
+    "zcp-builder",
+] }
+
 [dev-dependencies]
+incrementalmerkletree.workspace = true
 proptest.workspace = true
 rand_chacha.workspace = true
+# The `local-consensus` feature exposes `LocalNetwork`, used to build the migration transactions
+# against regtest params with the relevant network upgrades (including NU6.3) active.
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
+
+[features]
+## Builds the pure PCZT transaction builder (the `build` module), which turns a note-split plan and
+## the cryptographic ingredients a wallet supplies into an unproven migration PCZT. Requires the
+## Orchard pool; pulls in `orchard` and `pczt`. The caller supplies the RNG, so no `rand` dependency
+## is added.
+orchard = ["dep:orchard", "dep:pczt"]
 
 [lints]
 workspace = true
