@@ -51,7 +51,7 @@ impl CanonicalOneTwoFive {
     ) -> Self {
         Self {
             max_notes,
-            max_denomination_zatoshi: max_denomination_zec * COIN,
+            max_denomination_zatoshi: max_denomination_zec.saturating_mul(COIN),
             dust_floor_zatoshi,
             buffer_zatoshi: fee.transfer_fee_buffer_zatoshi(),
         }
