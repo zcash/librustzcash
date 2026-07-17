@@ -113,38 +113,50 @@ A transfer's prepared PCZT now has two persisted sub-states where the original s
 
 ### 4.2 Signing with a placeholder witness
 
-`orchard::tree::MerklePath::from_parts(position: u32, auth_path: [MerkleHashOrchard; MERKLE_DEPTH_ORCHARD])`
-is public (unlike the crate-private `MerklePath::dummy()`, which is for padding actions with no
-real spend at all — not what we want here). Construct a placeholder
-(`position = 0`, `auth_path = [MerkleHashOrchard::default(); MERKLE_DEPTH_ORCHARD]` or similar) for
-each self-funding note whose split output is not yet mined.
+**Verified empirically 2026-07-17/18** (see `zcash_pool_migration/tests/migration_e2e.rs`,
+`transaction_level_builder_rejects_orchard_anchor_none` and
+`placeholder_witness_synthetic_anchor_then_redacted_signs_successfully`, commit `ff54a227e7` on
+this branch). The naive approach this section originally specified —
+`BuildConfig::Standard { orchard_anchor: None, .. }` — does **not** work: it is not "defer the
+anchor", it means "build no Orchard bundle at all".
+`zcash_primitives::transaction::builder::BuildConfig::orchard_builder` only constructs the
+underlying `orchard::builder::Builder` when the anchor is `Some`; `Builder::add_orchard_spend` then
+fails immediately with `Error::OrchardBuilderNotAvailable`. This is not just a wrapper limitation:
+`orchard::builder::Builder::new` itself requires a non-optional `anchor: Anchor`, and
+`Builder::add_spend` performs a live consistency check (`SpendInfo::has_matching_anchor`) rejecting
+any `merkle_path` whose own root doesn't equal the builder's anchor. There is no "anchor-less
+spend" mode anywhere in the orchard crate's builder API — do not attempt `orchard_anchor: None`.
 
-**The bundle-level anchor MUST be left `None` at this stage, not a placeholder value.**
-`pczt::roles::updater`'s `set_anchor` helper (`pczt/src/roles/updater/mod.rs`) rejects overwriting
-an anchor slot that already holds a *different* value (`ConflictingAnchor`) — it only accepts a
-transition from `None` to `Some`. Passing `orchard_anchor: Some(Anchor::empty_tree())` (the pattern
-`build_self_funding_transfer_pczt` already uses for the analogous *Ironwood*-bundle-has-no-spend
-case) at initial construction would bake in a real value that `set_orchard_anchor(real_anchor)`
-could then never legally replace. `zcash_primitives::transaction::builder::BuildConfig::Standard.orchard_anchor`
-is `Option<orchard::Anchor>` and is exercised with `None` elsewhere in this workspace's own test
-suite (`zcash_primitives/src/transaction/builder.rs`, multiple cases) — pass `None` here for any
-spend whose funding note is not yet mined.
+**The working approach — build self-consistent, then redact:**
 
-**Open verification item (do first, before building out the rest of §4):** confirm empirically that
-the *orchard* crate's own builder (not just the `zcash_primitives` wrapper) accepts `add_spend`
-being called with a real note + placeholder `MerklePath` while the enclosing `BuildConfig`'s
-`orchard_anchor` is `None` — i.e., that it does not itself require `merkle_path.root(note.commitment())`
-to equal a `Some` anchor at spend-construction time. Write this as the crate's first new test
-(`zcash_pool_migration/tests/`), independent of the rest of the pipeline change: construct a spend
-with a placeholder `MerklePath` and `orchard_anchor: None`, run it through `Creator`/`IoFinalizer`/
-`Signer`, and assert the resulting PCZT is well-formed with `witness: None`-or-placeholder and
-`anchor: None`. If this does not work as expected, this whole approach needs re-evaluation before
-any further code is written against it.
+1. Construct a placeholder `orchard::tree::MerklePath` for the self-funding note whose split output
+   is not yet mined, via the public
+   `MerklePath::from_parts(position: u32, auth_path: [MerkleHashOrchard; MERKLE_DEPTH_ORCHARD])`
+   (unlike the crate-private `MerklePath::dummy()`, which is for padding actions with no real spend
+   at all — not what we want here). Any position/auth_path values work (e.g. all-zero) — they are
+   discarded in step 3.
+2. Compute a **synthetic anchor that matches this placeholder path's own root** —
+   `placeholder_path.root(note.commitment().into())` — and pass `Some(that synthetic anchor)` as
+   `orchard_anchor` in `BuildConfig::Standard`. This satisfies the builder's internal
+   `has_matching_anchor` check (the anchor and the witness are mutually consistent, just not real).
+   Build and sign exactly as today: `add_orchard_spend` → `add_ironwood_output` → `build_for_pczt`
+   → `Creator::build_from_parts` → `IoFinalizer::finalize_io()` → the crate's existing software
+   `Signer` step. All of this succeeds unmodified — signing genuinely does not depend on whether the
+   anchor/witness are real, only on the note's own secrets and the spend authorizing key.
+3. **Redact** the synthetic anchor and witness back to absent, *after* signing, via
+   `pczt::roles::redactor::Redactor::redact_orchard_with(|mut o| { o.clear_anchor();
+   o.redact_actions(|mut a| a.clear_spend_witness()); }).finish()`. `Redactor` is not used
+   elsewhere in this crate and needs no new Cargo feature (`pczt/src/roles.rs` does not gate it
+   behind a feature, unlike prover/signer). Verified directly via `Pczt`'s public accessors:
+   `orchard().anchor()` is `None` after redaction (and survives a serialize/parse round trip), while
+   `spend_auth_sig` remains `Some` — the signature is genuinely untouched by clearing the anchor,
+   confirming the ZIP 244 premise (anchor is authorizing data, not under the v6 sighash) holds in
+   practice, not just in principle.
 
-Build and sign the PCZT with these placeholders instead of a real
-`witness_at_checkpoint_id_caching` call and a real anchor. The resulting PCZT is fully, validly
-signed — signing does not depend on the (wrong) witness content — and is persisted in the
-`SignedAwaitingProof` sub-state.
+The resulting PCZT — validly signed, with `anchor: None` and no spend witness — is persisted in the
+`SignedAwaitingProof` sub-state. §4.3's later `set_orchard_anchor`/`set_orchard_spend_witnesses`
+calls are unaffected by this correction: they still require the slot to be `None` first, which the
+redaction step now provides (instead of the originally-planned "never set it in the first place").
 
 ### 4.3 Finalizing once the funding note is witnessed
 
