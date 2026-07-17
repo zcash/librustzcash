@@ -53,3 +53,15 @@ and this library adheres to Rust's notion of
   unsigned. It signs a finalized but still UNPROVEN PCZT: the spend-authorization signature is over
   the transaction's sighash, which is fixed independently of the zk proofs, so the migration signs up
   front (capturing the account's authorization) and proves later, at scheduling time.
+- Note-preparation transaction planning (the `preparation` module): a pure planner that partitions the
+  work of minting a note-split plan's self-funding notes into note-preparation transactions of exactly
+  `PREP_TX_ACTIONS` (16) Orchard actions, per ZIP 318, organised into the fewest sequential layers
+  (with parallel transactions inside a layer). `plan_preparation` takes the wallet's spendable
+  source-pool note values, the target funding-note values, and a per-transaction fee reserve, and
+  returns a `PreparationPlan` of `PrepTransaction`s (each a same-pool send-to-self referencing wallet
+  notes or earlier layers' outputs). It uses a largest-first greedy: feed each output transaction from
+  the largest note, route every leftover forward as a feeder note, and consolidate dust; once the
+  funding notes are scheduled it consolidates the leftover feeders into a single residual note, per
+  ZIP 318's "one note per part plus at most one residual note". A typical wallet needs one layer, and
+  extra layers appear only for a lone large note fanning out into many funding notes or a dust-heavy
+  balance. It is pure (no cryptography or I/O) and `no_std`.
