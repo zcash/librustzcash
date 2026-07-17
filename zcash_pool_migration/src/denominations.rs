@@ -18,6 +18,12 @@ pub(crate) const MIGRATION_MAX_PREPARED_NOTES_PER_RUN: usize = 64;
 /// Per-note fee buffer: 4 × the ZIP-317 marginal fee (5_000), covering 2 Orchard + 2 Ironwood
 /// actions, so each prepared note can pay its own migration-transfer fee.
 pub(crate) const TRANSFER_FEE_BUFFER_ZATOSHI: u64 = 20_000;
+/// Below this, a leftover balance is true dust: moving it would cost more in fees than it is
+/// worth, so it is never offered to the user as an optional migration, only ever left in the
+/// wallet. At or above it, a leftover is a genuine *residual* — too small to form a whole
+/// self-funding note, but large enough to be worth an opt-in "migrate the rest too" transfer (see
+/// [`crate::context::MigrationContext::propose_migration_transfers`]).
+pub(crate) const RESIDUAL_MIGRATION_MIN_ZATOSHI: u64 = 100_000;
 
 /// The outcome of planning a note split.
 ///

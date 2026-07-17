@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use rand::rngs::OsRng;
 use rusqlite::Connection;
 use uuid::Uuid;
 use zcash_client_sqlite::{AccountUuid, ReceivedNoteId};
@@ -455,10 +456,12 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     }
 
     /// Compute the optimal note split for the spendable Orchard balance. Each output note is
-    /// self-funding (`power_of_ten + buffer`); any residual stays in Orchard. The reported fee is
-    /// the exact ZIP-317 fee for the split transaction (`5000 × (spends + outputs)`, floored at 2
-    /// actions); at signing time the last output absorbs any drift between this plan and the
-    /// then-current balance.
+    /// self-funding (`power_of_ten + buffer`) and always keeps that exact value — any leftover
+    /// (fee-estimate drift, or a balance that doesn't decompose evenly) is left as ordinary,
+    /// unlocked Orchard change at signing time instead of being folded into a migration note (see
+    /// [`crate::split::finalize_split_outputs`]). The reported fee is the exact ZIP-317 fee for the
+    /// split transaction (`5000 × (spends + outputs)`, floored at 2 actions), converged against the
+    /// resulting output count so the real signing step reserves enough headroom.
     ///
     /// # Errors
     ///
@@ -468,14 +471,14 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     pub fn prepare_note_split(&self) -> Result<NoteSplitProposal, MigrationError> {
         let db = self.open_wallet()?;
         let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
-        let plan =
-            plan_denominations(total, FEE_ESTIMATE_ZATOSHI).map_err(MigrationError::Pipeline)?;
         // Pre-split there are no migration locks yet, so no exclusions apply.
         let locks = BTreeSet::new();
-        let n_spends = crate::split::select_spendable_orchard_notes(&db, self.account, &locks)?
-            .len()
-            .max(1);
-        let n_outputs = plan.migration_outputs.len();
+        let reserved = BTreeSet::new();
+        let n_spends =
+            crate::split::select_spendable_orchard_notes(&db, self.account, &reserved, &locks)?
+                .len()
+                .max(1);
+        let (plan, fee_estimate) = converge_denomination_plan(total, n_spends)?;
         let output_values = plan
             .migration_outputs
             .iter()
@@ -483,7 +486,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             .collect();
         Ok(NoteSplitProposal::from_parts(
             output_values,
-            Zatoshis::const_from_u64(crate::split::split_fee(n_spends, n_outputs)),
+            Zatoshis::const_from_u64(fee_estimate),
         ))
     }
 
@@ -526,7 +529,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             .collect();
         // Sign FIRST: build, prove, and sign the split without touching the engine's tables.
         let mut db = self.open_wallet()?;
-        let (signed, placed_outputs) = backend::sign_split(
+        let (signed, split_outputs) = backend::sign_split(
             &mut db,
             &self.network,
             self.account,
@@ -536,7 +539,12 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             usk,
         )?;
         let txid_hex = signed.txid.to_string();
-        let prepared: Vec<store::PreparedNote> = placed_outputs
+        // Only the self-funding migration notes are locked for the schedule. Any plain change
+        // output (`split_outputs.change`) is deliberately left untracked here: it is ordinary,
+        // unlocked Orchard balance for the wallet's regular scanner to pick up once the split
+        // mines, not a note this engine reserves for a scheduled transfer.
+        let prepared: Vec<store::PreparedNote> = split_outputs
+            .migration_notes
             .iter()
             .map(|&(action_index, value_zatoshi)| store::PreparedNote {
                 txid_hex: txid_hex.clone(),
@@ -613,7 +621,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             .iter()
             .map(|&v| u64::from(v))
             .collect();
-        let (pczt, placed_outputs) = crate::split::build_split_pczt(
+        let (pczt, split_outputs) = crate::split::build_split_pczt(
             &mut db,
             &self.network,
             self.account,
@@ -621,6 +629,10 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             &locks,
             &output_notes,
         )?;
+        // Only the migration notes are staged for locking; any plain change output
+        // (`split_outputs.change`) is deliberately dropped here — it is ordinary, unlocked Orchard
+        // balance, not a note this engine reserves for a scheduled transfer.
+        let placed_outputs = split_outputs.migration_notes;
         // The device-facing copy is serialized before proving: the proof is not signed over, and
         // the platform redacts the PCZT for the QR channel anyway.
         let unsigned = pczt.clone().serialize().map_err(|e| {
@@ -768,29 +780,49 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             self.network_str(),
             store::STAGED_KIND_TRANSFER,
         )?;
+        let orchard_fvk = backend::account_orchard_fvk(&db, self.account)?;
         let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
         let mut pairs = Vec::with_capacity(schedule.transfers().len());
         for t in schedule.transfers() {
-            let request =
-                backend::self_payment_request(&db, &self.network, self.account, t.amount())?;
-            let proposal = backend::propose_migration_transfer(
-                &db,
-                &self.network,
-                self.account,
-                target,
-                u32::from(t.anchor_height()),
-                &reserved,
-                &locks,
-                request,
-            )?;
-            reserved.extend(backend::proposal_note_refs(&proposal));
-            let pczt = backend::create_transfer_pczt(
+            // Direct-builder path first (matches `sign_and_store_migration_schedule`): a
+            // self-funding note pays its own fee, no wallet fee/change logic needed. Falls back to
+            // the ordinary input-selection pipeline when no such note exists (the immediate/sweep
+            // migration path).
+            let pczt = if let Some(outcome) = backend::build_self_funding_transfer_pczt(
                 &mut db,
                 &self.network,
                 self.account,
-                &proposal,
+                &orchard_fvk,
+                u64::from(t.amount()),
+                &reserved,
+                &locks,
+                target,
                 u32::from(t.expiry_height()),
-            )?;
+            )? {
+                reserved.insert(outcome.spent_note_id);
+                outcome.pczt
+            } else {
+                let request =
+                    backend::self_payment_request(&db, &self.network, self.account, t.amount())?;
+                let proposal = backend::propose_migration_transfer(
+                    &db,
+                    &self.network,
+                    self.account,
+                    target,
+                    u32::from(t.anchor_height()),
+                    &reserved,
+                    &locks,
+                    request,
+                )?;
+                reserved.extend(backend::proposal_note_refs(&proposal));
+                backend::create_transfer_pczt(
+                    &mut db,
+                    &self.network,
+                    self.account,
+                    &proposal,
+                    u32::from(t.expiry_height()),
+                )?
+            };
             let unsigned = pczt.clone().serialize().map_err(|e| {
                 MigrationError::Pipeline(format!("serialize unsigned transfer pczt: {e:?}"))
             })?;
@@ -929,24 +961,92 @@ impl<P: Parameters + Clone> MigrationContext<P> {
 
     // ----- migration proposal -----
 
-    /// Generate the full migration schedule for the spendable Orchard balance. Each transfer's
-    /// `amount` is the value that crosses the turnstile (the pre-split note pays its own fee).
+    /// The leftover Orchard balance that a migration schedule would *not* cross, reported only
+    /// when it is large enough to be worth offering the user a choice about (see
+    /// [`crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI`]). Values below that threshold are
+    /// true dust — moving them would cost more in fees than they're worth — and are never
+    /// reported; the caller should just leave them in the wallet.
+    ///
+    /// Intended for the "also migrate the rest?" opt-in: whales who prize the round-number
+    /// crossing-value privacy property may decline (the residual is not a power of ten, so
+    /// migrating it is comparatively more identifiable); everyday users who would rather have
+    /// nothing left behind can opt in, which [`Self::propose_migration_transfers`]'s
+    /// `include_residual` flag then adds to the schedule as one extra transfer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError::NotSynced`]/[`MigrationError::Backend`] if the spendable Orchard
+    /// balance cannot be read, and [`MigrationError::Pipeline`] if the plan would exceed the
+    /// per-run prepared-note limit.
+    pub fn residual_after_migration(&self) -> Result<Option<Zatoshis>, MigrationError> {
+        let db = self.open_wallet()?;
+        let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
+        let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
+        Ok(plan
+            .orchard_change
+            .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+            .map(Zatoshis::const_from_u64))
+    }
+
+    /// Generate the full migration schedule for the spendable Orchard balance. Each staggered
+    /// transfer's `amount` is the value that crosses the turnstile (the pre-split note pays its own
+    /// fee).
+    ///
+    /// When `include_residual` is `true` and the balance leaves a residual worth offering (see
+    /// [`Self::residual_after_migration`]), one further transfer for exactly that (non-round)
+    /// amount is appended to the schedule — it will not match any self-funding note, so it signs
+    /// via the ordinary input-selection pipeline rather than the direct-builder path the staggered
+    /// transfers use (see `backend::build_self_funding_transfer_pczt`).
     ///
     /// # Errors
     ///
     /// Returns [`MigrationError::NotSynced`]/[`MigrationError::Backend`] if the target/anchor
     /// heights or spendable Orchard balance cannot be read, and [`MigrationError::Pipeline`] if
     /// the resulting plan would exceed the per-run prepared-note limit.
-    pub fn propose_migration_transfers(&self) -> Result<MigrationSchedule, MigrationError> {
+    pub fn propose_migration_transfers(
+        &self,
+        include_residual: bool,
+    ) -> Result<MigrationSchedule, MigrationError> {
         let db = self.open_wallet()?;
         let (target, anchor) = backend::target_and_anchor(&db)?;
         let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
-        let plan =
-            plan_denominations(total, FEE_ESTIMATE_ZATOSHI).map_err(MigrationError::Pipeline)?;
+        // No fee reservation here (unlike `prepare_note_split`): by the time this runs, the
+        // spendable balance is expected to already consist of the split's self-funding notes
+        // (each already carrying its own transfer-fee buffer) — there is no further transaction
+        // fee to pay to "unlock" them, so decomposing with a zero prep-fee is what reproduces
+        // those exact notes back as crossing values. A balance that is not (yet, or no longer)
+        // purely self-funding notes — including leftover Orchard change — decomposes on a
+        // best-effort basis; `MigrationContext::sign_and_store_migration_schedule` falls back to
+        // the ordinary input-selection pipeline for any crossing value with no matching note (see
+        // `backend::build_self_funding_transfer_pczt`).
+        let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
+        let mut crossing_values = plan.crossing_values;
+        if include_residual {
+            if let Some(residual) = plan
+                .orchard_change
+                .filter(|&v| v >= crate::denominations::RESIDUAL_MIGRATION_MIN_ZATOSHI)
+            {
+                // Unlike a planned self-funding note, the residual has no fee pre-reserved by a
+                // denomination plan — net out TRANSFER_FEE_BUFFER_ZATOSHI here so the scheduled
+                // crossing value is what actually lands in Ironwood. This is exactly the value
+                // `build_self_funding_transfer_pczt` will look for later
+                // (`crossing_value + TRANSFER_FEE_BUFFER_ZATOSHI == residual`): the residual note
+                // `finalize_split_outputs` (split.rs) minted is worth exactly `residual`, so this
+                // transfer *does* match it and signs via the same direct-builder path as the
+                // round-number crossings — not the ordinary input-selection fallback, despite the
+                // residual's non-round crossing amount. Only a residual that didn't originate from
+                // a real split's exact accounting (or was already partially spent) would miss and
+                // fall back to `propose_migration_transfer`/`create_transfer_pczt` instead.
+                crossing_values.push(
+                    residual.saturating_sub(crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI),
+                );
+            }
+        }
         let run_id = new_run_id();
         Ok(scheduling::build_schedule(
+            &mut OsRng,
             &run_id,
-            &plan.crossing_values,
+            &crossing_values,
             target,
             anchor,
             // First transfer executable immediately; de-correlation from user activity is the
@@ -975,7 +1075,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let run_id = new_run_id();
         let amounts = crossing.map(|value| vec![value]).unwrap_or_default();
         Ok(scheduling::build_schedule(
-            &run_id, &amounts, target, anchor,
+            &mut OsRng, &run_id, &amounts, target, anchor,
             // immediate: executable now, no first-transfer privacy delay
             0,
         ))
@@ -1107,12 +1207,19 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// refinement re-anchors the persisted PCZTs in place via the updater role rather than
     /// regenerating them.
     ///
+    /// `include_residual` should match whatever choice the user made when the schedule being
+    /// refreshed was first proposed (see [`Self::propose_migration_transfers`]).
+    ///
     /// # Errors
     ///
     /// Returns whatever [`Self::restart_current_migration_step`] and
     /// [`Self::sign_and_store_migration_schedule`] can return.
-    pub fn refresh_stale_transfers(&self, usk: &UnifiedSpendingKey) -> Result<u32, MigrationError> {
-        let schedule = self.restart_current_migration_step()?;
+    pub fn refresh_stale_transfers(
+        &self,
+        usk: &UnifiedSpendingKey,
+        include_residual: bool,
+    ) -> Result<u32, MigrationError> {
+        let schedule = self.restart_current_migration_step(include_residual)?;
         let count = schedule.transfers().len() as u32;
         self.sign_and_store_migration_schedule(&schedule, usk)?;
         Ok(count)
@@ -1259,17 +1366,63 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     ///
     /// Returns [`MigrationError::Db`] if the run's stale scheduled transfers cannot be cleared,
     /// and whatever [`Self::propose_migration_transfers`] can return.
-    pub fn restart_current_migration_step(&self) -> Result<MigrationSchedule, MigrationError> {
+    pub fn restart_current_migration_step(
+        &self,
+        include_residual: bool,
+    ) -> Result<MigrationSchedule, MigrationError> {
         let conn = self.store_conn()?;
         if let Some(run) = self.active_run(&conn)? {
             store::clear_scheduled_pending(&conn, &run.run_id)?;
         }
-        self.propose_migration_transfers()
+        self.propose_migration_transfers(include_residual)
     }
 }
 
 fn new_run_id() -> String {
     Uuid::new_v4().to_string()
+}
+
+/// Decompose `total` into self-funding power-of-ten notes ([`plan_denominations`]), converging the
+/// reserved fee estimate against the resulting output count. Used by
+/// [`MigrationContext::prepare_note_split`], which is about to pay a real split-transaction fee
+/// and so needs that fee reserved accurately up front (unlike
+/// [`MigrationContext::propose_migration_transfers`], which re-derives a schedule from an
+/// *already* self-funded balance and so needs no fee reservation at all — see its own doc
+/// comment).
+///
+/// The prep-fee reserved while decomposing must cover the real split fee
+/// (`split::split_fee(n_spends, n_outputs)`), which itself depends on the resulting output count.
+/// Naively re-planning with the fee implied by the previous round's output count can **oscillate**
+/// forever between two fee/output-count pairs that imply each other (e.g. fee A decomposes to k
+/// outputs, whose real fee is B; fee B decomposes to k−1 outputs, whose real fee is A again) — the
+/// discrete jumps in `plan_denominations`'s greedy decomposition mean an *exact* fixed point
+/// (`real_fee == fee_estimate`) does not always exist. So instead of requiring exact equality,
+/// this stops as soon as the reserved fee is *sufficient* (`real_fee <= fee_estimate`) — which
+/// happens well before any cycle would repeat, since each non-terminating round strictly
+/// increases `fee_estimate` (bounded above by the note-count cap, so this always terminates) — and
+/// is provably safe: `plan_denominations` never lets a plan's outputs exceed its `total -
+/// fee_estimate` budget, so `sum(outputs) <= total - fee_estimate <= total - real_fee`, which is
+/// exactly the non-error condition [`crate::split::finalize_split_outputs`] checks at signing
+/// time. A stricter fixed point (spending exactly the reserved fee, not more than needed) is not
+/// required for correctness, only for optimality — the loop bound below is a defensive cap, not
+/// load-bearing.
+///
+/// Returns the plan together with the converged (sufficient, not necessarily exact) fee estimate.
+fn converge_denomination_plan(
+    total: u64,
+    n_spends: usize,
+) -> Result<(crate::denominations::DenominationPlan, u64), MigrationError> {
+    let mut fee_estimate = FEE_ESTIMATE_ZATOSHI;
+    let mut plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+    for _ in 0..=crate::denominations::MIGRATION_MAX_PREPARED_NOTES_PER_RUN {
+        let real_fee = crate::split::split_fee(n_spends, plan.migration_outputs.len().max(1));
+        if real_fee <= fee_estimate {
+            break;
+        }
+        fee_estimate = real_fee;
+        plan = plan_denominations(total, fee_estimate).map_err(MigrationError::Pipeline)?;
+    }
+    Ok((plan, fee_estimate))
 }
 
 /// Classify a recoverable failure's error message into an [`AttentionReason`].
@@ -1328,6 +1481,27 @@ mod tests {
         let (_file, ctx) = ctx();
         assert_eq!(ctx.migration_state().unwrap(), MigrationState::NotStarted);
         assert!(ctx.migration_progress().unwrap().is_none());
+    }
+
+    #[test]
+    fn converge_denomination_plan_terminates_on_an_oscillating_total() {
+        // 2.0005 ZEC, 1 spendable note: fee=10_000 decomposes to two 1-ZEC notes (real fee for 2
+        // outputs is 15_000); fee=15_000 decomposes to only one 1-ZEC note (real fee for 1 output
+        // is back down to 10_000, the 2-action grace floor) — an exact fixed point does not exist,
+        // it cycles between these two states forever. The loop must still terminate and return a
+        // plan whose reserved fee is *sufficient* for its own real fee, not necessarily equal to
+        // it (see the function's doc comment for why that's the correct, safe termination rule).
+        let (plan, fee_estimate) = converge_denomination_plan(200_050_000, 1).unwrap();
+        let real_fee = crate::split::split_fee(1, plan.migration_outputs.len().max(1));
+        assert!(
+            real_fee <= fee_estimate,
+            "the reserved fee ({fee_estimate}) must cover the real fee ({real_fee}) for the \
+             plan's own output count, or finalize_split_outputs will reject it at signing time"
+        );
+        // Confirm the plan is actually signable: finalize_split_outputs must not error given the
+        // exact total and outputs converge_denomination_plan settled on.
+        crate::split::finalize_split_outputs(1, 200_050_000, &plan.migration_outputs)
+            .expect("a converged plan must always be signable");
     }
 
     #[test]

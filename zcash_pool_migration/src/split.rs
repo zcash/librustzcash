@@ -57,38 +57,86 @@ pub(crate) fn split_fee(n_spends: usize, n_changes: usize) -> u64 {
     MARGINAL_FEE_ZATOSHI * actions.max(GRACE_ACTIONS)
 }
 
-/// Make the planned outputs balance exactly: `Σ(outputs) = selected_total − fee`, with the last
-/// output absorbing the residual (the denomination plan was made against an estimated fee and the
-/// wallet's balance snapshot; the builder requires an exact balance). Errors when the fee exceeds
-/// the selected total, when there are no outputs, or when absorption would make the last output
-/// non-positive.
-pub(crate) fn adjust_outputs_for_exact_balance(
-    selected_total: u64,
-    fee: u64,
-    outputs: &[u64],
-) -> Result<Vec<u64>, MigrationError> {
-    let required: u64 = selected_total.checked_sub(fee).ok_or_else(|| {
-        MigrationError::Pipeline(format!(
-            "note split: fee {fee} exceeds selected total {selected_total}"
-        ))
-    })?;
-    let mut adjusted = outputs.to_vec();
-    let current: u64 = adjusted.iter().sum();
-    let last = adjusted
-        .last_mut()
-        .ok_or_else(|| MigrationError::Pipeline("note split: no outputs to adjust".into()))?;
-    let new_last = (*last as i128) + (required as i128) - (current as i128);
-    if new_last <= 0 {
-        return Err(MigrationError::Pipeline(format!(
-            "note split: residual absorption drives the last output to {new_last} zatoshi"
-        )));
-    }
-    *last = new_last as u64;
-    Ok(adjusted)
+/// The note-split's resolved outputs, each already mapped to its real (post-shuffle) action index:
+/// the self-funding migration notes (to be migration-locked) and, if the real balance left
+/// anything over, one plain Orchard-pool change output holding exactly the leftover. `change` is
+/// never migration-locked — it is ordinary spendable balance, left for the user to spend normally
+/// or migrate manually later (per spec: values too small to plan a denomination for are left in
+/// the wallet, not forced into a migration note).
+pub(crate) struct SplitOutputs {
+    pub(crate) migration_notes: Vec<(u32, u64)>,
+    // Not yet read outside this module: surfacing the leftover amount to the platform (so it can
+    // offer the sub-1-ZEC "also migrate this" opt-in) is follow-up work.
+    #[allow(dead_code)]
+    pub(crate) change: Option<(u32, u64)>,
 }
 
-/// All spendable Orchard **V2** notes for `account`, excluding migration-locked notes. Selection
-/// goes through [`ReservedInputSource`] so its (txid, output_index) lock filtering applies.
+/// Resolve the transaction's real balance against the planned migration-note values, deciding
+/// whether the split needs an extra plain Orchard-pool change output for the leftover.
+///
+/// The migration notes always keep their exact planned values. The denomination plan was made
+/// against an estimated fee and a balance snapshot that can drift from the real fee computed here
+/// (which depends on the real spend count); drifting a migration note's value to absorb that
+/// difference would leak the drift amount when the note is later spent in a migration transfer,
+/// breaking the "clean power-of-ten crossing value" the self-funding note exists to provide. Any
+/// leftover — fee-estimate drift plus genuine dust — becomes its own plain change output instead,
+/// sized to whatever remains once *that* output's own marginal fee is paid.
+///
+/// If the leftover is smaller than one marginal action fee (so a dedicated change output would
+/// cost more to include than it is worth), it is paid into the transaction fee instead — the only
+/// case in which a leftover is absorbed rather than surfaced, and always for less than
+/// [`MARGINAL_FEE_ZATOSHI`].
+///
+/// Returns `(fee, change)`: the exact fee to build with, and the change output's value if one is
+/// needed.
+///
+/// # Errors
+///
+/// Returns [`MigrationError::Pipeline`] if there are no planned outputs, or if the real fee is
+/// higher than planned by more than the selected total (net of the planned migration outputs) can
+/// cover — the split must be re-planned with a fee estimate that reserves enough headroom (see
+/// [`crate::context::MigrationContext::prepare_note_split`]) rather than shrinking a migration
+/// note to make up the difference.
+pub(crate) fn finalize_split_outputs(
+    n_spends: usize,
+    selected_total: u64,
+    outputs: &[u64],
+) -> Result<(u64, Option<u64>), MigrationError> {
+    if outputs.is_empty() {
+        return Err(MigrationError::Pipeline(
+            "note split: no outputs to adjust".into(),
+        ));
+    }
+    let planned: u64 = outputs.iter().sum();
+    let fee_without_change = split_fee(n_spends, outputs.len());
+    let required = selected_total
+        .checked_sub(fee_without_change)
+        .ok_or_else(|| {
+            MigrationError::Pipeline(format!(
+                "note split: fee {fee_without_change} exceeds selected total {selected_total}"
+            ))
+        })?;
+    let leftover = required.checked_sub(planned).ok_or_else(|| {
+        MigrationError::Pipeline(format!(
+            "note split: real fee exceeds the plan by more than the selected total can cover \
+             (required {required} zatoshi, planned migration outputs {planned} zatoshi)"
+        ))
+    })?;
+    if leftover == 0 {
+        return Ok((fee_without_change, None));
+    }
+    let fee_with_change = split_fee(n_spends, outputs.len() + 1);
+    let extra_action_cost = fee_with_change - fee_without_change;
+    if leftover <= extra_action_cost {
+        // Cheaper to pay the leftover into the fee than to mint a change output for it.
+        return Ok((fee_without_change + leftover, None));
+    }
+    Ok((fee_with_change, Some(leftover - extra_action_cost)))
+}
+
+/// All spendable Orchard **V2** notes for `account`, excluding migration-locked notes and any
+/// already `reserved` by an earlier step in the same signing loop. Selection goes through
+/// [`ReservedInputSource`] so its (txid, output_index) lock filtering applies.
 ///
 /// Upstream now tracks Ironwood as a value pool distinct from Orchard — both share the
 /// `orchard::note::Note` plaintext shape, but the wallet backend accounts for them under separate
@@ -98,13 +146,13 @@ pub(crate) fn adjust_outputs_for_exact_balance(
 pub(crate) fn select_spendable_orchard_notes<P: Parameters>(
     db: &Db<P>,
     account: AccountUuid,
+    reserved: &BTreeSet<ReceivedNoteId>,
     migration_locks: &BTreeSet<(String, u32)>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, MigrationError> {
     let (target, _anchor) = db
         .get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted())?
         .ok_or(MigrationError::NotSynced)?;
-    let reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
-    let source = ReservedInputSource::new(db, &reserved, migration_locks);
+    let source = ReservedInputSource::new(db, reserved, migration_locks);
     let notes = source
         .select_unspent_notes(account, &[ShieldedPool::Orchard], target, &[])
         .map_err(|e| MigrationError::Pipeline(format!("note split: select notes: {e:?}")))?
@@ -116,11 +164,10 @@ pub(crate) fn select_spendable_orchard_notes<P: Parameters>(
 }
 
 /// Build the note-split transaction as an unproven PCZT: spend every spendable Orchard V2 note and
-/// fan the value into one same-address change output per planned denomination. Runs entirely on
-/// public upstream APIs (the high-level `create_pczt_from_proposal` path cannot keep V6
-/// Orchard-protocol outputs in the Orchard pool). Returns the PCZT plus, per requested change
-/// output, its `(action_index, value)` — the residual-adjusted value at the output's real
-/// (post-shuffle) action position within the transaction.
+/// fan the value into one same-address change output per planned denomination, plus (see
+/// [`finalize_split_outputs`]) one further plain change output if the real balance leaves anything
+/// over the plan. Runs entirely on public upstream APIs (the high-level `create_pczt_from_proposal`
+/// path cannot keep V6 Orchard-protocol outputs in the Orchard pool).
 ///
 /// Change outputs are sanctioned under the post-NU6.3 cross-address restriction: the orchard
 /// builder pairs each with a fabricated zero-value spend at the change's own address, signed by
@@ -135,7 +182,7 @@ pub(crate) fn select_spendable_orchard_notes<P: Parameters>(
 ///
 /// Returns [`MigrationError::NotSynced`] if the wallet has no synced block data yet;
 /// [`MigrationError::Pipeline`] if there are no spendable notes, if the requested outputs cannot
-/// be balanced against the selected total (see [`adjust_outputs_for_exact_balance`]), if the note
+/// be balanced against the selected total (see [`finalize_split_outputs`]), if the note
 /// commitment tree is missing the anchor/witness data needed to spend a selected note, or if the
 /// transaction-builder/PCZT-assembly pipeline itself fails.
 pub(crate) fn build_split_pczt<P: Parameters + Clone>(
@@ -145,17 +192,21 @@ pub(crate) fn build_split_pczt<P: Parameters + Clone>(
     orchard_fvk: &orchard::keys::FullViewingKey,
     migration_locks: &BTreeSet<(String, u32)>,
     outputs: &[u64],
-) -> Result<(pczt::Pczt, Vec<(u32, u64)>), MigrationError> {
+) -> Result<(pczt::Pczt, SplitOutputs), MigrationError> {
     // --- immutable phase: select the notes to consolidate ---
-    let notes = select_spendable_orchard_notes(db, account, migration_locks)?;
+    let reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
+    let notes = select_spendable_orchard_notes(db, account, &reserved, migration_locks)?;
     if notes.is_empty() {
         return Err(MigrationError::Pipeline(
             "note split: no spendable Orchard notes".into(),
         ));
     }
     let selected_total: u64 = notes.iter().map(|n| n.note().value().inner()).sum();
-    let fee = split_fee(notes.len(), outputs.len());
-    let adjusted = adjust_outputs_for_exact_balance(selected_total, fee, outputs)?;
+    let (_fee, change) = finalize_split_outputs(notes.len(), selected_total, outputs)?;
+    let mut requested: Vec<u64> = outputs.to_vec();
+    if let Some(change_value) = change {
+        requested.push(change_value);
+    }
 
     let (target, anchor_height) = db
         .get_target_and_anchor_heights(ConfirmationsPolicy::default().trusted())?
@@ -209,7 +260,7 @@ pub(crate) fn build_split_pczt<P: Parameters + Clone>(
     }
     let change_address = orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal);
     let internal_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::Internal);
-    for value in &adjusted {
+    for value in &requested {
         builder
             .add_orchard_change_output::<std::convert::Infallible>(
                 orchard_fvk.clone(),
@@ -229,7 +280,7 @@ pub(crate) fn build_split_pczt<P: Parameters + Clone>(
     // under its action index within the transaction. Map every change output (request order) to
     // its real action index via the build metadata — persisting request-order indices would make
     // the stored (txid, output_index) refs point at the wrong notes.
-    let placed: Vec<(u32, u64)> = adjusted
+    let placed: Vec<(u32, u64)> = requested
         .iter()
         .enumerate()
         .map(|(i, &value)| {
@@ -244,6 +295,15 @@ pub(crate) fn build_split_pczt<P: Parameters + Clone>(
                 })
         })
         .collect::<Result<_, _>>()?;
+    // `requested` is the migration outputs (request order) with the optional plain-change value
+    // appended last — split `placed` the same way so the caller knows which resolved notes to
+    // migration-lock and which (the leftover) to leave ordinary, unlocked Orchard balance.
+    let (migration_notes, change) = if change.is_some() {
+        let (notes, change_slice) = placed.split_at(outputs.len());
+        (notes.to_vec(), change_slice.first().copied())
+    } else {
+        (placed, None)
+    };
 
     // --- assemble the PCZT (Creator -> IoFinalizer) ---
     let created = pczt::roles::creator::Creator::build_from_parts(build_result.pczt_parts)
@@ -252,7 +312,13 @@ pub(crate) fn build_split_pczt<P: Parameters + Clone>(
         .finalize_io()
         .map_err(|e| MigrationError::Pipeline(format!("note split: io finalize: {e:?}")))?;
 
-    Ok((finalized, placed))
+    Ok((
+        finalized,
+        SplitOutputs {
+            migration_notes,
+            change,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -274,31 +340,49 @@ mod tests {
     }
 
     #[test]
-    fn adjust_keeps_outputs_when_balance_is_exact() {
-        let adjusted =
-            adjust_outputs_for_exact_balance(1_000_000, 15_000, &[500_000, 485_000]).unwrap();
-        assert_eq!(adjusted, vec![500_000, 485_000]);
+    fn finalize_reports_no_change_when_balance_is_exact() {
+        // 1 spend, 2 planned outputs: fee = split_fee(1, 2) = 15_000. Selected total leaves
+        // exactly the planned outputs once that fee is paid.
+        let (fee, change) = finalize_split_outputs(1, 1_000_000, &[500_000, 485_000]).unwrap();
+        assert_eq!(fee, 15_000);
+        assert_eq!(change, None);
     }
 
     #[test]
-    fn adjust_absorbs_the_residual_in_the_last_output() {
-        // Planned against an estimated fee; the exact fee differs → last output absorbs the delta.
-        let adjusted =
-            adjust_outputs_for_exact_balance(1_000_000, 15_000, &[500_000, 400_000]).unwrap();
-        assert_eq!(adjusted, vec![500_000, 485_000]);
-        let adjusted =
-            adjust_outputs_for_exact_balance(1_000_000, 15_000, &[500_000, 500_000]).unwrap();
-        assert_eq!(adjusted, vec![500_000, 485_000]);
+    fn finalize_never_folds_leftover_into_a_migration_note() {
+        // Same inputs as the exact-balance case, but the plan undershot: outputs sum to 900_000
+        // instead of 985_000, leaving an 85_000 zatoshi leftover once the (now 3-action) fee is
+        // paid. The migration outputs must come back byte-for-byte unchanged; the leftover must
+        // surface as a separate change value, never added to `outputs[1]`.
+        let (fee, change) = finalize_split_outputs(1, 1_000_000, &[500_000, 400_000]).unwrap();
+        // fee_without_change = split_fee(1, 2) = 15_000; leftover = 1_000_000 - 15_000 - 900_000
+        // = 85_000. fee_with_change = split_fee(1, 3) = 20_000; extra_action_cost = 5_000.
+        // leftover (85_000) > extra_action_cost, so a change output is minted.
+        assert_eq!(fee, 20_000);
+        assert_eq!(change, Some(80_000));
     }
 
     #[test]
-    fn adjust_rejects_a_nonpositive_last_output() {
-        assert!(adjust_outputs_for_exact_balance(1_000_000, 15_000, &[985_000, 10_000]).is_err());
+    fn finalize_folds_sub_marginal_leftover_into_fee_not_a_note() {
+        // Leftover (2_000) is smaller than the marginal cost of adding a change action (5_000):
+        // cheaper to pay it into the fee than to mint a dust output for it. Still never touches a
+        // migration note's value.
+        let (fee, change) = finalize_split_outputs(1, 1_012_000, &[500_000, 495_000]).unwrap();
+        assert_eq!(fee, 17_000);
+        assert_eq!(change, None);
     }
 
     #[test]
-    fn adjust_rejects_fee_exceeding_total_and_empty_outputs() {
-        assert!(adjust_outputs_for_exact_balance(10_000, 15_000, &[5_000]).is_err());
-        assert!(adjust_outputs_for_exact_balance(1_000_000, 15_000, &[]).is_err());
+    fn finalize_rejects_a_plan_the_real_fee_cannot_cover() {
+        // fee_without_change = split_fee(1, 2) = 15_000; required = 1_010_000 - 15_000 = 995_000,
+        // which is less than the planned outputs (1_000_000) — the plan under-reserved for the
+        // real fee. Must error rather than shrink a migration note to make up the difference.
+        assert!(finalize_split_outputs(1, 1_010_000, &[500_000, 500_000]).is_err());
+    }
+
+    #[test]
+    fn finalize_rejects_fee_exceeding_total_and_empty_outputs() {
+        assert!(finalize_split_outputs(1, 9_000, &[5_000]).is_err());
+        assert!(finalize_split_outputs(1, 1_000_000, &[]).is_err());
     }
 }
