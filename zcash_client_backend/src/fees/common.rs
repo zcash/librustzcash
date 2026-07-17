@@ -2,7 +2,8 @@ use core::cmp::{Ordering, max, min};
 use std::num::{NonZeroU64, NonZeroUsize};
 
 use zcash_primitives::transaction::fees::{
-    FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
+    FeeRule, transparent,
+    zip317::{MINIMUM_FEE, P2PKH_STANDARD_INPUT_SIZE, P2PKH_STANDARD_OUTPUT_SIZE},
 };
 use zcash_protocol::{
     ShieldedPool,
@@ -861,9 +862,24 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     let mut t_dust: Vec<_> = transparent_inputs
         .iter()
         .filter_map(|i| {
-            // For now, we're just assuming P2PKH inputs, so we don't check the
-            // size of the input script.
-            if i.coin().value() <= marginal_fee {
+            // A transparent input's marginal contribution to a ZIP 317-like fee is
+            // proportional to its serialized size: a P2SH input with a known size may
+            // amount to more than one logical action, so its economic threshold is
+            // correspondingly higher than a standard P2PKH input's. An input of unknown
+            // size is treated as having the standard P2PKH size; if it is in fact
+            // larger, fee computation will reject it as unsizeable in any case.
+            let input_actions = match i.serialized_size() {
+                transparent::InputSize::Known(size) => {
+                    size.div_ceil(P2PKH_STANDARD_INPUT_SIZE).max(1)
+                }
+                transparent::InputSize::Unknown(_) => 1,
+            };
+            // The multiplication can only overflow for absurd marginal fees or input
+            // sizes; saturating to `MAX_MONEY` treats any such input as dust.
+            let marginal_input_fee = (marginal_fee
+                * u64::try_from(input_actions).expect("input action count fits into a u64"))
+            .unwrap_or(Zatoshis::const_from_u64(zcash_protocol::value::MAX_MONEY));
+            if i.coin().value() <= marginal_input_fee {
                 Some(i.outpoint().clone())
             } else {
                 None
@@ -1016,8 +1032,12 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
             #[cfg(not(feature = "orchard"))]
             let i_action_count = 0;
 
-            // To calculate the number of unused actions, we assume that transparent inputs
-            // and outputs are P2PKH.
+            // This estimate treats each transparent input and output as a single logical
+            // action, which may under-count actions for P2SH inputs larger than the
+            // standard P2PKH input size. That can only make the grace-input allocation
+            // below more permissive (admitting a dust input whose spend is not actually
+            // free); the authoritative fee computation performed afterwards accounts for
+            // the actual serialized sizes.
             Ok(
                 max(t_req_inputs + t_extra, t_outputs_len + change.transparent)
                     + max(s_spend_count, s_output_count)

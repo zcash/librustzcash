@@ -1723,6 +1723,100 @@ mod tests {
         );
     }
 
+    /// Constructs two non-dust P2PKH inputs and one P2SH input with the given value and a
+    /// known 300-byte serialized size, paying a single 40_000-zat transparent output, and
+    /// returns the change computation result under the default (`ShieldChange`) policy.
+    #[cfg(feature = "transparent-inputs")]
+    fn compute_balance_with_p2sh_input_of_value(
+        p2sh_value: u64,
+    ) -> Result<
+        crate::fees::TransactionBalance,
+        ChangeError<zcash_primitives::transaction::fees::zip317::FeeError, Infallible>,
+    > {
+        use crate::fees::sapling as sapling_fees;
+        use crate::wallet::WalletTransparentOutput;
+        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Sapling,
+            DustOutputPolicy::default(),
+        );
+
+        let p2pkh_input = |txid_byte: u8| {
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([txid_byte; 32], 0),
+                TxOut::new(
+                    Zatoshis::const_from_u64(100_000),
+                    TransparentAddress::PublicKeyHash([1u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2PKH output")
+        };
+        let inputs = [
+            p2pkh_input(1),
+            p2pkh_input(2),
+            WalletTransparentOutput::<()>::from_parts(
+                OutPoint::new([3u8; 32], 0),
+                TxOut::new(
+                    Zatoshis::from_u64(p2sh_value).unwrap(),
+                    TransparentAddress::ScriptHash([7u8; 20]).script().into(),
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
+            .expect("valid P2SH output")
+            .with_known_input_size(300),
+        ];
+
+        change_strategy.compute_balance::<_, Infallible>(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap()
+                .into(),
+            &inputs,
+            &[TxOut::new(
+                Zatoshis::const_from_u64(40_000),
+                Script::default(),
+            )],
+            &sapling_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
+            None,
+            &(),
+        )
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn p2sh_input_dust_threshold_scales_with_input_size() {
+        use ::transparent::bundle::OutPoint;
+
+        // A P2SH input with a known 300-byte serialized size contributes
+        // `ceil(300 / 150) = 2` logical actions to a ZIP 317 fee, so its economic
+        // threshold is `2 * 5_000 = 10_000` zats. A 9_000-zat input is uneconomic even
+        // though its value exceeds the 5_000-zat marginal fee that bounds the threshold
+        // for a standard P2PKH input.
+        assert_matches!(
+            compute_balance_with_p2sh_input_of_value(9_000),
+            Err(ChangeError::DustInputs { transparent, .. })
+                if transparent == vec![OutPoint::new([3u8; 32], 0)]
+        );
+
+        // A value just above the size-scaled threshold is economic to spend.
+        assert_matches!(compute_balance_with_p2sh_input_of_value(10_001), Ok(_));
+    }
+
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_policy_has_no_effect_on_shielded_flows() {
