@@ -3,6 +3,7 @@
 use incrementalmerkletree::Position;
 use rusqlite::{Connection, Row, named_params, types::Value};
 use std::{num::NonZeroU64, rc::Rc};
+use tracing::warn;
 
 use zcash_client_backend::{
     data_api::{
@@ -341,8 +342,18 @@ where
     let Some(anchor_height) =
         get_anchor_height(conn, target_height, confirmations_policy.trusted())?
     else {
+        warn!(
+            "MIGRATION_DIAG select_spendable_notes: get_anchor_height returned None \
+             (protocol={protocol:?} target_height={target_height:?} defer_witness={defer_witness} \
+             trusted_depth={:?}) — no checkpoint found at or below the trusted floor, 0 notes",
+            confirmations_policy.trusted()
+        );
         return Ok(vec![]);
     };
+    warn!(
+        "MIGRATION_DIAG select_spendable_notes: protocol={protocol:?} target_height={target_height:?} \
+         anchor_height={anchor_height:?} defer_witness={defer_witness}"
+    );
 
     match target_value {
         TargetValue::AllFunds(mode) => select_unspent_notes(
@@ -574,6 +585,45 @@ where
     // When an anchor exists within an unscanned range, nodes without stabilized witness data will
     // not be reliably constructable. The selection query will use this to filter out such notes.
     let tip_unscanned = unscanned_tip_exists(conn, anchor_height, table_prefix)?;
+    warn!(
+        "MIGRATION_DIAG select_spendable_notes_matching_value: protocol={protocol:?} \
+         target_value={target_value:?} target_height={target_height:?} anchor_height={anchor_height:?} \
+         tip_unscanned={tip_unscanned} defer_witness={defer_witness}"
+    );
+    {
+        let mut diag_stmt = conn.prepare(&format!(
+            "SELECT rn.id, rn.value, rn.witness_stabilized, t.block AS mined_height,
+                    scan_state.max_priority
+             FROM {table_prefix}_received_notes rn
+             INNER JOIN accounts ON accounts.id = rn.account_id
+             INNER JOIN transactions t ON t.id_tx = rn.transaction_id
+             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+                ON rn.commitment_tree_position >= scan_state.start_position
+                AND rn.commitment_tree_position < scan_state.end_position_exclusive
+             WHERE accounts.uuid = :account_uuid
+             AND rn.id NOT IN ({})",
+            spent_notes_clause(table_prefix)
+        ))?;
+        let rows = diag_stmt.query_map(named_params![":account_uuid": account.0], |row| {
+            Ok((
+                row.get::<_, i64>("id")?,
+                row.get::<_, i64>("value")?,
+                row.get::<_, bool>("witness_stabilized")?,
+                row.get::<_, Option<u32>>("mined_height")?,
+                row.get::<_, Option<i64>>("max_priority")?,
+            ))
+        })?;
+        for row in rows {
+            let (id, value, witness_stabilized, mined_height, max_priority) = row?;
+            warn!(
+                "MIGRATION_DIAG unspent note: id={id} value={value} \
+                 witness_stabilized={witness_stabilized} mined_height={mined_height:?} \
+                 shard_max_priority={max_priority:?} (anchor_height={anchor_height:?} \
+                 mined_at_or_below_anchor={:?})",
+                mined_height.map(|h| h <= u32::from(anchor_height))
+            );
+        }
+    }
 
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached.
@@ -716,16 +766,22 @@ where
                         // A stabilized note was confirmed well beyond any reasonable
                         // confirmations policy at stabilization time, so the confirmations
                         // check is trivially satisfied.
-                        let has_confirmations = witness_stabilized
-                            || confirmations_policy.confirmations_until_spendable(
-                                target_height,
-                                PoolType::Shielded(protocol),
-                                Some(note.spending_key_scope()),
-                                note.mined_height(),
-                                tx_trusted,
-                                max_shielding_input_height,
-                                tx_shielding_inputs_trusted,
-                            ) == 0;
+                        let remaining = confirmations_policy.confirmations_until_spendable(
+                            target_height,
+                            PoolType::Shielded(protocol),
+                            Some(note.spending_key_scope()),
+                            note.mined_height(),
+                            tx_trusted,
+                            max_shielding_input_height,
+                            tx_shielding_inputs_trusted,
+                        );
+                        let has_confirmations = witness_stabilized || remaining == 0;
+                        warn!(
+                            "MIGRATION_DIAG post-SQL note: mined_height={:?} \
+                             witness_stabilized={witness_stabilized} tx_trusted={tx_trusted} \
+                             confirmations_remaining={remaining} has_confirmations={has_confirmations}",
+                            note.mined_height()
+                        );
 
                         has_confirmations.then_some(note)
                     },
