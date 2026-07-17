@@ -290,6 +290,156 @@ where
     })
 }
 
+/// The Orchard-specific wallet operations the engine needs to BUILD and PRE-SIGN a migration: the
+/// account's viewing key, note witnesses, an anchor to build against, and spend-authorization signing.
+/// Kept separate from [`MigrationBackend`] so the planning and persistence parts stay pure; one wallet
+/// implements both over the same account. Behind the `orchard` feature.
+#[cfg(feature = "orchard")]
+pub trait MigrationCrypto {
+    /// The backend's error type (shared with its [`MigrationBackend`] impl).
+    type Error;
+
+    /// The account's Orchard full viewing key.
+    fn orchard_fvk(&self) -> Result<orchard::keys::FullViewingKey, Self::Error>;
+
+    /// A current Orchard anchor to build against; every spend's witness resolves against this same tree
+    /// state. The proof is re-anchored to a drawn boundary at proving time, and the anchor is not in the
+    /// sighash, so a current or placeholder anchor is fine here.
+    fn orchard_anchor(&self) -> Result<orchard::Anchor, Self::Error>;
+
+    /// Resolve the spendable wallet note at `index` (into `spendable_orchard_note_values`) to its note
+    /// and a witness against `anchor`.
+    fn resolve_wallet_note(
+        &self,
+        index: usize,
+        anchor: orchard::Anchor,
+    ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error>;
+
+    /// Add the account's Orchard spend-authorization signatures to a finalized, unproven PCZT.
+    fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
+}
+
+/// Why committing a migration's preparation failed.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+pub enum CommitError<E> {
+    /// A wallet backend operation (witness, key, signing, or storage) failed.
+    Backend(E),
+    /// Building or serializing a transaction failed.
+    Build(alloc::string::String),
+    /// The plan needs multi-layer preparation. Pre-signing a later layer requires the output notes of
+    /// an earlier, unmined layer, which cannot yet be recovered from a built PCZT, so two-phase signing
+    /// commits only single-layer preparation. Full one-session pre-signing awaits a public pczt
+    /// output-recovery API.
+    UnsupportedMultiLayer,
+}
+
+#[cfg(feature = "orchard")]
+impl<E: fmt::Display> fmt::Display for CommitError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CommitError::Backend(e) => write!(f, "wallet backend error: {e}"),
+            CommitError::Build(m) => write!(f, "building the preparation failed: {m}"),
+            CommitError::UnsupportedMultiLayer => {
+                f.write_str("multi-layer preparation cannot yet be pre-signed (single-layer only)")
+            }
+        }
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<E: core::error::Error> core::error::Error for CommitError<E> {}
+
+/// Commit a planned migration's PREPARATION: build every preparation transaction, pre-sign it with the
+/// account's spend authorization, and persist it (as its serialized PCZT and metadata) through the
+/// backend, so the application can broadcast the preparation and, once it is mined, build and sign the
+/// transfers (the second phase). This is the two-phase signing path (ZIP 318 permits more than one
+/// signing session); it handles single-layer preparation, the common case, and reports
+/// [`CommitError::UnsupportedMultiLayer`] for a plan whose later layers spend earlier layers' still
+/// unmined outputs.
+///
+/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3), and
+/// `rng` a cryptographically secure RNG.
+#[cfg(feature = "orchard")]
+pub fn commit_preparation<P, B, R>(
+    params: &P,
+    target_height: u32,
+    backend: &mut B,
+    plan: &MigrationPlan,
+    rng: &mut R,
+) -> Result<MigrationState, CommitError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+    R: RngCore + rand_core::CryptoRng,
+{
+    use crate::build::build_prep_tx;
+    use crate::preparation::PrepInput;
+
+    let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
+    let anchor = backend.orchard_anchor().map_err(CommitError::Backend)?;
+    let expiry_height = crate::scheduling::expiry_height(target_height);
+
+    let mut transactions: Vec<MigrationTransaction> = Vec::new();
+    let mut next_id = 0u32;
+
+    for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
+        for (index, prep_tx) in prep_layer.iter().enumerate() {
+            let mut spends = Vec::with_capacity(prep_tx.inputs().len());
+            for input in prep_tx.inputs() {
+                match input {
+                    PrepInput::Wallet(i) => {
+                        let witness = backend
+                            .resolve_wallet_note(*i, anchor)
+                            .map_err(CommitError::Backend)?;
+                        spends.push(witness);
+                    }
+                    // Two-phase signing cannot pre-sign a spend of an earlier layer's unmined output.
+                    PrepInput::Prior { .. } => return Err(CommitError::UnsupportedMultiLayer),
+                }
+            }
+
+            let (pczt, _placed) = build_prep_tx(
+                params,
+                target_height,
+                &fvk,
+                anchor,
+                spends,
+                prep_tx.outputs(),
+                &mut *rng,
+            )
+            .map_err(|e| CommitError::Build(format!("{e}")))?;
+
+            let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
+            let bytes = signed
+                .serialize()
+                .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
+
+            transactions.push(MigrationTransaction {
+                id: MigrationTxId(next_id),
+                kind: MigrationTxKind::Preparation { layer, index },
+                pczt: bytes,
+                depends_on: Vec::new(),
+                scheduled_height: target_height,
+                expiry_height,
+                anchor_boundary: None,
+                state: MigrationTxState::Signed,
+            });
+            next_id += 1;
+        }
+    }
+
+    let state = MigrationState {
+        status: MigrationStatus::Committed,
+        note_split: plan.note_split().clone(),
+        transactions,
+    };
+    backend
+        .store_migration(&state)
+        .map_err(CommitError::Backend)?;
+    Ok(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,6 +576,134 @@ mod tests {
         assert_eq!(
             loaded.transactions[0].state,
             MigrationTxState::Mined { height: 2_000_105 }
+        );
+    }
+}
+
+#[cfg(all(test, feature = "orchard"))]
+mod commit_tests {
+    use super::*;
+    use rand_chacha::ChaCha8Rng;
+    use rand_core::SeedableRng;
+    use zcash_protocol::value::COIN;
+
+    use orchard::keys::{FullViewingKey, SpendAuthorizingKey};
+
+    use crate::build::sign_pczt;
+    use crate::build::test_util::{
+        TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
+    };
+    use crate::note_splitting::{FeePolicy, Zip317FeePolicy};
+    use crate::preparation::PREP_TX_ACTIONS;
+
+    fn prep_fee() -> u64 {
+        PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi()
+    }
+
+    /// A wallet with a single spendable note, which resolves every preparation input to that note's
+    /// witness, signs with its own spend-authorizing key, and stores the migration in memory.
+    struct CommitMock {
+        notes: Vec<u64>,
+        witness: (orchard::note::Note, orchard::tree::MerklePath),
+        anchor: orchard::Anchor,
+        fvk: FullViewingKey,
+        ask: SpendAuthorizingKey,
+        stored: Option<MigrationState>,
+    }
+
+    impl MigrationBackend for CommitMock {
+        type Error = core::convert::Infallible;
+
+        fn spendable_orchard_note_values(&self) -> Result<Vec<u64>, Self::Error> {
+            Ok(self.notes.clone())
+        }
+
+        fn chain_tip_height(&self) -> Result<u32, Self::Error> {
+            Ok(2_000_000)
+        }
+
+        fn store_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+            self.stored = Some(state.clone());
+            Ok(())
+        }
+
+        fn load_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            Ok(self.stored.clone())
+        }
+
+        fn update_transaction(
+            &mut self,
+            _id: MigrationTxId,
+            _state: MigrationTxState,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    impl MigrationCrypto for CommitMock {
+        type Error = core::convert::Infallible;
+
+        fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
+            Ok(self.fvk.clone())
+        }
+
+        fn orchard_anchor(&self) -> Result<orchard::Anchor, Self::Error> {
+            Ok(self.anchor)
+        }
+
+        fn resolve_wallet_note(
+            &self,
+            _index: usize,
+            _anchor: orchard::Anchor,
+        ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error> {
+            Ok(self.witness.clone())
+        }
+
+        fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
+            Ok(sign_pczt(pczt, &self.ask).expect("signs the migration PCZT"))
+        }
+    }
+
+    #[test]
+    fn commits_single_layer_preparation() {
+        let seed = 7u64;
+        let sk = spending_key(seed);
+        let fvk = FullViewingKey::from(&sk);
+        let ask = SpendAuthorizingKey::from(&sk);
+        let balance = 78 * COIN;
+        let (note, path, anchor) = single_note_witness(&fvk, balance, seed);
+
+        let mut backend = CommitMock {
+            notes: vec![balance],
+            witness: (note, path),
+            anchor,
+            fvk: fvk.clone(),
+            ask,
+            stored: None,
+        };
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&backend, prep_fee(), &mut rng).expect("plans a migration");
+        // A single note funding a handful of denominations needs one preparation layer.
+        assert_eq!(plan.preparation().layers().len(), 1);
+
+        let params = regtest_network(true);
+        let mut build_rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(&params, TARGET_HEIGHT, &mut backend, &plan, &mut build_rng)
+            .expect("commits the preparation");
+
+        // Every preparation transaction is built, pre-signed, and persisted as its PCZT bytes.
+        assert_eq!(state.status, MigrationStatus::Committed);
+        let prep_count: usize = plan.preparation().layers().iter().map(|l| l.len()).sum();
+        assert_eq!(state.transactions.len(), prep_count);
+        for tx in &state.transactions {
+            assert!(matches!(tx.kind, MigrationTxKind::Preparation { .. }));
+            assert_eq!(tx.state, MigrationTxState::Signed);
+            assert!(!tx.pczt.is_empty(), "the pre-signed PCZT is stored");
+        }
+        assert!(
+            backend.load_migration().unwrap().is_some(),
+            "the committed migration is persisted"
         );
     }
 }
