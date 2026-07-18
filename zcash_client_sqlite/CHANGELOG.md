@@ -24,20 +24,22 @@ workspace.
   names begin with the `ext_` prefix reserved for external migrations, and denies
   everything else (DDL, `PRAGMA`, `ATTACH`/`DETACH`, and transaction control).
 - `zewif::ZewifImportReport::addresses_never_exposed` counts transparent
-  addresses recorded in a ZeWIF document with no exposure height that also
-  appear in none of the document's transactions, and which are therefore
-  deliberately left unexposed on import.
+  addresses recorded in a ZeWIF document that are not known to have been
+  exposed, and which are therefore deliberately left unexposed on import.
 
 ### Fixed
 - The `zewif` importer no longer marks transparent addresses that have no
   recorded exposure height (`zewif::Address::exposed_at_height() == None`, e.g.
-  zcashd keypool reserves) *and appear in none of the imported transactions* as
-  exposed. Previously every such address was marked exposed at the account
-  birthday, which could exhaust the transparent gap limit (in particular the
-  small internal/change gap) and permanently block change-address reservation
-  after a zcashd migration. Addresses that lack a recorded exposure height but
-  appear as recipients in an imported transaction are still treated as exposed,
-  at the mined height recorded when the transaction is stored.
+  zcashd keypool reserves) as exposed unconditionally. Previously every such
+  address was marked exposed at the account birthday, which could exhaust the
+  transparent gap limit (in particular the small internal/change gap) and
+  permanently block change-address reservation after a zcashd migration. Such an
+  address is now treated as exposed only if the wallet already considers it so
+  (which, since the document's transactions are imported first, covers every
+  address those transactions show to have been used on-chain, change addresses
+  included), or if the document exposes an address at a higher child index under
+  the same account and key scope, since transparent addresses are handed out in
+  index order.
 
 ## [0.22.0-rc.1] - 2026-07-12
 
