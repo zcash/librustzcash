@@ -7276,6 +7276,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_pool_migration_sqlite"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "uuid",
+ "zcash_pool_migration_backend",
+ "zcash_protocol",
+]
+
+[[package]]
 name = "zcash_primitives"
 version = "0.29.0"
 dependencies = [

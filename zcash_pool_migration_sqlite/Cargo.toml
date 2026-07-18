@@ -1,0 +1,32 @@
+[package]
+name = "zcash_pool_migration_sqlite"
+description = "SQLite persistence for the Zcash value-pool migration engine"
+version = "0.1.0"
+authors = [
+    "Danny Willems <be.danny.willems@gmail.com>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+# The migration engine: the state types and the PoolMigrationRead/PoolMigrationWrite
+# store traits this crate implements over SQLite.
+zcash_pool_migration_backend = { version = "0.1.0", path = "../zcash_pool_migration_backend" }
+
+# The protocol value/height/txid types the engine's API now speaks in
+# (Zatoshis, BlockHeight, TxId): needed to encode them to and decode them
+# from the SQLite columns.
+zcash_protocol.workspace = true
+
+rusqlite.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
