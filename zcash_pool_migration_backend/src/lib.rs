@@ -27,5 +27,6 @@ pub mod engine;
 pub mod note_splitting;
 pub mod preparation;
 pub mod scheduling;
+pub mod state;
 #[cfg(feature = "wallet")]
 pub mod wallet;
