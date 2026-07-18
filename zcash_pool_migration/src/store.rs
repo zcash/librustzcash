@@ -278,7 +278,37 @@ pub(crate) fn init(conn: &Connection) -> rusqlite::Result<()> {
             created_at_ms INTEGER NOT NULL,
             PRIMARY KEY (account_uuid, network, kind, staging_id)
         );",
-    )
+    )?;
+    add_pending_txs_proof_columns_if_missing(conn)
+}
+
+/// `CREATE TABLE IF NOT EXISTS` above is a no-op against a database whose
+/// `ext_ironwood_migration_pending_txs` table already existed (from a build predating the
+/// sign-now/prove-later pipeline, design spec `2026-07-17-migration-sign-now-prove-later-design.md`
+/// §4.1) — such a table lacks `proof_status`/`spend_action_index` entirely, so every query
+/// referencing them (`next_due_transfer`, `has_due_transfer`, `finalize_pending_tx`, ...) fails with
+/// "no such column". Add the two columns if they aren't already present; idempotent and safe to run
+/// on every `init()` call, including against a fresh table that already has them (the `PRAGMA`
+/// check below is `false` in that case, so this becomes a no-op).
+fn add_pending_txs_proof_columns_if_missing(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(ext_ironwood_migration_pending_txs)")?;
+    let existing_columns: std::collections::HashSet<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+
+    if !existing_columns.contains("proof_status") {
+        conn.execute_batch(
+            "ALTER TABLE ext_ironwood_migration_pending_txs
+                 ADD COLUMN proof_status TEXT NOT NULL DEFAULT 'ready';",
+        )?;
+    }
+    if !existing_columns.contains("spend_action_index") {
+        conn.execute_batch(
+            "ALTER TABLE ext_ironwood_migration_pending_txs
+                 ADD COLUMN spend_action_index INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) fn insert_run(conn: &Connection, run: &NewRun) -> rusqlite::Result<()> {
@@ -684,6 +714,54 @@ mod tests {
         let conn = Connection::open(file.path()).unwrap();
         init(&conn).unwrap();
         (file, conn)
+    }
+
+    #[test]
+    fn init_adds_proof_columns_to_a_pre_existing_pending_txs_table() {
+        // Simulates a database created before the sign-now/prove-later pipeline (design spec
+        // 2026-07-17-migration-sign-now-prove-later-design.md §4.1): the pending_txs table exists
+        // but predates proof_status/spend_action_index entirely. `CREATE TABLE IF NOT EXISTS` alone
+        // would leave it that way, and every query referencing those columns would fail with
+        // "no such column" (observed live on a testnet device whose wallet DB predated this
+        // change).
+        let file = NamedTempFile::new().unwrap();
+        let conn = Connection::open(file.path()).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ext_ironwood_migration_pending_txs (
+                run_id TEXT NOT NULL,
+                txid_hex TEXT PRIMARY KEY,
+                raw_pczt BLOB NOT NULL,
+                anchor_height INTEGER NOT NULL,
+                target_height INTEGER NOT NULL,
+                next_executable_after_height INTEGER NOT NULL,
+                expiry_height INTEGER NOT NULL,
+                value_zatoshi INTEGER NOT NULL,
+                fee_zatoshi INTEGER NOT NULL,
+                selected_note_txid TEXT NOT NULL,
+                selected_note_output_index INTEGER NOT NULL,
+                selected_note_value INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                metadata_json TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+
+        // The real init() path: CREATE TABLE IF NOT EXISTS is a no-op against the table above, so
+        // this only exercises the ALTER TABLE fallback.
+        init(&conn).unwrap();
+
+        let has_due = has_due_transfer(&conn, "nonexistent-run", 0).unwrap();
+        assert!(!has_due, "query referencing proof_status must not error");
+
+        let columns: std::collections::HashSet<String> = conn
+            .prepare("PRAGMA table_info(ext_ironwood_migration_pending_txs)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(columns.contains("proof_status"));
+        assert!(columns.contains("spend_action_index"));
     }
 
     #[test]
