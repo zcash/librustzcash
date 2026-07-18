@@ -235,6 +235,17 @@ background-scheduling subsystem (§7) should treat `expiry_height` as a hard cut
 awaiting-proof rows too, surfaced via a new `AttentionReason` variant — do not assume this is
 already handled.
 
+**Fixed 2026-07-18 (was flagged Minor in review, hit live within hours):** the review also flagged
+that `init()`'s `CREATE TABLE IF NOT EXISTS` is a no-op against a `pending_txs` table that already
+existed from before this pipeline landed, leaving it without `proof_status`/`spend_action_index`
+entirely. This was reproduced live on a testnet device on the very next real test run — the wallet
+DB predated today's schema change, and every query referencing the new columns
+(`hasOverdueTransfers` in this case) crashed with "no such column" immediately after a successful
+note-split broadcast. Fixed (commit `4b5db3f697`) with an idempotent `ALTER TABLE` fallback in
+`init()`, guarded by `PRAGMA table_info`, plus a regression test
+(`init_adds_proof_columns_to_a_pre_existing_pending_txs_table`) that recreates the pre-existing-table
+scenario directly rather than relying on live device state to catch a regression.
+
 ## 5. Anchor reuse across a schedule (multiplicity / cohorts)
 
 ZIP 318's "Anchor-height bucketing and cohorts": multiple transfers from the *same* wallet MAY
