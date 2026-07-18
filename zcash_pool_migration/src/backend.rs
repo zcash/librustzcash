@@ -640,9 +640,23 @@ pub(crate) fn finalize_self_funding_transfer<P: Parameters + Clone>(
         }
     })?;
     let Some(merkle_path) = witness else {
+        tracing::debug!(
+            "MIGRATION_DIAG finalize_self_funding_transfer: txid={} note (txid={} output_index={}) \
+             not witnessable yet at anchor_height={anchor_height:?} — transient no-op, will retry",
+            row.txid_hex,
+            row.selected_note_txid,
+            row.selected_note_output_index,
+        );
         return Ok(None);
     };
     let merkle_path: orchard::tree::MerklePath = merkle_path.into();
+    tracing::debug!(
+        "MIGRATION_DIAG finalize_self_funding_transfer: txid={} note (txid={} output_index={}) IS \
+         witnessed — attaching real anchor_height={anchor_height:?} anchor={anchor:?} and proving",
+        row.txid_hex,
+        row.selected_note_txid,
+        row.selected_note_output_index,
+    );
 
     let pczt = pczt::Pczt::parse(&row.raw_pczt)
         .map_err(|e| MigrationError::Pipeline(format!("finalize transfer: parse pczt: {e:?}")))?;
@@ -667,6 +681,12 @@ pub(crate) fn finalize_self_funding_transfer<P: Parameters + Clone>(
     let tx = pczt::roles::tx_extractor::TransactionExtractor::new(finalized)
         .extract()
         .map_err(|e| MigrationError::Pipeline(format!("finalize transfer: extract tx: {e:?}")))?;
+    tracing::debug!(
+        "MIGRATION_DIAG finalize_self_funding_transfer: proven and finalized, final_txid={} \
+         pczt_bytes={} -> ReadyToBroadcast",
+        tx.txid(),
+        pczt_bytes.len(),
+    );
     Ok(Some(SignedPcztOutcome {
         txid: tx.txid(),
         pczt_bytes,
@@ -1187,6 +1207,11 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
         .transfers()
         .first()
         .map(|t| u32::from(t.anchor_height()));
+    tracing::debug!(
+        "MIGRATION_DIAG sign_schedule: run_id={run_id} target={target:?} pinned_anchor={pinned_anchor:?} \
+         transfer_count={}",
+        schedule.transfers().len()
+    );
     if let Some(anchor) = pinned_anchor {
         retain_anchor(db, anchor)?;
     }
@@ -1225,6 +1250,15 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
                     spent_note_output_index,
                     spent_note_value,
                 } = outcome;
+                tracing::debug!(
+                    "MIGRATION_DIAG sign_schedule: transfer id={} amount={} took SELF-FUNDING path, \
+                     spending note txid={spent_note_txid} output_index={spent_note_output_index} \
+                     value={spent_note_value} (action_index={spend_action_index}) -> \
+                     SignedAwaitingProof, pczt_bytes={}",
+                    t.id(),
+                    u64::from(t.amount()),
+                    raw_pczt.len(),
+                );
                 reserved.insert(spent_note_id);
                 store::insert_pending_txs(
                     conn,
@@ -1251,7 +1285,14 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
                 &locks,
                 request,
             )?;
-            reserved.extend(proposal_note_refs(&proposal));
+            let selected_notes = proposal_note_refs(&proposal);
+            tracing::debug!(
+                "MIGRATION_DIAG sign_schedule: transfer id={} amount={} took FALLBACK (ordinary \
+                 input-selection) path, selected_notes={selected_notes:?}, eagerly proven",
+                t.id(),
+                u64::from(t.amount()),
+            );
+            reserved.extend(selected_notes);
             let pczt = create_transfer_pczt(
                 db,
                 network,
@@ -1260,6 +1301,13 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
                 u32::from(t.expiry_height()),
             )?;
             let signed = prove_sign_finalize(pczt, usk)?;
+            tracing::debug!(
+                "MIGRATION_DIAG sign_schedule: transfer id={} FALLBACK path signed, txid={} \
+                 pczt_bytes={}",
+                t.id(),
+                signed.txid,
+                signed.pczt_bytes.len(),
+            );
             store::insert_pending_txs(conn, run_id, &[pending_row(t, &proposal, &signed)])?;
         }
         Ok(())

@@ -479,16 +479,26 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         // Pre-split there are no migration locks yet, so no exclusions apply.
         let locks = BTreeSet::new();
         let reserved = BTreeSet::new();
-        let n_spends =
-            crate::split::select_spendable_orchard_notes(&db, self.account, &reserved, &locks)?
-                .len()
-                .max(1);
+        let candidates =
+            crate::split::select_spendable_orchard_notes(&db, self.account, &reserved, &locks)?;
+        tracing::debug!(
+            "MIGRATION_DIAG prepare_note_split: total_spendable={total} candidate_notes={:?}",
+            candidates
+                .iter()
+                .map(|n| n.note().value().inner())
+                .collect::<Vec<_>>()
+        );
+        let n_spends = candidates.len().max(1);
         let (plan, fee_estimate) = converge_denomination_plan(total, n_spends)?;
         let output_values = plan
             .migration_outputs
             .iter()
             .map(|&v| Zatoshis::const_from_u64(v))
-            .collect();
+            .collect::<Vec<_>>();
+        tracing::debug!(
+            "MIGRATION_DIAG prepare_note_split: proposed_outputs={:?} fee_estimate={fee_estimate}",
+            output_values.iter().map(|&z| u64::from(z)).collect::<Vec<_>>()
+        );
         Ok(NoteSplitProposal::from_parts(
             output_values,
             Zatoshis::const_from_u64(fee_estimate),
@@ -544,6 +554,12 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             usk,
         )?;
         let txid_hex = signed.txid.to_string();
+        tracing::debug!(
+            "MIGRATION_DIAG sign_note_split: txid={txid_hex} migration_notes(action_index,value)={:?} \
+             leftover_change={:?}",
+            split_outputs.migration_notes,
+            split_outputs.change,
+        );
         // Only the self-funding migration notes are locked for the schedule. Any plain change
         // output (`split_outputs.change`) is deliberately left untracked here: it is ordinary,
         // unlocked Orchard balance for the wallet's regular scanner to pick up once the split
@@ -1047,8 +1063,12 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 );
             }
         }
+        tracing::debug!(
+            "MIGRATION_DIAG propose_migration_transfers: total_spendable={total} target={target:?} \
+             anchor={anchor:?} crossing_values={crossing_values:?} include_residual={include_residual}"
+        );
         let run_id = new_run_id();
-        Ok(scheduling::build_schedule(
+        let schedule = scheduling::build_schedule(
             &mut OsRng,
             &run_id,
             &crossing_values,
@@ -1058,7 +1078,22 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             // send-time machinery's job (background delivery; future: no send earlier than ~10
             // minutes after the last sync).
             0,
-        ))
+        );
+        tracing::debug!(
+            "MIGRATION_DIAG propose_migration_transfers: batch={:?}",
+            schedule
+                .transfers()
+                .iter()
+                .map(|t| (
+                    t.id().to_string(),
+                    u64::from(t.amount()),
+                    u32::from(t.anchor_height()),
+                    u32::from(t.next_executable_after_height()),
+                    u32::from(t.expiry_height()),
+                ))
+                .collect::<Vec<_>>()
+        );
+        Ok(schedule)
     }
 
     /// Propose the immediate (single-transaction) migration: sweep the entire spendable Orchard
@@ -1181,9 +1216,19 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         }
         let mut db = self.open_wallet()?;
         let (target, anchor_height) = backend::native_target_and_anchor(&db)?;
+        tracing::debug!(
+            "MIGRATION_DIAG finalize_ready_transfers: run_id={} awaiting_count={} target={target:?} \
+             anchor_height={anchor_height:?}",
+            run.run_id,
+            awaiting.len(),
+        );
         let Some(anchor) = backend::orchard_anchor_at(&mut db, anchor_height)? else {
             // Not synced far enough yet to have a checkpoint at the natural anchor height — every
             // awaiting transfer is transiently not-ready; nothing to finalize this call.
+            tracing::debug!(
+                "MIGRATION_DIAG finalize_ready_transfers: no checkpoint at anchor_height={anchor_height:?} \
+                 yet — all {} awaiting transfers stay pending", awaiting.len()
+            );
             return Ok(0);
         };
         let mut finalized_count = 0u32;
@@ -1303,7 +1348,14 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// Returns [`MigrationError::Pipeline`] if the PCZT cannot be parsed or extracted, or the
     /// transaction cannot be encoded.
     pub fn extract_broadcast_tx(&self, pczt_bytes: &[u8]) -> Result<Vec<u8>, MigrationError> {
-        backend::extract_broadcast_tx(pczt_bytes)
+        let raw = backend::extract_broadcast_tx(pczt_bytes)?;
+        tracing::debug!(
+            "MIGRATION_DIAG extract_broadcast_tx: extracted {} raw tx bytes from a {} byte PCZT — \
+             ready for the platform to broadcast",
+            raw.len(),
+            pczt_bytes.len(),
+        );
+        Ok(raw)
     }
 
     /// Re-propose at a fresh anchor and re-sign the active run's scheduled transfers, replacing
