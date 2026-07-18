@@ -340,6 +340,18 @@ before this document.
 extend — this repo's test suite does not currently cover this VM/Worker at all, independent of this
 change.
 
+**Unrelated bug found and fixed during live testing of the above (zashi-android):**
+`TransferProposal.anchorHeight`/`nextExecutableAfterHeight`/`expiryHeight` are block heights, not
+timestamps, but `MigrationReviewVM` (`scheduledLabel`, `toMigrationPlan`) and `MigrationProgressVM`
+(`delayUntil`) each used a height directly as (or against) epoch seconds — a live device showed
+every scheduled transfer as "Overdue · 494475h ago" (a height measured back to the Unix epoch is
+decades in the past relative to any real 2026 `Instant`). Not part of the sign-now/prove-later
+design this document otherwise covers, but found while testing it. Fixed by estimating the
+wall-clock delta from the block-height span via `ZcashSdk.BLOCK_INTERVAL_MILLIS`, anchored at
+`anchorHeight`; the conversion was extracted to a single shared, directly-unit-tested function
+(`estimatedSecondsBetweenHeights` in `MigrationDurationFormat.kt`) rather than left duplicated
+across both VMs.
+
 ## 8. Fallback on application open (reference, not re-specified here)
 
 ZIP 318 §"Fallback on application open" already specifies the missed-window behavior precisely:
