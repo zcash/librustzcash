@@ -374,6 +374,23 @@ witness/anchor state can actually change). This keeps the SCHEDULED-delivery-mod
 automatic background delivery) intact for this transient case, without touching the deliberately
 user-gated recovery path for actually-overdue/missed windows.
 
+**Third finding during live testing (zashi-android): the MANUAL delivery-mode fork itself was the
+wrong design, not just missing a retry.** A subagent audit of the migration timing/retry surface
+(prompted by asking whether a not-yet-mined note split was actually handled end to end) found that
+`MigrationDeliveryMode.MANUAL` — the fallback when the user declined the Battery-optimization
+permission — permanently gave up on real background sends for the rest of the plan after transfer #0,
+relying only on a notify-only worker the user had to act on manually every time. This contradicted
+the Battery/Notification screens' own copy ("background operations **may fail**... you may experience
+delays"; "**if we miss a window**... we can send you a local notification"), both of which promise
+background sending is always attempted regardless of permission state — permission only affects
+reliability. Confirmed directly with the product owner and reworked in zashi-android (commit
+`34856935b`): background delivery is now scheduled unconditionally; the MANUAL/notify-only pipeline
+(`MigrationNotifyWorker`, `MigrationDeliveryMode`, the `backgroundAvailable` flag threaded through the
+permission screens) was retired as dead code, since `MigrationWorker` already covers every outcome
+notification and the fix from the second finding above already handles the "not ready yet" retry case
+this exposed. Not a Rust-side change — purely app-layer scheduling logic — but recorded here since it
+directly builds on and retires part of the second finding's fix.
+
 ## 8. Fallback on application open (reference, not re-specified here)
 
 ZIP 318 §"Fallback on application open" already specifies the missed-window behavior precisely:
