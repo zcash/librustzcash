@@ -46,9 +46,9 @@ use crate::preparation::{PrepError, PreparationPlan, plan_preparation};
 use crate::scheduling::{self, Schedule};
 
 /// What the migration engine needs from a wallet to PLAN a migration: the account's spendable notes and
-/// the chain state. Later slices add the methods for building (note witnesses, viewing keys), signing,
-/// persistence, and reconciliation; a backend implements this trait over its own note store and chain
-/// view (for example a `zcash_client_backend` wallet, or the migration's own SQLite store).
+/// the chain state. Following the `zcash_client_backend` pattern, a later slice replaces this with the
+/// wallet's own note-source and chain-view traits (`WalletRead` / `InputSource`), so any such wallet is a
+/// migration wallet; for now a backend implements it directly over its note store and chain view.
 pub trait MigrationBackend {
     /// The backend's own error type (a store or chain-access failure).
     type Error;
@@ -60,14 +60,27 @@ pub trait MigrationBackend {
 
     /// The current chain-tip height, from which the transfer schedule's delays accumulate.
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error>;
+}
 
-    /// Persist the migration state: every transaction as its pre-signed PCZT plus the metadata the
-    /// application needs to prove, schedule, and broadcast it. Storing the pre-signed transactions,
-    /// not just the plan, is what lets a wallet resume a migration after being closed or restarted.
-    fn store_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error>;
+/// Read access to a persisted pool migration: the store side of the migration interface, mirroring
+/// `zcash_client_backend`'s `WalletRead`. A store implements this over its own tables (the
+/// `zcash_pool_migration_sqlite` crate does so as a migration registered into `zcash_client_sqlite`'s
+/// `WalletDb`). The committed migration is a set of pre-signed PCZTs plus their schedule and lifecycle
+/// state, so a wallet resumes a migration entirely from the store after being closed or restarted.
+pub trait PoolMigrationRead {
+    /// The store's own error type.
+    type Error;
 
-    /// Load the persisted migration state, if a migration is in progress.
-    fn load_migration(&self) -> Result<Option<MigrationState>, Self::Error>;
+    /// The migration currently in progress, if any.
+    fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error>;
+}
+
+/// Write access to a persisted pool migration, mirroring `zcash_client_backend`'s `WalletWrite`.
+pub trait PoolMigrationWrite: PoolMigrationRead {
+    /// Persist a committed migration: every transaction as its pre-signed PCZT plus the metadata the
+    /// application needs to prove, schedule, and broadcast it. Storing the pre-signed transactions, not
+    /// just the plan, is what lets a wallet resume a migration after being closed or restarted.
+    fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error>;
 
     /// Advance one stored transaction's lifecycle state (for example after the application broadcasts
     /// it, or the chain mines it, or it expires).
@@ -420,7 +433,10 @@ pub fn commit_preparation<P, B, R>(
 ) -> Result<MigrationState, CommitError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters + Clone,
-    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
     R: RngCore + rand_core::CryptoRng,
 {
     use crate::build::build_prep_tx;
@@ -508,7 +524,7 @@ where
         transactions,
     };
     backend
-        .store_migration(&state)
+        .put_migration(&state)
         .map_err(CommitError::Backend)?;
     Ok(state)
 }
@@ -531,13 +547,16 @@ pub fn commit_transfers<P, B, R>(
 ) -> Result<MigrationState, CommitError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters + Clone,
-    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
     R: RngCore + rand_core::CryptoRng,
 {
     use crate::build::build_transfer_pczt;
 
     let mut state = backend
-        .load_migration()
+        .get_migration()
         .map_err(CommitError::Backend)?
         .ok_or(CommitError::NoMigrationInProgress)?;
 
@@ -596,7 +615,7 @@ where
     }
 
     backend
-        .store_migration(&state)
+        .put_migration(&state)
         .map_err(CommitError::Backend)?;
     Ok(state)
 }
@@ -647,14 +666,20 @@ mod tests {
         fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
             Ok(self.tip)
         }
+    }
 
-        fn store_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+    impl PoolMigrationRead for MockBackend {
+        type Error = core::convert::Infallible;
+
+        fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            Ok(self.stored.clone())
+        }
+    }
+
+    impl PoolMigrationWrite for MockBackend {
+        fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
             self.stored = Some(state.clone());
             Ok(())
-        }
-
-        fn load_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-            Ok(self.stored.clone())
         }
 
         fn update_transaction(
@@ -702,7 +727,7 @@ mod tests {
     #[test]
     fn stores_loads_and_updates_a_migration() {
         let mut backend = MockBackend::new(Vec::new(), 0);
-        assert!(backend.load_migration().unwrap().is_none());
+        assert!(backend.get_migration().unwrap().is_none());
 
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let note_split =
@@ -723,11 +748,11 @@ mod tests {
             funding_notes: Vec::new(),
             transactions: vec![tx],
         };
-        backend.store_migration(&state).unwrap();
+        backend.put_migration(&state).unwrap();
 
         // The stored transactions round-trip, and a state update persists.
         let loaded = backend
-            .load_migration()
+            .get_migration()
             .unwrap()
             .expect("a migration is stored");
         assert_eq!(loaded.status, MigrationStatus::Committed);
@@ -741,7 +766,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let loaded = backend.load_migration().unwrap().unwrap();
+        let loaded = backend.get_migration().unwrap().unwrap();
         assert_eq!(
             loaded.transactions[0].state,
             MigrationTxState::Mined {
@@ -794,14 +819,20 @@ mod commit_tests {
         fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
             Ok(BlockHeight::from_u32(2_000_000))
         }
+    }
 
-        fn store_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+    impl PoolMigrationRead for CommitMock {
+        type Error = core::convert::Infallible;
+
+        fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            Ok(self.stored.clone())
+        }
+    }
+
+    impl PoolMigrationWrite for CommitMock {
+        fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
             self.stored = Some(state.clone());
             Ok(())
-        }
-
-        fn load_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-            Ok(self.stored.clone())
         }
 
         fn update_transaction(
@@ -942,6 +973,6 @@ mod commit_tests {
             );
             assert!(tx.pczt.as_ref().is_some_and(|b| !b.is_empty()));
         }
-        assert!(backend.load_migration().unwrap().is_some());
+        assert!(backend.get_migration().unwrap().is_some());
     }
 }
