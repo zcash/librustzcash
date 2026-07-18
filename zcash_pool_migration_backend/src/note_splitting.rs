@@ -253,6 +253,30 @@ impl NoteSplitPlan {
         }
     }
 
+    /// Reassemble a plan from its stored fields, exactly as they were persisted. This is the inverse
+    /// of the accessors below: a store (for example `zcash_pool_migration_sqlite`) reads the columns
+    /// back and reconstructs the plan verbatim, so `total_migratable_zatoshi` is taken as stored
+    /// rather than recomputed (the caller is responsible for having persisted a consistent set, which
+    /// for a plan produced by [`Self::from_notes`] means `total_migratable_zatoshi` equals the sum of
+    /// `crossing_values`).
+    pub fn from_stored_parts(
+        crossing_values: Vec<u64>,
+        note_fee_buffer_zatoshi: u64,
+        change: Option<u64>,
+        prep_fee_zatoshi: u64,
+        total_input_zatoshi: u64,
+        total_migratable_zatoshi: u64,
+    ) -> Self {
+        Self {
+            crossing_values,
+            note_fee_buffer_zatoshi,
+            change,
+            prep_fee_zatoshi,
+            total_input_zatoshi,
+            total_migratable_zatoshi,
+        }
+    }
+
     /// The value (in zatoshi) of each prepared note the split will create: the crossing value at the
     /// same index plus the [fee buffer](Self::note_fee_buffer_zatoshi), so the note can later pay its
     /// own migration-transfer fee. Derived from [`crossing_values`](Self::crossing_values); the plan
