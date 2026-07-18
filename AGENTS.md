@@ -129,6 +129,15 @@ since Mermaid layout is hard to reason about in plain text.
   below it, and `eip681` stands alone with no in-repo dependencies.
 - `zcash_client_sqlite` sits at the top, depending on `zcash_client_backend`.
 
+## Code Conventions
+
+- **Never use magic numbers.** Do not inline a bare numeric (or string) literal
+  whose meaning is not obvious from context. Give it a `const` with a
+  doc-commented rationale, and reuse the protocol's own named constants
+  (`COIN`, `MAX_MONEY`, the ZIP-317 `MARGINAL_FEE`, `PREP_TX_ACTIONS`,
+  `DENOM_CAP`, ...) rather than re-deriving their values. This applies to
+  production code, tests, and fixtures alike.
+
 ## Build & Test Commands
 
 For the most part we follow standard Rust `cargo` practices.
