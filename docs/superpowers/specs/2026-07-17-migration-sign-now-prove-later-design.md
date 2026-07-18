@@ -352,6 +352,28 @@ wall-clock delta from the block-height span via `ZcashSdk.BLOCK_INTERVAL_MILLIS`
 (`estimatedSecondsBetweenHeights` in `MigrationDurationFormat.kt`) rather than left duplicated
 across both VMs.
 
+**Second bug found and fixed during live testing (zashi-android): `MigrationWorker` never
+rescheduled after a "not ready yet" run.** Live on testnet, `finalize_ready_transfers()` legitimately
+returned 0 finalized (all 12 self-funding transfers' funding note wasn't witnessable yet at the
+freshly-computed anchor — the split confirmed only a handful of blocks before the anchor height this
+call computed, exactly the transient state §6 describes), so `executeNextPendingTransfer()` returned
+`null`. `MigrationWorker.doWork()`'s `null` branch only logged and returned `Result.success()` — unlike
+the `TransferResult.Success` branch (which reschedules the next window) or the non-retryable
+`NetworkError` branch (which at least notifies the user), nothing re-armed a future attempt. Since the
+originating WorkManager job is one-shot (cancelled once it runs) and reopening the app only calls
+read-only status checks (`getMigrationState`/`hasOverdueTransfers`/`hasInvalidTransfers`, never
+`finalizeReadyTransfers`), the schedule would silently stall — the user's only path back is
+`CheckMigrationRecoveryUseCase` eventually treating the plan's estimated `scheduledAt` as overdue and
+surfacing manual Send Now/Reschedule UI, which is the intended recovery path for a genuinely-missed
+window (Doze deferral, etc.), not for "still waiting on one more block of confirmations." Fixed in
+`MigrationWorker.kt`'s `null` branch: when `plan.nextPending != null` (a transfer is still pending, as
+opposed to the queue genuinely being empty), reschedule via the same
+`MigrationScheduler(applicationContext).schedule(delay)` used elsewhere, with `delay =
+ZcashSdk.BLOCK_INTERVAL_MILLIS` (one block interval — the finest granularity at which the underlying
+witness/anchor state can actually change). This keeps the SCHEDULED-delivery-mode contract (fully
+automatic background delivery) intact for this transient case, without touching the deliberately
+user-gated recovery path for actually-overdue/missed windows.
+
 ## 8. Fallback on application open (reference, not re-specified here)
 
 ZIP 318 §"Fallback on application open" already specifies the missed-window behavior precisely:
