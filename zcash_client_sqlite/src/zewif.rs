@@ -524,6 +524,10 @@ pub struct ZewifImportReport {
     /// wallet does not recognize as receivers of any imported account, and so
     /// could not be marked as exposed.
     pub addresses_not_recognized: usize,
+    /// The number of transparent addresses recorded in the document with no
+    /// exposure height and appearing in none of the document's transactions,
+    /// and so deliberately left unexposed.
+    pub addresses_never_exposed: usize,
     /// The number of transactions from the document that were stored because
     /// they involve the imported accounts.
     pub transactions_stored: usize,
@@ -952,8 +956,18 @@ where
         }
 
         register_transparent_keys(wdb, &params, secret_store, &taddrs, &mut report)?;
-        mark_addresses_exposed(wdb, &params, &taddrs, &mut report)?;
-        import_transactions(wdb, &params, document, &mut report)?;
+        // Import transactions before marking document-recorded exposures, so
+        // that addresses appearing in stored transactions are known to
+        // `mark_addresses_exposed` (which uses that to distinguish never-exposed
+        // keypool reserves from addresses exposed on-chain).
+        let tx_transparent_recipients = import_transactions(wdb, &params, document, &mut report)?;
+        mark_addresses_exposed(
+            wdb,
+            &params,
+            &taddrs,
+            &tx_transparent_recipients,
+            &mut report,
+        )?;
 
         Ok(report)
     })
@@ -964,8 +978,10 @@ where
 #[derive(Default)]
 struct TransparentAddressRecords {
     /// Maps each transparent address string to the account that recorded it
-    /// and the height at which it is known to have been exposed.
-    owners: HashMap<String, (AccountUuid, BlockHeight)>,
+    /// and the height at which it is known to have been exposed, if any. A
+    /// `None` height marks an address that was never exposed (for example a
+    /// zcashd keypool reserve), which must not be marked as exposed.
+    owners: HashMap<String, (AccountUuid, Option<BlockHeight>)>,
     /// The P2SH redeem scripts recorded on imported accounts' addresses.
     redeem_scripts: Vec<(AccountUuid, Vec<u8>)>,
 }
@@ -1074,10 +1090,19 @@ where
 ///
 /// Only addresses the wallet recognizes as receivers of an imported account
 /// can be marked; unrecognized addresses are counted in the report.
+///
+/// An address recorded without an exposure height is marked only if it appears
+/// in `tx_transparent_recipients` (the addresses that were recipients in the
+/// document's imported transactions, and so were exposed on-chain and already
+/// marked exposed at their mined height by [`import_transactions`]). A
+/// recognized address with neither a recorded height nor any transaction is a
+/// keypool reserve that was never handed out, and is left unexposed so that it
+/// does not consume the transparent gap limit.
 fn mark_addresses_exposed<DbT, P, S>(
     wdb: &mut DbT,
     params: &P,
     taddrs: &TransparentAddressRecords,
+    tx_transparent_recipients: &std::collections::HashSet<TransparentAddress>,
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
@@ -1100,6 +1125,27 @@ where
 
     let mut exposures: Vec<(TransparentAddress, BlockHeight)> = vec![];
     for (address_str, (_, exposure_height)) in &taddrs.owners {
+        let Some(exposure_height) = exposure_height else {
+            // No exposure height was recorded for this address.
+            match TransparentAddress::decode(params, address_str) {
+                Ok(taddr) if known.contains(&taddr) => {
+                    // If the address appears as a recipient in one of the
+                    // document's transactions, it was exposed on-chain: importing
+                    // those transactions has already marked it exposed at its true
+                    // mined height, so it must not be treated as a never-exposed
+                    // reserve. An address that appears in no transaction is a
+                    // keypool reserve that was never handed out; leave it
+                    // unexposed so it does not consume the gap limit. It stays a
+                    // tracked receiver and will be marked exposed if and when it
+                    // is reserved or later observed on-chain.
+                    if !tx_transparent_recipients.contains(&taddr) {
+                        report.addresses_never_exposed += 1;
+                    }
+                }
+                _ => report.addresses_not_recognized += 1,
+            }
+            continue;
+        };
         match TransparentAddress::decode(params, address_str) {
             Ok(taddr) if known.contains(&taddr) => {
                 exposures.push((taddr, *exposure_height));
@@ -1142,12 +1188,20 @@ fn import_transactions<DbT, P, S>(
     params: &P,
     document: &::zewif::Zewif,
     report: &mut ZewifImportReport,
-) -> Result<(), ZewifImportError<S>>
+) -> Result<std::collections::HashSet<TransparentAddress>, ZewifImportError<S>>
 where
     DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
     P: consensus::Parameters,
     S: std::error::Error,
 {
+    // The transparent addresses that appear as recipients in the document's
+    // transactions. Any such address has been exposed on-chain, regardless of
+    // whether the document recorded an exposure height for it; storing these
+    // transactions marks each address exposed (at its true mined height) via
+    // the transaction path, so `mark_addresses_exposed` treats membership here
+    // as exposure rather than as a never-exposed keypool reserve.
+    let mut tx_transparent_recipients = std::collections::HashSet::new();
+
     let mut txs: Vec<&::zewif::Transaction> = document.transactions().values().collect();
     txs.sort_by_key(|tx| {
         (
@@ -1212,6 +1266,15 @@ where
             });
         }
 
+        if let Some(bundle) = parsed.transparent_bundle() {
+            tx_transparent_recipients.extend(
+                bundle
+                    .vout
+                    .iter()
+                    .filter_map(|txout| txout.recipient_address()),
+            );
+        }
+
         decrypt_and_store_transaction(params, wdb, &parsed, mined_height)
             .map_err(ZewifImportError::Wallet)?;
 
@@ -1229,7 +1292,7 @@ where
         }
     }
 
-    Ok(())
+    Ok(tx_transparent_recipients)
 }
 
 /// Imports a single account, choosing the import path appropriate to its
@@ -1358,9 +1421,15 @@ where
     // registration and exposure marking.
     for address in account.addresses() {
         if let ::zewif::ProtocolAddress::Transparent(taddr) = address.address() {
+            // Preserve a missing exposure height as `None`; it marks an address
+            // that was never handed out (such as a zcashd keypool reserve).
+            // Defaulting it to the account birthday here would cause every
+            // pre-generated reserve to be marked exposed, exhausting the
+            // transparent gap limit (in particular the small internal/change
+            // gap) and blocking change-address reservation after import.
             let exposure_height = address
                 .exposed_at_height()
-                .map_or(birthday.height(), |h| BlockHeight::from(u32::from(h)));
+                .map(|h| BlockHeight::from(u32::from(h)));
             taddrs
                 .owners
                 .insert(taddr.address().to_owned(), (account_uuid, exposure_height));
@@ -1967,9 +2036,11 @@ mod tests {
             ::zewif::transparent::TransparentPubKey::from_bytes(pubkey.serialize().to_vec())
                 .unwrap(),
         );
-        account.add_address(::zewif::Address::new(
-            ::zewif::ProtocolAddress::Transparent(taddr),
-        ));
+        let mut exposed = ::zewif::Address::new(::zewif::ProtocolAddress::Transparent(taddr));
+        // This address was handed out, so it carries an exposure height and
+        // should be marked exposed on import.
+        exposed.set_exposed_at_height(::zewif::BlockHeight::from(2_600_050));
+        account.add_address(exposed);
 
         let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
         wallet.add_account(account);
@@ -1984,6 +2055,69 @@ mod tests {
         assert!(report.skipped_transparent_keys.is_empty());
         assert_eq!(report.addresses_marked_exposed, 1);
         assert_eq!(report.addresses_not_recognized, 0);
+        assert_eq!(report.addresses_never_exposed, 0);
+    }
+
+    /// An address recorded with no exposure height (for example a zcashd
+    /// keypool reserve) must be registered as a receiver but left unexposed, so
+    /// that it does not consume the transparent gap limit.
+    #[test]
+    fn unexposed_transparent_key_is_registered_but_not_exposed() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let secp = secp256k1::Secp256k1::new();
+        let secret_key = secp256k1::SecretKey::from_slice(&[0x42; 32]).unwrap();
+        let pubkey = secret_key.public_key(&secp);
+        let address = TransparentAddress::from_pubkey(&pubkey).encode(&TEST_NETWORK);
+        let mut wif_payload = vec![0xEF];
+        wif_payload.extend_from_slice(&secret_key.secret_bytes());
+        wif_payload.push(0x01);
+        let wif = bs58::encode(wif_payload).with_check().into_string();
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        store.add_transparent_key(::zewif::TransparentKeyEntry::new(
+            ::zewif::transparent::TransparentPubKey::from_bytes(pubkey.serialize().to_vec())
+                .unwrap(),
+            ::zewif::transparent::TransparentSpendingKey::new(wif),
+        ));
+
+        let mut account = ::zewif::Account::new(::zewif::AccountViewingKey::TransparentAddressSet);
+        account.set_name("legacy");
+        account.set_birthday_height(::zewif::BlockHeight::from(2_600_000));
+        account.set_key_source(::zewif::KeySource::Derived(::zewif::DerivedKeySource::new(
+            ::zewif::SeedFingerprint::new(ts.fingerprint_encoding.clone()),
+            0x7FFF_FFFF,
+            None,
+        )));
+        let mut taddr = ::zewif::transparent::Address::new(address.clone());
+        taddr.set_pubkey(
+            ::zewif::transparent::TransparentPubKey::from_bytes(pubkey.serialize().to_vec())
+                .unwrap(),
+        );
+        // No exposure height is set: this models a pre-generated keypool key
+        // that was never handed out.
+        account.add_address(::zewif::Address::new(
+            ::zewif::ProtocolAddress::Transparent(taddr),
+        ));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+
+        let mut sink = RecordingSink::default();
+        let report = import_wallet(&mut wdb, &doc, &mut sink).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        // The key is still registered as a receiver of the account...
+        assert_eq!(report.transparent_keys_registered, 1);
+        assert!(report.skipped_transparent_keys.is_empty());
+        // ...but the never-exposed reserve is not marked exposed.
+        assert_eq!(report.addresses_marked_exposed, 0);
+        assert_eq!(report.addresses_not_recognized, 0);
+        assert_eq!(report.addresses_never_exposed, 1);
     }
 
     #[test]
@@ -2164,6 +2298,47 @@ mod tests {
         (tx.txid(), bytes)
     }
 
+    /// Builds a transparent-only transaction with one output per
+    /// `(address, value)` pair, under the consensus rules in force at `height`.
+    fn transparent_tx_to_many(
+        outputs: &[(&TransparentAddress, u64)],
+        height: u32,
+    ) -> (zcash_protocol::TxId, Vec<u8>) {
+        use ::transparent::address::Script;
+        use ::transparent::bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut};
+        use zcash_primitives::transaction::{TransactionData, TxVersion};
+        use zcash_protocol::value::Zatoshis;
+
+        let height = consensus::BlockHeight::from(height);
+        let tx = TransactionData::from_parts(
+            TxVersion::V5,
+            BranchId::for_height(&TEST_NETWORK, height),
+            0,
+            height + 100,
+            #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+            Zatoshis::ZERO,
+            Some(transparent::Bundle {
+                vin: vec![TxIn::from_parts(OutPoint::fake(), Script::default(), 0)],
+                vout: outputs
+                    .iter()
+                    .map(|(to, value)| {
+                        TxOut::new(Zatoshis::const_from_u64(*value), to.script().into())
+                    })
+                    .collect(),
+                authorization: Authorized,
+            }),
+            None,
+            None,
+            None,
+        )
+        .freeze()
+        .unwrap();
+
+        let mut bytes = vec![];
+        tx.write(&mut bytes).unwrap();
+        (tx.txid(), bytes)
+    }
+
     /// Wraps raw transaction bytes as a mined ZeWIF transaction.
     fn raw_zewif_tx(
         txid: zcash_protocol::TxId,
@@ -2210,6 +2385,127 @@ mod tests {
         assert_eq!(report.transactions_stored, 1);
         assert_eq!(report.transactions_without_wallet_relevance, 0);
         assert_eq!(report.transactions_without_raw_data, 0);
+    }
+
+    /// A transparent address recorded without an exposure height, but which
+    /// appears as a recipient in a stored transaction, must be treated as
+    /// exposed rather than as a never-handed-out keypool reserve.
+    #[test]
+    fn address_without_height_appearing_in_a_stored_transaction_is_exposed() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let seed = test_seed_bytes(&ts);
+        let usk =
+            UnifiedSpendingKey::from_seed(&TEST_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
+        let (taddr, _) = usk.default_transparent_address();
+
+        let height = 2_600_000;
+        let (txid, raw) = transparent_tx_to(&taddr, 100_000, height);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        let mut account = hd_account(&ts, ts.fingerprint_encoding.clone(), 0);
+        // Record the account's transparent receiver with no exposure height, as
+        // `zewif-zcashd` exports every address (including handed-out ones). The
+        // transaction below pays to this address, so it was exposed on-chain.
+        account.add_address(::zewif::Address::new(
+            ::zewif::ProtocolAddress::Transparent(::zewif::transparent::Address::new(
+                taddr.encode(&TEST_NETWORK),
+            )),
+        ));
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+        let tx = raw_zewif_tx(txid, &raw, height);
+        doc.add_transaction(tx.txid(), tx);
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.transactions_stored, 1);
+        // The address appears in a stored transaction, so it is not treated as a
+        // never-exposed reserve...
+        assert_eq!(report.addresses_never_exposed, 0);
+        // ...and it is exposed (at the transaction's mined height) via the
+        // transaction-import path.
+        use zcash_client_backend::wallet::Exposure;
+        let receivers = wdb
+            .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
+            .unwrap();
+        let exposure = receivers
+            .get(&taddr)
+            .expect("the receiver is tracked by the account")
+            .exposure();
+        assert!(
+            matches!(exposure, Exposure::Exposed { at_height, .. } if at_height == BlockHeight::from(height)),
+            "expected exposure at mined height, got {exposure:?}",
+        );
+    }
+
+    /// A wallet-owned transparent change address that receives change in a
+    /// stored outgoing payment is detected and marked exposed, just like a
+    /// receive address: `import_transactions` collects every transparent output
+    /// of the stored transactions, change outputs included.
+    #[test]
+    fn wallet_owned_change_address_in_a_stored_payment_is_exposed() {
+        let (_file, mut wdb) = test_wallet_db();
+        let ts = test_seed(0);
+
+        let seed = test_seed_bytes(&ts);
+        let usk =
+            UnifiedSpendingKey::from_seed(&TEST_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
+
+        // The account's internal (change) transparent address.
+        use ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex};
+        let change_addr = usk
+            .transparent()
+            .to_account_pubkey()
+            .derive_internal_ivk()
+            .unwrap()
+            .derive_address(NonHardenedChildIndex::ZERO)
+            .unwrap();
+        // An unrelated external recipient, standing in for the payment's payee.
+        let payee = TransparentAddress::PublicKeyHash([7u8; 20]);
+
+        let height = 2_600_000;
+        // An outgoing payment: one output to the payee, and one change output
+        // back to the wallet's own change address.
+        let (txid, raw) =
+            transparent_tx_to_many(&[(&payee, 90_000), (&change_addr, 10_000)], height);
+
+        let mut store = ::zewif::SecretStore::new();
+        store.add_seed(seed_entry(&ts));
+        let account = hd_account(&ts, ts.fingerprint_encoding.clone(), 0);
+
+        let (mut doc, mut wallet) = document(::zewif::Network::Testnet);
+        wallet.add_account(account);
+        doc.add_wallet(wallet);
+        doc.set_secrets(::zewif::Secrets::Plain(store));
+        let tx = raw_zewif_tx(txid, &raw, height);
+        doc.add_transaction(tx.txid(), tx);
+
+        let report = import_wallet(&mut wdb, &doc, &mut RecordingSink::default()).unwrap();
+
+        assert_eq!(report.imported_accounts.len(), 1);
+        assert_eq!(report.transactions_stored, 1);
+
+        // The internal-scope change address is exposed at the transaction's
+        // mined height.
+        use zcash_client_backend::wallet::Exposure;
+        let receivers = wdb
+            .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
+            .unwrap();
+        let exposure = receivers
+            .get(&change_addr)
+            .expect("the change address is tracked by the account")
+            .exposure();
+        assert!(
+            matches!(exposure, Exposure::Exposed { at_height, .. } if at_height == BlockHeight::from(height)),
+            "expected the wallet-owned change address to be exposed, got {exposure:?}",
+        );
     }
 
     #[test]

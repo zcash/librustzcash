@@ -23,6 +23,21 @@ workspace.
   reads against any table, allows `INSERT`/`UPDATE`/`DELETE` only against tables whose
   names begin with the `ext_` prefix reserved for external migrations, and denies
   everything else (DDL, `PRAGMA`, `ATTACH`/`DETACH`, and transaction control).
+- `zewif::ZewifImportReport::addresses_never_exposed` counts transparent
+  addresses recorded in a ZeWIF document with no exposure height that also
+  appear in none of the document's transactions, and which are therefore
+  deliberately left unexposed on import.
+
+### Fixed
+- The `zewif` importer no longer marks transparent addresses that have no
+  recorded exposure height (`zewif::Address::exposed_at_height() == None`, e.g.
+  zcashd keypool reserves) *and appear in none of the imported transactions* as
+  exposed. Previously every such address was marked exposed at the account
+  birthday, which could exhaust the transparent gap limit (in particular the
+  small internal/change gap) and permanently block change-address reservation
+  after a zcashd migration. Addresses that lack a recorded exposure height but
+  appear as recipients in an imported transaction are still treated as exposed,
+  at the mined height recorded when the transaction is stored.
 
 ## [0.22.0-rc.1] - 2026-07-12
 
