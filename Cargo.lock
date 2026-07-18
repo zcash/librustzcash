@@ -7270,6 +7270,7 @@ dependencies = [
  "rusqlite",
  "shardtree",
  "tempfile",
+ "tracing",
  "uuid",
  "zcash_address",
  "zcash_client_backend",

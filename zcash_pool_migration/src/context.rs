@@ -139,38 +139,67 @@ fn parse_placed_csv(s: &str) -> Option<Vec<(u32, u64)>> {
         .collect()
 }
 
+/// Which build path a staged transfer PCZT took — carried alongside [`TransferStagingMetadata`] so
+/// [`MigrationContext::store_signed_schedule_pczts`] knows how to combine each one back: a
+/// self-funding transfer was built with a placeholder witness (design spec §4.2, external-signer
+/// variant — see [`crate::backend::build_self_funding_transfer_pczt_awaiting_proof_unsigned`]) and
+/// must be persisted as `SignedAwaitingProof`, not proven now; a fallback (ordinary input-selection)
+/// transfer was built with a real witness and proved eagerly at staging time (unchanged from before
+/// this distinction existed), so it is immediately finalized on signature return.
+enum TransferStagingKind {
+    SelfFunding {
+        spend_action_index: u32,
+        spent_note_txid: String,
+        spent_note_output_index: u32,
+        spent_note_value: u64,
+    },
+    Fallback,
+}
+
 /// What [`MigrationContext::create_unsigned_transfer_pczts`] records alongside each staged transfer
 /// PCZT so [`MigrationContext::store_signed_schedule_pczts`] can rebuild the transfer's
-/// [`store::PendingTxRow`] without re-running input selection: the schedule transfer's heights and
-/// crossing value. The fee and selected-note triple are not carried — the external-signer store
-/// step no longer holds the input-selection proposal they come from, so (as in the prototype) it
-/// records them as zero/empty; no scheduling decision reads those informational columns back.
+/// [`store::PendingTxRow`] without re-running input selection: the schedule transfer's heights,
+/// crossing value, and which path built it ([`TransferStagingKind`]). The fallback path's fee and
+/// selected-note triple are not carried — the external-signer store step no longer holds the
+/// input-selection proposal they come from, so (as in the prototype) it records them as
+/// zero/empty; no scheduling decision reads those informational columns back.
 struct TransferStagingMetadata {
     anchor_height: u32,
     next_executable_after_height: u32,
     expiry_height: u32,
     value_zatoshi: u64,
+    kind: TransferStagingKind,
 }
 
 /// Encodes [`TransferStagingMetadata`] as versioned text:
 ///
 /// ```text
-/// v1;anchor=<u32>;send=<u32>;expiry=<u32>;value=<u64>
+/// v1;anchor=<u32>;send=<u32>;expiry=<u32>;value=<u64>;kind=fallback
+/// v1;anchor=<u32>;send=<u32>;expiry=<u32>;value=<u64>;kind=self;action=<u32>;txid=<hex>;idx=<u32>;sval=<u64>
 /// ```
 ///
 /// Parsed by [`parse_transfer_staging`].
 fn encode_transfer_staging(meta: &TransferStagingMetadata) -> String {
-    format!(
+    let head = format!(
         "v1;anchor={};send={};expiry={};value={}",
-        meta.anchor_height,
-        meta.next_executable_after_height,
-        meta.expiry_height,
-        meta.value_zatoshi,
-    )
+        meta.anchor_height, meta.next_executable_after_height, meta.expiry_height, meta.value_zatoshi,
+    );
+    match &meta.kind {
+        TransferStagingKind::Fallback => format!("{head};kind=fallback"),
+        TransferStagingKind::SelfFunding {
+            spend_action_index,
+            spent_note_txid,
+            spent_note_output_index,
+            spent_note_value,
+        } => format!(
+            "{head};kind=self;action={spend_action_index};txid={spent_note_txid};\
+             idx={spent_note_output_index};sval={spent_note_value}"
+        ),
+    }
 }
 
 /// Parses the format [`encode_transfer_staging`] writes, returning [`MigrationError::Pipeline`] on
-/// any malformed input (wrong version, missing/extra field, non-numeric value).
+/// any malformed input (wrong version, missing/extra field, non-numeric value, unknown `kind`).
 fn parse_transfer_staging(text: &str) -> Result<TransferStagingMetadata, MigrationError> {
     let err = || MigrationError::Pipeline(format!("decode transfer staging metadata: {text:?}"));
     let mut fields = text.split(';');
@@ -181,14 +210,41 @@ fn parse_transfer_staging(text: &str) -> Result<TransferStagingMetadata, Migrati
     let send = parse_kv(fields.next(), "send=").ok_or_else(err)?;
     let expiry = parse_kv(fields.next(), "expiry=").ok_or_else(err)?;
     let value = parse_kv(fields.next(), "value=").ok_or_else(err)?;
-    if fields.next().is_some() {
-        return Err(err());
-    }
+    let kind_tag = fields.next().and_then(|s| s.strip_prefix("kind=")).ok_or_else(err)?;
+    let kind = match kind_tag {
+        "fallback" => {
+            if fields.next().is_some() {
+                return Err(err());
+            }
+            TransferStagingKind::Fallback
+        }
+        "self" => {
+            let spend_action_index = parse_kv(fields.next(), "action=").ok_or_else(err)?;
+            let spent_note_txid = fields
+                .next()
+                .and_then(|s| s.strip_prefix("txid="))
+                .ok_or_else(err)?
+                .to_string();
+            let spent_note_output_index = parse_kv(fields.next(), "idx=").ok_or_else(err)?;
+            let spent_note_value = parse_kv(fields.next(), "sval=").ok_or_else(err)?;
+            if fields.next().is_some() {
+                return Err(err());
+            }
+            TransferStagingKind::SelfFunding {
+                spend_action_index,
+                spent_note_txid,
+                spent_note_output_index,
+                spent_note_value,
+            }
+        }
+        _ => return Err(err()),
+    };
     Ok(TransferStagingMetadata {
         anchor_height: anchor,
         next_executable_after_height: send,
         expiry_height: expiry,
         value_zatoshi: value,
+        kind,
     })
 }
 
@@ -197,10 +253,12 @@ fn parse_kv<T: std::str::FromStr>(field: Option<&str>, key: &str) -> Option<T> {
     field?.strip_prefix(key)?.parse::<T>().ok()
 }
 
-/// Rebuilds the [`store::PendingTxRow`] for an externally signed transfer from its staged metadata
-/// and the combined (device-signed) outcome — the external-signer counterpart of
-/// `backend::pending_row`. The fee and selected-note triple are recorded as zero/empty (see
-/// [`TransferStagingMetadata`]).
+/// Rebuilds the [`store::PendingTxRow`] for an externally signed **fallback-path** transfer
+/// (`TransferStagingKind::Fallback`) from its staged metadata and the combined (device-signed)
+/// outcome — the external-signer counterpart of `backend::pending_row`. The fee and selected-note
+/// triple are recorded as zero/empty (see [`TransferStagingMetadata`]). Self-funding-path transfers
+/// use [`backend::self_funding_awaiting_proof_row_from_parts`] instead — see
+/// [`MigrationContext::store_signed_schedule_pczts`].
 fn transfer_pending_row(
     meta: &TransferStagingMetadata,
     combined: &backend::SignedPcztOutcome,
@@ -219,9 +277,9 @@ fn transfer_pending_row(
         selected_note_value: 0,
         status: "scheduled".to_string(),
         metadata_json: "{}".to_string(),
-        // The external-signer path proves eagerly (before staging, see
-        // `create_unsigned_transfer_pczts`) and is unaffected by design spec §4 — the combined
-        // PCZT handed back here already carries a real proof, so it is immediately broadcastable.
+        // The fallback path proves eagerly (before staging, see `create_unsigned_transfer_pczts`)
+        // and is unaffected by design spec §4 — the combined PCZT handed back here already carries
+        // a real proof, so it is immediately broadcastable.
         proof_status: "ready".to_string(),
         spend_action_index: 0,
     }
@@ -760,12 +818,19 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         ))
     }
 
-    /// Build one unsigned PCZT per transfer of `schedule` for an external signer, each proved and
-    /// staged like [`Self::create_unsigned_note_split_pczt`]. Returns the `(transfer id, unsigned
-    /// PCZT)` pairs to route to the signing device; the pairing must survive to
-    /// [`Self::store_signed_schedule_pczts`], which matches the signed PCZTs back to the staged
-    /// originals by id. Any previously staged (unconsumed) transfer PCZTs for the account are
+    /// Build one unsigned PCZT per transfer of `schedule` for an external signer. Returns the
+    /// `(transfer id, unsigned PCZT)` pairs to route to the signing device; the pairing must
+    /// survive to [`Self::store_signed_schedule_pczts`], which matches the signed PCZTs back to the
+    /// staged originals by id. Any previously staged (unconsumed) transfer PCZTs for the account are
     /// replaced.
+    ///
+    /// Mirrors [`Self::sign_and_store_migration_schedule`]'s per-transfer duality (design spec §4.2):
+    /// a self-funding transfer is built with a placeholder witness/synthetic anchor
+    /// ([`backend::build_self_funding_transfer_pczt_awaiting_proof_unsigned`]) and staged
+    /// **unproven** — its device signature is combined and completed later by the already-existing
+    /// `finalize_ready_transfers()`, exactly like the software-signing path's self-funding transfers
+    /// are today. A fallback (ordinary input-selection) transfer is built with a real witness and
+    /// proved eagerly here, unchanged from before this distinction existed.
     ///
     /// # Errors
     ///
@@ -805,12 +870,13 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
         let mut pairs = Vec::with_capacity(schedule.transfers().len());
         for t in schedule.transfers() {
-            // Direct-builder path first (matches `sign_and_store_migration_schedule`): a
-            // self-funding note pays its own fee, no wallet fee/change logic needed. Falls back to
-            // the ordinary input-selection pipeline when no such note exists (the immediate/sweep
-            // migration path).
-            let pczt = if let Some(outcome) = backend::build_self_funding_transfer_pczt(
-                &mut db,
+            // Placeholder-witness self-funding path first (matches
+            // `sign_and_store_migration_schedule`): a self-funding note pays its own fee, no wallet
+            // fee/change logic needed, and no proof is possible/attempted yet. Falls back to the
+            // ordinary input-selection pipeline (real witness, eager proof) when no such note
+            // exists (the immediate/sweep migration path).
+            if let Some(outcome) = backend::build_self_funding_transfer_pczt_awaiting_proof_unsigned(
+                &db,
                 &self.network,
                 self.account,
                 &orchard_fvk,
@@ -821,29 +887,51 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 u32::from(t.expiry_height()),
             )? {
                 reserved.insert(outcome.spent_note_id);
-                outcome.pczt
-            } else {
-                let request =
-                    backend::self_payment_request(&db, &self.network, self.account, t.amount())?;
-                let proposal = backend::propose_migration_transfer(
-                    &db,
-                    &self.network,
-                    self.account,
-                    target,
-                    u32::from(t.anchor_height()),
-                    &reserved,
-                    &locks,
-                    request,
+                let metadata = TransferStagingMetadata {
+                    anchor_height: u32::from(t.anchor_height()),
+                    next_executable_after_height: u32::from(t.next_executable_after_height()),
+                    expiry_height: u32::from(t.expiry_height()),
+                    value_zatoshi: u64::from(t.amount()),
+                    kind: TransferStagingKind::SelfFunding {
+                        spend_action_index: outcome.spend_action_index,
+                        spent_note_txid: outcome.spent_note_txid.clone(),
+                        spent_note_output_index: outcome.spent_note_output_index,
+                        spent_note_value: outcome.spent_note_value,
+                    },
+                };
+                store::upsert_staged_pczt(
+                    &conn,
+                    &self.account_str(),
+                    self.network_str(),
+                    store::STAGED_KIND_TRANSFER,
+                    &store::StagedPczt {
+                        staging_id: t.id().as_str().to_string(),
+                        raw_pczt: outcome.raw_pczt.clone(),
+                        metadata_json: encode_transfer_staging(&metadata),
+                    },
                 )?;
-                reserved.extend(backend::proposal_note_refs(&proposal));
-                backend::create_transfer_pczt(
-                    &mut db,
-                    &self.network,
-                    self.account,
-                    &proposal,
-                    u32::from(t.expiry_height()),
-                )?
-            };
+                pairs.push(UnsignedTransferPczt::from_parts(t.id().clone(), outcome.raw_pczt));
+                continue;
+            }
+            let request = backend::self_payment_request(&db, &self.network, self.account, t.amount())?;
+            let proposal = backend::propose_migration_transfer(
+                &db,
+                &self.network,
+                self.account,
+                target,
+                u32::from(t.anchor_height()),
+                &reserved,
+                &locks,
+                request,
+            )?;
+            reserved.extend(backend::proposal_note_refs(&proposal));
+            let pczt = backend::create_transfer_pczt(
+                &mut db,
+                &self.network,
+                self.account,
+                &proposal,
+                u32::from(t.expiry_height()),
+            )?;
             let unsigned = pczt.clone().serialize().map_err(|e| {
                 MigrationError::Pipeline(format!("serialize unsigned transfer pczt: {e:?}"))
             })?;
@@ -856,6 +944,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 next_executable_after_height: u32::from(t.next_executable_after_height()),
                 expiry_height: u32::from(t.expiry_height()),
                 value_zatoshi: u64::from(t.amount()),
+                kind: TransferStagingKind::Fallback,
             };
             store::upsert_staged_pczt(
                 &conn,
@@ -944,8 +1033,40 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let mut rows = Vec::with_capacity(paired.len());
         for (st, signed_bytes) in paired {
             let metadata = parse_transfer_staging(&st.metadata_json)?;
-            let combined = backend::combine_signed_pczt(&st.raw_pczt, signed_bytes)?;
-            rows.push(transfer_pending_row(&metadata, &combined));
+            match &metadata.kind {
+                TransferStagingKind::SelfFunding {
+                    spend_action_index,
+                    spent_note_txid,
+                    spent_note_output_index,
+                    spent_note_value,
+                } => {
+                    // No proof exists yet — combine + redact only, never `combine_signed_pczt`
+                    // (which finalizes/extracts and therefore requires one). Persisted as
+                    // `SignedAwaitingProof`; `finalize_ready_transfers()` completes it later,
+                    // exactly like the software-signing path's self-funding transfers today.
+                    let raw_pczt = backend::combine_and_redact_awaiting_proof_pczt(
+                        &st.raw_pczt,
+                        signed_bytes,
+                        *spend_action_index,
+                    )?;
+                    rows.push(backend::self_funding_awaiting_proof_row_from_parts(
+                        &st.staging_id,
+                        metadata.anchor_height,
+                        metadata.next_executable_after_height,
+                        metadata.expiry_height,
+                        metadata.value_zatoshi,
+                        spent_note_txid,
+                        *spent_note_output_index,
+                        *spent_note_value,
+                        raw_pczt,
+                        *spend_action_index,
+                    ));
+                }
+                TransferStagingKind::Fallback => {
+                    let combined = backend::combine_signed_pczt(&st.raw_pczt, signed_bytes)?;
+                    rows.push(transfer_pending_row(&metadata, &combined));
+                }
+            }
         }
         // Atomic store — mirrors `sign_and_store_migration_schedule`'s persistence tail.
         let tx = conn.unchecked_transaction()?;
@@ -1017,7 +1138,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     /// [`Self::residual_after_migration`]), one further transfer for exactly that (non-round)
     /// amount is appended to the schedule — it will not match any self-funding note, so it signs
     /// via the ordinary input-selection pipeline rather than the direct-builder path the staggered
-    /// transfers use (see `backend::build_self_funding_transfer_pczt`).
+    /// transfers use (see `backend::sign_self_funding_transfer_awaiting_proof`).
     ///
     /// # Errors
     ///
@@ -1039,7 +1160,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         // purely self-funding notes — including leftover Orchard change — decomposes on a
         // best-effort basis; `MigrationContext::sign_and_store_migration_schedule` falls back to
         // the ordinary input-selection pipeline for any crossing value with no matching note (see
-        // `backend::build_self_funding_transfer_pczt`).
+        // `backend::sign_self_funding_transfer_awaiting_proof`).
         let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
         let mut crossing_values = plan.crossing_values;
         if include_residual {
@@ -1050,7 +1171,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 // Unlike a planned self-funding note, the residual has no fee pre-reserved by a
                 // denomination plan — net out TRANSFER_FEE_BUFFER_ZATOSHI here so the scheduled
                 // crossing value is what actually lands in Ironwood. This is exactly the value
-                // `build_self_funding_transfer_pczt` will look for later
+                // `sign_self_funding_transfer_awaiting_proof` will look for later
                 // (`crossing_value + TRANSFER_FEE_BUFFER_ZATOSHI == residual`): the residual note
                 // `finalize_split_outputs` (split.rs) minted is worth exactly `residual`, so this
                 // transfer *does* match it and signs via the same direct-builder path as the
@@ -1775,6 +1896,7 @@ mod tests {
             next_executable_after_height: u32::from(proposal.next_executable_after_height()),
             expiry_height: u32::from(proposal.expiry_height()),
             value_zatoshi: u64::from(proposal.amount()),
+            kind: TransferStagingKind::Fallback,
         };
         let conn = ctx.store_conn().unwrap();
         store::upsert_staged_pczt(
@@ -1827,12 +1949,13 @@ mod tests {
         let decoded = parse_split_staging("v1;notes=;placed=").unwrap();
         assert!(decoded.output_notes.is_empty() && decoded.placed_outputs.is_empty());
 
-        // Transfer metadata.
+        // Transfer metadata, fallback kind.
         let xfer = TransferStagingMetadata {
             anchor_height: 9_999_999,
             next_executable_after_height: 1000,
             expiry_height: 1288,
             value_zatoshi: 990_000,
+            kind: TransferStagingKind::Fallback,
         };
         let decoded = parse_transfer_staging(&encode_transfer_staging(&xfer)).unwrap();
         assert_eq!(decoded.anchor_height, xfer.anchor_height);
@@ -1842,6 +1965,37 @@ mod tests {
         );
         assert_eq!(decoded.expiry_height, xfer.expiry_height);
         assert_eq!(decoded.value_zatoshi, xfer.value_zatoshi);
+        assert!(matches!(decoded.kind, TransferStagingKind::Fallback));
+
+        // Transfer metadata, self-funding kind.
+        let xfer_self = TransferStagingMetadata {
+            anchor_height: 111,
+            next_executable_after_height: 222,
+            expiry_height: 333,
+            value_zatoshi: 444,
+            kind: TransferStagingKind::SelfFunding {
+                spend_action_index: 1,
+                spent_note_txid: "abcd".repeat(16),
+                spent_note_output_index: 3,
+                spent_note_value: 555_020_000,
+            },
+        };
+        let decoded_self = parse_transfer_staging(&encode_transfer_staging(&xfer_self)).unwrap();
+        assert_eq!(decoded_self.anchor_height, xfer_self.anchor_height);
+        match decoded_self.kind {
+            TransferStagingKind::SelfFunding {
+                spend_action_index,
+                spent_note_txid,
+                spent_note_output_index,
+                spent_note_value,
+            } => {
+                assert_eq!(spend_action_index, 1);
+                assert_eq!(spent_note_txid, "abcd".repeat(16));
+                assert_eq!(spent_note_output_index, 3);
+                assert_eq!(spent_note_value, 555_020_000);
+            }
+            TransferStagingKind::Fallback => panic!("expected SelfFunding, got Fallback"),
+        }
 
         // Malformed input is rejected, not silently defaulted.
         assert!(parse_split_staging("v2;notes=;placed=").is_err()); // wrong version
@@ -1851,6 +2005,8 @@ mod tests {
         assert!(parse_split_staging("v1;notes=;placed=5").is_err()); // missing `:value`
         assert!(parse_split_staging("v1;notes=;placed=;extra=1").is_err()); // trailing field
         assert!(parse_transfer_staging("v1;anchor=1;send=2;expiry=3").is_err()); // missing value
+        assert!(parse_transfer_staging("v1;anchor=1;send=2;expiry=3;value=4").is_err()); // missing kind
+        assert!(parse_transfer_staging("v1;anchor=1;send=2;expiry=3;value=4;kind=bogus").is_err()); // unknown kind
         assert!(parse_transfer_staging("v1;anchor=x;send=2;expiry=3;value=4").is_err()); // non-numeric
     }
 

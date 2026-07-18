@@ -163,8 +163,8 @@ pub(crate) fn target_and_anchor<P: Parameters>(db: &Db<P>) -> Result<(u32, u32),
 ///
 /// Uses the *untrusted* confirmation count (10, vs. 3 for trusted/wallet-produced outputs — see
 /// [`ConfirmationsPolicy`]) to pick the anchor, not the trusted one: the anchor this returns is
-/// later reused as a fixed, pinned height by [`propose_migration_transfer`] and
-/// [`build_self_funding_transfer_pczt`] to actually select and spend notes, via the *full*
+/// later reused as a fixed, pinned height by [`propose_migration_transfer`] to actually select
+/// and spend notes, via the *full*
 /// `ConfirmationsPolicy::default()` (both thresholds). An anchor picked only `trusted()` (3) blocks
 /// back is not necessarily far enough back for an untrusted-origin note (e.g. externally received
 /// funds, which need 10) to already satisfy its own confirmation requirement relative to that same
@@ -226,35 +226,16 @@ pub(crate) fn self_payment_request<P: Parameters>(
     build_self_payment(&address, u64::from(value))
 }
 
-/// The outcome of [`build_self_funding_transfer_pczt`]: the unproven PCZT plus everything needed
-/// to persist the pending row without re-querying the wallet.
-///
-/// Since design spec §4.2 moved the software-signing path onto
-/// [`sign_self_funding_transfer_awaiting_proof`] instead, this function's only remaining caller
-/// ([`crate::context::MigrationContext::create_unsigned_transfer_pczts`], the external-signer
-/// path) only reads `pczt` and `spent_note_id` — the selected-note triple below is not currently
-/// persisted for that path (see `TransferStagingMetadata`'s own doc comment on that pre-existing
-/// gap), but is kept here (not read, hence the `allow`) since it costs nothing to carry and a
-/// future external-signer enhancement recording the same selected-note fields the software path
-/// does would want it.
-#[allow(dead_code)]
-pub(crate) struct SelfFundingTransferOutcome {
-    pub(crate) pczt: pczt::Pczt,
-    pub(crate) spent_note_id: ReceivedNoteId,
-    pub(crate) spent_note_txid: String,
-    pub(crate) spent_note_output_index: u32,
-    pub(crate) spent_note_value: u64,
-}
-
 /// Find a spendable Orchard note worth exactly `crossing_value + TRANSFER_FEE_BUFFER_ZATOSHI` (the
 /// shape a note split always mints) among notes not already `reserved` by an earlier transfer in
 /// the current signing loop or migration-locked by another run, plus the account's current
 /// Orchard/Ironwood receiver to pay the crossing into.
 ///
-/// Shared by both self-funding transfer builders: [`build_self_funding_transfer_pczt`] (real
-/// witness, used by the external-signer path, which proves eagerly and so needs one at build time)
-/// and [`sign_self_funding_transfer_awaiting_proof`] (placeholder witness, design spec §4.2's
-/// sign-now/prove-later path).
+/// Shared by every self-funding transfer builder — [`sign_self_funding_transfer_awaiting_proof`]
+/// (software-signing path) and [`build_self_funding_transfer_pczt_awaiting_proof_unsigned`]
+/// (external-signer path) — both placeholder-witness, design spec §4.2's sign-now/prove-later
+/// scheme (the external-signer path no longer has a real-witness/eager-proof self-funding builder;
+/// its fallback path still uses real witness/eager proof for the ordinary input-selection case).
 ///
 /// Returns `Ok(None)` when no matching note exists.
 ///
@@ -293,131 +274,6 @@ fn find_self_funding_candidate<P: Parameters + Clone>(
     Ok(Some((received, recipient)))
 }
 
-/// Attempt to build a migration-transfer PCZT directly on the transaction builder, the way the
-/// note split already does (spec follow-up: transfers should not run through the wallet's
-/// fee/change-selection logic — a self-funding note pays its own fee out of its own buffer, full
-/// stop). Looks for exactly one spendable Orchard **V2** note worth `crossing_value +
-/// TRANSFER_FEE_BUFFER_ZATOSHI` (the shape a note split always mints) among notes not already
-/// `reserved` by an earlier transfer in this signing loop or migration-locked by another run, and
-/// if found, spends it whole into a single Ironwood output of `crossing_value` — no Orchard change
-/// output, since a self-funding note's value covers the crossing plus the transfer's own fee
-/// exactly.
-///
-/// Uses the note's REAL witness/anchor (unlike [`sign_self_funding_transfer_awaiting_proof`]):
-/// this function is now used only by the external-signer path
-/// ([`crate::context::MigrationContext::create_unsigned_transfer_pczts`]), which proves eagerly and
-/// so needs one at build time. The software-signing path
-/// ([`crate::context::MigrationContext::sign_and_store_migration_schedule`]) uses
-/// [`sign_self_funding_transfer_awaiting_proof`] instead (design spec §4.2).
-///
-/// Returns `Ok(None)` when no such note exists — the immediate/sweep migration path has no note
-/// split and must select from whatever notes make up an arbitrary-sized balance, so it always
-/// falls back to the wallet's ordinary input-selection pipeline
-/// ([`propose_migration_transfer`]/[`create_transfer_pczt`]) instead.
-///
-/// # Errors
-///
-/// Returns [`MigrationError::NotSynced`] if the wallet has no synced block data yet, and
-/// [`MigrationError::Pipeline`]/[`MigrationError::InvalidState`] if the recipient address cannot be
-/// resolved, the note commitment tree is missing the anchor/witness data needed to spend the
-/// selected note, or the transaction-builder/PCZT-assembly pipeline itself fails.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn build_self_funding_transfer_pczt<P: Parameters + Clone>(
-    db: &mut Db<P>,
-    network: &P,
-    account: AccountUuid,
-    orchard_fvk: &orchard::keys::FullViewingKey,
-    crossing_value: u64,
-    reserved: &BTreeSet<ReceivedNoteId>,
-    locks: &BTreeSet<(String, u32)>,
-    target_height: u32,
-    expiry_height: u32,
-) -> Result<Option<SelfFundingTransferOutcome>, MigrationError> {
-    let Some((received, recipient)) =
-        find_self_funding_candidate(db, account, crossing_value, reserved, locks)?
-    else {
-        return Ok(None);
-    };
-
-    let (_target, anchor_height) = native_target_and_anchor(db)?;
-    let (anchor, merkle_path) = db.with_orchard_tree_mut::<_, _, MigrationError>(|tree| {
-        let anchor: orchard::Anchor = tree
-            .root_at_checkpoint_id(&anchor_height)?
-            .ok_or_else(|| {
-                MigrationError::Pipeline(format!(
-                    "transfer: anchor not found at height {anchor_height}"
-                ))
-            })?
-            .into();
-        let merkle_path = tree
-            .witness_at_checkpoint_id_caching(
-                received.note_commitment_tree_position(),
-                &anchor_height,
-            )?
-            .ok_or_else(|| {
-                MigrationError::Pipeline(format!(
-                    "transfer: witness checkpoint pruned at {anchor_height}"
-                ))
-            })?;
-        Ok((anchor, merkle_path.into()))
-    })?;
-
-    let mut builder = Builder::new(
-        network.clone(),
-        BlockHeight::from_u32(target_height),
-        BuildConfig::Standard {
-            sapling_anchor: None,
-            orchard_anchor: Some(anchor),
-            // No Ironwood spend exists in a migration transfer to anchor against (the bundle is
-            // output-only), but the builder still needs *some* anchor to construct the Ironwood
-            // bundle at all — the empty-tree placeholder is upstream's own convention for an
-            // output-only bundle (see zcash_primitives::transaction::builder's own coinbase/test
-            // fixtures).
-            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
-            // The padded default is what the self-funding buffer (TRANSFER_FEE_BUFFER_ZATOSHI)
-            // is sized for: 2 Orchard + 2 Ironwood actions.
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
-        },
-    )
-    .with_expiry_height(BlockHeight::from_u32(expiry_height));
-
-    builder
-        .add_orchard_spend::<std::convert::Infallible>(
-            orchard_fvk.clone(),
-            *received.note(),
-            merkle_path,
-        )
-        .map_err(|e| MigrationError::Pipeline(format!("transfer: add spend: {e:?}")))?;
-    let external_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
-    builder
-        .add_ironwood_output::<std::convert::Infallible>(
-            Some(external_ovk),
-            recipient,
-            Zatoshis::const_from_u64(crossing_value),
-            MemoBytes::empty(),
-        )
-        .map_err(|e| MigrationError::Pipeline(format!("transfer: add ironwood output: {e:?}")))?;
-
-    let build_result = builder
-        .build_for_pczt(OsRng, &Zip317FeeRule::standard())
-        .map_err(|e| MigrationError::Pipeline(format!("transfer: build: {e:?}")))?;
-
-    let created = pczt::roles::creator::Creator::build_from_parts(build_result.pczt_parts)
-        .ok_or_else(|| MigrationError::Pipeline("transfer: pczt creation failed".into()))?;
-    let finalized = pczt::roles::io_finalizer::IoFinalizer::new(created)
-        .finalize_io()
-        .map_err(|e| MigrationError::Pipeline(format!("transfer: io finalize: {e:?}")))?;
-
-    Ok(Some(SelfFundingTransferOutcome {
-        pczt: finalized,
-        spent_note_id: *received.internal_note_id(),
-        spent_note_txid: received.txid().to_string(),
-        spent_note_output_index: received.output_index() as u32,
-        spent_note_value: received.note().value().inner(),
-    }))
-}
-
 /// The outcome of [`sign_self_funding_transfer_awaiting_proof`]: a validly SIGNED PCZT, serialized,
 /// whose Orchard anchor and spend witness have been redacted back to absent (design spec §4.1's
 /// `SignedAwaitingProof` shape) — ready to persist under the schedule transfer's own id (a real
@@ -439,8 +295,8 @@ pub(crate) struct SelfFundingAwaitingProofOutcome {
 /// Build, sign, and redact a migration-transfer PCZT for a self-funding note — design spec §4.2's
 /// sign-now/prove-later path, used by [`sign_schedule`] (the software-signing path).
 ///
-/// Unlike [`build_self_funding_transfer_pczt`] (used only by the external-signer path, which
-/// proves *eagerly* and therefore needs a real anchor/witness at build time), this never touches
+/// Unlike the ordinary (fallback) input-selection path, which proves *eagerly* and therefore
+/// needs a real anchor/witness at build time, this never touches
 /// the wallet's commitment tree, so it works identically whether or not the funding note's split
 /// output has been mined/witnessed yet. It builds against a placeholder
 /// [`orchard::tree::MerklePath`] and a synthetic anchor self-consistent with that placeholder path's
@@ -458,8 +314,8 @@ pub(crate) struct SelfFundingAwaitingProofOutcome {
 /// [`finalize_self_funding_transfer`] attaches the note's real witness/anchor and proves it.
 ///
 /// Returns `Ok(None)` when no matching self-funding note exists (mirrors
-/// [`build_self_funding_transfer_pczt`]'s fallback contract, so [`sign_schedule`]'s caller-side
-/// fallback logic is unchanged).
+/// [`build_self_funding_transfer_pczt_awaiting_proof_unsigned`]'s fallback contract, so
+/// [`sign_schedule`]'s caller-side fallback logic is unchanged).
 ///
 /// # Errors
 ///
@@ -503,7 +359,7 @@ pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
             sapling_anchor: None,
             orchard_anchor: Some(synthetic_anchor),
             // No Ironwood spend exists to anchor against (output-only bundle); the empty-tree
-            // placeholder is upstream's own convention here (see `build_self_funding_transfer_pczt`).
+            // placeholder is upstream's own convention here.
             ironwood_anchor: Some(orchard::Anchor::empty_tree()),
             orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
             ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
@@ -569,6 +425,164 @@ pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
         spent_note_output_index: received.output_index() as u32,
         spent_note_value: received.note().value().inner(),
     }))
+}
+
+/// The unsigned counterpart of [`SelfFundingAwaitingProofOutcome`]: `raw_pczt` here is an
+/// io-finalized but **unsigned** PCZT (placeholder witness/synthetic anchor still present,
+/// un-redacted) — the shape an external signer needs. The note-identifying fields are carried
+/// through untouched so the later combine-and-redact step can rebuild the same
+/// [`store::PendingTxRow`] shape [`self_funding_awaiting_proof_row`] already produces for the
+/// software-signing path.
+pub(crate) struct SelfFundingUnsignedOutcome {
+    pub(crate) raw_pczt: Vec<u8>,
+    pub(crate) spend_action_index: u32,
+    pub(crate) spent_note_id: ReceivedNoteId,
+    pub(crate) spent_note_txid: String,
+    pub(crate) spent_note_output_index: u32,
+    pub(crate) spent_note_value: u64,
+}
+
+/// The external-signer counterpart of [`sign_self_funding_transfer_awaiting_proof`] (design spec
+/// §4.2, external-signer variant): builds the identical placeholder-witness/synthetic-anchor PCZT,
+/// but stops before signing and returns the unsigned, io-finalized PCZT for the device channel
+/// instead. Deliberately never touches the wallet's commitment tree, so — like its software-signing
+/// sibling — it works identically whether or not the funding note's split output has been
+/// mined/witnessed yet.
+///
+/// The caller stages `raw_pczt` verbatim (it is also exactly what gets shown to the device — unlike
+/// [`crate::context::MigrationContext::create_unsigned_note_split_pczt`]'s split/staged pair, there
+/// is no proof yet to strip here, so one copy serves both purposes). Once the device's signature
+/// comes back, [`combine_and_redact_awaiting_proof_pczt`] merges it in and redacts the same way
+/// [`sign_self_funding_transfer_awaiting_proof`] does internally after signing.
+///
+/// Returns `Ok(None)` when no matching self-funding note exists, mirroring
+/// [`sign_self_funding_transfer_awaiting_proof`]'s fallback contract.
+///
+/// # Errors
+///
+/// Returns [`MigrationError::InvalidState`]/[`MigrationError::Backend`] if the recipient address
+/// cannot be resolved, and [`MigrationError::Pipeline`] if the build/serialize pipeline fails.
+pub(crate) fn build_self_funding_transfer_pczt_awaiting_proof_unsigned<P: Parameters + Clone>(
+    db: &Db<P>,
+    network: &P,
+    account: AccountUuid,
+    orchard_fvk: &orchard::keys::FullViewingKey,
+    crossing_value: u64,
+    reserved: &BTreeSet<ReceivedNoteId>,
+    locks: &BTreeSet<(String, u32)>,
+    target_height: u32,
+    expiry_height: u32,
+) -> Result<Option<SelfFundingUnsignedOutcome>, MigrationError> {
+    let Some((received, recipient)) =
+        find_self_funding_candidate(db, account, crossing_value, reserved, locks)?
+    else {
+        return Ok(None);
+    };
+
+    // Same placeholder witness / synthetic anchor technique as
+    // `sign_self_funding_transfer_awaiting_proof` — see that function's comments for why this
+    // specific construction (not `Anchor::empty_tree()`, not the note's real anchor) is required.
+    let placeholder_path = orchard::tree::MerklePath::from_parts(
+        0,
+        [orchard::tree::MerkleHashOrchard::empty_leaf(); orchard::NOTE_COMMITMENT_TREE_DEPTH],
+    );
+    let synthetic_anchor = placeholder_path.root((*received.note()).commitment().into());
+
+    let mut builder = Builder::new(
+        network.clone(),
+        BlockHeight::from_u32(target_height),
+        BuildConfig::Standard {
+            sapling_anchor: None,
+            orchard_anchor: Some(synthetic_anchor),
+            ironwood_anchor: Some(orchard::Anchor::empty_tree()),
+            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
+            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+        },
+    )
+    .with_expiry_height(BlockHeight::from_u32(expiry_height));
+
+    builder
+        .add_orchard_spend::<std::convert::Infallible>(
+            orchard_fvk.clone(),
+            *received.note(),
+            placeholder_path,
+        )
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: add spend: {e:?}")))?;
+    let external_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    builder
+        .add_ironwood_output::<std::convert::Infallible>(
+            Some(external_ovk),
+            recipient,
+            Zatoshis::const_from_u64(crossing_value),
+            MemoBytes::empty(),
+        )
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: add ironwood output: {e:?}")))?;
+
+    let build_result = builder
+        .build_for_pczt(OsRng, &Zip317FeeRule::standard())
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: build: {e:?}")))?;
+    let spend_action_index = build_result
+        .orchard_meta
+        .spend_action_index(0)
+        .ok_or_else(|| {
+            MigrationError::Pipeline("transfer: spend action index missing after build".into())
+        })? as u32;
+
+    let created = pczt::roles::creator::Creator::build_from_parts(build_result.pczt_parts)
+        .ok_or_else(|| MigrationError::Pipeline("transfer: pczt creation failed".into()))?;
+    let finalized = pczt::roles::io_finalizer::IoFinalizer::new(created)
+        .finalize_io()
+        .map_err(|e| MigrationError::Pipeline(format!("transfer: io finalize: {e:?}")))?;
+    let raw_pczt = finalized.serialize().map_err(|e| {
+        MigrationError::Pipeline(format!("transfer: serialize unsigned pczt: {e:?}"))
+    })?;
+
+    Ok(Some(SelfFundingUnsignedOutcome {
+        raw_pczt,
+        spend_action_index,
+        spent_note_id: *received.internal_note_id(),
+        spent_note_txid: received.txid().to_string(),
+        spent_note_output_index: received.output_index() as u32,
+        spent_note_value: received.note().value().inner(),
+    }))
+}
+
+/// Merge an external signer's signature into a staged unsigned self-funding transfer PCZT (from
+/// [`build_self_funding_transfer_pczt_awaiting_proof_unsigned`]) and redact it back to the
+/// `SignedAwaitingProof` shape — the external-signer counterpart of what
+/// [`sign_self_funding_transfer_awaiting_proof`] does in-process right after signing. Deliberately
+/// does **not** prove or extract (unlike [`combine_signed_pczt`]): no real anchor/witness exists
+/// yet, so proving is impossible here — [`crate::backend::finalize_self_funding_transfer`]
+/// completes it later, exactly as it already does for the software-signing path.
+///
+/// # Errors
+///
+/// Returns [`MigrationError::Pipeline`] if either PCZT cannot be parsed, cannot be combined, or the
+/// redacted result cannot be serialized.
+pub(crate) fn combine_and_redact_awaiting_proof_pczt(
+    staged_raw: &[u8],
+    signed_bytes: &[u8],
+    spend_action_index: u32,
+) -> Result<Vec<u8>, MigrationError> {
+    let staged = pczt::Pczt::parse(staged_raw)
+        .map_err(|e| MigrationError::Pipeline(format!("parse staged awaiting-proof pczt: {e:?}")))?;
+    let signed = pczt::Pczt::parse(signed_bytes)
+        .map_err(|e| MigrationError::Pipeline(format!("parse signed awaiting-proof pczt: {e:?}")))?;
+    let combined = pczt::roles::combiner::Combiner::new(vec![staged, signed])
+        .combine()
+        .map_err(|e| MigrationError::Pipeline(format!("combine awaiting-proof pczt: {e:?}")))?;
+    // Same scoping as `sign_self_funding_transfer_awaiting_proof`: only the real spend's witness is
+    // cleared, never the padded dummy action's (which would leave the Prover with a dummy action it
+    // cannot prove later).
+    let redacted = pczt::roles::redactor::Redactor::new(combined)
+        .redact_orchard_with(|mut o| {
+            o.clear_anchor();
+            o.redact_action(spend_action_index as usize, |mut a| a.clear_spend_witness());
+        })
+        .finish();
+    redacted
+        .serialize()
+        .map_err(|e| MigrationError::Pipeline(format!("serialize awaiting-proof pczt: {e:?}")))
 }
 
 /// Root of the Orchard commitment tree at `anchor_height`, or `None` if the wallet has not
@@ -702,9 +716,9 @@ pub(crate) fn finalize_self_funding_transfer<P: Parameters + Clone>(
 /// change routing of a version-6 transfer is validated end to end in Task 13). The proposal is
 /// pinned to transaction version 6 so the realized PCZT carries the Ironwood bundle.
 ///
-/// This is the **fallback** path for a transfer with no matching self-funding note (see
-/// [`build_self_funding_transfer_pczt`]) — in practice, the immediate/sweep migration path, which
-/// has no note split and must select from whatever notes make up an arbitrary-sized balance.
+/// This is the **fallback** path for a transfer with no matching self-funding note — in
+/// practice, the immediate/sweep migration path, which has no note split and must select from
+/// whatever notes make up an arbitrary-sized balance.
 ///
 /// # Errors
 ///
@@ -1141,14 +1155,45 @@ pub(crate) fn self_funding_awaiting_proof_row(
     raw_pczt: Vec<u8>,
     spend_action_index: u32,
 ) -> store::PendingTxRow {
-    let crossing_value = u64::from(t.amount());
-    store::PendingTxRow {
-        txid_hex: t.id().as_str().to_string(),
+    self_funding_awaiting_proof_row_from_parts(
+        t.id().as_str(),
+        u32::from(t.anchor_height()),
+        u32::from(t.next_executable_after_height()),
+        u32::from(t.expiry_height()),
+        u64::from(t.amount()),
+        spent_note_txid,
+        spent_note_output_index,
+        spent_note_value,
         raw_pczt,
-        anchor_height: u32::from(t.anchor_height()),
-        target_height: u32::from(t.next_executable_after_height()),
-        next_executable_after_height: u32::from(t.next_executable_after_height()),
-        expiry_height: u32::from(t.expiry_height()),
+        spend_action_index,
+    )
+}
+
+/// [`self_funding_awaiting_proof_row`] taking its [`TransferProposal`] fields directly, for callers
+/// that only have a schedule transfer's staged heights/value (the external-signer store step,
+/// which reconstructs from staging metadata rather than holding the original `TransferProposal` —
+/// mirrors how [`crate::context::MigrationContext::store_signed_schedule_pczts`]'s fallback path
+/// already reconstructs from `TransferStagingMetadata` instead).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn self_funding_awaiting_proof_row_from_parts(
+    transfer_id: &str,
+    anchor_height: u32,
+    next_executable_after_height: u32,
+    expiry_height: u32,
+    crossing_value: u64,
+    spent_note_txid: &str,
+    spent_note_output_index: u32,
+    spent_note_value: u64,
+    raw_pczt: Vec<u8>,
+    spend_action_index: u32,
+) -> store::PendingTxRow {
+    store::PendingTxRow {
+        txid_hex: transfer_id.to_string(),
+        raw_pczt,
+        anchor_height,
+        target_height: next_executable_after_height,
+        next_executable_after_height,
+        expiry_height,
         value_zatoshi: crossing_value,
         fee_zatoshi: spent_note_value.saturating_sub(crossing_value),
         selected_note_txid: spent_note_txid.to_string(),

@@ -774,6 +774,118 @@ fn sign_now_prove_later_transfer_awaits_proof_until_funding_note_is_witnessed() 
     assert_ne!(first.txid(), second.txid());
 }
 
+/// The external-signer (Keystone) counterpart of
+/// `sign_now_prove_later_transfer_awaits_proof_until_funding_note_is_witnessed`: proves that
+/// `create_unsigned_transfer_pczts`/`store_signed_schedule_pczts` produce the exact same
+/// `SignedAwaitingProof` outcome as the software-signing path for a self-funding transfer, built
+/// entirely without touching the commitment tree (works before the funding note is witnessed) and
+/// completed later by the same, unmodified `finalize_ready_transfers()`.
+#[test]
+fn external_signer_schedule_awaits_proof_until_funding_note_is_witnessed() {
+    use zcash_pool_migration::types::SignedTransferPczt;
+
+    // Same seed as the software-signing variant: decomposes into [10, 2] ZEC self-funding notes.
+    let seed_value = 1_200_080_000u64;
+    let (_dir, mut st, db_path, account) = seed_wallet(&[seed_value], 10);
+    let usk = st.get_account().usk().clone();
+    let ask = orchard::keys::SpendAuthorizingKey::from(usk.orchard());
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    // --- Phase 1: split, mined to only 3 confirmations (same as the software-signing variant) ---
+    let split_proposal = ctx.prepare_note_split().unwrap();
+    let prepared_split = ctx.sign_note_split(&split_proposal, &usk).unwrap();
+    let split_raw_tx = ctx
+        .extract_broadcast_tx(prepared_split.pczt_bytes())
+        .unwrap();
+    let split_tx = Transaction::read(&split_raw_tx[..], BranchId::Nu6_3).expect("split tx parses");
+    ctx.record_transfer_result(
+        prepared_split.id(),
+        TransferResult::Success(prepared_split.txid()),
+    )
+    .unwrap();
+    let (h, _) = st.generate_next_block_from_tx(0, &split_tx);
+    st.scan_cached_blocks(h, 1);
+    st.add_empty_blocks(2);
+
+    // --- Phase 2: propose, build UNSIGNED PCZTs for an external signer, "sign" them exactly the
+    // way `placeholder_witness_synthetic_anchor_then_redacted_signs_successfully` signs a
+    // hand-built one (mirrors what a real device would return), then store the signed set ---
+    let schedule = ctx.propose_migration_transfers(false).unwrap();
+    let mut crossings: Vec<u64> = schedule
+        .transfers()
+        .iter()
+        .map(|t| u64::from(t.amount()))
+        .collect();
+    crossings.sort_unstable();
+    assert_eq!(crossings, vec![200_000_000u64, 1_000_000_000]);
+
+    let unsigned = ctx.create_unsigned_transfer_pczts(&schedule).unwrap();
+    assert_eq!(unsigned.len(), 2);
+
+    let signed: Vec<SignedTransferPczt> = unsigned
+        .iter()
+        .map(|u| {
+            let pczt = pczt::Pczt::parse(u.pczt_bytes()).expect("unsigned pczt parses");
+            let mut signer = pczt::roles::signer::Signer::new(pczt)
+                .expect("signer inits fine with a placeholder witness/synthetic anchor");
+            for index in 0.. {
+                match signer.sign_orchard(index, &ask) {
+                    Err(pczt::roles::signer::Error::InvalidIndex) => break,
+                    Ok(())
+                    | Err(pczt::roles::signer::Error::OrchardSign(
+                        orchard::pczt::SignerError::WrongSpendAuthorizingKey,
+                    )) => {}
+                    Err(e) => panic!("sign orchard: {e:?}"),
+                }
+            }
+            let signed_bytes = signer.finish().serialize().expect("serialize signed pczt");
+            SignedTransferPczt::from_parts(u.id().clone(), signed_bytes)
+        })
+        .collect();
+    ctx.store_signed_schedule_pczts(&signed).unwrap();
+
+    // Same assertions as the software-signing variant: signed but not due, both awaiting proof.
+    assert!(
+        ctx.next_due_transfer().unwrap().is_none(),
+        "a signed-but-unproven transfer is never due"
+    );
+    let conn = Connection::open(&db_path).unwrap();
+    let awaiting: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ext_ironwood_migration_pending_txs WHERE proof_status = 'awaiting_proof'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        awaiting, 2,
+        "both externally-signed self-funding transfers are persisted as SignedAwaitingProof"
+    );
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        0,
+        "not witnessed yet is a transient no-op, not an error (design spec §6)"
+    );
+
+    // --- Phase 3: mine to a witnessable anchor — the same unmodified `finalize_ready_transfers()`
+    // completes both, exactly like the software-signing path ---
+    st.add_empty_blocks(10);
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        2,
+        "both notes are witnessed now, and finalizing reuses one anchor for both (design spec §5)"
+    );
+    let ready: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ext_ironwood_migration_pending_txs WHERE proof_status = 'ready'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(ready, 2, "both transfers are now proved and broadcastable");
+}
+
 /// The much more common case: the spendable balance does not divide evenly into self-funding
 /// notes plus the real split fee. The leftover must surface as its own plain, **unlocked** Orchard
 /// change output — never folded into the last migration note's value (which would leak the
