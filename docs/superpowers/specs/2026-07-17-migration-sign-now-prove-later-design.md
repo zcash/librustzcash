@@ -295,6 +295,40 @@ timing, WorkManager scheduling, fallback-on-open) — that is real, separate, su
 tracked against ZIP 318 §"Transfer scheduling"/"Background scheduling"/"Fallback on application
 open" directly, out of scope for the local testbed fix this document describes.
 
+### 7.1 Implementation status (2026-07-18)
+
+Steps 1–4 above are implemented, across both repos (branch `feature/orchard_migration` in each):
+
+- **`zcash-android-wallet-sdk`** (commit `57b25204`) — `finalize_ready_transfers` exposed end to end:
+  `migration.rs` (`finalizeReadyTransfersNative`, modeled on `isSyncRequiredBeforeNextTransferNative`)
+  → `MigrationRustBackend.kt` → `TypesafeMigrationBackend(Impl).kt` → `MigrationSdk.kt`
+  (`suspend fun finalizeReadyTransfers(): Int`) → `OrchardMigrationSdkImpl.kt` (via the existing
+  `logged("finalizeReadyTransfers") { ... }` wrapper).
+- **`zashi-android`** — `MigrationReviewVM.kt`'s `confirmAutomatic` (commit `804e7a012`) now calls
+  `isNoteSplitNeeded()` → `prepareNoteSplit()` → `submitNoteSplit(proposal, usk)` before
+  `signAndStoreMigrationSchedule`, per steps 1–3 above; `submitNoteSplit` was confirmed to already
+  compose sign → extract → broadcast → `recordTransferResult` into one call (no additional
+  composition was needed on the app side). `MigrationWorker.kt` (commit `61966f3c8`) calls
+  `sdk.finalizeReadyTransfers()` in `doWork()`, immediately after resolving `sdk` and *before* the
+  `isSyncRequiredBeforeNextTransfer()` gate, so a funding note witnessed since the last run is
+  finalized in time to be picked up by `executeNextPendingTransfer()` later in the same run —
+  concretely satisfying step 4's "background execution... calling `finalize_ready_transfers()`",
+  as a narrow stopgap rather than the full Phase 2 scheduling subsystem (unchanged from this
+  section's framing above).
+
+**Known deviation:** the Keystone (external-signer) branch of `confirmAutomatic` was deliberately
+left unchanged — it returns early into the QR sign/scan detour before reaching the new note-split
+call. Per §4.5's first documented deviation, the external-signer PCZT path
+(`create_unsigned_transfer_pczts`) still proves eagerly on the Rust side and was never moved to the
+placeholder-witness scheme, so wiring note-split into that branch would need its own composition
+against a deferred-proof path that doesn't exist for external signing yet. Keystone migration
+therefore still requires the wallet's existing notes to already fund the schedule exactly, same as
+before this document.
+
+**Known gap:** `MigrationReviewVM` (and `MigrationWorker`) have no pre-existing test coverage to
+extend — this repo's test suite does not currently cover this VM/Worker at all, independent of this
+change.
+
 ## 8. Fallback on application open (reference, not re-specified here)
 
 ZIP 318 §"Fallback on application open" already specifies the missed-window behavior precisely:
