@@ -7173,6 +7173,7 @@ dependencies = [
  "zcash_encoding",
  "zcash_keys",
  "zcash_note_encryption",
+ "zcash_pool_migration_sqlite",
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
