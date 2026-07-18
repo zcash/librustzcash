@@ -257,7 +257,7 @@ impl NoteSplitPlan {
     /// of the accessors below: a store (for example `zcash_pool_migration_sqlite`) reads the columns
     /// back and reconstructs the plan verbatim, so `total_migratable_zatoshi` is taken as stored
     /// rather than recomputed (the caller is responsible for having persisted a consistent set, which
-    /// for a plan produced by [`Self::from_notes`] means `total_migratable_zatoshi` equals the sum of
+    /// for a plan produced by `Self::from_notes` means `total_migratable_zatoshi` equals the sum of
     /// `crossing_values`).
     pub fn from_stored_parts(
         crossing_values: Vec<u64>,

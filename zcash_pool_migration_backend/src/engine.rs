@@ -395,11 +395,6 @@ pub enum CommitError<E> {
     Backend(E),
     /// Building or serializing a transaction failed.
     Build(alloc::string::String),
-    /// Retained for API compatibility; no longer returned. Multi-layer preparation is now committed
-    /// phase by phase: [`commit_preparation`] signs layer 0 and [`commit_pending_preparation`] signs
-    /// each later layer once its predecessor mines, so a plan whose later layers spend earlier layers'
-    /// outputs is fully supported.
-    UnsupportedMultiLayer,
     /// No committed migration was found to build the transfers for (nothing was loaded from storage).
     NoMigrationInProgress,
 }
@@ -410,9 +405,6 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
         match self {
             CommitError::Backend(e) => write!(f, "wallet backend error: {e}"),
             CommitError::Build(m) => write!(f, "building the migration failed: {m}"),
-            CommitError::UnsupportedMultiLayer => {
-                f.write_str("multi-layer preparation cannot yet be pre-signed (single-layer only)")
-            }
             CommitError::NoMigrationInProgress => {
                 f.write_str("no committed migration is in progress")
             }
@@ -591,7 +583,8 @@ where
 ///
 /// Loads the committed migration, finds the earliest still-`Planned` preparation layer (a `layer > 0`)
 /// whose whole immediately-prior layer is [`Mined`](MigrationTxState::Mined), builds and pre-signs
-/// EVERY transaction of that one layer (resolving each transaction's [`PrepInput::Prior`] spends to the
+/// EVERY transaction of that one layer (resolving each transaction's
+/// [`PrepInput::Prior`](crate::preparation::PrepInput::Prior) spends to the
 /// prior layer's now-witnessable feeder notes by value), and persists the result. If no layer is ready
 /// (the next layer's dependencies are not all mined, or every preparation layer is already built), it
 /// returns the migration unchanged, so a caller can poll it. Call it once per newly-mined layer until
