@@ -131,6 +131,13 @@ pub struct PrepTransaction {
 }
 
 impl PrepTransaction {
+    /// Construct a transaction from its spent and produced notes. Used to reconstruct a persisted plan
+    /// (the inverse of [`inputs`](Self::inputs) plus [`outputs`](Self::outputs)); the caller supplies
+    /// parts a valid plan could have produced.
+    pub fn from_parts(inputs: Vec<PrepInput>, outputs: Vec<PrepOutput>) -> Self {
+        PrepTransaction { inputs, outputs }
+    }
+
     /// The notes this transaction spends.
     pub fn inputs(&self) -> &[PrepInput] {
         &self.inputs
@@ -159,6 +166,20 @@ pub struct PreparationPlan {
 }
 
 impl PreparationPlan {
+    /// Reconstruct a plan from its parts: the layers in dependency order (see [`layers`](Self::layers))
+    /// and the direct-funding notes (see [`direct_funding_notes`](Self::direct_funding_notes)). Used by
+    /// a store to round-trip a persisted plan; the caller supplies parts a valid plan could have
+    /// produced (no validation beyond what the accessors expose is done here).
+    pub fn from_parts(
+        layers: Vec<Vec<PrepTransaction>>,
+        direct_funding: Vec<(usize, u64)>,
+    ) -> Self {
+        PreparationPlan {
+            layers,
+            direct_funding,
+        }
+    }
+
     /// The layers, in dependency order (later layers may spend earlier layers' outputs).
     pub fn layers(&self) -> &[Vec<PrepTransaction>] {
         &self.layers
