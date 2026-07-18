@@ -168,6 +168,12 @@ impl MigrationState {
     /// uncommitted or freshly committed migration keeps its `Planning`/`Committed` status until work
     /// begins).
     pub fn recompute_status(&mut self) {
+        // A terminal status (Complete or Failed, the latter also used for a cancelled migration) is
+        // final: never move out of it. Otherwise a cancelled migration whose transactions were
+        // already broadcast would be resurrected to InProgress the next time the status is recomputed.
+        if self.is_terminal() {
+            return;
+        }
         let all_mined = !self.transactions.is_empty()
             && self
                 .transactions
@@ -222,6 +228,11 @@ impl MigrationState {
     /// when everything is mined, or `Waiting` otherwise. This is made once, here, so it is never
     /// duplicated per consumer.
     pub fn next_step(&self, target_height: BlockHeight) -> AdvanceStep {
+        // A terminal migration (complete, or failed/cancelled) has no next action: never build or
+        // broadcast for it, so a cancelled migration cannot be driven further.
+        if self.is_terminal() {
+            return AdvanceStep::Complete;
+        }
         if let Some(id) = self.next_broadcastable(target_height) {
             return AdvanceStep::Broadcast { id };
         }
@@ -523,6 +534,36 @@ mod tests {
         s.mark_mined(MigrationTxId(1), BlockHeight::from_u32(11));
         assert_eq!(s.status, MigrationStatus::Complete);
         assert!(s.is_terminal());
+    }
+
+    #[test]
+    fn terminal_status_is_not_resurrected() {
+        // A cancelled migration (Failed) whose transactions were already broadcast must stay
+        // terminal: neither recomputing the status nor asking for the next step may revive it.
+        let mut s = state_with(vec![
+            tx(0, prep(0, 0), MigrationTxState::Broadcast { txid: [1; 32] }),
+            tx(1, transfer(0), MigrationTxState::Signed),
+        ]);
+        s.status = MigrationStatus::Failed;
+
+        s.recompute_status();
+        assert_eq!(
+            s.status,
+            MigrationStatus::Failed,
+            "a Failed (cancelled) migration must not be revived to InProgress"
+        );
+        assert!(s.is_terminal());
+
+        // The next step for a terminal migration is Complete (no action), so a driver never
+        // broadcasts or builds for it; a Signed transaction is NOT offered for broadcast.
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(100)),
+            AdvanceStep::Complete
+        );
+
+        // Detecting a mined transaction still does not resurrect it.
+        s.mark_mined(MigrationTxId(0), BlockHeight::from_u32(10));
+        assert_eq!(s.status, MigrationStatus::Failed);
     }
 
     #[test]
