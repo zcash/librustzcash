@@ -24,6 +24,18 @@ workspace.
   names begin with the `ext_` prefix reserved for external migrations, and denies
   everything else (DDL, `PRAGMA`, `ATTACH`/`DETACH`, and transaction control).
 
+### Changed
+- The `zip-233` feature flag now also enables `zcash_client_backend/zip-233`,
+  keeping the two crates' feature-gated `zcash_primitives` call signatures in
+  agreement when this crate is built with ZIP 233 support.
+
+### Fixed
+- Value in immature transparent coinbase outputs is now reported as pending
+  spendability (in the `value_pending_spendability` field of the coinbase
+  bucket) in wallet-summary account balances. Previously it was incorrectly
+  counted as spendable before the coinbase output reached maturity, even
+  though it could not be selected for shielding.
+
 ## [0.22.0-rc.1] - 2026-07-12
 
 ### Added

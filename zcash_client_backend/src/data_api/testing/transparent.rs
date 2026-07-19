@@ -4,16 +4,23 @@ use assert_matches::assert_matches;
 
 use sapling::zip32::ExtendedSpendingKey;
 use transparent::{
-    address::TransparentAddress,
-    bundle::{OutPoint, TxOut},
+    address::{Script, TransparentAddress},
+    bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
     keys::TransparentKeyScope,
 };
 use zcash_keys::{
     address::Address,
     keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
 };
-use zcash_primitives::block::BlockHash;
-use zcash_protocol::{local_consensus::LocalNetwork, value::Zatoshis};
+use zcash_primitives::{
+    block::BlockHash,
+    transaction::{Transaction, TransactionData, TxVersion, fees::zip317},
+};
+use zcash_protocol::{
+    consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS},
+    local_consensus::LocalNetwork,
+    value::Zatoshis,
+};
 use zip321::{Payment, TransactionRequest};
 
 #[cfg(feature = "transparent-key-import")]
@@ -25,8 +32,8 @@ use {
 use super::TestAccount;
 use crate::{
     data_api::{
-        Account as _, Balance, CoinbaseFilter, InputSource as _, MaxSpendMode, TargetValue,
-        WalletRead as _, WalletTest as _, WalletWrite,
+        Account as _, AccountBalance, Balance, CoinbaseFilter, InputSource as _, MaxSpendMode,
+        TargetValue, WalletRead as _, WalletTest as _, WalletWrite,
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
@@ -59,7 +66,9 @@ fn check_balance<DSF>(
     #[allow(deprecated)]
     let old_unshielded_value = balance.unshielded();
     assert_eq!(old_unshielded_value, expected.total());
-    assert_eq!(balance.unshielded_balance(), expected);
+    assert_eq!(balance.unshielded_regular_balance(), expected);
+    assert_eq!(balance.unshielded_coinbase_balance(), &Balance::ZERO);
+    assert_eq!(balance.unshielded_balance(), *expected);
 
     // Check the older APIs for consistency.
     let target_height = TargetHeight::from(st.wallet().chain_height().unwrap().unwrap() + 1);
@@ -775,6 +784,275 @@ where
         taddr,
         ConfirmationsPolicy::new_symmetrical_unchecked(2, true),
         &zero_or_one_conf_value,
+    );
+}
+
+/// Constructs a fake transparent-only coinbase transaction paying `value` to `taddr`.
+///
+/// The result is a structurally valid coinbase transaction (a single input spending the null
+/// outpoint), which causes the receiving wallet to classify it as coinbase when it is stored
+/// via [`decrypt_and_store_transaction`]. The `lock_time` parameter has no consensus meaning
+/// here; distinct values may be used to give otherwise-identical coinbase transactions
+/// distinct txids.
+fn fake_transparent_coinbase_tx(
+    lock_time: u32,
+    value: Zatoshis,
+    taddr: &TransparentAddress,
+) -> Transaction {
+    let coinbase_bundle = Bundle {
+        vin: vec![TxIn::from_parts(
+            OutPoint::NULL,
+            Script::default(),
+            u32::MAX,
+        )],
+        vout: vec![TxOut::new(value, taddr.script().into())],
+        authorization: Authorized,
+    };
+
+    TransactionData::<zcash_primitives::transaction::Authorized>::from_parts(
+        TxVersion::V5,
+        BranchId::Nu5,
+        lock_time,
+        // Coinbase transactions do not expire.
+        BlockHeight::from(0),
+        // Coinbase transactions burn nothing.
+        #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+        Zatoshis::ZERO,
+        Some(coinbase_bundle),
+        None,
+        None,
+        None,
+    )
+    .freeze()
+    .unwrap()
+}
+
+/// Retrieves the [`AccountBalance`] for the given test account from the wallet summary.
+fn get_account_balance<DSF>(
+    st: &TestState<impl TestCache, <DSF as DataStoreFactory>::DataStore, LocalNetwork>,
+    account: &TestAccount<<DSF as DataStoreFactory>::Account>,
+    confirmations_policy: ConfirmationsPolicy,
+) -> AccountBalance
+where
+    DSF: DataStoreFactory,
+{
+    let summary = st
+        .wallet()
+        .get_wallet_summary(confirmations_policy)
+        .unwrap()
+        .unwrap();
+    *summary.account_balances().get(&account.id()).unwrap()
+}
+
+/// Verifies that transparent funds are reported in the correct `AccountBalance` bucket
+/// (regular vs. coinbase), that immature coinbase value is reported as pending rather than
+/// spendable, and that it becomes spendable upon reaching coinbase maturity.
+pub fn transparent_coinbase_balance_split<DSF>(ds_factory: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Mine a coinbase output paying the wallet's transparent address at tx index 0.
+    let coinbase_value = Zatoshis::const_from_u64(625_000_000);
+    let coinbase_tx = fake_transparent_coinbase_tx(0, coinbase_value, taddr);
+    let (h, _) = st.generate_next_block_from_tx(0, &coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), &coinbase_tx, Some(h)).unwrap();
+
+    // Immature coinbase: the value is pending spendability in the coinbase bucket, not
+    // spendable; the regular bucket is untouched.
+    let balance = get_account_balance::<DSF>(&st, &account, ConfirmationsPolicy::MIN);
+    assert_eq!(
+        balance.unshielded_coinbase_balance().spendable_value(),
+        Zatoshis::ZERO
+    );
+    assert_eq!(
+        balance
+            .unshielded_coinbase_balance()
+            .value_pending_spendability(),
+        coinbase_value
+    );
+    assert_eq!(balance.unshielded_regular_balance(), &Balance::ZERO);
+
+    // The same holds when the confirmations policy itself is not yet satisfied (the coinbase
+    // output has only one confirmation here), which exercises the pending-balance query.
+    let balance = get_account_balance::<DSF>(
+        &st,
+        &account,
+        ConfirmationsPolicy::new_symmetrical_unchecked(2, false),
+    );
+    assert_eq!(
+        balance.unshielded_coinbase_balance().spendable_value(),
+        Zatoshis::ZERO
+    );
+    assert_eq!(
+        balance
+            .unshielded_coinbase_balance()
+            .value_pending_spendability(),
+        coinbase_value
+    );
+    assert_eq!(balance.unshielded_regular_balance(), &Balance::ZERO);
+
+    // Receive a regular (non-coinbase) UTXO. This output's transaction has no known tx_index,
+    // so it must be classified as regular (non-coinbase) funds.
+    let regular_value = Zatoshis::const_from_u64(100_000);
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(regular_value, taddr.script().into()),
+        Some(h),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Mixed state: the regular value is spendable, the coinbase value remains pending, and the
+    // combined accessors report the sums of the two buckets.
+    let balance = get_account_balance::<DSF>(&st, &account, ConfirmationsPolicy::MIN);
+    assert_eq!(
+        balance.unshielded_regular_balance().spendable_value(),
+        regular_value
+    );
+    assert_eq!(
+        balance
+            .unshielded_coinbase_balance()
+            .value_pending_spendability(),
+        coinbase_value
+    );
+    assert_eq!(
+        balance.unshielded_balance(),
+        (*balance.unshielded_regular_balance() + *balance.unshielded_coinbase_balance()).unwrap()
+    );
+    #[allow(deprecated)]
+    let unshielded = balance.unshielded();
+    assert_eq!(unshielded, (regular_value + coinbase_value).unwrap());
+    assert_eq!(balance.total(), (regular_value + coinbase_value).unwrap());
+
+    // Once the coinbase output reaches maturity, its value moves from pending to spendable.
+    for _ in 0..COINBASE_MATURITY_BLOCKS {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(h + 1, COINBASE_MATURITY_BLOCKS as usize);
+
+    let balance = get_account_balance::<DSF>(&st, &account, ConfirmationsPolicy::MIN);
+    assert_eq!(
+        balance.unshielded_coinbase_balance().spendable_value(),
+        coinbase_value
+    );
+    assert_eq!(
+        balance
+            .unshielded_coinbase_balance()
+            .value_pending_spendability(),
+        Zatoshis::ZERO
+    );
+    assert_eq!(
+        balance.unshielded_regular_balance().spendable_value(),
+        regular_value
+    );
+    assert_eq!(balance.total(), (regular_value + coinbase_value).unwrap());
+}
+
+/// Verifies that dust-valued (uneconomic) transparent outputs are reported in the
+/// `uneconomic_value` field of the correct `AccountBalance` bucket (regular vs. coinbase).
+pub fn transparent_coinbase_balance_dust<DSF>(ds_factory: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    let dust_value = Zatoshis::const_from_u64(1000);
+    assert!(dust_value <= zip317::MARGINAL_FEE);
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account.id(), UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    // Mine a dust coinbase output paying the wallet's transparent address at tx index 0.
+    let coinbase_tx = fake_transparent_coinbase_tx(0, dust_value, taddr);
+    let (h, _) = st.generate_next_block_from_tx(0, &coinbase_tx);
+    st.scan_cached_blocks(h, 1);
+    let params = *st.network();
+    decrypt_and_store_transaction(&params, st.wallet_mut(), &coinbase_tx, Some(h)).unwrap();
+
+    // Receive a dust regular (non-coinbase) UTXO.
+    let utxo = WalletTransparentOutput::from_parts(
+        OutPoint::fake(),
+        TxOut::new(dust_value, taddr.script().into()),
+        Some(h),
+        Some(account.id()),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Each dust output lands in the uneconomic value of its own bucket, and contributes to
+    // neither spendable nor pending value.
+    let balance = get_account_balance::<DSF>(&st, &account, ConfirmationsPolicy::MIN);
+    assert_eq!(
+        balance.unshielded_regular_balance().uneconomic_value(),
+        dust_value
+    );
+    assert_eq!(
+        balance.unshielded_coinbase_balance().uneconomic_value(),
+        dust_value
+    );
+    assert_eq!(
+        balance.uneconomic_value(),
+        (dust_value + dust_value).unwrap()
+    );
+    assert_eq!(
+        balance.unshielded_balance().spendable_value(),
+        Zatoshis::ZERO
+    );
+    assert_eq!(
+        balance.unshielded_balance().value_pending_spendability(),
+        Zatoshis::ZERO
+    );
+    assert_eq!(balance.total(), Zatoshis::ZERO);
+
+    // Dust classification takes precedence over coinbase maturity: after the coinbase output
+    // matures, its value remains uneconomic rather than becoming spendable.
+    for _ in 0..COINBASE_MATURITY_BLOCKS {
+        st.generate_empty_block();
+    }
+    st.scan_cached_blocks(h + 1, COINBASE_MATURITY_BLOCKS as usize);
+
+    let balance = get_account_balance::<DSF>(&st, &account, ConfirmationsPolicy::MIN);
+    assert_eq!(
+        balance.unshielded_coinbase_balance().uneconomic_value(),
+        dust_value
+    );
+    assert_eq!(
+        balance.unshielded_coinbase_balance().spendable_value(),
+        Zatoshis::ZERO
     );
 }
 

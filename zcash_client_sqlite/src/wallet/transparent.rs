@@ -1750,7 +1750,10 @@ pub(crate) fn add_transparent_account_balances(
     };
 
     let mut stmt_account_spendable_balances = conn.prepare(&format!(
-        "SELECT accounts.uuid, SUM(u.value_zat)
+        "SELECT accounts.uuid, SUM(u.value_zat),
+            (IFNULL(t.tx_index, 1) == 0) AS is_coinbase,
+            (t.mined_height IS NOT NULL
+             AND :target_height - t.mined_height >= {COINBASE_MATURITY_BLOCKS}) AS is_mature
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1758,7 +1761,7 @@ pub(crate) fn add_transparent_account_balances(
          WHERE ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the received txo is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         GROUP BY accounts.uuid",
+         GROUP BY accounts.uuid, is_coinbase, is_mature",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
@@ -1775,17 +1778,33 @@ pub(crate) fn add_transparent_account_balances(
         let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
             SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
         })?;
+        let is_coinbase: bool = row.get("is_coinbase")?;
+        let is_mature: bool = row.get("is_mature")?;
 
-        account_balances
+        let balance = account_balances
             .entry(account)
-            .or_insert(AccountBalance::ZERO)
-            .with_unshielded_balance_mut(|bal| {
+            .or_insert(AccountBalance::ZERO);
+        if is_coinbase {
+            balance.with_unshielded_coinbase_balance_mut(|bal| {
+                if value <= zip317::MARGINAL_FEE {
+                    bal.add_uneconomic_value(value)
+                } else if is_mature {
+                    bal.add_spendable_value(value)
+                } else {
+                    // Immature coinbase value may not yet be spent (by shielding); report it
+                    // as pending until the coinbase output reaches maturity.
+                    bal.add_pending_spendable_value(value)
+                }
+            })?;
+        } else {
+            balance.with_unshielded_regular_balance_mut(|bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
                 } else {
                     bal.add_spendable_value(value)
                 }
             })?;
+        }
     }
 
     // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
@@ -1794,7 +1813,8 @@ pub(crate) fn add_transparent_account_balances(
     // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
     if min_confirmations > 0 {
         let mut stmt_account_unconfirmed_balances = conn.prepare(&format!(
-            "SELECT accounts.uuid, SUM(u.value_zat)
+            "SELECT accounts.uuid, SUM(u.value_zat),
+                (IFNULL(t.tx_index, 1) == 0) AS is_coinbase
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1813,7 +1833,7 @@ pub(crate) fn add_transparent_account_balances(
              )
              AND u.id NOT IN ({}) -- and the received txo is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-             GROUP BY accounts.uuid",
+             GROUP BY accounts.uuid, is_coinbase",
             spent_utxos_clause(),
             excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
         ))?;
@@ -1829,17 +1849,23 @@ pub(crate) fn add_transparent_account_balances(
             let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
             })?;
+            let is_coinbase: bool = row.get("is_coinbase")?;
 
-            account_balances
+            let add_pending = |bal: &mut Balance| {
+                if value <= zip317::MARGINAL_FEE {
+                    bal.add_uneconomic_value(value)
+                } else {
+                    bal.add_pending_spendable_value(value)
+                }
+            };
+            let balance = account_balances
                 .entry(account)
-                .or_insert(AccountBalance::ZERO)
-                .with_unshielded_balance_mut(|bal| {
-                    if value <= zip317::MARGINAL_FEE {
-                        bal.add_uneconomic_value(value)
-                    } else {
-                        bal.add_pending_spendable_value(value)
-                    }
-                })?;
+                .or_insert(AccountBalance::ZERO);
+            if is_coinbase {
+                balance.with_unshielded_coinbase_balance_mut(add_pending)?;
+            } else {
+                balance.with_unshielded_regular_balance_mut(add_pending)?;
+            }
         }
     }
     Ok(())
@@ -2985,6 +3011,22 @@ mod tests {
     #[test]
     fn transparent_balance_spendability() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn transparent_coinbase_balance_split() {
+        zcash_client_backend::data_api::testing::transparent::transparent_coinbase_balance_split(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn transparent_coinbase_balance_dust() {
+        zcash_client_backend::data_api::testing::transparent::transparent_coinbase_balance_dust(
             TestDbFactory::default(),
             BlockCache::new(),
         );

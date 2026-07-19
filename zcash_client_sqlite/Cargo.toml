@@ -119,7 +119,7 @@ zip321 = { workspace = true }
 
 [features]
 default = ["multicore"]
-zip-233 = ["zcash_primitives/zip-233"]
+zip-233 = ["zcash_primitives/zip-233", "zcash_client_backend/zip-233"]
 
 ## Enables multithreading support for creating proofs and building subtrees.
 multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]

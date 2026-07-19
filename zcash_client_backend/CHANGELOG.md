@@ -19,6 +19,10 @@ workspace.
   `pczt` feature.
 - `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
   counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
+- `zip-233` feature flag, forwarding to `zcash_primitives/zip-233`. It gates no
+  API of this crate; it exists so code in this crate that constructs
+  `zcash_primitives` transactions can pass the feature-gated ZIP 233 arguments
+  exactly when the underlying crate expects them.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
@@ -28,6 +32,30 @@ workspace.
   construction too — useful when a caller's view of the chain tip used to
   derive `min_target_height` may lag the real tip by more than the default
   expiry buffer covers.
+- `zcash_client_backend::data_api::AccountBalance` now tracks transparent funds
+  in two separate buckets: regular (non-coinbase) funds and funds in coinbase
+  outputs, replacing its single internal unshielded balance:
+  - New accessors `AccountBalance::unshielded_regular_balance` and
+    `AccountBalance::unshielded_coinbase_balance`, and new mutators
+    `AccountBalance::with_unshielded_regular_balance_mut` and
+    `AccountBalance::with_unshielded_coinbase_balance_mut`. Transparent outputs
+    whose transaction index within their block is unknown are classified as
+    regular (non-coinbase) funds.
+  - `AccountBalance::unshielded_balance` now returns a `Balance` by value,
+    computed as the sum of the regular and coinbase buckets, instead of a
+    `&Balance` reference.
+  - Value in immature transparent coinbase outputs is now expected to be
+    reported in the `value_pending_spendability` field of the coinbase bucket
+    rather than as spendable value; it becomes spendable only once the output
+    reaches coinbase maturity.
+- `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
+  `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
+  error type, so that `propose_send_max_transfer` can report
+  `GreedyInputSelectorError::UnsupportedTexAddress` — consistent with
+  `propose_transfer` — when a TEX recipient is requested and the
+  `transparent-inputs` feature is not enabled. Balance errors encountered
+  during send-max input selection are now wrapped in
+  `GreedyInputSelectorError::Balance`.
 - `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
   `orchard::builder::BundleType` and `orchard::bundle::BundleVersion` that the
   transaction builder will be configured with, and returns a `Result`. It
@@ -37,14 +65,6 @@ workspace.
   transfers, and so requires `spends + outputs` actions. The method now also
   accounts for the bundle type's padding, and is gated on the `orchard`
   feature.
-- `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
-  `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
-  error type, so that `propose_send_max_transfer` can report
-  `GreedyInputSelectorError::UnsupportedTexAddress` — consistent with
-  `propose_transfer` — when a TEX recipient is requested and the
-  `transparent-inputs` feature is not enabled. Balance errors encountered
-  during send-max input selection are now wrapped in
-  `GreedyInputSelectorError::Balance`.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
@@ -77,6 +97,11 @@ workspace.
   returns `GreedyInputSelectorError::Balance` instead of panicking when a
   custom fee rule produces per-transaction fees whose sum exceeds the maximum
   monetary amount.
+
+### Removed
+- `zcash_client_backend::data_api::AccountBalance::`
+  - `with_unshielded_balance_mut`; use `with_unshielded_regular_balance_mut` or
+    `with_unshielded_coinbase_balance_mut` instead as appropriate.
 
 ## [0.24.0-rc.1] - 2026-07-12
 
