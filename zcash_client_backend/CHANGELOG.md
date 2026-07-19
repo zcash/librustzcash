@@ -19,6 +19,10 @@ workspace.
   `pczt` feature.
 - `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
   counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
+- `zip-233` feature flag, forwarding to `zcash_primitives/zip-233`. It gates no
+  API of this crate; it exists so code in this crate that constructs
+  `zcash_primitives` transactions can pass the feature-gated ZIP 233 arguments
+  exactly when the underlying crate expects them.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
