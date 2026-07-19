@@ -8,9 +8,50 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.27.0] - PENDING
+## [Unreleased]
+
+## [0.28.0] - 2026-06-02
 
 ### Added
+- Support for the NU6.2 consensus branch. The following now handle
+  `zcash_protocol::consensus::BranchId::Nu6_2` (mapped to `TxVersion::V5`):
+  - `zcash_primitives::transaction::TxVersion::suggested_for_branch`
+  - `zcash_primitives::transaction::TxVersion::valid_in_branch`
+
+### Changed
+- Migrated to `orchard 0.14.0`, `zcash_protocol 0.9.0`, `zcash_transparent 0.8.0`
+- `zcash_primitives::transaction::components::orchard::read_v5_bundle` now takes
+  an additional `proof_size_enforcement: orchard::bundle::ProofSizeEnforcement`
+  argument.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46).
+
+### Security
+- Deserialization of v5 Orchard bundles now rejects proofs whose length is not
+  the canonical size for the number of actions, preventing a proof padded with
+  arbitrary data (GHSA-2x4w-pxqw-58v9). Proof-size enforcement is `Strict` for
+  transactions parsed under NU6.2 and later consensus branches, and `Unenforced`
+  for earlier branches to preserve the ability to parse historical transactions.
+
+## [0.27.1] - 2026-05-14
+
+### Fixed
+- `zcash_primitives::transaction::fees::transparent::InputView::serialized_size`:
+  the implementation for `TransparentInputInfo` now reports the ZIP 317 standard
+  size (`STANDARD_P2PKH` = 150 bytes) for P2PKH inputs, matching what
+  proposal-time fee computation already uses. Previously it reported the exact
+  serialized size (149 bytes), causing builds of transactions with `>= 150`
+  P2PKH inputs to fail with `Error::ChangeRequired` due to fee disagreement
+  across `ceildiv(t_in_total_size, 150)` boundaries.
+
+## [0.27.0] - 2026-04-23
+
+### Added
+- `zcash_primitives::block`:
+  - `Block`
+  - `impl Debug for {BlockHeader, BlockHeaderData}`
 - `zcash_primitives::transaction::builder`:
   - `impl<FE> From<coinbase::Error> for Error<FE>`
   - `Builder::add_transparent_p2pkh_input`
@@ -19,7 +60,9 @@ workspace.
 
 ### Changed
 - MSRV is now 1.85.1.
-- Migrated to `orchard 0.12`, `sapling-crypto 0.6`.
+- Migrated to `orchard 0.13`, `sapling-crypto 0.7`, `equihash 0.3`,
+  `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_transparent 0.7`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
 - `zcash_primitives::transaction::builder`:
   - `Error` has new `Coinbase` and `TargetIncompatible` variants.
   - `Builder::add_orchard_output`'s `value` parameter now has type `Zatoshis`
@@ -27,6 +70,8 @@ workspace.
   - `Builder::add_transparent_input` now takes a `zcash_transparent::builder::TransparentInputInfo`
     instead of its constituent parts. Use `Builder::add_transparent_p2pkh_input` if you need the
     previous API.
+  - `Builder::add_transparent_p2sh_input` is no longer restricted to the PCZT
+    workflow; it can now be used with `Builder::build`.
   - `BuildConfig`:
     -  The `Coinbase` variant now includes an `Option<zcash_script::opcode::PushValue>` payload.
     -  No longer implements `Copy`.
@@ -37,6 +82,7 @@ workspace.
 - `zcash_primitives::legacy` module (use the `zcash_transparent` crate instead).
 - `zcash_primitives::memo` module (use `zcash_protocol::memo` instead)
 - `zcash_primitives::transaction`:
+  - `util::sha256d` module (use `zcash_transparent::util::sha256d` instead).
   - `builder::Builder::set_coinbase_miner_data` use the added
     `BuildConfig::Coinbase` payload instead.
   - `components`:
@@ -63,6 +109,19 @@ workspace.
     - `SIGHASH_ANYONECANPAY` (use `zcash_transparent::sighash::SIGHASH_ANYONECANPAY` instead).
     - `SighashType` (use `zcash_transparent::sighash::SighashType` instead).
 - `zcash_primitives::zip32` module (use the `zip32` crate instead).
+
+### Added
+- `zcash_primitives::transaction::components::sprout::JsDescription`:
+  - `vpub_old` and `vpub_new` accessors for Sprout value pool changes.
+  - `anchor` accessor for the note commitment tree anchor.
+  - `nullifiers` and `commitments` accessors for input/output note data.
+  - `random_seed` and `macs` accessors for the random seed and MACs.
+  - `groth_proof_bytes` accessor that returns Groth16 proof bytes
+    (returns `None` for PHGR proofs).
+- `zcash_primitives::transaction::Authorized` now implements `Clone`.
+- `zcash_primitives::transaction::TransactionData<Authorized>` now
+  implements `Clone`.
+- `zcash_primitives::transaction::Transaction` now implements `Clone`.
 
 ## [0.26.4] - 2025-12-17
 

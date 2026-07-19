@@ -515,9 +515,10 @@ mod tests {
                 NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
                 NetworkUpgrade::Nu6 => Some(BlockHeight::from_u32(1_300_000)),
                 NetworkUpgrade::Nu6_1 => Some(BlockHeight::from_u32(1_400_000)),
+                NetworkUpgrade::Nu6_2 => Some(BlockHeight::from_u32(1_500_000)),
                 #[cfg(zcash_unstable = "nu7")]
-                NetworkUpgrade::Nu7 => Some(BlockHeight::from_u32(1_500_000)),
-                NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_500_000)),
+                NetworkUpgrade::Nu7 => Some(BlockHeight::from_u32(1_600_000)),
+                NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_600_000)),
             }
         }
 

@@ -1,6 +1,6 @@
 use alloc::string::ToString;
 use core::fmt;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use zcash_encoding::ReverseHex;
 

@@ -24,8 +24,14 @@ pub enum TransferType {
     /// The output was received on one of the wallet's external addresses via decryption using the
     /// associated incoming viewing key, or at one of the wallet's transparent addresses.
     Incoming,
-    /// The output was received on one of the wallet's internal-only shielded addresses via trial
-    /// decryption using one of the wallet's internal incoming viewing keys.
+    /// The output is internal to a single wallet account, e.g. change: the recipient and the
+    /// funder are the same wallet account. For shielded outputs, this corresponds to decryption
+    /// using the account's internal incoming viewing key.
+    AccountInternal,
+    /// The output is internal to the wallet but spans accounts: a wallet account funded the
+    /// transaction and a different wallet account received the output. Only produced for
+    /// transparent outputs; shielded cross-account transfers are observed as separate `Outgoing`
+    /// (from the funder) and `Incoming` (to the recipient) outputs.
     WalletInternal,
     /// The output was decrypted using one of the wallet's outgoing viewing keys, or was created
     /// in a transaction constructed by this wallet.
@@ -130,7 +136,8 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
             chain_tip_height
                 .map(|max_height| max_height + 1) // "mempool height"
                 .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
-                .expect("Sapling activation height must be known.")
+                // Fall back to the genesis block in regtest mode.
+                .unwrap_or_else(|| BlockHeight::from(0))
         }),
     );
     let sapling_bundle = tx.sapling_bundle();
@@ -157,7 +164,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {
                                     try_note_decryption(&sapling_domain, &ivk_internal, output)
-                                        .map(|ret| (ret, TransferType::WalletInternal))
+                                        .map(|ret| (ret, TransferType::AccountInternal))
                                 })
                                 .or_else(|| {
                                     try_output_recovery_with_ovk(
@@ -213,7 +220,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {
                                     try_note_decryption(&domain, &ivk_internal, action)
-                                        .map(|ret| (ret, TransferType::WalletInternal))
+                                        .map(|ret| (ret, TransferType::AccountInternal))
                                 })
                                 .or_else(|| {
                                     try_output_recovery_with_ovk(

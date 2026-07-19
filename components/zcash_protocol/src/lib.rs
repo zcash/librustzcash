@@ -13,8 +13,6 @@
 #![cfg_attr(docsrs, doc(auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
-// Temporary until we have addressed all Result<T, ()> cases.
-#![allow(clippy::result_unit_err)]
 
 #[cfg_attr(any(test, feature = "test-dependencies"), macro_use)]
 extern crate alloc;
@@ -65,5 +63,24 @@ impl fmt::Display for PoolType {
             PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
             PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
         }
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::{Just, Strategy, prop_oneof};
+
+    use super::ShieldedProtocol;
+
+    /// A [`proptest`] strategy that yields a [`ShieldedProtocol`] variant uniformly at
+    /// random.
+    ///
+    /// This is useful for properties that should hold for every shielded protocol, so that
+    /// the protocol does not have to be hard-coded in each test.
+    pub fn arb_protocol() -> impl Strategy<Value = ShieldedProtocol> {
+        prop_oneof![
+            Just(ShieldedProtocol::Sapling),
+            Just(ShieldedProtocol::Orchard),
+        ]
     }
 }

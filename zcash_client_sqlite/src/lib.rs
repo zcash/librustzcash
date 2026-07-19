@@ -31,6 +31,7 @@
 #![cfg_attr(docsrs, doc(auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
+#![deny(missing_docs)]
 
 use incrementalmerkletree::Position;
 use nonempty::NonEmpty;
@@ -40,7 +41,7 @@ use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
 use std::{
     borrow::{Borrow, BorrowMut},
     cmp::{max, min},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::AsRef,
     fmt,
     num::NonZeroU32,
@@ -61,6 +62,7 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
+        error::{FindAccountForAddressError, RewindError},
         ll::{
             self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
             wallet::store_decrypted_tx,
@@ -112,10 +114,10 @@ use {
         bundle::OutPoint,
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    std::{collections::HashSet, time::SystemTime},
+    std::time::SystemTime,
     zcash_client_backend::{
         data_api::{
-            Balance, TransactionsInvolvingAddress, WalletUtxo,
+            TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter,
             ll::wallet::generate_transparent_gap_addresses,
         },
         wallet::TransparentAddressMetadata,
@@ -274,7 +276,7 @@ pub struct WalletDb<C, P, CL, R> {
 }
 
 /// A wrapper for a SQLite transaction affecting the wallet database.
-pub struct SqlTransaction<'conn>(pub(crate) &'conn rusqlite::Transaction<'conn>);
+pub struct SqlTransaction<'conn>(&'conn rusqlite::Transaction<'conn>);
 
 impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     fn borrow(&self) -> &rusqlite::Connection {
@@ -362,6 +364,16 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
 }
 
 impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
+    /// Performs several wallet database operations atomically.
+    ///
+    /// This has two main uses:
+    /// - Ensuring that several [`WalletRead`] and/or [`WalletWrite`] operations either
+    ///   all succeed, or nothing happens. If an error occurs inside the given function,
+    ///   any operations completed by it are rolled back.
+    /// - Amortizing the cost of database transactionality. If several identical
+    ///   operations are planned in sequence (e.g. [`WalletWrite::store_decrypted_tx`]),
+    ///   this function can be used to avoid the overhead of a separate database
+    ///   transaction per insert.
     pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
         F: FnOnce(&mut WalletDb<SqlTransaction<'_>, &P, &CL, &mut R>) -> Result<A, E>,
@@ -571,7 +583,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         outpoint: &OutPoint,
         target_height: TargetHeight,
-    ) -> Result<Option<WalletUtxo>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
@@ -585,13 +597,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletUtxo>, Self::Error> {
+        output_filter: TransparentOutputFilter,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
             &self.params,
             address,
             target_height,
             confirmations_policy,
+            output_filter,
         )
     }
 
@@ -737,6 +751,19 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn list_addresses(&self, account: Self::AccountId) -> Result<Vec<AddressInfo>, Self::Error> {
         wallet::list_addresses(self.conn.borrow(), &self.params, account)
+    }
+
+    /// Implements this method with a single SQL query, avoiding the O(accounts × addresses)
+    /// scan that delegating to
+    /// [`zcash_client_backend::data_api::defaults::find_account_for_address`] would require.
+    /// See [`zcash_client_backend::data_api::WalletRead::find_account_for_address`] for the
+    /// semantics.
+    fn find_account_for_address<Q: consensus::Parameters>(
+        &self,
+        params: &Q,
+        address: &zcash_keys::address::Address,
+    ) -> Result<Option<Self::AccountId>, FindAccountForAddressError<Self::Error>> {
+        wallet::find_account_for_address(self.conn.borrow(), params, address)
     }
 
     fn get_last_generated_address_matching(
@@ -900,7 +927,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         account: Self::AccountId,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<HashMap<TransparentAddress, (TransparentKeyScope, Balance)>, Self::Error> {
+    ) -> Result<TransparentBalances, Self::Error> {
         wallet::transparent::get_transparent_balances(
             self.conn.borrow(),
             &self.params,
@@ -1088,15 +1115,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
-        let result = wallet::transparent::get_wallet_transparent_output(
+    ) -> Result<
+        Option<WalletTransparentOutput<<Self as InputSource>::AccountId>>,
+        <Self as InputSource>::Error,
+    > {
+        wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
             target_height,
-        )?
-        .map(|utxo| utxo.into_wallet_output());
-
-        Ok(result)
+        )
     }
 
     fn get_notes(
@@ -1183,51 +1210,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         birthday: &AccountBirthday,
         key_source: Option<&str>,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
-        self.borrow_mut().transactionally(|wdb| {
-            let seed_fingerprint =
-                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
-                    SqliteClientError::BadAccountData(
-                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
-                    )
-                })?;
-            let zip32_account_index =
-                wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
-                    .map(|a| {
-                        a.next()
-                            .ok_or(SqliteClientError::Zip32AccountIndexOutOfRange)
-                    })
-                    .transpose()?
-                    .unwrap_or(zip32::AccountId::ZERO);
-
-            let usk = UnifiedSpendingKey::from_seed(
-                &wdb.params,
-                seed.expose_secret(),
-                zip32_account_index,
-            )
-            .map_err(|_| SqliteClientError::KeyDerivationError(zip32_account_index))?;
-            let ufvk = usk.to_unified_full_viewing_key();
-
-            let account = wallet::add_account(
-                wdb.conn.0,
-                &wdb.params,
-                account_name,
-                &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(
-                        seed_fingerprint,
-                        zip32_account_index,
-                        #[cfg(feature = "zcashd-compat")]
-                        None,
-                    ),
-                    key_source: key_source.map(|s| s.to_owned()),
-                },
-                wallet::ViewingKey::Full(Box::new(ufvk)),
-                birthday,
-                #[cfg(feature = "transparent-inputs")]
-                &wdb.gap_limits,
-            )?;
-
-            Ok((account.id(), usk))
-        })
+        self.borrow_mut()
+            .transactionally(|wdb| wdb.create_account(account_name, seed, birthday, key_source))
     }
 
     fn import_account_hd(
@@ -1239,38 +1223,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         key_source: Option<&str>,
     ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let seed_fingerprint =
-                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
-                    SqliteClientError::BadAccountData(
-                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
-                    )
-                })?;
-
-            let usk =
-                UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account_index)
-                    .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
-            let ufvk = usk.to_unified_full_viewing_key();
-
-            let account = wallet::add_account(
-                wdb.conn.0,
-                &wdb.params,
-                account_name,
-                &AccountSource::Derived {
-                    derivation: Zip32Derivation::new(
-                        seed_fingerprint,
-                        account_index,
-                        #[cfg(feature = "zcashd-compat")]
-                        None,
-                    ),
-                    key_source: key_source.map(|s| s.to_owned()),
-                },
-                wallet::ViewingKey::Full(Box::new(ufvk)),
-                birthday,
-                #[cfg(feature = "transparent-inputs")]
-                &wdb.gap_limits,
-            )?;
-
-            Ok((account, usk))
+            wdb.import_account_hd(account_name, seed, account_index, birthday, key_source)
         })
     }
 
@@ -1283,24 +1236,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error> {
         self.transactionally(|wdb| {
-            wallet::add_account(
-                wdb.conn.0,
-                &wdb.params,
-                account_name,
-                &AccountSource::Imported {
-                    purpose,
-                    key_source: key_source.map(|s| s.to_owned()),
-                },
-                wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
-                birthday,
-                #[cfg(feature = "transparent-inputs")]
-                &wdb.gap_limits,
-            )
+            wdb.import_account_ufvk(account_name, ufvk, birthday, purpose, key_source)
         })
     }
 
     fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| wallet::delete_account(wdb.conn.0, account_uuid))
+        self.transactionally(|wdb| wdb.delete_account(account_uuid))
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -1309,9 +1250,16 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         account: Self::AccountId,
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            wallet::import_standalone_transparent_pubkey(wdb.conn.0, wdb.params, account, pubkey)
-        })
+        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkey(account, pubkey))
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        account: Self::AccountId,
+        script: zcash_script::script::Redeem,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.import_standalone_transparent_script(account, script))
     }
 
     fn get_next_available_address(
@@ -1319,17 +1267,295 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         account_uuid: Self::AccountId,
         request: UnifiedAddressRequest,
     ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
-        self.transactionally(|wdb| {
-            wallet::get_next_available_address(
-                wdb.conn.0,
-                &wdb.params,
-                &wdb.clock,
-                account_uuid,
-                request,
-                #[cfg(feature = "transparent-inputs")]
-                &wdb.gap_limits,
-            )
-        })
+        self.transactionally(|wdb| wdb.get_next_available_address(account_uuid, request))
+    }
+
+    fn get_address_for_index(
+        &mut self,
+        account: Self::AccountId,
+        diversifier_index: DiversifierIndex,
+        request: UnifiedAddressRequest,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        self.transactionally(|wdb| wdb.get_address_for_index(account, diversifier_index, request))
+    }
+
+    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.update_chain_tip(tip_height))
+    }
+
+    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
+    #[allow(clippy::type_complexity)]
+    fn put_blocks(
+        &mut self,
+        from_state: &ChainState,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.put_blocks(from_state, blocks))
+    }
+
+    fn put_received_transparent_utxo(
+        &mut self,
+        _output: &WalletTransparentOutput<Self::AccountId>,
+    ) -> Result<Self::UtxoRef, Self::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        return self.transactionally(|wdb| wdb.put_received_transparent_utxo(_output));
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
+    }
+
+    fn store_decrypted_tx(
+        &mut self,
+        d_tx: DecryptedTransaction<Transaction, Self::AccountId>,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.store_decrypted_tx(d_tx))
+    }
+
+    fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.set_tx_trust(txid, trusted))
+    }
+
+    fn store_transactions_to_be_sent(
+        &mut self,
+        transactions: &[SentTransaction<Self::AccountId>],
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.store_transactions_to_be_sent(transactions))
+    }
+
+    fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+        self.transactionally(|wdb| wdb.truncate_to_height(max_height))
+    }
+
+    fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.truncate_to_chain_state(chain_state))
+    }
+
+    fn rewind_to_chain_state(
+        &mut self,
+        chain_state: ChainState,
+        reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        let tx = self
+            .conn
+            .borrow_mut()
+            .transaction()
+            .map_err(|e| RewindError::DataSource(SqliteClientError::from(e)))?;
+        let result = wallet::rewind_to_chain_state(
+            &tx,
+            &self.params,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+            &chain_state,
+            reset_account_birthdays,
+        );
+        if result.is_ok() {
+            tx.commit()
+                .map_err(|e| RewindError::DataSource(SqliteClientError::from(e)))?;
+        }
+        result
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_ephemeral_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| wdb.reserve_next_n_ephemeral_addresses(account_id, n))
+    }
+
+    fn set_transaction_status(
+        &mut self,
+        txid: TxId,
+        status: data_api::TransactionStatus,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| WalletWrite::set_transaction_status(wdb, txid, status))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn schedule_next_check(
+        &mut self,
+        address: &TransparentAddress,
+        offset_seconds: u32,
+    ) -> Result<Option<SystemTime>, Self::Error> {
+        self.transactionally(|wdb| wdb.schedule_next_check(address, offset_seconds))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn mark_transparent_addresses_exposed(
+        &mut self,
+        exposures: &[(TransparentAddress, BlockHeight)],
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.mark_transparent_addresses_exposed(exposures))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn notify_address_checked(
+        &mut self,
+        request: TransactionsInvolvingAddress,
+        as_of_height: BlockHeight,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.notify_address_checked(request, as_of_height))
+    }
+}
+
+/// This impl block is only usable when you already have an [`SqlTransaction`], meaning
+/// you are inside a [`WalletDb::transactionally`] block with a lock on the database.
+impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
+    for WalletDb<SqlTransaction<'_>, P, CL, R>
+{
+    type UtxoRef = UtxoId;
+
+    fn create_account(
+        &mut self,
+        account_name: &str,
+        seed: &SecretVec<u8>,
+        birthday: &AccountBirthday,
+        key_source: Option<&str>,
+    ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
+        let seed_fingerprint =
+            SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                SqliteClientError::BadAccountData(
+                    "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                )
+            })?;
+        let zip32_account_index = wallet::max_zip32_account_index(self.conn.0, &seed_fingerprint)?
+            .map(|a| {
+                a.next()
+                    .ok_or(SqliteClientError::Zip32AccountIndexOutOfRange)
+            })
+            .transpose()?
+            .unwrap_or(zip32::AccountId::ZERO);
+
+        let usk =
+            UnifiedSpendingKey::from_seed(&self.params, seed.expose_secret(), zip32_account_index)
+                .map_err(|_| SqliteClientError::KeyDerivationError(zip32_account_index))?;
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let account = wallet::add_account(
+            self.conn.0,
+            &self.params,
+            account_name,
+            &AccountSource::Derived {
+                derivation: Zip32Derivation::new(
+                    seed_fingerprint,
+                    zip32_account_index,
+                    #[cfg(feature = "zcashd-compat")]
+                    None,
+                ),
+                key_source: key_source.map(|s| s.to_owned()),
+            },
+            wallet::ViewingKey::Full(Box::new(ufvk)),
+            birthday,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+        )?;
+
+        Ok((account.id(), usk))
+    }
+
+    fn import_account_hd(
+        &mut self,
+        account_name: &str,
+        seed: &SecretVec<u8>,
+        account_index: zip32::AccountId,
+        birthday: &AccountBirthday,
+        key_source: Option<&str>,
+    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+        let seed_fingerprint =
+            SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                SqliteClientError::BadAccountData(
+                    "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                )
+            })?;
+
+        let usk = UnifiedSpendingKey::from_seed(&self.params, seed.expose_secret(), account_index)
+            .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        let account = wallet::add_account(
+            self.conn.0,
+            &self.params,
+            account_name,
+            &AccountSource::Derived {
+                derivation: Zip32Derivation::new(
+                    seed_fingerprint,
+                    account_index,
+                    #[cfg(feature = "zcashd-compat")]
+                    None,
+                ),
+                key_source: key_source.map(|s| s.to_owned()),
+            },
+            wallet::ViewingKey::Full(Box::new(ufvk)),
+            birthday,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+        )?;
+
+        Ok((account, usk))
+    }
+
+    fn import_account_ufvk(
+        &mut self,
+        account_name: &str,
+        ufvk: &UnifiedFullViewingKey,
+        birthday: &AccountBirthday,
+        purpose: AccountPurpose,
+        key_source: Option<&str>,
+    ) -> Result<Self::Account, Self::Error> {
+        wallet::add_account(
+            self.conn.0,
+            &self.params,
+            account_name,
+            &AccountSource::Imported {
+                purpose,
+                key_source: key_source.map(|s| s.to_owned()),
+            },
+            wallet::ViewingKey::Full(Box::new(ufvk.to_owned())),
+            birthday,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+        )
+    }
+
+    fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
+        wallet::delete_account(self.conn.0, account_uuid)
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        account: Self::AccountId,
+        pubkey: secp256k1::PublicKey,
+    ) -> Result<(), Self::Error> {
+        wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        account: Self::AccountId,
+        script: zcash_script::script::Redeem,
+    ) -> Result<(), Self::Error> {
+        wallet::import_standalone_transparent_script(self.conn.0, &self.params, account, script)
+    }
+
+    fn get_next_available_address(
+        &mut self,
+        account_uuid: Self::AccountId,
+        request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
+        wallet::get_next_available_address(
+            self.conn.0,
+            &self.params,
+            &self.clock,
+            account_uuid,
+            request,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+        )
     }
 
     fn get_address_for_index(
@@ -1367,51 +1593,46 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     }
 
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            wallet::scanning::update_chain_tip(wdb.conn.0, &wdb.params, tip_height)?;
-            Ok(())
-        })
+        wallet::scanning::update_chain_tip(self.conn.0, &self.params, tip_height)?;
+        Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
-                wdb,
-                #[cfg(feature = "transparent-inputs")]
-                wdb.gap_limits,
-                from_state,
-                blocks,
-            )
-            .map_err(SqliteClientError::from)
-        })
+        ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
+            self,
+            #[cfg(feature = "transparent-inputs")]
+            self.gap_limits,
+            from_state,
+            blocks,
+        )
+        .map_err(SqliteClientError::from)
     }
 
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput<Self::AccountId>,
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return self.transactionally(|wdb| {
+        return {
             let (account_id, _, key_scope, utxo_id) =
                 wallet::transparent::put_received_transparent_utxo(
-                    wdb.conn.0,
-                    &wdb.params,
-                    &wdb.gap_limits,
+                    self.conn.0,
+                    &self.params,
+                    &self.gap_limits,
                     _output,
                 )?;
 
             if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
                 use ReceiverRequirement::*;
                 wallet::transparent::generate_gap_addresses(
-                    wdb.conn.0,
-                    &wdb.params,
-                    &wdb.gap_limits,
+                    self.conn.0,
+                    &self.params,
+                    &self.gap_limits,
                     account_id,
                     t_key_scope,
                     UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
@@ -1420,7 +1641,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
             }
 
             Ok(utxo_id)
-        });
+        };
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -1432,56 +1653,65 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         d_tx: DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            let chain_tip = wallet::chain_tip_height(wdb.conn.borrow())?
-                .ok_or(SqliteClientError::ChainHeightUnknown)?;
-            store_decrypted_tx(
-                wdb,
-                wdb.params,
-                #[cfg(feature = "transparent-inputs")]
-                wdb.gap_limits,
-                chain_tip,
-                d_tx,
-            )
-        })
+        let chain_tip = wallet::chain_tip_height(self.conn.borrow())?
+            .ok_or(SqliteClientError::ChainHeightUnknown)?;
+        store_decrypted_tx(
+            self,
+            &self.params.clone(),
+            #[cfg(feature = "transparent-inputs")]
+            self.gap_limits,
+            chain_tip,
+            d_tx,
+        )
     }
 
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| wallet::set_tx_trust(wdb.conn.0, txid, trusted))
+        wallet::set_tx_trust(self.conn.0, txid, trusted)
     }
 
     fn store_transactions_to_be_sent(
         &mut self,
         transactions: &[SentTransaction<Self::AccountId>],
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            for sent_tx in transactions {
-                wallet::store_transaction_to_be_sent(
-                    wdb.conn.0,
-                    &wdb.params,
-                    #[cfg(feature = "transparent-inputs")]
-                    &wdb.gap_limits,
-                    sent_tx,
-                )?;
-            }
-            Ok(())
-        })
+        for sent_tx in transactions {
+            wallet::store_transaction_to_be_sent(
+                self.conn.0,
+                &self.params,
+                #[cfg(feature = "transparent-inputs")]
+                &self.gap_limits,
+                sent_tx,
+            )?;
+        }
+        Ok(())
     }
 
     fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
-        self.transactionally(|wdb| {
-            wallet::truncate_to_height(
-                wdb.conn.0,
-                &wdb.params,
-                #[cfg(feature = "transparent-inputs")]
-                &wdb.gap_limits,
-                max_height,
-            )
-        })
+        wallet::truncate_to_height(
+            self.conn.0,
+            &self.params,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+            max_height,
+        )
     }
 
     fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| wallet::truncate_to_chain_state(wdb, chain_state))
+        wallet::truncate_to_chain_state(self, chain_state)
+    }
+
+    fn rewind_to_chain_state(
+        &mut self,
+        chain_state: ChainState,
+        reset_account_birthdays: HashSet<Self::AccountId>,
+    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        wallet::rewind_to_chain_state(
+            self.conn.0,
+            &self.params,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+            &chain_state,
+            reset_account_birthdays,
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1490,19 +1720,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         account_id: Self::AccountId,
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
-        self.transactionally(|wdb| {
-            let account_id = wallet::get_account_ref(wdb.conn.0, account_id)?;
-            let reserved = wallet::transparent::reserve_next_n_addresses(
-                wdb.conn.0,
-                &wdb.params,
-                account_id,
-                TransparentKeyScope::EPHEMERAL,
-                wdb.gap_limits.ephemeral(),
-                n,
-            )?;
+        let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
+        let reserved = wallet::transparent::reserve_next_n_addresses(
+            self.conn.0,
+            &self.params,
+            account_id,
+            TransparentKeyScope::EPHEMERAL,
+            self.gap_limits.ephemeral(),
+            n,
+        )?;
 
-            Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
-        })
+        Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
     }
 
     fn set_transaction_status(
@@ -1510,16 +1738,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         txid: TxId,
         status: data_api::TransactionStatus,
     ) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            wallet::set_transaction_status(
-                wdb.conn.0,
-                &wdb.params,
-                #[cfg(feature = "transparent-inputs")]
-                &wdb.gap_limits,
-                txid,
-                status,
-            )
-        })
+        wallet::set_transaction_status(
+            self.conn.0,
+            &self.params,
+            #[cfg(feature = "transparent-inputs")]
+            &self.gap_limits,
+            txid,
+            status,
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1528,16 +1754,26 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         address: &TransparentAddress,
         offset_seconds: u32,
     ) -> Result<Option<SystemTime>, Self::Error> {
-        self.transactionally(|wdb| {
-            wallet::transparent::schedule_next_check(
-                wdb.conn.0,
-                &wdb.params,
-                wdb.clock,
-                &mut wdb.rng,
-                address,
-                offset_seconds,
-            )
-        })
+        wallet::transparent::schedule_next_check(
+            self.conn.0,
+            &self.params,
+            &self.clock,
+            &mut self.rng,
+            address,
+            offset_seconds,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn mark_transparent_addresses_exposed(
+        &mut self,
+        exposures: &[(TransparentAddress, BlockHeight)],
+    ) -> Result<(), Self::Error> {
+        wallet::transparent::mark_transparent_addresses_exposed(
+            self.conn.0,
+            &self.params,
+            exposures,
+        )
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1556,14 +1792,12 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
             }
         }
 
-        self.transactionally(|wdb| {
-            wallet::transparent::update_observed_unspent_heights(
-                wdb.conn.0,
-                &wdb.params,
-                request.address(),
-                as_of_height,
-            )
-        })
+        wallet::transparent::update_observed_unspent_heights(
+            self.conn.0,
+            &self.params,
+            request.address(),
+            as_of_height,
+        )
     }
 }
 
@@ -1639,7 +1873,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
-    ) -> Result<Option<WalletUtxo>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
@@ -1886,7 +2120,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     #[cfg(feature = "transparent-inputs")]
     fn put_transparent_output(
         &mut self,
-        output: &zcash_client_backend::wallet::WalletTransparentOutput,
+        output: &WalletTransparentOutput<Self::AccountId>,
         observation_height: BlockHeight,
         known_unspent: bool,
     ) -> Result<(Self::AccountId, Option<TransparentKeyScope>), Self::Error> {
@@ -2226,6 +2460,83 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 }
 
+#[cfg(feature = "orchard")]
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
+    /// Return all Orchard notes received at or before `height`
+    /// and unspent as of that height, for the given account.
+    ///
+    /// Unlike [`InputSource::select_unspent_notes`] (which applies confirmation,
+    /// dust, and expiry filters for transaction construction), this returns every
+    /// note that existed and was unspent at the given height.
+    ///
+    /// This function does not verify that a Merkle witness can be constructed
+    /// for each returned note at `height`. Witness construction is a separate
+    /// concern intended to be handled by the callers. As an example, a companion
+    /// `WalletDb::generate_orchard_witnesses_at_historical_height` returns an
+    /// actionable error for any position the wallet cannot witness at `height`
+    /// (for example, because the wallet has not synced through `height`, the checkpoint was pruned,
+    /// or the position does not belong to the wallet).
+    pub fn get_unspent_orchard_notes_at_historical_height(
+        &self,
+        account: AccountUuid,
+        height: BlockHeight,
+    ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, SqliteClientError> {
+        wallet::orchard::get_unspent_orchard_notes_at_historical_height(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            height,
+        )
+    }
+
+    /// Generates Orchard Merkle witnesses at a historical height.
+    ///
+    /// Loads the wallet's Orchard shard data into an ephemeral in-memory
+    /// `ShardStore`, inserts the provided frontier at `height` as a checkpoint,
+    /// and generates a witness for each of the given note positions.
+    ///
+    /// The caller must provide the valid frontier at the given height. The wallet DB
+    /// is strictly read-only; shard data is read but not modified.
+    ///
+    /// # Errors
+    ///
+    /// Returns:
+    /// - [`SqliteClientError::CommitmentTree`] if reading the wallet's shard
+    ///   or cap data fails, or if the shard data reconstructed from the
+    ///   wallet is internally inconsistent at a node the computation
+    ///   requires.
+    /// - [`SqliteClientError::HistoricalFrontierInvalid`] if
+    ///   `frontier_at_height` is inconsistent with the shard data
+    ///   reconstructed from the wallet at `height`.
+    /// - [`SqliteClientError::HistoricalWitnessUnavailable`] if a witness
+    ///   cannot be generated for one of `note_positions` at `height` (most
+    ///   commonly because the wallet has not yet synced through that
+    ///   height).
+    pub fn generate_orchard_witnesses_at_historical_height(
+        &self,
+        note_positions: &[Position],
+        frontier_at_height: incrementalmerkletree::frontier::NonEmptyFrontier<
+            orchard::tree::MerkleHashOrchard,
+        >,
+        height: BlockHeight,
+    ) -> Result<
+        Vec<
+            incrementalmerkletree::MerklePath<
+                orchard::tree::MerkleHashOrchard,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >,
+        >,
+        SqliteClientError,
+    > {
+        wallet::commitment_tree::generate_orchard_witnesses_at_historical_height(
+            self.conn.borrow(),
+            note_positions,
+            frontier_at_height,
+            height,
+        )
+    }
+}
+
 /// A handle for the SQLite block source.
 pub struct BlockDb(rusqlite::Connection);
 
@@ -2301,13 +2612,21 @@ pub struct FsBlockDb {
 #[derive(Debug)]
 #[cfg(feature = "unstable")]
 pub enum FsBlockDbError {
+    /// Filesystem I/O error.
     Fs(io::Error),
+    /// SQLite database error.
     Db(rusqlite::Error),
+    /// Protobuf decoding error.
     Protobuf(prost::DecodeError),
+    /// The expected block file was not found at the given path.
     MissingBlockPath(PathBuf),
+    /// The block store root directory is invalid.
     InvalidBlockstoreRoot(PathBuf),
+    /// A block file path within the store is invalid.
     InvalidBlockPath(PathBuf),
+    /// Data in the block store is corrupted.
     CorruptedData(String),
+    /// The requested block was not found in the cache.
     CacheMiss(BlockHeight),
 }
 
@@ -2492,23 +2811,29 @@ mod tests {
 
     use secrecy::{ExposeSecret, Secret, SecretVec};
     use uuid::Uuid;
+    #[cfg(feature = "orchard")]
+    use zcash_client_backend::data_api::error::FindAccountForAddressError;
     use zcash_client_backend::data_api::{
         Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
         WalletWrite,
         chain::ChainState,
         testing::{TestBuilder, TestState},
     };
+    use zcash_keys::address::UnifiedAddress;
     use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::consensus;
+    use zip32::DiversifierIndex;
 
     use crate::{
         AccountUuid, error::SqliteClientError, testing::db::TestDbFactory, util::Clock as _,
         wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
     };
 
+    use crate::testing::db::TestDb;
     #[cfg(feature = "unstable")]
     use zcash_keys::keys::sapling;
+    use zcash_protocol::local_consensus::LocalNetwork;
 
     #[test]
     fn validate_seed() {
@@ -2697,14 +3022,16 @@ mod tests {
     ) where
         DbT::Account: core::fmt::Debug,
     {
+        // Re-importing the same UFVK is a duplicate (no new capability added), so
+        // it should produce an AccountCollision error.
         assert_matches!(
             st.wallet_mut()
                 .import_account_ufvk("", ufvk, birthday, AccountPurpose::Spending { derivation: None }, None),
             Err(e) if is_account_collision(&e)
         );
 
-        // Remove the transparent component so that we don't have a match on the full UFVK.
-        // That should still produce an AccountCollision error.
+        // Importing a UFVK with fewer components than the existing account should fail:
+        // the existing IVK items are not a subset of the new (smaller) FVK's items.
         #[cfg(feature = "transparent-inputs")]
         {
             assert!(ufvk.transparent().is_some());
@@ -2727,8 +3054,7 @@ mod tests {
             );
         }
 
-        // Remove the Orchard component so that we don't have a match on the full UFVK.
-        // That should still produce an AccountCollision error.
+        // Remove the Orchard component: still a collision since existing has Orchard.
         #[cfg(feature = "orchard")]
         {
             assert!(ufvk.orchard().is_some());
@@ -2866,6 +3192,195 @@ mod tests {
             &birthday,
             |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == seed_based.0),
         );
+    }
+
+    #[test]
+    pub(crate) fn ivk_only_account_upgrade_paths() {
+        use zcash_keys::keys::UnifiedIncomingViewingKey;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0u8; 32];
+        let usk =
+            UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let full_uivk = ufvk.to_unified_incoming_viewing_key();
+
+        // Create a UIVK with only the Sapling component (a subset of the full UIVK).
+        let sapling_only_uivk = UnifiedIncomingViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            full_uivk.sapling().clone(),
+            #[cfg(feature = "orchard")]
+            None,
+        );
+
+        // Import the sapling-only IVK as an IVK-only account.
+        let network = *st.network();
+        let ivk_account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "ivk-only",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+
+        // (a) Same IVK import should fail (duplicate, no new capability).
+        assert_matches!(
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "duplicate",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk.clone())),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            }),
+            Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
+        );
+
+        // (b) UFVK that subsumes the existing IVK should succeed as an upgrade.
+        let ufvk_upgraded = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "",
+                &ufvk,
+                &birthday,
+                AccountPurpose::Spending { derivation: None },
+                None,
+            )
+            .unwrap();
+        // Should return the same account, now with the UFVK.
+        assert_eq!(ufvk_upgraded.id(), ivk_account.id());
+        assert!(ufvk_upgraded.ufvk().is_some());
+        assert_eq!(
+            ufvk_upgraded.ufvk().unwrap().encode(&network),
+            ufvk.encode(&network),
+        );
+
+        // (c) IVK import over an account that now has a UFVK should fail.
+        assert_matches!(
+            st.wallet_mut().db_mut().transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "downgrade",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            }),
+            Err(SqliteClientError::AccountCollision(id)) if id == ivk_account.id()
+        );
+    }
+
+    /// Tests that importing a UIVK with additional items over an existing IVK-only
+    /// account succeeds as an additive upgrade. Only meaningful when features provide
+    /// more than one shielded pool (e.g. `orchard`).
+    #[cfg(feature = "orchard")]
+    #[test]
+    pub(crate) fn ivk_over_ivk_additive_upgrade() {
+        use zcash_keys::keys::UnifiedIncomingViewingKey;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+
+        let seed = vec![0u8; 32];
+        let usk =
+            UnifiedSpendingKey::from_seed(st.network(), &seed, zip32::AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let full_uivk = ufvk.to_unified_incoming_viewing_key();
+        let network = *st.network();
+
+        // Create a UIVK with only Sapling (a strict subset of the full UIVK).
+        let sapling_only_uivk = UnifiedIncomingViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            full_uivk.sapling().clone(),
+            None, // no Orchard
+        );
+
+        // Import the sapling-only IVK.
+        let ivk_account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "sapling-only",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(sapling_only_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+
+        // Import the full UIVK (sapling + orchard) — should upgrade.
+        let upgraded = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                crate::wallet::add_account(
+                    wdb.conn.0,
+                    &wdb.params,
+                    "upgraded",
+                    &AccountSource::Imported {
+                        purpose: AccountPurpose::ViewOnly,
+                        key_source: None,
+                    },
+                    crate::wallet::ViewingKey::Incoming(Box::new(full_uivk)),
+                    &birthday,
+                    #[cfg(feature = "transparent-inputs")]
+                    &crate::GapLimits::default(),
+                )
+            })
+            .unwrap();
+
+        assert_eq!(upgraded.id(), ivk_account.id());
+        assert!(upgraded.ufvk().is_none());
+        assert!(upgraded.uivk().encode(&network) != ivk_account.uivk().encode(&network));
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -3014,5 +3529,368 @@ mod tests {
         assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1.block_meta));
         assert_eq!(st.cache().find_block(h2).unwrap(), None);
         assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
+    }
+
+    #[test]
+    fn find_account_for_address_returns_matching_account_for_own_ua() {
+        use zcash_keys::address::Address;
+
+        // Create a test wallet with one account and expose one of its own UAs
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+
+        // Asserts that looking up the exact same UA returns the owning account
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &Address::Unified(ua));
+
+        assert_eq!(result.unwrap(), Some(account.id()));
+    }
+
+    #[test]
+    fn find_account_for_address_returns_none_for_unknown_address() {
+        use zcash_keys::address::Address;
+
+        // Create a test wallet with one account
+        let st = create_test_wallet_with_one_account();
+
+        // Build a transparent address that is not present in the wallet DB
+        let unknown_address = Address::Transparent(
+            ::transparent::address::TransparentAddress::PublicKeyHash([0u8; 20]),
+        );
+
+        // Asserts that an unrelated address does not resolve to any account
+        assert_eq!(
+            st.wallet()
+                .find_account_for_address(st.network(), &unknown_address)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn find_account_for_address_returns_matching_account_for_receivers_of_own_ua() {
+        use zcash_keys::address::Address;
+        // Create a test wallet with one account and expose one of its own UAs
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+        let (ua, _) = generate_unified_address_with_all_available_keys(&mut state, account.id());
+        // Asserts that looking up a receiver address extracted from the stored UA
+        // returns the owning account via the non-UA query path.
+        if let Some(taddr) = ua.transparent() {
+            let result = state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Transparent(*taddr));
+            assert_eq!(result.unwrap(), Some(account.id()));
+        }
+        if let Some(pa) = ua.sapling() {
+            let result = state
+                .wallet()
+                .find_account_for_address(state.network(), &Address::Sapling(*pa));
+            assert_eq!(result.unwrap(), Some(account.id()));
+        }
+    }
+
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    #[test]
+    fn find_account_for_ua_finds_via_transparent_receiver_cache() {
+        use crate::AccountRef;
+        use crate::wallet::transparent;
+        use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
+        use zcash_keys::address::{Address, UnifiedAddress};
+        use zcash_keys::keys::ReceiverRequirement::*;
+
+        // Create a test wallet with one account
+        let mut state = create_test_wallet_with_one_account();
+        let account = state.test_account().cloned().unwrap();
+        let acc1_id = account.id();
+
+        let account_rowid = delete_account_addresses(&mut state, acc1_id);
+
+        // Inserts in the DB one row representing a transparent address of that account
+        let transparent_address =
+            UnifiedSpendingKey::from_seed(&state.network(), &[7u8; 32], zip32::AccountId::ZERO)
+                .expect("valid seed")
+                .to_unified_full_viewing_key()
+                .default_address(UnifiedAddressRequest::unsafe_custom(Omit, Require, Require))
+                .unwrap()
+                .0
+                .transparent()
+                .cloned()
+                .expect("UA must have transparent receiver");
+
+        state
+            .wallet_mut()
+            .update_chain_tip(account.birthday().height())
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .db_mut()
+            .transactionally(|wdb| {
+                transparent::store_address_range(
+                    wdb.conn.0,
+                    wdb.params(),
+                    AccountRef(account_rowid),
+                    TransparentKeyScope::EXTERNAL,
+                    vec![(
+                        Address::Transparent(transparent_address),
+                        transparent_address,
+                        NonHardenedChildIndex::ZERO,
+                    )],
+                )?;
+                transparent::reserve_next_n_addresses(
+                    wdb.conn.0,
+                    wdb.params(),
+                    AccountRef(account_rowid),
+                    TransparentKeyScope::EXTERNAL,
+                    20,
+                    1,
+                )?;
+                Ok::<_, SqliteClientError>(())
+            })
+            .unwrap();
+
+        // Builds a new UA that shares the transparent receiver, but also has an
+        // Orchard receiver coming from a different seed
+        let usk_external =
+            UnifiedSpendingKey::from_seed(&state.network(), &[99u8; 32], zip32::AccountId::ZERO)
+                .expect("valid seed");
+
+        let o_external = usk_external
+            .to_unified_full_viewing_key()
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .expect("default address must be derivable")
+            .0
+            .orchard()
+            .cloned()
+            .expect("orchard receiver must be present");
+        let address = Address::Unified(
+            UnifiedAddress::from_receivers(Some(o_external), None, Some(transparent_address))
+                .expect("orchard+transparent UA must be valid"),
+        );
+
+        // Asserts that the unique possible account is found anyways, based on the transparent address,
+        // since there are no UA conflicts.
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
+        assert_eq!(result.unwrap(), Some(acc1_id));
+    }
+
+    #[test]
+    fn find_account_for_ua_finds_via_sapling() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+
+        // Create a test wallet with one account
+        let mut state = create_test_wallet_with_one_account();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let sapling_activation = state.network().sapling.unwrap();
+
+        let (acc1_id, _) = state
+            .wallet_mut()
+            .create_account("", &Secret::new(vec![0u8; 32]), &birthday, None)
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(sapling_activation)
+            .unwrap();
+
+        // Expose a normal UA for that account and keep only its Sapling receiver
+        let (ua1, _) = generate_unified_address_with_all_available_keys(&mut state, acc1_id);
+
+        let sapling_receiver = ua1
+            .sapling()
+            .cloned()
+            .expect("UA must have sapling receiver");
+
+        let address = Address::Unified(
+            {
+                #[cfg(feature = "orchard")]
+                {
+                    UnifiedAddress::from_receivers(None, Some(sapling_receiver), None)
+                }
+
+                #[cfg(not(feature = "orchard"))]
+                {
+                    UnifiedAddress::from_receivers(Some(sapling_receiver), None)
+                }
+            }
+            .expect("sapling-only UA must be valid"),
+        );
+
+        // Asserts that the account is still found via the shielded receiver flags path
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
+
+        assert_eq!(result.unwrap(), Some(acc1_id));
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_ua_finds_via_orchard() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+
+        // Create a test wallet with one account
+        let mut state = create_test_wallet_with_one_account();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let sapling_activation = state.network().sapling.unwrap();
+
+        let (acc1_id, _) = state
+            .wallet_mut()
+            .create_account("", &Secret::new(vec![0u8; 32]), &birthday, None)
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(sapling_activation)
+            .unwrap();
+
+        // Expose a normal UA for that account and keep only its Orchard receiver
+        let (ua1, _) = generate_unified_address_with_all_available_keys(&mut state, acc1_id);
+
+        let orchard_receiver = ua1
+            .orchard()
+            .cloned()
+            .expect("UA must have orchard receiver");
+
+        let address = Address::Unified(
+            UnifiedAddress::from_receivers(Some(orchard_receiver), None, None)
+                .expect("orchard-only UA must be valid"),
+        );
+
+        // Asserts that the account is still found via the shielded receiver flags path
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &address);
+
+        assert_eq!(result.unwrap(), Some(acc1_id));
+    }
+
+    /// A UA whose Sapling receiver belongs to account 1 and whose Orchard receiver
+    /// belongs to account 2 must produce a `UnifiedAddressConflict` error.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn find_account_for_ua_errors_when_receivers_map_to_different_accounts() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+
+        // Create a test wallet with two different accounts
+        let mut state = create_test_wallet_with_one_account();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(state.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let sapling_activation = state.network().sapling.unwrap();
+
+        let seed1 = Secret::new(vec![0u8; 32]);
+        let seed2 = Secret::new(vec![1u8; 32]);
+
+        let (acc1_id, _) = state
+            .wallet_mut()
+            .create_account("", &seed1, &birthday, None)
+            .unwrap();
+        let (acc2_id, _) = state
+            .wallet_mut()
+            .create_account("", &seed2, &birthday, None)
+            .unwrap();
+
+        state
+            .wallet_mut()
+            .update_chain_tip(sapling_activation)
+            .unwrap();
+
+        let (ua1, _) = generate_unified_address_with_all_available_keys(&mut state, acc1_id);
+        let (ua2, _) = generate_unified_address_with_all_available_keys(&mut state, acc2_id);
+
+        // Build a synthetic UA that mixes receivers from two different accounts
+        let sapling_receiver_1 = ua1.sapling().cloned().unwrap();
+        let orchard_receiver_2 = ua2.orchard().cloned().unwrap();
+
+        let invalid_address = Address::Unified(
+            UnifiedAddress::from_receivers(
+                Some(orchard_receiver_2),
+                Some(sapling_receiver_1),
+                None,
+            )
+            .expect("sapling+orchard UA must be valid"),
+        );
+
+        // Asserts that the lookup reports a conflict instead of arbitrarily choosing one account
+        let result = state
+            .wallet()
+            .find_account_for_address(state.network(), &invalid_address);
+        assert!(matches!(
+            result,
+            Err(FindAccountForAddressError::UnifiedAddressConflict)
+        ));
+    }
+
+    fn create_test_wallet_with_one_account() -> TestState<(), TestDb, LocalNetwork> {
+        TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build()
+    }
+
+    fn generate_unified_address_with_all_available_keys(
+        state: &mut TestState<(), TestDb, LocalNetwork>,
+        account_id: AccountUuid,
+    ) -> (UnifiedAddress, DiversifierIndex) {
+        state
+            .wallet_mut()
+            .get_next_available_address(account_id, UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap()
+            .expect("address generation for account 1 must succeed")
+    }
+
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    fn delete_account_addresses(
+        state: &mut TestState<(), TestDb, LocalNetwork>,
+        account_id: AccountUuid,
+    ) -> i64 {
+        use rusqlite::named_params;
+
+        // Remove from the DB all the addresses associated to the account
+        let account_rowid: i64 = state
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT id FROM accounts WHERE uuid = :uuid",
+                named_params![":uuid": account_id.expose_uuid()],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        state
+            .wallet()
+            .conn()
+            .execute(
+                "DELETE FROM addresses WHERE account_id = :account_id",
+                named_params![":account_id": account_rowid],
+            )
+            .unwrap();
+        account_rowid
     }
 }

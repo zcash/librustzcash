@@ -1,12 +1,15 @@
 //! Types for wallet error handling.
 
+use std::collections::HashMap;
 use std::error;
 use std::fmt::{self, Debug, Display};
+use std::hash::Hash;
 
 use shardtree::error::ShardTreeError;
 use zcash_address::ConversionError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_primitives::transaction::builder;
+use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::{
     PoolType,
     value::{BalanceError, Zatoshis},
@@ -72,8 +75,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// An error occurred building a new transaction.
     Builder(builder::Error<FeeError>),
 
-    /// It is forbidden to provide a memo when constructing a transparent output.
-    MemoForbidden,
+    /// An error occurred constructing a payment for the transaction.
+    Payment(zip321::PaymentError),
 
     /// Attempted to send change to an unsupported pool.
     ///
@@ -104,6 +107,61 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
     /// An error occurred while working with PCZTs.
     #[cfg(feature = "pczt")]
     Pczt(PcztError),
+}
+
+/// Errors that may occur when rewinding the wallet to a previous chain state.
+pub enum RewindError<AccountId: Hash + Eq, E> {
+    /// An error occurred retrieving data from the underlying data source.
+    DataSource(E),
+    /// Every account in the wallet has a birthday height greater than the height to which any
+    /// reset birthday would be lowered (the chain state's block height plus one), and the
+    /// `reset_account_birthdays` argument supplied by the caller was empty. So long as at
+    /// least one account already has a birthday at or below the new birthday floor, the
+    /// rewind proceeds without lowering any birthdays even when `reset_account_birthdays` is
+    /// empty. The caller should re-try the rewind, providing a non-empty set of accounts
+    /// whose birthday metadata should be lowered to the new birthday floor.
+    ///
+    /// The reported map contains every account in the wallet along with its existing birthday
+    /// height. The caller may include any subset of these in the next call's
+    /// `reset_account_birthdays`; accounts not included will retain their existing birthday
+    /// metadata. (Rescanning of any blocks above the rewind target is performed against all
+    /// wallet viewing keys regardless of which accounts' birthday metadata is reset.)
+    RewindBeyondBirthdays(HashMap<AccountId, BlockHeight>),
+}
+
+impl<AccountId: Hash + Eq + Debug, E: Debug> Debug for RewindError<AccountId, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewindError::DataSource(e) => f.debug_tuple("DataSource").field(e).finish(),
+            RewindError::RewindBeyondBirthdays(birthdays) => f
+                .debug_tuple("RewindBeyondBirthdays")
+                .field(birthdays)
+                .finish(),
+        }
+    }
+}
+
+impl<AccountId: Hash + Eq + Debug, E: Display> Display for RewindError<AccountId, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RewindError::DataSource(e) => write!(f, "Wallet data source error: {e}"),
+            RewindError::RewindBeyondBirthdays(birthdays) => write!(
+                f,
+                "Rewind would precede the birthday height of one or more accounts: {birthdays:?}"
+            ),
+        }
+    }
+}
+
+impl<AccountId: Hash + Eq + Debug, E: error::Error + 'static> error::Error
+    for RewindError<AccountId, E>
+{
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            RewindError::DataSource(e) => Some(e),
+            RewindError::RewindBeyondBirthdays(_) => None,
+        }
+    }
 }
 
 /// Errors that can occur while working with PCZTs.
@@ -211,10 +269,7 @@ where
             ),
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {e}"),
-            Error::MemoForbidden => write!(
-                f,
-                "It is not possible to send a memo to a transparent address."
-            ),
+            Error::Payment(e) => write!(f, "An error occurred constructing a payment: {e}"),
             Error::UnsupportedChangeType(t) => write!(
                 f,
                 "Attempted to send change to an unsupported pool type: {t}"
@@ -441,5 +496,45 @@ impl<DE, TE, SE, FE, CE, N> From<pczt::roles::tx_extractor::Error>
 {
     fn from(e: pczt::roles::tx_extractor::Error) -> Self {
         Error::Pczt(PcztError::Extraction(e))
+    }
+}
+
+/// Errors that may occur when resolving the account controlling an address.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum FindAccountForAddressError<E> {
+    /// Error returned by the underlying wallet backend.
+    Backend(E),
+
+    /// A Unified Address whose receivers map to different accounts.
+    UnifiedAddressConflict,
+}
+
+impl<E> From<E> for FindAccountForAddressError<E> {
+    fn from(err: E) -> Self {
+        Self::Backend(err)
+    }
+}
+
+impl<E: Display> Display for FindAccountForAddressError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FindAccountForAddressError::Backend(e) => {
+                write!(f, "Wallet backend error: {e}")
+            }
+            FindAccountForAddressError::UnifiedAddressConflict => write!(
+                f,
+                "Receivers of the provided Unified Address map to different wallet accounts."
+            ),
+        }
+    }
+}
+
+impl<E: error::Error + 'static> error::Error for FindAccountForAddressError<E> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            FindAccountForAddressError::Backend(e) => Some(e),
+            FindAccountForAddressError::UnifiedAddressConflict => None,
+        }
     }
 }

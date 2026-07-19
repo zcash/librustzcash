@@ -1,7 +1,7 @@
 [package]
 name = "zcash_transparent"
 description = "Rust implementations of the Zcash transparent protocol"
-version = "0.6.3"
+version = "0.8.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@electriccoin.co>",
@@ -25,12 +25,8 @@ zip32.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
-# - Digests (output types exposed)
-blake2b_simd.workspace = true
-sha2.workspace = true
-
 # - Encodings
-core2.workspace = true
+corez.workspace = true
 
 # - Secret management
 subtle.workspace = true
@@ -53,6 +49,9 @@ zcash_script = { workspace = true, features = ["descriptor"] }
 # - Boilerplate
 getset.workspace = true
 nonempty.workspace = true
+
+# - Digests
+sha2.workspace = true
 
 # - Documentation
 document-features = { workspace = true, optional = true }

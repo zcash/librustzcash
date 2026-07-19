@@ -8,9 +8,26 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.7.0] - PENDING
+## [Unreleased]
+
+## [0.8.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.7.0] - 2026-04-23
 
 ### Added
+- `zcash_transparent::util::hash160` module
+- `zcash_transparent::util::sha256d` (moved from
+  `zcash_primitives::transaction::util::sha256d`)
+- `zcash_transparent::address::TransparentAddress::from_script_kind`
+- `zcash_transparent::bundle::TxOut::script_kind`
 - `zcash_transparent::pczt`:
   - `Input::with_signable_input`
   - `Input::append_signature`
@@ -20,11 +37,27 @@ workspace.
 - `zcash_transparent::builder::SpendInfo`
 - `zcash_transparent::builder::TransparentInputInfo::{from_parts, spend_info}`
 - `zcash_transparent::builder::Builder::add_p2pkh_input`
+- `impl {PartialEq, Eq} for zcash_transparent::keys::AccountPubKey` (compares
+  chain code and public key only; BIP 32 derivation metadata is ignored since
+  it is not preserved by the UFVK encoding)
+- `impl {PartialEq, Eq} for zcash_transparent::keys::ExternalIvk`
 - `impl Hash for zcash_transparent::keys::TransparentKeyScope`
+- `zcash_transparent::builder::p2sh_input_serialized_len`
 
 ### Changed
 - MSRV is now 1.85.1.
+- Migrated to `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_address 0.11`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
+- `zcash_transparent::sighash::SignableInput::from_parts` now validates the
+  referenced transparent input index against `&Bundle<_>` and returns
+  `Result<_, InvalidInputIndex>`.
+- `zcash_transparent::builder::TransparentBuilder::add_p2sh_input` is no longer
+  restricted to the PCZT workflow; `Bundle::apply_signatures`,
+  `Bundle::prepare_transparent_signatures`, and
+  `TransparentSignatureContext::finalize_signatures` now support P2SH (multisig)
+  inputs.
 - `zcash_transparent::pczt`:
+  - `Bundle::extract` now takes its `self` argument by reference.
   - `SignerError` has added variants:
     - `InvalidExternalSignature`
     - `MissingPreimage`
@@ -32,6 +65,18 @@ workspace.
 - `zcash_transparent::builder::Builder::add_input` now takes a `TransparentInputInfo`
   instead of its constituent parts. Use `Builder::add_p2pkh_input` if you need the
   previous API.
+
+### Fixed
+- `Debug` output for `zcash_transparent::keys::{AccountPrivKey,
+  AccountPubKey, ExternalIvk, InternalIvk, EphemeralIvk, InternalOvk,
+  ExternalOvk}` now redacts key material.
+- `Debug` output for `zcash_transparent::zip48::{AccountPrivKey}`
+  now redacts the embedded extended key material.
+
+## [0.6.4] - 2026-04-16
+
+### Added
+- `zcash_transparent::sighash::SighashType::from_raw`
 
 ## [0.6.3] - 2025-12-17
 

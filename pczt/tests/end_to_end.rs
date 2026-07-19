@@ -22,7 +22,7 @@ use rand_core::OsRng;
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
-    builder::{BuildConfig, Builder, PcztResult},
+    builder::{BuildConfig, Builder, DEFAULT_TX_EXPIRY_DELTA, PcztResult},
     fees::zip317,
     sighash::SignableInput,
     sighash_v5::v5_signature_hash,
@@ -35,6 +35,9 @@ use zcash_protocol::{
     value::Zatoshis,
 };
 use zcash_script::script::{self, Evaluable};
+
+#[cfg(zcash_unstable = "nu7")]
+use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
 
 static ORCHARD_PROVING_KEY: OnceLock<orchard::circuit::ProvingKey> = OnceLock::new();
 
@@ -51,6 +54,38 @@ fn orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
 fn check_round_trip(pczt: &Pczt) {
     let encoded = pczt.serialize();
     assert_eq!(encoded, Pczt::parse(&encoded).unwrap().serialize());
+}
+
+// Returns target and expiry block heights for a V5 test transaction.
+//
+// The builder uses the target height to select the transaction version, so this
+// function must return a height that selects V5. The expiry height is the last block
+// at which the transaction may be included - must remain within the V5 range as well.
+fn tx_v5_test_heights() -> (u32, u32) {
+    // Use a large target height when NU7 support is disabled.
+    #[cfg(not(zcash_unstable = "nu7"))]
+    {
+        let target_height = 10_000_000;
+        let expiry_height = target_height + DEFAULT_TX_EXPIRY_DELTA;
+
+        (target_height, expiry_height)
+    }
+
+    // Use the latest possible V5 height range when NU7 support is enabled.
+    #[cfg(zcash_unstable = "nu7")]
+    {
+        let expiry_height = MainNetwork
+            .activation_height(NetworkUpgrade::Nu7)
+            .map(u32::from)
+            .and_then(|nu7_height| nu7_height.checked_sub(1))
+            .expect("valid NU7 activation height must be configured");
+
+        let target_height = expiry_height
+            .checked_sub(DEFAULT_TX_EXPIRY_DELTA)
+            .expect("NU7 activation height must exceed the transaction expiry delta");
+
+        (target_height, expiry_height)
+    }
 }
 
 #[test]
@@ -86,10 +121,12 @@ fn transparent_to_orchard() {
         transparent_addr.script().into(),
     );
 
+    let (builder_target_height, expected_expiry_height) = tx_v5_test_heights();
+
     // Create the transaction's I/O.
     let mut builder = Builder::new(
         params,
-        10_000_000.into(),
+        builder_target_height.into(),
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
@@ -157,7 +194,7 @@ fn transparent_to_orchard() {
     let tx = TransactionExtractor::new(pczt).extract().unwrap();
     let tx_digests = tx.digest(TxIdDigester);
 
-    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+    assert_eq!(u32::from(tx.expiry_height()), expected_expiry_height,);
 
     // Validate the transaction.
     let bundle = tx.transparent_bundle().unwrap();
@@ -167,28 +204,36 @@ fn transparent_to_orchard() {
         Some(
             v5_signature_hash(
                 &tx_effects,
-                &SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
-                    match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
-                        (zcash_script::signature::SignedOutputs::All, false) => SighashType::ALL,
-                        (zcash_script::signature::SignedOutputs::All, true) => {
-                            SighashType::ALL_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, false) => {
-                            SighashType::SINGLE
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, true) => {
-                            SighashType::SINGLE_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::None, false) => SighashType::NONE,
-                        (zcash_script::signature::SignedOutputs::None, true) => {
-                            SighashType::NONE_ANYONECANPAY
-                        }
-                    },
-                    0,
-                    &Script(script_code.clone()),
-                    coin.script_pubkey(),
-                    coin.value(),
-                )),
+                &SignableInput::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
+                            (zcash_script::signature::SignedOutputs::All, false) => {
+                                SighashType::ALL
+                            }
+                            (zcash_script::signature::SignedOutputs::All, true) => {
+                                SighashType::ALL_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, false) => {
+                                SighashType::SINGLE
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, true) => {
+                                SighashType::SINGLE_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::None, false) => {
+                                SighashType::NONE
+                            }
+                            (zcash_script::signature::SignedOutputs::None, true) => {
+                                SighashType::NONE_ANYONECANPAY
+                            }
+                        },
+                        0,
+                        &Script(script_code.clone()),
+                        coin.script_pubkey(),
+                        coin.value(),
+                    )
+                    .unwrap(),
+                ),
                 &tx_digests,
             )
             .as_ref()
@@ -249,10 +294,12 @@ fn transparent_p2sh_multisig_to_orchard() {
     // generated from a redeem script that didn't contain bad opcodes.
     let redeem_script = redeem_script.weaken();
 
+    let (builder_target_height, expected_expiry_height) = tx_v5_test_heights();
+
     // Create the transaction's I/O.
     let mut builder = Builder::new(
         params,
-        10_000_000.into(),
+        builder_target_height.into(),
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
@@ -334,7 +381,7 @@ fn transparent_p2sh_multisig_to_orchard() {
     let tx = TransactionExtractor::new(pczt).extract().unwrap();
     let tx_digests = tx.digest(TxIdDigester);
 
-    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+    assert_eq!(u32::from(tx.expiry_height()), expected_expiry_height,);
 
     // Validate the transaction.
     let bundle = tx.transparent_bundle().unwrap();
@@ -344,28 +391,36 @@ fn transparent_p2sh_multisig_to_orchard() {
         Some(
             v5_signature_hash(
                 &tx_effects,
-                &SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
-                    match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
-                        (zcash_script::signature::SignedOutputs::All, false) => SighashType::ALL,
-                        (zcash_script::signature::SignedOutputs::All, true) => {
-                            SighashType::ALL_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, false) => {
-                            SighashType::SINGLE
-                        }
-                        (zcash_script::signature::SignedOutputs::Single, true) => {
-                            SighashType::SINGLE_ANYONECANPAY
-                        }
-                        (zcash_script::signature::SignedOutputs::None, false) => SighashType::NONE,
-                        (zcash_script::signature::SignedOutputs::None, true) => {
-                            SighashType::NONE_ANYONECANPAY
-                        }
-                    },
-                    0,
-                    &Script(script_code.clone()),
-                    coin.script_pubkey(),
-                    coin.value(),
-                )),
+                &SignableInput::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        match (hash_type.signed_outputs(), hash_type.anyone_can_pay()) {
+                            (zcash_script::signature::SignedOutputs::All, false) => {
+                                SighashType::ALL
+                            }
+                            (zcash_script::signature::SignedOutputs::All, true) => {
+                                SighashType::ALL_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, false) => {
+                                SighashType::SINGLE
+                            }
+                            (zcash_script::signature::SignedOutputs::Single, true) => {
+                                SighashType::SINGLE_ANYONECANPAY
+                            }
+                            (zcash_script::signature::SignedOutputs::None, false) => {
+                                SighashType::NONE
+                            }
+                            (zcash_script::signature::SignedOutputs::None, true) => {
+                                SighashType::NONE_ANYONECANPAY
+                            }
+                        },
+                        0,
+                        &Script(script_code.clone()),
+                        coin.script_pubkey(),
+                        coin.value(),
+                    )
+                    .unwrap(),
+                ),
                 &tx_digests,
             )
             .as_ref()
@@ -456,10 +511,12 @@ fn sapling_to_orchard() {
         (anchor.into(), merkle_path)
     };
 
+    let (builder_target_height, expected_expiry_height) = tx_v5_test_heights();
+
     // Build the Orchard bundle we'll be using.
     let mut builder = Builder::new(
         MainNetwork,
-        10_000_000.into(),
+        builder_target_height.into(),
         BuildConfig::Standard {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
@@ -568,7 +625,7 @@ fn sapling_to_orchard() {
         .extract()
         .unwrap();
 
-    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+    assert_eq!(u32::from(tx.expiry_height()), expected_expiry_height,);
 }
 
 #[test]
@@ -630,10 +687,12 @@ fn orchard_to_orchard() {
         (anchor.into(), merkle_path.into())
     };
 
+    let (builder_target_height, expected_expiry_height) = tx_v5_test_heights();
+
     // Build the Orchard bundle we'll be using.
     let mut builder = Builder::new(
         MainNetwork,
-        10_000_000.into(),
+        builder_target_height.into(),
         BuildConfig::Standard {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
@@ -698,5 +757,5 @@ fn orchard_to_orchard() {
     // We should now be able to extract the fully authorized transaction.
     let tx = TransactionExtractor::new(pczt).extract().unwrap();
 
-    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+    assert_eq!(u32::from(tx.expiry_height()), expected_expiry_height,);
 }

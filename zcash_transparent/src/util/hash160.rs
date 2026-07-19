@@ -1,7 +1,21 @@
-use core2::io::{self, Read, Write};
+//! HASH160 (`RIPEMD-160(SHA-256(data))`) hashing utilities.
+
+use corez::io::{self, Read, Write};
+use ripemd::Ripemd160;
 use sha2::{Digest, Sha256, digest::Output};
 
-/// Abstraction over a reader which SHA-256d-hashes the data being read.
+/// Computes `RIPEMD-160(SHA-256(input))` in one shot.
+pub fn hash(input: &[u8]) -> [u8; 20] {
+    let mut writer = HashWriter::default();
+    writer
+        .write_all(input)
+        .expect("HashWriter::write is infallible");
+    writer.into_hash().into()
+}
+
+/// Abstraction over a reader which HASH160-hashes the data being read.
+///
+/// HASH160 is defined as `RIPEMD-160(SHA-256(data))`.
 pub struct HashReader<R: Read> {
     reader: R,
     hasher: Sha256,
@@ -21,8 +35,8 @@ impl<R: Read> HashReader<R> {
     }
 
     /// Destroy this reader and return the hash of what was read.
-    pub fn into_hash(self) -> Output<Sha256> {
-        Sha256::digest(self.hasher.finalize())
+    pub fn into_hash(self) -> Output<Ripemd160> {
+        Ripemd160::digest(self.hasher.finalize())
     }
 }
 
@@ -38,7 +52,9 @@ impl<R: Read> Read for HashReader<R> {
     }
 }
 
-/// Abstraction over a writer which SHA-256d-hashes the data being read.
+/// Abstraction over a writer which HASH160-hashes the data being written.
+///
+/// HASH160 is defined as `RIPEMD-160(SHA-256(data))`.
 pub struct HashWriter {
     hasher: Sha256,
 }
@@ -53,8 +69,8 @@ impl Default for HashWriter {
 
 impl HashWriter {
     /// Destroy this writer and return the hash of what was written.
-    pub fn into_hash(self) -> Output<Sha256> {
-        Sha256::digest(self.hasher.finalize())
+    pub fn into_hash(self) -> Output<Ripemd160> {
+        Ripemd160::digest(self.hasher.finalize())
     }
 }
 

@@ -47,7 +47,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             || {
                 self.params
                     .activation_height(consensus::NetworkUpgrade::Sapling)
-                    .expect("sapling network upgrade has activated")
+                    // Fall back to the genesis block in regtest mode.
+                    .unwrap_or_else(|| BlockHeight::from(0))
             },
             BlockHeight::from,
         ));

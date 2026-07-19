@@ -30,6 +30,7 @@ impl<C: Clock> Clock for &C {
     }
 }
 
+/// Test utilities for clock simulation.
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use std::sync::{Arc, RwLock};

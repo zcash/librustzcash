@@ -10,8 +10,24 @@ workspace.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`.
+
+## [0.11.0] - 2026-04-23
+
 ### Added
 - `zcash_address::ZcashAddress::is_transparent_only`
+
+### Changed
+- MSRV is now 1.85.1
+- Migrated to `zcash_encoding 0.4`, `zcash_protocol 0.8`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
+
+### Fixed
+- `Debug` output for `zcash_address::unified::{Fvk, Ivk}` now
+  redacts viewing key material instead of emitting raw key bytes.
 
 ### Removed
 

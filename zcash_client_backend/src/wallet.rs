@@ -7,6 +7,7 @@ use incrementalmerkletree::Position;
 use ::transparent::{
     address::TransparentAddress,
     bundle::{OutPoint, TxOut},
+    keys::TransparentKeyScope,
 };
 use zcash_address::ZcashAddress;
 use zcash_keys::{address::Receiver, keys::OutgoingViewingKey};
@@ -17,18 +18,17 @@ use zcash_protocol::{
     consensus::{BlockHeight, TxIndex},
     value::{BalanceError, Zatoshis},
 };
+#[cfg(feature = "transparent-key-import")]
+use zcash_script::script;
 use zip32::Scope;
 
-use crate::fees::sapling as sapling_fees;
+use crate::{TransferType, fees::sapling as sapling_fees};
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
-    std::time::SystemTime,
-};
+use {::transparent::keys::NonHardenedChildIndex, std::time::SystemTime};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -74,16 +74,40 @@ impl NoteId {
 ///   internal account ID and metadata about the outpoint;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recipient<AccountId> {
+    /// An output sent to a recipient external to the wallet.
     External {
         recipient_address: ZcashAddress,
         output_pool: PoolType,
     },
+    /// A transparent output sent to an ephemeral address of a wallet account
+    /// (e.g. the middle hop of a ZIP 320 / TEX flow). The `outpoint` is
+    /// recorded so the wallet can later detect when this output is spent
+    /// without relying on a continuous address watch.
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent {
         receiving_account: AccountId,
         ephemeral_address: TransparentAddress,
         outpoint: OutPoint,
     },
+    /// A transparent output sent to a non-ephemeral transparent address belonging to
+    /// a wallet account. Used to record the send side of a transparent output that
+    /// the wallet both funded and received.
+    ///
+    /// Distinct from [`Self::InternalAccount`] because for transparent outputs
+    /// the recipient address is observable on chain and must be recorded;
+    /// additionally, the receiving account may not be known at the point the
+    /// send is recorded. For shielded outputs the recipient address is not
+    /// externally meaningful, so wallet-internal sends are recorded against
+    /// the receiving account alone.
+    #[cfg(feature = "transparent-inputs")]
+    InternalTransparent {
+        receiving_account: AccountId,
+        recipient_address: TransparentAddress,
+    },
+    /// A shielded output recorded against a wallet account. Used for
+    /// same-account outputs such as change (`external_address` is `None`) and
+    /// for outputs received via an external IVK but funded by another wallet
+    /// account, in which case `external_address` is the address that was paid.
     InternalAccount {
         receiving_account: AccountId,
         external_address: Option<ZcashAddress>,
@@ -171,14 +195,20 @@ impl<AccountId> WalletTx<AccountId> {
 
 /// A transparent output controlled by the wallet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WalletTransparentOutput {
+pub struct WalletTransparentOutput<AccountId> {
     outpoint: OutPoint,
     txout: TxOut,
     mined_height: Option<BlockHeight>,
+    recipient_account: Option<AccountId>,
+    recipient_key_scope: Option<TransparentKeyScope>,
     recipient_address: TransparentAddress,
+    funding_account: Option<AccountId>,
+    /// The known serialized input size for this output, if available.
+    /// This is set for P2SH outputs where the redeem script is known.
+    known_input_size: Option<usize>,
 }
 
-impl WalletTransparentOutput {
+impl<AccountId> WalletTransparentOutput<AccountId> {
     /// Constructs a new [`WalletTransparentOutput`] from its constituent parts.
     ///
     /// Returns `None` if the recipient address for the provided [`TxOut`] cannot be
@@ -187,20 +217,71 @@ impl WalletTransparentOutput {
         outpoint: OutPoint,
         txout: TxOut,
         mined_height: Option<BlockHeight>,
-    ) -> Option<WalletTransparentOutput> {
+        recipient_account: Option<AccountId>,
+        recipient_key_scope: Option<TransparentKeyScope>,
+        funding_account: Option<AccountId>,
+    ) -> Option<Self> {
         txout
             .recipient_address()
             .map(|recipient_address| WalletTransparentOutput {
                 outpoint,
                 txout,
                 mined_height,
+                recipient_account,
+                recipient_key_scope,
                 recipient_address,
+                funding_account,
+                known_input_size: None,
             })
+    }
+
+    /// Returns a copy of this output with account-identifying data redacted,
+    /// for inclusion in a [`Proposal`].
+    ///
+    /// Specifically:
+    /// - The `AccountId` type parameter is replaced with `()`, erasing the value
+    ///   of `recipient_account` while preserving whether the output is
+    ///   wallet-owned (the `Some` / `None` distinction is retained).
+    /// - `funding_account` is cleared to `None`, since a proposal does not
+    ///   carry information about which account funded prior outputs.
+    ///
+    /// Used when constructing or reconstructing a [`Proposal`], whose
+    /// transparent inputs are deliberately account-agnostic so that proposals
+    /// can be wire-encoded and shared without revealing wallet account
+    /// structure.
+    ///
+    /// [`Proposal`]: crate::proposal::Proposal
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn redact_account_data(self) -> WalletTransparentOutput<()> {
+        WalletTransparentOutput {
+            outpoint: self.outpoint,
+            txout: self.txout,
+            mined_height: self.mined_height,
+            recipient_account: self.recipient_account.map(|_| ()),
+            recipient_key_scope: self.recipient_key_scope,
+            recipient_address: self.recipient_address,
+            funding_account: None,
+            known_input_size: self.known_input_size,
+        }
+    }
+
+    /// Sets the known serialized input size for this output.
+    ///
+    /// This should be used for P2SH outputs where the wallet knows the redeem script
+    /// and can compute the expected input size for fee calculation.
+    pub fn with_known_input_size(mut self, size: usize) -> Self {
+        self.known_input_size = Some(size);
+        self
     }
 
     /// Returns the [`OutPoint`] corresponding to the output.
     pub fn outpoint(&self) -> &OutPoint {
         &self.outpoint
+    }
+
+    /// The index of the output in the transaction that created this output.
+    pub fn index(&self) -> usize {
+        self.outpoint.n() as usize
     }
 
     /// Returns the transaction output itself.
@@ -213,9 +294,73 @@ impl WalletTransparentOutput {
         self.mined_height
     }
 
+    /// Returns the transparent key scope at which this address was derived, if known.
+    ///
+    /// This metadata MUST be returned for any transparent address derived by the wallet;
+    /// this metadata is used by `propose_shielding` to ensure that shielding transactions
+    /// do not inadvertently link ephemeral addresses to other wallet activity on-chain.
+    pub fn recipient_key_scope(&self) -> Option<TransparentKeyScope> {
+        self.recipient_key_scope
+    }
+
+    /// Returns the [`TransferType`] for this output, derived from the recipient,
+    /// recipient-key-scope, and funding-account information stored on the output:
+    ///
+    /// - [`TransferType::Outgoing`] when [`recipient_account`](Self::recipient_account)
+    ///   is `None` (the recipient is external to the wallet).
+    /// - [`TransferType::AccountInternal`] when the recipient is a wallet account and
+    ///   the output is a same-account self-transfer. This is detected either
+    ///   structurally, when [`recipient_key_scope`](Self::recipient_key_scope) is
+    ///   `INTERNAL` or `EPHEMERAL` (those key scopes exist only within a single
+    ///   account), or by observation, when the recipient account is also the
+    ///   [`funding_account`](Self::funding_account). The latter case also covers
+    ///   standalone addresses, which have no key scope.
+    /// - [`TransferType::WalletInternal`] when the recipient is a wallet account and
+    ///   the [`funding_account`](Self::funding_account) is a different wallet account
+    ///   (a cross-account transfer within the wallet).
+    /// - [`TransferType::Incoming`] when the recipient is a wallet account and no
+    ///   wallet funding account is known.
+    pub fn transfer_type(&self) -> TransferType
+    where
+        AccountId: PartialEq,
+    {
+        match (
+            self.recipient_account.as_ref(),
+            self.recipient_key_scope,
+            self.funding_account.as_ref(),
+        ) {
+            (None, _, _) => TransferType::Outgoing,
+            (Some(_), Some(TransparentKeyScope::INTERNAL | TransparentKeyScope::EPHEMERAL), _) => {
+                TransferType::AccountInternal
+            }
+            (Some(r), _, Some(r0)) if r == r0 => TransferType::AccountInternal,
+            (Some(_), _, Some(_)) => TransferType::WalletInternal,
+            (Some(_), _, _) => TransferType::Incoming,
+        }
+    }
+
+    /// The identifier for the account that received this output, if known to belong to the
+    /// wallet. Returns `None` for outputs sent to addresses outside the wallet.
+    pub fn recipient_account(&self) -> Option<&AccountId> {
+        self.recipient_account.as_ref()
+    }
+
     /// Returns the wallet address that received the UTXO.
     pub fn recipient_address(&self) -> &TransparentAddress {
         &self.recipient_address
+    }
+
+    /// The identifier for the wallet account that provided funds in the transaction
+    /// that created the output, if known.
+    ///
+    /// Note: the Zcash protocol permits construction of transactions where multiple distinct
+    /// accounts provide funds; however, `zcash_client_backend` does not currently support the
+    /// construction of transactions of this form. In cases where multiple funding accounts are
+    /// detected, the account that provided the most significant source of funds should be selected
+    /// if possible; in the future, this should be either expanded to support a set of funding
+    /// accounts (which will require potentially invasive storage backend changes).
+    pub fn funding_account(&self) -> Option<&AccountId> {
+        self.funding_account.as_ref()
     }
 
     /// Returns the value of the UTXO
@@ -224,12 +369,30 @@ impl WalletTransparentOutput {
     }
 }
 
-impl transparent_fees::InputView for WalletTransparentOutput {
+impl<AccountId: Debug> transparent_fees::InputView for WalletTransparentOutput<AccountId> {
     fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }
     fn coin(&self) -> &TxOut {
         &self.txout
+    }
+    fn serialized_size(&self) -> transparent_fees::InputSize {
+        match self.known_input_size {
+            Some(size) => transparent_fees::InputSize::Known(size),
+            None => {
+                // Fall back to default: only P2PKH is recognized.
+                match zcash_script::script::PubKey::parse(&self.txout.script_pubkey().0)
+                    .ok()
+                    .as_ref()
+                    .and_then(zcash_script::solver::standard)
+                {
+                    Some(zcash_script::solver::ScriptKind::PubKeyHash { .. }) => {
+                        transparent_fees::InputSize::STANDARD_P2PKH
+                    }
+                    _ => transparent_fees::InputSize::Unknown(self.outpoint.clone()),
+                }
+            }
+        }
     }
 }
 
@@ -763,16 +926,31 @@ impl TransparentAddressMetadata {
         }
     }
 
-    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::Standalone`] source
-    /// information and the specified exposure height.
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::StandalonePubkey`]
+    /// source information for a P2PKH address and the specified exposure height.
     #[cfg(feature = "transparent-key-import")]
-    pub fn standalone(
+    pub fn standalone_p2pkh(
         pubkey: secp256k1::PublicKey,
         exposure: Exposure,
         next_check_time: Option<SystemTime>,
     ) -> Self {
         Self {
-            source: TransparentAddressSource::Standalone(pubkey),
+            source: TransparentAddressSource::StandalonePubkey(pubkey),
+            exposure,
+            next_check_time,
+        }
+    }
+
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::StandaloneScript`]
+    /// source information for a P2SH address and the specified exposure height.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn standalone_script(
+        redeem_script: script::Redeem,
+        exposure: Exposure,
+        next_check_time: Option<SystemTime>,
+    ) -> Self {
+        Self {
+            source: TransparentAddressSource::StandaloneScript(redeem_script),
             exposure,
             next_check_time,
         }
@@ -825,6 +1003,13 @@ impl TransparentAddressMetadata {
     pub fn address_index(&self) -> Option<NonHardenedChildIndex> {
         self.source.address_index()
     }
+
+    /// Returns the redeem script for the address, if this is a P2SH address.
+    /// Returns `None` for non-P2SH addresses.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn redeem_script(&self) -> Option<&script::Redeem> {
+        self.source.redeem_script()
+    }
 }
 
 /// Source information for a transparent address.
@@ -837,11 +1022,18 @@ pub enum TransparentAddressSource {
         scope: TransparentKeyScope,
         address_index: NonHardenedChildIndex,
     },
+
     /// The address was derived from a secp256k1 public key for which derivation information is
     /// unknown or for which the associated spending key was produced from system randomness.
     /// This variant provides the public key directly.
     #[cfg(feature = "transparent-key-import")]
-    Standalone(secp256k1::PublicKey),
+    StandalonePubkey(secp256k1::PublicKey),
+
+    /// The address was derived from a P2SH redeem_script for which derivation information is
+    /// unknown.
+    /// This variant provides the redeem script directly.
+    #[cfg(feature = "transparent-key-import")]
+    StandaloneScript(script::Redeem),
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -852,7 +1044,9 @@ impl TransparentAddressSource {
         match self {
             TransparentAddressSource::Derived { scope, .. } => Some(*scope),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::Standalone(_) => None,
+            TransparentAddressSource::StandalonePubkey(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneScript(_) => None,
         }
     }
 
@@ -862,7 +1056,22 @@ impl TransparentAddressSource {
         match self {
             TransparentAddressSource::Derived { address_index, .. } => Some(*address_index),
             #[cfg(feature = "transparent-key-import")]
-            TransparentAddressSource::Standalone(_) => None,
+            TransparentAddressSource::StandalonePubkey(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneScript(_) => None,
+        }
+    }
+
+    /// Returns the redeem script for the address, if this is a P2SH address.
+    /// Returns `None` for non-P2SH addresses.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn redeem_script(&self) -> Option<&script::Redeem> {
+        match self {
+            TransparentAddressSource::Derived { .. } => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandalonePubkey(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneScript(redeem_script) => Some(redeem_script),
         }
     }
 }

@@ -50,10 +50,10 @@ message SentNote {
 message Recipient {
   RecipientType recipient_type = 1;
 
-  optional string address = 2; // either the zcash address if external or transparent address if EphemeralTransparent
+  optional string address = 2; // either the zcash address if External, or transparent address if EphemeralTransparent / InternalTransparent
   optional PoolType pool_type = 3; // the shielded protocol if External
-  optional uint32 account_id = 4; // the account id if EphemeralTransparent or InternalAccount
-  optional OutPoint outpoint = 5; // the outpoint metadata if InternalAccount
+  optional uint32 account_id = 4; // the account id if EphemeralTransparent, InternalTransparent, or InternalAccount
+  optional OutPoint outpoint = 5; // the outpoint metadata if EphemeralTransparent
   optional Note note = 6; // the note if InternalAccount
 }
 
@@ -61,6 +61,7 @@ enum RecipientType {
   ExternalRecipient = 0;
   EphemeralTransparent = 1;
   InternalAccount = 2;
+  InternalTransparent = 3;
 }
 
 // associates a note and a transaction where it was spent

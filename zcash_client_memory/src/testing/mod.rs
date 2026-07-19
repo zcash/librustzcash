@@ -156,6 +156,14 @@ where
                         #[cfg(feature = "transparent-inputs")]
                         None,
                     ),
+                    #[cfg(feature = "transparent-inputs")]
+                    Recipient::InternalTransparent {
+                        recipient_address, ..
+                    } => OutputOfSentTx::from_parts(
+                        note.value,
+                        Some(Address::from(recipient_address)),
+                        None,
+                    ),
                 })
             })
             .collect::<Result<_, Error>>()
@@ -171,14 +179,18 @@ where
         &self,
         outpoint: &::transparent::bundle::OutPoint,
         _spendable_as_of: Option<TargetHeight>,
-    ) -> Result<Option<WalletTransparentOutput>, <Self as InputSource>::Error> {
+    ) -> Result<Option<WalletTransparentOutput<AccountId>>, <Self as InputSource>::Error> {
         // FIXME: perform spendability check according to `_spendable_as_of`
         Ok(self
             .transparent_received_outputs
             .get(outpoint)
             .map(|txo| (txo, self.tx_table.get(&txo.transaction_id)))
             .and_then(|(txo, tx)| {
-                txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
+                txo.to_wallet_transparent_output(
+                    outpoint,
+                    tx.and_then(|tx| tx.mined_height()),
+                    self.find_funding_account(&txo.transaction_id),
+                )
             }))
     }
 
@@ -204,8 +216,8 @@ where
     ) -> Result<Vec<NoteId>, Error> {
         Ok(self
             .get_sent_notes()
-            .iter()
-            .filter_map(|(id, _)| {
+            .keys()
+            .filter_map(|id| {
                 if let SentNoteId::Shielded(id) = id {
                     if id.txid() == txid && id.protocol() == protocol {
                         Some(*id)
@@ -391,7 +403,7 @@ where
             _ => {}
         }
 
-        checkpoints.sort_by(|(a, _), (b, _)| a.cmp(b));
+        checkpoints.sort_by_key(|(a, _)| *a);
 
         Ok(checkpoints)
     }

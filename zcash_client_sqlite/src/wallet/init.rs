@@ -28,6 +28,7 @@ const MIN_SQLITE_MINOR_VERSION: u32 = 35;
 
 const MIGRATIONS_TABLE: &str = "schemer_migrations";
 
+/// Errors that can occur when applying migrations to the wallet database.
 #[derive(Debug)]
 pub enum WalletMigrationError {
     /// A feature required by the wallet database is not supported by the version of
@@ -212,10 +213,6 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::AccountUnknown => {
             unreachable!("all accounts are known in migration context")
         }
-        #[cfg(feature = "transparent-inputs")]
-        SqliteClientError::GapAddresses => {
-            unreachable!("we don't deal with gap addresses in migrations")
-        }
         SqliteClientError::UnknownZip32Derivation => {
             unreachable!("we don't call methods that require operating on imported accounts")
         }
@@ -250,8 +247,13 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
             unreachable!("we don't service transaction data requests in migrations")
         }
         #[cfg(feature = "transparent-key-import")]
-        SqliteClientError::PubkeyImportConflict(_) => {
-            unreachable!("we do not import pubkeys in migrations")
+        SqliteClientError::StandaloneImportConflict(_) => {
+            unreachable!("we do not import standalone transparent addresses in migrations")
+        }
+        #[cfg(feature = "orchard")]
+        SqliteClientError::HistoricalFrontierInvalid(_)
+        | SqliteClientError::HistoricalWitnessUnavailable { .. } => {
+            unreachable!("we do not generate historical witnesses in migrations")
         }
     }
 }
@@ -819,6 +821,10 @@ mod tests {
         }
 
         let expected_indices = vec![
+            db::INDEX_ACCOUNTS_ORCHARD_IVK,
+            db::INDEX_ACCOUNTS_P2PKH_IVK,
+            db::INDEX_ACCOUNTS_P2SH_IVK,
+            db::INDEX_ACCOUNTS_SAPLING_IVK,
             db::INDEX_ACCOUNTS_UFVK,
             db::INDEX_ACCOUNTS_UIVK,
             db::INDEX_ACCOUNTS_UUID,
@@ -833,11 +839,13 @@ mod tests {
             db::INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_ORCHARD_RECEIVED_NOTES_ADDRESS,
             db::INDEX_ORCHARD_RECEIVED_NOTES_TX,
+            db::INDEX_ORCHARD_RECEIVED_NOTES_WITNESS_STABILIZED,
             db::INDEX_SAPLING_RNS_NOTE,
             db::INDEX_SAPLING_RNS_TX,
             db::INDEX_SAPLING_RECEIVED_NOTES_ACCOUNT,
             db::INDEX_SAPLING_RECEIVED_NOTES_ADDRESS,
             db::INDEX_SAPLING_RECEIVED_NOTES_TX,
+            db::INDEX_SAPLING_RECEIVED_NOTES_WITNESS_STABILIZED,
             db::INDEX_SENT_NOTES_FROM_ACCOUNT,
             db::INDEX_SENT_NOTES_TO_ACCOUNT,
             db::INDEX_SENT_NOTES_TX,
@@ -1165,7 +1173,8 @@ mod tests {
 
             // add a sapling sent note
             wdb.conn.execute(
-                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
+                "INSERT INTO blocks (height, hash, time, sapling_tree) \
+                 VALUES (0, x'0000000000000000000000000000000000000000000000000000000000000000', 0, x'000000')",
                 [],
             )?;
 
@@ -1362,7 +1371,8 @@ mod tests {
                 )
                 .encode(&wdb.params);
                 wdb.conn.execute(
-                    "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
+                    "INSERT INTO blocks (height, hash, time, sapling_tree) \
+                 VALUES (0, x'0000000000000000000000000000000000000000000000000000000000000000', 0, x'000000')",
                     [],
                 )?;
                 wdb.conn.execute(

@@ -13,13 +13,13 @@ use {
 
 use alloc::vec::Vec;
 use core::convert::TryFrom;
-use core2::io::{self, Read, Write};
+use corez::io::{self, Read, Write};
 
 use nonempty::NonEmpty;
 
 use orchard::{
     Action, Anchor,
-    bundle::{Authorization, Authorized, Flags},
+    bundle::{Authorization, Authorized, Flags, ProofSizeEnforcement},
     flavor::OrchardVanilla,
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     primitives::OrchardPrimitives,
@@ -64,6 +64,7 @@ impl MapAuth<Authorized, Authorized> for () {
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(
     mut reader: R,
+    proof_size_enforcement: ProofSizeEnforcement,
 ) -> io::Result<Option<orchard::Bundle<Authorized, ZatBalance, OrchardVanilla>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
@@ -88,14 +89,19 @@ pub fn read_v5_bundle<R: Read>(
             binding_signature,
         );
 
-        Ok(Some(orchard::Bundle::from_parts(
+        // `try_from_parts` rejects a proof whose length is not the canonical size for the
+        // number of actions, preventing a proof padded with arbitrary data (GHSA-2x4w-pxqw-58v9).
+        orchard::Bundle::try_from_parts(
             actions,
             flags,
             value_balance,
             vec![],
             anchor,
             authorization,
-        )))
+            proof_size_enforcement,
+        )
+        .map(Some)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -153,14 +159,17 @@ pub fn read_v6_bundle<R: Read>(
 
     let authorization = Authorized::from_parts(orchard::Proof::new(proof_bytes), binding_signature);
 
-    Ok(Some(orchard::Bundle::from_parts(
+    orchard::Bundle::try_from_parts(
         actions,
         flags,
         value_balance,
         burn,
         anchor,
         authorization,
-    )))
+        ProofSizeEnforcement::Strict,
+    )
+    .map(Some)
+    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Reads burn for OrchardZSA
@@ -249,14 +258,8 @@ pub fn read_action_without_auth<R: Read, P: OrchardPrimitives>(
     let cmx = read_cmx(&mut reader)?;
     let encrypted_note = read_note_ciphertext(&mut reader)?;
 
-    Ok(Action::from_parts(
-        nf_old,
-        rk,
-        cmx,
-        encrypted_note,
-        cv_net,
-        (),
-    ))
+    Action::from_parts(nf_old, rk, cmx, encrypted_note, cv_net, ())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
@@ -452,8 +455,7 @@ mod tests {
         alloc::vec::Vec,
         orchard::primitives::redpallas,
         orchard::sighash_kind::{OrchardSig, OrchardSighashKind},
-        rand::RngCore,
-        rand::rngs::OsRng,
+        rand_core::{OsRng, RngCore},
         std::io::Cursor,
     };
 

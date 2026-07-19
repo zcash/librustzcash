@@ -4,7 +4,7 @@ use {
         encoding::{ReadBytesExt, WriteBytesExt},
         sighash_versioning::{issue_sighash_kind_from_info, issue_sighash_kind_to_info},
     },
-    core2::io::{self, Error, ErrorKind, Read, Write},
+    corez::io::{self, Error, ErrorKind, Read, Write},
     nonempty::NonEmpty,
     orchard::{
         issuance::auth::{IssueAuthSig, IssueValidatingKey, ZSASchnorr},

@@ -150,15 +150,17 @@ fn zip_0143() {
     for tv in self::data::zip_0143::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => {
-                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+            Some(n) => SignableInput::Transparent(
+                ::transparent::sighash::SignableInput::from_parts(
+                    tx.transparent_bundle().unwrap(),
                     SighashType::parse(tv.hash_type as u8).unwrap(),
                     n as usize,
                     &tv.script_code,
                     &tv.script_code,
                     Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
-                ))
-            }
+                )
+                .unwrap(),
+            ),
             _ => SignableInput::Shielded,
         };
 
@@ -174,15 +176,17 @@ fn zip_0243() {
     for tv in self::data::zip_0243::make_test_vectors() {
         let tx = Transaction::read(&tv.tx[..], tv.consensus_branch_id).unwrap();
         let signable_input = match tv.transparent_input {
-            Some(n) => {
-                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
+            Some(n) => SignableInput::Transparent(
+                ::transparent::sighash::SignableInput::from_parts(
+                    tx.transparent_bundle().unwrap(),
                     SighashType::parse(tv.hash_type as u8).unwrap(),
                     n as usize,
                     &tv.script_code,
                     &tv.script_code,
                     Zatoshis::from_nonnegative_i64(tv.amount).unwrap(),
-                ))
-            }
+                )
+                .unwrap(),
+            ),
             _ => SignableInput::Shielded,
         };
 
@@ -232,14 +236,16 @@ impl Authorization for TestUnauthorized {
     type TzeAuth = tze::Authorized;
 }
 
-mod orchard_zsa_digests;
+#[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
+pub mod orchard_zsa_digests;
+
 #[test]
 fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
     ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
         let tx = Transaction::read(
-            tv.tx,
+            &tv.tx[..],
             #[cfg(not(zcash_unstable = "nu7"))]
             BranchId::Nu5,
             #[cfg(zcash_unstable = "nu7")]
@@ -332,13 +338,17 @@ fn zip_0244() {
             let value = bundle.authorization.input_amounts[index];
             let script_pubkey = &bundle.authorization.input_scriptpubkeys[index];
             let signable_input = |hash_type| {
-                SignableInput::Transparent(::transparent::sighash::SignableInput::from_parts(
-                    hash_type,
-                    index,
-                    script_pubkey,
-                    script_pubkey,
-                    value,
-                ))
+                SignableInput::Transparent(
+                    ::transparent::sighash::SignableInput::from_parts(
+                        bundle,
+                        hash_type,
+                        index,
+                        script_pubkey,
+                        script_pubkey,
+                        value,
+                    )
+                    .unwrap(),
+                )
             };
 
             assert_eq!(
@@ -402,14 +412,14 @@ fn zip_0244() {
         );
     }
 
-    for tv in self::data::zip_0244::TEST_VECTORS {
-        perform_digest_tests(tv);
+    for tv in self::data::zip_0244::make_test_vectors() {
+        perform_digest_tests(&tv);
     }
 
     // The orchard_zsa_digests test vectors include zip233_amount
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
-    for tv in self::orchard_zsa_digests::TEST_VECTORS {
-        perform_digest_tests(tv);
+    for tv in self::orchard_zsa_digests::make_test_vectors() {
+        perform_digest_tests(&tv);
     }
 }
 
@@ -434,7 +444,7 @@ fn zip_0233() {
         let input_scriptpubkeys = tv
             .script_pubkeys
             .iter()
-            .map(|s| Script(script::Code(s.clone())))
+            .map(|s| Script(script::Code(s.to_vec())))
             .collect();
 
         let test_bundle = txdata

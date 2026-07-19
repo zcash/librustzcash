@@ -1,6 +1,7 @@
 //! Helper functions for managing light client key material.
 #[cfg(feature = "transparent-inputs")]
 use ::transparent::keys::TransparentKeyScope;
+use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
@@ -31,7 +32,7 @@ use ::transparent::address::TransparentAddress;
 use {
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
     core::convert::TryFrom,
-    core2::io::{Read, Write},
+    corez::io::{Read, Write},
     zcash_encoding::CompactSize,
     zcash_protocol::consensus::BranchId,
 };
@@ -209,7 +210,7 @@ impl Era {
 }
 
 /// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: ::transparent::keys::AccountPrivKey,
@@ -217,6 +218,19 @@ pub struct UnifiedSpendingKey {
     sapling: sapling::ExtendedSpendingKey,
     #[cfg(feature = "orchard")]
     orchard: orchard::keys::SpendingKey,
+}
+
+impl core::fmt::Debug for UnifiedSpendingKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut d = f.debug_struct("UnifiedSpendingKey");
+        #[cfg(feature = "transparent-inputs")]
+        d.field("transparent", &"...");
+        #[cfg(feature = "sapling")]
+        d.field("sapling", &"...");
+        #[cfg(feature = "orchard")]
+        d.field("orchard", &"...");
+        d.finish()
+    }
 }
 
 impl UnifiedSpendingKey {
@@ -347,7 +361,7 @@ impl UnifiedSpendingKey {
     #[allow(clippy::unnecessary_unwrap)]
     #[cfg(feature = "unstable")]
     pub fn from_bytes(era: Era, encoded: &[u8]) -> Result<Self, DecodingError> {
-        let mut source = core2::io::Cursor::new(encoded);
+        let mut source = corez::io::Cursor::new(encoded);
         let decoded_era = source
             .read_u32::<LittleEndian>()
             .map_err(|_| DecodingError::ReadError("era"))
@@ -586,6 +600,32 @@ impl From<bip32::Error> for AddressGenerationError {
     }
 }
 
+/// An error type for failures in combining [`ReceiverRequirement`] values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReceiverRequirementError {
+    /// The two requirements are incompatible: one requires inclusion and the other requires
+    /// omission.
+    Conflict,
+    /// A set of receiver requirements would not include any shielded receiver.
+    NoShieldedReceiver,
+}
+
+impl Display for ReceiverRequirementError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReceiverRequirementError::Conflict => {
+                write!(f, "Require and Omit receiver requirements are incompatible")
+            }
+            ReceiverRequirementError::NoShieldedReceiver => {
+                write!(
+                    f,
+                    "A unified address must include at least one shielded receiver"
+                )
+            }
+        }
+    }
+}
+
 /// An enumeration of the ways in which a receiver may be requested to be present in a generated
 /// [`UnifiedAddress`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -609,18 +649,13 @@ impl ReceiverRequirement {
     /// Return the intersection of two requirements that chooses the stronger requirement, if one
     /// exists. [`ReceiverRequirement::Require`] and [`ReceiverRequirement::Omit`] are
     /// incompatible; attempting an intersection between these will return an error.
-    pub fn intersect(self, other: Self) -> Result<Self, ()> {
+    pub fn intersect(self, other: Self) -> Result<Self, ReceiverRequirementError> {
         use ReceiverRequirement::*;
         match (self, other) {
-            (Require, Omit) => Err(()),
-            (Require, Require) => Ok(Require),
-            (Require, Allow) => Ok(Require),
-            (Allow, Require) => Ok(Require),
+            (Require, Omit) | (Omit, Require) => Err(ReceiverRequirementError::Conflict),
+            (Require, Require) | (Require, Allow) | (Allow, Require) => Ok(Require),
             (Allow, Allow) => Ok(Allow),
-            (Allow, Omit) => Ok(Omit),
-            (Omit, Require) => Err(()),
-            (Omit, Allow) => Ok(Omit),
-            (Omit, Omit) => Ok(Omit),
+            (Allow, Omit) | (Omit, Allow) | (Omit, Omit) => Ok(Omit),
         }
     }
 }
@@ -646,7 +681,7 @@ impl UnifiedAddressRequest {
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
         p2pkh: ReceiverRequirement,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, ReceiverRequirementError> {
         ReceiverRequirements::new(orchard, sapling, p2pkh).map(UnifiedAddressRequest::Custom)
     }
 
@@ -670,15 +705,16 @@ pub struct ReceiverRequirements {
 impl ReceiverRequirements {
     /// Construct a new unified address request from its constituent parts.
     ///
-    /// Returns `Err(())` if the resulting unified address would not include at least one shielded receiver.
+    /// Returns an error if the resulting unified address would not include at least one shielded
+    /// receiver.
     pub fn new(
         orchard: ReceiverRequirement,
         sapling: ReceiverRequirement,
         p2pkh: ReceiverRequirement,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, ReceiverRequirementError> {
         use ReceiverRequirement::*;
         if orchard == Omit && sapling == Omit {
-            Err(())
+            Err(ReceiverRequirementError::NoShieldedReceiver)
         } else {
             Ok(Self {
                 orchard,
@@ -707,9 +743,12 @@ impl ReceiverRequirements {
     };
 
     /// Constructs a new unified address request that includes only the receivers that are allowed
-    /// both in itself and a given other request. Returns [`None`] if requirements are incompatible
+    /// both in itself and a given other request. Returns an error if requirements are incompatible
     /// or if no shielded receiver type is allowed.
-    pub fn intersect(&self, other: &ReceiverRequirements) -> Result<ReceiverRequirements, ()> {
+    pub fn intersect(
+        &self,
+        other: &ReceiverRequirements,
+    ) -> Result<ReceiverRequirements, ReceiverRequirementError> {
         let orchard = self.orchard.intersect(other.orchard)?;
         let sapling = self.sapling.intersect(other.sapling)?;
         let p2pkh = self.p2pkh.intersect(other.p2pkh)?;
@@ -761,8 +800,14 @@ impl From<bip32::Error> for DerivationError {
 
 /// A key that provides the capability to recover outgoing transaction information from
 /// the block chain.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct OutgoingViewingKey([u8; 32]);
+
+impl core::fmt::Debug for OutgoingViewingKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("OutgoingViewingKey").field(&"...").finish()
+    }
+}
 
 impl From<[u8; 32]> for OutgoingViewingKey {
     fn from(ovk: [u8; 32]) -> Self {
@@ -805,7 +850,7 @@ impl AsRef<[u8; 32]> for OutgoingViewingKey {
 }
 
 /// A [ZIP 316](https://zips.z.cash/zip-0316) unified full viewing key.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct UnifiedFullViewingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<::transparent::keys::AccountPubKey>,
@@ -814,6 +859,27 @@ pub struct UnifiedFullViewingKey {
     #[cfg(feature = "orchard")]
     orchard: Option<orchard::keys::FullViewingKey>,
     unknown: Vec<(u32, Vec<u8>)>,
+}
+
+impl core::fmt::Debug for UnifiedFullViewingKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut d = f.debug_struct("UnifiedFullViewingKey");
+        #[cfg(feature = "transparent-inputs")]
+        d.field("transparent", &self.transparent.as_ref().map(|_| "..."));
+        #[cfg(feature = "sapling")]
+        d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
+        #[cfg(feature = "orchard")]
+        d.field("orchard", &self.orchard.as_ref().map(|_| "..."));
+        d.field(
+            "unknown_typecodes",
+            &self
+                .unknown
+                .iter()
+                .map(|(typecode, _)| *typecode)
+                .collect::<Vec<_>>(),
+        )
+        .finish()
+    }
 }
 
 impl UnifiedFullViewingKey {
@@ -1070,6 +1136,55 @@ impl UnifiedFullViewingKey {
         self.orchard.as_ref()
     }
 
+    /// Returns `true` if this UFVK subsumes the given UIVK: every IVK item present in
+    /// `other` has a matching item derivable from `self`. The UFVK may have additional
+    /// items representing capabilities not present in the UIVK.
+    pub fn subsumes_uivk(&self, other: &UnifiedIncomingViewingKey) -> bool {
+        self.to_unified_incoming_viewing_key().subsumes(other)
+    }
+
+    /// Returns `true` if this UFVK subsumes `other`: every FVK item in `other` has a
+    /// matching item in `self`, including both incoming and outgoing viewing capability.
+    ///
+    /// For unknown items, exact equality of (typecode, data) is required.
+    pub fn subsumes_ufvk(&self, other: &UnifiedFullViewingKey) -> bool {
+        #[cfg(feature = "orchard")]
+        match (&other.orchard, &self.orchard) {
+            (Some(e), Some(n)) if e != n => {
+                return false;
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "sapling")]
+        match (&other.sapling, &self.sapling) {
+            (Some(e), Some(n)) if e != n => {
+                return false;
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        match (&other.transparent, &self.transparent) {
+            (Some(e), Some(n)) if e != n => {
+                return false;
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        // Every unknown item in `other` must have an identical entry in `self`.
+        for item in &other.unknown {
+            if !self.unknown.contains(item) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
@@ -1186,7 +1301,7 @@ impl UnifiedFullViewingKey {
 }
 
 /// A [ZIP 316](https://zips.z.cash/zip-0316) unified incoming viewing key.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct UnifiedIncomingViewingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<::transparent::keys::ExternalIvk>,
@@ -1196,6 +1311,35 @@ pub struct UnifiedIncomingViewingKey {
     orchard: Option<orchard::keys::IncomingViewingKey>,
     /// Stores the unrecognized elements of the unified encoding.
     unknown: Vec<(u32, Vec<u8>)>,
+}
+
+impl PartialEq for UnifiedIncomingViewingKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.subsumes(other) && other.subsumes(self)
+    }
+}
+
+impl Eq for UnifiedIncomingViewingKey {}
+
+impl core::fmt::Debug for UnifiedIncomingViewingKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut d = f.debug_struct("UnifiedIncomingViewingKey");
+        #[cfg(feature = "transparent-inputs")]
+        d.field("transparent", &self.transparent);
+        #[cfg(feature = "sapling")]
+        d.field("sapling", &self.sapling.as_ref().map(|_| "..."));
+        #[cfg(feature = "orchard")]
+        d.field("orchard", &self.orchard.as_ref().map(|_| "..."));
+        d.field(
+            "unknown_typecodes",
+            &self
+                .unknown
+                .iter()
+                .map(|(typecode, _)| *typecode)
+                .collect::<Vec<_>>(),
+        )
+        .finish()
+    }
 }
 
 impl UnifiedIncomingViewingKey {
@@ -1396,6 +1540,50 @@ impl UnifiedIncomingViewingKey {
         &self.orchard
     }
 
+    /// Returns `true` if this UIVK subsumes `other`: every IVK item present in `other`
+    /// has a matching item in `self`. This key may have additional items representing
+    /// capabilities not present in `other`.
+    ///
+    /// For unknown items, exact equality of (typecode, data) is required. Future
+    /// revisions may apply more specific semantics for known metadata typecodes.
+    pub fn subsumes(&self, other: &UnifiedIncomingViewingKey) -> bool {
+        #[cfg(feature = "orchard")]
+        match (other.orchard(), &self.orchard) {
+            (Some(e), Some(n)) if e != n => {
+                return false;
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "sapling")]
+        match (other.sapling(), &self.sapling) {
+            (Some(e), Some(n)) if e != n => {
+                return false;
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        #[cfg(feature = "transparent-inputs")]
+        match (other.transparent(), &self.transparent) {
+            (Some(e), Some(n)) if e != n => {
+                return false;
+            }
+            (Some(_), None) => return false,
+            _ => {}
+        }
+
+        // Every unknown item in `other` must have an identical entry in `self`.
+        for item in &other.unknown {
+            if !self.unknown.contains(item) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Attempts to derive the Unified Address for the given diversifier index and receiver types.
     ///
     /// Returns an error if the this key does not produce a valid receiver for a required receiver
@@ -1559,6 +1747,34 @@ impl UnifiedIncomingViewingKey {
         self.find_address(DiversifierIndex::new(), request)
     }
 
+    /// Attempts to recover a diversifier index for each of the receivers of the given
+    /// [`UnifiedAddress`].
+    ///
+    /// Returns the empty set if no shielded receiver of `ua` can be attributed to this key.
+    /// Transparent receivers are not considered here, as recovering a diversifier index from a
+    /// transparent receiver alone is not possible without additional context.
+    pub fn decrypt_diversifiers(&self, ua: &UnifiedAddress) -> BTreeSet<DiversifierIndex> {
+        #[cfg(not(feature = "sapling"))]
+        let sapling_di: Option<DiversifierIndex> = None;
+
+        #[cfg(feature = "sapling")]
+        let sapling_di = ua
+            .sapling()
+            .zip(self.sapling().as_ref())
+            .and_then(|(receiver, ivk)| ivk.decrypt_diversifier(receiver));
+
+        #[cfg(not(feature = "orchard"))]
+        let orchard_di: Option<DiversifierIndex> = None;
+
+        #[cfg(feature = "orchard")]
+        let orchard_di = ua
+            .orchard()
+            .zip(self.orchard().as_ref())
+            .and_then(|(receiver, ivk)| ivk.diversifier_index(receiver));
+
+        sapling_di.into_iter().chain(orchard_di).collect()
+    }
+
     /// Convenience method for choosing a set of receiver requirements based upon the given unified
     /// address request and the available items of this key.
     ///
@@ -1599,9 +1815,11 @@ impl UnifiedIncomingViewingKey {
 
     /// Constructs the [`ReceiverRequirements`] that requires a receiver for each data item of this UIVK.
     ///
-    /// Returns [`Err`] if the resulting request would not include a shielded receiver.
+    /// Returns an error if the resulting request would not include a shielded receiver.
     #[allow(unused_mut)]
-    pub fn to_receiver_requirements(&self) -> Result<ReceiverRequirements, ()> {
+    pub fn to_receiver_requirements(
+        &self,
+    ) -> Result<ReceiverRequirements, ReceiverRequirementError> {
         use ReceiverRequirement::*;
 
         let mut orchard = Omit;
@@ -2139,5 +2357,231 @@ mod tests {
             #[cfg(feature = "transparent-inputs")]
             assert_eq!(decoded.transparent().to_bytes(), usk.transparent().to_bytes());
         }
+    }
+
+    #[test]
+    #[cfg(all(
+        feature = "sapling",
+        feature = "orchard",
+        feature = "transparent-inputs"
+    ))]
+    fn uivk_decrypt_diversifier_matches_own_ua_and_rejects_foreign() {
+        use crate::address::UnifiedAddress;
+        use crate::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
+
+        let ufvk_a = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[1u8; 32], AccountId::ZERO)
+            .unwrap()
+            .to_unified_full_viewing_key();
+        let ufvk_b = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[2u8; 32], AccountId::ZERO)
+            .unwrap()
+            .to_unified_full_viewing_key();
+
+        let (ua_a, mut di_a) = ufvk_a
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+
+        // The UIVK for A recovers the diversifier index used to derive A's own UA.
+        let uivk_a = ufvk_a.to_unified_incoming_viewing_key();
+        let ua_a_dis = uivk_a.decrypt_diversifiers(&ua_a);
+        assert_eq!(ua_a_dis.len(), 1);
+        assert_eq!(ua_a_dis.first(), Some(di_a).as_ref());
+
+        // The UIVK for B, which did not derive A's UA, returns None.
+        let uivk_b = ufvk_b.to_unified_incoming_viewing_key();
+        assert_eq!(uivk_b.decrypt_diversifiers(&ua_a).len(), 0);
+
+        // A frankenstein UA combining A's Sapling receiver with B's Orchard receiver is
+        // attributed to A (matched via Sapling, tried first).
+        let (ua_b, di_b) = ufvk_b
+            .default_address(UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+        let franken = UnifiedAddress::from_receivers(
+            Some(*ua_b.orchard().unwrap()),
+            Some(*ua_a.sapling().unwrap()),
+            None,
+        )
+        .unwrap();
+
+        let franken_dis_a = uivk_a.decrypt_diversifiers(&franken);
+        assert_eq!(franken_dis_a.len(), 1);
+        assert_eq!(franken_dis_a.first(), Some(di_a).as_ref());
+
+        let franken_dis_b = uivk_b.decrypt_diversifiers(&franken);
+        assert_eq!(franken_dis_b.len(), 1);
+        assert_eq!(franken_dis_b.first(), Some(di_b).as_ref());
+
+        di_a.increment()
+            .expect("diversifier space is not exhausted");
+        let (next_ua_a, _) = ufvk_a
+            .find_address(di_a, UnifiedAddressRequest::AllAvailableKeys)
+            .unwrap();
+        let mixed_ua = UnifiedAddress::from_receivers(
+            Some(*ua_a.orchard().unwrap()),
+            Some(*next_ua_a.sapling().unwrap()),
+            None,
+        )
+        .unwrap();
+        let mixed_dis_a = uivk_a.decrypt_diversifiers(&mixed_ua);
+        assert_eq!(mixed_dis_a.len(), 2);
+    }
+
+    #[cfg(feature = "unstable")]
+    #[test]
+    fn usk_debug_redaction() {
+        let seed = [0u8; 64];
+        let usk = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
+        assert!(format!("{:?}", usk).contains("\"...\""));
+    }
+
+    #[test]
+    #[cfg(any(feature = "orchard", feature = "sapling"))]
+    fn ufvk_debug_redaction() {
+        #[cfg(feature = "orchard")]
+        let orchard = {
+            let sk =
+                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
+            Some(orchard::keys::FullViewingKey::from(&sk))
+        };
+
+        #[cfg(feature = "sapling")]
+        let sapling = {
+            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO);
+            Some(extsk.to_diversifiable_full_viewing_key())
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        let transparent = {
+            let privkey =
+                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO).unwrap();
+            Some(privkey.to_account_pubkey())
+        };
+
+        let ufvk = UnifiedFullViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            #[cfg(feature = "sapling")]
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        )
+        .unwrap();
+
+        let debug_str = format!("{:?}", ufvk);
+        #[cfg(feature = "transparent-inputs")]
+        assert!(debug_str.contains("transparent: Some(\"...\")"));
+        #[cfg(feature = "sapling")]
+        assert!(debug_str.contains("sapling: Some(\"...\")"));
+        #[cfg(feature = "orchard")]
+        assert!(debug_str.contains("orchard: Some(\"...\")"));
+    }
+
+    #[test]
+    #[cfg(any(feature = "orchard", feature = "sapling"))]
+    fn uivk_debug_redaction() {
+        #[cfg(feature = "orchard")]
+        let orchard = {
+            let sk =
+                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
+            Some(orchard::keys::FullViewingKey::from(&sk).to_ivk(Scope::External))
+        };
+
+        #[cfg(feature = "sapling")]
+        let sapling = {
+            let extsk = sapling::spending_key(&[0; 32], 0, AccountId::ZERO);
+            Some(extsk.to_diversifiable_full_viewing_key().to_external_ivk())
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        let transparent = {
+            let privkey =
+                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::ZERO).unwrap();
+            Some(privkey.to_account_pubkey().derive_external_ivk().unwrap())
+        };
+
+        let uivk = UnifiedIncomingViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            #[cfg(feature = "sapling")]
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        );
+
+        let debug_str = format!("{:?}", uivk);
+        #[cfg(feature = "sapling")]
+        assert!(debug_str.contains("sapling: Some(\"...\")"));
+        #[cfg(feature = "orchard")]
+        assert!(debug_str.contains("orchard: Some(\"...\")"));
+    }
+
+    #[test]
+    fn ovk_debug_redaction() {
+        assert_eq!(
+            format!("{:?}", super::OutgoingViewingKey::from([0u8; 32])),
+            "OutgoingViewingKey(\"...\")"
+        );
+    }
+
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_ufvk_same_key() {
+        let seed = vec![0u8; 32];
+        let usk =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        // A UFVK subsumes itself.
+        assert!(ufvk.subsumes_ufvk(&ufvk));
+    }
+
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_uivk_from_same_ufvk() {
+        let seed = vec![0u8; 32];
+        let usk =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let uivk = ufvk.to_unified_incoming_viewing_key();
+
+        // A UFVK subsumes the UIVK derived from it.
+        assert!(ufvk.subsumes_uivk(&uivk));
+    }
+
+    #[cfg(all(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_ufvk_subset() {
+        let seed = vec![0u8; 32];
+        let usk =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed, AccountId::ZERO).unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        // A UFVK with all components subsumes one with fewer components.
+        let subset_ufvk = UnifiedFullViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            None,
+            ufvk.sapling().cloned(),
+            None, // no Orchard
+        )
+        .unwrap();
+        assert!(ufvk.subsumes_ufvk(&subset_ufvk));
+        // The subset does not subsume the full key.
+        assert!(!subset_ufvk.subsumes_ufvk(&ufvk));
+    }
+
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    #[test]
+    fn subsumes_ufvk_different_keys() {
+        let seed0 = vec![0u8; 32];
+        let seed1 = vec![1u8; 32];
+        let usk0 =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed0, AccountId::ZERO).unwrap();
+        let usk1 =
+            super::UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &seed1, AccountId::ZERO).unwrap();
+        let ufvk0 = usk0.to_unified_full_viewing_key();
+        let ufvk1 = usk1.to_unified_full_viewing_key();
+
+        // UFVKs from different seeds do not subsume each other.
+        assert!(!ufvk0.subsumes_ufvk(&ufvk1));
+        assert!(!ufvk1.subsumes_ufvk(&ufvk0));
     }
 }

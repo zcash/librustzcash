@@ -2,7 +2,8 @@
 
 use core::cmp::Ordering;
 use core::fmt;
-use rand::{CryptoRng, RngCore};
+
+use rand_core::{CryptoRng, RngCore};
 
 use ::sapling::{Note, PaymentAddress, builder::SaplingMetadata};
 use ::transparent::{
@@ -807,9 +808,6 @@ impl<P: consensus::Parameters, U> Builder<'_, P, U> {
     }
 
     /// Adds a transparent P2SH coin to be spent in this transaction.
-    ///
-    /// This is only for use with [`Self::build_for_pczt`]. It is unsupported with
-    /// [`Self::build`], which will return an error.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_transparent_p2sh_input(
         &mut self,
@@ -1652,8 +1650,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Extensio
 
 #[cfg(all(any(test, feature = "test-dependencies"), feature = "circuits"))]
 mod testing {
-    use rand::RngCore;
-    use rand_core::CryptoRng;
+    use rand_core::{CryptoRng, RngCore};
 
     use ::sapling::prover::mock::{MockOutputProver, MockSpendProver};
     use ::transparent::builder::TransparentSigningSet;

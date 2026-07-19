@@ -1,7 +1,5 @@
 use std::num::NonZeroU32;
 
-#[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::data_api::WalletUtxo;
 use zcash_client_backend::{
     data_api::{
         AccountMeta, InputSource, NoteFilter, PoolMeta, ReceivedNotes, TargetValue, WalletRead,
@@ -22,7 +20,10 @@ use zcash_protocol::ShieldedProtocol::Orchard;
 #[cfg(feature = "transparent-inputs")]
 use {
     ::transparent::{address::TransparentAddress, bundle::OutPoint},
-    zcash_client_backend::data_api::TransactionStatus,
+    zcash_client_backend::{
+        data_api::{TransactionStatus, TransparentOutputFilter},
+        wallet::WalletTransparentOutput,
+    },
     zcash_protocol::consensus::BlockHeight,
 };
 
@@ -154,7 +155,8 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-    ) -> Result<Vec<WalletUtxo>, Self::Error> {
+        output_filter: TransparentOutputFilter,
+    ) -> Result<Vec<WalletTransparentOutput<AccountId>>, Self::Error> {
         // TODO: take into consideration coinbase maturity
         // See <https://github.com/zcash/librustzcash/issues/821>
         let txos = self
@@ -166,16 +168,21 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
                 self.utxo_is_spendable(outpoint, target_height, confirmations_policy)
                     .unwrap_or(false)
             })
+            .filter(|(_, _, tx)| match output_filter {
+                TransparentOutputFilter::All => true,
+                // Coinbase transactions have tx_index == 0. If tx_index is unknown
+                // (None), conservatively treat it as **non-coinbase**, matching the SQL
+                // implementation's IFNULL(tx_index, 1) == 0 behavior.
+                TransparentOutputFilter::CoinbaseOnly => {
+                    tx.is_some_and(|tx| tx.tx_index().unwrap_or(1) == 0)
+                }
+            })
             .filter_map(|(outpoint, txo, tx)| {
-                txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
-                    .map(|out| {
-                        WalletUtxo::new(
-                            out,
-                            // FIXME: this needs to be updated to identify the transparent key
-                            // scope for derived addresses in the wallet.
-                            None,
-                        )
-                    })
+                txo.to_wallet_transparent_output(
+                    outpoint,
+                    tx.and_then(|tx| tx.mined_height()),
+                    self.find_funding_account(&txo.transaction_id),
+                )
             })
             .collect();
         Ok(txos)
@@ -186,22 +193,18 @@ impl<P: consensus::Parameters> InputSource for MemoryWalletDb<P> {
         &self,
         outpoint: &OutPoint,
         _target_height: TargetHeight,
-    ) -> Result<Option<WalletUtxo>, Self::Error> {
+    ) -> Result<Option<WalletTransparentOutput<AccountId>>, Self::Error> {
         // FIXME: make use of `target_height` to check spendability.
         Ok(self
             .transparent_received_outputs
             .get(outpoint)
             .map(|txo| (txo, self.tx_table.get(&txo.transaction_id)))
             .and_then(|(txo, tx)| {
-                txo.to_wallet_transparent_output(outpoint, tx.and_then(|tx| tx.mined_height()))
-                    .map(|out| {
-                        WalletUtxo::new(
-                            out,
-                            // FIXME: this needs to be updated to identify the transparent key
-                            // scope for derived addresses in the wallet.
-                            None,
-                        )
-                    })
+                txo.to_wallet_transparent_output(
+                    outpoint,
+                    tx.and_then(|tx| tx.mined_height()),
+                    self.find_funding_account(&txo.transaction_id),
+                )
             }))
     }
 
@@ -282,7 +285,7 @@ impl<P: consensus::Parameters> MemoryWalletDb<P> {
             .collect::<Vec<_>>();
 
         // sort by oldest first (use location in commitment tree since this gives a total order)
-        eligible_notes.sort_by(|a, b| a.commitment_tree_position.cmp(&b.commitment_tree_position));
+        eligible_notes.sort_by_key(|a| a.commitment_tree_position);
 
         // now take notes until we have enough to cover the target value
         let mut value_acc = Zatoshis::ZERO;

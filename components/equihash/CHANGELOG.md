@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-23
+
+### Changed
+- MSRV is now 1.85.1
+- Migrated from yanked `core2` crate to `corez 0.1.1`.
+
 ## [0.2.2] - 2025-03-04
 
 Documentation improvements and rendering fix; no code changes.
