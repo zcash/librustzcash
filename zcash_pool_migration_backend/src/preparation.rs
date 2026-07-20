@@ -77,17 +77,28 @@ pub const FUNDING_OUTPUTS_PER_TX: usize = PREP_TX_ACTIONS - 2;
 pub const CONSOLIDATION_INPUTS_PER_TX: usize = PREP_TX_ACTIONS - 1;
 
 /// A note a preparation transaction spends: either one of the wallet's original spendable notes, or a
-/// note an earlier layer produced.
+/// note an earlier layer produced. Each variant carries the note's `value` (in zatoshi).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrepInput {
-    /// The wallet note at this index in the caller-supplied `available` slice.
-    Wallet(usize),
-    /// The `output`-th output of the `transaction`-th transaction of an earlier `layer`.
+    /// The wallet note at this `index` in the caller-supplied `available` slice, worth `value`.
+    Wallet { index: usize, value: u64 },
+    /// The `output`-th output of the `transaction`-th transaction of an earlier `layer`, worth
+    /// `value`.
     Prior {
         layer: usize,
         transaction: usize,
         output: usize,
+        value: u64,
     },
+}
+
+impl PrepInput {
+    /// The note value this input carries.
+    pub fn value(&self) -> u64 {
+        match self {
+            PrepInput::Wallet { value, .. } | PrepInput::Prior { value, .. } => *value,
+        }
+    }
 }
 
 /// A note a preparation transaction produces.
@@ -163,26 +174,6 @@ impl PreparationPlan {
         self.layers.iter().map(Vec::len).sum()
     }
 
-    /// The value an input carries, resolved against the wallet's `available` notes (for a
-    /// [`PrepInput::Wallet`]) or an earlier layer's output (for a [`PrepInput::Prior`]). Returns
-    /// `None` if the reference is out of range.
-    pub fn input_value(&self, input: &PrepInput, available: &[u64]) -> Option<u64> {
-        match input {
-            PrepInput::Wallet(i) => available.get(*i).copied(),
-            PrepInput::Prior {
-                layer,
-                transaction,
-                output,
-            } => self
-                .layers
-                .get(*layer)?
-                .get(*transaction)?
-                .outputs
-                .get(*output)
-                .map(PrepOutput::value),
-        }
-    }
-
     /// An iterator over every output of every transaction, in plan (layer then transaction) order.
     fn all_outputs(&self) -> impl Iterator<Item = &PrepOutput> {
         self.layers
@@ -251,9 +242,6 @@ impl fmt::Display for PrepError {
 
 impl core::error::Error for PrepError {}
 
-/// A note available to spend in the current layer: a reference and its value.
-type PoolNote = (PrepInput, u64);
-
 /// Plan the note-preparation transactions that mint `funding` (the self-funding note values, in
 /// zatoshi) from `available` (the wallet's spendable source-pool note values, in zatoshi), reserving
 /// `fee_per_tx` zatoshi for each transaction (the ZIP-317 fee of a padded [`PREP_TX_ACTIONS`]-action
@@ -313,7 +301,10 @@ pub fn plan_preparation(
     {
         if big >= subtree_cost(&remaining, fee_per_tx).1 {
             build_split(
-                PrepInput::Wallet(idx),
+                PrepInput::Wallet {
+                    index: idx,
+                    value: big,
+                },
                 big,
                 &remaining,
                 fee_per_tx,
@@ -326,11 +317,11 @@ pub fn plan_preparation(
 
     // The notes available to spend in the current layer (layer 0: the wallet's own notes not already
     // used directly as funding notes).
-    let mut current: Vec<PoolNote> = available
+    let mut current: Vec<PrepInput> = available
         .iter()
         .enumerate()
         .filter(|(i, _)| !used[*i])
-        .map(|(i, &v)| (PrepInput::Wallet(i), v))
+        .map(|(i, &v)| PrepInput::Wallet { index: i, value: v })
         .collect();
 
     while !remaining.is_empty() {
@@ -338,22 +329,23 @@ pub fn plan_preparation(
             return Err(PrepError::InsufficientFunds);
         }
         // Largest notes first.
-        current.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        current.sort_unstable_by_key(|n| core::cmp::Reverse(n.value()));
 
         // Pass 1: assign funding to the notes that can fund at least the smallest remaining note.
         // `partial` holds a note, the funding values it will mint, and its leftover budget; the rest
         // go to `consolidatable` to be combined into feeder notes.
         let mut partial: Vec<(PrepInput, Vec<u64>, u64)> = Vec::new();
-        let mut consolidatable: Vec<PoolNote> = Vec::new();
+        let mut consolidatable: Vec<PrepInput> = Vec::new();
 
-        for (in_ref, value) in current.drain(..) {
+        for input in current.drain(..) {
             if remaining.is_empty() {
                 // Everything is already scheduled; this note stays unspent in the wallet.
                 continue;
             }
+            let value = input.value();
             let smallest = *remaining.last().expect("remaining is non-empty");
             if value <= fee_per_tx || value - fee_per_tx < smallest {
-                consolidatable.push((in_ref, value));
+                consolidatable.push(input);
                 continue;
             }
             let budget = value - fee_per_tx;
@@ -370,29 +362,27 @@ pub fn plan_preparation(
             }
             // `value - fee_per_tx >= smallest` guarantees at least the smallest note was assignable.
             debug_assert!(!assigned.is_empty());
-            partial.push((in_ref, assigned, budget - used));
+            partial.push((input, assigned, budget - used));
         }
 
         // Pass 2: mint the funding notes, routing every leftover forward as a feeder so a later layer
         // reuses it rather than scattering change.
         let mut txs: Vec<PrepTransaction> = Vec::new();
-        let mut next: Vec<PoolNote> = Vec::new();
-        for (in_ref, assigned, leftover) in partial {
+        let mut next: Vec<PrepInput> = Vec::new();
+        for (input, assigned, leftover) in partial {
             let mut outputs: Vec<PrepOutput> =
                 assigned.into_iter().map(PrepOutput::Funding).collect();
             if leftover > 0 {
-                next.push((
-                    PrepInput::Prior {
-                        layer: layers.len(),
-                        transaction: txs.len(),
-                        output: outputs.len(),
-                    },
-                    leftover,
-                ));
+                next.push(PrepInput::Prior {
+                    layer: layers.len(),
+                    transaction: txs.len(),
+                    output: outputs.len(),
+                    value: leftover,
+                });
                 outputs.push(PrepOutput::Intermediate(leftover));
             }
             txs.push(PrepTransaction {
-                inputs: vec![in_ref],
+                inputs: vec![input],
                 outputs,
             });
         }
@@ -423,7 +413,7 @@ pub fn plan_preparation(
             break;
         }
         let mut txs: Vec<PrepTransaction> = Vec::new();
-        let mut next: Vec<PoolNote> = Vec::new();
+        let mut next: Vec<PrepInput> = Vec::new();
         consolidate(pool, layers.len(), fee_per_tx, &mut txs, &mut next);
         if txs.is_empty() {
             break; // the remainder is sub-fee dust; leave it as change
@@ -442,6 +432,7 @@ pub fn plan_preparation(
                     layer,
                     transaction,
                     output,
+                    ..
                 } = input
                 {
                     spent.push((*layer, *transaction, *output));
@@ -490,43 +481,42 @@ fn consolidation_batch_sizes(mut n: usize) -> Vec<usize> {
 /// [`CONSOLIDATION_INPUTS_PER_TX`] inputs) to `txs` in layer `layer`, with its feeder pushed to
 /// `next`. Returns any notes whose batch could not cover the fee (too small to consolidate).
 fn consolidate(
-    mut pool: Vec<PoolNote>,
+    mut pool: Vec<PrepInput>,
     layer: usize,
     fee: u64,
     txs: &mut Vec<PrepTransaction>,
-    next: &mut Vec<PoolNote>,
-) -> Vec<PoolNote> {
+    next: &mut Vec<PrepInput>,
+) -> Vec<PrepInput> {
     if pool.len() < 2 {
         return pool;
     }
-    pool.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    pool.sort_unstable_by_key(|n| core::cmp::Reverse(n.value()));
     let mut leftover = Vec::new();
     for size in consolidation_batch_sizes(pool.len()) {
-        let batch: Vec<PoolNote> = pool.drain(..size).collect();
-        let sum: u64 = batch.iter().map(|&(_, v)| v).sum();
+        let batch: Vec<PrepInput> = pool.drain(..size).collect();
+        let sum: u64 = batch.iter().map(PrepInput::value).sum();
         if sum <= fee {
             leftover.extend(batch); // too small to pay a fee; leave unspent
             continue;
         }
         let feeder = sum - fee;
-        next.push((
-            PrepInput::Prior {
-                layer,
-                transaction: txs.len(),
-                output: 0,
-            },
-            feeder,
-        ));
+        next.push(PrepInput::Prior {
+            layer,
+            transaction: txs.len(),
+            output: 0,
+            value: feeder,
+        });
         txs.push(PrepTransaction {
-            inputs: batch.into_iter().map(|(r, _)| r).collect(),
+            inputs: batch,
             outputs: vec![PrepOutput::Intermediate(feeder)],
         });
     }
     leftover
 }
 
-/// Every intermediate ("feeder") output that no transaction spends, as `(reference, value)` pairs.
-fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PoolNote> {
+/// Every intermediate ("feeder") output that no transaction spends, as [`PrepInput`] references (each
+/// carrying its value).
+fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PrepInput> {
     let mut spent: Vec<(usize, usize, usize)> = Vec::new();
     for layer in layers {
         for tx in layer {
@@ -535,6 +525,7 @@ fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PoolNote> {
                     layer,
                     transaction,
                     output,
+                    ..
                 } = input
                 {
                     spent.push((*layer, *transaction, *output));
@@ -548,14 +539,12 @@ fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PoolNote> {
             for (oi, output) in tx.outputs.iter().enumerate() {
                 if let PrepOutput::Intermediate(v) = output {
                     if !spent.contains(&(li, ti, oi)) {
-                        out.push((
-                            PrepInput::Prior {
-                                layer: li,
-                                transaction: ti,
-                                output: oi,
-                            },
-                            *v,
-                        ));
+                        out.push(PrepInput::Prior {
+                            layer: li,
+                            transaction: ti,
+                            output: oi,
+                            value: *v,
+                        });
                     }
                 }
             }
@@ -684,6 +673,7 @@ fn build_split(
             layer,
             transaction: tx_index,
             output,
+            value: cv,
         };
         build_split(
             child,
@@ -765,9 +755,9 @@ mod tests {
                     if let PrepInput::Prior { layer, .. } = input {
                         assert!(*layer < li, "layer {li} tx {ti}: forward/self reference");
                     }
-                    let v = plan.input_value(input, available).expect("input resolves");
+                    let v = input.value();
                     in_sum += v;
-                    if let PrepInput::Wallet(_) = input {
+                    if let PrepInput::Wallet { .. } = input {
                         wallet_spent += v;
                     }
                 }
@@ -796,7 +786,7 @@ mod tests {
                 "direct funding note {i} value"
             );
             assert!(
-                !seen_inputs.contains(&PrepInput::Wallet(i)),
+                !seen_inputs.contains(&PrepInput::Wallet { index: i, value: v }),
                 "direct funding note {i} also spent by a transaction"
             );
         }

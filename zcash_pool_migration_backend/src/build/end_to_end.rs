@@ -42,9 +42,10 @@ fn migration_pipeline_end_to_end() {
     assert_eq!(prep.transaction_count(), 1);
 
     // 3. Build + pre-sign the preparation transaction. The wallet backend resolves the transaction's
-    //    single input (PrepInput::Wallet(0)) to the account's note and its witness against the anchor.
+    //    single input (PrepInput::Wallet { index: 0, .. }) to the account's note and its witness
+    //    against the anchor.
     let tx = &prep.layers()[0][0];
-    assert!(matches!(tx.inputs(), [PrepInput::Wallet(0)]));
+    assert!(matches!(tx.inputs(), [PrepInput::Wallet { index: 0, .. }]));
     let (note, path, anchor) = single_note_witness(&fvk, balance, seed);
     let (prep_pczt, placed) = build_prep_tx(
         &params,
