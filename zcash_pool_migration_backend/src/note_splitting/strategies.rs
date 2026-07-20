@@ -47,7 +47,7 @@ impl CanonicalOneTwoFive {
         max_notes: usize,
         max_denomination_zec: u64,
         dust_floor_zatoshi: u64,
-        fee: &dyn FeePolicy,
+        fee: &impl FeePolicy,
     ) -> Self {
         Self {
             max_notes,
@@ -71,11 +71,11 @@ impl CanonicalOneTwoFive {
 }
 
 impl DenominationStrategy for CanonicalOneTwoFive {
-    fn plan(
+    fn plan<R: RngCore>(
         &self,
         total_input_zatoshi: u64,
         prep_fee_zatoshi: u64,
-        _rng: &mut dyn RngCore,
+        _rng: &mut R,
     ) -> NoteSplitPlan {
         if total_input_zatoshi <= prep_fee_zatoshi {
             return NoteSplitPlan::empty(total_input_zatoshi, prep_fee_zatoshi, None);
@@ -85,26 +85,25 @@ impl DenominationStrategy for CanonicalOneTwoFive {
         let min_note = self.dust_floor_zatoshi + buffer;
         let mut budget = total_input_zatoshi - prep_fee_zatoshi;
 
-        let mut migration_outputs = Vec::new();
         let mut crossing_values = Vec::new();
-        while budget >= min_note && migration_outputs.len() < self.max_notes {
+        while budget >= min_note && crossing_values.len() < self.max_notes {
             // Largest `{1, 2, 5} * 10^k` denomination whose note fits the budget, capped.
             let affordable = (budget - buffer).min(self.max_denomination_zatoshi);
             let crossing = largest_one_two_five(affordable, self.dust_floor_zatoshi);
             if crossing < self.dust_floor_zatoshi {
                 break;
             }
-            let note = crossing + buffer;
-            migration_outputs.push(note);
+            // The prepared note is `crossing + buffer`; only the crossing is stored (the buffer is
+            // constant), but the whole note is what the budget must fund.
+            budget -= crossing + buffer;
             crossing_values.push(crossing);
-            budget -= note;
         }
 
         NoteSplitPlan::from_notes(
             total_input_zatoshi,
             prep_fee_zatoshi,
-            migration_outputs,
             crossing_values,
+            buffer,
             budget,
         )
     }
