@@ -135,16 +135,18 @@ pub fn most_recent_boundary(height: u32) -> u32 {
     height - (height % BOUNDARY_MODULUS)
 }
 
-/// Fraction of the unit interval covered by one `u64` step, i.e. `1 / 2^53`. Drawing 53 random bits
-/// and scaling by this yields a uniform value on a dyadic grid; see [`draw_unit_half_open`].
+/// Width of one step when the unit interval `[0, 1)` is split into `2^53` equal parts, i.e.
+/// `1 / 2^53`. Drawing 53 random bits and scaling by this yields a value spread uniformly over those
+/// `2^53` evenly spaced points; see [`draw_unit_half_open`].
 const UNIT_STEP: f64 = 1.0 / ((1u64 << 53) as f64);
 
 /// Number of high bits kept from a drawn `u64` to form a 53-bit mantissa (an `f64` has a 53-bit
 /// significand, so this is the most uniform grid representable without rounding bias).
 const U64_TO_MANTISSA_SHIFT: u32 = 11;
 
-/// Draw a uniform `f64` in the half-open interval `[0, 1)` from `rng`, on the 53-bit dyadic grid.
-/// Keeps the top [`U64_TO_MANTISSA_SHIFT`] bits of a fresh `u64` and scales by [`UNIT_STEP`].
+/// Draw a uniform `f64` in the half-open interval `[0, 1)` from `rng`, quantized to the `2^53` evenly
+/// spaced 53-bit values. Keeps the top [`U64_TO_MANTISSA_SHIFT`] bits of a fresh `u64` and scales by
+/// [`UNIT_STEP`].
 fn draw_unit_half_open<R: RngCore>(rng: &mut R) -> f64 {
     ((rng.next_u64() >> U64_TO_MANTISSA_SHIFT) as f64) * UNIT_STEP
 }
