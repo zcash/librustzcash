@@ -71,6 +71,9 @@ fn migration_pipeline_end_to_end() {
     let crossing = split.crossing_values()[0];
     let funding_value = funding[0];
     let (fnote, fpath, fanchor) = single_note_witness(&fvk, funding_value, seed + 2);
+    // A recent Ironwood note-commitment-tree root (a one-note tree here) to anchor the transfer's
+    // padding dummy spends, as the wallet backend would supply from the live pool.
+    let (_, _, ironwood_anchor) = single_note_witness(&fvk, crossing, seed + 4);
     let transfer_pczt = build_transfer_pczt(
         &params,
         TARGET_HEIGHT,
@@ -79,6 +82,7 @@ fn migration_pipeline_end_to_end() {
         fanchor,
         fnote,
         fpath,
+        ironwood_anchor,
         crossing,
         ChaCha8Rng::seed_from_u64(seed + 3),
     )
