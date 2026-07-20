@@ -30,7 +30,7 @@
 //! chosen, never the values themselves).
 //!
 //! The other tunables are pluggable too: the per-note fee comes from a [`FeePolicy`], and the
-//! maximum denomination, dust floor, and note cap are constructor parameters of the strategy.
+//! maximum denomination, minimum denomination, and note cap are constructor parameters of the strategy.
 //!
 //! # Common structure
 //!
@@ -61,7 +61,7 @@
 //!
 //! The strategy fixes the remaining parameters: `D`, the denomination set the parts are drawn from (a
 //! `{1, 2, 5} * 10^k` series, the powers of ten, ...); `d_min` and `d_max`, the smallest and largest
-//! permitted denomination (dust floor and cap); `K`, the maximum number of parts (the note cap); and
+//! permitted denomination (minimum denomination and cap); `K`, the maximum number of parts (the note cap); and
 //! `f`, the per-note fee buffer (from the fee policy). The decision variables are the count `k` and
 //! the parts themselves. Each part `n_i` must obey these principles:
 //!
@@ -144,7 +144,7 @@ pub const MIGRATION_MAX_DENOMINATION_ZEC: u64 = 10_000;
 /// at or above this threshold (but too small to form a whole self-funding note) is surfaced to the
 /// user as an opt-in choice: migrate the remainder too (which can compromise privacy, so it is shown
 /// with a disclaimer) or lock it to keep that privacy. Consumed by the context module in a later
-/// slice. Also the default dust floor of [`CanonicalOneTwoFive`] (ZIP 318's `MAX_RESIDUAL_VALUE`).
+/// slice. Also the default minimum denomination of [`CanonicalOneTwoFive`] (ZIP 318's `MAX_RESIDUAL_VALUE`).
 pub const RESIDUAL_MIGRATION_MIN_ZATOSHI: u64 = COIN / 100; // 0.01 ZEC
 
 /// Source-pool logical actions in a migration transfer (the spend and its change), each charged the
