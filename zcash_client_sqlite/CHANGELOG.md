@@ -23,6 +23,23 @@ workspace.
   reads against any table, allows `INSERT`/`UPDATE`/`DELETE` only against tables whose
   names begin with the `ext_` prefix reserved for external migrations, and denies
   everything else (DDL, `PRAGMA`, `ATTACH`/`DETACH`, and transaction control).
+- `zewif::ZewifImportReport::addresses_never_exposed` counts transparent
+  addresses recorded in a ZeWIF document that are not known to have been
+  exposed, and which are therefore deliberately left unexposed on import.
+
+### Fixed
+- The `zewif` importer no longer marks transparent addresses that have no
+  recorded exposure height (`zewif::Address::exposed_at_height() == None`, e.g.
+  zcashd keypool reserves) as exposed unconditionally. Previously every such
+  address was marked exposed at the account birthday, which could exhaust the
+  transparent gap limit (in particular the small internal/change gap) and
+  permanently block change-address reservation after a zcashd migration. Such an
+  address is now treated as exposed only if the wallet already considers it so
+  (which, since the document's transactions are imported first, covers every
+  address those transactions show to have been used on-chain, change addresses
+  included), or if the document exposes an address at a higher child index under
+  the same account and key scope, since transparent addresses are handed out in
+  index order.
 
 ### Changed
 - The `zip-233` feature flag now also enables `zcash_client_backend/zip-233`,
