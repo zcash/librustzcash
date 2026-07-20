@@ -308,6 +308,96 @@ Type safety is paramount. This is a security-critical codebase.
 - **`testing` submodules**: Exposed via `test-dependencies` feature for cross-crate
   test utilities (proptest strategies, mock implementations).
 
+## Database Write Atomicity (`zcash_client_sqlite`)
+
+`rusqlite` autocommits every statement executed outside an explicit transaction. A
+sequence of writes that must land together will therefore commit one at a time unless
+it is wrapped, and a failure partway through (an I/O error, a full disk, a crash, or an
+error returned by a later step) leaves a subset committed. Downstream wallets have
+shipped real bugs of this shape against this crate's API, so it is checked on every
+change that writes to the wallet database.
+
+**Before writing or reviewing any code that writes to the wallet database, answer these
+four questions in order.** Answer them in the PR description when the answer to the
+first is "more than one".
+
+1. **How many writes does this operation issue?** Count every `INSERT`, `UPDATE`, and
+   `DELETE`, including those inside loops and inside the functions it calls. If the
+   answer is one, stop here. Otherwise continue.
+2. **Must they land together?** Is there any subset of these rows that, if committed
+   alone, the rest of the wallet would treat as valid state? If so, they must share one
+   transaction.
+3. **What happens on retry?** Assume the operation failed after committing a subset and
+   the caller runs it again. Does the retry repair the state, or does it refuse,
+   diverge, or duplicate? This is the question that decides whether a partial write is
+   a transient annoyance or a permanent one, and it is the one most often skipped.
+4. **Does any read path see only one side?** If one store is reachable through an API
+   that never consults the other, a partial write surfaces to the caller as valid data.
+
+Two patterns turn a partial write into an unrecoverable one. Either of them present in
+a multi-write operation is a hard requirement for a transaction, not a judgement call:
+
+- **One-shot guards.** A check of the form "if this table is non-empty, refuse" turns a
+  partial commit into a permanent refusal to ever finish the operation. The guard MUST
+  also run inside the transaction, against the same connection. Reading it on a
+  separate connection is both outside the rollback and a check-then-act race.
+- **Asymmetric read paths.** When one API reads a table that another write path owns, a
+  half-committed write is visible through one and absent through the other.
+
+### Which primitive to use
+
+- Several `WalletRead` or `WalletWrite` operations that must be atomic with each other:
+  `WalletDb::transactionally`.
+- A wallet write that must be paired with a write to an application's own
+  `ext_`-prefixed tables: `WalletDb::transactionally_with_extension`. Do not expose the
+  connection to let a caller hand-roll this; the private connection is what enforces
+  the crate's invariants.
+- Within the crate, a write helper that may be called from inside an existing
+  transaction MUST take a `&rusqlite::Transaction` (or the transaction-scoped handle)
+  rather than opening its own, so callers can compose it. A helper that opens its own
+  transaction cannot be made atomic with anything else.
+
+A `rusqlite` transaction cannot be held across an `.await`. Callers must hoist async
+work outside it, so an API that forces async work into the middle of a write sequence
+is an API that cannot be used atomically. Prefer signatures that let the caller
+pre-compute async inputs and pass them in.
+
+### Never discard an error inside a transaction closure
+
+The `WalletDb<SqlTransaction<'_>>` implementations take no savepoint per method, so a
+`WalletWrite` call that fails partway leaves its partial writes sitting in the
+enclosing transaction. Nothing undoes them on its own: the rollback happens only
+because the error propagates out of the closure and the `Transaction` is dropped
+uncommitted. Discarding an error inside the closure (`let _ = ...`, `.ok()`, or a
+`match` arm that logs and continues) therefore commits that partial state, and the
+enclosing `transactionally` still returns `Ok`. Inside a `transactionally` or
+`transactionally_with_extension` closure, every fallible call MUST propagate with `?`.
+This is the load-bearing assumption of the whole design; do not weaken it locally.
+
+Note also that atomicity does not compose across calls. `WalletDb<C: BorrowMut<Connection>>`
+implements both `WalletWrite` and `WalletCommitmentTrees`, and each method there opens
+its own transaction, so two sequential calls are two commits with an inconsistent
+window between them. Nothing in the signatures says so. Sequences that must be atomic
+have to be moved inside one `transactionally` closure.
+
+### Documenting atomicity on `WalletWrite`
+
+`WalletWrite` is implemented by storage backends this crate does not control, and its
+callers cannot see whether a given method is atomic. Every trait method in
+`zcash_client_backend::data_api` that mutates more than one piece of state MUST state
+its atomicity requirement in its rustdoc, in the terms the `apply_tree_changes` doc
+comment uses: whether an implementation is required to apply the whole update or none
+of it, and what the caller may assume after an error. A method with a multi-part update and no
+such sentence is an incomplete specification; add it when you touch the method.
+
+### Test evidence
+
+A change that adds or modifies a multi-statement write MUST come with a test that
+returns an error from inside the transaction and asserts that none of the writes
+persisted. See `transactionally_with_extension_rolls_back_on_error` in
+`zcash_client_sqlite/src/lib.rs` for the shape. Asserting that the success path commits
+is not sufficient; the bug being guarded against is on the failure path.
+
 ## Branching & Merging
 
 This repository uses a **merge-based workflow**. Squash merges are not permitted.
