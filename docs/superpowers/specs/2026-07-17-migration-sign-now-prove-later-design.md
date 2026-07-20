@@ -171,7 +171,9 @@ redaction step now provides (instead of the originally-planned "never set it in 
 
 Once `migration_state()`'s reconciliation (existing mechanism, spec §5.3) detects that a
 note-preparation output is mined and a boundary has passed, for each `SignedAwaitingProof` PCZT
-whose funding note is now witnessed:
+whose funding note is now witnessed **and whose own `next_executable_after_height` has been
+reached** (see §4.6 — this second condition was missing from the original design and added
+2026-07-20):
 
 1. Fetch the note's real `MerklePath` (existing `witness_at_checkpoint_id_caching` call, unchanged).
 2. Fetch/select the anchor per the reuse rule in §5.
@@ -193,9 +195,9 @@ pub fn sign_and_store_migration_schedule(&self, schedule: &MigrationSchedule, us
     -> Result<(), MigrationError>;
 
 // New: called by the reconciliation hub once a funding note is witnessed. Idempotent — a no-op if
-// there is nothing in SignedAwaitingProof yet, or if the specific transfer's note isn't witnessed
-// yet (returns 0, does not error — this is an ordinary, expected transient state, not
-// MigrationError::Pipeline; see §6).
+// there is nothing in SignedAwaitingProof yet, nothing due is witnessed yet, or nothing witnessed
+// is due yet (returns 0, does not error — this is an ordinary, expected transient state, not
+// MigrationError::Pipeline; see §6, §4.6).
 pub fn finalize_ready_transfers(&self) -> Result<u32, MigrationError>; // returns count finalized
 ```
 
@@ -245,6 +247,44 @@ note-split broadcast. Fixed (commit `4b5db3f697`) with an idempotent `ALTER TABL
 `init()`, guarded by `PRAGMA table_info`, plus a regression test
 (`init_adds_proof_columns_to_a_pre_existing_pending_txs_table`) that recreates the pre-existing-table
 scenario directly rather than relying on live device state to catch a regression.
+
+### 4.6 `finalize_ready_transfers` must gate on send height too, not just witnessed (2026-07-20)
+
+**Found live on testnet.** §4.3 as originally written only gated finalizing (attach real
+witness/anchor, prove, transition to `ReadyToBroadcast`) on the funding note being witnessed —
+deliberately, since proving genuinely has no dependency on the transfer's own scheduled send height
+(only on the note being spendable at some anchor). In practice this meant that the moment the
+*first* transfer's funding note became witnessed, `finalize_ready_transfers` proved **every**
+`SignedAwaitingProof` transfer of the run in that same call — including transfers scheduled hours
+or days out (§5.6/§5's whole point is staggering transfers over time so they don't all land at
+once). A live run with 11 scheduled transfers proved all 11 in one call the moment the (shared)
+self-funding split was witnessed, even though only the first was actually due.
+
+This is not just wasted CPU/battery: it also means the wallet holds fully-proven, broadcastable
+transactions in local state for every future transfer, days ahead of their scheduled send — data
+that has no reason to exist yet given how far out its send time is.
+
+**Fix:** `finalize_ready_transfers` now only proves/finalizes a `SignedAwaitingProof` transfer once
+its own `next_executable_after_height <= ` the current target height — the identical condition
+`next_due_transfer` already used to decide broadcast eligibility. In effect, proving and sending now
+happen back-to-back for each transfer, in the same reconciliation call, once (and only once) that
+transfer's scheduled height actually arrives — rather than proving racing far ahead of sending.
+
+This does **not** change anything about anchor reuse (§5) or the `SignedAwaitingProof` /
+`ReadyToBroadcast` states themselves (§4.1) — only which rows a given call is allowed to act on.
+
+Note: this fix is scoped to the height-based ground truth (`next_executable_after_height` vs. the
+chain tip). A related, separate concern surfaced during the same live session: the platform's own
+WorkManager scheduling delay (`MigrationWorker.nextDelay()`, zashi-android) estimates a transfer's
+send time from **wall-clock epoch seconds**, computed once at schedule-persist time from the
+Rust schedule's block-height deltas — a different clock than the height-based ground truth this
+section fixes. The two can drift (most obviously, but not only, under an emulator's manual
+wall-clock time-jump), causing the worker to wake and poll earlier than the real height-based
+due time — observed live as a `scheduling next migration transfer in 0s` log line for a transfer
+that was, by height, still ~24h out. This did **not** cause a premature send (the height gate above,
+which the worker still calls at execution time, correctly withheld it) — but is a separate, known
+scheduling-estimate inaccuracy, not addressed by this fix, left for a future pass if it proves to
+matter on real devices (vs. being purely a time-jumped-emulator artifact).
 
 ## 5. Anchor reuse across a schedule (multiplicity / cohorts)
 

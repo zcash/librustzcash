@@ -422,6 +422,54 @@ fn transfer_pipeline_builds_self_funding_notes_directly_with_no_change() {
 }
 
 // ======================================================================================
+// Test 0: propose_migration_transfers_from_split derives crossing values from the split's own
+// output plan, not an independent guess.
+// ======================================================================================
+
+/// Regression test for a real bug: `propose_migration_transfers` (independent guess,
+/// `plan_denominations(total, 0)`) and `prepare_note_split` (independent guess,
+/// `converge_denomination_plan`) can disagree on denominations for the same balance — live
+/// testnet debugging found a case where the schedule needed two notes of one value but the split
+/// (computed moments later) only minted one. The self-funding lookup then fell back, for the
+/// missing one, to an unrelated already-existing note that the split's own "sweep every spendable
+/// note" construction had *already consumed as one of its own inputs* — a silent double-spend once
+/// the split mined. `propose_migration_transfers_from_split` must derive crossing values purely
+/// from the split proposal's own `output_values()`, never recomputing an independent guess.
+#[test]
+fn propose_migration_transfers_from_split_uses_the_splits_own_output_values() {
+    use zcash_pool_migration::types::NoteSplitProposal;
+
+    let seed_value = 1_200_080_000u64;
+    let (_dir, _st, db_path, account) = seed_wallet(&[seed_value], 10);
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    // Deliberately does NOT match what plan_denominations(total, 0) would independently compute
+    // for this exact balance (which decomposes into [10, 2] ZEC crossings — see the sibling test
+    // below) — proves the schedule is sourced from the proposal, not recomputed from the balance.
+    let split = NoteSplitProposal::from_parts(
+        vec![
+            Zatoshis::const_from_u64(2_020_000),
+            Zatoshis::const_from_u64(2_020_000),
+            Zatoshis::const_from_u64(5_020_000),
+        ],
+        Zatoshis::const_from_u64(15_000),
+    );
+
+    let schedule = ctx.propose_migration_transfers_from_split(&split).unwrap();
+    let mut crossings: Vec<u64> = schedule
+        .transfers()
+        .iter()
+        .map(|t| u64::from(t.amount()))
+        .collect();
+    crossings.sort_unstable();
+    assert_eq!(
+        crossings,
+        vec![2_000_000u64, 2_000_000, 5_000_000],
+        "crossing values are exactly the split proposal's own output_values minus the transfer \
+         fee buffer, not an independently recomputed denomination plan over the wallet balance"
+    );
+}
+
 // Test 1: the note split plans and signs against the seeded wallet.
 // ======================================================================================
 
@@ -572,12 +620,24 @@ fn split_then_transfer_pipeline_spends_self_funding_notes_directly() {
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
     // Design spec §4.2: both transfers are signed via the placeholder-witness path and start out
-    // `SignedAwaitingProof`; both funding notes are already mined/witnessed (Phase 1 above), so
-    // one `finalize_ready_transfers` call completes both, reusing the same anchor (§5).
+    // `SignedAwaitingProof`; both funding notes are already mined/witnessed (Phase 1 above), but
+    // only the first crossing's send height has been reached yet (§4.6) — finalize completes just
+    // that one.
     assert_eq!(
         ctx.finalize_ready_transfers().unwrap(),
-        2,
-        "both self-funding notes are already witnessed"
+        1,
+        "only the first crossing is due yet, even though both notes are witnessed"
+    );
+
+    // Mine past the second crossing's (independently sampled, capped) send-height gap so it
+    // becomes due too, then finalize again — this test verifies the full pipeline for both
+    // crossings, not just the one due immediately.
+    const MAX_CADENCE_BLOCKS: usize = 1152;
+    st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        1,
+        "the second crossing is due now too"
     );
 
     // Every persisted transfer must have gone through the direct-builder path: exactly one real
@@ -714,8 +774,18 @@ fn sign_now_prove_later_transfer_awaits_proof_until_funding_note_is_witnessed() 
     st.add_empty_blocks(10);
     assert_eq!(
         ctx.finalize_ready_transfers().unwrap(),
-        2,
-        "both notes are witnessed now, and finalizing reuses one anchor for both (design spec §5)"
+        1,
+        "both notes are witnessed now, but only the first crossing is due yet (design spec §4.6)"
+    );
+
+    // Mine past the second crossing's (independently sampled, capped) send-height gap so it
+    // becomes due too, then finalize again — reusing a (fresh) anchor, per §5.
+    const MAX_CADENCE_BLOCKS: usize = 1152;
+    st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        1,
+        "the second crossing is due now too"
     );
 
     // Every pending row is now ready, with a real (extractable, provable) PCZT.
@@ -756,11 +826,7 @@ fn sign_now_prove_later_transfer_awaits_proof_until_funding_note_is_witnessed() 
         "the finalized transactions carry exactly the scheduled crossings"
     );
 
-    // And now due at the current tip (both transfers' send height is at-or-before the current
-    // target — first_delay is 0, and the second transfer's independently sampled gap is bounded
-    // by `scheduling::MAX_CADENCE_BLOCKS`; mine past it to be tip-independent of the exact draw).
-    const MAX_CADENCE_BLOCKS: usize = 1152;
-    st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
+    // Both transfers are now due at the current tip (already mined past both send heights above).
     let first = ctx
         .next_due_transfer()
         .unwrap()
@@ -851,9 +917,19 @@ fn schedule_signed_immediately_after_split_spends_that_same_splits_own_not_yet_m
 
     assert_eq!(
         ctx.finalize_ready_transfers().unwrap(),
-        2,
-        "both self-funding transfers correctly reference this run's own split output, which is \
-         now mined and witnessed"
+        1,
+        "the first crossing correctly references this run's own split output, which is now mined \
+         and witnessed — the second isn't due yet (design spec §4.6)"
+    );
+
+    // Mine past the second crossing's (independently sampled, capped) send-height gap so it
+    // becomes due too, then finalize again.
+    const MAX_CADENCE_BLOCKS: usize = 1152;
+    st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        1,
+        "the second crossing correctly references this run's own split output too, now that it's due"
     );
 
     let conn = Connection::open(&db_path).unwrap();
@@ -962,12 +1038,22 @@ fn external_signer_schedule_awaits_proof_until_funding_note_is_witnessed() {
     );
 
     // --- Phase 3: mine to a witnessable anchor — the same unmodified `finalize_ready_transfers()`
-    // completes both, exactly like the software-signing path ---
+    // completes both, exactly like the software-signing path (once each is also due — §4.6) ---
     st.add_empty_blocks(10);
     assert_eq!(
         ctx.finalize_ready_transfers().unwrap(),
-        2,
-        "both notes are witnessed now, and finalizing reuses one anchor for both (design spec §5)"
+        1,
+        "both notes are witnessed now, but only the first crossing is due yet"
+    );
+
+    // Mine past the second crossing's (independently sampled, capped) send-height gap so it
+    // becomes due too, then finalize again.
+    const MAX_CADENCE_BLOCKS: usize = 1152;
+    st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        1,
+        "the second crossing is due now too"
     );
     let ready: i64 = conn
         .query_row(
@@ -1218,10 +1304,11 @@ fn next_due_transfer_is_height_gated() {
     );
     ctx.sign_and_store_migration_schedule(&schedule, &usk)
         .unwrap();
-    // Design spec §4.2: both self-funding notes are signed via the placeholder-witness path; both
-    // are already witnessed (10 confirmations mined before the context ever opened the wallet), so
-    // finalize_ready_transfers completes both before either can be due.
-    assert_eq!(ctx.finalize_ready_transfers().unwrap(), 2);
+    // Design spec §4.2/§4.6: both self-funding notes are signed via the placeholder-witness path
+    // and are already witnessed (10 confirmations mined before the context ever opened the
+    // wallet) — but only the first transfer's send height has been reached yet, so only it gets
+    // proved/finalized this call.
+    assert_eq!(ctx.finalize_ready_transfers().unwrap(), 1);
 
     // Only the first transfer is due at the current tip.
     let first = ctx
@@ -1238,6 +1325,12 @@ fn next_due_transfer_is_height_gated() {
     const MAX_CADENCE_BLOCKS: usize = 1152;
     st.add_empty_blocks(MAX_CADENCE_BLOCKS + 1);
 
+    // The second transfer only gets proved/finalized once it's actually due too.
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        1,
+        "the second transfer is due now"
+    );
     let second = ctx
         .next_due_transfer()
         .unwrap()

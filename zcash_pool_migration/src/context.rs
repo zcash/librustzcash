@@ -1205,15 +1205,16 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let db = self.open_wallet()?;
         let (target, anchor) = backend::target_and_anchor(&db)?;
         let total = backend::pool_balances(&db, self.account)?.orchard_spendable;
-        // No fee reservation here (unlike `prepare_note_split`): by the time this runs, the
-        // spendable balance is expected to already consist of the split's self-funding notes
-        // (each already carrying its own transfer-fee buffer) — there is no further transaction
-        // fee to pay to "unlock" them, so decomposing with a zero prep-fee is what reproduces
-        // those exact notes back as crossing values. A balance that is not (yet, or no longer)
-        // purely self-funding notes — including leftover Orchard change — decomposes on a
-        // best-effort basis; `MigrationContext::sign_and_store_migration_schedule` falls back to
-        // the ordinary input-selection pipeline for any crossing value with no matching note (see
-        // `backend::sign_self_funding_transfer_awaiting_proof`).
+        // No fee reservation here (unlike `prepare_note_split`): this path is only correct when
+        // the spendable balance *already* consists of the split's self-funding notes (each
+        // already carrying its own transfer-fee buffer) — there is no further transaction fee to
+        // pay to "unlock" them, so decomposing with a zero prep-fee is what reproduces those exact
+        // notes back as crossing values. Call this only when `is_note_split_needed()` is `false`
+        // (nothing to split — existing notes already cover every denomination) or for
+        // IMMEDIATE-style previews; whenever a split is about to run or just ran, use
+        // [`Self::propose_migration_transfers_from_split`] instead, which derives crossing values
+        // from the split's own real output plan rather than an independent guess that can diverge
+        // from it (see that method's doc comment for the concrete bug this avoids).
         let plan = plan_denominations(total, 0).map_err(MigrationError::Pipeline)?;
         let mut crossing_values = plan.crossing_values;
         if include_residual {
@@ -1237,9 +1238,57 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 );
             }
         }
+        self.build_and_log_schedule(target, anchor, crossing_values, "propose_migration_transfers")
+    }
+
+    /// Propose the migration schedule directly from a note-split's own output plan — use this
+    /// instead of [`Self::propose_migration_transfers`] whenever a split is about to run or just
+    /// ran, so every crossing value is guaranteed to match a note the split actually produces.
+    ///
+    /// `propose_migration_transfers` computes its crossing values independently
+    /// (`plan_denominations(total, 0)`, assuming the balance *already* consists of self-funding
+    /// notes); `prepare_note_split` computes the split's own outputs independently too
+    /// (`converge_denomination_plan`, a real converged fee). These two guesses over the same
+    /// balance are not guaranteed to agree — live testnet debugging found a case where the
+    /// schedule needed two notes of one denomination but the split (computed moments later) only
+    /// minted one. The self-funding lookup then fell back, for the missing one, to an
+    /// already-existing note elsewhere in the wallet — one the split's own "sweep every spendable
+    /// note" construction had *already consumed as one of its own inputs* — a silent double-spend
+    /// once the split mines. Deriving the schedule from the split's own realized plan instead of a
+    /// second independent guess makes this class of mismatch structurally impossible: every
+    /// self-funding transfer is guaranteed to find its note in *this run's own split*.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError::NotSynced`]/[`MigrationError::Backend`] if the target/anchor
+    /// heights cannot be read.
+    pub fn propose_migration_transfers_from_split(
+        &self,
+        split: &NoteSplitProposal,
+    ) -> Result<MigrationSchedule, MigrationError> {
+        let db = self.open_wallet()?;
+        let (target, anchor) = backend::target_and_anchor(&db)?;
+        let crossing_values: Vec<u64> = split
+            .output_values()
+            .iter()
+            .map(|&v| u64::from(v).saturating_sub(crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI))
+            .collect();
+        self.build_and_log_schedule(target, anchor, crossing_values, "propose_migration_transfers_from_split")
+    }
+
+    /// Shared tail of [`Self::propose_migration_transfers`]/
+    /// [`Self::propose_migration_transfers_from_split`]: build and log a [`MigrationSchedule`]
+    /// from already-decided `crossing_values`.
+    fn build_and_log_schedule(
+        &self,
+        target: u32,
+        anchor: u32,
+        crossing_values: Vec<u64>,
+        caller: &str,
+    ) -> Result<MigrationSchedule, MigrationError> {
         tracing::debug!(
-            "MIGRATION_DIAG propose_migration_transfers: total_spendable={total} target={target:?} \
-             anchor={anchor:?} crossing_values={crossing_values:?} include_residual={include_residual}"
+            "MIGRATION_DIAG {caller}: total_target={target:?} anchor={anchor:?} \
+             crossing_values={crossing_values:?}"
         );
         let run_id = new_run_id();
         let schedule = scheduling::build_schedule(
@@ -1254,7 +1303,7 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             0,
         );
         tracing::debug!(
-            "MIGRATION_DIAG propose_migration_transfers: batch={:?}",
+            "MIGRATION_DIAG {caller}: batch={:?}",
             schedule
                 .transfers()
                 .iter()
@@ -1353,16 +1402,26 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         Ok(())
     }
 
-    /// Complete every `SignedAwaitingProof` transfer of the active run whose funding note is now
-    /// witnessed (design spec §4.3): attach its real witness and anchor, prove it, and transition
-    /// it to `ReadyToBroadcast` (eligible for [`Self::next_due_transfer`] from then on). Intended
-    /// to be called by the platform's reconciliation hub whenever it observes new sync progress —
-    /// e.g. alongside [`Self::migration_state`] — though calling it redundantly is always safe.
+    /// Complete every `SignedAwaitingProof` transfer of the active run that is both (a) witnessed
+    /// and (b) actually due — its own `next_executable_after_height` has been reached — attaching
+    /// its real witness and anchor, proving it, and transitioning it to `ReadyToBroadcast` (eligible
+    /// for [`Self::next_due_transfer`] from then on). Intended to be called by the platform's
+    /// reconciliation hub whenever it observes new sync progress — e.g. alongside
+    /// [`Self::migration_state`] — though calling it redundantly is always safe.
+    ///
+    /// Deliberately does **not** prove every witnessed transfer up front, even though proving
+    /// itself only needs the witness, not the send height (design spec §4.2/§4.3 originally allowed
+    /// this — see §4.6). A schedule can be witnessed-and-provable days before most of its transfers
+    /// are due; proving all of them eagerly does `awaiting_count` proofs' worth of CPU/battery work
+    /// the moment the first one is witnessed, for transfers that won't be sent for a long time. Each
+    /// transfer is proved on its own, on a later call, once the chain has actually reached its
+    /// `next_executable_after_height` — the same call that then finds it due via
+    /// [`Self::next_due_transfer`].
     ///
     /// Idempotent and a no-op — returning `Ok(0)`, **not** an error — when there is no active run,
-    /// nothing is awaiting a proof yet, or every awaiting transfer's funding note is still not
-    /// witnessed: per spec §6, "not witnessed yet" is the ordinary, expected steady state while a
-    /// note-preparation output is still mining, not a failure.
+    /// nothing is awaiting a proof yet, nothing awaiting a proof is due yet, or every due transfer's
+    /// funding note is still not witnessed: per spec §6, "not witnessed yet" is the ordinary,
+    /// expected steady state while a note-preparation output is still mining, not a failure.
     ///
     /// Anchor reuse (spec §5): every transfer finalized within a single call shares one anchor —
     /// the wallet's current natural anchor, fetched once at the start of the call — rather than
@@ -1384,24 +1443,33 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         let Some(run) = self.active_run(&conn)? else {
             return Ok(0);
         };
-        let awaiting = store::awaiting_proof_pending_txs(&conn, &run.run_id)?;
+        let mut awaiting = store::awaiting_proof_pending_txs(&conn, &run.run_id)?;
         if awaiting.is_empty() {
             return Ok(0);
         }
         let mut db = self.open_wallet()?;
         let (target, anchor_height) = backend::native_target_and_anchor(&db)?;
+        let tip_height = u32::from(target);
+        let total_awaiting = awaiting.len();
+        // Only prove what's actually due — see the doc comment above for why eagerly proving
+        // everything witnessed, regardless of send height, is wrong.
+        awaiting.retain(|row| row.next_executable_after_height <= tip_height);
         tracing::debug!(
-            "MIGRATION_DIAG finalize_ready_transfers: run_id={} awaiting_count={} target={target:?} \
-             anchor_height={anchor_height:?}",
+            "MIGRATION_DIAG finalize_ready_transfers: run_id={} awaiting_count={} due_now={} \
+             target={target:?} anchor_height={anchor_height:?}",
             run.run_id,
+            total_awaiting,
             awaiting.len(),
         );
+        if awaiting.is_empty() {
+            return Ok(0);
+        }
         let Some(anchor) = backend::orchard_anchor_at(&mut db, anchor_height)? else {
             // Not synced far enough yet to have a checkpoint at the natural anchor height — every
-            // awaiting transfer is transiently not-ready; nothing to finalize this call.
+            // due transfer is transiently not-ready; nothing to finalize this call.
             tracing::debug!(
                 "MIGRATION_DIAG finalize_ready_transfers: no checkpoint at anchor_height={anchor_height:?} \
-                 yet — all {} awaiting transfers stay pending", awaiting.len()
+                 yet — all {} due transfers stay pending", awaiting.len()
             );
             return Ok(0);
         };
