@@ -2,7 +2,7 @@
 //! quantization of the Orchard -> Ironwood migration ([ZIP 318]). It decomposes a balance by taking,
 //! at each step, the largest `{1, 2, 5} * 10^k` denomination the remaining budget can fund
 //! (equivalently, decimal-digit expansion into `{5, 2, 1}` times each place value), working in
-//! zatoshi so it mints sub-1-ZEC denominations down to a dust floor. See the [parent module](super)
+//! zatoshi so it mints sub-1-ZEC denominations down to a minimum denomination. See the [parent module](super)
 //! for the value-collision privacy rationale.
 //!
 //! [ZIP 318]: https://zips.z.cash/zip-0318
@@ -24,7 +24,7 @@ use super::{
 /// denomination the remaining budget can fund (bounded by the maximum denomination), so the parts are
 /// non-increasing. This is exactly the ZIP's greedy decimal-digit expansion, where each decimal digit
 /// expands into `{5, 2, 1}` times its place value. It works in zatoshi, minting sub-1-ZEC
-/// denominations down to the dust floor: 0.53 ZEC decomposes into `0.5 + 0.02 + 0.01`, 540 ZEC into
+/// denominations down to the minimum denomination: 0.53 ZEC decomposes into `0.5 + 0.02 + 0.01`, 540 ZEC into
 /// `500 + 20 + 20`, 123.45 ZEC into `100 + 20 + 2 + 1 + 0.2 + 0.2 + 0.05`, and 25,000 ZEC into
 /// `10,000 + 10,000 + 5,000` (a balance above the cap emits multiple cap-sized parts). The
 /// decomposition is a pure function of the balance; the `rng` argument is ignored.
@@ -36,29 +36,29 @@ use super::{
 pub struct CanonicalOneTwoFive {
     max_notes: usize,
     max_denomination_zatoshi: u64,
-    dust_floor_zatoshi: u64,
+    min_denomination_zatoshi: u64,
     buffer_zatoshi: u64,
 }
 
 impl CanonicalOneTwoFive {
-    /// A strategy with an explicit note cap, maximum denomination (in whole ZEC), dust floor (in
+    /// A strategy with an explicit note cap, maximum denomination (in whole ZEC), minimum denomination (in
     /// zatoshi, which MUST be a power of ten), and fee model.
     pub fn new(
         max_notes: usize,
         max_denomination_zec: u64,
-        dust_floor_zatoshi: u64,
+        min_denomination_zatoshi: u64,
         fee: &impl FeePolicy,
     ) -> Self {
         Self {
             max_notes,
             max_denomination_zatoshi: max_denomination_zec.saturating_mul(COIN),
-            dust_floor_zatoshi,
+            min_denomination_zatoshi,
             buffer_zatoshi: fee.transfer_fee_buffer_zatoshi(),
         }
     }
 
     /// The recommended configuration: [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes,
-    /// [`MIGRATION_MAX_DENOMINATION_ZEC`] cap, [`RESIDUAL_MIGRATION_MIN_ZATOSHI`] dust floor, ZIP-317
+    /// [`MIGRATION_MAX_DENOMINATION_ZEC`] cap, [`RESIDUAL_MIGRATION_MIN_ZATOSHI`] minimum denomination, ZIP-317
     /// fees.
     pub fn recommended() -> Self {
         Self::new(
@@ -81,16 +81,16 @@ impl DenominationStrategy for CanonicalOneTwoFive {
             return NoteSplitPlan::empty(total_input_zatoshi, prep_fee_zatoshi, None);
         }
         let buffer = self.buffer_zatoshi;
-        // Smallest self-funding note: the dust floor plus its transfer buffer.
-        let min_note = self.dust_floor_zatoshi + buffer;
+        // Smallest self-funding note: the minimum denomination plus its transfer buffer.
+        let min_note = self.min_denomination_zatoshi + buffer;
         let mut budget = total_input_zatoshi - prep_fee_zatoshi;
 
         let mut crossing_values = Vec::new();
         while budget >= min_note && crossing_values.len() < self.max_notes {
             // Largest `{1, 2, 5} * 10^k` denomination whose note fits the budget, capped.
             let affordable = (budget - buffer).min(self.max_denomination_zatoshi);
-            let crossing = largest_one_two_five(affordable, self.dust_floor_zatoshi);
-            if crossing < self.dust_floor_zatoshi {
+            let crossing = largest_one_two_five(affordable, self.min_denomination_zatoshi);
+            if crossing < self.min_denomination_zatoshi {
                 break;
             }
             // The prepared note is `crossing + buffer`; only the crossing is stored (the buffer is
@@ -276,7 +276,7 @@ mod tests {
         );
     }
 
-    /// A larger balance across the full 1-2-5 series, and a sub-1-ZEC balance down to the dust floor.
+    /// A larger balance across the full 1-2-5 series, and a sub-1-ZEC balance down to the minimum denomination.
     #[test]
     fn expands_large_and_sub_one_zec() {
         let zec: Vec<u64> = crossings(12_345 * COIN).iter().map(|&c| c / COIN).collect();
@@ -352,7 +352,7 @@ mod tests {
         // `(balance in zatoshi, expected crossings in zatoshi, expected source-pool change)`.
         let cases: Vec<(u64, Vec<u64>, Option<u64>)> = vec![
             // Ari, 3748.6174 ZEC: 3->[2,1] 7->[5,2] 4->[2,2] 8->[5,2,1] .6->[.5,.1] .01->[.01],
-            // 12 notes + 0.005 ZEC sub-floor dust change.
+            // 12 notes + 0.005 ZEC sub-floor change.
             (
                 374_861_740_000,
                 vec![
@@ -372,7 +372,7 @@ mod tests {
                 Some(500_000),
             ),
             // Bo, 9631.8827 ZEC: 9->[5,2,2] 6->[5,1] 3->[2,1] 1->[1] .8->[.5,.2,.1] .07->[.05,.02],
-            // 13 notes + 0.0101 ZEC change (at/above the dust floor but too small to self-fund).
+            // 13 notes + 0.0101 ZEC change (at/above the minimum denomination but too small to self-fund).
             (
                 963_188_270_000,
                 vec![
@@ -441,14 +441,14 @@ mod tests {
                 vec![COIN / 2, COIN / 5, COIN / 20, COIN / 50, COIN / 50],
                 Some(300_000),
             ),
-            // Fin, 0.381 ZEC: .3->[.2,.1] .8->[.05,.02,.01] (down to the 0.01 dust floor), 5 notes,
+            // Fin, 0.381 ZEC: .3->[.2,.1] .8->[.05,.02,.01] (down to the 0.01 minimum denomination), 5 notes,
             // no change.
             (
                 38_100_000,
                 vec![COIN / 5, COIN / 10, COIN / 20, COIN / 50, COIN / 100],
                 None,
             ),
-            // Gwen, 0.0152 ZEC: a single 0.01 dust-floor note + 0.005 ZEC sub-floor change.
+            // Gwen, 0.0152 ZEC: a single 0.01 minimum-denomination note + 0.005 ZEC sub-floor change.
             (1_520_000, vec![COIN / 100], Some(500_000)),
             // Ivan, 142.5314 ZEC (typical wallet): 1->[1] 4->[2,2] 2->[2] .5->[.5] .03->[.02,.01],
             // 7 notes, no change.
