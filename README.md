@@ -35,6 +35,7 @@ graph TB
         end
 
         subgraph standalone_components
+            eip681
             equihash
             f4jumble
             zcash_encoding
