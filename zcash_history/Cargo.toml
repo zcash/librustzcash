@@ -1,0 +1,29 @@
+[package]
+name = "zcash_history"
+version = "0.5.0"
+authors = ["NikVolf <nikvolf@gmail.com>"]
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Library for Zcash blockchain history tools"
+categories.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true
+proptest.workspace = true
+
+[dependencies]
+primitive-types = { version = "0.12", default-features = false }
+byteorder.workspace = true
+blake2b_simd.workspace = true
+proptest = { workspace = true, optional = true }
+
+[features]
+test-dependencies = ["dep:proptest"]
+
+[lib]
+bench = false
+
+[lints]
+workspace = true

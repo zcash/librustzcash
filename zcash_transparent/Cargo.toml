@@ -1,0 +1,89 @@
+[package]
+name = "zcash_transparent"
+description = "Rust implementations of the Zcash transparent protocol"
+version = "0.9.0"
+authors = [
+    "Jack Grigg <jack@electriccoin.co>",
+    "Kris Nuttycombe <kris@electriccoin.co>",
+    "Daira-Emma Hopwood <daira@electriccoin.co>",
+]
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+zcash_address.workspace = true
+zcash_encoding.workspace = true
+zcash_protocol.workspace = true
+zip32.workspace = true
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Encodings
+corez.workspace = true
+
+# - Secret management
+subtle.workspace = true
+
+# - Shielded protocols
+zcash_spec.workspace = true
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+
+# - Transparent inputs
+#   - `Error` type exposed
+bip32.workspace = true
+#   - `SecretKey` and `PublicKey` types exposed
+secp256k1 = { workspace = true, optional = true }
+zcash_script = { workspace = true, features = ["descriptor"] }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+nonempty.workspace = true
+
+# - Digests
+sha2.workspace = true
+
+# - Documentation
+document-features = { workspace = true, optional = true }
+
+# - Encodings
+bs58.workspace = true
+hex.workspace = true
+
+# - Transparent protocol
+ripemd.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+zcash_protocol = { workspace = true, features = ["test-dependencies"] }
+
+[features]
+default = ["std"]
+std = [
+    "dep:document-features",
+    "secp256k1?/std",
+    "zcash_address/std",
+    "zcash_script/std",
+]
+
+## Enables spending transparent notes with the transaction builder.
+transparent-inputs = ["bip32/secp256k1-ffi", "dep:secp256k1"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = [
+    "dep:proptest",
+    "zcash_protocol/test-dependencies",
+]
+
+[lints]
+workspace = true

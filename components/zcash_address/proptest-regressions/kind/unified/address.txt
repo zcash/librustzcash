@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc fd6f22032b9add1319ad27b183de7d522bf9dfa0d6ef56354812bce5a803c11c # shrinks to network = Main, ua = Address([Orchard([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 101, 7, 48, 33, 241, 53, 105]), P2pkh([104, 47, 211, 146, 155, 136, 129, 215, 137, 152, 117, 157, 55, 4, 199, 123, 69, 12, 133, 89]), Sapling([164, 56, 210, 240, 243, 207, 59, 213, 35, 184, 250, 69, 206, 249, 184, 252, 184, 103, 227, 207, 249, 127, 133, 218, 97, 241, 242, 12, 155, 162, 137, 100, 200, 50, 96, 79, 33, 137, 242, 172, 43, 6, 255])])

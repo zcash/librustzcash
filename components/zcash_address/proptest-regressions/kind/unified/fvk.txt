@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e104d5971b8fa530680706dab1f954d27650407285c4d78f3c8428fe20c8f008 # shrinks to network = Main, ufvk = Ufvk([Sapling([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), Orchard([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 199, 56, 71, 87, 43, 196, 81, 100, 9, 151, 208, 145, 131, 104, 86, 105, 222, 242, 35, 138, 199, 195, 23, 165, 218, 165, 79, 239, 183, 228, 111, 72, 26, 242, 158, 79, 109, 240, 47, 52, 59, 46, 164, 181, 240, 159, 234, 120, 160, 214, 6, 235, 69, 147, 88, 78, 48, 20, 53, 243, 221, 39, 208, 139, 21, 211, 238, 118, 101, 5, 77, 77, 29, 176, 157, 151, 6, 72])])

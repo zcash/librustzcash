@@ -1,0 +1,78 @@
+name: 'Prepare CI'
+description: 'Prepares feature flags'
+inputs:
+  extra-features:
+    description: 'Extra feature flags to enable'
+    required: false
+    default: ''
+  transparent-pool:
+    description: 'Enable all transparent pool-specific feature flags'
+    required: false
+    default: false
+  orchard-pool:
+    description: 'Enable all Orchard pool-specific feature flags'
+    required: false
+    default: false
+  all-pools:
+    description: 'Enable all pool-specific feature flags'
+    required: false
+    default: true
+  all-features:
+    description: 'Enable all feature flags'
+    required: false
+    default: false
+  test-dependencies:
+    description: 'Include test dependencies'
+    required: false
+    default: true
+outputs:
+  feature-flags:
+    description: 'Feature flags'
+    value: ${{ steps.prepare.outputs.flags || steps.prepare-all.outputs.flags }}
+runs:
+  using: 'composite'
+  steps:
+    - id: transparent-pool
+      shell: bash
+      run: echo "features=transparent-inputs transparent-key-import transparent-key-encoding" >> $GITHUB_OUTPUT
+      if: inputs.transparent-pool == 'true' || inputs.all-pools == 'true'
+
+    - id: orchard-pool
+      shell: bash
+      run: echo "features=orchard" >> $GITHUB_OUTPUT
+      if: inputs.orchard-pool == 'true' || inputs.all-pools == 'true'
+
+    - id: test
+      shell: bash
+      run: echo "feature=test-dependencies" >> $GITHUB_OUTPUT
+      if: inputs.test-dependencies == 'true'
+
+    # `steps.pools.outputs.features` and `steps.test.outputs.feature` cannot
+    # expand into attacker-controllable code because the previous steps only
+    # enable them to have one of two fixed values.
+    - name: Prepare feature flags # zizmor: ignore[template-injection]
+      id: prepare
+      shell: bash
+      run: >
+        echo "flags=--features '
+        bundled-prover
+        download-params
+        lightwalletd-tonic
+        sync
+        temporary-zcashd
+        unstable
+        unstable-serialization
+        unstable-spanning-tree
+        ${EXTRA_FEATURES}
+        ${{ steps.transparent-pool.outputs.features }}
+        ${{ steps.orchard-pool.outputs.features }}
+        ${{ steps.test.outputs.feature }}
+        '" >> $GITHUB_OUTPUT
+      env:
+        EXTRA_FEATURES: ${{ inputs.extra-features }}
+      if: inputs.all-features == 'false'
+
+    - id: prepare-all
+      shell: bash
+      run: echo "flags=--all-features" >> $GITHUB_OUTPUT
+      if: inputs.all-features == 'true'

@@ -1,0 +1,34 @@
+[package]
+name = "zcash_encoding"
+description = "Binary encodings used throughout the Zcash ecosystem."
+version = "0.4.0"
+authors = [
+    "Jack Grigg <jack@electriccoin.co>",
+    "Kris Nuttycombe <kris@electriccoin.co>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories = ["cryptography::cryptocurrencies", "encoding"]
+keywords = ["zcash"]
+
+[dependencies]
+corez.workspace = true
+hex.workspace = true
+nonempty.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+default = ["std"]
+std = ["corez/std"]
+
+[lib]
+bench = false
+
+[lints]
+workspace = true

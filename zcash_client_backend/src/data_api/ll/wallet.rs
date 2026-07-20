@@ -1,0 +1,1919 @@
+use std::collections::BTreeMap;
+#[cfg(feature = "orchard")]
+use std::collections::BTreeSet;
+use std::hash::Hash;
+use std::ops::Range;
+
+use rayon::{
+    iter::{IndexedParallelIterator as _, ParallelIterator},
+    slice::ParallelSliceMut as _,
+};
+use tracing::{debug, info, trace, warn};
+
+use incrementalmerkletree::{Hashable, Marking, Position, Retention, frontier::Frontier};
+use shardtree::{LocatedPrunableTree, ShardTree, error::ShardTreeError, store::ShardStore};
+use transparent::{address::TransparentAddress, bundle::OutPoint};
+use zcash_keys::{address::Receiver, encoding::AddressCodec as _};
+use zcash_primitives::transaction::Transaction;
+use zcash_protocol::{
+    PoolType, ShieldedPool,
+    consensus::{self, BlockHeight},
+    value::{BalanceError, Zatoshis},
+};
+use zcash_script::solver::ScriptKind;
+
+use crate::{
+    TransferType,
+    data_api::{
+        DecryptedTransaction, SAPLING_SHARD_HEIGHT, ScannedBlock, TransactionStatus,
+        WalletCommitmentTrees, chain::ChainState, ll::ReceivedShieldedOutput,
+    },
+    wallet::{Recipient, WalletTransparentOutput},
+};
+
+use super::{LowLevelWalletRead, LowLevelWalletWrite, TxMeta};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::data_api::Account,
+    std::collections::HashSet,
+    transparent::keys::TransparentKeyScope,
+    zcash_keys::keys::{
+        ReceiverRequirement, UnifiedAddressRequest,
+        transparent::gap_limits::{
+            AddressStore, GapAddressesError, GapLimits, generate_gap_addresses,
+        },
+    },
+};
+
+#[cfg(feature = "orchard")]
+use {crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint};
+
+/// The maximum number of blocks the wallet is allowed to rewind. This is
+/// consistent with the bound in zcashd, and allows block data deeper than
+/// this delta from the chain tip to be pruned.
+pub(crate) const PRUNING_DEPTH: u32 = 100;
+
+pub(crate) fn determine_fee<DbT, T: TxMeta>(
+    _wallet_db: &DbT,
+    tx: &T,
+) -> Result<Option<Zatoshis>, DbT::Error>
+where
+    DbT: LowLevelWalletRead,
+    DbT::Error: From<BalanceError>,
+{
+    tx.fee_paid(|_outpoint| {
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            // Transparent inputs aren't supported, so this closure should never be
+            // called during transaction construction. But in case it is, handle it
+            // correctly.
+            Ok(None)
+        }
+
+        // This closure can do DB lookups to fetch the value of each transparent input.
+        #[cfg(feature = "transparent-inputs")]
+        if let Some(out) = _wallet_db.get_wallet_transparent_output(_outpoint, None)? {
+            Ok(Some(out.txout().value()))
+        } else {
+            // If we can’t find it, fee computation can't complete accurately
+            Ok(None)
+        }
+    })
+}
+
+/// Generates transparent gap addresses for a given account and key scope.
+///
+/// This is a convenience function that resolves the account's viewing keys from the wallet
+/// database and delegates to [`generate_gap_addresses`].
+#[cfg(feature = "transparent-inputs")]
+pub fn generate_transparent_gap_addresses<DbT, SE>(
+    wallet_db: &mut DbT,
+    gap_limits: GapLimits,
+    account_id: <DbT as LowLevelWalletRead>::AccountId,
+    key_scope: TransparentKeyScope,
+    request: UnifiedAddressRequest,
+) -> Result<(), GapAddressesError<SE>>
+where
+    DbT: LowLevelWalletWrite<Error = SE>
+        + AddressStore<Error = SE, AccountRef = <DbT as LowLevelWalletRead>::AccountRef>,
+    DbT::TxRef: Eq + Hash,
+{
+    let account_ref = wallet_db
+        .get_account_ref(account_id)
+        .map_err(GapAddressesError::Storage)?;
+
+    let account = wallet_db
+        .get_account_internal(account_ref)
+        .map_err(GapAddressesError::Storage)?
+        .ok_or(GapAddressesError::AccountUnknown)?;
+
+    generate_gap_addresses(
+        wallet_db,
+        &gap_limits,
+        account_ref,
+        &account.uivk(),
+        account.ufvk(),
+        key_scope,
+        request,
+        false,
+    )?;
+
+    Ok(())
+}
+
+pub enum PutBlocksError<SE, TE> {
+    /// Returned if a provided block sequence has gaps.
+    NonSequentialBlocks {
+        prev_height: BlockHeight,
+        block_height: BlockHeight,
+    },
+    /// Wraps an error produced by the underlying data storage system.
+    Storage(SE),
+    /// Wraps an error produced by [`shardtree`] insertion.
+    ShardTree(ShardTreeError<TE>),
+    /// Wraps an error produced by [`shardtree`] while inserting the note commitment data for a
+    /// range of scanned blocks into one of the wallet's note commitment trees. The `pool` and
+    /// `block_range` fields record the shielded pool whose note commitment tree was being updated
+    /// and the range of block heights (start-inclusive, end-exclusive) that were being added to
+    /// the wallet when the error occurred.
+    ShardTreeForBlockRange {
+        /// The shielded pool whose note commitment tree was being updated when the error occurred.
+        pool: ShieldedPool,
+        /// The range of block heights that were being added to the wallet when the error
+        /// occurred.
+        block_range: Range<BlockHeight>,
+        /// The underlying error produced by [`shardtree`] insertion.
+        error: ShardTreeError<TE>,
+    },
+    #[cfg(feature = "transparent-inputs")]
+    GapAddresses(GapAddressesError<SE>),
+}
+
+impl<SE, TE> From<ShardTreeError<TE>> for PutBlocksError<SE, TE> {
+    fn from(value: ShardTreeError<TE>) -> Self {
+        PutBlocksError::ShardTree(value)
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<SE, TE> From<GapAddressesError<SE>> for PutBlocksError<SE, TE> {
+    fn from(value: GapAddressesError<SE>) -> Self {
+        PutBlocksError::GapAddresses(value)
+    }
+}
+
+/// A trait alias capturing the database capabilities required by [`put_blocks`].
+#[cfg(not(feature = "transparent-inputs"))]
+pub trait PutBlocksDbT<SE, TE, AR>:
+    LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>
+{
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+impl<T: LowLevelWalletWrite<Error = SE> + WalletCommitmentTrees<Error = TE>, SE, TE, AR>
+    PutBlocksDbT<SE, TE, AR> for T
+{
+}
+
+/// A trait alias capturing the database capabilities required by [`put_blocks`].
+///
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be maintained as new blocks are
+/// scanned.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
+#[cfg(feature = "transparent-inputs")]
+pub trait PutBlocksDbT<SE, TE, AR>:
+    LowLevelWalletWrite<Error = SE>
+    + WalletCommitmentTrees<Error = TE>
+    + AddressStore<Error = SE, AccountRef = AR>
+{
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<
+    T: LowLevelWalletWrite<Error = SE>
+        + WalletCommitmentTrees<Error = TE>
+        + AddressStore<Error = SE, AccountRef = AR>,
+    SE,
+    TE,
+    AR,
+> PutBlocksDbT<SE, TE, AR> for T
+{
+}
+
+/// A trait alias capturing the database capabilities required by [`put_blocks_rows`].
+///
+/// Unlike [`PutBlocksDbT`], this does not require [`WalletCommitmentTrees`]: the row stage
+/// of [`put_blocks`] only writes through the [`LowLevelWalletWrite`] interface.
+#[cfg(not(feature = "transparent-inputs"))]
+pub trait PutBlocksRowsDbT<SE, AR>: LowLevelWalletWrite<Error = SE> {}
+
+#[cfg(not(feature = "transparent-inputs"))]
+impl<T: LowLevelWalletWrite<Error = SE>, SE, AR> PutBlocksRowsDbT<SE, AR> for T {}
+
+/// A trait alias capturing the database capabilities required by [`put_blocks_rows`].
+///
+/// Unlike [`PutBlocksDbT`], this does not require [`WalletCommitmentTrees`]: the row stage
+/// of [`put_blocks`] only writes through the [`LowLevelWalletWrite`] interface.
+///
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be maintained as new blocks are
+/// scanned.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
+#[cfg(feature = "transparent-inputs")]
+pub trait PutBlocksRowsDbT<SE, AR>:
+    LowLevelWalletWrite<Error = SE> + AddressStore<Error = SE, AccountRef = AR>
+{
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<T: LowLevelWalletWrite<Error = SE> + AddressStore<Error = SE, AccountRef = AR>, SE, AR>
+    PutBlocksRowsDbT<SE, AR> for T
+{
+}
+
+/// The note commitment data accumulated by [`put_blocks_rows`] across a sequence of scanned
+/// blocks: exactly the input that the note commitment tree stage of [`put_blocks`] consumes.
+///
+/// Commitment entries are wrapped in `Option` so that downstream subtree construction (see
+/// [`build_subtrees`]) can move them out of the buffer from within a `rayon` parallel iterator;
+/// every entry is `Some` on return from [`put_blocks_rows`].
+#[derive(Default)]
+pub struct PutBlocksRows {
+    /// The ordered vector of note commitments for Sapling outputs, beginning at the position
+    /// following the final Sapling tree state of the `from_state` argument.
+    pub sapling_commitments: Vec<Option<(sapling::Node, Retention<BlockHeight>)>>,
+    /// The ordered vector of note commitments for Orchard outputs, beginning at the position
+    /// following the final Orchard tree state of the `from_state` argument.
+    #[cfg(feature = "orchard")]
+    pub orchard_commitments:
+        Vec<Option<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>>,
+    /// The ordered vector of note commitments for Ironwood outputs, beginning at the position
+    /// following the final Ironwood tree state of the `from_state` argument.
+    #[cfg(feature = "orchard")]
+    pub ironwood_commitments:
+        Vec<Option<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>>,
+    /// The note commitment tree positions of outputs received by the wallet, for use with
+    /// [`LowLevelWalletWrite::notify_scan_complete`].
+    pub note_positions: Vec<(ShieldedPool, Position)>,
+    /// The height of the last block in the persisted sequence; `None` if and only if the
+    /// provided block vector was empty.
+    pub last_scanned_height: Option<BlockHeight>,
+}
+
+/// Persists the row-level (non-tree) data for a sequence of scanned blocks: block metadata,
+/// transaction and note rows, spent-note marking, nullifier tracking and pruning, and — when
+/// the `transparent-inputs` feature is enabled — transparent gap address maintenance for the
+/// involved accounts.
+///
+/// This is the first stage of [`put_blocks`], which is equivalent to `put_blocks_rows` followed
+/// by the note commitment tree updates (see [`build_subtrees`] and [`update_tree`]) and
+/// [`LowLevelWalletWrite::notify_scan_complete`]. It is exposed so that wallet stores that
+/// maintain their note commitment trees by other means can reuse the row-writing logic through
+/// the [`LowLevelWalletWrite`] interface without also taking on the [`WalletCommitmentTrees`]
+/// requirement.
+///
+/// The `TE` type parameter is unconstrained here (the row stage cannot produce a tree error);
+/// it exists so that errors propagate directly as the [`PutBlocksError`] of the enclosing
+/// [`put_blocks`] call.
+///
+/// # Parameters
+/// - `wallet_db`: A handle to the underlying data store.
+/// - `from_state`: The note commitment tree state as of the end of the last block prior to the
+///   first block in the provided block vector; [`PutBlocksError::NonSequentialBlocks`] will be
+///   returned if this invariant is violated.
+/// - `blocks`: The scanned block data to be added to the data store. This vector must contain
+///   data for blocks in sequentially increasing height order;
+///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
+///
+/// # Nullifier tracking
+///
+/// When a batch extends the wallet's contiguous fully-scanned frontier (i.e.
+/// [`LowLevelWalletRead::block_fully_scanned_height`] equals the `from_state` height, so
+/// every block from the wallet birthday through the previous block has been scanned),
+/// nullifier-map insertion is skipped for blocks more than
+/// [`NULLIFIER_MAP_RETENTION_BLOCKS`] below the end of the batch. Under that precondition
+/// the skipped entries are provably unobservable: the nullifier map exists to detect
+/// spends observed before the corresponding note's block has been scanned, which cannot
+/// occur below a contiguous frontier — any wallet note spendable in a skipped block was
+/// either received in an already-scanned block (so its spend is detected directly against
+/// the wallet's own nullifiers rather than the map) or is received later in this same
+/// ascending batch (so the spend is linked when the receiving transaction is processed).
+/// For every out-of-order range — scanning after a gap, recent-first, or chain-tip
+/// pre-scans — the nullifiers of every block are tracked.
+pub fn put_blocks_rows<DbT, SE, TE>(
+    wallet_db: &mut DbT,
+    #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    from_state: &ChainState,
+    blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
+) -> Result<PutBlocksRows, PutBlocksError<SE, TE>>
+where
+    DbT: PutBlocksRowsDbT<SE, <DbT as LowLevelWalletRead>::AccountRef>,
+    DbT::TxRef: Eq + Hash,
+{
+    if blocks.is_empty() {
+        return Ok(PutBlocksRows::default());
+    }
+
+    let initial_block = blocks.first().expect("blocks is known to be nonempty");
+    let mut initial_block_sequential = from_state.block_height() + 1 == initial_block.height();
+    {
+        initial_block_sequential &= from_state.final_sapling_tree().tree_size()
+            + u64::try_from(initial_block.sapling().commitments().len()).unwrap()
+            == u64::from(initial_block.sapling().final_tree_size());
+    }
+    #[cfg(feature = "orchard")]
+    {
+        initial_block_sequential &= from_state.final_orchard_tree().tree_size()
+            + u64::try_from(initial_block.orchard().commitments().len()).unwrap()
+            == u64::from(initial_block.orchard().final_tree_size());
+        initial_block_sequential &= from_state.final_ironwood_tree().tree_size()
+            + u64::try_from(initial_block.ironwood().commitments().len()).unwrap()
+            == u64::from(initial_block.ironwood().final_tree_size());
+    }
+    if !initial_block_sequential {
+        return Err(PutBlocksError::NonSequentialBlocks {
+            prev_height: from_state.block_height(),
+            block_height: initial_block.height(),
+        });
+    }
+
+    let nullifier_tracking_floor = nullifier_tracking_floor(
+        wallet_db
+            .block_fully_scanned_height()
+            .map_err(PutBlocksError::Storage)?,
+        from_state.block_height(),
+        blocks.last().map(|block| block.height()),
+    );
+
+    let mut sapling_commitments = vec![];
+    #[cfg(feature = "orchard")]
+    let mut orchard_commitments = vec![];
+    #[cfg(feature = "orchard")]
+    let mut ironwood_commitments = vec![];
+    let mut last_scanned_height = None;
+    let mut note_positions = vec![];
+
+    #[cfg(feature = "transparent-inputs")]
+    let mut tx_refs = HashSet::new();
+
+    for block in blocks.into_iter() {
+        if last_scanned_height
+            .iter()
+            .any(|prev| block.height() != *prev + 1)
+        {
+            return Err(PutBlocksError::NonSequentialBlocks {
+                prev_height: last_scanned_height.expect("last scanned height is known"),
+                block_height: block.height(),
+            });
+        }
+
+        // Insert the block into the database.
+        wallet_db
+            .put_block_meta(
+                block.height(),
+                block.block_hash(),
+                block.block_time(),
+                block.sapling().final_tree_size(),
+                block.sapling().commitments().len().try_into().unwrap(),
+                #[cfg(feature = "orchard")]
+                block.orchard().final_tree_size(),
+                #[cfg(feature = "orchard")]
+                block.orchard().commitments().len().try_into().unwrap(),
+                #[cfg(feature = "orchard")]
+                block.ironwood().final_tree_size(),
+                #[cfg(feature = "orchard")]
+                block.ironwood().commitments().len().try_into().unwrap(),
+            )
+            .map_err(PutBlocksError::Storage)?;
+
+        for tx in block.transactions() {
+            let tx_ref = wallet_db
+                .put_tx_meta(tx, block.height())
+                .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "transparent-inputs")]
+            tx_refs.insert(tx_ref);
+
+            wallet_db
+                .queue_tx_retrieval(std::iter::once(tx.txid()), None)
+                .map_err(PutBlocksError::Storage)?;
+
+            // Mark notes as spent and remove them from the scanning cache
+            mark_notes_spent(
+                wallet_db,
+                tx_ref,
+                #[cfg(feature = "transparent-inputs")]
+                None.iter(),
+                tx.sapling_spends().iter().map(|spend| spend.nf()),
+                #[cfg(feature = "orchard")]
+                tx.orchard_spends().iter().map(|spend| spend.nf()),
+                #[cfg(feature = "orchard")]
+                tx.ironwood_spends().iter().map(|spend| spend.nf()),
+            )
+            .map_err(PutBlocksError::Storage)?;
+
+            // TODO: Pass in the actual network parameters even though we don't need them.
+            let params: Option<&consensus::Network> = None;
+
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.sapling_outputs(),
+                // Check whether this note was spent in a later block range that
+                // we previously scanned.
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_sapling_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_sapling_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "orchard")]
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.orchard_outputs(),
+                // Check whether this note was spent in a later block range that
+                // we previously scanned.
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_orchard_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_orchard_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "orchard")]
+            put_shielded_outputs(
+                wallet_db,
+                params,
+                tx_ref,
+                None,
+                tx.ironwood_outputs(),
+                // Check whether this note was spent in a later block range that
+                // we previously scanned.
+                |wallet_db, output| {
+                    Ok(output
+                        .nf()
+                        .map(|nf| wallet_db.detect_ironwood_spend(nf))
+                        .transpose()?
+                        .flatten())
+                },
+                |wallet_db, output, tx_ref, spent_in| {
+                    wallet_db.put_received_ironwood_note(
+                        output,
+                        tx_ref,
+                        Some(block.height()),
+                        spent_in,
+                    )
+                },
+                |_account_id| (),
+            )
+            .map_err(PutBlocksError::Storage)?;
+        }
+
+        // Insert the new nullifiers from this block into the nullifier map, unless the caller
+        // has excluded this height from nullifier tracking.
+        if should_track_nullifiers(nullifier_tracking_floor, block.height()) {
+            wallet_db
+                .track_block_sapling_nullifiers(block.height(), block.sapling().nullifier_map())
+                .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "orchard")]
+            wallet_db
+                .track_block_orchard_nullifiers(block.height(), block.orchard().nullifier_map())
+                .map_err(PutBlocksError::Storage)?;
+
+            #[cfg(feature = "orchard")]
+            wallet_db
+                .track_block_ironwood_nullifiers(block.height(), block.ironwood().nullifier_map())
+                .map_err(PutBlocksError::Storage)?;
+        }
+
+        note_positions.extend(block.transactions().iter().flat_map(|wtx| {
+            let iter = wtx
+                .sapling_outputs()
+                .iter()
+                .map(|out| (ShieldedPool::Sapling, out.note_commitment_tree_position()));
+            #[cfg(feature = "orchard")]
+            let iter = iter.chain(
+                wtx.orchard_outputs()
+                    .iter()
+                    .map(|out| (ShieldedPool::Orchard, out.note_commitment_tree_position())),
+            );
+            #[cfg(feature = "orchard")]
+            let iter = iter.chain(
+                wtx.ironwood_outputs()
+                    .iter()
+                    .map(|out| (ShieldedPool::Ironwood, out.note_commitment_tree_position())),
+            );
+
+            iter
+        }));
+
+        last_scanned_height = Some(block.height());
+        let block_commitments = block.into_commitments();
+        trace!(
+            "Sapling commitments for {:?}: {:?}",
+            last_scanned_height,
+            block_commitments
+                .sapling
+                .iter()
+                .map(|(_, r)| *r)
+                .collect::<Vec<_>>()
+        );
+        #[cfg(feature = "orchard")]
+        trace!(
+            "Orchard commitments for {:?}: {:?}",
+            last_scanned_height,
+            block_commitments
+                .orchard
+                .iter()
+                .map(|(_, r)| *r)
+                .collect::<Vec<_>>()
+        );
+
+        sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
+        #[cfg(feature = "orchard")]
+        orchard_commitments.extend(block_commitments.orchard.into_iter().map(Some));
+        #[cfg(feature = "orchard")]
+        ironwood_commitments.extend(block_commitments.ironwood.into_iter().map(Some));
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    for (account_id, key_scope) in wallet_db
+        .find_involved_accounts(tx_refs)
+        .map_err(PutBlocksError::Storage)?
+    {
+        if let Some(t_key_scope) = key_scope {
+            use ReceiverRequirement::*;
+            generate_transparent_gap_addresses(
+                wallet_db,
+                gap_limits,
+                account_id,
+                t_key_scope,
+                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            )
+            .map_err(PutBlocksError::GapAddresses)?;
+        }
+    }
+
+    // Prune the nullifier map of entries we no longer need.
+    wallet_db
+        .prune_tracked_nullifiers(PRUNING_DEPTH)
+        .map_err(PutBlocksError::Storage)?;
+
+    Ok(PutBlocksRows {
+        sapling_commitments,
+        #[cfg(feature = "orchard")]
+        orchard_commitments,
+        #[cfg(feature = "orchard")]
+        ironwood_commitments,
+        note_positions,
+        last_scanned_height,
+    })
+}
+
+/// Adds information about a sequence of scanned blocks to the provided data store.
+///
+/// This is equivalent to persisting the row-level data via [`put_blocks_rows`] and then
+/// updating the note commitment trees with the returned commitments.
+///
+/// # Parameters
+/// - `wallet_db`: A handle to the underlying data store.
+/// - `from_state`: The note commitment tree state as of the end of the last block prior to the
+///   first block in the provided block vector; [`PutBlocksError::NonSequentialBlocks`] will be
+///   returned if this invariant is violated.
+/// - `blocks`: The scanned block data to be added to the data store. This vector must contain
+///   data for blocks in sequentially increasing height order;
+///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
+/// - `anchor_retention_height`: If `Some(h)`, checkpoints established at or above height `h` whose
+///   height falls on the [`ANCHOR_RETENTION_INTERVAL`] are retained as durable anchors, exempting
+///   them from automatic pruning of excess checkpoints. `None` disables anchor retention.
+pub fn put_blocks<DbT, SE, TE>(
+    wallet_db: &mut DbT,
+    #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    from_state: &ChainState,
+    blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
+    anchor_retention_height: Option<BlockHeight>,
+) -> Result<(), PutBlocksError<SE, TE>>
+where
+    DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
+    DbT::TxRef: Eq + Hash,
+{
+    let rows = put_blocks_rows(
+        wallet_db,
+        #[cfg(feature = "transparent-inputs")]
+        gap_limits,
+        from_state,
+        blocks,
+    )?;
+
+    let mut sapling_commitments = rows.sapling_commitments;
+    #[cfg(feature = "orchard")]
+    let mut orchard_commitments = rows.orchard_commitments;
+    #[cfg(feature = "orchard")]
+    let mut ironwood_commitments = rows.ironwood_commitments;
+    let note_positions = rows.note_positions;
+    let last_scanned_height = rows.last_scanned_height;
+
+    // We will have a start position and a last scanned height in all cases where
+    // `blocks` is non-empty.
+    if let Some(last_scanned_height) = last_scanned_height {
+        // Create subtrees from the note commitments in parallel.
+        const CHUNK_SIZE: usize = 1024;
+        let sapling_subtrees = build_subtrees::<_, SAPLING_SHARD_HEIGHT>(
+            Position::from(from_state.final_sapling_tree().tree_size()),
+            &mut sapling_commitments,
+            CHUNK_SIZE,
+        );
+
+        #[cfg(feature = "orchard")]
+        let orchard_subtrees = build_subtrees::<_, ORCHARD_SHARD_HEIGHT>(
+            Position::from(from_state.final_orchard_tree().tree_size()),
+            &mut orchard_commitments,
+            CHUNK_SIZE,
+        );
+
+        // The Ironwood note commitment tree is Orchard-shaped and so uses the Orchard shard
+        // height, but is a distinct pool with its own tree.
+        #[cfg(feature = "orchard")]
+        let ironwood_subtrees = build_subtrees::<_, ORCHARD_SHARD_HEIGHT>(
+            Position::from(from_state.final_ironwood_tree().tree_size()),
+            &mut ironwood_commitments,
+            CHUNK_SIZE,
+        );
+
+        // Ensure that we have the same set of checkpoints across all trees. Each tree must gain a
+        // checkpoint at every height that is checkpointed in any of the other trees, so the set of
+        // heights to ensure for a given tree is the union of the checkpoint heights of the others.
+        #[cfg(feature = "orchard")]
+        let (
+            missing_sapling_checkpoints,
+            missing_orchard_checkpoints,
+            missing_ironwood_checkpoints,
+        ) = {
+            let sapling_checkpoint_positions = checkpoint_positions(&sapling_subtrees);
+            let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
+            let ironwood_checkpoint_positions = checkpoint_positions(&ironwood_subtrees);
+
+            let [ensure_sapling, ensure_orchard, ensure_ironwood] = cross_pool_ensure_heights(
+                &sapling_checkpoint_positions.keys().copied().collect(),
+                &orchard_checkpoint_positions.keys().copied().collect(),
+                &ironwood_checkpoint_positions.keys().copied().collect(),
+            );
+
+            (
+                ensure_checkpoints(
+                    ensure_sapling.iter(),
+                    &sapling_checkpoint_positions,
+                    from_state.final_sapling_tree(),
+                ),
+                ensure_checkpoints(
+                    ensure_orchard.iter(),
+                    &orchard_checkpoint_positions,
+                    from_state.final_orchard_tree(),
+                ),
+                ensure_checkpoints(
+                    ensure_ironwood.iter(),
+                    &ironwood_checkpoint_positions,
+                    from_state.final_ironwood_tree(),
+                ),
+            )
+        };
+
+        // Update the Sapling note commitment tree with all newly read note commitments
+        {
+            let mut sapling_subtrees = sapling_subtrees.into_iter();
+            #[cfg(feature = "orchard")]
+            let mut missing_checkpoints = missing_sapling_checkpoints.into_iter();
+            wallet_db.with_sapling_tree_mut(|sapling_tree| {
+                update_tree(
+                    "Sapling",
+                    from_state.final_sapling_tree(),
+                    from_state.block_height(),
+                    sapling_tree,
+                    anchor_retention_height,
+                    &mut sapling_subtrees,
+                    #[cfg(feature = "orchard")]
+                    &mut missing_checkpoints,
+                )
+                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
+                    pool: ShieldedPool::Sapling,
+                    block_range: from_state.block_height()..(last_scanned_height + 1),
+                    error,
+                })
+            })?;
+        }
+
+        // Update the Orchard note commitment tree with all newly read note commitments
+        #[cfg(feature = "orchard")]
+        {
+            let mut orchard_subtrees = orchard_subtrees.into_iter();
+            let mut missing_checkpoints = missing_orchard_checkpoints.into_iter();
+            wallet_db.with_orchard_tree_mut(|orchard_tree| {
+                update_tree(
+                    "Orchard",
+                    from_state.final_orchard_tree(),
+                    from_state.block_height(),
+                    orchard_tree,
+                    anchor_retention_height,
+                    &mut orchard_subtrees,
+                    &mut missing_checkpoints,
+                )
+                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
+                    pool: ShieldedPool::Orchard,
+                    block_range: from_state.block_height()..(last_scanned_height + 1),
+                    error,
+                })
+            })?;
+        }
+
+        // Update the Ironwood note commitment tree with all newly read note commitments
+        #[cfg(feature = "orchard")]
+        {
+            let mut ironwood_subtrees = ironwood_subtrees.into_iter();
+            let mut missing_checkpoints = missing_ironwood_checkpoints.into_iter();
+            wallet_db.with_ironwood_tree_mut(|ironwood_tree| {
+                update_tree(
+                    "Ironwood",
+                    from_state.final_ironwood_tree(),
+                    from_state.block_height(),
+                    ironwood_tree,
+                    anchor_retention_height,
+                    &mut ironwood_subtrees,
+                    &mut missing_checkpoints,
+                )
+                .map_err(|error| PutBlocksError::ShardTreeForBlockRange {
+                    pool: ShieldedPool::Ironwood,
+                    block_range: from_state.block_height()..(last_scanned_height + 1),
+                    error,
+                })
+            })?;
+        }
+
+        wallet_db
+            .notify_scan_complete(
+                Range {
+                    start: from_state.block_height() + 1,
+                    end: last_scanned_height + 1,
+                },
+                &note_positions,
+            )
+            .map_err(PutBlocksError::Storage)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "transparent-inputs"))]
+type GapError<DbT> = <DbT as LowLevelWalletRead>::Error;
+
+/// A trait alias capturing the database capabilities required by [`store_decrypted_tx`].
+#[cfg(not(feature = "transparent-inputs"))]
+pub trait StoreDecryptedTxDbT: LowLevelWalletWrite {}
+
+#[cfg(not(feature = "transparent-inputs"))]
+impl<T: LowLevelWalletWrite> StoreDecryptedTxDbT for T {}
+
+#[cfg(feature = "transparent-inputs")]
+type GapError<DbT> = GapAddressesError<<DbT as LowLevelWalletRead>::Error>;
+
+/// A trait alias capturing the database capabilities required by [`store_decrypted_tx`].
+///
+/// The `transparent-inputs` feature is enabled in this build, so this additionally requires
+/// [`AddressStore`] so that transparent gap addresses can be regenerated after storing a
+/// decrypted transaction.
+///
+/// [`AddressStore`]: zcash_keys::keys::transparent::gap_limits::AddressStore
+#[cfg(feature = "transparent-inputs")]
+pub trait StoreDecryptedTxDbT:
+    LowLevelWalletWrite
+    + AddressStore<
+        Error = <Self as LowLevelWalletRead>::Error,
+        AccountRef = <Self as LowLevelWalletRead>::AccountRef,
+    >
+where
+    <Self as LowLevelWalletRead>::Error: From<GapError<Self>>,
+{
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<
+    T: LowLevelWalletWrite
+        + AddressStore<
+            Error = <T as LowLevelWalletRead>::Error,
+            AccountRef = <T as LowLevelWalletRead>::AccountRef,
+        >,
+> StoreDecryptedTxDbT for T
+where
+    <T as LowLevelWalletRead>::Error: From<GapError<T>>,
+{
+}
+
+/// Persists a decrypted transaction to the wallet database.
+///
+/// This function stores a transaction that has been decrypted by the wallet, including:
+/// - The transaction data and any computed fee (if all inputs are known)
+/// - Received shielded notes (Sapling and Orchard)
+/// - Sent outputs with recipient information
+/// - Transparent outputs received by or sent from the wallet
+/// - Nullifier tracking for spent notes
+///
+/// The function also queues requests for retrieval of any unknown transparent inputs,
+/// which may be needed to compute the transaction fee or track wallet history.
+///
+/// # Parameters
+/// - `wallet_db`: The wallet database to update.
+/// - `params`: The network parameters.
+/// - `chain_tip_height`: The current chain tip height, used as the observation height for
+///   unmined transactions.
+/// - `d_tx`: The decrypted transaction to store.
+///
+/// # Returns
+/// Returns `Ok(())` if the transaction was successfully stored, or an error if a database
+/// operation failed.
+pub fn store_decrypted_tx<DbT, P>(
+    wallet_db: &mut DbT,
+    params: &P,
+    #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
+    chain_tip_height: BlockHeight,
+    d_tx: DecryptedTransaction<Transaction, <DbT as LowLevelWalletRead>::AccountId>,
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: StoreDecryptedTxDbT,
+    <DbT as LowLevelWalletRead>::AccountId: core::fmt::Debug,
+    <DbT as LowLevelWalletRead>::Error: From<BalanceError> + From<GapError<DbT>>,
+    P: consensus::Parameters,
+{
+    let funding_accounts = wallet_db.get_funding_accounts(d_tx.tx())?;
+
+    // TODO(#1305): Correctly track accounts that fund each transaction output.
+    let funding_account = funding_accounts.iter().next().copied();
+    if funding_accounts.len() > 1 {
+        warn!(
+            "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
+            d_tx.tx().txid(),
+            funding_account.unwrap()
+        )
+    }
+
+    let wallet_transparent_outputs =
+        detect_wallet_transparent_outputs::<_, _, <DbT as LowLevelWalletRead>::Error>(
+            params,
+            d_tx.tx(),
+            d_tx.mined_height(),
+            funding_account,
+            #[cfg(feature = "transparent-inputs")]
+            |address| wallet_db.find_account_for_transparent_address(address),
+        )?;
+
+    // If there is no wallet involvement, we don't need to store the transaction, so just return
+    // here.
+    if funding_account.is_none()
+        && wallet_transparent_outputs.is_empty()
+        && !d_tx.has_decrypted_outputs()
+    {
+        wallet_db.delete_retrieval_queue_entries(d_tx.tx().txid())?;
+        return Ok(());
+    }
+
+    info!("Storing decrypted transaction with id {}", d_tx.tx().txid());
+    let observed_height = d_tx.mined_height().unwrap_or(chain_tip_height + 1);
+
+    // If the transaction is fully shielded, or all transparent inputs are available, set the
+    // fee value.
+    let fee = determine_fee(wallet_db, d_tx.tx())?;
+
+    let tx_ref = wallet_db.put_tx_data(d_tx.tx(), fee, None, None, observed_height)?;
+    if let Some(height) = d_tx.mined_height() {
+        wallet_db.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?;
+    }
+
+    mark_notes_spent(
+        wallet_db,
+        tx_ref,
+        #[cfg(feature = "transparent-inputs")]
+        d_tx.tx()
+            .transparent_bundle()
+            .iter()
+            .flat_map(|b| b.vin.iter())
+            .map(|txin| txin.prevout()),
+        d_tx.tx()
+            .sapling_bundle()
+            .iter()
+            .flat_map(|b| b.shielded_spends().iter())
+            .map(|spend| spend.nullifier()),
+        #[cfg(feature = "orchard")]
+        d_tx.tx()
+            .orchard_bundle()
+            .iter()
+            .flat_map(|b| b.actions().iter())
+            .map(|action| action.nullifier()),
+        #[cfg(feature = "orchard")]
+        d_tx.tx()
+            .ironwood_bundle()
+            .iter()
+            .flat_map(|b| b.actions().iter())
+            .map(|action| action.nullifier()),
+    )?;
+
+    // A flag used to determine whether it is necessary to query for transactions that
+    // provided transparent inputs to this transaction, in order to be able to correctly
+    // recover transparent transaction history.
+    #[cfg(feature = "transparent-inputs")]
+    let mut tx_has_wallet_outputs = false;
+    #[cfg(feature = "transparent-inputs")]
+    {
+        tx_has_wallet_outputs |= !d_tx.sapling_outputs().is_empty();
+
+        #[cfg(feature = "orchard")]
+        {
+            tx_has_wallet_outputs |= !d_tx.orchard_outputs().is_empty();
+            tx_has_wallet_outputs |= !d_tx.ironwood_outputs().is_empty();
+        }
+
+        // Two cases handled here:
+        // - If the wallet created the transparent output, we need to ensure
+        //   that any transparent inputs belonging to the wallet will be
+        //   discovered.
+        // - Even if we know the funding account, we don't know that we have
+        //   information for all of the transparent inputs to the transaction.
+        tx_has_wallet_outputs |= !wallet_transparent_outputs.is_empty();
+    }
+
+    // The set of account/scope pairs for which to update the gap limit.
+    #[cfg(feature = "transparent-inputs")]
+    let mut gap_update_set = HashSet::new();
+
+    put_shielded_outputs(
+        wallet_db,
+        Some(params),
+        tx_ref,
+        funding_account,
+        d_tx.sapling_outputs(),
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_sapling_note(output, tx_ref, d_tx.mined_height(), spent_in)
+        },
+        |_account_id| {
+            #[cfg(feature = "transparent-inputs")]
+            gap_update_set.insert((_account_id, TransparentKeyScope::EXTERNAL));
+        },
+    )?;
+
+    #[cfg(feature = "orchard")]
+    put_shielded_outputs(
+        wallet_db,
+        Some(params),
+        tx_ref,
+        funding_account,
+        d_tx.orchard_outputs(),
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_orchard_note(output, tx_ref, d_tx.mined_height(), spent_in)
+        },
+        |_account_id| {
+            #[cfg(feature = "transparent-inputs")]
+            gap_update_set.insert((_account_id, TransparentKeyScope::EXTERNAL));
+        },
+    )?;
+
+    // Ironwood outputs are Orchard-shaped but belong to a distinct pool; store them in the
+    // Ironwood tables rather than misfiling them alongside Orchard notes.
+    #[cfg(feature = "orchard")]
+    put_shielded_outputs(
+        wallet_db,
+        Some(params),
+        tx_ref,
+        funding_account,
+        d_tx.ironwood_outputs(),
+        |_, _| Ok(None),
+        |wallet_db, output, tx_ref, spent_in| {
+            wallet_db.put_received_ironwood_note(output, tx_ref, d_tx.mined_height(), spent_in)
+        },
+        |_account_id| {
+            #[cfg(feature = "transparent-inputs")]
+            gap_update_set.insert((_account_id, TransparentKeyScope::EXTERNAL));
+        },
+    )?;
+
+    put_transparent_outputs(
+        wallet_db,
+        params,
+        tx_ref,
+        &wallet_transparent_outputs,
+        #[cfg(feature = "transparent-inputs")]
+        |wallet_db, output| wallet_db.put_transparent_output(output, observed_height, false),
+        #[cfg(feature = "transparent-inputs")]
+        |account_id, t_key_scope| {
+            gap_update_set.insert((account_id, t_key_scope));
+        },
+    )?;
+
+    // Regenerate the gap limit addresses.
+    #[cfg(feature = "transparent-inputs")]
+    for (account_id, key_scope) in gap_update_set {
+        use ReceiverRequirement::*;
+        generate_transparent_gap_addresses(
+            wallet_db,
+            gap_limits,
+            account_id,
+            key_scope,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+        )?;
+    }
+
+    // For each transaction that spends a transparent output of this transaction and does not
+    // already have a known fee value, set the fee if possible.
+    for (spending_tx_ref, spending_tx) in
+        wallet_db.get_txs_spending_transparent_outputs_of(tx_ref)?
+    {
+        if let Some(fee) = determine_fee(wallet_db, &spending_tx)? {
+            wallet_db.update_tx_fee(spending_tx_ref, fee)?;
+        }
+    }
+
+    // If the transaction has outputs that belong to the wallet as well as transparent
+    // inputs, we may need to download the transactions corresponding to the transparent
+    // prevout references to determine whether the transaction was created (at least in
+    // part) by this wallet.
+    #[cfg(feature = "transparent-inputs")]
+    if tx_has_wallet_outputs {
+        wallet_db.queue_transparent_input_retrieval(tx_ref, &d_tx)?
+    }
+
+    wallet_db.delete_retrieval_queue_entries(d_tx.tx().txid())?;
+
+    // If the decrypted transaction is unmined and has no shielded components, add it to
+    // the queue for status retrieval.
+    #[cfg(feature = "transparent-inputs")]
+    {
+        let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
+        #[cfg(feature = "orchard")]
+        let detectable_via_scanning =
+            detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+
+        if d_tx.mined_height().is_none() && !detectable_via_scanning {
+            wallet_db.queue_tx_retrieval(std::iter::once(d_tx.tx().txid()), None)?
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn detect_wallet_transparent_outputs<P, AccountId, E>(
+    params: &P,
+    tx: &Transaction,
+    mined_height: Option<BlockHeight>,
+    funding_account: Option<AccountId>,
+    #[cfg(feature = "transparent-inputs")] find_account_for_address: impl Fn(
+        &TransparentAddress,
+    ) -> Result<
+        Option<(AccountId, Option<TransparentKeyScope>)>,
+        E,
+    >,
+) -> Result<Vec<WalletTransparentOutput<AccountId>>, E>
+where
+    P: consensus::Parameters,
+    AccountId: Copy + core::fmt::Debug + std::hash::Hash + std::cmp::Eq,
+{
+    let mut result = vec![];
+    for (output_index, txout) in tx
+        .transparent_bundle()
+        .iter()
+        .flat_map(|b| b.vout.iter())
+        .enumerate()
+    {
+        let script_kind = txout.script_kind();
+        if let Some(address) = script_kind
+            .as_ref()
+            .and_then(TransparentAddress::from_script_kind)
+        {
+            debug!(
+                "{:?} output {} has recipient {}",
+                tx.txid(),
+                output_index,
+                address.encode(params)
+            );
+
+            #[allow(unused_mut)]
+            let mut detected = false;
+
+            // If the output belongs to the wallet, add it to `transparent_received_outputs`.
+            #[cfg(feature = "transparent-inputs")]
+            if let Some((account_uuid, key_scope)) = find_account_for_address(&address)? {
+                debug!(
+                    "{:?} output {} belongs to account {:?}",
+                    tx.txid(),
+                    output_index,
+                    account_uuid
+                );
+                result.push(
+                    WalletTransparentOutput::from_parts(
+                        OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
+                        txout.clone(),
+                        mined_height,
+                        Some(account_uuid),
+                        key_scope,
+                        funding_account,
+                    )
+                    .expect("txout.recipient_address extraction previously checked"),
+                );
+                detected = true;
+            } else {
+                debug!(
+                    "Address {} is not recognized as belonging to any of our accounts.",
+                    address.encode(params)
+                );
+            }
+
+            if !detected {
+                // If a transaction we observe contains spends from our wallet, we will
+                // store its transparent outputs in the same way they would be stored by
+                // create_spend_to_address.
+                if let Some(account_id) = funding_account {
+                    result.push(
+                        WalletTransparentOutput::from_parts(
+                            OutPoint::new(tx.txid().into(), u32::try_from(output_index).unwrap()),
+                            txout.clone(),
+                            mined_height,
+                            None,
+                            None,
+                            Some(account_id),
+                        )
+                        .expect("txout.recipient_address extraction previously checked"),
+                    );
+                }
+            }
+        } else if let Some(script_kind) = script_kind {
+            // `OP_RETURN` (nulldata) outputs are provably-unspendable data carriers with
+            // no recipient address; they are never wallet outputs, so skip them silently
+            // rather than reporting them as unsupported.
+            if !matches!(script_kind, ScriptKind::NullData { .. }) {
+                warn!(
+                    "Ignoring unsupported script kind '{}' for tx {} output {}",
+                    script_kind.as_str(),
+                    tx.txid(),
+                    output_index
+                );
+            }
+        } else {
+            warn!(
+                "Unable to determine recipient address for tx {} output {}",
+                tx.txid(),
+                output_index
+            );
+        }
+    }
+
+    Ok(result)
+}
+
+fn mark_notes_spent<'a, DbT>(
+    wallet_db: &mut DbT,
+    tx_ref: <DbT as LowLevelWalletRead>::TxRef,
+    #[cfg(feature = "transparent-inputs")] transparent_prevouts: impl Iterator<
+        Item = &'a transparent::bundle::OutPoint,
+    >,
+    sapling_nfs: impl Iterator<Item = &'a sapling::Nullifier>,
+    #[cfg(feature = "orchard")] orchard_nfs: impl Iterator<Item = &'a orchard::note::Nullifier>,
+    #[cfg(feature = "orchard")] ironwood_nfs: impl Iterator<Item = &'a orchard::note::Nullifier>,
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletWrite,
+{
+    // If any of the utxos spent in the transaction are ours, mark them as spent.
+    #[cfg(feature = "transparent-inputs")]
+    for outpoint in transparent_prevouts {
+        wallet_db.mark_transparent_utxo_spent(outpoint, tx_ref)?;
+    }
+
+    // Mark Sapling notes as spent when we observe their nullifiers.
+    for nf in sapling_nfs {
+        wallet_db.mark_sapling_note_spent(nf, tx_ref)?;
+    }
+
+    // Mark Orchard notes as spent when we observe their nullifiers.
+    #[cfg(feature = "orchard")]
+    for nf in orchard_nfs {
+        wallet_db.mark_orchard_note_spent(nf, tx_ref)?;
+    }
+
+    // Mark Ironwood notes as spent when we observe their nullifiers.
+    #[cfg(feature = "orchard")]
+    for nf in ironwood_nfs {
+        wallet_db.mark_ironwood_note_spent(nf, tx_ref)?;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn put_shielded_outputs<DbT, P, Output>(
+    wallet_db: &mut DbT,
+    params: Option<&P>,
+    tx_ref: <DbT as LowLevelWalletRead>::TxRef,
+    funding_account: Option<DbT::AccountId>,
+    outputs: &[Output],
+    detect_note_spent_in: impl Fn(
+        &mut DbT,
+        &Output,
+    ) -> Result<
+        Option<<DbT as LowLevelWalletRead>::TxRef>,
+        <DbT as LowLevelWalletRead>::Error,
+    >,
+    put_received_note: impl Fn(
+        &mut DbT,
+        &Output,
+        <DbT as LowLevelWalletRead>::TxRef,
+        Option<<DbT as LowLevelWalletRead>::TxRef>,
+    ) -> Result<(), <DbT as LowLevelWalletRead>::Error>,
+    mut on_external_account: impl FnMut(<DbT as LowLevelWalletRead>::AccountId),
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletWrite,
+    P: consensus::Parameters,
+    Output: ReceivedShieldedOutput<AccountId = <DbT as LowLevelWalletRead>::AccountId>,
+{
+    for output in outputs {
+        let sent_output = match output.transfer_type() {
+            TransferType::Outgoing => {
+                let note = output.to_wallet_note();
+
+                let recipient = Recipient::External {
+                    recipient_address: external_address(
+                        wallet_db,
+                        params.expect("present when outgoing is possible (store_decrypted_tx)"),
+                        output.account_id(),
+                        note.receiver(),
+                    )?,
+                    output_pool: PoolType::Shielded(note.pool()),
+                };
+
+                Some((output.account_id(), recipient, note.value()))
+            }
+            TransferType::AccountInternal => {
+                let spent_in = detect_note_spent_in(wallet_db, output)?;
+                put_received_note(wallet_db, output, tx_ref, spent_in)?;
+
+                let note = output.to_wallet_note();
+                let value = note.value();
+
+                let recipient = Recipient::InternalShielded {
+                    receiving_account: output.account_id(),
+                    external_address: None,
+                    note: Box::new(note),
+                };
+
+                Some((output.account_id(), recipient, value))
+            }
+            TransferType::Incoming => {
+                let spent_in = detect_note_spent_in(wallet_db, output)?;
+                put_received_note(wallet_db, output, tx_ref, spent_in)?;
+                on_external_account(output.account_id());
+
+                if let Some(account_id) = funding_account {
+                    let note = output.to_wallet_note();
+                    let value = note.value();
+
+                    // Even if the recipient address is external, record the send as internal.
+                    let recipient = Recipient::InternalShielded {
+                        receiving_account: output.account_id(),
+                        external_address: Some(external_address(
+                            wallet_db,
+                            params.expect(
+                                "present when funding_account is known (store_decrypted_tx)",
+                            ),
+                            output.account_id(),
+                            note.receiver(),
+                        )?),
+                        note: Box::new(note),
+                    };
+
+                    Some((account_id, recipient, value))
+                } else {
+                    None
+                }
+            }
+            TransferType::WalletInternal => unreachable!(
+                "TransferType::WalletInternal is only produced for transparent outputs"
+            ),
+        };
+
+        if let Some((from_account_uuid, recipient, value)) = sent_output {
+            wallet_db.put_sent_output(
+                from_account_uuid,
+                tx_ref,
+                output.index(),
+                &recipient,
+                value,
+                output.memo(),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn put_transparent_outputs<DbT, P>(
+    wallet_db: &mut DbT,
+    params: &P,
+    tx_ref: <DbT as LowLevelWalletRead>::TxRef,
+    outputs: &[WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>],
+    #[cfg(feature = "transparent-inputs")] put_received_output: impl Fn(
+        &mut DbT,
+        &WalletTransparentOutput<<DbT as LowLevelWalletRead>::AccountId>,
+    ) -> Result<
+        (
+            <DbT as LowLevelWalletRead>::AccountId,
+            std::option::Option<TransparentKeyScope>,
+        ),
+        <DbT as LowLevelWalletRead>::Error,
+    >,
+    #[cfg(feature = "transparent-inputs")] mut on_received: impl FnMut(
+        <DbT as LowLevelWalletRead>::AccountId,
+        TransparentKeyScope,
+    ),
+) -> Result<(), <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletWrite,
+    P: consensus::Parameters,
+{
+    for output in outputs {
+        // Receive side: record the output as received whenever its recipient
+        // address belongs to a wallet account.
+        #[cfg(feature = "transparent-inputs")]
+        if output.recipient_account().is_some() {
+            let (account_id, _) = put_received_output(wallet_db, output)?;
+
+            if let Some(t_key_scope) = output.recipient_key_scope() {
+                on_received(account_id, t_key_scope);
+            }
+
+            // Queue this outpoint for explicit transparent-spend detection.
+            //
+            // Unlike shielded notes -- whose spends are detected naturally
+            // during scanning via nullifier matching -- transparent spends are
+            // only found when the wallet already knows which outpoints to
+            // watch. For receives at ordinary transparent addresses this is
+            // handled by indexer-driven address watches, but for receives at
+            // ephemeral addresses (e.g. the middle hop of a ZIP 320 / TEX
+            // flow) there is no ongoing watch. A purely-transparent spend of
+            // such an output would otherwise go undetected. This is
+            // especially a problem in wallet recovery, where transactions can
+            // be processed out of order: queuing here ensures the spend is
+            // detected even when the receive side is processed first.
+            wallet_db.queue_transparent_spend_detection(
+                *output.recipient_address(),
+                tx_ref,
+                output.outpoint().n(),
+            )?;
+        }
+
+        // Send side: record the output as sent for the wallet account that
+        // funded the transaction, if any. If the recipient is also a wallet
+        // account, the send is recorded as an internal transfer.
+        if let Some(&from_account) = output.funding_account() {
+            let recipient = match output.recipient_account() {
+                #[cfg(feature = "transparent-inputs")]
+                Some(&receiving_account) => Recipient::InternalTransparent {
+                    receiving_account,
+                    recipient_address: *output.recipient_address(),
+                },
+                #[cfg(not(feature = "transparent-inputs"))]
+                Some(_) => Recipient::External {
+                    recipient_address: Receiver::Transparent(*output.recipient_address())
+                        .to_zcash_address(params.network_type()),
+                    output_pool: PoolType::TRANSPARENT,
+                },
+                None => {
+                    let receiver = Receiver::Transparent(*output.recipient_address());
+
+                    #[cfg(feature = "transparent-inputs")]
+                    let recipient_address =
+                        external_address(wallet_db, params, from_account, receiver)?;
+
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    let recipient_address = receiver.to_zcash_address(params.network_type());
+
+                    Recipient::External {
+                        recipient_address,
+                        output_pool: PoolType::TRANSPARENT,
+                    }
+                }
+            };
+
+            wallet_db.put_sent_output(
+                from_account,
+                tx_ref,
+                output.index(),
+                &recipient,
+                output.value(),
+                None,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns the most likely account address that corresponds to the given [`Receiver`].
+fn external_address<DbT, P>(
+    wallet_db: &DbT,
+    params: &P,
+    account_id: DbT::AccountId,
+    receiver: Receiver,
+) -> Result<zcash_address::ZcashAddress, <DbT as LowLevelWalletRead>::Error>
+where
+    DbT: LowLevelWalletRead,
+    P: consensus::Parameters,
+{
+    let recipient_address = wallet_db
+        .select_receiving_address(account_id, &receiver)?
+        .unwrap_or_else(|| receiver.to_zcash_address(params.network_type()));
+
+    Ok(recipient_address)
+}
+
+/// Creates subtrees from note commitments in parallel.
+///
+/// `commitments` is an `&mut [Option<_>]` to emulate move semantics inside a `rayon`
+/// parallel iterator; every entry must be `Some` on entry, and every entry will have been
+/// taken on return.
+///
+/// Returns each located subtree together with the map from checkpointed block height to
+/// note commitment tree position within that subtree.
+pub fn build_subtrees<H, const SHARD_HEIGHT: u8>(
+    start_position: Position,
+    commitments: &mut [Option<(H, Retention<BlockHeight>)>],
+    chunk_size: usize,
+) -> Vec<(LocatedPrunableTree<H>, BTreeMap<BlockHeight, Position>)>
+where
+    H: Clone + PartialEq + Hashable + Send + Sync,
+{
+    commitments
+        .par_chunks_mut(chunk_size)
+        .enumerate()
+        .filter_map(|(i, chunk)| {
+            let start = start_position + (i * chunk_size) as u64;
+            let end = start + chunk.len() as u64;
+
+            shardtree::LocatedTree::from_iter(
+                start..end,
+                SHARD_HEIGHT.into(),
+                chunk.iter_mut().map(|n| n.take().expect("always Some")),
+            )
+        })
+        .map(|res| (res.subtree, res.checkpoints))
+        .collect()
+}
+
+/// Produces an overall set of checkpoints from a list of subtrees.
+#[cfg(feature = "orchard")]
+pub fn checkpoint_positions<H>(
+    subtrees: &[(LocatedPrunableTree<H>, BTreeMap<BlockHeight, Position>)],
+) -> BTreeMap<BlockHeight, Position> {
+    subtrees
+        .iter()
+        .flat_map(|(_, checkpoints)| checkpoints.iter())
+        .map(|(k, v)| (*k, *v))
+        .collect()
+}
+
+/// Produces the checkpoints that must be added to a pool's note commitment tree so that it
+/// gains a checkpoint at each of the requested heights, drawing position information from the
+/// existing checkpoint positions (or from the provided frontier when no preceding checkpoint
+/// exists). Heights at which a checkpoint already exists are skipped.
+#[cfg(feature = "orchard")]
+pub fn ensure_checkpoints<'a, H, I: Iterator<Item = &'a BlockHeight>, const DEPTH: u8>(
+    // An iterator of checkpoints heights for which we wish to ensure that
+    // checkpoints exists.
+    ensure_heights: I,
+    // The map of checkpoint positions from which we will draw note commitment tree
+    // position information for the newly created checkpoints.
+    existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
+    // The frontier whose position will be used for an inserted checkpoint when
+    // there is no preceding checkpoint in existing_checkpoint_positions.
+    state_final_tree: &Frontier<H, DEPTH>,
+) -> Vec<(BlockHeight, Checkpoint)> {
+    ensure_heights
+        .flat_map(|ensure_height| {
+            existing_checkpoint_positions
+                .range::<BlockHeight, _>(..=*ensure_height)
+                .last()
+                .map_or_else(
+                    || {
+                        Some((
+                            *ensure_height,
+                            state_final_tree
+                                .value()
+                                .map_or_else(Checkpoint::tree_empty, |t| {
+                                    Checkpoint::at_position(t.position())
+                                }),
+                        ))
+                    },
+                    |(existing_checkpoint_height, position)| {
+                        if *existing_checkpoint_height < *ensure_height {
+                            Some((*ensure_height, Checkpoint::at_position(*position)))
+                        } else {
+                            // The checkpoint already exists, so we don't need to
+                            // do anything.
+                            None
+                        }
+                    },
+                )
+                .into_iter()
+        })
+        .collect::<Vec<_>>()
+}
+
+/// The number of trailing blocks in a batch whose nullifier-map entries are always
+/// retained, even when [`put_blocks_rows`] can prove that insertion is skippable. This
+/// keeps the map's contents aligned with a
+/// [`LowLevelWalletWrite::prune_tracked_nullifiers`] pruning depth of the same value, and
+/// comfortably exceeds the maximum reorg depth the wallet tolerates.
+///
+/// [`LowLevelWalletWrite::prune_tracked_nullifiers`]: super::LowLevelWalletWrite::prune_tracked_nullifiers
+pub const NULLIFIER_MAP_RETENTION_BLOCKS: u32 = 100;
+
+/// Derives the nullifier-tracking floor for one [`put_blocks_rows`] batch (see the
+/// "Nullifier tracking" section of its documentation).
+///
+/// Returns `Some` only when the batch extends the contiguous fully-scanned frontier
+/// (`fully_scanned == Some(from_state_height)`) and is long enough that a floor above
+/// `from_state_height` retains the full [`NULLIFIER_MAP_RETENTION_BLOCKS`] trailing
+/// window; every out-of-order or short batch derives `None` and tracks fully.
+fn nullifier_tracking_floor(
+    fully_scanned: Option<BlockHeight>,
+    from_state_height: BlockHeight,
+    batch_end: Option<BlockHeight>,
+) -> Option<BlockHeight> {
+    if fully_scanned == Some(from_state_height) {
+        batch_end.and_then(|last| {
+            let floor =
+                BlockHeight::from(u32::from(last).saturating_sub(NULLIFIER_MAP_RETENTION_BLOCKS));
+            (floor > from_state_height + 1).then_some(floor)
+        })
+    } else {
+        None
+    }
+}
+
+/// Returns whether the nullifiers of a block at `block_height` should be inserted into the
+/// nullifier map.
+///
+/// Tracking is skipped only when a `nullifier_tracking_floor` was derived and
+/// `block_height` lies strictly below it; with no floor, every block's nullifiers are
+/// tracked. See the "Nullifier tracking" section of [`put_blocks_rows`].
+fn should_track_nullifiers(
+    nullifier_tracking_floor: Option<BlockHeight>,
+    block_height: BlockHeight,
+) -> bool {
+    nullifier_tracking_floor.is_none_or(|floor| block_height >= floor)
+}
+
+/// The interval, in blocks, at which checkpoints are retained as durable "anchors" once anchor
+/// retention is active. At 75-second blocks this is roughly every 6 hours (4 per day).
+const ANCHOR_RETENTION_INTERVAL: u32 = 288;
+
+/// Returns whether the checkpoint at `height` should be retained as a durable anchor.
+///
+/// Anchor retention is active for `height` when `anchor_retention_height` is `Some` and `height`
+/// is at or above it (i.e. at or after the network upgrade that enables anchor retention), and
+/// `height` falls on the [`ANCHOR_RETENTION_INTERVAL`].
+fn should_retain_anchor(anchor_retention_height: Option<BlockHeight>, height: BlockHeight) -> bool {
+    anchor_retention_height.is_some_and(|floor| height >= floor)
+        && u32::from(height) % ANCHOR_RETENTION_INTERVAL == 0
+}
+
+/// Retains `height` as a durable anchor checkpoint when [`should_retain_anchor`] holds.
+fn retain_anchor_checkpoint<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+    tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+    anchor_retention_height: Option<BlockHeight>,
+    height: BlockHeight,
+) -> Result<(), ShardTreeError<S::Error>>
+where
+    S: ShardStore<CheckpointId = BlockHeight>,
+    S::H: Clone + PartialEq + Hashable,
+{
+    if should_retain_anchor(anchor_retention_height, height) {
+        tree.ensure_retained(height)?;
+    }
+    Ok(())
+}
+
+/// Given the checkpoint heights present in each of the three shielded pools' note commitment
+/// trees, in the order (Sapling, Orchard, Ironwood), returns for each pool the set of checkpoint
+/// heights it must ensure so that every pool ends up checkpointed at every height that is
+/// checkpointed in any pool.
+///
+/// The set returned for a given pool is the union of the checkpoint heights of the other two
+/// pools. Consequently the union of a pool's existing checkpoint heights with the heights returned
+/// for it equals the union of all three pools' checkpoint heights, so all three trees end up
+/// checkpointed at the same set of heights. When one pool has no checkpoints, the sets returned for
+/// the other two reduce to each other's heights, matching the prior two-pool behavior.
+#[cfg(feature = "orchard")]
+pub fn cross_pool_ensure_heights(
+    sapling: &BTreeSet<BlockHeight>,
+    orchard: &BTreeSet<BlockHeight>,
+    ironwood: &BTreeSet<BlockHeight>,
+) -> [BTreeSet<BlockHeight>; 3] {
+    let union = |a: &BTreeSet<BlockHeight>, b: &BTreeSet<BlockHeight>| {
+        a.union(b).copied().collect::<BTreeSet<BlockHeight>>()
+    };
+    [
+        union(orchard, ironwood),
+        union(sapling, ironwood),
+        union(sapling, orchard),
+    ]
+}
+
+/// Updates the given note commitment tree with all newly read note commitments starting
+/// at the block `frontier_height + 1`.
+///
+/// If `anchor_retention_height` is `Some`, every checkpoint established at or above that height
+/// whose height falls on the [`ANCHOR_RETENTION_INTERVAL`] is retained as a durable anchor.
+///
+/// This is generic over the [`ShardStore`] backing the tree, so stores that maintain their note
+/// commitment trees by other means (for example, accumulating updates in memory and flushing
+/// them in bulk) can reuse the exact tree-update logic that [`put_blocks`] applies.
+pub fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+    protocol: &'static str,
+    frontier: &Frontier<S::H, DEPTH>,
+    frontier_height: BlockHeight,
+    tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+    anchor_retention_height: Option<BlockHeight>,
+    subtrees: impl Iterator<Item = (LocatedPrunableTree<S::H>, BTreeMap<BlockHeight, Position>)>,
+    #[cfg(feature = "orchard")] missing_checkpoints: impl Iterator<Item = (BlockHeight, Checkpoint)>,
+) -> Result<(), ShardTreeError<S::Error>>
+where
+    S: ShardStore<CheckpointId = BlockHeight>,
+    S::H: Clone + PartialEq + Hashable,
+{
+    debug!(
+        "{protocol} initial tree size at {frontier_height:?}: {:?}",
+        frontier.tree_size()
+    );
+    // We insert the frontier with `Checkpoint` retention because we need to be
+    // able to truncate the tree back to this point.
+    tree.insert_frontier(
+        frontier.clone(),
+        Retention::Checkpoint {
+            id: frontier_height,
+            marking: Marking::Reference,
+        },
+    )?;
+    retain_anchor_checkpoint(tree, anchor_retention_height, frontier_height)?;
+
+    for (subtree, checkpoints) in subtrees {
+        // Capture the checkpoint heights before the checkpoint map is consumed by `insert_tree`.
+        let checkpoint_heights = checkpoints.keys().copied().collect::<Vec<_>>();
+        tree.insert_tree(subtree, checkpoints)?;
+        for height in checkpoint_heights {
+            retain_anchor_checkpoint(tree, anchor_retention_height, height)?;
+        }
+    }
+
+    // Ensure we have a tree checkpoint for each checkpointed block height.
+    // We skip all checkpoints below the minimum retained checkpoint in the
+    // tree, because branches below this height may be pruned.
+    #[cfg(feature = "orchard")]
+    {
+        let min_checkpoint_height = tree
+            .store()
+            .min_checkpoint_id()
+            .map_err(ShardTreeError::Storage)?
+            .expect("At least one checkpoint was inserted (by insert_frontier)");
+
+        for (height, checkpoint) in missing_checkpoints {
+            if height > min_checkpoint_height {
+                debug!(
+                    "Adding missing {protocol} checkpoint for height: {:?}: {:?}",
+                    height,
+                    checkpoint.position()
+                );
+                tree.store_mut()
+                    .add_checkpoint(height, checkpoint.clone())
+                    .map_err(ShardTreeError::Storage)?;
+                retain_anchor_checkpoint(tree, anchor_retention_height, height)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "orchard")]
+    use std::collections::BTreeSet;
+
+    use proptest::prelude::*;
+    use zcash_protocol::consensus::BlockHeight;
+
+    #[cfg(feature = "orchard")]
+    use super::cross_pool_ensure_heights;
+    use super::{
+        ANCHOR_RETENTION_INTERVAL, NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor,
+        should_retain_anchor, should_track_nullifiers,
+    };
+
+    /// A range scanned after a gap of unscanned history (or below the frontier, or with no
+    /// frontier at all) must track every nullifier: a skipped entry could belong to a note
+    /// in the gap whose spentness would then be undetectable once the gap is scanned.
+    #[test]
+    fn out_of_order_ranges_track_fully() {
+        let h = BlockHeight::from;
+        // Frontier far below this range's start: gap ⇒ no floor.
+        assert_eq!(
+            nullifier_tracking_floor(Some(h(1_000)), h(500_000), Some(h(510_000))),
+            None
+        );
+        // No frontier at all ⇒ no floor.
+        assert_eq!(
+            nullifier_tracking_floor(None, h(500_000), Some(h(510_000))),
+            None
+        );
+        // Frontier above the range start (re-scan below the frontier) ⇒ no floor.
+        assert_eq!(
+            nullifier_tracking_floor(Some(h(600_000)), h(500_000), Some(h(510_000))),
+            None
+        );
+    }
+
+    /// Extending the contiguous frontier skips inserts below the trailing retention
+    /// window and keeps the window itself; batches no longer than the window (and empty
+    /// batches) track fully.
+    #[test]
+    fn frontier_batches_retain_the_trailing_window() {
+        let from = BlockHeight::from(500_000);
+        let last = BlockHeight::from(510_000);
+        let floor =
+            nullifier_tracking_floor(Some(from), from, Some(last)).expect("frontier ⇒ floor");
+        assert_eq!(
+            u32::from(last) - u32::from(floor),
+            NULLIFIER_MAP_RETENTION_BLOCKS
+        );
+
+        let short = BlockHeight::from(500_000 + NULLIFIER_MAP_RETENTION_BLOCKS / 2);
+        assert_eq!(
+            nullifier_tracking_floor(Some(from), from, Some(short)),
+            None
+        );
+        assert_eq!(nullifier_tracking_floor(Some(from), from, None), None);
+    }
+
+    #[test]
+    fn nullifier_tracking_floor_gating() {
+        let floor = BlockHeight::from(1000);
+
+        // With no floor, every block's nullifiers are tracked.
+        assert!(should_track_nullifiers(None, BlockHeight::from(0)));
+        assert!(should_track_nullifiers(None, BlockHeight::from(999)));
+
+        // At or above the floor: tracked.
+        assert!(should_track_nullifiers(
+            Some(floor),
+            BlockHeight::from(1000)
+        ));
+        assert!(should_track_nullifiers(
+            Some(floor),
+            BlockHeight::from(1001)
+        ));
+
+        // Strictly below the floor: skipped.
+        assert!(!should_track_nullifiers(
+            Some(floor),
+            BlockHeight::from(999)
+        ));
+        assert!(!should_track_nullifiers(Some(floor), BlockHeight::from(0)));
+    }
+
+    #[test]
+    fn anchor_retention_gating() {
+        let interval = ANCHOR_RETENTION_INTERVAL;
+        let floor = BlockHeight::from(4 * interval);
+
+        // With no retention floor, nothing is retained, even on the interval.
+        assert!(!should_retain_anchor(None, BlockHeight::from(8 * interval)));
+
+        // On the interval and at or above the floor: retained.
+        assert!(should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(4 * interval)
+        ));
+        assert!(should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(8 * interval)
+        ));
+
+        // On the interval but below the floor: not retained.
+        assert!(!should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(3 * interval)
+        ));
+
+        // At or above the floor but not on the interval: not retained.
+        assert!(!should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(4 * interval + 1)
+        ));
+        assert!(!should_retain_anchor(
+            Some(floor),
+            BlockHeight::from(5 * interval - 1)
+        ));
+    }
+
+    #[cfg(feature = "orchard")]
+    prop_compose! {
+        /// An arbitrary set of note-commitment-tree checkpoint block heights.
+        fn arb_heights()(
+            heights in proptest::collection::vec(0u32..100, 0..20),
+        ) -> BTreeSet<BlockHeight> {
+            heights.into_iter().map(BlockHeight::from).collect()
+        }
+    }
+
+    #[cfg(feature = "orchard")]
+    fn union(a: &BTreeSet<BlockHeight>, b: &BTreeSet<BlockHeight>) -> BTreeSet<BlockHeight> {
+        a.union(b).copied().collect()
+    }
+
+    proptest! {
+        /// After reconciliation every pool is checkpointed at exactly the union of all three
+        /// pools' checkpoint heights, so the three note commitment trees end up with an identical
+        /// set of checkpoint heights. This is the invariant that keeps cross-pool rewinds
+        /// consistent.
+        #[test]
+        #[cfg(feature = "orchard")]
+        fn ensure_heights_align_all_pools(
+            sapling in arb_heights(),
+            orchard in arb_heights(),
+            ironwood in arb_heights(),
+        ) {
+            let [ensure_sapling, ensure_orchard, ensure_ironwood] =
+                cross_pool_ensure_heights(&sapling, &orchard, &ironwood);
+
+            let total = union(&union(&sapling, &orchard), &ironwood);
+
+            prop_assert_eq!(union(&sapling, &ensure_sapling), total.clone());
+            prop_assert_eq!(union(&orchard, &ensure_orchard), total.clone());
+            prop_assert_eq!(union(&ironwood, &ensure_ironwood), total);
+
+            // The heights ensured for a pool are exactly the union of the other two pools'
+            // checkpoint heights.
+            prop_assert_eq!(ensure_sapling, union(&orchard, &ironwood));
+            prop_assert_eq!(ensure_orchard, union(&sapling, &ironwood));
+            prop_assert_eq!(ensure_ironwood, union(&sapling, &orchard));
+        }
+
+        /// With no Ironwood checkpoints (the pre-Ironwood-activation reality), reconciliation of
+        /// the Sapling and Orchard trees is unchanged from the prior two-pool behavior: each
+        /// ensures the other's heights, and the empty Ironwood tree ensures the union of both.
+        #[test]
+        #[cfg(feature = "orchard")]
+        fn ensure_heights_degrade_to_two_pools(
+            sapling in arb_heights(),
+            orchard in arb_heights(),
+        ) {
+            let [ensure_sapling, ensure_orchard, ensure_ironwood] =
+                cross_pool_ensure_heights(&sapling, &orchard, &BTreeSet::new());
+
+            prop_assert_eq!(ensure_sapling, orchard.clone());
+            prop_assert_eq!(ensure_orchard, sapling.clone());
+            prop_assert_eq!(ensure_ironwood, union(&sapling, &orchard));
+        }
+    }
+}

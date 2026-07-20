@@ -1,0 +1,277 @@
+# Changelog
+All notable changes to this library will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this library adheres to Rust's notion of
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Future releases are
+indicated by the `PLANNED` status in order to make it possible to correctly
+represent the transitive `semver` implications of changes within the enclosing
+workspace.
+
+## [Unreleased]
+
+## [0.9.0] - 2026-07-09
+
+### Changed
+- Migrated to `zcash_protocol 0.10.0`, `zcash_address 0.13.0`.
+
+## [0.9.0-pre.0] - 2026-06-30
+
+### Added
+- `transparent::bundle::OutPoint` now implements `std::hash::Hash`.
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`.
+
+### Changed
+- `zcash_transparent::zip48::FullViewingKey::standard` now takes its `threshold`
+  argument as a `NonZeroU8` instead of a `u8`. This makes the
+  threshold-must-be-nonzero invariant explicit in the type and unrepresentable
+  by construction. Previously a zero threshold was accepted, producing a 0-of-N
+  (anyone-can-spend) P2SH multisig redeem script.
+
+## [0.8.0] - 2026-06-02
+
+### Changed
+- Migrated to `zcash_protocol 0.9.0`, `zcash_address 0.12.0`.
+
+### Fixed
+- Updated to crate versions that fix an Orchard soundness vulnerability
+  (GHSA-ww9q-8r59-xv46) and Orchard non-canonical proof size issue
+  (GHSA-2x4w-pxqw-58v9).
+
+## [0.7.0] - 2026-04-23
+
+### Added
+- `zcash_transparent::util::hash160` module
+- `zcash_transparent::util::sha256d` (moved from
+  `zcash_primitives::transaction::util::sha256d`)
+- `zcash_transparent::address::TransparentAddress::from_script_kind`
+- `zcash_transparent::bundle::TxOut::script_kind`
+- `zcash_transparent::pczt`:
+  - `Input::with_signable_input`
+  - `Input::append_signature`
+- `impl core::error::Error` for:
+  -` zcash_transparent::builder::Error`
+  - `zcash_transparent::coinbase::Error`
+- `zcash_transparent::builder::SpendInfo`
+- `zcash_transparent::builder::TransparentInputInfo::{from_parts, spend_info}`
+- `zcash_transparent::builder::Builder::add_p2pkh_input`
+- `impl {PartialEq, Eq} for zcash_transparent::keys::AccountPubKey` (compares
+  chain code and public key only; BIP 32 derivation metadata is ignored since
+  it is not preserved by the UFVK encoding)
+- `impl {PartialEq, Eq} for zcash_transparent::keys::ExternalIvk`
+- `impl Hash for zcash_transparent::keys::TransparentKeyScope`
+- `zcash_transparent::builder::p2sh_input_serialized_len`
+
+### Changed
+- MSRV is now 1.85.1.
+- Migrated to `zcash_encoding 0.4`, `zcash_protocol 0.8`, `zcash_address 0.11`.
+- Migrated from the yanked `core2` crate to `corez 0.1.1`.
+- `zcash_transparent::sighash::SignableInput::from_parts` now validates the
+  referenced transparent input index against `&Bundle<_>` and returns
+  `Result<_, InvalidInputIndex>`.
+- `zcash_transparent::builder::TransparentBuilder::add_p2sh_input` is no longer
+  restricted to the PCZT workflow; `Bundle::apply_signatures`,
+  `Bundle::prepare_transparent_signatures`, and
+  `TransparentSignatureContext::finalize_signatures` now support P2SH (multisig)
+  inputs.
+- `zcash_transparent::pczt`:
+  - `Bundle::extract` now takes its `self` argument by reference.
+  - `SignerError` has added variants:
+    - `InvalidExternalSignature`
+    - `MissingPreimage`
+    - `UnsupportedPubkey`
+- `zcash_transparent::builder::Builder::add_input` now takes a `TransparentInputInfo`
+  instead of its constituent parts. Use `Builder::add_p2pkh_input` if you need the
+  previous API.
+
+### Fixed
+- `Debug` output for `zcash_transparent::keys::{AccountPrivKey,
+  AccountPubKey, ExternalIvk, InternalIvk, EphemeralIvk, InternalOvk,
+  ExternalOvk}` now redacts key material.
+- `Debug` output for `zcash_transparent::zip48::{AccountPrivKey}`
+  now redacts the embedded extended key material.
+
+## [0.6.4] - 2026-04-16
+
+### Added
+- `zcash_transparent::sighash::SighashType::from_raw`
+
+## [0.6.3] - 2025-12-17
+
+### Added
+- `zcash_transparent::zip48`:
+  - `FullViewingKey::derive_matching_account_priv_key`
+
+### Changed
+- Enabling the `std` feature now enables `zcash_address/std`, `zcash_script/std`,
+  and `secp256k1?/std`. This change is intended to improve the ergonomics for
+  downstream users of this crate, to eliminate the need for users to manually
+  enable the `std` feature of those dependencies.
+
+## [0.6.2] - 2025-12-12
+
+### Added
+- `zcash_transparent`:
+  - `builder`:
+    - `Coinbase` marker type
+    - `impl Authorization for Coinbase`
+    - `impl MapAuth<Coinbase, Authorized> for Coinbase`
+    - `impl TransparentAuthorizingContext for Coinbase`
+    - `TransparentBuilder::build_coinbase`
+    - `std::error::Error for Error` when the `std` feature is enabled.
+  - `bundle`:
+    - `Outpoint::NULL`
+    - `TxIn::<builder::Coinbase>::coinbase`
+  - `coinbase` module, containing helpers for constructing coinbase transactions.
+
+## [0.6.1] - 2025-10-27
+
+### Added
+- `zcash_transparent::address::TransparentAddress::to_zcash_address`
+- `zcash_transparent::pczt`:
+  - `Bip32Derivation::extract_zip_48_fields`
+- `zcash_transparent::zip48` module, behind the `transparent-inputs` feature flag.
+
+## [0.6.0] - 2025-10-02
+
+### Added
+- `zcash_transparent::builder`:
+  - `TransparentBuilder::add_p2sh_input` (only for use in combination with
+    `TransparentBuilder::build_for_pczt`).
+  - `TransparentInputInfo::serialized_len`
+
+### Changed
+- Migrated to `zcash_protocol 0.7`, `zcash_address 0.10`
+- `zcash_transparent::pczt`:
+  - `Input::sign` now returns `SignerError::WrongSpendingKey` if the provided
+    signing key is not involved with the input in any way we can detect.
+  - `Bundle::finalize_spends` can now finalize P2MS inputs.
+  - `SpendFinalizerError` has added variants:
+    - `MissingRedeemScript`
+    - `RedeemScriptTooLong`
+    - `InvalidSignature`
+    - `UncompressedPubkeyInScript`
+    - `UnsupportedRedeemScript`
+
+## [0.5.0] - 2025-09-25
+
+### Added
+- `zcash_transparent::address`:
+  - `TransparentAddress::from_script_from_chain`
+  - `TransparentAddress::from_script_pubkey`
+  - `impl From<zcash_script::script::FromChain> for Script`
+  - `impl From<zcash_script::script::PubKey> for Script`
+  - `impl From<zcash_script::script::Sig> for Script`
+- `zcash_transparent::builder`:
+  - `TransparentBuilder::add_null_data_output`
+  - `Bundle<Unauthorized>::prepare_transparent_signatures` to initialize the signing context.
+  - `TransparentSignatureContext` struct for staged application of external signatures.
+- `zcash_transparent::bundle`:
+  - `TxIn::from_parts`
+  - `TxIn::{prevout, script_sig, sequence}` accessor methods.
+  - `TxOut::{value, script_pubkey}` accessor methods.
+  - `testing::{arb_script_pubkey, arb_script_sig}`
+
+### Changed
+- `zcash_transparent::address`:
+  - `Script` now wraps a `zcash_script::script::Code` instead of a bare `Vec<u8>`.
+  - `TransparentAddress::script` now returns `zcash_script::script::PubKey`
+    instead of `Script`.
+- `zcash_transparent::builder`:
+  - `Error` has added variants:
+    - `UnsupportedScript`
+    - `NullDataTooLong`
+    - `InputCountMismatch`
+    - `InvalidExternalSignature { sig_index: usize }`
+    - `DuplicateSignature`
+    - `MissingSignatures`
+  - `testing::arb_script` (use `arb_script_pubkey` or `arb_script_sig` instead).
+- `zcash_transparent::pczt`:
+  - `InputUpdater::set_redeem_script` now takes `zcash_script::script::FromChain`
+    instead of `Script`.
+  - `OutputUpdater::set_redeem_script` now takes `zcash_script::script::Redeem`
+    instead of `Script`.
+  - `ParseError` has added variants:
+    - `InvalidRedeemScript`
+    - `InvalidScriptPubkey`
+    - `InvalidScriptSig`
+
+### Deprecated
+- `zcash_transparent::bundle`:
+  - `TxIn::{prevout, script_sig, sequence}` public fields (use the new accessor
+    methods instead).
+  - `TxOut::{value, script_pubkey}` public fields (use the new accessor methods
+    instead).
+
+### Removed
+- `zcash_transparent::address`:
+  - `Script::address` (use `TransparentAddress::from_script_from_chain` or
+    `TransparentAddress::from_script_pubkey` instead).
+
+## [0.4.0] - 2025-07-31
+
+### Added
+- `zcash_transparent::address::TransparentAddress::from_pubkey`
+
+### Changed
+- Migrated to `zcash_protocol 0.6`, `zcash_address 0.9`
+- The type of `zcash_transparent::bundle::Bundle::value_balance` has changed.
+  The closure provided to this method for input retrieval can now indicate that
+  an input for the given outpoint is not available, and `value_balance` will
+  return `Ok(None)` when this is the case.
+
+### Removed
+- Removed deprecated method `zcash_transparent::keys::pubkey_to_address`;
+  use `zcash_transparent::address::TransparentAddress::from_pubkey` instead.
+
+## [0.3.0] - 2025-05-30
+
+### Changed
+- Migrated to `zcash_address 0.8`.
+
+## [0.2.3] - 2025-04-04
+
+### Added
+- `zcash_transparent::sighash::SignableInput::from_parts`
+
+## [0.2.2] - 2025-04-02
+
+### Added
+- `zcash_transparent::keys::NonHardenedChildRange`
+- `zcash_transparent::keys::NonHardenedChildIter`
+- `zcash_transparent::keys::NonHardenedChildIndex::const_from_index`
+
+## [0.2.1] - 2025-03-19
+
+### Added
+- `zcash_transparent::keys::NonHardenedChildIndex::saturating_sub`
+- `zcash_transparent::keys::NonHardenedChildIndex::saturating_add`
+- `zcash_transparent::keys::NonHardenedChildIndex::MAX`
+- `impl From<NonHardenedChildIndex> for zip32::DiversifierIndex`
+- `impl TryFrom<zip32::DiversifierIndex> for NonHardenedChildIndex`
+- `impl {PartialOrd, Ord} for NonHardenedChildIndex`
+
+## [0.2.0] - 2025-02-21
+
+### Fixed
+- `zcash_transparent::keys::AccountPubKey::derive_pubkey_at_bip32_path` now
+  returns the correct result for valid paths instead of an error or panic.
+
+### Added
+- `zcash_transparent::pczt::Bip32Derivation::extract_bip_44_fields`
+
+### Changed
+- MSRV is now 1.81.0.
+- Migrated to `bip32 =0.6.0-pre.1`, `secp256k1 0.29`, `zcash_encoding 0.3`,
+  `zcash_protocol 0.5`, `zcash_address 0.7`.
+
+## [0.1.0] - 2024-12-16
+
+The entries below are relative to the `zcash_primitives` crate as of the tag
+`zcash_primitives-0.20.0`.
+
+### Added
+- `zcash_transparent::keys::AccountPubKey::derive_pubkey_at_bip32_path`

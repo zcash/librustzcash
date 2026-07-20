@@ -1,0 +1,136 @@
+// Copyright (c) 2019-2021 The Zcash developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or https://www.opensource.org/licenses/mit-license.php .
+
+syntax = "proto3";
+package cash.z.wallet.sdk.rpc;
+option go_package = "lightwalletd/walletrpc";
+option swift_prefix = "";
+
+// REMINDER: proto3 fields are all optional. A field that is not present will be set to its zero/false/empty
+// value.
+
+// Information about the state of the chain as of a given block.
+message ChainMetadata {
+    uint32 saplingCommitmentTreeSize = 1; // the size of the Sapling note commitment tree as of the end of this block
+    uint32 orchardCommitmentTreeSize = 2; // the size of the Orchard note commitment tree as of the end of this block
+    uint32 ironwoodCommitmentTreeSize = 3; // the size of the Ironwood note commitment tree as of the end of this block
+}
+
+// A compact representation of a Zcash block.
+//
+// CompactBlock is a packaging of ONLY the data from a block that's needed to:
+//   1. Detect a payment to your Shielded address
+//   2. Detect a spend of your Shielded notes
+//   3. Update your witnesses to generate new spend proofs.
+//   4. Spend UTXOs associated to t-addresses of your wallet.
+//
+// Currently, the `header` field should always be unset (empty). In the future, 
+// the presence or absence of header data may be made dependent on request 
+// parameters, although it is likely that such flexibility will only be provided via 
+// newly-added service methods, not via existing APIs.
+message CompactBlock {
+    // Field 1 (`protoVersion`) was removed; see
+    // https://github.com/zcash/lightwallet-protocol/issues/25
+    reserved 1;
+    reserved "protoVersion";
+    uint64 height = 2;               // the height of this block
+    bytes hash = 3;                  // if present, the ID (hash) of this block
+    bytes prevHash = 4;              // if present, the ID (hash) of this block's predecessor
+    uint32 time = 5;                 // if non-zero, Unix epoch time when the block was mined
+    bytes header = 6;                // if present, full header (as returned by the getblock RPC)
+    repeated CompactTx vtx = 7;      // zero or more compact transactions from this block
+    ChainMetadata chainMetadata = 8; // information about the state of the chain as of this block
+}
+
+// A compact representation of a Zcash transaction.
+//
+// CompactTx contains the minimum information for a wallet to know if this transaction
+// is relevant to it (either pays to it or spends from it) via shielded elements. Additionally,
+// it can optionally include the minimum necessary data to detect payments to transparent addresses
+// related to your wallet.
+message CompactTx {
+    // The index of the transaction within the block.
+    uint64 index = 1;
+
+    // The id of the transaction as defined in
+    // [§ 7.1.1 ‘Transaction Identifiers’](https://zips.z.cash/protocol/protocol.pdf#txnidentifiers)
+    // This byte array MUST be in protocol order and MUST NOT be reversed
+    // or hex-encoded; the byte-reversed and hex-encoded representation is
+    // exclusively a textual representation of a txid.
+    bytes txid = 2;
+
+    // The transaction fee: present if server can provide. In the case of a
+    // stateless server and a transaction with transparent inputs, this will be
+    // unset because the calculation requires reference to prior transactions.
+    // If there are no transparent inputs, the fee will be calculable as:
+    //    valueBalanceSapling + valueBalanceOrchard + valueBalanceIronwood
+    //    + sum(vPubNew) - sum(vPubOld) - sum(tOut)
+    uint32 fee = 3;
+
+    repeated CompactSaplingSpend spends = 4;
+    repeated CompactSaplingOutput outputs = 5;
+    repeated CompactOrchardAction actions = 6;
+    repeated CompactOrchardAction ironwoodActions = 9;
+
+    // `CompactTxIn` values corresponding to the `vin` entries of the full transaction.
+    //
+    // Note: the single null-outpoint input for coinbase transactions is omitted. Light
+    // clients can test `CompactTx.index == 0` to determine whether a `CompactTx`
+    // represents a coinbase transaction, as the coinbase transaction is always the
+    // first transaction in any block.
+    repeated CompactTxIn vin = 7;
+
+    // A sequence of transparent outputs being created by the transaction.
+    repeated TxOut vout = 8;
+}
+
+// A compact representation of a transparent transaction input.
+message CompactTxIn {
+    // The id of the transaction that generated the output being spent. This
+    // byte array must be in protocol order and MUST NOT be reversed or
+    // hex-encoded.
+    bytes prevoutTxid = 1;
+
+    // The index of the output being spent in the `vout` array of the
+    // transaction referred to by `prevoutTxid`.
+    uint32 prevoutIndex = 2;
+}
+
+// A transparent output being created by the transaction.
+//
+// This contains identical data to the `TxOut` type in the transaction itself, and
+// thus it is not "compact".
+message TxOut {
+    // The value of the output, in Zatoshis.
+    uint64 value = 1;
+
+    // The script pubkey that must be satisfied in order to spend this output.
+    bytes scriptPubKey = 2;
+}
+
+// A compact representation of a [Sapling Spend](https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus).
+//
+// CompactSaplingSpend is a Sapling Spend Description as described in 7.3 of the Zcash
+// protocol specification.
+message CompactSaplingSpend {
+    bytes nf = 1;   // Nullifier (see the Zcash protocol specification)
+}
+
+// A compact representation of a [Sapling Output](https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus).
+//
+// It encodes the `cmu` field, `ephemeralKey` field, and a 52-byte prefix of the
+// `encCiphertext` field of a Sapling Output Description. Total size is 116 bytes.
+message CompactSaplingOutput {
+    bytes cmu = 1;          // Note commitment u-coordinate.
+    bytes ephemeralKey = 2; // Ephemeral public key.
+    bytes ciphertext = 3;   // First 52 bytes of ciphertext.
+}
+
+// A compact representation of an [Orchard Action](https://zips.z.cash/protocol/protocol.pdf#actionencodingandconsensus).
+message CompactOrchardAction {
+    bytes nullifier = 1;        // [32] The nullifier of the input note
+    bytes cmx = 2;              // [32] The x-coordinate of the note commitment for the output note
+    bytes ephemeralKey = 3;     // [32] An encoding of an ephemeral Pallas public key
+    bytes ciphertext = 4;       // [52] The first 52 bytes of the encCiphertext field
+}

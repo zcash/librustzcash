@@ -1,0 +1,48 @@
+[package]
+name = "zcash_address"
+description = "Zcash address parsing and serialization"
+version = "0.13.0"
+authors = [
+    "Jack Grigg <jack@electriccoin.co>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories = ["cryptography::cryptocurrencies", "encoding"]
+keywords = ["zcash", "address", "sapling", "unified"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+bech32.workspace = true
+bs58.workspace = true
+corez.workspace = true
+f4jumble = { version = "0.1.1", path = "../f4jumble", default-features = false, features = ["alloc"] }
+zcash_protocol.workspace = true
+zcash_encoding.workspace = true
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+assert_matches.workspace = true
+proptest.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "corez/std",
+    "f4jumble/std",
+    "zcash_encoding/std",
+    "zcash_protocol/std",
+]
+test-dependencies = ["dep:proptest"]
+
+[lib]
+bench = false
+
+[lints]
+workspace = true

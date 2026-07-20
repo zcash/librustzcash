@@ -1,0 +1,549 @@
+name: CI
+
+permissions: {}
+
+on:
+  pull_request:
+  push:
+    branches: main
+  merge_group:
+
+jobs:
+  required-test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      statuses: write
+    strategy:
+      matrix:
+        target:
+          - Linux
+        state:
+          - transparent
+          - transparent-inputs-only
+          - transparent-key-encoding-only
+          - Sapling-only
+          - Orchard
+          - all-pools
+          - all-features
+          - NU6.3
+          - NU7
+
+        include:
+          - target: Linux
+            os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+
+          - state: transparent
+            transparent-pool: true
+          - state: transparent-inputs-only
+            extra_flags: transparent-inputs
+          - state: transparent-key-encoding-only
+            extra_flags: transparent-key-encoding
+          - state: Orchard
+            orchard-pool: true
+          - state: all-pools
+            all-pools: true
+          - state: all-features
+            all-features: true
+          - state: NU7
+            all-features: true
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          transparent-pool: ${{ matrix.transparent-pool || false }}
+          orchard-pool: ${{ matrix.orchard-pool || false }}
+          all-pools: ${{ matrix.all-pools || false }}
+          all-features: ${{ matrix.all-features || false }}
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: msrv
+          save-if: ${{ matrix.state == 'all-features' }}
+      - name: Run tests
+        run: >
+          cargo test
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test:
+    name: Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - macOS
+          - Windows
+        state:
+          - transparent
+          - Sapling-only
+          - Orchard
+          - all-pools
+          - all-features
+          - NU6.3
+          - NU7
+
+        include:
+          - target: macOS
+            os: macOS-latest
+          - target: Windows
+            os: ${{ vars.WINDOWS_LARGE_RUNNER || 'windows-latest' }}
+
+          - state: transparent
+            transparent-pool: true
+          - state: Orchard
+            orchard-pool: true
+          - state: all-pools
+            all-pools: true
+          - state: all-features
+            all-features: true
+          - state: NU7
+            all-features: true
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+        exclude:
+          - target: macOS
+            state: all-features
+          - target: macOS
+            state: NU6.3
+          - target: macOS
+            state: NU7
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          transparent-pool: ${{ matrix.transparent-pool || false }}
+          orchard-pool: ${{ matrix.orchard-pool || false }}
+          all-pools: ${{ matrix.all-pools || false }}
+          all-features: ${{ matrix.all-features || false }}
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: msrv
+          save-if: ${{ matrix.state == 'all-features' && matrix.target != 'Windows' }}
+      - name: Run tests
+        run: >
+          cargo test
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test-slow:
+    name: Slow Test ${{ matrix.state }} on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      matrix:
+        target:
+          - Linux
+        state: # all-pools intentionally omitted
+          - transparent
+          - Sapling-only
+          - Orchard
+          - all-features
+          - NU6.3
+          - NU7
+
+        include:
+          - target: Linux
+            os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+
+          - state: transparent
+            transparent-pool: true
+          - state: Orchard
+            orchard-pool: true
+          - state: all-features
+            all-features: true
+          - state: NU7
+            all-features: true
+            rustflags: '--cfg zcash_unstable="nu7"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          transparent-pool: ${{ matrix.transparent-pool || false }}
+          orchard-pool: ${{ matrix.orchard-pool || false }}
+          all-pools: false
+          all-features: ${{ matrix.all-features || false }}
+          extra-features: ${{ matrix.extra_flags || '' }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: msrv
+          save-if: "false"
+      - name: Run slow tests
+        run: >
+          cargo test
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+          --features expensive-tests
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  build-latest:
+    name: Latest build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    env:
+      # Override the workspace `rust-toolchain.toml` (which pins the MSRV) so
+      # this job actually exercises the latest stable toolchain.
+      RUSTUP_TOOLCHAIN: stable
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          shared-key: latest
+      # macOS-latest pre-installs a system `rustc` that is not a rustup proxy
+      # and does not understand `+toolchain` syntax. Ensure rustup's proxies in
+      # $CARGO_HOME/bin take precedence so `rustc +stable ...` works.
+      - name: Ensure rustup proxies take precedence
+        shell: bash
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
+      - name: Remove lockfile to build with latest dependencies
+        run: rm Cargo.lock
+      - name: Build crates
+        run: >
+          cargo build
+          --workspace
+          --all-targets
+          ${{ steps.prepare.outputs.feature-flags }}
+          --verbose
+      - name: Verify working directory is clean (excluding lockfile)
+        run: git diff --exit-code ':!Cargo.lock'
+
+  build-nodefault:
+    name: Build target ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - wasm32-wasip1
+        include:
+          - target: wasm32-wasip1
+            build_deps: >
+              gcc-multilib
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          path: crates
+      - name: Install linux build dependencies
+        run: sudo apt update && sudo apt install ${{ matrix.build_deps }}
+        if: matrix.build_deps != ''
+      # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
+      # be incompatible with some of these targets.
+      - name: Copy Rust toolchain into the root for use in synthetic crate setup
+        run: cp crates/rust-toolchain.toml .
+      - name: Create synthetic crate for testing
+        run: cargo init --lib ci-build
+      - name: Move Rust toolchain file into synthetic crate
+        run: mv rust-toolchain.toml ci-build/
+      - name: Copy patch directives into synthetic crate
+        run: |
+          echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
+          cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
+      - name: Add zcash_proofs as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_proofs
+      - name: Add zcash_client_backend as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --path ../crates/zcash_client_backend
+      - name: Copy pinned dependencies into synthetic crate
+        run: cp crates/Cargo.lock ci-build/
+      - name: Add target
+        working-directory: ./ci-build
+        run: rustup target add ${{ matrix.target }}
+      - name: Build for target
+        working-directory: ./ci-build
+        run: cargo build --verbose --target ${{ matrix.target }}
+
+  build-nostd:
+    name: Build target ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - thumbv7em-none-eabihf
+        include:
+          - target: thumbv7em-none-eabihf
+            build_deps: >
+              gcc-arm-none-eabi
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          path: crates
+      - name: Install linux build dependencies
+        run: sudo apt update && sudo apt install ${{ matrix.build_deps }}
+        if: matrix.build_deps != ''
+      # We use a synthetic crate to ensure no dev-dependencies are enabled, which can
+      # be incompatible with some of these targets.
+      - name: Copy Rust toolchain into the root for use in synthetic crate setup
+        run: cp crates/rust-toolchain.toml .
+      - name: Create synthetic crate for testing
+        run: cargo init --lib ci-build
+      - name: Move Rust toolchain file into synthetic crate
+        run: mv rust-toolchain.toml ci-build/
+      - name: Copy patch directives into synthetic crate
+        run: |
+          echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
+          cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
+      - name: Add no_std pragma to lib.rs
+        run: |
+          echo "#![no_std]" > ./ci-build/src/lib.rs
+      - name: Add zcash_keys as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_keys
+      - name: Add pczt as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/pczt
+      - name: Add zcash_primitives as a dependency of the synthetic crate
+        working-directory: ./ci-build
+        run: cargo add --no-default-features --path ../crates/zcash_primitives
+      - name: Add lazy_static with the spin_no_std feature
+        working-directory: ./ci-build
+        run: cargo add lazy_static --features "spin_no_std"
+      - name: Copy pinned dependencies into synthetic crate
+        run: cp crates/Cargo.lock ci-build/
+      - name: Add target
+        working-directory: ./ci-build
+        run: rustup target add ${{ matrix.target }}
+      - name: Build for target
+        working-directory: ./ci-build
+        run: cargo build --verbose --target ${{ matrix.target }}
+
+  bitrot:
+    name: Bitrot check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # Build benchmarks to prevent bitrot
+      - name: Build benchmarks
+        run: cargo build --all --benches
+
+  clippy:
+    name: Clippy (MSRV)
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # We can't currently use only the common feature set (to exclude checking of
+      # unstable in-progress code) because this action doesn't support spaces within CLI
+      # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
+      - name: Run clippy
+        uses: auguwu/clippy-action@9817d076b82df0194935be9db6154c56ac07b317 # 1.5.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: ${{ inputs.target }}
+          check-args: >
+            --all-features
+            --all-targets
+          args: >
+            -D warnings
+
+  clippy-beta:
+    name: Clippy (beta)
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # We can't currently use only the common feature set (to exclude checking of
+      # unstable in-progress code) because this action doesn't support spaces within CLI
+      # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
+      - uses: dtolnay/rust-toolchain@beta
+        id: toolchain
+        with:
+          components: clippy
+      - run: rustup override set "${TOOLCHAIN}"
+        shell: sh
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
+      - name: Run Clippy (beta)
+        uses: auguwu/clippy-action@9817d076b82df0194935be9db6154c56ac07b317 # 1.5.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: ${{ inputs.target }}
+          check-args: >
+            --all-features
+            --all-targets
+          args: >
+            -W clippy::all
+
+  # This is run with nightly and `RUSTDOCFLAGS` to emulate the documentation renders on
+  # docs.rs and in `.github/workflows/book.yml` as closely as possible.
+  doc-links:
+    name: Intra-doc links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+      - uses: dtolnay/rust-toolchain@nightly
+        id: toolchain
+      - run: rustup override set "${TOOLCHAIN}"
+        env:
+          TOOLCHAIN: ${{steps.toolchain.outputs.name}}
+      - run: cargo fetch
+      # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
+      - name: Check intra-doc links
+        run: >
+          cargo doc
+          --no-deps
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+          --document-private-items
+        env:
+          RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  readme-graph:
+    name: Readme dependency graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Check consistency
+        run: python3 .github/helpers/check-dep-graph.py
+
+  protobuf:
+    name: protobuf consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - id: prepare
+        uses: ./.github/actions/prepare
+      - name: Install protoc
+        uses: supplypike/setup-bin@8365380a806a88e7a0f0d07059b175ca2f5418d7 # v5.0.1
+        with:
+          uri: 'https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip'
+          name: 'protoc'
+          version: '25.1'
+          subPath: 'bin'
+      - name: Trigger protobuf regeneration
+        run: >
+          cargo check
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: run cargo-fmt to handle the case that regeneration sometimes produces unformatted output
+        run: cargo fmt
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  uuid:
+    name: UUID validity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Extract UUIDs
+        id: extract
+        run: |
+          {
+            echo 'UUIDS<<EOF'
+            git grep -h "const MIGRATION_ID: Uuid = Uuid::from_u128" zcash_client_sqlite/ |
+              sed -e "s,.*Uuid::from_u128(0x,," -e "s,_,-,g" -e "s,);,,"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Check UUID validity
+        env:
+          UUIDS: ${{ steps.extract.outputs.UUIDS }}
+        run: uuidparse -n -o type $UUIDS | xargs -L 1 test "invalid" !=
+      - name: Check UUID type
+        env:
+          UUIDS: ${{ steps.extract.outputs.UUIDS }}
+        run: uuidparse -n -o type $UUIDS | xargs -L 1 test "random" =
+      - name: Check UUID uniqueness
+        env:
+          UUIDS: ${{ steps.extract.outputs.UUIDS }}
+        run: >
+          test $(
+            uuidparse -n -o uuid $U4 | wc -l
+          ) -eq $(
+            uuidparse -n -o uuid $U4 | sort | uniq | wc -l
+          )
+
+  required-checks:
+    name: Required status checks have passed
+    needs:
+      - required-test
+      - build-latest
+      - build-nodefault
+      - bitrot
+      - clippy
+      - doc-links
+      - fmt
+      - protobuf
+      - uuid
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine whether all required-pass steps succeeded
+        run: |
+          echo "${NEEDS}" | jq -e '[ .[] | .result == "success" ] | all'
+        env:
+          NEEDS: ${{ toJSON(needs) }}

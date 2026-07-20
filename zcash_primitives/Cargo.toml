@@ -1,0 +1,154 @@
+[package]
+name = "zcash_primitives"
+description = "Rust implementations of the Zcash primitives"
+version = "0.29.0"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+equihash.workspace = true
+zcash_encoding.workspace = true
+zcash_protocol.workspace = true
+zcash_script.workspace = true
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - CSPRNG
+rand_core.workspace = true
+
+# - Digests (output types exposed)
+blake2b_simd.workspace = true
+sha2.workspace = true
+
+# - Logging and metrics
+memuse.workspace = true
+
+# - Shielded protocols
+ff.workspace = true
+jubjub.workspace = true
+nonempty.workspace = true
+orchard.workspace = true
+sapling.workspace = true
+
+# - Note Commitment Trees
+incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+
+# - Transparent protocol
+transparent.workspace = true
+
+# - Transparent inputs
+block-buffer.workspace = true # remove after edition2024 upgrade
+crypto-common.workspace = true # remove after edition2024 upgrade
+#   - `SecretKey` and `PublicKey` types exposed
+secp256k1 = { workspace = true, optional = true }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features = { workspace = true, optional = true }
+
+# - Encodings
+hex.workspace = true
+
+# - Shielded protocols
+redjubjub.workspace = true
+
+# No-std support
+corez.workspace = true
+
+[dependencies.zcash_note_encryption]
+workspace = true
+features = ["pre-zip-212"]
+
+[dev-dependencies]
+bls12_381.workspace = true
+chacha20poly1305 = "0.10"
+criterion.workspace = true
+incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
+proptest.workspace = true
+assert_matches.workspace = true
+rand_xorshift.workspace = true
+transparent = { workspace = true, features = ["test-dependencies"] }
+sapling = { workspace = true, features = ["test-dependencies"] }
+orchard = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
+zip32.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
+
+[features]
+default = ["multicore", "std", "circuits"]
+std = [
+    "document-features",
+    "redjubjub/std",
+    "sapling/std",
+    "orchard/std",
+    "transparent/std",
+]
+zip-233 = []
+
+## Enables creating proofs
+circuits = ["orchard/circuit", "sapling/circuit"]
+
+## Enables multithreading support for creating proofs.
+multicore = ["orchard/multicore", "sapling/multicore"]
+
+## Enables spending transparent notes with the transaction builder.
+transparent-inputs = [
+    "transparent/transparent-inputs",
+    "dep:secp256k1",
+]
+
+### A temporary feature flag that exposes granular APIs needed by `zcashd`. These APIs
+### should not be relied upon and will be removed in a future release.
+temporary-zcashd = []
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = [
+    "dep:proptest",
+    "incrementalmerkletree/test-dependencies",
+    "orchard/test-dependencies",
+    "sapling/test-dependencies",
+    "transparent/test-dependencies",
+    "zcash_protocol/test-dependencies",
+]
+
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
+
+## A feature used to ensure that expensive tests do not run when running with --all-features
+no-expensive-tests = []
+
+## A feature that provides `FeeRule` implementations and constructors for
+## non-standard fees.
+non-standard-fees = []
+
+[lib]
+bench = false
+
+[[bench]]
+name = "note_decryption"
+harness = false
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[lints]
+workspace = true

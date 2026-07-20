@@ -1,0 +1,314 @@
+[package]
+name = "zcash_client_backend"
+description = "APIs for creating shielded Zcash light clients"
+version = "0.24.0-rc.1"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
+
+[package.metadata.cargo-udeps.ignore]
+development = ["zcash_proofs"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+zcash_address.workspace = true
+zcash_encoding.workspace = true
+zcash_keys = { workspace = true, features = ["std", "sapling"] }
+zcash_note_encryption.workspace = true
+zcash_primitives = { workspace = true, features = ["std", "circuits"] }
+zcash_protocol.workspace = true
+zcash_script.workspace = true
+zip32.workspace = true
+zip321.workspace = true
+transparent.workspace = true
+pczt = { workspace = true, optional = true }
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Data Access API
+time = { workspace = true, features = ["std"] }
+nonempty.workspace = true
+
+# - CSPRNG
+rand_core.workspace = true
+
+# - Encodings
+base64.workspace = true
+bech32.workspace = true
+bs58.workspace = true
+postcard = { workspace = true, optional = true }
+
+# - Errors
+bip32 = { workspace = true, optional = true }
+
+# - Logging and metrics
+memuse.workspace = true
+tracing.workspace = true
+
+# - Protobuf interfaces and gRPC bindings
+hex.workspace = true
+prost.workspace = true
+tonic = { workspace = true, optional = true, features = ["codegen"] }
+tonic-prost = { workspace = true, optional = true }
+
+# - Secret management
+secrecy.workspace = true
+subtle.workspace = true
+
+# - Shielded protocols
+bls12_381.workspace = true
+group.workspace = true
+orchard.workspace = true
+sapling.workspace = true
+
+# - Transparent protocol
+secp256k1 = { workspace = true, optional = true }
+
+# - Sync engine
+async-trait = { version = "0.1", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+# - Note commitment trees
+incrementalmerkletree.workspace = true
+shardtree.workspace = true
+
+# - Test dependencies
+ambassador = { workspace = true, optional = true }
+assert_matches = { workspace = true, optional = true }
+pasta_curves = { workspace = true, optional = true }
+proptest = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
+zcash_proofs = { workspace = true, optional = true }
+
+# - Tor
+# -- Exposed types: `arti_client::DormantMode`, `fs_mistrust::MistrustBuilder`.
+# -- Exposed error types: `arti_client::Error`, `arti_client::config::ConfigBuildError`,
+#    `hyper::Error`, `hyper::http::Error`, `serde_json::Error`. We could avoid this with
+#    changes to error handling.
+arti-client = { workspace = true, optional = true }
+dynosaur = { workspace = true, optional = true }
+fs-mistrust = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true, features = ["client", "http1"] }
+serde_json = { workspace = true, optional = true }
+trait-variant = { workspace = true, optional = true }
+
+# - Currency conversion
+rust_decimal = { workspace = true, optional = true }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features.workspace = true
+
+# - Encodings
+byteorder = { workspace = true, optional = true }
+percent-encoding.workspace = true
+
+# - Scanning
+flume.workspace = true
+rayon.workspace = true
+
+# - Tor
+tokio = { workspace = true, optional = true, features = ["fs"] }
+tor-rtcompat = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+
+# - HTTP through Tor
+http-body-util = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Boilerplate
+getset.workspace = true
+
+[build-dependencies]
+tonic-prost-build.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+ambassador.workspace = true
+assert_matches.workspace = true
+gumdrop = "0.8"
+incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
+jubjub.workspace = true
+proptest.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true
+shardtree = { workspace = true, features = ["test-dependencies"] }
+tempfile = "3.5.0"
+tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
+transparent = { workspace = true, features = ["test-dependencies"] }
+zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_keys = { workspace = true, features = ["test-dependencies"] }
+zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
+
+[features]
+default = ["time/default"]
+zip-233 = ["zcash_primitives/zip-233"]
+
+## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
+lightwalletd-tonic = ["dep:tonic", "dep:tonic-prost", "hyper-util?/tokio"]
+
+## Enables the `tls-webpki-roots` feature of `tonic`.
+lightwalletd-tonic-tls-webpki-roots = ["lightwalletd-tonic", "tonic?/tls-webpki-roots"]
+
+## Enables the `transport` feature of `tonic` producing a fully-featured client and server implementation
+lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
+
+## Enables receiving transparent funds and shielding them.
+transparent-inputs = [
+    "dep:bip32",
+    "dep:secp256k1",
+    "transparent/transparent-inputs",
+    "zcash_keys/transparent-inputs",
+    "zcash_primitives/transparent-inputs",
+]
+
+# Enables operations that permit arbitrary transparent pubkeys to be associated
+# with an account in the wallet. Applications that rely on this feature must
+# maintain spending keys corresponding to all imported pubkeys for any account
+# from which it permits spending.
+transparent-key-import = ["transparent-inputs"]
+
+## Enables per-outpoint transparent spend queries, for consumers that have access
+## to a spent-outpoint index (e.g. a full node's spend index). Adds the
+## `TransactionDataRequest::GetSpendingTx` request variant and the
+## `WalletWrite::notify_output_verified_unspent` method, and is what a wallet
+## targeting such a data source enables instead of relying on address-based
+## `TransactionsInvolvingAddress` requests for transparent spend detection.
+spend-index = ["transparent-inputs"]
+
+## Enables receiving and spending Orchard funds.
+##
+## The `orchard` crate itself is an unconditional dependency (via
+## `zcash_primitives`, which always requires it because every v5+ transaction
+## carries an Orchard bundle type); this feature gates the wallet's
+## Orchard note-handling code, not the crate linkage.
+orchard = ["dep:pasta_curves", "zcash_keys/orchard"]
+
+## Enables compatibility with legacy zcashd wallet data
+zcashd-compat = ["zcash_keys/zcashd-compat"]
+
+## Enables creating partially-constructed transactions for use in hardware wallet and multisig scenarios.
+pczt = [
+  "orchard",
+  "transparent-inputs",
+  "pczt/zcp-builder",
+  "pczt/io-finalizer",
+  "pczt/prover",
+  "pczt/signer",
+  "pczt/spend-finalizer",
+  "pczt/tx-extractor",
+  "dep:postcard",
+  "dep:serde",
+]
+
+## Exposes a wallet synchronization function that implements the necessary state machine.
+sync = [
+    "lightwalletd-tonic",
+    "dep:async-trait",
+    "dep:futures-util",
+]
+
+## Exposes a batch decryption engine for use within syncing.
+##
+## This feature flag will eventually be removed when the `sync::run` function behind the
+## `sync` feature flag is replaced with a sync engine that makes use of the batch
+## decryption engine.
+sync-decryptor = [
+    "dep:tokio",
+    "tokio?/macros",
+    "tokio?/rt",
+    "tokio?/sync",
+    "tokio?/time",
+    # Required by the named-task `spawn!` macro on `--cfg tokio_unstable`, where
+    # `tokio::task::Builder` is gated behind tokio's `tracing` feature.
+    "tokio?/tracing",
+]
+
+## Exposes a Tor client for hiding a wallet's IP address while performing certain wallet
+## operations.
+tor = [
+    "dep:arti-client",
+    "dep:dynosaur",
+    "dep:fs-mistrust",
+    "dep:futures-util",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:rand",
+    "dep:rust_decimal",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:tokio",
+    "dep:tokio-rustls",
+    "dep:tor-rtcompat",
+    "dep:trait-variant",
+    "dep:tower",
+    "dep:webpki-roots",
+]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+##
+## NOTE: Semver-breaking changes to the APIs exposed by this feature may be
+## present in any release version, including patch releases.
+test-dependencies = [
+    "dep:ambassador",
+    "dep:assert_matches",
+    "dep:proptest",
+    "dep:jubjub",
+    "dep:rand",
+    "dep:rand_chacha",
+    "transparent/test-dependencies",
+    "orchard/test-dependencies",
+    "zcash_keys/test-dependencies",
+    "zcash_primitives/test-dependencies",
+    "zcash_proofs/bundled-prover",
+    "zcash_protocol/local-consensus",
+    "incrementalmerkletree/test-dependencies",
+]
+
+## Exposes APIs that allow calculation of non-standard fees.
+non-standard-fees = ["zcash_primitives/non-standard-fees"]
+
+#! ### Experimental features
+
+## Exposes unstable APIs. Their behaviour may change at any time.
+unstable = ["dep:byteorder", "zcash_keys/unstable"]
+
+## Exposes APIs for unstable serialization formats. These may change at any time.
+unstable-serialization = ["dep:byteorder"]
+
+## Exposes the `data_api::scanning::spanning_tree` module.
+unstable-spanning-tree = []
+
+[lib]
+bench = false
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[lints]
+workspace = true

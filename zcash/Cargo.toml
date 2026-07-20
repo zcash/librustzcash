@@ -1,0 +1,39 @@
+[package]
+name = "zcash"
+version = "0.1.0"
+authors = [
+    "Jack Grigg <jack@electriccoin.co>",
+]
+edition.workspace = true
+rust-version.workspace = true
+description = "Zcash Rust APIs"
+readme = "README.md"
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+
+[package.metadata.release]
+release = false
+
+[dependencies]
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+zcash_primitives.workspace = true
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features.workspace = true
+
+[features]
+default = ["multicore"]
+
+## Enables multithreading support for creating proofs.
+multicore = ["zcash_primitives/multicore"]
+
+## Enables use of the transparent payment protocol for inputs.
+transparent-inputs = ["zcash_primitives/transparent-inputs"]
+
+[lints]
+workspace = true

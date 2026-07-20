@@ -1,0 +1,60 @@
+[package]
+name = "zcash_protocol"
+description = "Zcash protocol network constants and value types."
+version = "0.10.0"
+authors = [
+    "Jack Grigg <jack@electriccoin.co>",
+    "Kris Nuttycombe <kris@nutty.land>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories = ["cryptography::cryptocurrencies"]
+keywords = ["zcash"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# - Logging and metrics
+memuse = { workspace = true, optional = true }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features = { workspace = true, optional = true }
+
+# - Encodings
+zcash_encoding.workspace = true
+corez.workspace = true
+hex.workspace = true
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+incrementalmerkletree = { workspace = true, optional = true }
+incrementalmerkletree-testing = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+default = ["std"]
+std = ["document-features", "dep:memuse"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = [
+    "dep:incrementalmerkletree",
+    "dep:incrementalmerkletree-testing",
+    "dep:proptest",
+    "incrementalmerkletree?/test-dependencies",
+]
+
+## Exposes support for working with a local consensus (e.g. regtest).
+local-consensus = []
+
+[lints]
+workspace = true
