@@ -7,27 +7,32 @@
 //! (plan -> build -> sign -> schedule -> persist) without knowing how the wallet stores notes, resolves
 //! witnesses, holds keys, or persists state.
 //!
-//! This first slice covers PLANNING: [`plan_migration`] decomposes the account's spendable balance into
-//! canonical denominations, plans the preparation transactions, schedules the transfers, and reconciles
-//! the split against the preparation fees (dropping the smallest denominations when the fees do not fit
-//! the balance), producing a [`MigrationPlan`] preview for the user to consent to (ZIP 318 requires
-//! consent before any funds leave the pool). Building, signing, anchoring at proving time, persistence,
-//! and reconciliation-on-launch are added by later slices, which grow [`MigrationBackend`] with the
-//! witness, key, and storage methods they need.
+//! [`plan_migration`] decomposes the account's spendable balance into canonical denominations, plans the
+//! preparation transactions, schedules the transfers, and reconciles the split against the preparation
+//! fees (dropping the smallest denominations when the fees do not fit the balance), producing a
+//! [`MigrationPlan`] preview for the user to consent to (ZIP 318 requires consent before any funds leave
+//! the pool). After consent, [`commit_preparation`] and [`commit_transfers`] build and pre-sign the
+//! transactions (see below), reading the account's notes and witnesses and signing through the backend
+//! traits, and persisting each transaction through the store traits. The concrete durable store,
+//! anchoring at proving time, and reconciliation-on-launch are grown by a later slice.
 //!
-//! # The committed migration is stored as pre-signed PCZTs
+//! # The committed migration is stored as its transactions' PCZTs
 //!
-//! Planning is only the first phase, and the app that broadcasts is separate from the engine that
-//! plans. Once the user consents, the engine will BUILD every preparation and transfer transaction as a
-//! PCZT and PRE-SIGN it in a single session (the Orchard spend authorization is fixed independently of
-//! the proofs and the anchor), then hand each pre-signed PCZT to the backend to PERSIST alongside its
-//! schedule: broadcast height, expiry, layer and dependencies, drawn anchor boundary, and state. The
-//! durable artifact is therefore the pre-signed PCZT ready to send, not just the plan. The consuming
-//! application later reads the due transactions back from the store, updates each proof against a fresh
-//! boundary anchor, broadcasts them at their scheduled heights, and reports the outcome so the engine
-//! can advance each transaction's state. A wallet closed between planning and broadcast, or restarted
-//! partway through, resumes from the stored PCZTs. This shapes the `MigrationBackend` storage methods
-//! (store/load a transaction PCZT + its state) and the persisted state model that later slices add.
+//! Planning is only the first phase, and the application that broadcasts is separate from the engine that
+//! plans and signs. Once the user consents, the engine builds each preparation and transfer transaction
+//! as a PCZT and pre-signs it (the Orchard spend authorization is fixed independently of the proofs and
+//! the anchor), then hands each to the backend to PERSIST alongside its schedule: broadcast height,
+//! expiry, layer and dependencies, drawn anchor boundary, and state. Signing spans MORE THAN ONE session,
+//! as ZIP 318 permits: [`commit_preparation`] builds and signs the preparation, and only once it has
+//! mined, so the funding notes it mints become witnessable, does [`commit_transfers`] build and sign the
+//! transfers. (Later slices extend this to a multi-layer preparation, signing each layer as its
+//! predecessor mines, and to an external hardware signer, which builds each transaction UNSIGNED and signs
+//! it out of band before it is applied back.) The durable artifact is therefore each transaction's PCZT
+//! plus its schedule and state, not just the plan. The consuming application later reads the due
+//! transactions back from the store, proves each against a fresh boundary anchor, broadcasts them at
+//! their scheduled heights, and reports the outcome so the engine can advance each transaction's state. A
+//! wallet closed between planning and broadcast, or restarted partway through, resumes from the stored
+//! PCZTs.
 //!
 //! [`note_splitting`]: crate::note_splitting
 //! [`preparation`]: crate::preparation
