@@ -178,6 +178,47 @@ pub enum MigrationStatus {
     Failed,
 }
 
+impl AsRef<str> for MigrationStatus {
+    /// The stable lowercase wire name of the status, as stored by a backend and parsed back with
+    /// [`TryFrom<&str>`](Self). Borrow-free: it returns a `&'static str`, so encoding a status
+    /// allocates nothing.
+    fn as_ref(&self) -> &str {
+        match self {
+            MigrationStatus::Planning => "planning",
+            MigrationStatus::Committed => "committed",
+            MigrationStatus::InProgress => "in_progress",
+            MigrationStatus::Complete => "complete",
+            MigrationStatus::Failed => "failed",
+        }
+    }
+}
+
+/// The error returned when a string does not name a [`MigrationStatus`] (its [`TryFrom<&str>`] impl).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseMigrationStatusError;
+
+impl fmt::Display for ParseMigrationStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unrecognized migration status")
+    }
+}
+
+impl TryFrom<&str> for MigrationStatus {
+    type Error = ParseMigrationStatusError;
+
+    /// Parses the lowercase wire name produced by [`AsRef<str>`](AsRef).
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(match s {
+            "planning" => MigrationStatus::Planning,
+            "committed" => MigrationStatus::Committed,
+            "in_progress" => MigrationStatus::InProgress,
+            "complete" => MigrationStatus::Complete,
+            "failed" => MigrationStatus::Failed,
+            _ => return Err(ParseMigrationStatusError),
+        })
+    }
+}
+
 /// The persisted state of a migration: the note split (for the preview and residual accounting) and
 /// every transaction, each as its pre-signed PCZT and metadata. A wallet resumes a migration entirely
 /// from this state after being closed or restarted; this is what a [`MigrationBackend`] stores.
