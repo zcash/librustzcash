@@ -82,6 +82,7 @@ zeroize = { version = "1.7", default-features = false }
 
 # Boilerplate & missing stdlib
 getset = "0.1"
+libm = "0.2"
 nonempty = { version = "0.11", default-features = false }
 
 # CSPRNG
