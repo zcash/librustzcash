@@ -24,7 +24,8 @@
 //! Because an output may take *any* value (internal change is free), exactness is never required, so
 //! this is NOT a subset-sum problem. It is a *fixed-charge network flow* (NP-hard in general) whose
 //! divisible-value, uniform-fee instance decomposes into two classic k-ary trees, a consolidation
-//! merge tree (many dust notes into one) and a split tree (one large note into many), and is solved by
+//! merge tree (many sub-quantum notes into one) and a split tree (one large note into many), and is
+//! solved by
 //! a greedy. The objective is lexicographic: feasibility first, then the fewest *layers* (each layer
 //! waits for a confirmation and a boundary, so layers dominate the wall-clock), then the fewest
 //! transactions (each a fixed fee `phi`).

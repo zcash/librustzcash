@@ -17,7 +17,9 @@
 //!
 //! A single transaction therefore cannot always turn the wallet's notes into every funding note: a
 //! note that must fan out into more outputs than one transaction holds, or a balance spread across
-//! more dust notes than one transaction can consume, needs **layers**. A layer is a set of
+//! more SUB-QUANTUM notes (each below the smallest funding denomination, so too small to fund a
+//! crossing on its own; not to be confused with sub-fee "dust") than one transaction can consume,
+//! needs **layers**. A layer is a set of
 //! transactions with no dependencies between them (buildable, provable, and broadcastable in
 //! parallel); a later layer may spend the outputs of an earlier one, but only after they are mined
 //! and a boundary passes, so each extra layer extends the preparation phase by roughly one anchor
@@ -28,12 +30,12 @@
 //!
 //! The planner is a largest-first layered greedy. In each layer it feeds each output transaction from
 //! the largest available note it can (one big note funds up to [`FUNDING_OUTPUTS_PER_TX`] funding
-//! notes), routes every leftover forward as an intermediate ("feeder") note, and consolidates notes
-//! too small to fund anything on their own into feeder notes. Once all funding notes are scheduled it
-//! consolidates the feeders that no layer spent into a single residual note, matching ZIP 318's
-//! "one note per part plus at most one residual note". For a typical wallet (a few notes, a handful of
-//! funding notes) this is a single layer; extra layers appear only for a lone large note fanning out
-//! into many funding notes, or a dust-heavy balance.
+//! notes), routes every leftover forward as an intermediate ("feeder") note, and consolidates
+//! sub-quantum notes (too small to fund anything on their own) into feeder notes. Once all funding
+//! notes are scheduled it consolidates the feeders that no layer spent into a single residual note,
+//! matching ZIP 318's "one note per part plus at most one residual note". For a typical wallet (a few
+//! notes, a handful of funding notes) this is a single layer; extra layers appear only for a lone
+//! large note fanning out into many funding notes, or a sub-quantum-heavy balance.
 //!
 //! The single-residual goal is only reachable above the fee threshold. When several transactions each
 //! strand a remainder smaller than a transaction fee and those remainders together are still worth
@@ -45,8 +47,8 @@
 //! that note through a BALANCED tree (fanning out by [`FUNDING_OUTPUTS_PER_TX`] per layer), so the
 //! depth is logarithmic in the funding-note count rather than linear in it. The balanced tree uses more
 //! transactions, and so more fee, than a linear feeder chain would; it trades that for fewer layers,
-//! which dominate the wall-clock. Every other shape (many notes, mixed sizes, dust) uses the layered
-//! greedy above.
+//! which dominate the wall-clock. Every other shape (many notes, mixed sizes, sub-quantum) uses the
+//! layered greedy above.
 //!
 //! This is a pure planner: it works in note *values* (in zatoshi) and does no cryptography or I/O. It
 //! reserves a fixed per-transaction fee (the caller passes the ZIP-317 fee of a padded
@@ -75,17 +77,28 @@ pub const FUNDING_OUTPUTS_PER_TX: usize = PREP_TX_ACTIONS - 2;
 pub const CONSOLIDATION_INPUTS_PER_TX: usize = PREP_TX_ACTIONS - 1;
 
 /// A note a preparation transaction spends: either one of the wallet's original spendable notes, or a
-/// note an earlier layer produced.
+/// note an earlier layer produced. Each variant carries the note's `value` (in zatoshi).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrepInput {
-    /// The wallet note at this index in the caller-supplied `available` slice.
-    Wallet(usize),
-    /// The `output`-th output of the `transaction`-th transaction of an earlier `layer`.
+    /// The wallet note at this `index` in the caller-supplied `available` slice, worth `value`.
+    Wallet { index: usize, value: u64 },
+    /// The `output`-th output of the `transaction`-th transaction of an earlier `layer`, worth
+    /// `value`.
     Prior {
         layer: usize,
         transaction: usize,
         output: usize,
+        value: u64,
     },
+}
+
+impl PrepInput {
+    /// The note value this input carries.
+    pub fn value(&self) -> u64 {
+        match self {
+            PrepInput::Wallet { value, .. } | PrepInput::Prior { value, .. } => *value,
+        }
+    }
 }
 
 /// A note a preparation transaction produces.
@@ -161,26 +174,6 @@ impl PreparationPlan {
         self.layers.iter().map(Vec::len).sum()
     }
 
-    /// The value an input carries, resolved against the wallet's `available` notes (for a
-    /// [`PrepInput::Wallet`]) or an earlier layer's output (for a [`PrepInput::Prior`]). Returns
-    /// `None` if the reference is out of range.
-    pub fn input_value(&self, input: &PrepInput, available: &[u64]) -> Option<u64> {
-        match input {
-            PrepInput::Wallet(i) => available.get(*i).copied(),
-            PrepInput::Prior {
-                layer,
-                transaction,
-                output,
-            } => self
-                .layers
-                .get(*layer)?
-                .get(*transaction)?
-                .outputs
-                .get(*output)
-                .map(PrepOutput::value),
-        }
-    }
-
     /// An iterator over every output of every transaction, in plan (layer then transaction) order.
     fn all_outputs(&self) -> impl Iterator<Item = &PrepOutput> {
         self.layers
@@ -249,9 +242,6 @@ impl fmt::Display for PrepError {
 
 impl core::error::Error for PrepError {}
 
-/// A note available to spend in the current layer: a reference and its value.
-type PoolNote = (PrepInput, u64);
-
 /// Plan the note-preparation transactions that mint `funding` (the self-funding note values, in
 /// zatoshi) from `available` (the wallet's spendable source-pool note values, in zatoshi), reserving
 /// `fee_per_tx` zatoshi for each transaction (the ZIP-317 fee of a padded [`PREP_TX_ACTIONS`]-action
@@ -299,7 +289,8 @@ pub fn plan_preparation(
     // Fan-out fast path: when a single wallet note can produce every remaining funding note, split it
     // through a balanced tree (depth logarithmic in the note count) rather than the linear feeder chain
     // the layered loop below would build for a lone large note. Only that case takes this path;
-    // everything else (many notes, mixed sizes, dust) falls through to the layered greedy unchanged.
+    // everything else (many notes, mixed sizes, sub-quantum) falls through to the layered greedy
+    // unchanged.
     // Trade-off: the balanced tree uses more transactions (fees) than the chain, buying fewer layers.
     if let Some((idx, big)) = available
         .iter()
@@ -310,7 +301,10 @@ pub fn plan_preparation(
     {
         if big >= subtree_cost(&remaining, fee_per_tx).1 {
             build_split(
-                PrepInput::Wallet(idx),
+                PrepInput::Wallet {
+                    index: idx,
+                    value: big,
+                },
                 big,
                 &remaining,
                 fee_per_tx,
@@ -323,11 +317,11 @@ pub fn plan_preparation(
 
     // The notes available to spend in the current layer (layer 0: the wallet's own notes not already
     // used directly as funding notes).
-    let mut current: Vec<PoolNote> = available
+    let mut current: Vec<PrepInput> = available
         .iter()
         .enumerate()
         .filter(|(i, _)| !used[*i])
-        .map(|(i, &v)| (PrepInput::Wallet(i), v))
+        .map(|(i, &v)| PrepInput::Wallet { index: i, value: v })
         .collect();
 
     while !remaining.is_empty() {
@@ -335,22 +329,23 @@ pub fn plan_preparation(
             return Err(PrepError::InsufficientFunds);
         }
         // Largest notes first.
-        current.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        current.sort_unstable_by_key(|n| core::cmp::Reverse(n.value()));
 
         // Pass 1: assign funding to the notes that can fund at least the smallest remaining note.
         // `partial` holds a note, the funding values it will mint, and its leftover budget; the rest
         // go to `consolidatable` to be combined into feeder notes.
         let mut partial: Vec<(PrepInput, Vec<u64>, u64)> = Vec::new();
-        let mut consolidatable: Vec<PoolNote> = Vec::new();
+        let mut consolidatable: Vec<PrepInput> = Vec::new();
 
-        for (in_ref, value) in current.drain(..) {
+        for input in current.drain(..) {
             if remaining.is_empty() {
                 // Everything is already scheduled; this note stays unspent in the wallet.
                 continue;
             }
+            let value = input.value();
             let smallest = *remaining.last().expect("remaining is non-empty");
             if value <= fee_per_tx || value - fee_per_tx < smallest {
-                consolidatable.push((in_ref, value));
+                consolidatable.push(input);
                 continue;
             }
             let budget = value - fee_per_tx;
@@ -367,29 +362,27 @@ pub fn plan_preparation(
             }
             // `value - fee_per_tx >= smallest` guarantees at least the smallest note was assignable.
             debug_assert!(!assigned.is_empty());
-            partial.push((in_ref, assigned, budget - used));
+            partial.push((input, assigned, budget - used));
         }
 
         // Pass 2: mint the funding notes, routing every leftover forward as a feeder so a later layer
         // reuses it rather than scattering change.
         let mut txs: Vec<PrepTransaction> = Vec::new();
-        let mut next: Vec<PoolNote> = Vec::new();
-        for (in_ref, assigned, leftover) in partial {
+        let mut next: Vec<PrepInput> = Vec::new();
+        for (input, assigned, leftover) in partial {
             let mut outputs: Vec<PrepOutput> =
                 assigned.into_iter().map(PrepOutput::Funding).collect();
             if leftover > 0 {
-                next.push((
-                    PrepInput::Prior {
-                        layer: layers.len(),
-                        transaction: txs.len(),
-                        output: outputs.len(),
-                    },
-                    leftover,
-                ));
+                next.push(PrepInput::Prior {
+                    layer: layers.len(),
+                    transaction: txs.len(),
+                    output: outputs.len(),
+                    value: leftover,
+                });
                 outputs.push(PrepOutput::Intermediate(leftover));
             }
             txs.push(PrepTransaction {
-                inputs: vec![in_ref],
+                inputs: vec![input],
                 outputs,
             });
         }
@@ -420,7 +413,7 @@ pub fn plan_preparation(
             break;
         }
         let mut txs: Vec<PrepTransaction> = Vec::new();
-        let mut next: Vec<PoolNote> = Vec::new();
+        let mut next: Vec<PrepInput> = Vec::new();
         consolidate(pool, layers.len(), fee_per_tx, &mut txs, &mut next);
         if txs.is_empty() {
             break; // the remainder is sub-fee dust; leave it as change
@@ -439,6 +432,7 @@ pub fn plan_preparation(
                     layer,
                     transaction,
                     output,
+                    ..
                 } = input
                 {
                     spent.push((*layer, *transaction, *output));
@@ -487,43 +481,42 @@ fn consolidation_batch_sizes(mut n: usize) -> Vec<usize> {
 /// [`CONSOLIDATION_INPUTS_PER_TX`] inputs) to `txs` in layer `layer`, with its feeder pushed to
 /// `next`. Returns any notes whose batch could not cover the fee (too small to consolidate).
 fn consolidate(
-    mut pool: Vec<PoolNote>,
+    mut pool: Vec<PrepInput>,
     layer: usize,
     fee: u64,
     txs: &mut Vec<PrepTransaction>,
-    next: &mut Vec<PoolNote>,
-) -> Vec<PoolNote> {
+    next: &mut Vec<PrepInput>,
+) -> Vec<PrepInput> {
     if pool.len() < 2 {
         return pool;
     }
-    pool.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    pool.sort_unstable_by_key(|n| core::cmp::Reverse(n.value()));
     let mut leftover = Vec::new();
     for size in consolidation_batch_sizes(pool.len()) {
-        let batch: Vec<PoolNote> = pool.drain(..size).collect();
-        let sum: u64 = batch.iter().map(|&(_, v)| v).sum();
+        let batch: Vec<PrepInput> = pool.drain(..size).collect();
+        let sum: u64 = batch.iter().map(PrepInput::value).sum();
         if sum <= fee {
             leftover.extend(batch); // too small to pay a fee; leave unspent
             continue;
         }
         let feeder = sum - fee;
-        next.push((
-            PrepInput::Prior {
-                layer,
-                transaction: txs.len(),
-                output: 0,
-            },
-            feeder,
-        ));
+        next.push(PrepInput::Prior {
+            layer,
+            transaction: txs.len(),
+            output: 0,
+            value: feeder,
+        });
         txs.push(PrepTransaction {
-            inputs: batch.into_iter().map(|(r, _)| r).collect(),
+            inputs: batch,
             outputs: vec![PrepOutput::Intermediate(feeder)],
         });
     }
     leftover
 }
 
-/// Every intermediate ("feeder") output that no transaction spends, as `(reference, value)` pairs.
-fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PoolNote> {
+/// Every intermediate ("feeder") output that no transaction spends, as [`PrepInput`] references (each
+/// carrying its value).
+fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PrepInput> {
     let mut spent: Vec<(usize, usize, usize)> = Vec::new();
     for layer in layers {
         for tx in layer {
@@ -532,6 +525,7 @@ fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PoolNote> {
                     layer,
                     transaction,
                     output,
+                    ..
                 } = input
                 {
                     spent.push((*layer, *transaction, *output));
@@ -545,14 +539,12 @@ fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PoolNote> {
             for (oi, output) in tx.outputs.iter().enumerate() {
                 if let PrepOutput::Intermediate(v) = output {
                     if !spent.contains(&(li, ti, oi)) {
-                        out.push((
-                            PrepInput::Prior {
-                                layer: li,
-                                transaction: ti,
-                                output: oi,
-                            },
-                            *v,
-                        ));
+                        out.push(PrepInput::Prior {
+                            layer: li,
+                            transaction: ti,
+                            output: oi,
+                            value: *v,
+                        });
                     }
                 }
             }
@@ -681,6 +673,7 @@ fn build_split(
             layer,
             transaction: tx_index,
             output,
+            value: cv,
         };
         build_split(
             child,
@@ -762,9 +755,9 @@ mod tests {
                     if let PrepInput::Prior { layer, .. } = input {
                         assert!(*layer < li, "layer {li} tx {ti}: forward/self reference");
                     }
-                    let v = plan.input_value(input, available).expect("input resolves");
+                    let v = input.value();
                     in_sum += v;
-                    if let PrepInput::Wallet(_) = input {
+                    if let PrepInput::Wallet { .. } = input {
                         wallet_spent += v;
                     }
                 }
@@ -793,7 +786,7 @@ mod tests {
                 "direct funding note {i} value"
             );
             assert!(
-                !seen_inputs.contains(&PrepInput::Wallet(i)),
+                !seen_inputs.contains(&PrepInput::Wallet { index: i, value: v }),
                 "direct funding note {i} also spent by a transaction"
             );
         }
@@ -891,16 +884,19 @@ mod tests {
         assert_plan_valid(&plan, &[total], &funding, fee_per_tx());
     }
 
-    /// Dust smaller than a funding note is consolidated into a feeder before it can fund anything, and
-    /// the leftover collapses to a single residual note.
+    /// A sub-quantum note (smaller than any funding note) is consolidated into a feeder before it can
+    /// fund anything, and the leftover collapses to a single residual note.
     #[test]
-    fn dust_is_consolidated_first() {
+    fn sub_quantum_is_consolidated_first() {
         // Twenty notes each far below the single 100-unit funding note (plus fees).
         let per = fee_per_tx() + 20;
         let available: Vec<u64> = core::iter::repeat_n(per, 20).collect();
         let funding = [100u64];
         let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
-        assert!(plan.layer_count() >= 2, "dust must consolidate first");
+        assert!(
+            plan.layer_count() >= 2,
+            "sub-quantum notes must consolidate first"
+        );
         assert_eq!(plan.residual_count(), 1, "one residual note");
         assert_plan_valid(&plan, &available, &funding, fee_per_tx());
     }
@@ -979,11 +975,11 @@ mod tests {
         );
     }
 
-    /// Dust that cannot fund on its own consolidates in batches of at most `CONSOLIDATION_INPUTS_PER_TX`,
-    /// never a singleton; the first layer's transactions have exactly the shape
-    /// `consolidation_batch_sizes` prescribes.
+    /// Sub-quantum notes that cannot fund on their own consolidate in batches of at most
+    /// `CONSOLIDATION_INPUTS_PER_TX`, never a singleton; the first layer's transactions have exactly
+    /// the shape `consolidation_batch_sizes` prescribes.
     #[test]
-    fn dust_consolidation_batch_shapes() {
+    fn sub_quantum_consolidation_batch_shapes() {
         for n in [15usize, 16, 17, 30] {
             // Each note is below the 100_000 funding note, so the whole first layer is consolidation.
             let available = vec![50_000u64; n];
@@ -1002,11 +998,11 @@ mod tests {
     }
 
     /// A single layer can both split a large note directly into a funding note and consolidate a cloud
-    /// of dust that is needed to fund the rest. (Dust the plan does not need is left untouched, so the
-    /// large note must be too small to fund everything on its own.)
+    /// of sub-quantum notes that are needed to fund the rest. (Sub-quantum notes the plan does not
+    /// need are left untouched, so the large note must be too small to fund everything on its own.)
     #[test]
     fn mixes_split_and_consolidate_in_one_layer() {
-        let mut available = vec![40_000u64; 10]; // dust: needed to fund the 100_000 note
+        let mut available = vec![40_000u64; 10]; // sub-quantum: needed to fund the 100_000 note
         available.push(400_000); // funds the 300_000 note directly, but not also the 100_000 note
         let funding = [300_000u64, 100_000];
         let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
@@ -1022,10 +1018,11 @@ mod tests {
         );
     }
 
-    /// Fee-dominated dust (each note only just above the fee) cannot overcome the per-transaction fee to
-    /// reach a funding note, and the planner terminates with insufficient funds rather than looping.
+    /// Fee-dominated sub-quantum notes (each only just above the per-transaction fee) cannot overcome
+    /// the per-transaction fee to reach a funding note, and the planner terminates with insufficient
+    /// funds rather than looping.
     #[test]
-    fn fee_dominated_dust_terminates_insufficient() {
+    fn fee_dominated_sub_quantum_terminates_insufficient() {
         // Two 90_000 notes: one consolidation nets 100_000, still short of 100_000 + a funding fee.
         let available = vec![90_000u64; 2];
         assert_eq!(
@@ -1034,10 +1031,10 @@ mod tests {
         );
     }
 
-    /// A single dust note cannot be batched (a lone consolidation only wastes a fee) and cannot fund a
-    /// larger note: insufficient when needed, and left untouched (empty plan) when not.
+    /// A single sub-quantum note cannot be batched (a lone consolidation only wastes a fee) and cannot
+    /// fund a larger note: insufficient when needed, and left untouched (empty plan) when not.
     #[test]
-    fn lone_dust_note() {
+    fn lone_sub_quantum_note() {
         assert_eq!(
             plan_preparation(&[50_000], &[100_000], fee_per_tx()),
             Err(PrepError::InsufficientFunds)
@@ -1068,9 +1065,9 @@ mod tests {
         );
     }
 
-    /// Deep consolidation: 300 dust notes consolidate 15:1 per layer (300 -> 20 -> 2), then a funding
-    /// layer, then one residual-collapse layer: exactly four layers, one residual. The count grows only
-    /// logarithmically (base `CONSOLIDATION_INPUTS_PER_TX`) in the dust count.
+    /// Deep consolidation: 300 sub-quantum notes consolidate 15:1 per layer (300 -> 20 -> 2), then a
+    /// funding layer, then one residual-collapse layer: exactly four layers, one residual. The count
+    /// grows only logarithmically (base `CONSOLIDATION_INPUTS_PER_TX`) in the sub-quantum-note count.
     #[test]
     fn deep_consolidation_layer_count() {
         let available = vec![50_000u64; 300];
@@ -1080,21 +1077,25 @@ mod tests {
         assert_eq!(
             plan.layer_count(),
             4,
-            "300 dust -> 20 -> 2 -> fund -> residual"
+            "300 sub-quantum -> 20 -> 2 -> fund -> residual"
         );
         assert_eq!(plan.residual_count(), 1);
     }
 
-    /// A very large dust count still plans in a small, logarithmically-bounded number of layers:
-    /// 3000 -> 200 -> 14 -> 1 feeder, then a funding layer, exactly four layers. This is the "many
-    /// small notes" stress case (termination and performance).
+    /// A very large sub-quantum-note count still plans in a small, logarithmically-bounded number of
+    /// layers: 3000 -> 200 -> 14 -> 1 feeder, then a funding layer, exactly four layers. This is the
+    /// "many small notes" stress case (termination and performance).
     #[test]
-    fn thousands_of_dust_notes_layer_count() {
+    fn thousands_of_sub_quantum_notes_layer_count() {
         let available = vec![50_000u64; 3_000];
         let funding = [10_000_000u64];
         let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
         assert_plan_valid(&plan, &available, &funding, fee_per_tx());
-        assert_eq!(plan.layer_count(), 4, "3000 dust -> 200 -> 14 -> 1 -> fund");
+        assert_eq!(
+            plan.layer_count(),
+            4,
+            "3000 sub-quantum -> 200 -> 14 -> 1 -> fund"
+        );
     }
 
     /// A lone large note fanning out into many funding notes is split through a BALANCED tree, so the
@@ -1158,10 +1159,10 @@ mod tests {
         assert_eq!(plan.residual_count(), 0, "exact split leaves no residual");
     }
 
-    /// A hundred dust notes both consolidate and then split into thirty funding notes in a bounded
-    /// number of layers, minting every note with at most one residual.
+    /// A hundred sub-quantum notes both consolidate and then split into thirty funding notes in a
+    /// bounded number of layers, minting every note with at most one residual.
     #[test]
-    fn many_dust_fund_many_notes() {
+    fn many_sub_quantum_fund_many_notes() {
         let available = vec![50_000u64; 100];
         let funding = vec![100_000u64; 30];
         let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
@@ -1169,7 +1170,7 @@ mod tests {
         assert_eq!(
             plan.layer_count(),
             3,
-            "100 dust consolidate then fund 30 notes"
+            "100 sub-quantum consolidate then fund 30 notes"
         );
         assert!(plan.residual_count() <= 1);
     }
