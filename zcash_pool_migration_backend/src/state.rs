@@ -17,6 +17,7 @@
 
 use alloc::vec::Vec;
 
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
@@ -105,7 +106,7 @@ pub struct TransactionStatus {
     /// The height it was mined at, once mined.
     pub mined_height: Option<BlockHeight>,
     /// The transaction id (raw internal bytes), once broadcast.
-    pub txid: Option<[u8; 32]>,
+    pub txid: Option<TxId>,
 }
 
 impl MigrationState {
@@ -210,7 +211,7 @@ impl MigrationState {
     /// Records that the transaction `id` was broadcast with the given `txid`, then recomputes the
     /// overall status. The consumer calls this after it broadcasts the transaction the engine handed
     /// it.
-    pub fn mark_broadcast(&mut self, id: MigrationTxId, txid: [u8; 32]) {
+    pub fn mark_broadcast(&mut self, id: MigrationTxId, txid: TxId) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
             tx.state = MigrationTxState::Broadcast { txid };
         }
@@ -461,7 +462,13 @@ mod tests {
         l1.depends_on = vec![MigrationTxId(0), MigrationTxId(1)];
         let mut s = state_with(vec![
             tx(0, prep(0, 0), mined(10)),
-            tx(1, prep(0, 1), MigrationTxState::Broadcast { txid: [0; 32] }),
+            tx(
+                1,
+                prep(0, 1),
+                MigrationTxState::Broadcast {
+                    txid: TxId::from_bytes([0; 32]),
+                },
+            ),
             l1.clone(),
         ]);
         assert_eq!(s.ready_prep_layer(), None);
@@ -507,7 +514,9 @@ mod tests {
         );
 
         // Dependency not mined: not broadcastable.
-        s.transactions[0].state = MigrationTxState::Broadcast { txid: [0; 32] };
+        s.transactions[0].state = MigrationTxState::Broadcast {
+            txid: TxId::from_bytes([0; 32]),
+        };
         assert_eq!(s.next_broadcastable(BlockHeight::from_u32(5)), None);
     }
 
@@ -529,7 +538,9 @@ mod tests {
         );
 
         // 2) Layer 0 broadcast, not yet mined -> nothing ready, waiting.
-        s.transactions[0].state = MigrationTxState::Broadcast { txid: [1; 32] };
+        s.transactions[0].state = MigrationTxState::Broadcast {
+            txid: TxId::from_bytes([1; 32]),
+        };
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Waiting
@@ -598,10 +609,10 @@ mod tests {
         ]);
         assert_eq!(s.status, MigrationStatus::Committed);
 
-        s.mark_broadcast(MigrationTxId(0), [7; 32]);
+        s.mark_broadcast(MigrationTxId(0), TxId::from_bytes([7; 32]));
         assert!(matches!(
             s.transactions[0].state,
-            MigrationTxState::Broadcast { txid } if txid == [7; 32]
+            MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([7; 32])
         ));
         assert_eq!(s.status, MigrationStatus::InProgress);
         assert!(!s.is_terminal());
@@ -617,7 +628,13 @@ mod tests {
         // A cancelled migration (Failed) whose transactions were already broadcast must stay
         // terminal: neither recomputing the status nor asking for the next step may revive it.
         let mut s = state_with(vec![
-            tx(0, prep(0, 0), MigrationTxState::Broadcast { txid: [1; 32] }),
+            tx(
+                0,
+                prep(0, 0),
+                MigrationTxState::Broadcast {
+                    txid: TxId::from_bytes([1; 32]),
+                },
+            ),
             tx(1, transfer(0), MigrationTxState::Signed),
         ]);
         s.status = MigrationStatus::Failed;

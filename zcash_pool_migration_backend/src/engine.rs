@@ -43,6 +43,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use rand_core::RngCore;
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{BalanceError, Zatoshis};
 
@@ -96,7 +97,11 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
     ) -> Result<(), Self::Error>;
 }
 
-/// A stable identifier for a migration transaction within a migration.
+/// A stable ordinal identifier for a migration transaction within a migration. This is a ROW KEY
+/// into the persisted migration (usable before a transaction is built, when no [`TxId`] exists yet:
+/// deferred preparation layers and transfers are recorded as unbuilt placeholders); it is NOT a
+/// Zcash transaction id. The real [`TxId`] becomes available once a transaction is built and signed
+/// (it commits only effecting data), and is carried by [`MigrationTxState::Broadcast`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MigrationTxId(pub u32);
 
@@ -126,7 +131,7 @@ pub enum MigrationTxState {
     /// Proved against a real anchor, ready to broadcast.
     Proved,
     /// Broadcast to the network, with its transaction id.
-    Broadcast { txid: [u8; 32] },
+    Broadcast { txid: TxId },
     /// Mined at the given height.
     Mined { height: BlockHeight },
     /// Expired before it could be mined, and to be rebuilt.
