@@ -1,0 +1,31 @@
+[package]
+name = "zcash_pool_migration_backend"
+description = "Backend-agnostic value-pool migration engine for Zcash wallets"
+version = "0.1.0"
+authors = [
+    "Danny Willems <be.danny.willems@gmail.com>",
+    "John Boyd <john@coldnoise.net>",
+    "Michal Fousek <michal.fousek@chlup.info>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+rand_core.workspace = true
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+rand_chacha.workspace = true
+
+[lints]
+workspace = true
