@@ -168,6 +168,14 @@ pub trait FeePolicy {
         (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER)
             * self.marginal_fee_zatoshi()
     }
+
+    /// The fee (in zatoshi) reserved for one note-preparation transaction: a transaction padded to
+    /// [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS) logical actions (per ZIP 318), each
+    /// charged the marginal fee. This is the per-transaction reserve
+    /// [`plan_preparation`](crate::preparation::plan_preparation) subtracts from the inputs.
+    fn prep_transaction_fee_zatoshi(&self) -> u64 {
+        crate::preparation::PREP_TX_ACTIONS as u64 * self.marginal_fee_zatoshi()
+    }
 }
 
 /// The ZIP-317 fee model: the marginal fee is the ZIP-317 [`MARGINAL_FEE`].
