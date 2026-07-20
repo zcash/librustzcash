@@ -72,6 +72,11 @@ pub enum Blocker {
     /// Built and due only at a later height (the privacy broadcast schedule): waiting for the chain tip
     /// to reach its scheduled height.
     Schedule,
+    /// Built but awaiting an EXTERNAL signature: its unsigned PCZT was exported to a hardware or offline
+    /// signer, and this transaction cannot advance until
+    /// [`MigrationState::apply_signature`](MigrationState::apply_signature) stores the signed PCZT
+    /// returned by the device.
+    Signature,
 }
 
 /// The status of one migration transaction, as a wallet renders it and decides the next step. This is
@@ -222,6 +227,32 @@ impl MigrationState {
         self.recompute_status();
     }
 
+    /// Store an EXTERNALLY signed PCZT for transaction `id`, moving it from
+    /// [`AwaitingSignature`](MigrationTxState::AwaitingSignature) to [`Signed`](MigrationTxState::Signed)
+    /// so the normal state machine can prove and broadcast it. This is the second half of the
+    /// external-signing seam: after
+    /// [`build_preparation_unsigned`](crate::engine::build_preparation_unsigned) or
+    /// [`build_transfers_unsigned`](crate::engine::build_transfers_unsigned) exports the unsigned PCZT,
+    /// the caller has it signed out of band and returns the signed PCZT here, matched by `id`. Persist
+    /// the state afterwards (`put_migration`).
+    ///
+    /// Returns `true` if the signature was applied. Returns `false`, leaving the state unchanged, if no
+    /// transaction has that `id` or it is not awaiting a signature (already signed, still an unbuilt
+    /// placeholder, or already broadcast or mined), so a caller can detect a stale or misrouted signature.
+    #[must_use]
+    pub fn apply_signature(&mut self, id: MigrationTxId, signed_pczt: Vec<u8>) -> bool {
+        let Some(tx) = self
+            .transactions
+            .iter_mut()
+            .find(|t| t.id == id && matches!(t.state, MigrationTxState::AwaitingSignature))
+        else {
+            return false;
+        };
+        tx.pczt = Some(signed_pczt);
+        tx.state = MigrationTxState::Signed;
+        true
+    }
+
     /// Decides the next step to advance the migration, from state alone. The priority is: prove and
     /// broadcast the next due, dependency-satisfied transaction; else build the next ready preparation
     /// layer; else, once the whole preparation is mined, build the transfers; else report `Complete`
@@ -282,6 +313,10 @@ impl MigrationState {
                             (false, None, Some(Blocker::Dependencies))
                         }
                     }
+                    // Built for an external signer and waiting for its signed PCZT; the wallet's
+                    // automatic driver takes no action (the external-signing caller drives it via
+                    // `apply_signature`), so it is neither ready nor blocked on the chain.
+                    MigrationTxState::AwaitingSignature => (false, None, Some(Blocker::Signature)),
                     MigrationTxState::Signed | MigrationTxState::Proved => {
                         if !deps_ok {
                             (false, None, Some(Blocker::Dependencies))
@@ -364,6 +399,47 @@ mod tests {
         MigrationTxState::Mined {
             height: BlockHeight::from_u32(height),
         }
+    }
+
+    #[test]
+    fn apply_signature_moves_awaiting_to_signed() {
+        let mut state = state_with(vec![tx(0, prep(0, 0), MigrationTxState::AwaitingSignature)]);
+        assert!(state.apply_signature(MigrationTxId(0), vec![1u8, 2, 3]));
+        assert_eq!(state.transactions[0].state, MigrationTxState::Signed);
+        assert_eq!(
+            state.transactions[0].pczt.as_deref(),
+            Some(&[1u8, 2, 3][..])
+        );
+    }
+
+    #[test]
+    fn apply_signature_rejects_unknown_or_wrong_state() {
+        let mut state = state_with(vec![
+            tx(0, prep(0, 0), MigrationTxState::AwaitingSignature),
+            tx(1, transfer(0), MigrationTxState::Planned),
+        ]);
+        // An unknown id, and a transaction not awaiting a signature (a Planned placeholder), are both
+        // rejected without changing any state.
+        assert!(!state.apply_signature(MigrationTxId(9), vec![1u8]));
+        assert!(!state.apply_signature(MigrationTxId(1), vec![1u8]));
+        assert_eq!(
+            state.transactions[0].state,
+            MigrationTxState::AwaitingSignature
+        );
+        // The first signature applies; a second, after it is already Signed, is rejected (a stale or
+        // misrouted signature cannot overwrite the stored one).
+        assert!(state.apply_signature(MigrationTxId(0), vec![1u8]));
+        assert!(!state.apply_signature(MigrationTxId(0), vec![2u8]));
+        assert_eq!(state.transactions[0].pczt.as_deref(), Some(&[1u8][..]));
+    }
+
+    #[test]
+    fn awaiting_signature_is_blocked_on_signature() {
+        let state = state_with(vec![tx(0, prep(0, 0), MigrationTxState::AwaitingSignature)]);
+        let views = state.transaction_statuses(BlockHeight::from_u32(100));
+        assert!(!views[0].ready);
+        assert_eq!(views[0].action, None);
+        assert_eq!(views[0].blocked_on, Some(Blocker::Signature));
     }
 
     #[test]

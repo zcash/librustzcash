@@ -114,6 +114,13 @@ pub enum MigrationTxKind {
 pub enum MigrationTxState {
     /// Built but not yet signed.
     Planned,
+    /// Built and awaiting an EXTERNAL signature: its UNSIGNED PCZT is held in
+    /// [`pczt`](MigrationTransaction::pczt), exported for a hardware or offline signer.
+    /// [`apply_signature`](MigrationState::apply_signature) moves it to [`Signed`](Self::Signed) once the
+    /// signed PCZT is returned. Only the external-signing path
+    /// ([`build_preparation_unsigned`]/[`build_transfers_unsigned`]) produces this state; the in-process
+    /// commit functions sign immediately and go straight to [`Signed`](Self::Signed).
+    AwaitingSignature,
     /// Pre-signed (the account's spend authorization is attached), not yet proved.
     Signed,
     /// Proved against a real anchor, ready to broadcast.
@@ -415,6 +422,62 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
 #[cfg(feature = "orchard")]
 impl<E: core::error::Error> core::error::Error for CommitError<E> {}
 
+/// How a freshly built migration PCZT is finished by the commit functions: signed in-process with the
+/// wallet's spend authority, or left unsigned for an external (hardware or offline) signer.
+#[cfg(feature = "orchard")]
+#[derive(Clone, Copy)]
+enum Signing {
+    /// Sign in-process via [`MigrationCrypto::sign`].
+    InProcess,
+    /// Leave the PCZT unsigned for an external signer; the caller receives it to sign out of band.
+    External,
+}
+
+/// An UNSIGNED migration transaction PCZT to route to an external (hardware or offline) signer, paired
+/// with the id that [`MigrationState::apply_signature`] uses to store the signed PCZT it returns as.
+///
+/// Produced by [`build_preparation_unsigned`] and [`build_transfers_unsigned`]. The `(id, pczt)` pairing
+/// MUST survive the round-trip to the signer, because `apply_signature` matches the returned signed PCZT
+/// back to its transaction by id.
+#[cfg(feature = "orchard")]
+#[derive(Clone, Debug)]
+pub struct UnsignedMigrationTx {
+    /// The transaction's id in the committed migration.
+    pub id: MigrationTxId,
+    /// The serialized UNSIGNED PCZT to sign out of band.
+    pub pczt: Vec<u8>,
+}
+
+/// Serialize a freshly built PCZT for storage. For [`Signing::InProcess`], sign it with the backend and
+/// return the signed bytes as [`Signed`](MigrationTxState::Signed); for [`Signing::External`], return the
+/// unsigned bytes as [`AwaitingSignature`](MigrationTxState::AwaitingSignature) (the caller also routes a
+/// copy of those bytes to the external signer).
+#[cfg(feature = "orchard")]
+fn finish_built_pczt<B>(
+    backend: &mut B,
+    pczt: ::pczt::Pczt,
+    signing: Signing,
+) -> Result<(Vec<u8>, MigrationTxState), CommitError<<B as MigrationBackend>::Error>>
+where
+    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+{
+    match signing {
+        Signing::InProcess => {
+            let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
+            let bytes = signed
+                .serialize()
+                .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
+            Ok((bytes, MigrationTxState::Signed))
+        }
+        Signing::External => {
+            let bytes = pczt
+                .serialize()
+                .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
+            Ok((bytes, MigrationTxState::AwaitingSignature))
+        }
+    }
+}
+
 /// Commit a planned migration's PREPARATION: build and pre-sign the FIRST layer of preparation
 /// transactions (the ones that spend the wallet's own notes) with the account's spend authorization,
 /// record every later preparation layer and every transfer as an unbuilt placeholder, and persist the
@@ -428,6 +491,9 @@ impl<E: core::error::Error> core::error::Error for CommitError<E> {}
 /// signs its one layer here and records only the transfer placeholders; nothing is deferred. A
 /// multi-layer plan (a lone whale fanning out, or a dust-heavy balance) signs layer 0 here and defers
 /// the rest.
+///
+/// For an EXTERNAL signer (a hardware wallet), use [`build_preparation_unsigned`] instead, which builds
+/// the same layer-0 transactions but leaves them unsigned for the device and returns their PCZTs.
 ///
 /// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3), and
 /// `rng` a cryptographically secure RNG.
@@ -447,6 +513,69 @@ where
         + PoolMigrationWrite,
     R: RngCore + rand_core::CryptoRng,
 {
+    commit_preparation_inner(
+        params,
+        target_height,
+        backend,
+        plan,
+        rng,
+        Signing::InProcess,
+    )
+    .map(|(state, _unsigned)| state)
+}
+
+/// Commit a planned migration's PREPARATION for an EXTERNAL signer: build the FIRST layer of preparation
+/// transactions but leave them UNSIGNED, persist the committed migration (with those transactions in the
+/// [`AwaitingSignature`](MigrationTxState::AwaitingSignature) state), and return the state together with
+/// the unsigned layer-0 PCZTs to route to the signing device. Later preparation layers and every transfer
+/// are recorded as unbuilt placeholders exactly as [`commit_preparation`] records them.
+///
+/// After the device signs, call [`MigrationState::apply_signature`] for each returned PCZT (matched by
+/// [`UnsignedMigrationTx::id`]) to move it to [`Signed`](MigrationTxState::Signed), persist with
+/// `put_migration`, and drive the rest of the migration through the normal state machine (proving and
+/// broadcasting are unchanged). Transfers are signed later via [`build_transfers_unsigned`].
+///
+/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3), and
+/// `rng` a cryptographically secure RNG.
+#[cfg(feature = "orchard")]
+pub fn build_preparation_unsigned<P, B, R>(
+    params: &P,
+    target_height: BlockHeight,
+    backend: &mut B,
+    plan: &MigrationPlan,
+    rng: &mut R,
+) -> Result<(MigrationState, Vec<UnsignedMigrationTx>), CommitError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
+    R: RngCore + rand_core::CryptoRng,
+{
+    commit_preparation_inner(params, target_height, backend, plan, rng, Signing::External)
+}
+
+/// Shared body of [`commit_preparation`] (with [`Signing::InProcess`]) and
+/// [`build_preparation_unsigned`] (with [`Signing::External`]). Layer-0 transactions are finished via
+/// [`finish_built_pczt`]; the returned `Vec<UnsignedMigrationTx>` is empty for the in-process path.
+#[cfg(feature = "orchard")]
+fn commit_preparation_inner<P, B, R>(
+    params: &P,
+    target_height: BlockHeight,
+    backend: &mut B,
+    plan: &MigrationPlan,
+    rng: &mut R,
+    signing: Signing,
+) -> Result<(MigrationState, Vec<UnsignedMigrationTx>), CommitError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
+    R: RngCore + rand_core::CryptoRng,
+{
     use crate::build::build_prep_tx;
     use crate::preparation::PrepInput;
 
@@ -455,6 +584,7 @@ where
     let expiry_height = crate::scheduling::expiry_height(target_height);
 
     let mut transactions: Vec<MigrationTransaction> = Vec::new();
+    let mut unsigned: Vec<UnsignedMigrationTx> = Vec::new();
     let mut next_id = 0u32;
     // The transaction ids assigned to each preparation layer, so a later layer's placeholder can depend
     // on the whole layer before it, and the transfers can depend on the last preparation layer.
@@ -500,10 +630,13 @@ where
                 )
                 .map_err(|e| CommitError::Build(format!("{e}")))?;
 
-                let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
-                let bytes = signed
-                    .serialize()
-                    .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
+                let (bytes, tx_state) = finish_built_pczt(backend, pczt, signing)?;
+                if matches!(signing, Signing::External) {
+                    unsigned.push(UnsignedMigrationTx {
+                        id,
+                        pczt: bytes.clone(),
+                    });
+                }
 
                 transactions.push(MigrationTransaction {
                     id,
@@ -513,7 +646,7 @@ where
                     scheduled_height: target_height,
                     expiry_height,
                     anchor_boundary: None,
-                    state: MigrationTxState::Signed,
+                    state: tx_state,
                 });
             } else {
                 // A later layer spends the previous layer's feeder notes, which are not witnessable
@@ -573,7 +706,7 @@ where
     backend
         .put_migration(&state)
         .map_err(CommitError::Backend)?;
-    Ok(state)
+    Ok((state, unsigned))
 }
 
 /// Build and pre-sign the next READY preparation layer: the deferred second phase of committing a
@@ -746,6 +879,8 @@ where
 /// stored by [`commit_preparation`]), resolves the funding notes, and builds only the transfers still
 /// `Planned`, so it is safe to call again after a partial failure. `params` is the network,
 /// `target_height` the height the transfers are built at, and `rng` a cryptographically secure RNG.
+///
+/// For an EXTERNAL signer, use [`build_transfers_unsigned`] instead.
 #[cfg(feature = "orchard")]
 pub fn commit_transfers<P, B, R>(
     params: &P,
@@ -761,12 +896,64 @@ where
         + PoolMigrationWrite,
     R: RngCore + rand_core::CryptoRng,
 {
+    commit_transfers_inner(params, target_height, backend, rng, Signing::InProcess)
+        .map(|(state, _unsigned)| state)
+}
+
+/// Commit a migration's TRANSFERS for an EXTERNAL signer: build each still-`Planned` transfer but leave
+/// it UNSIGNED (in the [`AwaitingSignature`](MigrationTxState::AwaitingSignature) state), persist the
+/// migration, and return the state together with the unsigned transfer PCZTs to route to the signing
+/// device. After the device signs, call [`MigrationState::apply_signature`] for each returned PCZT
+/// (matched by [`UnsignedMigrationTx::id`]) to move it to [`Signed`](MigrationTxState::Signed), persist
+/// with `put_migration`, then prove and broadcast through the normal state machine.
+///
+/// Like [`commit_transfers`], only transfers still `Planned` are built, so it is safe to call again
+/// after a partial failure. `params` is the network, `target_height` the height the transfers are built
+/// at, and `rng` a cryptographically secure RNG.
+#[cfg(feature = "orchard")]
+pub fn build_transfers_unsigned<P, B, R>(
+    params: &P,
+    target_height: BlockHeight,
+    backend: &mut B,
+    rng: &mut R,
+) -> Result<(MigrationState, Vec<UnsignedMigrationTx>), CommitError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
+    R: RngCore + rand_core::CryptoRng,
+{
+    commit_transfers_inner(params, target_height, backend, rng, Signing::External)
+}
+
+/// Shared body of [`commit_transfers`] (with [`Signing::InProcess`]) and [`build_transfers_unsigned`]
+/// (with [`Signing::External`]). The returned `Vec<UnsignedMigrationTx>` is empty for the in-process
+/// path.
+#[cfg(feature = "orchard")]
+fn commit_transfers_inner<P, B, R>(
+    params: &P,
+    target_height: BlockHeight,
+    backend: &mut B,
+    rng: &mut R,
+    signing: Signing,
+) -> Result<(MigrationState, Vec<UnsignedMigrationTx>), CommitError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
+    R: RngCore + rand_core::CryptoRng,
+{
     use crate::build::build_transfer_pczt;
 
     let mut state = backend
         .get_migration()
         .map_err(CommitError::Backend)?
         .ok_or(CommitError::NoMigrationInProgress)?;
+    let mut unsigned: Vec<UnsignedMigrationTx> = Vec::new();
 
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
     let anchor = backend.orchard_anchor().map_err(CommitError::Backend)?;
@@ -813,19 +1000,21 @@ where
         )
         .map_err(|e| CommitError::Build(format!("{e}")))?;
 
-        let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
-        let bytes = signed
-            .serialize()
-            .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
-
+        let (bytes, tx_state) = finish_built_pczt(backend, pczt, signing)?;
+        if matches!(signing, Signing::External) {
+            unsigned.push(UnsignedMigrationTx {
+                id: tx.id,
+                pczt: bytes.clone(),
+            });
+        }
         tx.pczt = Some(bytes);
-        tx.state = MigrationTxState::Signed;
+        tx.state = tx_state;
     }
 
     backend
         .put_migration(&state)
         .map_err(CommitError::Backend)?;
-    Ok(state)
+    Ok((state, unsigned))
 }
 
 #[cfg(test)]
