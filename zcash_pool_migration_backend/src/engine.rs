@@ -42,6 +42,7 @@ use alloc::vec::Vec;
 
 use core::fmt;
 
+use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
@@ -103,7 +104,21 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
 /// Zcash transaction id. The real [`TxId`] becomes available once a transaction is built and signed
 /// (it commits only effecting data), and is carried by [`MigrationTxState::Broadcast`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MigrationTxId(pub u32);
+pub struct MigrationTxId(pub(crate) u32);
+
+impl MigrationTxId {
+    /// Wrap a stored ordinal as a migration-transaction row key (for a store reading a persisted
+    /// migration back).
+    pub const fn new(index: u32) -> Self {
+        MigrationTxId(index)
+    }
+}
+
+impl From<MigrationTxId> for u32 {
+    fn from(id: MigrationTxId) -> u32 {
+        id.0
+    }
+}
 
 /// What a migration transaction does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,33 +156,69 @@ pub enum MigrationTxState {
 /// One transaction of a committed migration: its pre-signed PCZT plus the metadata the consuming
 /// application needs to prove it against a fresh anchor, wait for its dependencies, broadcast it at
 /// its scheduled height, and track its state.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Getters, CopyGetters)]
 pub struct MigrationTransaction {
     /// This transaction's stable id.
-    pub id: MigrationTxId,
+    #[getset(get_copy = "pub")]
+    pub(crate) id: MigrationTxId,
     /// What it does (a preparation transaction or a transfer).
-    pub kind: MigrationTxKind,
+    #[getset(get_copy = "pub")]
+    pub(crate) kind: MigrationTxKind,
     /// The pre-signed, unproven PCZT, serialized (`pczt::Pczt::serialize`), or `None` until the
     /// transaction is built and signed. A transfer is recorded as a `Planned` placeholder at commit
     /// time and its PCZT is filled in once the preparation is mined (two-phase signing). When present
     /// this is the durable artifact: the application updates its proof against a fresh anchor and
     /// broadcasts it.
-    pub pczt: Option<Vec<u8>>,
+    #[getset(get = "pub")]
+    pub(crate) pczt: Option<Vec<u8>>,
     /// The transactions that must be mined before this one may be broadcast (the preparation layer
     /// dependency graph; empty for an independent transaction).
-    pub depends_on: Vec<MigrationTxId>,
+    #[getset(get = "pub")]
+    pub(crate) depends_on: Vec<MigrationTxId>,
     /// The height at which to broadcast (for a transfer; a preparation transaction waits for its
     /// dependencies to mine and a boundary to pass rather than a fixed height).
-    pub scheduled_height: BlockHeight,
+    #[getset(get_copy = "pub")]
+    pub(crate) scheduled_height: BlockHeight,
     /// The height after which the transaction is invalid and must be rebuilt.
-    pub expiry_height: BlockHeight,
+    #[getset(get_copy = "pub")]
+    pub(crate) expiry_height: BlockHeight,
     /// The boundary height whose tree state the transaction proves against. For a transfer this is
     /// drawn at SCHEDULING time (the schedule fully determines the candidate set; see
     /// [`commit_preparation`]); `None` for a preparation transaction, or when no candidate boundary
     /// exists at the scheduled height (the application then draws against its proving-time view).
-    pub anchor_boundary: Option<BlockHeight>,
+    #[getset(get_copy = "pub")]
+    pub(crate) anchor_boundary: Option<BlockHeight>,
     /// The transaction's lifecycle state.
-    pub state: MigrationTxState,
+    #[getset(get_copy = "pub")]
+    pub(crate) state: MigrationTxState,
+}
+
+impl MigrationTransaction {
+    /// Reassemble a stored migration transaction from its persisted parts, exactly as a store read
+    /// them back (the inverse of the accessors). The caller is responsible for having persisted a
+    /// consistent row (for example, a `Broadcast` or `Mined` transaction carries its PCZT).
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        id: MigrationTxId,
+        kind: MigrationTxKind,
+        pczt: Option<Vec<u8>>,
+        depends_on: Vec<MigrationTxId>,
+        scheduled_height: BlockHeight,
+        expiry_height: BlockHeight,
+        anchor_boundary: Option<BlockHeight>,
+        state: MigrationTxState,
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            pczt,
+            depends_on,
+            scheduled_height,
+            expiry_height,
+            anchor_boundary,
+            state,
+        }
+    }
 }
 
 /// The overall status of a migration.
@@ -229,23 +280,48 @@ impl TryFrom<&str> for MigrationStatus {
 /// The persisted state of a migration: the note split (for the preview and residual accounting) and
 /// every transaction, each as its pre-signed PCZT and metadata. A wallet resumes a migration entirely
 /// from this state after being closed or restarted; this is what a [`MigrationBackend`] stores.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Getters, CopyGetters)]
 pub struct MigrationState {
     /// The overall status.
-    pub status: MigrationStatus,
+    #[getset(get_copy = "pub")]
+    pub(crate) status: MigrationStatus,
     /// The note-split decomposition (the denominations and residual).
-    pub note_split: NoteSplitPlan,
+    #[getset(get = "pub")]
+    pub(crate) note_split: NoteSplitPlan,
     /// The reconciled self-funding note values (in zatoshi), one per crossing: a `Transfer { crossing }`
     /// transaction spends `funding_notes[crossing]` and crosses `funding_notes[crossing]` minus the fee
     /// buffer into the destination pool.
-    pub funding_notes: Vec<Zatoshis>,
+    #[getset(get = "pub")]
+    pub(crate) funding_notes: Vec<Zatoshis>,
     /// The preparation plan (its layers and direct-funding notes), retained so the deferred preparation
     /// layers can be rebuilt after their prior layer mines (see
     /// [`commit_pending_preparation`]). A `Preparation { layer, index }` transaction's spends resolve
     /// against `preparation.layers()[layer][index]`.
-    pub preparation: PreparationPlan,
+    #[getset(get = "pub")]
+    pub(crate) preparation: PreparationPlan,
     /// Every migration transaction, in dependency order.
-    pub transactions: Vec<MigrationTransaction>,
+    #[getset(get = "pub")]
+    pub(crate) transactions: Vec<MigrationTransaction>,
+}
+
+impl MigrationState {
+    /// Reassemble a persisted migration from its stored parts, exactly as a store read them back
+    /// (the inverse of the accessors).
+    pub fn from_parts(
+        status: MigrationStatus,
+        note_split: NoteSplitPlan,
+        funding_notes: Vec<Zatoshis>,
+        preparation: PreparationPlan,
+        transactions: Vec<MigrationTransaction>,
+    ) -> Self {
+        Self {
+            status,
+            note_split,
+            funding_notes,
+            preparation,
+            transactions,
+        }
+    }
 }
 
 /// A planned migration, before anything is built, signed, or broadcast: the denomination split, the
@@ -491,12 +567,24 @@ enum Signing {
 /// MUST survive the round-trip to the signer, because `apply_signature` matches the returned signed PCZT
 /// back to its transaction by id.
 #[cfg(feature = "orchard")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Getters, CopyGetters)]
 pub struct UnsignedMigrationTx {
     /// The transaction's id in the committed migration.
-    pub id: MigrationTxId,
+    #[getset(get_copy = "pub")]
+    pub(crate) id: MigrationTxId,
     /// The serialized UNSIGNED PCZT to sign out of band.
-    pub pczt: Vec<u8>,
+    #[getset(get = "pub")]
+    pub(crate) pczt: Vec<u8>,
+}
+
+#[cfg(feature = "orchard")]
+impl UnsignedMigrationTx {
+    /// Take the id and the unsigned PCZT bytes (to route the bytes to the external signer while
+    /// keeping the id to match the signed result back; see
+    /// [`MigrationState::apply_signature`](crate::engine::MigrationState)).
+    pub fn into_parts(self) -> (MigrationTxId, Vec<u8>) {
+        (self.id, self.pczt)
+    }
 }
 
 /// Serialize a freshly built PCZT for storage. For [`Signing::InProcess`], sign it with the backend and

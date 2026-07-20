@@ -17,6 +17,7 @@
 
 use alloc::vec::Vec;
 
+use getset::{CopyGetters, Getters};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
@@ -85,28 +86,38 @@ pub enum Blocker {
 /// front (later layers become witnessable only as earlier layers mine) and may be restarted between
 /// layers, so it decides which transaction to sign or broadcast next, and what the rest are waiting on,
 /// from this view of the persisted state alone.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Getters, CopyGetters)]
 pub struct TransactionStatus {
     /// This transaction's stable id.
-    pub id: MigrationTxId,
+    #[getset(get_copy = "pub")]
+    pub(crate) id: MigrationTxId,
     /// What it does (a preparation transaction, carrying its layer / anchor bucket, or a transfer).
-    pub kind: MigrationTxKind,
+    #[getset(get_copy = "pub")]
+    pub(crate) kind: MigrationTxKind,
     /// Its current lifecycle state.
-    pub state: MigrationTxState,
+    #[getset(get_copy = "pub")]
+    pub(crate) state: MigrationTxState,
     /// The transactions that must be mined before this one can be built or broadcast.
-    pub depends_on: Vec<MigrationTxId>,
+    #[getset(get = "pub")]
+    pub(crate) depends_on: Vec<MigrationTxId>,
     /// The height at or after which it is due to broadcast.
-    pub scheduled_height: BlockHeight,
+    #[getset(get_copy = "pub")]
+    pub(crate) scheduled_height: BlockHeight,
     /// Whether the wallet can act on it right now.
-    pub ready: bool,
+    #[getset(get_copy = "pub")]
+    pub(crate) ready: bool,
     /// The action available now, when `ready` is true.
-    pub action: Option<NextAction>,
+    #[getset(get_copy = "pub")]
+    pub(crate) action: Option<NextAction>,
     /// Why it is not yet actionable, when it is waiting (and not already broadcast or mined).
-    pub blocked_on: Option<Blocker>,
+    #[getset(get_copy = "pub")]
+    pub(crate) blocked_on: Option<Blocker>,
     /// The height it was mined at, once mined.
-    pub mined_height: Option<BlockHeight>,
+    #[getset(get_copy = "pub")]
+    pub(crate) mined_height: Option<BlockHeight>,
     /// The transaction id (raw internal bytes), once broadcast.
-    pub txid: Option<TxId>,
+    #[getset(get_copy = "pub")]
+    pub(crate) txid: Option<TxId>,
 }
 
 impl MigrationState {
