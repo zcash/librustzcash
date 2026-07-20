@@ -612,6 +612,60 @@ mod tests {
         }
     }
 
+    /// Assert one golden schedule vector: the exact cumulative broadcast heights for a fixed
+    /// `(commit, n, seed)`, plus the structural invariants they must satisfy. The heights are captured
+    /// from the deterministic [`ChaCha8Rng`], so they pin the exact delay draws as a regression guard;
+    /// the invariant checks keep each vector auditable by eye, since each per-step GAP is the drawn
+    /// inter-arrival delay and must be a valid `[0, MAX_DELAY]` value.
+    fn check_schedule_golden(commit: u32, n: usize, seed: u64, expected: &[u32]) {
+        let hs = schedule_broadcast_heights(commit, n, &mut rng(seed));
+        assert_eq!(hs, expected, "schedule({commit}, {n}, seed={seed})");
+        assert_eq!(hs.len(), n);
+        let mut prev = commit;
+        for &h in &hs {
+            assert!(
+                h >= prev,
+                "heights must be non-decreasing (commit {commit})"
+            );
+            let gap = h - prev;
+            assert!(
+                gap <= MAX_DELAY,
+                "delay {gap} exceeds MAX_DELAY {MAX_DELAY}"
+            );
+            prev = h;
+        }
+    }
+
+    /// Golden vectors for the cumulative broadcast schedule: fixed `(commit, n, seed)` triples pinned
+    /// to their exact height sequences (a regression guard on the delay sampling), with the per-step
+    /// gaps noted so the drawn delays are visible. `MEAN_DELAY` is 144 and `MAX_DELAY` is 576 blocks.
+    #[test]
+    fn schedule_broadcast_heights_golden() {
+        // n = 0 schedules nothing, whatever the seed.
+        check_schedule_golden(1_000_000, 0, 1, &[]);
+        // gaps: 74, 12, 131, 36, 48
+        check_schedule_golden(
+            1_000_000,
+            5,
+            1,
+            &[1_000_074, 1_000_086, 1_000_217, 1_000_253, 1_000_301],
+        );
+        // gaps: 165, 432, 80, 142, 49, 23, 53, 235
+        check_schedule_golden(
+            2_000_000,
+            8,
+            42,
+            &[
+                2_000_165, 2_000_597, 2_000_677, 2_000_819, 2_000_868, 2_000_891, 2_000_944,
+                2_001_179,
+            ],
+        );
+        // gaps: 25, 26, 175
+        check_schedule_golden(500_000, 3, 7, &[500_025, 500_051, 500_226]);
+        // commit height 0; gaps: 11, 6, 225, 58, 13, 28
+        check_schedule_golden(0, 6, 12_345, &[11, 17, 242, 300, 313, 341]);
+    }
+
     // --- expiry_height ------------------------------------------------------------------------
 
     proptest! {
