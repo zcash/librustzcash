@@ -161,8 +161,10 @@ pub struct MigrationTransaction {
     pub scheduled_height: BlockHeight,
     /// The height after which the transaction is invalid and must be rebuilt.
     pub expiry_height: BlockHeight,
-    /// The boundary height whose tree state the transaction proves against, drawn at proving time (for
-    /// a transfer); `None` until proved.
+    /// The boundary height whose tree state the transaction proves against. For a transfer this is
+    /// drawn at SCHEDULING time (the schedule fully determines the candidate set; see
+    /// [`commit_preparation`]); `None` for a preparation transaction, or when no candidate boundary
+    /// exists at the scheduled height (the application then draws against its proving-time view).
     pub anchor_boundary: Option<BlockHeight>,
     /// The transaction's lifecycle state.
     pub state: MigrationTxState,
@@ -624,10 +626,14 @@ where
 {
     use crate::build::build_prep_tx;
     use crate::preparation::PrepInput;
+    use zcash_protocol::consensus::NetworkUpgrade;
 
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
     let anchor = backend.orchard_anchor().map_err(CommitError::Backend)?;
     let expiry_height = crate::scheduling::expiry_height(target_height);
+    let nu63_activation = params
+        .activation_height(NetworkUpgrade::Nu6_3)
+        .ok_or_else(|| CommitError::Build("NU6.3 is not active on this network".into()))?;
 
     let mut transactions: Vec<MigrationTransaction> = Vec::new();
     let mut unsigned: Vec<UnsignedMigrationTx> = Vec::new();
@@ -727,6 +733,14 @@ where
     // Record each transfer as a Planned placeholder carrying its schedule; its PCZT is built and
     // signed later, once the preparation is mined (see `commit_transfers`). This persists the drawn
     // schedule (which is not reproducible) as part of the committed migration.
+    //
+    // The boundary anchor is drawn HERE, at scheduling time, because the schedule fully determines
+    // it: the candidate set lies strictly above the NU6.3 activation, at or after the height the
+    // funding preparation is built to mine (`target_height` bounds the funding notes' creation from
+    // below), and strictly below the most recent boundary at the transfer's scheduled broadcast
+    // height (the chain view the wallet will have observed when it proves, just before broadcast).
+    // `None` means no candidate boundary exists at that scheduled height (a transfer scheduled very
+    // close to activation); the application then draws against the proving-time view instead.
     let funding_notes = plan.funding_notes().to_vec();
     for (crossing, schedule) in plan.schedule().iter().enumerate() {
         transactions.push(MigrationTransaction {
@@ -736,7 +750,12 @@ where
             depends_on: last_layer_ids.clone(),
             scheduled_height: schedule.broadcast_height(),
             expiry_height: schedule.expiry_height(),
-            anchor_boundary: None,
+            anchor_boundary: scheduling::draw_anchor_boundary(
+                nu63_activation,
+                target_height,
+                schedule.broadcast_height(),
+                rng,
+            ),
             state: MigrationTxState::Planned,
         });
         next_id += 1;
@@ -1394,6 +1413,24 @@ mod commit_tests {
                         !tx.depends_on.is_empty(),
                         "a transfer waits for the preparation to mine"
                     );
+                    // The boundary anchor is drawn at scheduling time; when a candidate set exists
+                    // it lies on the boundary grid, strictly above the NU6.3 activation, at or
+                    // after the funding preparation's build height, and strictly below the most
+                    // recent boundary at the scheduled broadcast height.
+                    if let Some(b) = tx.anchor_boundary {
+                        let b = u32::from(b);
+                        assert_eq!(b % crate::scheduling::BOUNDARY_MODULUS, 0);
+                        assert!(b > 10, "boundary above the regtest NU6.3 activation");
+                        assert!(
+                            b >= TARGET_HEIGHT.div_ceil(crate::scheduling::BOUNDARY_MODULUS)
+                                * crate::scheduling::BOUNDARY_MODULUS
+                        );
+                        assert!(
+                            b < u32::from(crate::scheduling::most_recent_boundary(
+                                tx.scheduled_height
+                            ))
+                        );
+                    }
                 }
             }
         }
