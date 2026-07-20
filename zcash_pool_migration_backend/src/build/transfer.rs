@@ -27,9 +27,12 @@ use super::{BuildError, build_config, finalize_pczt};
 /// the empty tree). The transfer's fee is funded entirely by the note's buffer, so there is no change
 /// output; a build that balances proves the buffer matches the fee.
 ///
-/// The ingredients (which the wallet backend resolves) are: the Orchard `anchor` and the note's
+/// The ingredients (which the wallet backend resolves) are: the `orchard_anchor` and the note's
 /// `merkle_path`; the `note` itself (a self-funding note the split minted, worth
-/// `crossing_value` plus the fee buffer); and the `orchard_fvk` (authorizes the spend, derives the
+/// `crossing_value` plus the fee buffer); the `ironwood_anchor`, a recent root of the destination
+/// Ironwood note-commitment tree (the output-only bundle is padded with dummy spends that carry this
+/// anchor, and consensus rejects a stale one such as the empty-tree root once the pool holds notes);
+/// and the `orchard_fvk` (authorizes the spend, derives the
 /// output viewing key, and derives the destination: per ZIP 318 the crossing is sent to the account's
 /// own internal Ironwood change address). `target_height` and `expiry_height` bound the transaction.
 /// It mirrors the note split's
@@ -49,9 +52,10 @@ pub fn build_transfer_pczt<P, R>(
     target_height: u32,
     expiry_height: u32,
     orchard_fvk: &FullViewingKey,
-    anchor: orchard::Anchor,
+    orchard_anchor: orchard::Anchor,
     note: orchard::note::Note,
     merkle_path: orchard::tree::MerklePath,
+    ironwood_anchor: orchard::Anchor,
     crossing_value: u64,
     rng: R,
 ) -> Result<pczt::Pczt, BuildError>
@@ -61,9 +65,12 @@ where
 {
     let target = BlockHeight::from_u32(target_height);
     let expiry = BlockHeight::from_u32(expiry_height);
-    // The Ironwood bundle is output-only (no spend to anchor against); the empty tree is the
-    // output-only anchor convention.
-    let config = build_config(anchor, Some(orchard::Anchor::empty_tree()));
+    // The Ironwood bundle is output-only, but the DEFAULT bundle type pads it to the minimum action
+    // count with dummy spends, which carry the bundle's `ironwood_anchor`. Consensus requires that
+    // anchor to be a recent Ironwood note-commitment-tree root, so the caller passes the current
+    // root: the empty-tree root is a valid anchor only until the pool holds any notes, after which
+    // consensus rejects it.
+    let config = build_config(orchard_anchor, Some(ironwood_anchor));
     let mut builder = Builder::new(params.clone(), target, config).with_expiry_height(expiry);
 
     builder
@@ -120,6 +127,9 @@ mod tests {
             let target_height = 100;
             let expiry_height = 140;
             let rng = ChaCha8Rng::seed_from_u64(crossing_value);
+            // A real, non-empty Ironwood anchor (the root of a one-note tree): the transfer must
+            // build against a genuine recent root, not only the empty-tree root.
+            let (_, _, ironwood_anchor) = single_note_witness(&fvk, note_value, note_seed ^ 1);
             let result = build_transfer_pczt(
                 &params,
                 target_height,
@@ -128,6 +138,7 @@ mod tests {
                 anchor,
                 note,
                 path,
+                ironwood_anchor,
                 crossing_value,
                 rng,
             );
