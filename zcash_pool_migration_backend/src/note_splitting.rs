@@ -184,28 +184,23 @@ impl FeePolicy for Zip317FeePolicy {
 /// cross the turnstile, and the residual kept in the source pool. Produced by a
 /// [`DenominationStrategy`].
 ///
-/// [`migration_outputs`](Self::migration_outputs) and [`crossing_values`](Self::crossing_values) are
-/// PARALLEL (index `i` describes the same prepared note) and differ by exactly the per-note fee
-/// buffer (see [`FeePolicy::transfer_fee_buffer_zatoshi`]), so for every `i`:
-///
-/// ```text
-/// migration_outputs[i] == crossing_values[i] + buffer
-/// ```
-///
-/// They describe that one note at the two phases of the migration:
+/// The plan stores the [`crossing_values`](Self::crossing_values) and one constant per-note fee
+/// buffer (see [`FeePolicy::transfer_fee_buffer_zatoshi`]); the prepared-note values are derived, not
+/// stored, since every prepared note is exactly its crossing value plus that buffer. Each index `i`
+/// describes one prepared note at the two phases of the migration:
 /// - `crossing_values[i]` is the denomination that CROSSES the turnstile into the destination pool
 ///   when the note is spent (the privacy-relevant value an observer sees; their sum is
 ///   [`total_migratable_zatoshi`](Self::total_migratable_zatoshi)).
-/// - `migration_outputs[i]` is the note CREATED in the source pool during the prep phase: the
-///   crossing value plus the buffer, so the note self-funds its own migration transfer (the buffer
-///   pays that transfer's fee, and the crossing value is what remains to cross).
+/// - [`migration_outputs`](Self::migration_outputs)`[i] == crossing_values[i] + buffer` is the note
+///   CREATED in the source pool during the prep phase, so it self-funds its own migration transfer
+///   (the buffer pays that transfer's fee, and the crossing value is what remains to cross).
 ///
 /// Value the strategy could not pack into a whole self-funding note is neither of these; it is
 /// [`change`](Self::change), left untouched in the source pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoteSplitPlan {
-    migration_outputs: Vec<u64>,
     crossing_values: Vec<u64>,
+    note_fee_buffer_zatoshi: u64,
     change: Option<u64>,
     prep_fee_zatoshi: u64,
     total_input_zatoshi: u64,
@@ -213,19 +208,20 @@ pub struct NoteSplitPlan {
 }
 
 impl NoteSplitPlan {
-    /// Assemble a plan from a strategy's computed notes (`migration_outputs`, parallel
-    /// `crossing_values`) and the `remaining_budget` left after them, which becomes source-pool change.
+    /// Assemble a plan from a strategy's computed `crossing_values`, the per-note fee buffer they each
+    /// carry (the prepared-note values are `crossing + note_fee_buffer_zatoshi`), and the
+    /// `remaining_budget` left after them, which becomes source-pool change.
     pub(crate) fn from_notes(
         total_input_zatoshi: u64,
         prep_fee_zatoshi: u64,
-        migration_outputs: Vec<u64>,
         crossing_values: Vec<u64>,
+        note_fee_buffer_zatoshi: u64,
         remaining_budget: u64,
     ) -> Self {
         let total_migratable_zatoshi = crossing_values.iter().sum();
         Self {
-            migration_outputs,
             crossing_values,
+            note_fee_buffer_zatoshi,
             change: (remaining_budget > 0).then_some(remaining_budget),
             prep_fee_zatoshi,
             total_input_zatoshi,
@@ -240,8 +236,8 @@ impl NoteSplitPlan {
         change: Option<u64>,
     ) -> Self {
         Self {
-            migration_outputs: Vec::new(),
             crossing_values: Vec::new(),
+            note_fee_buffer_zatoshi: 0,
             change,
             prep_fee_zatoshi,
             total_input_zatoshi,
@@ -250,16 +246,28 @@ impl NoteSplitPlan {
     }
 
     /// The value (in zatoshi) of each prepared note the split will create: the crossing value at the
-    /// same index plus the fee buffer, so the note can later pay its own migration-transfer fee.
-    pub fn migration_outputs(&self) -> &[u64] {
-        &self.migration_outputs
+    /// same index plus the [fee buffer](Self::note_fee_buffer_zatoshi), so the note can later pay its
+    /// own migration-transfer fee. Derived from [`crossing_values`](Self::crossing_values); the plan
+    /// stores only the crossings and the constant buffer.
+    pub fn migration_outputs(&self) -> Vec<u64> {
+        self.crossing_values
+            .iter()
+            .map(|&c| c + self.note_fee_buffer_zatoshi)
+            .collect()
     }
 
     /// The denomination values (in zatoshi) that will cross the turnstile into the destination pool
-    /// when the note at the same index is spent; parallel to [`Self::migration_outputs`]. Their
-    /// exact form (a `{1, 2, 5} * 10^k` ZEC value, a power of ten, ...) depends on the strategy.
+    /// when the note at the same index is spent. Their exact form (a `{1, 2, 5} * 10^k` ZEC value, a
+    /// power of ten, ...) depends on the strategy. Each prepared note (see
+    /// [`migration_outputs`](Self::migration_outputs)) is one of these plus the fee buffer.
     pub fn crossing_values(&self) -> &[u64] {
         &self.crossing_values
+    }
+
+    /// The constant fee buffer (in zatoshi) added to every crossing value to form the prepared note,
+    /// so each note self-funds its own migration transfer. The same for every note in the plan.
+    pub fn note_fee_buffer_zatoshi(&self) -> u64 {
+        self.note_fee_buffer_zatoshi
     }
 
     /// Any residual left in the source pool (in zatoshi) because it could not form a whole
@@ -287,17 +295,19 @@ impl NoteSplitPlan {
 }
 
 /// A rule for decomposing a spendable source-pool balance into the notes a migration run will prepare.
-/// See the module docs for the implementation and its denomination set. Object-safe, so a wallet can
-/// hold a selected `Box<dyn DenominationStrategy>` and a future variant can be added behind it.
+/// See the module docs for the implementation and its denomination set.
 pub trait DenominationStrategy {
     /// Decompose `total_input_zatoshi`, after reserving `prep_fee_zatoshi` for the note-split
-    /// transaction, into self-funding notes. `rng` is used by randomized strategies and ignored by
-    /// deterministic ones.
-    fn plan(
+    /// transaction, into self-funding notes. `prep_fee_zatoshi` is a single constant (the fee for the
+    /// note-split transaction padded to the maximum split action count), not a fee rule, because the
+    /// migration pads that transaction to the maximum anyway; sizing the reservation to that padded
+    /// maximum lets the decomposition proceed without re-deriving a fee per candidate split. `rng` is
+    /// used by randomized strategies and ignored by deterministic ones.
+    fn plan<R: RngCore>(
         &self,
         total_input_zatoshi: u64,
         prep_fee_zatoshi: u64,
-        rng: &mut dyn RngCore,
+        rng: &mut R,
     ) -> NoteSplitPlan;
 }
 
