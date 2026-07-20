@@ -774,6 +774,99 @@ fn sign_now_prove_later_transfer_awaits_proof_until_funding_note_is_witnessed() 
     assert_ne!(first.txid(), second.txid());
 }
 
+/// Regression test for a real bug: self-funding transfer construction must reference *this run's
+/// own* just-signed split output, not search the wallet for any already-mined note that happens to
+/// match the target value. Unlike every other test in this file, this one signs the schedule
+/// **immediately** after signing the split — with zero blocks mined or scanned in between, exactly
+/// matching the real app's actual call order (`sign_note_split` immediately followed by
+/// `sign_and_store_migration_schedule`, per `MigrationReviewVM.confirmAutomatic`) — against a
+/// freshly seeded wallet with no pre-existing notes at any migration denomination. Design spec §2
+/// promises signing works "before note-split has even broadcast, let alone mined"; the buggy
+/// implementation this fix replaces could only find a self-funding note that was *already* mined
+/// and scanned, so on a wallet with no matching history it would have found nothing at all for
+/// every self-funding candidate (silently falling back to the eager-proof "ordinary" pipeline) —
+/// or, worse, on a wallet that happened to have unrelated stale notes at the same denomination
+/// (this crate's earlier live-testnet symptom), silently reference the wrong note, permanently
+/// stranding the transfer.
+#[test]
+fn schedule_signed_immediately_after_split_spends_that_same_splits_own_not_yet_mined_output() {
+    // Same seed/decomposition as the other sign-now/prove-later tests: [10, 2] ZEC self-funding
+    // notes. No prior migration activity on this wallet — the only way a self-funding candidate at
+    // these values can be found is via this run's own split.
+    let seed_value = 1_200_080_000u64;
+    let (_dir, mut st, db_path, account) = seed_wallet(&[seed_value], 10);
+    let usk = st.get_account().usk().clone();
+
+    let ctx = MigrationContext::new(&db_path, ironwood_active_network(), account).unwrap();
+
+    // --- Phase 1: sign the split, but do NOT mine or scan it — it exists only as a signed PCZT
+    // this run knows about, exactly the "before note-split has even broadcast" case §2 covers. ---
+    let split_proposal = ctx.prepare_note_split().unwrap();
+    let prepared_split = ctx.sign_note_split(&split_proposal, &usk).unwrap();
+    let split_raw_tx = ctx
+        .extract_broadcast_tx(prepared_split.pczt_bytes())
+        .unwrap();
+    let split_tx = Transaction::read(&split_raw_tx[..], BranchId::Nu6_3).expect("split tx parses");
+    ctx.record_transfer_result(
+        prepared_split.id(),
+        TransferResult::Success(prepared_split.txid()),
+    )
+    .unwrap();
+
+    // --- Phase 2: sign the schedule right away, with the split still entirely unmined/unscanned.
+    // With the bug this fix replaces, this either errors (no witnessable input for the fallback
+    // path either) or silently produces transfers that can never be finalized. ---
+    let schedule = ctx.propose_migration_transfers(false).unwrap();
+    let mut crossings: Vec<u64> = schedule
+        .transfers()
+        .iter()
+        .map(|t| u64::from(t.amount()))
+        .collect();
+    crossings.sort_unstable();
+    assert_eq!(
+        crossings,
+        vec![200_000_000u64, 1_000_000_000],
+        "the schedule reproduces the split's own crossing values before the split is even mined"
+    );
+    ctx.sign_and_store_migration_schedule(&schedule, &usk)
+        .unwrap();
+
+    assert!(
+        ctx.next_due_transfer().unwrap().is_none(),
+        "a signed-but-unproven transfer is never due"
+    );
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        0,
+        "the split isn't mined yet — transient no-op, not an error (design spec §6)"
+    );
+
+    // --- Phase 3: now mine and scan the split for the first time, and confirm the schedule's
+    // self-funding transfers actually reference it — the whole point of this test. If they'd been
+    // built against a blind wallet-wide search instead, there would be nothing to find here (this
+    // wallet has no other notes at these values) and finalize would stay at 0 forever. ---
+    let (h, _) = st.generate_next_block_from_tx(0, &split_tx);
+    st.scan_cached_blocks(h, 1);
+    st.add_empty_blocks(10);
+
+    assert_eq!(
+        ctx.finalize_ready_transfers().unwrap(),
+        2,
+        "both self-funding transfers correctly reference this run's own split output, which is \
+         now mined and witnessed"
+    );
+
+    let conn = Connection::open(&db_path).unwrap();
+    let ready: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM ext_ironwood_migration_pending_txs WHERE proof_status = 'ready'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(ready, 2, "both transfers reached ReadyToBroadcast");
+}
+
 /// The external-signer (Keystone) counterpart of
 /// `sign_now_prove_later_transfer_awaits_proof_until_funding_note_is_witnessed`: proves that
 /// `create_unsigned_transfer_pczts`/`store_signed_schedule_pczts` produce the exact same

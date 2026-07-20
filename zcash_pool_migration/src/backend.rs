@@ -37,7 +37,7 @@ use zcash_client_backend::data_api::{Account as _, InputSource, WalletCommitment
 use zcash_client_backend::fees::zip317::MultiOutputChangeStrategy;
 use zcash_client_backend::fees::{DustOutputPolicy, SplitPolicy};
 use zcash_client_backend::proposal::Proposal;
-use zcash_client_backend::wallet::{OvkPolicy, ReceivedNote};
+use zcash_client_backend::wallet::OvkPolicy;
 use zcash_client_sqlite::util::SystemClock;
 use zcash_client_sqlite::{AccountUuid, ReceivedNoteId, WalletDb};
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
@@ -226,10 +226,67 @@ pub(crate) fn self_payment_request<P: Parameters>(
     build_self_payment(&address, u64::from(value))
 }
 
-/// Find a spendable Orchard note worth exactly `crossing_value + TRANSFER_FEE_BUFFER_ZATOSHI` (the
-/// shape a note split always mints) among notes not already `reserved` by an earlier transfer in
-/// the current signing loop or migration-locked by another run, plus the account's current
+/// A note this signing loop has settled on spending for one self-funding transfer, sourced either
+/// from this run's own just-signed split (`note_id: None` — not yet mined, so it has no
+/// `ReceivedNoteId`) or from an already-mined, already-scanned note elsewhere in the wallet
+/// (`note_id: Some(_)`).
+struct SelfFundingCandidate {
+    note: orchard::note::Note,
+    txid: TxId,
+    output_index: u32,
+    note_id: Option<ReceivedNoteId>,
+}
+
+/// Reconstructs the full `orchard::note::Note` for one output of an already-signed PCZT, from that
+/// output's own plaintext note fields (recipient, value, rho, rseed) — present in any signer's own
+/// copy of a PCZT it built, even before broadcast/mining. Mirrors the reconstruction
+/// `pczt::orchard`'s own internal memo-recovery helper performs, using only its `Output`/`Spend`
+/// public getters.
+fn reconstruct_note_from_split_pczt(
+    raw_pczt: &[u8],
+    output_index: u32,
+) -> Result<orchard::note::Note, MigrationError> {
+    let err = |msg: &str| MigrationError::Pipeline(format!("self-funding: {msg}"));
+    let pczt = pczt::Pczt::parse(raw_pczt).map_err(|e| err(&format!("parse split pczt: {e:?}")))?;
+    let action = pczt
+        .orchard()
+        .actions()
+        .get(output_index as usize)
+        .ok_or_else(|| err(&format!("split pczt has no action at output_index={output_index}")))?;
+    let recipient_bytes: [u8; 43] = (*action.output().recipient())
+        .ok_or_else(|| err("split output has no recipient"))?;
+    let recipient: orchard::Address =
+        Option::from(orchard::Address::from_raw_address_bytes(&recipient_bytes))
+            .ok_or_else(|| err("split output has an invalid recipient"))?;
+    let value: u64 = (*action.output().value()).ok_or_else(|| err("split output has no value"))?;
+    let rho: orchard::note::Rho = Option::from(orchard::note::Rho::from_bytes(action.spend().nullifier()))
+        .ok_or_else(|| err("split action has an invalid rho"))?;
+    let rseed_bytes: [u8; 32] =
+        (*action.output().rseed()).ok_or_else(|| err("split output has no rseed"))?;
+    let rseed = Option::from(orchard::note::RandomSeed::from_bytes(rseed_bytes, &rho))
+        .ok_or_else(|| err("split output has an invalid rseed"))?;
+    Option::from(orchard::Note::from_parts(
+        recipient,
+        orchard::value::NoteValue::from_raw(value),
+        rho,
+        rseed,
+        orchard::note::NoteVersion::V2,
+    ))
+    .ok_or_else(|| err("split output note is invalid"))
+}
+
+/// Find a note worth exactly `crossing_value + TRANSFER_FEE_BUFFER_ZATOSHI` (the shape a note
+/// split always mints) to fund one self-funding transfer, plus the account's current
 /// Orchard/Ironwood receiver to pay the crossing into.
+///
+/// **Prefers this run's own just-signed split output over any already-mined note elsewhere in the
+/// wallet** — design spec §2/§4.2: a self-funding transfer is meant to spend a note *this run's*
+/// split just produced, known the instant that split was signed (its txid is fixed by signing,
+/// before it is ever broadcast), not merely any note that happens to already exist with a matching
+/// value. Only falls back to the wallet-wide already-mined-notes search
+/// (`crate::split::select_spendable_orchard_notes`) when this run has no matching unclaimed
+/// prepared note — the correct behavior for IMMEDIATE mode (no split at all) or a residual balance
+/// already sitting at this exact denomination.
 ///
 /// Shared by every self-funding transfer builder — [`sign_self_funding_transfer_awaiting_proof`]
 /// (software-signing path) and [`build_self_funding_transfer_pczt_awaiting_proof_unsigned`]
@@ -237,30 +294,31 @@ pub(crate) fn self_payment_request<P: Parameters>(
 /// scheme (the external-signer path no longer has a real-witness/eager-proof self-funding builder;
 /// its fallback path still uses real witness/eager proof for the ordinary input-selection case).
 ///
-/// Returns `Ok(None)` when no matching note exists.
+/// `reserved_prepared` tracks `(txid_hex, output_index)` pairs already claimed earlier in the
+/// current signing loop from this run's own prepared notes (which have no `ReceivedNoteId` to
+/// dedupe against); `reserved_scanned` does the same for already-mined notes claimed via the
+/// wallet-wide fallback.
+///
+/// Returns `Ok(None)` when no matching note exists via either path.
 ///
 /// # Errors
 ///
 /// Returns [`MigrationError::InvalidState`] if the recipient address cannot be resolved, and
-/// [`MigrationError::NotSynced`]/[`MigrationError::Backend`] on a wallet access error.
-type SelfFundingCandidate = (ReceivedNote<ReceivedNoteId, orchard::note::Note>, orchard::Address);
-
+/// [`MigrationError::NotSynced`]/[`MigrationError::Backend`]/[`MigrationError::Db`]/
+/// [`MigrationError::Pipeline`] on a wallet/store access or PCZT-parsing error.
+#[allow(clippy::too_many_arguments)]
 fn find_self_funding_candidate<P: Parameters + Clone>(
     db: &Db<P>,
+    conn: &Connection,
     account: AccountUuid,
+    run_id: Option<&str>,
     crossing_value: u64,
-    reserved: &BTreeSet<ReceivedNoteId>,
+    reserved_scanned: &BTreeSet<ReceivedNoteId>,
+    reserved_prepared: &BTreeSet<(String, u32)>,
     locks: &BTreeSet<(String, u32)>,
-) -> Result<Option<SelfFundingCandidate>, MigrationError> {
+) -> Result<Option<(SelfFundingCandidate, orchard::Address)>, MigrationError> {
     let target_note_value =
         crossing_value.saturating_add(crate::denominations::TRANSFER_FEE_BUFFER_ZATOSHI);
-    let candidates = crate::split::select_spendable_orchard_notes(db, account, reserved, locks)?;
-    let Some(received) = candidates
-        .into_iter()
-        .find(|n| n.note().value().inner() == target_note_value)
-    else {
-        return Ok(None);
-    };
 
     let recipient = db
         .get_last_generated_address_matching(account, UnifiedAddressRequest::AllAvailableKeys)?
@@ -271,7 +329,45 @@ fn find_self_funding_candidate<P: Parameters + Clone>(
             ),
         ))?;
 
-    Ok(Some((received, recipient)))
+    // `run_id` is `None` only when the caller has no active run yet (nothing prepared to
+    // reference) — the wallet-wide fallback below is the only option in that case.
+    if let Some(run_id) = run_id {
+        if let Some(prepared) =
+            store::prepared_note_for_value(conn, run_id, target_note_value, reserved_prepared)?
+        {
+            if let Some(prep) = store::prep_tx(conn, run_id)? {
+                let note = reconstruct_note_from_split_pczt(&prep.raw_pczt, prepared.output_index)?;
+                let txid = parse_txid_hex(&prepared.txid_hex)?;
+                return Ok(Some((
+                    SelfFundingCandidate {
+                        note,
+                        txid,
+                        output_index: prepared.output_index,
+                        note_id: None,
+                    },
+                    recipient,
+                )));
+            }
+        }
+    }
+
+    let candidates =
+        crate::split::select_spendable_orchard_notes(db, account, reserved_scanned, locks)?;
+    let Some(received) = candidates
+        .into_iter()
+        .find(|n| n.note().value().inner() == target_note_value)
+    else {
+        return Ok(None);
+    };
+    Ok(Some((
+        SelfFundingCandidate {
+            note: *received.note(),
+            txid: *received.txid(),
+            output_index: received.output_index() as u32,
+            note_id: Some(*received.internal_note_id()),
+        },
+        recipient,
+    )))
 }
 
 /// The outcome of [`sign_self_funding_transfer_awaiting_proof`]: a validly SIGNED PCZT, serialized,
@@ -286,7 +382,9 @@ pub(crate) struct SelfFundingAwaitingProofOutcome {
     /// action order is shuffled at build time), so [`finalize_self_funding_transfer`] knows which
     /// action `Updater::set_orchard_spend_witnesses` must target.
     pub(crate) spend_action_index: u32,
-    pub(crate) spent_note_id: ReceivedNoteId,
+    /// `None` when the spent note was this run's own split output (not yet mined, so it has no
+    /// `ReceivedNoteId`) — `spent_note_txid`/`spent_note_output_index` identify it either way.
+    pub(crate) spent_note_id: Option<ReceivedNoteId>,
     pub(crate) spent_note_txid: String,
     pub(crate) spent_note_output_index: u32,
     pub(crate) spent_note_value: u64,
@@ -327,16 +425,27 @@ pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
     db: &Db<P>,
     network: &P,
     account: AccountUuid,
+    conn: &Connection,
+    run_id: Option<&str>,
     orchard_fvk: &orchard::keys::FullViewingKey,
     usk: &UnifiedSpendingKey,
     crossing_value: u64,
-    reserved: &BTreeSet<ReceivedNoteId>,
+    reserved_scanned: &BTreeSet<ReceivedNoteId>,
+    reserved_prepared: &BTreeSet<(String, u32)>,
     locks: &BTreeSet<(String, u32)>,
     target_height: u32,
     expiry_height: u32,
 ) -> Result<Option<SelfFundingAwaitingProofOutcome>, MigrationError> {
-    let Some((received, recipient)) =
-        find_self_funding_candidate(db, account, crossing_value, reserved, locks)?
+    let Some((candidate, recipient)) = find_self_funding_candidate(
+        db,
+        conn,
+        account,
+        run_id,
+        crossing_value,
+        reserved_scanned,
+        reserved_prepared,
+        locks,
+    )?
     else {
         return Ok(None);
     };
@@ -350,7 +459,7 @@ pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
         0,
         [orchard::tree::MerkleHashOrchard::empty_leaf(); orchard::NOTE_COMMITMENT_TREE_DEPTH],
     );
-    let synthetic_anchor = placeholder_path.root((*received.note()).commitment().into());
+    let synthetic_anchor = placeholder_path.root(candidate.note.commitment().into());
 
     let mut builder = Builder::new(
         network.clone(),
@@ -370,7 +479,7 @@ pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
     builder
         .add_orchard_spend::<std::convert::Infallible>(
             orchard_fvk.clone(),
-            *received.note(),
+            candidate.note,
             placeholder_path,
         )
         .map_err(|e| MigrationError::Pipeline(format!("transfer: add spend: {e:?}")))?;
@@ -420,10 +529,10 @@ pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
     Ok(Some(SelfFundingAwaitingProofOutcome {
         raw_pczt,
         spend_action_index,
-        spent_note_id: *received.internal_note_id(),
-        spent_note_txid: received.txid().to_string(),
-        spent_note_output_index: received.output_index() as u32,
-        spent_note_value: received.note().value().inner(),
+        spent_note_id: candidate.note_id,
+        spent_note_txid: candidate.txid.to_string(),
+        spent_note_output_index: candidate.output_index,
+        spent_note_value: candidate.note.value().inner(),
     }))
 }
 
@@ -436,7 +545,9 @@ pub(crate) fn sign_self_funding_transfer_awaiting_proof<P: Parameters + Clone>(
 pub(crate) struct SelfFundingUnsignedOutcome {
     pub(crate) raw_pczt: Vec<u8>,
     pub(crate) spend_action_index: u32,
-    pub(crate) spent_note_id: ReceivedNoteId,
+    /// `None` when the spent note was this run's own split output — see
+    /// [`SelfFundingAwaitingProofOutcome::spent_note_id`].
+    pub(crate) spent_note_id: Option<ReceivedNoteId>,
     pub(crate) spent_note_txid: String,
     pub(crate) spent_note_output_index: u32,
     pub(crate) spent_note_value: u64,
@@ -462,19 +573,31 @@ pub(crate) struct SelfFundingUnsignedOutcome {
 ///
 /// Returns [`MigrationError::InvalidState`]/[`MigrationError::Backend`] if the recipient address
 /// cannot be resolved, and [`MigrationError::Pipeline`] if the build/serialize pipeline fails.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_self_funding_transfer_pczt_awaiting_proof_unsigned<P: Parameters + Clone>(
     db: &Db<P>,
     network: &P,
     account: AccountUuid,
+    conn: &Connection,
+    run_id: Option<&str>,
     orchard_fvk: &orchard::keys::FullViewingKey,
     crossing_value: u64,
-    reserved: &BTreeSet<ReceivedNoteId>,
+    reserved_scanned: &BTreeSet<ReceivedNoteId>,
+    reserved_prepared: &BTreeSet<(String, u32)>,
     locks: &BTreeSet<(String, u32)>,
     target_height: u32,
     expiry_height: u32,
 ) -> Result<Option<SelfFundingUnsignedOutcome>, MigrationError> {
-    let Some((received, recipient)) =
-        find_self_funding_candidate(db, account, crossing_value, reserved, locks)?
+    let Some((candidate, recipient)) = find_self_funding_candidate(
+        db,
+        conn,
+        account,
+        run_id,
+        crossing_value,
+        reserved_scanned,
+        reserved_prepared,
+        locks,
+    )?
     else {
         return Ok(None);
     };
@@ -486,7 +609,7 @@ pub(crate) fn build_self_funding_transfer_pczt_awaiting_proof_unsigned<P: Parame
         0,
         [orchard::tree::MerkleHashOrchard::empty_leaf(); orchard::NOTE_COMMITMENT_TREE_DEPTH],
     );
-    let synthetic_anchor = placeholder_path.root((*received.note()).commitment().into());
+    let synthetic_anchor = placeholder_path.root(candidate.note.commitment().into());
 
     let mut builder = Builder::new(
         network.clone(),
@@ -504,7 +627,7 @@ pub(crate) fn build_self_funding_transfer_pczt_awaiting_proof_unsigned<P: Parame
     builder
         .add_orchard_spend::<std::convert::Infallible>(
             orchard_fvk.clone(),
-            *received.note(),
+            candidate.note,
             placeholder_path,
         )
         .map_err(|e| MigrationError::Pipeline(format!("transfer: add spend: {e:?}")))?;
@@ -540,10 +663,10 @@ pub(crate) fn build_self_funding_transfer_pczt_awaiting_proof_unsigned<P: Parame
     Ok(Some(SelfFundingUnsignedOutcome {
         raw_pczt,
         spend_action_index,
-        spent_note_id: *received.internal_note_id(),
-        spent_note_txid: received.txid().to_string(),
-        spent_note_output_index: received.output_index() as u32,
-        spent_note_value: received.note().value().inner(),
+        spent_note_id: candidate.note_id,
+        spent_note_txid: candidate.txid.to_string(),
+        spent_note_output_index: candidate.output_index,
+        spent_note_value: candidate.note.value().inner(),
     }))
 }
 
@@ -633,6 +756,19 @@ pub(crate) fn finalize_self_funding_transfer<P: Parameters + Clone>(
         target,
     )?
     else {
+        // Distinct from the witness-not-found branch below: this means the note isn't a currently
+        // spendable note at all — either its split parent genuinely hasn't mined/synced yet
+        // (transient, the ordinary case), or it's already been spent (permanent — e.g. another
+        // migration run claimed it first). Both look identical here; logged so a permanently stuck
+        // row is diagnosable from logs alone rather than indistinguishable from "still mining".
+        tracing::debug!(
+            "MIGRATION_DIAG finalize_self_funding_transfer: txid={} note (txid={} output_index={}) \
+             is not a currently spendable note — transient no-op if its split parent hasn't mined \
+             yet, permanent if the note was already spent elsewhere; will keep retrying either way",
+            row.txid_hex,
+            row.selected_note_txid,
+            row.selected_note_output_index,
+        );
         return Ok(None);
     };
     // `NotContained`/`CheckpointPruned` both mean "not witnessable at this anchor yet" — e.g. the
@@ -1265,6 +1401,9 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
     // the success and the error path.
     let sign_all = |db: &mut Db<P>| -> Result<(), MigrationError> {
         let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
+        // Claims from this run's own prepared (not-yet-mined) split notes within this loop —
+        // separate from `reserved` since a prepared note has no `ReceivedNoteId` yet.
+        let mut reserved_prepared: BTreeSet<(String, u32)> = BTreeSet::new();
         let orchard_fvk = orchard::keys::FullViewingKey::from(usk.orchard());
         for t in schedule.transfers() {
             // Direct-builder path (design spec §4.2): a self-funding note pays its own fee, no
@@ -1279,10 +1418,13 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
                 db,
                 network,
                 account,
+                conn,
+                Some(run_id),
                 &orchard_fvk,
                 usk,
                 u64::from(t.amount()),
                 &reserved,
+                &reserved_prepared,
                 &locks,
                 target,
                 u32::from(t.expiry_height()),
@@ -1304,7 +1446,10 @@ pub(crate) fn sign_schedule<P: Parameters + Clone>(
                     u64::from(t.amount()),
                     raw_pczt.len(),
                 );
-                reserved.insert(spent_note_id);
+                if let Some(note_id) = spent_note_id {
+                    reserved.insert(note_id);
+                }
+                reserved_prepared.insert((spent_note_txid.to_lowercase(), spent_note_output_index));
                 store::insert_pending_txs(
                     conn,
                     run_id,

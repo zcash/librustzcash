@@ -492,17 +492,20 @@ impl<P: Parameters + Clone> MigrationContext<P> {
     // ----- note splitting -----
 
     /// Whether the Orchard notes must be split before migration. Splitting is mandatory whenever
-    /// there is spendable Orchard balance and no split has yet been confirmed.
+    /// there is spendable Orchard balance and no split has yet been confirmed for this run — or,
+    /// even with no active run, whenever the wallet's already-spendable notes don't already cover
+    /// every denomination a fresh split would mint (compared as a multiset, not merely "some
+    /// balance exists at these values": one 1-ZEC note does not satisfy a plan that needs two).
     ///
     /// # Errors
     ///
     /// Returns [`MigrationError::NotSynced`]/[`MigrationError::Backend`] if the spendable Orchard
-    /// balance cannot be read, and [`MigrationError::Db`] on an engine-table access error.
+    /// balance or its notes cannot be read, and [`MigrationError::Db`] on an engine-table access
+    /// error.
     pub fn is_note_split_needed(&self) -> Result<bool, MigrationError> {
         let conn = self.store_conn()?;
-        let already_prepared = self
-            .active_run(&conn)?
-            .and_then(|r| Phase::parse(&r.phase))
+        let active_run_phase = self.active_run(&conn)?.and_then(|r| Phase::parse(&r.phase));
+        let already_prepared = active_run_phase
             .map(|p| {
                 !matches!(
                     p,
@@ -513,9 +516,47 @@ impl<P: Parameters + Clone> MigrationContext<P> {
             })
             .unwrap_or(false);
         if already_prepared {
+            tracing::debug!(
+                "MIGRATION_DIAG is_note_split_needed: SKIP — active run's own phase is already \
+                 past ReadyToPrepare ({active_run_phase:?})"
+            );
             return Ok(false);
         }
-        Ok(self.orchard_spendable()? > 0)
+
+        let total = self.orchard_spendable()?;
+        if total == 0 {
+            tracing::debug!("MIGRATION_DIAG is_note_split_needed: SKIP — no spendable Orchard balance");
+            return Ok(false);
+        }
+
+        let db = self.open_wallet()?;
+        let locks = BTreeSet::new();
+        let reserved = BTreeSet::new();
+        let candidates =
+            crate::split::select_spendable_orchard_notes(&db, self.account, &reserved, &locks)?;
+        let n_spends = candidates.len().max(1);
+        let (plan, _fee_estimate) = converge_denomination_plan(total, n_spends)?;
+
+        let mut available: std::collections::BTreeMap<u64, usize> = std::collections::BTreeMap::new();
+        for note in &candidates {
+            *available.entry(note.note().value().inner()).or_insert(0) += 1;
+        }
+        let mut needed: std::collections::BTreeMap<u64, usize> = std::collections::BTreeMap::new();
+        for &value in &plan.migration_outputs {
+            *needed.entry(value).or_insert(0) += 1;
+        }
+        let already_satisfied = needed
+            .iter()
+            .all(|(value, count)| available.get(value).copied().unwrap_or(0) >= *count);
+
+        tracing::debug!(
+            "MIGRATION_DIAG is_note_split_needed: {} — total_spendable={total} needed_denominations={:?} \
+             already_available={:?}",
+            if already_satisfied { "SKIP (already covered by existing notes)" } else { "SPLIT REQUIRED" },
+            needed,
+            available,
+        );
+        Ok(!already_satisfied)
     }
 
     /// Compute the optimal note split for the spendable Orchard balance. Each output note is
@@ -868,6 +909,9 @@ impl<P: Parameters + Clone> MigrationContext<P> {
         )?;
         let orchard_fvk = backend::account_orchard_fvk(&db, self.account)?;
         let mut reserved: BTreeSet<ReceivedNoteId> = BTreeSet::new();
+        // Claims from this run's own prepared (not-yet-mined) split notes within this loop — see
+        // `backend::sign_schedule`'s identical `reserved_prepared` for why this is a separate set.
+        let mut reserved_prepared: BTreeSet<(String, u32)> = BTreeSet::new();
         let mut pairs = Vec::with_capacity(schedule.transfers().len());
         for t in schedule.transfers() {
             // Placeholder-witness self-funding path first (matches
@@ -879,14 +923,23 @@ impl<P: Parameters + Clone> MigrationContext<P> {
                 &db,
                 &self.network,
                 self.account,
+                &conn,
+                own_run_id.as_deref(),
                 &orchard_fvk,
                 u64::from(t.amount()),
                 &reserved,
+                &reserved_prepared,
                 &locks,
                 target,
                 u32::from(t.expiry_height()),
             )? {
-                reserved.insert(outcome.spent_note_id);
+                if let Some(note_id) = outcome.spent_note_id {
+                    reserved.insert(note_id);
+                }
+                reserved_prepared.insert((
+                    outcome.spent_note_txid.to_lowercase(),
+                    outcome.spent_note_output_index,
+                ));
                 let metadata = TransferStagingMetadata {
                     anchor_height: u32::from(t.anchor_height()),
                     next_executable_after_height: u32::from(t.next_executable_after_height()),

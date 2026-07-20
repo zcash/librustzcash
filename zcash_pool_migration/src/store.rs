@@ -401,6 +401,43 @@ pub(crate) fn insert_prepared_notes(
     Ok(())
 }
 
+/// Finds this run's own locked prepared note worth exactly `value_zatoshi`, excluding any
+/// `(txid_hex, output_index)` already claimed earlier in the caller's current signing loop
+/// (`already_claimed`) — a not-yet-mined prepared note has no `ReceivedNoteId` to dedupe against,
+/// so the loop tracks claims by this same key instead. Returns the first match in `output_index`
+/// order for determinism. `None` means this run's split (if any) has no unclaimed output at this
+/// value — the caller falls back to the wallet-wide already-mined-notes search.
+pub(crate) fn prepared_note_for_value(
+    conn: &Connection,
+    run_id: &str,
+    value_zatoshi: u64,
+    already_claimed: &BTreeSet<(String, u32)>,
+) -> rusqlite::Result<Option<PreparedNote>> {
+    let mut stmt = conn.prepare(
+        "SELECT txid_hex, output_index, value_zatoshi, note_version, nullifier_hex, lock_state
+         FROM ext_ironwood_migration_prepared_notes
+         WHERE run_id = ?1 AND value_zatoshi = ?2 AND lock_state = 'locked'
+         ORDER BY output_index",
+    )?;
+    let rows = stmt.query_map(params![run_id, value_zatoshi as i64], |row| {
+        Ok(PreparedNote {
+            txid_hex: row.get(0)?,
+            output_index: row.get(1)?,
+            value_zatoshi: row.get::<_, i64>(2)? as u64,
+            note_version: row.get(3)?,
+            nullifier_hex: row.get(4)?,
+            lock_state: row.get(5)?,
+        })
+    })?;
+    for row in rows {
+        let row = row?;
+        if !already_claimed.contains(&(row.txid_hex.to_lowercase(), row.output_index)) {
+            return Ok(Some(row));
+        }
+    }
+    Ok(None)
+}
+
 /// Locked prepared-note refs of the account's live (non-terminal) runs, excluding `exclude_run_id`
 /// when given. A run's own operations pass their run id: the schedule transfers must SPEND the notes
 /// the run's split prepared (locks exist to keep *other* migration operations off them), and the
