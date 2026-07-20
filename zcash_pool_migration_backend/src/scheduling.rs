@@ -543,6 +543,38 @@ mod tests {
         }
     }
 
+    /// Assert one hand-derived [`most_recent_boundary`] value plus its invariants (a multiple of the
+    /// modulus, `<= height`, and within one modulus of it). `BOUNDARY_MODULUS` is 144.
+    fn check_most_recent_boundary_golden(height: u32, expected: u32) {
+        let b = u32::from(most_recent_boundary(bh(height)));
+        assert_eq!(b, expected, "most_recent_boundary({height})");
+        assert_eq!(b % BOUNDARY_MODULUS, 0, "not a boundary");
+        assert!(b <= height, "boundary {b} above height {height}");
+        assert!(
+            height - b < BOUNDARY_MODULUS,
+            "boundary {b} more than a modulus below {height}"
+        );
+    }
+
+    /// Golden vectors for [`most_recent_boundary`], hand-derived from `BOUNDARY_MODULUS == 144`:
+    /// the result is `height - (height % 144)`, i.e. `height` rounded DOWN to a multiple of 144.
+    #[test]
+    fn most_recent_boundary_golden() {
+        // Each case is (input height, expected boundary = height rounded down to a multiple of 144).
+        let cases: [(u32, u32); 7] = [
+            (0, 0),
+            (143, 0),
+            (144, 144), // exact boundary maps to itself
+            (287, 144),
+            (288, 288),           // 2 * 144
+            (300, 288),           // 300 = 2*144 + 12
+            (1_000_000, 999_936), // 6944 * 144 = 999_936, rem 64
+        ];
+        for (height, exp_output) in cases {
+            check_most_recent_boundary_golden(height, exp_output);
+        }
+    }
+
     // --- draw_delay ---------------------------------------------------------------------------
 
     proptest! {
@@ -573,6 +605,31 @@ mod tests {
             (100.0..150.0).contains(&mean),
             "empirical mean {mean} out of expected band"
         );
+    }
+
+    /// Assert a golden sequence of [`draw_delay`] draws for a fixed seed, pinning the exact
+    /// deterministic [`ChaCha8Rng`] output as a regression guard, plus the documented invariant that
+    /// every delay is in the closed range `[0, MAX_DELAY]` (the truncated-exponential bound).
+    fn check_delay_golden(seed: u64, expected: &[u32]) {
+        let mut r = rng(seed);
+        let got: Vec<u32> = (0..expected.len()).map(|_| draw_delay(&mut r)).collect();
+        assert_eq!(got, expected, "draw_delay(seed={seed})");
+        for &d in &got {
+            assert!(d <= MAX_DELAY, "delay {d} exceeds MAX_DELAY {MAX_DELAY}");
+        }
+    }
+
+    /// Golden vectors for [`draw_delay`] over several seeds. These are the captured deterministic
+    /// draws; the `seed=1` sequence matches the per-step gaps pinned in
+    /// [`schedule_broadcast_heights_golden`] (74, 12, 131, 36, 48, ...).
+    #[test]
+    fn draw_delay_golden() {
+        let exp_seed1 = [74, 12, 131, 36, 48, 179, 89, 24];
+        let exp_seed42 = [165, 432, 80, 142, 49, 23, 53, 235];
+        let exp_seed7 = [25, 26, 175, 187, 132, 64, 12, 273];
+        check_delay_golden(1, &exp_seed1);
+        check_delay_golden(42, &exp_seed42);
+        check_delay_golden(7, &exp_seed7);
     }
 
     // --- shuffle ------------------------------------------------------------------------------
@@ -610,6 +667,58 @@ mod tests {
                 assert!(gen_index(&mut r, bound) < bound);
             }
         }
+    }
+
+    /// Assert a golden [`shuffle_indices`] permutation for a fixed `(n, seed)`, pinning the exact
+    /// deterministic [`ChaCha8Rng`] shuffle, plus the invariant that the result is a permutation of
+    /// `0..n` (each index present exactly once).
+    fn check_shuffle_indices_golden(n: usize, seed: u64, expected: &[usize]) {
+        let perm = shuffle_indices(n, &mut rng(seed));
+        assert_eq!(perm, expected, "shuffle_indices({n}, seed={seed})");
+        assert_eq!(perm.len(), n);
+        let mut sorted = perm.clone();
+        sorted.sort_unstable();
+        assert!(
+            sorted.iter().copied().eq(0..n),
+            "not a permutation of 0..{n}"
+        );
+    }
+
+    /// Golden vectors for [`shuffle_indices`]: fixed `(n, seed)` pairs pinned to the exact
+    /// Fisher-Yates permutation they produce (a regression guard on the shuffle), each verified to be
+    /// a genuine permutation of `0..n`.
+    #[test]
+    fn shuffle_indices_golden() {
+        let exp_empty: [usize; 0] = []; // empty stays empty
+        let exp_singleton = [0]; // singleton is the identity
+        let exp_n5_seed1 = [4, 3, 1, 0, 2];
+        let exp_n8_seed42 = [4, 7, 0, 1, 3, 2, 6, 5];
+        let exp_n10_seed7 = [4, 6, 2, 0, 8, 3, 7, 5, 9, 1];
+        check_shuffle_indices_golden(0, 1, &exp_empty);
+        check_shuffle_indices_golden(1, 1, &exp_singleton);
+        check_shuffle_indices_golden(5, 1, &exp_n5_seed1);
+        check_shuffle_indices_golden(8, 42, &exp_n8_seed42);
+        check_shuffle_indices_golden(10, 7, &exp_n10_seed7);
+    }
+
+    /// Golden vectors for [`shuffle_in_place`]: a fixed concrete slice shuffled under a fixed seed,
+    /// pinned to its exact reordering, and verified to preserve the original multiset of elements.
+    #[test]
+    fn shuffle_in_place_golden() {
+        fn check(seed: u64, expected: &[u32]) {
+            let mut v = alloc::vec![10u32, 20, 30, 40, 50, 60];
+            let mut original = v.clone();
+            original.sort_unstable();
+            shuffle_in_place(&mut v, &mut rng(seed));
+            assert_eq!(v, expected, "shuffle_in_place(seed={seed})");
+            let mut sorted = v.clone();
+            sorted.sort_unstable();
+            assert_eq!(sorted, original, "multiset changed by shuffle");
+        }
+        let exp_seed1 = [20, 40, 50, 60, 10, 30];
+        let exp_seed42 = [30, 10, 40, 20, 60, 50];
+        check(1, &exp_seed1);
+        check(42, &exp_seed42);
     }
 
     // --- schedule_broadcast_heights -----------------------------------------------------------
@@ -837,6 +946,138 @@ mod tests {
         );
     }
 
+    /// Assert a golden sequence of [`draw_anchor_boundary`] draws for a fixed candidate set and seed,
+    /// pinning the exact deterministic recency-weighted picks, plus the documented invariants for
+    /// each: a multiple of the modulus, strictly above `act`, strictly below the most recent
+    /// boundary derived from `chain_tip`, at/after `funding`, and with an age in
+    /// `[1, ANCHOR_AGE_CAP]`.
+    fn check_anchor_golden(act: u32, funding: u32, chain_tip: u32, seed: u64, expected: &[u32]) {
+        let most_recent = most_recent_boundary_u32(chain_tip);
+        let mut r = rng(seed);
+        let got: Vec<u32> = (0..expected.len())
+            .map(|_| {
+                u32::from(
+                    draw_anchor_boundary(bh(act), bh(funding), bh(chain_tip), &mut r).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(got, expected, "draw_anchor_boundary(seed={seed})");
+        for &b in &got {
+            assert_eq!(
+                b % BOUNDARY_MODULUS,
+                0,
+                "boundary {b} not a multiple of the modulus"
+            );
+            assert!(
+                b > act,
+                "boundary {b} must be strictly above activation {act}"
+            );
+            assert!(
+                b < most_recent,
+                "boundary {b} must be below most_recent {most_recent}"
+            );
+            assert!(
+                b >= funding,
+                "boundary {b} must be at/after funding {funding}"
+            );
+            let age = (most_recent - b) / BOUNDARY_MODULUS;
+            assert!(
+                (1..=ANCHOR_AGE_CAP).contains(&age),
+                "age {age} out of [1, cap]"
+            );
+        }
+    }
+
+    /// Golden vectors for [`draw_anchor_boundary`]. The candidate set spans boundaries `288..=2736`
+    /// (`act = 144`, `funding = 288`, chain tip `2880`); each pinned sequence is the exact
+    /// recency-weighted draw, and every entry is checked against the candidate-set invariants. The
+    /// modal pick is the highest candidate 2736 (age 1), as the `Geometric(1/2)` age draw expects.
+    /// A tip in the middle of the same boundary interval derives the same boundary and must
+    /// reproduce the same vectors.
+    #[test]
+    fn draw_anchor_boundary_golden() {
+        let (act, funding, tip) = (
+            BOUNDARY_MODULUS,
+            2 * BOUNDARY_MODULUS,
+            20 * BOUNDARY_MODULUS,
+        );
+        let exp_seed1 = [2736, 2736, 2736, 2592, 2736, 2304];
+        let exp_seed42 = [2736, 2304, 2448, 2592, 2160, 2592];
+        let exp_seed7 = [2736, 2592, 2736, 2736, 2304, 2592];
+        let exp_seed100 = [2592, 2736, 2736, 2592, 2016, 2736];
+        check_anchor_golden(act, funding, tip, 1, &exp_seed1);
+        check_anchor_golden(act, funding, tip, 42, &exp_seed42);
+        check_anchor_golden(act, funding, tip, 7, &exp_seed7);
+        check_anchor_golden(act, funding, tip, 100, &exp_seed100);
+        // A mid-interval tip (not itself a boundary) must yield identical draws.
+        check_anchor_golden(act, funding, tip + 100, 1, &exp_seed1);
+        check_anchor_golden(act, funding, tip + BOUNDARY_MODULUS - 1, 42, &exp_seed42);
+    }
+
+    /// Golden vectors for [`draw_anchor_boundary_bounded`]: a sequence of draws over the same
+    /// candidate set (`288..=2736`), each accepted draw recorded into the running
+    /// [`BoundaryCounts`], pinned to the exact chosen boundaries. The invariant checked is the
+    /// `K_MAX` cap: no boundary ends up holding more than [`K_MAX`] of the wallet's parts.
+    #[test]
+    fn draw_anchor_boundary_bounded_golden() {
+        fn check(seed: u64, expected: &[Option<u32>]) {
+            let (act, funding, tip) = (
+                BOUNDARY_MODULUS,
+                2 * BOUNDARY_MODULUS,
+                20 * BOUNDARY_MODULUS,
+            );
+            let mut r = rng(seed);
+            let mut counts = BoundaryCounts::new();
+            let mut got: Vec<Option<u32>> = Vec::new();
+            for _ in 0..expected.len() {
+                match draw_anchor_boundary_bounded(bh(act), bh(funding), bh(tip), &counts, &mut r) {
+                    Some(b) => {
+                        counts.record(b);
+                        got.push(Some(u32::from(b)));
+                    }
+                    None => got.push(None),
+                }
+            }
+            assert_eq!(got, expected, "draw_anchor_boundary_bounded(seed={seed})");
+            for (_, c) in counts.cohorts() {
+                assert!(c <= K_MAX, "cohort count {c} exceeds K_MAX {K_MAX}");
+            }
+        }
+        let exp_seed1 = [
+            Some(2736),
+            Some(2736),
+            Some(2592),
+            Some(2304),
+            Some(2592),
+            Some(2304),
+            Some(2016),
+            Some(2448),
+        ];
+        let exp_seed42 = [
+            Some(2736),
+            Some(2304),
+            Some(2448),
+            Some(2592),
+            Some(2160),
+            Some(2592),
+            Some(2448),
+            Some(1296),
+        ];
+        let exp_seed7 = [
+            Some(2736),
+            Some(2592),
+            Some(2736),
+            Some(2304),
+            Some(2592),
+            Some(2304),
+            Some(2448),
+            Some(2448),
+        ];
+        check(1, &exp_seed1);
+        check(42, &exp_seed42);
+        check(7, &exp_seed7);
+    }
+
     #[test]
     fn anchor_tiny_range_single_candidate() {
         // Exactly one candidate: the boundary below the tip's, and it satisfies all bounds.
@@ -904,10 +1145,150 @@ mod tests {
         assert_eq!(counts.cohorts(), alloc::vec![(bh(144), 3), (bh(288), 2)]);
     }
 
-    // --- schedule wiring ----------------------------------------------------------------------
+    /// Golden for the [`BoundaryCounts`] primitive operations (`new`, `record`, `count`, `cohorts`)
+    /// exercised directly rather than through [`group_by_boundary`]: a fresh tally is empty,
+    /// [`BoundaryCounts::record`] returns the incremented running count at that boundary, and
+    /// [`BoundaryCounts::cohorts`] lists distinct boundaries sorted ascending regardless of
+    /// insertion order.
+    #[test]
+    fn boundary_counts_golden() {
+        let mut c = BoundaryCounts::new();
+        assert_eq!(c, BoundaryCounts::default(), "new() must equal default()");
+        assert_eq!(c.count(bh(144)), 0, "empty tally counts zero");
+        assert!(c.cohorts().is_empty(), "empty tally has no cohorts");
+        // record returns the new running count at the boundary; insert out of order (288 before 144).
+        // Each expected running count is bound so the incrementing sequence is readable.
+        let exp_record_288_first = 1;
+        let exp_record_144_first = 1;
+        let exp_record_288_second = 2;
+        let exp_record_288_third = 3;
+        assert_eq!(c.record(bh(288)), exp_record_288_first);
+        assert_eq!(c.record(bh(144)), exp_record_144_first);
+        assert_eq!(c.record(bh(288)), exp_record_288_second);
+        assert_eq!(c.record(bh(288)), exp_record_288_third);
+        assert_eq!(c.count(bh(288)), 3);
+        assert_eq!(c.count(bh(144)), 1);
+        assert_eq!(c.count(bh(432)), 0, "unrecorded boundary counts zero");
+        // cohorts sorted ascending by boundary height, not insertion order.
+        let exp_cohorts = alloc::vec![(bh(144), 1), (bh(288), 3)];
+        assert_eq!(c.cohorts(), exp_cohorts);
+    }
 
     proptest! {
-        /// [`schedule`] pairs each broadcast height with its canonical expiry.
+        /// [`group_by_boundary`] / [`BoundaryCounts`] tallies faithfully: the cohort counts sum to the
+        /// input length, each boundary's count equals its number of occurrences, an absent boundary
+        /// counts zero, and cohorts are strictly ascending by boundary height (distinct + sorted).
+        #[test]
+        fn group_by_boundary_tallies(boundaries in prop::collection::vec(0u32..2000, 0..64)) {
+            let heights: Vec<BlockHeight> = boundaries.iter().copied().map(bh).collect();
+            let counts = group_by_boundary(&heights);
+            // Sum of cohort counts equals the number of recorded boundaries.
+            let total: usize = counts.cohorts().iter().map(|(_, c)| *c).sum();
+            prop_assert_eq!(total, boundaries.len());
+            // Every recorded boundary is counted with its exact multiplicity.
+            for &b in &boundaries {
+                let occ = boundaries.iter().filter(|&&x| x == b).count();
+                prop_assert_eq!(counts.count(bh(b)), occ);
+            }
+            // A boundary outside the drawn range is never present.
+            prop_assert_eq!(counts.count(bh(9999)), 0);
+            // cohorts() is strictly ascending by boundary height (distinct keys, sorted).
+            let cohorts = counts.cohorts();
+            for w in cohorts.windows(2) {
+                prop_assert!(w[0].0 < w[1].0, "cohorts not strictly ascending");
+            }
+        }
+    }
+
+    // --- schedule wiring ----------------------------------------------------------------------
+
+    /// Assert one golden [`schedule`] result: the exact broadcast/expiry height pairs for a fixed
+    /// `(commit, n, seed)`, plus the wiring invariants. The broadcast heights are cross-checked to
+    /// equal [`schedule_broadcast_heights`] on the same seed (identical RNG consumption), and each
+    /// expiry is checked to equal [`expiry_height`] of its broadcast height.
+    fn check_schedule_golden_pairs(
+        commit: u32,
+        n: usize,
+        seed: u64,
+        expected_broadcast: &[u32],
+        expected_expiry: &[u32],
+    ) {
+        let schedules = schedule(bh(commit), n, &mut rng(seed));
+        let broadcast: Vec<u32> = schedules
+            .iter()
+            .map(|s| u32::from(s.broadcast_height()))
+            .collect();
+        let expiry: Vec<u32> = schedules
+            .iter()
+            .map(|s| u32::from(s.expiry_height()))
+            .collect();
+        assert_eq!(
+            broadcast, expected_broadcast,
+            "schedule({commit}, {n}, seed={seed}) broadcast"
+        );
+        assert_eq!(
+            expiry, expected_expiry,
+            "schedule({commit}, {n}, seed={seed}) expiry"
+        );
+        // Broadcast heights equal the cumulative-delay schedule for the same seed.
+        assert_eq!(
+            broadcast,
+            schedule_broadcast_heights(bh(commit), n, &mut rng(seed))
+                .into_iter()
+                .map(u32::from)
+                .collect::<Vec<u32>>(),
+            "broadcast heights must match the cumulative rule"
+        );
+        // Each expiry is the canonical rolling window of its broadcast height, and broadcast >= commit.
+        for (&b, &e) in broadcast.iter().zip(&expiry) {
+            assert!(b >= commit, "broadcast {b} below commit {commit}");
+            assert_eq!(
+                e,
+                u32::from(expiry_height(bh(b))),
+                "expiry {e} != expiry_height({b})"
+            );
+        }
+    }
+
+    /// Golden vectors for [`schedule`]: the exact `(broadcast, expiry)` height pairs for fixed
+    /// `(commit, n, seed)` triples. Broadcast heights reuse the cumulative delays pinned in
+    /// [`schedule_broadcast_heights_golden`]; every expiry equals `expiry_height(broadcast)`, and all
+    /// broadcasts here fall inside one `EXPIRY_MODULUS` period so they share a single expiry height.
+    #[test]
+    fn schedule_golden() {
+        // n = 0 schedules nothing.
+        let exp_broadcast_empty: [u32; 0] = [];
+        let exp_expiry_empty: [u32; 0] = [];
+        check_schedule_golden_pairs(1_000_000, 0, 1, &exp_broadcast_empty, &exp_expiry_empty);
+
+        // commit = 1_000_000, n = 5, seed = 1: broadcast heights and their shared expiry.
+        let exp_broadcast_c1m_seed1 = [1_000_074, 1_000_086, 1_000_217, 1_000_253, 1_000_301];
+        let exp_expiry_c1m_seed1 = [1_036_800; 5];
+        check_schedule_golden_pairs(
+            1_000_000,
+            5,
+            1,
+            &exp_broadcast_c1m_seed1,
+            &exp_expiry_c1m_seed1,
+        );
+
+        // commit = 0, n = 6, seed = 12_345.
+        let exp_broadcast_c0_seed12345 = [11, 17, 242, 300, 313, 341];
+        let exp_expiry_c0_seed12345 = [69_120; 6];
+        check_schedule_golden_pairs(
+            0,
+            6,
+            12_345,
+            &exp_broadcast_c0_seed12345,
+            &exp_expiry_c0_seed12345,
+        );
+    }
+
+    proptest! {
+        /// [`schedule`] pairs each broadcast height with its canonical expiry, the broadcast heights
+        /// follow the cumulative rule (equal to [`schedule_broadcast_heights`] on the same seed and
+        /// non-decreasing from the commit height), and each expiry is [`expiry_height`] of its
+        /// broadcast height.
         #[test]
         fn schedule_pairs_broadcast_and_expiry(commit in 0u32..1_000_000,
                                                n in 0usize..24,
@@ -915,8 +1296,14 @@ mod tests {
             let mut r = rng(seed);
             let schedules = schedule(bh(commit), n, &mut r);
             prop_assert_eq!(schedules.len(), n);
-            for s in schedules {
-                prop_assert!(s.broadcast_height() >= bh(commit));
+            // Broadcast heights follow the cumulative delay rule (same RNG => same heights).
+            let broadcast: Vec<BlockHeight> =
+                schedules.iter().map(|s| s.broadcast_height()).collect();
+            prop_assert_eq!(&broadcast, &schedule_broadcast_heights(bh(commit), n, &mut rng(seed)));
+            let mut prev = bh(commit);
+            for s in &schedules {
+                prop_assert!(s.broadcast_height() >= prev, "broadcast heights must be non-decreasing");
+                prev = s.broadcast_height();
                 prop_assert_eq!(s.expiry_height(), expiry_height(s.broadcast_height()));
             }
         }
