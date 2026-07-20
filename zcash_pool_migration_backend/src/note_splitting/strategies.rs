@@ -294,4 +294,274 @@ mod tests {
         let zec: Vec<u64> = crossings(45_000 * COIN).iter().map(|&c| c / COIN).collect();
         assert_eq!(zec, vec![10_000, 10_000, 10_000, 10_000, 5_000]);
     }
+
+    /// Plans a real migration preparation for one user's `balance_zatoshi` with the recommended
+    /// ZIP-317-fee strategy (no reserved prep fee), and asserts the WHOLE planned transaction set,
+    /// not just the crossing quantization:
+    ///
+    /// - the crossing values (what an observer sees cross the turnstile),
+    /// - the prepared self-funding notes actually created in the source pool, each
+    ///   `crossing + transfer buffer` (the output that funds one migration-transfer transaction),
+    /// - the source-pool change left behind.
+    ///
+    /// The transfer buffer is the ZIP-317 [`FeePolicy`] buffer, so this exercises the fee model the
+    /// fee-free [`crossings`] helper deliberately skips.
+    fn check_user_preparation(
+        balance_zatoshi: u64,
+        expected_crossings_zatoshi: &[u64],
+        expected_change_zatoshi: Option<u64>,
+    ) {
+        let buffer = Zip317FeePolicy.transfer_fee_buffer_zatoshi();
+        let expected_notes: Vec<u64> = expected_crossings_zatoshi
+            .iter()
+            .map(|&c| c + buffer)
+            .collect();
+        let s = CanonicalOneTwoFive::recommended();
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+        let plan = s.plan(balance_zatoshi, 0, &mut rng);
+        assert_eq!(
+            plan.crossing_values(),
+            expected_crossings_zatoshi,
+            "unexpected crossings for balance {balance_zatoshi} zat",
+        );
+        assert_eq!(
+            plan.migration_outputs(),
+            expected_notes.as_slice(),
+            "unexpected prepared notes for balance {balance_zatoshi} zat",
+        );
+        assert_eq!(
+            plan.change(),
+            expected_change_zatoshi,
+            "unexpected change for balance {balance_zatoshi} zat",
+        );
+    }
+
+    /// Golden vectors for the full migration preparation (the planned transaction set, fees included)
+    /// of many different users' messy, non-round balances. Each note the plan creates is a real
+    /// transaction output holding `crossing + transfer buffer` (20,000 zat under ZIP-317), and the
+    /// leftover that cannot form a whole self-funding note stays as source-pool change.
+    ///
+    /// Every expected split is derived BY HAND from the canonical `{1, 2, 5} * 10^k` greedy rule
+    /// (digit expansion: 1->[1], 2->[2], 3->[2,1], 4->[2,2], 5->[5], 6->[5,1], 7->[5,2], 8->[5,2,1],
+    /// 9->[5,2,2] times each place value; balances above the 10,000 ZEC cap emit multiple cap-sized
+    /// parts). For the first group each balance is exactly `sum(crossings) + notes * buffer + change`,
+    /// so every crossing self-funds and the residual is the stated change; the last two are
+    /// independently chosen balances that exercise the fee model draining the smallest notes.
+    #[test]
+    fn messy_multi_user_preparations() {
+        // `(balance in zatoshi, expected crossings in zatoshi, expected source-pool change)`.
+        let cases: Vec<(u64, Vec<u64>, Option<u64>)> = vec![
+            // Ari, 3748.6174 ZEC: 3->[2,1] 7->[5,2] 4->[2,2] 8->[5,2,1] .6->[.5,.1] .01->[.01],
+            // 12 notes + 0.005 ZEC sub-floor dust change.
+            (
+                374_861_740_000,
+                vec![
+                    2_000 * COIN,
+                    1_000 * COIN,
+                    500 * COIN,
+                    200 * COIN,
+                    20 * COIN,
+                    20 * COIN,
+                    5 * COIN,
+                    2 * COIN,
+                    COIN,
+                    COIN / 2,
+                    COIN / 10,
+                    COIN / 100,
+                ],
+                Some(500_000),
+            ),
+            // Bo, 9631.8827 ZEC: 9->[5,2,2] 6->[5,1] 3->[2,1] 1->[1] .8->[.5,.2,.1] .07->[.05,.02],
+            // 13 notes + 0.0101 ZEC change (at/above the dust floor but too small to self-fund).
+            (
+                963_188_270_000,
+                vec![
+                    5_000 * COIN,
+                    2_000 * COIN,
+                    2_000 * COIN,
+                    500 * COIN,
+                    100 * COIN,
+                    20 * COIN,
+                    10 * COIN,
+                    COIN,
+                    COIN / 2,
+                    COIN / 5,
+                    COIN / 10,
+                    COIN / 20,
+                    COIN / 50,
+                ],
+                Some(1_010_000),
+            ),
+            // Cleo, 27853.4226 ZEC: above the cap -> two 10,000; then 7853.42 = 7->[5,2] 8->[5,2,1]
+            // 5->[5] 3->[2,1] .4->[.2,.2] .02->[.02]. 13 notes, no change.
+            (
+                2_785_342_260_000,
+                vec![
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    5_000 * COIN,
+                    2_000 * COIN,
+                    500 * COIN,
+                    200 * COIN,
+                    100 * COIN,
+                    50 * COIN,
+                    2 * COIN,
+                    COIN,
+                    COIN / 5,
+                    COIN / 5,
+                    COIN / 50,
+                ],
+                None,
+            ),
+            // Dex, 61337.5028 ZEC: above the cap -> six 10,000; then 1337.5 = 1->[1] 3->[2,1]
+            // 3->[2,1] 7->[5,2] .5->[.5]. 14 notes, no change.
+            (
+                6_133_750_280_000,
+                vec![
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    1_000 * COIN,
+                    200 * COIN,
+                    100 * COIN,
+                    20 * COIN,
+                    10 * COIN,
+                    5 * COIN,
+                    2 * COIN,
+                    COIN / 2,
+                ],
+                None,
+            ),
+            // Evie, 0.794 ZEC: .7->[.5,.2] .9->[.05,.02,.02], 5 notes + 0.003 ZEC sub-floor change.
+            (
+                79_400_000,
+                vec![COIN / 2, COIN / 5, COIN / 20, COIN / 50, COIN / 50],
+                Some(300_000),
+            ),
+            // Fin, 0.381 ZEC: .3->[.2,.1] .8->[.05,.02,.01] (down to the 0.01 dust floor), 5 notes,
+            // no change.
+            (
+                38_100_000,
+                vec![COIN / 5, COIN / 10, COIN / 20, COIN / 50, COIN / 100],
+                None,
+            ),
+            // Gwen, 0.0152 ZEC: a single 0.01 dust-floor note + 0.005 ZEC sub-floor change.
+            (1_520_000, vec![COIN / 100], Some(500_000)),
+            // Ivan, 142.5314 ZEC (typical wallet): 1->[1] 4->[2,2] 2->[2] .5->[.5] .03->[.02,.01],
+            // 7 notes, no change.
+            (
+                14_253_140_000,
+                vec![
+                    100 * COIN,
+                    20 * COIN,
+                    20 * COIN,
+                    2 * COIN,
+                    COIN / 2,
+                    COIN / 50,
+                    COIN / 100,
+                ],
+                None,
+            ),
+            // Jia, 76.1986 ZEC (typical wallet): 7->[5,2] 6->[5,1] .1->[.1] .09->[.05,.02,.02],
+            // 8 notes + 0.007 ZEC sub-floor change.
+            (
+                7_619_860_000,
+                vec![
+                    50 * COIN,
+                    20 * COIN,
+                    5 * COIN,
+                    COIN,
+                    COIN / 10,
+                    COIN / 20,
+                    COIN / 50,
+                    COIN / 50,
+                ],
+                Some(700_000),
+            ),
+            // Kai, 999.993 ZEC (every digit a 9 -> every place expands [5,2,2]): 999.99 =
+            // 9->[5,2,2] 9->[5,2,2] 9->[5,2,2] .9->[.5,.2,.2] .09->[.05,.02,.02]. 15 notes, no change.
+            (
+                99_999_300_000,
+                vec![
+                    500 * COIN,
+                    200 * COIN,
+                    200 * COIN,
+                    50 * COIN,
+                    20 * COIN,
+                    20 * COIN,
+                    5 * COIN,
+                    2 * COIN,
+                    2 * COIN,
+                    COIN / 2,
+                    COIN / 5,
+                    COIN / 5,
+                    COIN / 20,
+                    COIN / 50,
+                    COIN / 50,
+                ],
+                None,
+            ),
+            // Lex, 32222.2218 ZEC: above the cap -> three 10,000; then 2222.22 (every digit a 2 ->
+            // [2]): 2->[2] 2->[2] 2->[2] 2->[2] .2->[.2] .02->[.02]. 9 notes, no change.
+            (
+                3_222_222_180_000,
+                vec![
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    10_000 * COIN,
+                    2_000 * COIN,
+                    200 * COIN,
+                    20 * COIN,
+                    2 * COIN,
+                    COIN / 5,
+                    COIN / 50,
+                ],
+                None,
+            ),
+            // Mira, 4050.0735 ZEC (interior zero digits skipped): 4->[2,2] 0->[] 5->[5] 0->[] 0->[]
+            // .07->[.05,.02], 5 notes + 0.0025 ZEC sub-floor change.
+            (
+                405_007_350_000,
+                vec![2_000 * COIN, 2_000 * COIN, 50 * COIN, COIN / 20, COIN / 50],
+                Some(250_000),
+            ),
+            // Ozan, 88.884 ZEC (independently chosen): 88.88 = 8->[5,2,1] 8->[5,2,1] .8->[.5,.2,.1]
+            // .08->[.05,.02,.01]. The 0.004 ZEC fee-free residual exceeds the 12 notes' buffers
+            // (12 * 0.0002 = 0.0024 ZEC), so all 12 notes self-fund and 0.0016 ZEC stays as change.
+            (
+                8_888_400_000,
+                vec![
+                    50 * COIN,
+                    20 * COIN,
+                    10 * COIN,
+                    5 * COIN,
+                    2 * COIN,
+                    COIN,
+                    COIN / 2,
+                    COIN / 5,
+                    COIN / 10,
+                    COIN / 20,
+                    COIN / 50,
+                    COIN / 100,
+                ],
+                Some(160_000),
+            ),
+            // Priya, 7.1101 ZEC (independently chosen): the fee-free split is 7->[5,2] .1->[.1]
+            // .01->[.01], but only 0.0001 ZEC of residual is left for the buffers, so the 0.01
+            // crossing cannot self-fund (it needs 0.01 + 0.0002 ZEC). It is dropped: the plan is
+            // [5, 2, 0.1] and the unspent 0.0095 ZEC stays as change.
+            (
+                711_010_000,
+                vec![5 * COIN, 2 * COIN, COIN / 10],
+                Some(950_000),
+            ),
+        ];
+
+        for (balance, crossings, change) in &cases {
+            check_user_preparation(*balance, crossings, *change);
+        }
+    }
 }

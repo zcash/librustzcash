@@ -12,11 +12,14 @@
 #![no_std]
 #![deny(rustdoc::broken_intra_doc_links)]
 
-// The crate itself is `no_std` and needs only `alloc` (for `Vec`); `macro_use` under test brings the
-// `vec!` macro into scope, and the tests link `std` for `proptest`.
-#[cfg_attr(test, macro_use)]
+// The crate itself is `no_std` and needs only `alloc`; `macro_use` brings the `vec!` and `format!`
+// macros into scope (the `build` module uses `format!`), and the tests link `std` for `proptest`.
+#[macro_use]
 extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+#[cfg(feature = "orchard")]
+pub mod build;
 pub mod note_splitting;
+pub mod preparation;
