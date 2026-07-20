@@ -102,3 +102,14 @@ and this library adheres to Rust's notion of
   `UnsupportedMultiLayer` for a plan whose later layers spend earlier, still unmined layers' outputs
   (full one-session pre-signing awaits a public pczt output-recovery API). Planning is pure (`no_std`);
   reconciliation-on-launch is added by a later slice.
+- An external-signer seam on the `engine` module (behind the `orchard` feature), so a hardware or
+  offline signer can sign a migration's transactions out of band. `build_preparation_unsigned` and
+  `build_transfers_unsigned` mirror `commit_preparation` / `commit_transfers` but leave the transactions
+  UNSIGNED in a new `MigrationTxState::AwaitingSignature` state and return their serialized PCZTs
+  (`UnsignedMigrationTx`, paired with the transaction id) to route to the signing device. Once the
+  device returns a signed PCZT, `MigrationState::apply_signature` stores it and moves the transaction to
+  `Signed`, after which the normal state machine proves and broadcasts it unchanged (proving remains a
+  consumer responsibility, as for in-process signing). External signing therefore replaces only the
+  build-and-sign step; the rest of the lifecycle is identical. The status view surfaces an awaiting
+  transaction as blocked on `Blocker::Signature`. Deferred multi-layer preparation layers still sign in
+  process.
