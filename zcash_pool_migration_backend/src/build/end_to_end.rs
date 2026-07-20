@@ -36,7 +36,7 @@ fn migration_pipeline_end_to_end() {
 
     // 2. Preparation: plan the send-to-self transactions that mint those funding notes. A typical
     //    wallet (one note, a handful of funding notes) prepares in a single transaction.
-    let prep = plan_preparation(&[balance], funding, split.prep_fee_zatoshi())
+    let prep = plan_preparation(&[balance], &funding, split.prep_fee_zatoshi())
         .expect("the balance funds the preparation");
     assert_eq!(prep.layer_count(), 1);
     assert_eq!(prep.transaction_count(), 1);
