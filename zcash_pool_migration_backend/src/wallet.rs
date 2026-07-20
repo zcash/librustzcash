@@ -18,7 +18,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt;
-use core::num::NonZeroU32;
 
 use ::orchard::Anchor;
 use ::orchard::keys::{FullViewingKey, SpendAuthorizingKey};
@@ -39,12 +38,6 @@ use crate::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTxId, MigrationTxState,
     PoolMigrationRead, PoolMigrationWrite,
 };
-
-/// The confirmation depth used to pick the anchor checkpoint the migration builds against. The
-/// anchor is not committed to a transaction's sighash (the proof is re-anchored to a drawn boundary
-/// at proving time), so the exact depth is not security-critical; one confirmation is enough for a
-/// checkpoint that exists in the note commitment tree.
-const ANCHOR_CONFIRMATIONS: NonZeroU32 = NonZeroU32::MIN;
 
 /// A failure of the wallet-backed migration adapter. Parameterized by the error types of the three
 /// wallet traits and the store, which for `zcash_client_sqlite`'s `WalletDb` are all one type but in
@@ -156,18 +149,6 @@ where
         self.store
     }
 
-    /// The anchor checkpoint height the migration builds against (a checkpoint guaranteed to exist in
-    /// the note commitment tree).
-    fn anchor_height(&self) -> Result<BlockHeight, AdapterError<W, St>> {
-        let guard = self.wallet.borrow();
-        let wallet: &W = &guard;
-        let (_, anchor) = wallet
-            .get_target_and_anchor_heights(ANCHOR_CONFIRMATIONS)
-            .map_err(Error::WalletRead)?
-            .ok_or(Error::AnchorUnavailable)?;
-        Ok(anchor)
-    }
-
     /// The target height for note selection (the chain tip plus one).
     fn selection_target(&self) -> Result<TargetHeight, AdapterError<W, St>> {
         let guard = self.wallet.borrow();
@@ -202,12 +183,16 @@ where
         Ok(notes)
     }
 
-    /// Resolve the anchor and a witness for each requested tree position, all against one checkpoint.
+    /// Resolve the anchor and a witness for each requested tree position, all against the single
+    /// checkpoint at `anchor_height`. The caller (the engine) names the tree state — a bucketed
+    /// boundary height — so the witnesses are certain to match the anchor the transaction proves
+    /// against; the checkpoint must exist in the note commitment tree ([`Error::AnchorUnavailable`]
+    /// otherwise).
     fn witness(
         &self,
+        anchor_height: BlockHeight,
         positions: &[Position],
     ) -> Result<(Anchor, Vec<MerklePath>), AdapterError<W, St>> {
-        let anchor_height = self.anchor_height()?;
         let mut guard = self.wallet.borrow_mut();
         let wallet: &mut W = &mut guard;
         wallet.with_orchard_tree_mut::<_, (Anchor, Vec<MerklePath>), AdapterError<W, St>>(|tree| {
@@ -270,12 +255,11 @@ where
         Ok(FullViewingKey::from(self.usk.orchard()))
     }
 
-    fn orchard_anchor(&self) -> Result<Anchor, Self::Error> {
-        Ok(self.witness(&[])?.0)
+    fn orchard_anchor(&self, anchor_height: BlockHeight) -> Result<Anchor, Self::Error> {
+        Ok(self.witness(anchor_height, &[])?.0)
     }
 
-    fn ironwood_anchor(&self) -> Result<Anchor, Self::Error> {
-        let anchor_height = self.anchor_height()?;
+    fn ironwood_anchor(&self, anchor_height: BlockHeight) -> Result<Anchor, Self::Error> {
         let mut guard = self.wallet.borrow_mut();
         let wallet: &mut W = &mut guard;
         let root = wallet.with_ironwood_tree_mut::<_, _, AdapterError<W, St>>(|tree| {
@@ -294,18 +278,18 @@ where
     fn resolve_wallet_note(
         &self,
         index: usize,
-        _anchor: Anchor,
+        anchor_height: BlockHeight,
     ) -> Result<(OrchardNote, MerklePath), Self::Error> {
         let notes = self.spendable_orchard()?;
         let &(note, position, _) = notes.get(index).ok_or(Error::NoteNotFound(index))?;
-        let (_, mut paths) = self.witness(&[position])?;
+        let (_, mut paths) = self.witness(anchor_height, &[position])?;
         Ok((note, paths.remove(0)))
     }
 
     fn resolve_funding_notes(
         &self,
         values: &[Zatoshis],
-        _anchor: Anchor,
+        anchor_height: BlockHeight,
     ) -> Result<Vec<(OrchardNote, MerklePath)>, Self::Error> {
         let notes = self.spendable_orchard()?;
         let mut used = vec![false; notes.len()];
@@ -322,7 +306,7 @@ where
             chosen.push((notes[note_index].0, notes[note_index].1));
         }
         let positions: Vec<Position> = chosen.iter().map(|(_, pos)| *pos).collect();
-        let (_, paths) = self.witness(&positions)?;
+        let (_, paths) = self.witness(anchor_height, &positions)?;
         Ok(chosen
             .into_iter()
             .map(|(note, _)| note)

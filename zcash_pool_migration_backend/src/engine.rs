@@ -409,22 +409,25 @@ pub trait MigrationCrypto {
     /// The account's Orchard full viewing key.
     fn orchard_fvk(&self) -> Result<orchard::keys::FullViewingKey, Self::Error>;
 
-    /// A current Orchard anchor to build against; every spend's witness resolves against this same tree
-    /// state. The proof is re-anchored to a drawn boundary at proving time, and the anchor is not in the
-    /// sighash, so a current or placeholder anchor is fine here.
-    fn orchard_anchor(&self) -> Result<orchard::Anchor, Self::Error>;
+    /// The Orchard anchor at the tree state of `anchor_height`; every spend's witness resolves
+    /// against this same tree state. The engine passes a BOUNDARY height (see
+    /// [`crate::scheduling::most_recent_boundary`]) so witnesses are computed against the bucketed
+    /// anchor rather than whatever the wallet's default confirmation policy would choose. The proof
+    /// is re-anchored to the drawn boundary at proving time, and the anchor is not in the sighash.
+    fn orchard_anchor(&self, anchor_height: BlockHeight) -> Result<orchard::Anchor, Self::Error>;
 
-    /// A recent Ironwood anchor for a transfer's destination bundle: the output-only bundle's dummy
-    /// spends carry this anchor, and consensus requires a recent Ironwood note-commitment-tree root
-    /// (the empty-tree root is valid only until the pool holds notes).
-    fn ironwood_anchor(&self) -> Result<orchard::Anchor, Self::Error>;
+    /// The Ironwood anchor at the tree state of `anchor_height`, for a transfer's destination
+    /// bundle: the output-only bundle's dummy spends carry this anchor, and consensus requires a
+    /// recent Ironwood note-commitment-tree root (the empty-tree root is valid only until the pool
+    /// holds notes).
+    fn ironwood_anchor(&self, anchor_height: BlockHeight) -> Result<orchard::Anchor, Self::Error>;
 
     /// Resolve the spendable wallet note at `index` (into `spendable_orchard_note_values`) to its note
     /// and a witness against `anchor`.
     fn resolve_wallet_note(
         &self,
         index: usize,
-        anchor: orchard::Anchor,
+        anchor_height: BlockHeight,
     ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error>;
 
     /// Resolve the self-funding notes minted by the preparation, one per requested value, each to its
@@ -435,7 +438,7 @@ pub trait MigrationCrypto {
     fn resolve_funding_notes(
         &self,
         values: &[Zatoshis],
-        anchor: orchard::Anchor,
+        anchor_height: BlockHeight,
     ) -> Result<Vec<(orchard::note::Note, orchard::tree::MerklePath)>, Self::Error>;
 
     /// Add the account's Orchard spend-authorization signatures to a finalized, unproven PCZT.
@@ -629,7 +632,11 @@ where
     use zcash_protocol::consensus::NetworkUpgrade;
 
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
-    let anchor = backend.orchard_anchor().map_err(CommitError::Backend)?;
+    // Witness against the BUCKETED anchor: the most recent boundary at the build height.
+    let anchor_height = scheduling::most_recent_boundary(target_height);
+    let anchor = backend
+        .orchard_anchor(anchor_height)
+        .map_err(CommitError::Backend)?;
     let expiry_height = crate::scheduling::expiry_height(target_height);
     let nu63_activation = params
         .activation_height(NetworkUpgrade::Nu6_3)
@@ -656,7 +663,7 @@ where
                     match input {
                         PrepInput::Wallet { index, .. } => {
                             let witness = backend
-                                .resolve_wallet_note(*index, anchor)
+                                .resolve_wallet_note(*index, anchor_height)
                                 .map_err(CommitError::Backend)?;
                             spends.push(witness);
                         }
@@ -849,7 +856,11 @@ where
     };
 
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
-    let anchor = backend.orchard_anchor().map_err(CommitError::Backend)?;
+    // Witness against the BUCKETED anchor: the most recent boundary at the build height.
+    let anchor_height = scheduling::most_recent_boundary(target_height);
+    let anchor = backend
+        .orchard_anchor(anchor_height)
+        .map_err(CommitError::Backend)?;
     let expiry_height = crate::scheduling::expiry_height(target_height);
 
     // The (index-into-transactions, plan layer/index) of every still-Planned transaction of the ready
@@ -881,7 +892,7 @@ where
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| CommitError::Build("prior input value out of range".into()))?;
     let mut prior_notes = backend
-        .resolve_funding_notes(&prior_values, anchor)
+        .resolve_funding_notes(&prior_values, anchor_height)
         .map_err(CommitError::Backend)?
         .into_iter();
 
@@ -892,7 +903,7 @@ where
             match input {
                 PrepInput::Wallet { index, .. } => {
                     let witness = backend
-                        .resolve_wallet_note(*index, anchor)
+                        .resolve_wallet_note(*index, anchor_height)
                         .map_err(CommitError::Backend)?;
                     spends.push(witness);
                 }
@@ -1021,10 +1032,16 @@ where
     let mut unsigned: Vec<UnsignedMigrationTx> = Vec::new();
 
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
-    let anchor = backend.orchard_anchor().map_err(CommitError::Backend)?;
-    let ironwood_anchor = backend.ironwood_anchor().map_err(CommitError::Backend)?;
+    // Witness against the BUCKETED anchor: the most recent boundary at the build height.
+    let anchor_height = scheduling::most_recent_boundary(target_height);
+    let anchor = backend
+        .orchard_anchor(anchor_height)
+        .map_err(CommitError::Backend)?;
+    let ironwood_anchor = backend
+        .ironwood_anchor(anchor_height)
+        .map_err(CommitError::Backend)?;
     let witnesses = backend
-        .resolve_funding_notes(&state.funding_notes, anchor)
+        .resolve_funding_notes(&state.funding_notes, anchor_height)
         .map_err(CommitError::Backend)?;
 
     // The fee buffer each self-funding note carries (its value minus the value that crosses) is constant
@@ -1315,18 +1332,24 @@ mod commit_tests {
             Ok(self.fvk.clone())
         }
 
-        fn orchard_anchor(&self) -> Result<orchard::Anchor, Self::Error> {
+        fn orchard_anchor(
+            &self,
+            _anchor_height: BlockHeight,
+        ) -> Result<orchard::Anchor, Self::Error> {
             Ok(self.anchor)
         }
 
-        fn ironwood_anchor(&self) -> Result<orchard::Anchor, Self::Error> {
+        fn ironwood_anchor(
+            &self,
+            _anchor_height: BlockHeight,
+        ) -> Result<orchard::Anchor, Self::Error> {
             Ok(self.anchor)
         }
 
         fn resolve_wallet_note(
             &self,
             index: usize,
-            _anchor: orchard::Anchor,
+            _anchor_height: BlockHeight,
         ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error> {
             Ok(self.witnesses[index].clone())
         }
@@ -1334,7 +1357,7 @@ mod commit_tests {
         fn resolve_funding_notes(
             &self,
             values: &[Zatoshis],
-            _anchor: orchard::Anchor,
+            _anchor_height: BlockHeight,
         ) -> Result<Vec<(orchard::note::Note, orchard::tree::MerklePath)>, Self::Error> {
             // The funding notes are the witnesses after the source note (index 0).
             Ok(self.witnesses[1..1 + values.len()].to_vec())
@@ -1525,18 +1548,24 @@ mod commit_tests {
             Ok(self.fvk.clone())
         }
 
-        fn orchard_anchor(&self) -> Result<orchard::Anchor, Self::Error> {
+        fn orchard_anchor(
+            &self,
+            _anchor_height: BlockHeight,
+        ) -> Result<orchard::Anchor, Self::Error> {
             Ok(self.anchor)
         }
 
-        fn ironwood_anchor(&self) -> Result<orchard::Anchor, Self::Error> {
+        fn ironwood_anchor(
+            &self,
+            _anchor_height: BlockHeight,
+        ) -> Result<orchard::Anchor, Self::Error> {
             Ok(self.anchor)
         }
 
         fn resolve_wallet_note(
             &self,
             index: usize,
-            _anchor: orchard::Anchor,
+            _anchor_height: BlockHeight,
         ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error> {
             Ok(self.witnesses[index].clone())
         }
@@ -1544,7 +1573,7 @@ mod commit_tests {
         fn resolve_funding_notes(
             &self,
             values: &[Zatoshis],
-            _anchor: orchard::Anchor,
+            _anchor_height: BlockHeight,
         ) -> Result<Vec<(orchard::note::Note, orchard::tree::MerklePath)>, Self::Error> {
             // By-value greedy over the minted notes (index >= n_wallet), with a persistent used-set so
             // successive resolutions (a layer's feeders, then a later layer's, then the funding notes)
