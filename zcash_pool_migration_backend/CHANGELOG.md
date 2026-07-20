@@ -9,6 +9,10 @@ and this library adheres to Rust's notion of
 
 ### Added
 - Initial scaffolding of the backend-agnostic Orchard -> Ironwood value-pool migration engine crate.
+- `MigrationPlan::from_parts`, a public constructor that reassembles a plan from its note split,
+  reconciled funding notes, preparation, and schedule (mirroring `PreparationPlan::from_parts` and
+  `NoteSplitPlan::from_stored_parts`), so a plan can be built outside the crate (used by the
+  `zcash_pool_migration_memory` test-support crate's integration tests).
 - Note-split planning (the `note_splitting` module): decomposing a spendable source-pool balance into
   the self-funding notes that cross the turnstile. The module is pool-agnostic (its code names no
   specific pool); Zcash's first use is the Orchard -> Ironwood migration. The composition rule is
