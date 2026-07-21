@@ -360,4 +360,18 @@ impl MigrationCrypto for CommitMock {
     fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
         Ok(sign_pczt(pczt, &self.ask).expect("signs the migration PCZT"))
     }
+
+    fn prove_transfer(
+        &self,
+        pczt: pczt::Pczt,
+        _anchor_boundary: BlockHeight,
+    ) -> Result<pczt::Pczt, Self::Error> {
+        // A stand-in for proving. A real prover resolves the funding note's witness against
+        // `anchor_boundary`, installs the Orchard source and Ironwood destination anchors through
+        // the PCZT `Updater` role, and runs the Orchard + Ironwood provers. Resolving the funding
+        // note requires commitment-tree access this mock does not model, so it returns the PCZT
+        // unchanged; the engine's `prove_transfer` orchestration (reading and passing the persisted
+        // `anchor_boundary`, and the Signed -> Proved transition) is what the tests exercise.
+        Ok(pczt)
+    }
 }

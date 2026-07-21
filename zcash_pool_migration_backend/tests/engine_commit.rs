@@ -18,8 +18,8 @@ use zcash_protocol::value::COIN;
 use zcash_pool_migration_backend::build::sign_pczt;
 use zcash_pool_migration_backend::engine::{
     MigrationPlan, MigrationStatus, MigrationTxKind, MigrationTxState, PoolMigrationRead,
-    PoolMigrationWrite, batch_unsigned_by_action_budget, build_preparation_unsigned,
-    commit_preparation, plan_migration,
+    PoolMigrationWrite, ProveError, batch_unsigned_by_action_budget, build_preparation_unsigned,
+    commit_preparation, plan_migration, prove_transfer,
 };
 use zcash_pool_migration_backend::preparation::PREP_TX_ACTIONS;
 use zcash_pool_migration_backend::state::AdvanceStep;
@@ -254,4 +254,72 @@ fn external_signing_batches_by_action_budget() {
     for tx in state.transactions() {
         assert_eq!(tx.state(), MigrationTxState::Signed);
     }
+}
+
+/// Proving a due transfer consults the anchor boundary the schedule DREW and persisted on the
+/// transaction (not the tip), moving it `Signed -> Proved`. This exercises the engine orchestration
+/// of [`prove_transfer`]: it reads the persisted `anchor_boundary`, hands it to the crypto backend
+/// (here the in-memory mock stands in for the real prover), stores the returned PCZT, and advances
+/// the state. It also checks the guards: a preparation transaction is not a transfer, and an
+/// already-proved transfer is not re-proved.
+#[test]
+fn prove_transfer_consults_the_persisted_anchor_boundary() {
+    let seed = 7u64;
+    let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
+    let params = regtest_network(true);
+    let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+    let mut state = commit_preparation(
+        &params,
+        BlockHeight::from_u32(TARGET_HEIGHT),
+        &mut backend,
+        &plan,
+        &mut rng,
+    )
+    .expect("commits the migration");
+
+    // Every transfer is Signed and carries a drawn anchor boundary after commit.
+    let transfer_id = state
+        .transactions()
+        .iter()
+        .find(|t| matches!(t.kind(), MigrationTxKind::Transfer { .. }))
+        .map(|t| {
+            assert!(
+                t.anchor_boundary().is_some(),
+                "a transfer carries the boundary its schedule drew"
+            );
+            assert!(matches!(t.state(), MigrationTxState::Signed));
+            t.id()
+        })
+        .expect("a committed migration has transfers");
+
+    // Proving reads the persisted boundary, proves, and advances Signed -> Proved.
+    prove_transfer(&backend, &mut state, transfer_id).expect("proves the due transfer");
+    let proved = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == transfer_id)
+        .expect("the transfer is still present");
+    assert!(
+        matches!(proved.state(), MigrationTxState::Proved),
+        "the transfer is proved"
+    );
+
+    // An already-proved transfer is not re-proved.
+    assert!(matches!(
+        prove_transfer(&backend, &mut state, transfer_id),
+        Err(ProveError::NotReady(_))
+    ));
+
+    // A preparation transaction is not a transfer: it anchors to its dependencies, not a drawn
+    // boundary, so it is rejected rather than proved.
+    let prep_id = state
+        .transactions()
+        .iter()
+        .find(|t| matches!(t.kind(), MigrationTxKind::Preparation { .. }))
+        .expect("a committed migration has preparation transactions")
+        .id();
+    assert!(matches!(
+        prove_transfer(&backend, &mut state, prep_id),
+        Err(ProveError::NotATransfer(_))
+    ));
 }
