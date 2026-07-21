@@ -3,8 +3,14 @@
 //!
 //! This is the only public surface of the crate: it wraps the generic (crate-internal) store with
 //! this pool's table names, exposing a concrete [`PoolMigrations`] that implements
-//! [`PoolMigrationRead`] / [`PoolMigrationWrite`], the canonical [`MIGRATION_ID`], and
-//! [`init_migration_tables`]. The generic store type never leaks into this API.
+//! [`PoolMigrationRead`] / [`PoolMigrationWrite`], the canonical [`MIGRATION_ID`] /
+//! [`ACCOUNT_KEY_MIGRATION_ID`], and [`init_migration_tables`]. The generic store type never leaks
+//! into this API.
+//!
+//! Rows are keyed by the owning account's UUID, and a [`PoolMigrations`] handle is scoped to one
+//! account at construction ([`PoolMigrations::for_account`]), so the engine traits stay
+//! account-agnostic while several accounts of one wallet database migrate independently —
+//! concurrently or one after another.
 
 use std::borrow::{Borrow, BorrowMut};
 
@@ -29,6 +35,12 @@ static TABLES: Tables = Tables {
 /// `ironwood_received_notes::MIGRATION_ID`.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7b2f6a41_9c3d_4e58_8a17_2f6b9d0c4e11);
 
+/// The `schemerz` migration id for re-keying the pool-migration tables by account
+/// (`account_uuid` replacing the former singleton row id). `zcash_client_sqlite` registers its
+/// (thin) migration under this id, depending on [`MIGRATION_ID`]; databases whose tables were
+/// created at the current (account-keyed) shape see it as a no-op.
+pub const ACCOUNT_KEY_MIGRATION_ID: Uuid = Uuid::from_u128(0x8d1f42c9_5b3a_4e76_9c0d_e4a52b8f6371);
+
 /// A failure reading or writing the pool-migration store.
 pub use crate::error::Error;
 
@@ -39,16 +51,18 @@ pub fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
 
-/// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`] over
-/// a `rusqlite::Connection`. Construct it with a connection borrow (`&Connection` for read-only
-/// access, `&mut Connection` to also write); `zcash_client_sqlite` builds it over the same connection
-/// its `WalletDb` uses, so the pool-migration tables share the wallet database.
+/// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`]
+/// over a `rusqlite::Connection`, scoped to one account's migration. Construct it with a connection
+/// borrow (`&Connection` for read-only access, `&mut Connection` to also write) and the owning
+/// account's UUID; `zcash_client_sqlite` builds it over the same connection its `WalletDb` uses, so
+/// the pool-migration tables share the wallet database, with each account's migration in its own
+/// row.
 pub struct PoolMigrations<C>(Store<C>);
 
 impl<C> PoolMigrations<C> {
-    /// Wrap a connection borrow as the store.
-    pub fn new(conn: C) -> Self {
-        Self(Store::new(conn, &TABLES))
+    /// Wrap a connection borrow as the store for `account`'s migration.
+    pub fn for_account(conn: C, account: Uuid) -> Self {
+        Self(Store::new(conn, &TABLES, account))
     }
 
     /// Recover the wrapped connection borrow.
@@ -85,9 +99,10 @@ mod tests {
 
     use proptest::prelude::*;
     use rusqlite::Connection;
+    use uuid::Uuid;
 
     use zcash_pool_migration_backend::engine::{
-        MigrationTxId, MigrationTxState, PoolMigrationWrite,
+        MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
     use zcash_pool_migration_backend::testing::{
         arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
@@ -97,12 +112,17 @@ mod tests {
 
     use crate::error::Error;
 
+    /// A fixed account for the single-account conformance cases.
+    const ACCOUNT: Uuid = Uuid::from_u128(0x11111111_1111_1111_1111_111111111111);
+    /// A second, distinct account for the isolation cases.
+    const OTHER_ACCOUNT: Uuid = Uuid::from_u128(0x22222222_2222_2222_2222_222222222222);
+
     /// A fresh, empty store over a new in-memory database with the migration tables created. Each
     /// proptest case and test gets its own, so writes never bleed between cases.
     fn fresh_store() -> PoolMigrations<Connection> {
         let conn = Connection::open_in_memory().expect("in-memory db");
         init_migration_tables(&conn).expect("create tables");
-        PoolMigrations::new(conn)
+        PoolMigrations::for_account(conn, ACCOUNT)
     }
 
     #[test]
@@ -151,6 +171,46 @@ mod tests {
                 .update_transaction(MigrationTxId::new(u32::MAX), MigrationTxState::Proved)
                 .expect_err("no such transaction");
             prop_assert!(matches!(err, Error::Corrupt(_)));
+        }
+
+        /// Accounts are isolated: one account's writes are invisible to another account's handle
+        /// over the same database, a replace under one account leaves the other's migration
+        /// untouched, and a transaction update addresses only the owning account's rows.
+        #[test]
+        fn accounts_are_isolated(
+            first in arb_migration_state(),
+            second in arb_migration_state(),
+            new in arb_migration_tx_state(),
+        ) {
+            let mut conn = Connection::open_in_memory().expect("in-memory db");
+            init_migration_tables(&conn).expect("create tables");
+
+            // A write under ACCOUNT is invisible to OTHER_ACCOUNT.
+            let mut store_a = PoolMigrations::for_account(&mut conn, ACCOUNT);
+            store_a.replace_migration(&first).expect("write A");
+            let conn = store_a.into_inner();
+            let store_b = PoolMigrations::for_account(&*conn, OTHER_ACCOUNT);
+            prop_assert_eq!(store_b.get_migration().expect("read B"), None);
+
+            // Both accounts hold their own migration after B writes too.
+            let mut store_b = PoolMigrations::for_account(&mut *conn, OTHER_ACCOUNT);
+            store_b.replace_migration(&second).expect("write B");
+            let store_a = PoolMigrations::for_account(&*conn, ACCOUNT);
+            prop_assert_eq!(store_a.get_migration().expect("read A"), Some(first.clone()));
+
+            // A replace under B leaves A untouched.
+            let mut store_b = PoolMigrations::for_account(&mut *conn, OTHER_ACCOUNT);
+            store_b.replace_migration(&second).expect("re-write B");
+            let store_a = PoolMigrations::for_account(&*conn, ACCOUNT);
+            prop_assert_eq!(store_a.get_migration().expect("read A"), Some(first.clone()));
+
+            // An update under A addresses only A's rows: B's copy of the same id is unchanged.
+            if let Some(id) = first_transaction_id(&first) {
+                let mut store_a = PoolMigrations::for_account(&mut *conn, ACCOUNT);
+                store_a.update_transaction(id, new).expect("update A");
+                let store_b = PoolMigrations::for_account(&*conn, OTHER_ACCOUNT);
+                prop_assert_eq!(store_b.get_migration().expect("read B"), Some(second));
+            }
         }
     }
 }

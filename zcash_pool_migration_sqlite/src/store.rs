@@ -12,10 +12,17 @@
 //!
 //! The blob encodings and the column set are the same for every pool: only the table and index
 //! names change from one migration to the next.
+//!
+//! Rows are keyed by the owning account's UUID: each account has at most one active migration, and
+//! a [`Store`] handle is scoped to a single account at construction, so the engine traits it serves
+//! ([`PoolMigrationRead`] / [`PoolMigrationWrite`]) stay account-agnostic. Wallets that host several
+//! accounts (each potentially with its own seed or an imported viewing key) migrate them
+//! independently — concurrently or one after another — over the same database.
 
 use std::borrow::{Borrow, BorrowMut};
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
+use uuid::Uuid;
 
 use zcash_encoding::Vector;
 
@@ -34,30 +41,27 @@ use crate::error::Error;
 /// supplies a `'static` value of this for its own pool; the generic store interpolates these into
 /// every DDL and query, so one implementation serves every pool.
 pub(crate) struct Tables {
-    /// The migration-state table (one row per active migration).
+    /// The migration-state table (one row per account's active migration).
     pub migrations: &'static str,
     /// The per-transaction table.
     pub transactions: &'static str,
-    /// The index over `(state, scheduled_height)` on the transactions table.
+    /// The index over `(account_uuid, state, scheduled_height)` on the transactions table.
     pub tx_due_index: &'static str,
 }
 
-/// The primary-key value of the single active migration. There is at most one migration in progress,
-/// so it is stored as one row; a future multi-account model would replace this with an account key.
-pub(crate) const SINGLETON_ID: i64 = 0;
-
-/// DDL for the migrations table: the note-split decomposition and overall status of the single active
-/// migration. The `note_split` column holds the whole [`NoteSplitPlan`] blob (its crossing values,
-/// fee buffer, change, and totals), the `funding_notes` column a [`Vector`] of little-endian `u64`
-/// amounts, and the `preparation` column the [`PreparationPlan`] blob (retained so deferred
-/// preparation layers can be rebuilt after their prior layer mines). The canonical byte encodings all
-/// live on the backend types (`NoteSplitPlan::write`, `PreparationPlan::write`); the store only maps
-/// them to and from these columns.
+/// DDL for the migrations table: the note-split decomposition and overall status of each account's
+/// active migration, keyed by the account UUID (at most one active migration per account). The
+/// `note_split` column holds the whole [`NoteSplitPlan`] blob (its crossing values, fee buffer,
+/// change, and totals), the `funding_notes` column a [`Vector`] of little-endian `u64` amounts, and
+/// the `preparation` column the [`PreparationPlan`] blob (retained so deferred preparation layers can
+/// be rebuilt after their prior layer mines). The canonical byte encodings all live on the backend
+/// types (`NoteSplitPlan::write`, `PreparationPlan::write`); the store only maps them to and from
+/// these columns.
 pub(crate) fn create_migrations_sql(t: &Tables) -> String {
     format!(
         "
     CREATE TABLE IF NOT EXISTS {} (
-        id INTEGER PRIMARY KEY,
+        account_uuid BLOB NOT NULL PRIMARY KEY,
         status TEXT NOT NULL,
         note_split BLOB NOT NULL,
         funding_notes BLOB NOT NULL,
@@ -67,13 +71,13 @@ pub(crate) fn create_migrations_sql(t: &Tables) -> String {
     )
 }
 
-/// DDL for the transactions table: one row per migration transaction, its pre-signed PCZT (`pczt`,
-/// always present: every transaction is built when the migration is committed, under one-phase
-/// signing), its dependency graph (`depends_on`, a serialized vector of `u32` transaction ids),
-/// schedule, and lifecycle `state`. `kind` holds the whole [`MigrationTxKind`] blob (its canonical
-/// [`MigrationTxKind::write`]); `state` is the queryable-and-indexed lifecycle discriminant (the
-/// [`MigrationTxState`] `AsRef<str>` value) with `txid`/`mined_height` carrying the `broadcast`/`mined`
-/// payloads.
+/// DDL for the transactions table: one row per migration transaction of an account's active
+/// migration, its pre-signed PCZT (`pczt`, always present: every transaction is built when the
+/// migration is committed, under one-phase signing), its dependency graph (`depends_on`, a
+/// serialized vector of `u32` transaction ids), schedule, and lifecycle `state`. `kind` holds the
+/// whole [`MigrationTxKind`] blob (its canonical [`MigrationTxKind::write`]); `state` is the
+/// queryable-and-indexed lifecycle discriminant (the [`MigrationTxState`] `AsRef<str>` value) with
+/// `txid`/`mined_height` carrying the `broadcast`/`mined` payloads.
 ///
 /// [`MigrationTxKind`]: zcash_pool_migration_backend::engine::MigrationTxKind
 /// [`MigrationTxKind::write`]: zcash_pool_migration_backend::engine::MigrationTxKind::write
@@ -82,7 +86,7 @@ pub(crate) fn create_transactions_sql(t: &Tables) -> String {
     format!(
         "
     CREATE TABLE IF NOT EXISTS {} (
-        migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
+        account_uuid BLOB NOT NULL REFERENCES {}(account_uuid) ON DELETE CASCADE,
         tx_id INTEGER NOT NULL,
         kind BLOB NOT NULL,
         pczt BLOB NOT NULL,
@@ -93,19 +97,19 @@ pub(crate) fn create_transactions_sql(t: &Tables) -> String {
         state TEXT NOT NULL,
         txid BLOB,
         mined_height INTEGER,
-        PRIMARY KEY (migration_id, tx_id)
+        PRIMARY KEY (account_uuid, tx_id)
     )",
         t.transactions, t.migrations
     )
 }
 
-/// DDL for the index over `(state, scheduled_height)`, so the application can query the transactions
-/// that are due to prove or broadcast without scanning the table.
+/// DDL for the index over `(account_uuid, state, scheduled_height)`, so the application can query
+/// an account's transactions that are due to prove or broadcast without scanning the table.
 pub(crate) fn create_index_sql(t: &Tables) -> String {
     format!(
         "
     CREATE INDEX IF NOT EXISTS {}
-        ON {} (state, scheduled_height)",
+        ON {} (account_uuid, state, scheduled_height)",
         t.tx_due_index, t.transactions
     )
 }
@@ -123,22 +127,27 @@ pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
 }
 
 /// The generic pool-migration store: it carries the [`PoolMigrationRead`] / [`PoolMigrationWrite`]
-/// logic over a `rusqlite::Connection`, parameterized by the [`Tables`] names for a given pool.
-/// Construct it with a connection borrow (`&Connection` for read-only access, `&mut Connection` to
-/// also write) plus the pool's table names; a concrete facade wraps it so the generic type never
-/// appears in the public API.
+/// logic over a `rusqlite::Connection`, parameterized by the [`Tables`] names for a given pool and
+/// scoped to a single account's migration. Construct it with a connection borrow (`&Connection` for
+/// read-only access, `&mut Connection` to also write), the pool's table names, and the owning
+/// account's UUID; a concrete facade wraps it so the generic type never appears in the public API.
 ///
 /// [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
 /// [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
 pub(crate) struct Store<C> {
     conn: C,
     tables: &'static Tables,
+    account: Uuid,
 }
 
 impl<C> Store<C> {
-    /// Wrap a connection borrow and the pool's table names as the store.
-    pub(crate) fn new(conn: C, tables: &'static Tables) -> Self {
-        Self { conn, tables }
+    /// Wrap a connection borrow and the pool's table names as the store for `account`'s migration.
+    pub(crate) fn new(conn: C, tables: &'static Tables, account: Uuid) -> Self {
+        Self {
+            conn,
+            tables,
+            account,
+        }
     }
 
     /// Recover the wrapped connection borrow.
@@ -148,23 +157,25 @@ impl<C> Store<C> {
 }
 
 impl<C: Borrow<Connection>> Store<C> {
-    /// Read the single active migration, if any.
+    /// Read the account's active migration, if any.
     pub(crate) fn get_migration(&self) -> Result<Option<MigrationState>, Error> {
-        read_migration(self.conn.borrow(), self.tables)
+        read_migration(self.conn.borrow(), self.tables, self.account)
     }
 }
 
 impl<C: BorrowMut<Connection>> Store<C> {
-    /// Replace the single active migration with `state`, atomically (deletes any existing one first).
+    /// Replace the account's active migration with `state`, atomically (deletes any existing one
+    /// first).
     pub(crate) fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Error> {
         let tables = self.tables;
+        let account = self.account;
         let tx = self.conn.borrow_mut().transaction()?;
-        replace_migration(&tx, tables, state)?;
+        replace_migration(&tx, tables, account, state)?;
         tx.commit()?;
         Ok(())
     }
 
-    /// Advance the lifecycle state of the transaction identified by `id`.
+    /// Advance the lifecycle state of the account's transaction identified by `id`.
     pub(crate) fn update_transaction(
         &mut self,
         id: MigrationTxId,
@@ -174,14 +185,14 @@ impl<C: BorrowMut<Connection>> Store<C> {
             &format!(
                 "UPDATE {}
                     SET state = :state, txid = :txid, mined_height = :mined_height
-                  WHERE migration_id = :migration_id AND tx_id = :tx_id",
+                  WHERE account_uuid = :account_uuid AND tx_id = :tx_id",
                 self.tables.transactions
             ),
             named_params! {
                 ":state": state.as_ref(),
                 ":txid": state.broadcast_txid().map(|b| b.to_vec()),
                 ":mined_height": state.mined_height().map(u32::from),
-                ":migration_id": SINGLETON_ID,
+                ":account_uuid": self.account.as_bytes().as_slice(),
                 ":tx_id": u32::from(id),
             },
         )?;
@@ -192,16 +203,20 @@ impl<C: BorrowMut<Connection>> Store<C> {
     }
 }
 
-/// Read the single active migration from the tables named by `t`, if any.
-fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState>, Error> {
+/// Read `account`'s active migration from the tables named by `t`, if any.
+fn read_migration(
+    conn: &Connection,
+    t: &Tables,
+    account: Uuid,
+) -> Result<Option<MigrationState>, Error> {
     let row = conn
         .query_row(
             &format!(
                 "SELECT status, note_split, funding_notes, preparation
-                   FROM {} WHERE id = ?",
+                   FROM {} WHERE account_uuid = ?",
                 t.migrations
             ),
-            params![SINGLETON_ID],
+            params![account.as_bytes().as_slice()],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -220,7 +235,7 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
     let note_split =
         NoteSplitPlan::read(note_split.as_slice()).map_err(|_| Error::Corrupt("note_split"))?;
 
-    let transactions = read_transactions(conn, t)?;
+    let transactions = read_transactions(conn, t, account)?;
 
     let status =
         MigrationStatus::try_from(status.as_str()).map_err(|_| Error::Corrupt("status"))?;
@@ -234,17 +249,21 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
     )))
 }
 
-/// Read the transactions of the single active migration from the table named by `t`.
-fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTransaction>, Error> {
+/// Read the transactions of `account`'s active migration from the table named by `t`.
+fn read_transactions(
+    conn: &Connection,
+    t: &Tables,
+    account: Uuid,
+) -> Result<Vec<MigrationTransaction>, Error> {
     let mut stmt = conn.prepare(&format!(
         "SELECT tx_id, kind, pczt, depends_on, scheduled_height,
                 expiry_height, anchor_boundary, state, txid, mined_height
            FROM {}
-          WHERE migration_id = ?
+          WHERE account_uuid = ?
           ORDER BY tx_id",
         t.transactions
     ))?;
-    let rows = stmt.query_map(params![SINGLETON_ID], |row| {
+    let rows = stmt.query_map(params![account.as_bytes().as_slice()], |row| {
         Ok((
             row.get::<_, u32>(0)?,             // tx_id
             row.get::<_, Vec<u8>>(1)?,         // kind
@@ -305,21 +324,25 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
     Ok(out)
 }
 
-/// Replace the single active migration in the tables named by `t` with `state` (deletes any existing
-/// migration and its transactions first). Runs inside the caller's transaction so the replacement is atomic.
+/// Replace `account`'s active migration in the tables named by `t` with `state` (deletes the
+/// account's existing migration and its transactions first). Runs inside the caller's transaction so
+/// the replacement is atomic. Other accounts' rows are untouched.
 fn replace_migration(
     tx: &rusqlite::Transaction,
     t: &Tables,
+    account: Uuid,
     state: &MigrationState,
 ) -> Result<(), Error> {
-    // Replace semantics: the store holds at most one migration.
+    let account_bytes = account.as_bytes().as_slice();
+
+    // Replace semantics: the store holds at most one migration per account.
     tx.execute(
-        &format!("DELETE FROM {} WHERE migration_id = ?", t.transactions),
-        params![SINGLETON_ID],
+        &format!("DELETE FROM {} WHERE account_uuid = ?", t.transactions),
+        params![account_bytes],
     )?;
     tx.execute(
-        &format!("DELETE FROM {} WHERE id = ?", t.migrations),
-        params![SINGLETON_ID],
+        &format!("DELETE FROM {} WHERE account_uuid = ?", t.migrations),
+        params![account_bytes],
     )?;
 
     // Each type serializes itself through its own `write`; writing to a `Vec` is infallible, so
@@ -343,13 +366,13 @@ fn replace_migration(
     tx.execute(
         &format!(
             "INSERT INTO {}
-                (id, status, note_split, funding_notes, preparation)
+                (account_uuid, status, note_split, funding_notes, preparation)
              VALUES
-                (:id, :status, :note_split, :funding_notes, :preparation)",
+                (:account_uuid, :status, :note_split, :funding_notes, :preparation)",
             t.migrations
         ),
         named_params! {
-            ":id": SINGLETON_ID,
+            ":account_uuid": account_bytes,
             ":status": state.status().as_ref(),
             ":note_split": note_split,
             ":funding_notes": funding_notes,
@@ -372,16 +395,16 @@ fn replace_migration(
         tx.execute(
             &format!(
                 "INSERT INTO {}
-                    (migration_id, tx_id, kind, pczt, depends_on,
+                    (account_uuid, tx_id, kind, pczt, depends_on,
                      scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height)
                  VALUES
-                    (:migration_id, :tx_id, :kind, :pczt, :depends_on,
+                    (:account_uuid, :tx_id, :kind, :pczt, :depends_on,
                      :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
                      :mined_height)",
                 t.transactions
             ),
             named_params! {
-                ":migration_id": SINGLETON_ID,
+                ":account_uuid": account_bytes,
                 ":tx_id": u32::from(mtx.id()),
                 ":kind": kind,
                 ":pczt": mtx.pczt().as_slice(),
