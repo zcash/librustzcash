@@ -800,14 +800,21 @@ pub trait MigrationCrypto {
 pub enum CommitError<E> {
     /// A wallet backend operation (witness, key, signing, or storage) failed.
     Backend(E),
-    /// Building or serializing a transaction failed.
-    Build(alloc::string::String),
+    /// Building a migration transaction failed. Carries the structured builder error.
+    Build(crate::build::BuildError),
+    /// Serializing a built migration PCZT (for storage or an external signer) failed.
+    Serialize(pczt::EncodingError),
+    /// NU6.3 is not active on this network, so there is no destination pool to migrate into. The
+    /// planning side models the same recoverable condition as
+    /// [`MigrationError::Nu63NotActive`](MigrationError::Nu63NotActive).
+    Nu63NotActive,
     /// No committed migration was found to build the transfers for (nothing was loaded from storage).
     NoMigrationInProgress,
-    /// A resolved wallet note's value does not match the value the plan recorded for it: the
-    /// wallet's spendable set changed between planning and commit (the plan captures notes by
-    /// their index into that set, so any receipt or spend since planning shifts them), and the
-    /// migration must be re-planned.
+    /// The plan is stale and must be re-planned. Either a resolved wallet note's value no longer
+    /// matches the value the plan recorded for it (the plan captures notes by their index into the
+    /// spendable set at planning time, so any receipt or spend since planning shifts them), or the
+    /// build height has advanced past every candidate anchor boundary the schedule can prove
+    /// against.
     StalePlan,
     /// A non-terminal migration is already stored. A committed migration is resumed from the
     /// store (or cancelled), never rebuilt over: overwriting it would orphan its pre-signed —
@@ -827,13 +834,16 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommitError::Backend(e) => write!(f, "wallet backend error: {e}"),
-            CommitError::Build(m) => write!(f, "building the migration failed: {m}"),
+            CommitError::Build(e) => write!(f, "building the migration failed: {e}"),
+            CommitError::Serialize(e) => {
+                write!(f, "serializing a migration transaction failed: {e:?}")
+            }
+            CommitError::Nu63NotActive => f.write_str("NU6.3 is not active on this network"),
             CommitError::NoMigrationInProgress => {
                 f.write_str("no committed migration is in progress")
             }
             CommitError::StalePlan => f.write_str(
-                "a wallet note no longer matches the plan; the spendable set changed since \
-                 planning and the migration must be re-planned",
+                "the plan no longer matches the wallet or the build height and must be re-planned",
             ),
             CommitError::MigrationInProgress => f.write_str(
                 "a non-terminal migration is already stored; resume or cancel it instead of \
@@ -1047,15 +1057,11 @@ where
     match signing {
         Signing::InProcess => {
             let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
-            let bytes = signed
-                .serialize()
-                .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
+            let bytes = signed.serialize().map_err(CommitError::Serialize)?;
             Ok((bytes, MigrationTxState::Signed))
         }
         Signing::External => {
-            let bytes = pczt
-                .serialize()
-                .map_err(|e| CommitError::Build(format!("serialize: {e:?}")))?;
+            let bytes = pczt.serialize().map_err(CommitError::Serialize)?;
             Ok((bytes, MigrationTxState::AwaitingSignature))
         }
     }
@@ -1177,7 +1183,7 @@ where
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
     let nu63_activation = params
         .activation_height(NetworkUpgrade::Nu6_3)
-        .ok_or_else(|| CommitError::Build("NU6.3 is not active on this network".into()))?;
+        .ok_or(CommitError::Nu63NotActive)?;
 
     let mut transactions: Vec<MigrationTransaction> = Vec::new();
     let mut unsigned: Vec<UnsignedMigrationTx> = Vec::new();
@@ -1228,7 +1234,7 @@ where
                             .iter()
                             .position(|(v, _, used)| !used && v == value)
                             .ok_or_else(|| {
-                                CommitError::Build(format!(
+                                CommitError::InconsistentPlan(format!(
                                     "layer {layer} spends a feeder note of value {} that no \
                                      earlier layer mints",
                                     u64::from(*value)
@@ -1271,7 +1277,7 @@ where
                 prep_tx.outputs(),
                 &mut *rng,
             )
-            .map_err(|e| CommitError::Build(format!("{e}")))?;
+            .map_err(CommitError::Build)?;
 
             // Grow the minted pool with this transaction's recovered spendable outputs. Change
             // outputs are excluded: they stay in the source pool and must never be matched to a
@@ -1348,13 +1354,15 @@ where
         next_id += 1;
 
         let funding_value = *funding_notes.get(crossing).ok_or_else(|| {
-            CommitError::Build(format!("no funding note value for crossing {crossing}"))
+            CommitError::InconsistentPlan(format!("no funding note value for crossing {crossing}"))
         })?;
         let pos = minted
             .iter()
             .position(|(v, _, used)| !used && *v == funding_value)
             .ok_or_else(|| {
-                CommitError::Build(format!("no minted funding note for crossing {crossing}"))
+                CommitError::InconsistentPlan(format!(
+                    "no minted funding note for crossing {crossing}"
+                ))
             })?;
         minted[pos].2 = true;
         let note = minted[pos].1;
@@ -1363,7 +1371,9 @@ where
             .crossing_values()
             .get(crossing)
             .ok_or_else(|| {
-                CommitError::Build(format!("no stored crossing value for transfer {crossing}"))
+                CommitError::InconsistentPlan(format!(
+                    "no stored crossing value for transfer {crossing}"
+                ))
             })?;
 
         let pczt = build_transfer_pczt(
@@ -1375,7 +1385,7 @@ where
             crossing_value,
             &mut *rng,
         )
-        .map_err(|e| CommitError::Build(format!("{e}")))?;
+        .map_err(CommitError::Build)?;
         let (bytes, tx_state) = finish_built_pczt(backend, pczt, signing)?;
         if matches!(signing, Signing::External) {
             unsigned.push(UnsignedMigrationTx {
@@ -1399,13 +1409,7 @@ where
                     schedule.broadcast_height(),
                     rng,
                 )
-                .ok_or_else(|| {
-                    CommitError::Build(
-                        "transfer scheduled before any candidate anchor boundary; the plan is \
-                         stale relative to the build height and must be re-planned"
-                            .into(),
-                    )
-                })?,
+                .ok_or(CommitError::StalePlan)?,
             ),
             state: tx_state,
         });
