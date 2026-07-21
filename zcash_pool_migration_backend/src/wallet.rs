@@ -13,9 +13,10 @@
 //! [`WalletMigration`] holds the wallet by a SHARED borrow and touches no note commitment tree:
 //! every migration transaction is built and signed with its anchor and witnesses deferred to
 //! proving time (ZIP 374). Proving is the separate [`WalletMigrationProver`], which borrows the
-//! wallet as `&mut W` to resolve the drawn source anchor and the funding note's witness from the
-//! wallet's Orchard commitment tree and installs them through the PCZT `Updater` role before
-//! proving both bundles, just before broadcast.
+//! wallet as `&mut W` to resolve the source anchor and each spend's witness from the wallet's
+//! Orchard commitment tree and installs them through the PCZT `Updater` role before proving the
+//! transaction (a transfer's Orchard + Ironwood bundles, or a preparation's Orchard bundle), just
+//! before broadcast.
 //!
 //! [`commit_preparation`]: crate::engine::commit_preparation
 
@@ -268,30 +269,34 @@ fn post_nu6_3_orchard_proving_key() -> &'static ProvingKey {
     PROVING_KEY.get_or_init(|| ProvingKey::build(OrchardCircuitVersion::PostNu6_3))
 }
 
-/// Why proving a migration transfer through the wallet-backed prover failed. `TE` is the wallet's
-/// commitment-tree error type ([`WalletCommitmentTrees::Error`]).
+/// Why proving a migration transaction through the wallet-backed prover failed. `TE` is the
+/// wallet's commitment-tree error type ([`WalletCommitmentTrees::Error`]); `NE` is its note-source
+/// error type ([`InputSource::Error`]).
 #[derive(Debug)]
-pub enum WalletProveError<TE> {
-    /// The transfer PCZT has no real Orchard spend to witness. Every migration transfer spends one
-    /// funding note, so its bundle carries exactly one action whose witness is still deferred (all
-    /// the fabricated dummy spends keep their own witnesses); its absence means the PCZT is not a
-    /// deferred-anchor transfer awaiting proof.
+pub enum WalletProveError<TE, NE> {
+    /// The PCZT has no real Orchard spend whose witness is still deferred. A migration transfer
+    /// spends one funding note and a preparation transaction one or more, so the Orchard bundle
+    /// carries at least one action with an absent witness (the fabricated dummy spends keep their
+    /// own); none means the PCZT is not a deferred-anchor migration transaction awaiting proof.
     NoRealSpend,
-    /// No tree position is known for the funding note the transfer spends (keyed by the revealed
-    /// spend nullifier). The caller's position map does not cover this note.
-    UnknownFundingNote([u8; 32]),
-    /// The Orchard commitment tree has no root at the drawn anchor-boundary checkpoint (the
-    /// checkpoint was never created, or was pruned before proving; see issue #2700).
+    /// No spendable Orchard note in the wallet matches a spend's revealed nullifier, so its tree
+    /// position is unknown: the note the transaction spends is not among the account's unspent
+    /// notes (it was never scanned, or has already been spent).
+    UnknownSpentNote([u8; 32]),
+    /// Enumerating the account's spendable Orchard notes (to locate each spend by nullifier) failed.
+    Notes(NE),
+    /// The Orchard commitment tree has no root at the anchor checkpoint (the checkpoint was never
+    /// created, or was pruned before proving; see issue #2700).
     AnchorNotFound(BlockHeight),
-    /// The funding note has no witness at the drawn anchor-boundary checkpoint (the checkpoint was
-    /// pruned, or the note's position is not marked in the tree).
+    /// A spent note has no witness at the anchor checkpoint (the checkpoint was pruned, or the
+    /// note's position is not marked in the tree).
     WitnessNotFound(BlockHeight),
     /// A commitment-tree query failed.
     Tree(ShardTreeError<TE>),
     /// Installing the Orchard source or Ironwood destination anchor through the PCZT `Updater` role
     /// failed.
     Anchor(AnchorUpdateError),
-    /// Installing the funding note's spend witness through the PCZT `Updater` role failed.
+    /// Installing a spend witness through the PCZT `Updater` role failed.
     Witness(SpendWitnessUpdateError),
     /// Creating the Orchard or Ironwood proof failed. The two proof roles return distinct error
     /// types and `pczt` does not export the Ironwood one, so the failure is carried as a labeled
@@ -299,140 +304,228 @@ pub enum WalletProveError<TE> {
     Prove(alloc::string::String),
 }
 
-impl<TE> From<ShardTreeError<TE>> for WalletProveError<TE> {
+impl<TE, NE> From<ShardTreeError<TE>> for WalletProveError<TE, NE> {
     fn from(e: ShardTreeError<TE>) -> Self {
         WalletProveError::Tree(e)
     }
 }
 
-impl<TE: fmt::Debug> fmt::Display for WalletProveError<TE> {
+impl<TE: fmt::Debug, NE: fmt::Debug> fmt::Display for WalletProveError<TE, NE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WalletProveError::NoRealSpend => {
-                f.write_str("the transfer PCZT has no deferred-witness Orchard spend to prove")
+                f.write_str("the PCZT has no deferred-witness Orchard spend to prove")
             }
-            WalletProveError::UnknownFundingNote(nf) => {
+            WalletProveError::UnknownSpentNote(nf) => {
                 write!(
                     f,
-                    "no tree position known for funding note nullifier {nf:?}"
+                    "no spendable Orchard note matches spend nullifier {nf:?}"
                 )
+            }
+            WalletProveError::Notes(e) => {
+                write!(f, "enumerating spendable Orchard notes failed: {e:?}")
             }
             WalletProveError::AnchorNotFound(h) => write!(
                 f,
-                "the Orchard tree has no root at the drawn anchor-boundary checkpoint {}",
+                "the Orchard tree has no root at the anchor checkpoint {}",
                 u32::from(*h)
             ),
             WalletProveError::WitnessNotFound(h) => write!(
                 f,
-                "the funding note has no witness at the drawn anchor-boundary checkpoint {}",
+                "a spent note has no witness at the anchor checkpoint {}",
                 u32::from(*h)
             ),
             WalletProveError::Tree(e) => write!(f, "commitment-tree query failed: {e:?}"),
             WalletProveError::Anchor(e) => write!(f, "installing an anchor failed: {e:?}"),
-            WalletProveError::Witness(e) => write!(f, "installing the spend witness failed: {e:?}"),
+            WalletProveError::Witness(e) => write!(f, "installing a spend witness failed: {e:?}"),
             WalletProveError::Prove(msg) => write!(f, "creating a bundle proof failed: {msg}"),
         }
     }
 }
 
-impl<TE: fmt::Debug> core::error::Error for WalletProveError<TE> {}
+impl<TE: fmt::Debug, NE: fmt::Debug> core::error::Error for WalletProveError<TE, NE> {}
 
-/// A wallet-backed prover for migration transfers: the mutable counterpart to [`WalletMigration`].
+/// The wallet-backed prover's error for a wallet `W`: a [`WalletProveError`] over the wallet's
+/// commitment-tree and note-source error types.
+type ProverError<W> =
+    WalletProveError<<W as WalletCommitmentTrees>::Error, <W as InputSource>::Error>;
+
+/// A wallet-backed prover for migration transactions: the mutable counterpart to [`WalletMigration`].
 ///
-/// Proving a transfer resolves its DEFERRED Orchard source anchor and the funding note's Merkle
-/// witness against the boundary the schedule drew (ZIP 374), which needs MUTABLE access to the
-/// wallet's Orchard commitment tree ([`WalletCommitmentTrees::with_orchard_tree_mut`], whose witness
-/// resolution caches into the tree). That is why proving lives here, borrowing the wallet as
-/// `&mut W`, rather than on the shared-borrow [`WalletMigration`] used to build and sign.
+/// Proving resolves a transaction's DEFERRED Orchard anchor and its spends' Merkle witnesses against
+/// a checkpoint (ZIP 374), which needs MUTABLE access to the wallet's Orchard commitment tree
+/// ([`WalletCommitmentTrees::with_orchard_tree_mut`], whose witness resolution caches into the
+/// tree). That is why proving lives here, borrowing the wallet as `&mut W`, rather than on the
+/// shared-borrow [`WalletMigration`] used to build and sign.
 ///
-/// The funding note a transfer spends is identified by the revealed spend nullifier; `funding_positions`
-/// maps that nullifier to the note's position in the wallet's Orchard commitment tree. A production
-/// consumer fills this map from the wallet's own note store (looking each nullifier up in the
-/// received-notes table); the anchor-boundary checkpoint the witness is taken against must still
-/// exist in the tree at proving time (migration anchor-checkpoint retention, issue #2700).
-pub struct WalletMigrationProver<'a, W> {
+/// Each spend is located by the nullifier it reveals: the prover enumerates the account's unspent
+/// Orchard notes ([`InputSource::select_unspent_notes`]), recomputes each note's nullifier under the
+/// account's full viewing key, and matches. This serves both a transfer (one funding-note spend
+/// plus an Ironwood output) and a preparation transaction (one or more spends, no Ironwood). The
+/// anchor checkpoint the witnesses are taken against must still exist in the tree at proving time
+/// (migration anchor-checkpoint retention, issue #2700).
+pub struct WalletMigrationProver<'a, W>
+where
+    W: InputSource,
+{
     wallet: &'a mut W,
-    funding_positions: BTreeMap<[u8; 32], Position>,
+    account: <W as InputSource>::AccountId,
+    fvk: FullViewingKey,
 }
 
-impl<'a, W> WalletMigrationProver<'a, W> {
-    /// Wrap a wallet (borrowed mutably for commitment-tree access) and the map from each funding
-    /// note's revealed spend nullifier to its position in the wallet's Orchard commitment tree.
-    pub fn new(wallet: &'a mut W, funding_positions: BTreeMap<[u8; 32], Position>) -> Self {
+impl<'a, W> WalletMigrationProver<'a, W>
+where
+    W: InputSource,
+{
+    /// Wrap a wallet (borrowed mutably for commitment-tree access), the account whose notes the
+    /// migration spends, and that account's Orchard full viewing key (used to recompute each spent
+    /// note's nullifier when locating it among the account's unspent notes).
+    pub fn new(
+        wallet: &'a mut W,
+        account: <W as InputSource>::AccountId,
+        fvk: FullViewingKey,
+    ) -> Self {
         Self {
             wallet,
-            funding_positions,
+            account,
+            fvk,
         }
+    }
+}
+
+impl<'a, W> WalletMigrationProver<'a, W>
+where
+    W: WalletCommitmentTrees + InputSource,
+    <W as InputSource>::AccountId: Copy,
+{
+    /// Prove one migration transaction's Orchard bundle (and its Ironwood bundle, when it has one)
+    /// against `anchor`: install the source anchor and every deferred spend's witness through the
+    /// PCZT `Updater` role, then run the provers. Shared by
+    /// [`prove_transfer`](MigrationProver::prove_transfer) (a transfer: one Orchard spend plus an
+    /// Ironwood output) and [`prove_preparation`](MigrationProver::prove_preparation) (a preparation:
+    /// one or more Orchard spends, no Ironwood).
+    fn prove_orchard(
+        &mut self,
+        pczt: ::pczt::Pczt,
+        anchor: BlockHeight,
+    ) -> Result<::pczt::Pczt, ProverError<W>> {
+        // Every Orchard action whose witness is still deferred is a real spend to witness; the padded
+        // dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
+        let real_spends: Vec<(usize, [u8; 32])> = pczt
+            .orchard()
+            .actions()
+            .iter()
+            .enumerate()
+            .filter(|(_, action)| action.spend().witness().is_none())
+            .map(|(index, action)| (index, *action.spend().nullifier()))
+            .collect();
+        if real_spends.is_empty() {
+            return Err(WalletProveError::NoRealSpend);
+        }
+
+        // Locate each spend in the wallet's note store: map every unspent Orchard note's nullifier
+        // (recomputed under the account FVK) to its commitment-tree position, then look up each spend.
+        let target = TargetHeight::from(u32::from(anchor) + 1);
+        let received = self
+            .wallet
+            .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[], false)
+            .map_err(WalletProveError::Notes)?;
+        let positions: BTreeMap<[u8; 32], Position> = received
+            .orchard()
+            .iter()
+            .map(|rn| {
+                (
+                    rn.note().nullifier(&self.fvk).to_bytes(),
+                    rn.note_commitment_tree_position(),
+                )
+            })
+            .collect();
+        let spend_positions: Vec<(usize, Position)> = real_spends
+            .iter()
+            .map(|(index, nf)| {
+                positions
+                    .get(nf)
+                    .map(|pos| (*index, *pos))
+                    .ok_or(WalletProveError::UnknownSpentNote(*nf))
+            })
+            .collect::<Result<_, _>>()?;
+
+        // A transfer carries an Ironwood output bundle; a preparation transaction is Orchard-only.
+        let has_ironwood = !pczt.ironwood().actions().is_empty();
+
+        // Resolve the source anchor (the tree root at the checkpoint) and each spend's Merkle witness
+        // against it, mirroring `create_proposed_transactions`.
+        let (anchor_root, witnesses): (Anchor, Vec<(usize, MerklePath)>) =
+            self.wallet
+                .with_orchard_tree_mut::<_, _, ProverError<W>>(|tree| {
+                    let root: Anchor = tree
+                        .root_at_checkpoint_id(&anchor)?
+                        .ok_or(WalletProveError::AnchorNotFound(anchor))?
+                        .into();
+                    let mut witnesses = Vec::with_capacity(spend_positions.len());
+                    for (index, position) in &spend_positions {
+                        let path: MerklePath = tree
+                            .witness_at_checkpoint_id_caching(*position, &anchor)?
+                            .ok_or(WalletProveError::WitnessNotFound(anchor))?
+                            .into();
+                        witnesses.push((*index, path));
+                    }
+                    Ok((root, witnesses))
+                })?;
+
+        // Install the deferred data through the Updater role: the Orchard source anchor and every
+        // spend's witness, plus (for a transfer) the Ironwood destination anchor (the output side
+        // anchors to the empty tree; it has no spend to witness).
+        let mut updater = Updater::new(pczt)
+            .set_orchard_anchor(anchor_root)
+            .map_err(WalletProveError::Anchor)?
+            .set_orchard_spend_witnesses(witnesses)
+            .map_err(WalletProveError::Witness)?;
+        if has_ironwood {
+            updater = updater
+                .set_ironwood_anchor(Anchor::empty_tree())
+                .map_err(WalletProveError::Anchor)?;
+        }
+        let updated = updater.finish();
+
+        // Prove the Orchard bundle, and the Ironwood bundle too when present, with the single
+        // post-NU6.3 Orchard proving key.
+        let pk = post_nu6_3_orchard_proving_key();
+        let orchard_proven = Prover::new(updated)
+            .create_orchard_proof(pk)
+            .map_err(|e| WalletProveError::Prove(alloc::format!("orchard proof: {e:?}")))?;
+        let proven = if has_ironwood {
+            orchard_proven
+                .create_ironwood_proof(pk)
+                .map_err(|e| WalletProveError::Prove(alloc::format!("ironwood proof: {e:?}")))?
+        } else {
+            orchard_proven
+        };
+        Ok(proven.finish())
     }
 }
 
 impl<'a, W> MigrationProver for WalletMigrationProver<'a, W>
 where
-    W: WalletCommitmentTrees,
+    W: WalletCommitmentTrees + InputSource,
+    <W as InputSource>::AccountId: Copy,
 {
-    type Error = WalletProveError<<W as WalletCommitmentTrees>::Error>;
+    type Error = ProverError<W>;
 
     fn prove_transfer(
         &mut self,
         pczt: ::pczt::Pczt,
         anchor_boundary: BlockHeight,
     ) -> Result<::pczt::Pczt, Self::Error> {
-        // The one Orchard action whose witness is still deferred is the real funding-note spend; the
-        // padded dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
-        let (spend_index, nullifier) = pczt
-            .orchard()
-            .actions()
-            .iter()
-            .enumerate()
-            .find(|(_, action)| action.spend().witness().is_none())
-            .map(|(index, action)| (index, *action.spend().nullifier()))
-            .ok_or(WalletProveError::NoRealSpend)?;
+        self.prove_orchard(pczt, anchor_boundary)
+    }
 
-        let position = *self
-            .funding_positions
-            .get(&nullifier)
-            .ok_or(WalletProveError::UnknownFundingNote(nullifier))?;
-
-        // Resolve the source anchor (the tree root at the boundary checkpoint) and the funding note's
-        // Merkle witness against it, mirroring `create_proposed_transactions`.
-        let (anchor, merkle_path): (Anchor, MerklePath) = self
-            .wallet
-            .with_orchard_tree_mut::<_, _, WalletProveError<<W as WalletCommitmentTrees>::Error>>(
-                |tree| {
-                    let anchor: Anchor = tree
-                        .root_at_checkpoint_id(&anchor_boundary)?
-                        .ok_or(WalletProveError::AnchorNotFound(anchor_boundary))?
-                        .into();
-                    let merkle_path: MerklePath = tree
-                        .witness_at_checkpoint_id_caching(position, &anchor_boundary)?
-                        .ok_or(WalletProveError::WitnessNotFound(anchor_boundary))?
-                        .into();
-                    Ok((anchor, merkle_path))
-                },
-            )?;
-
-        // Install the deferred data through the Updater role: the Orchard source anchor and the
-        // funding note's witness, and the Ironwood destination anchor (the output side anchors to the
-        // empty tree; it has no spend to witness).
-        let updated = Updater::new(pczt)
-            .set_orchard_anchor(anchor)
-            .map_err(WalletProveError::Anchor)?
-            .set_orchard_spend_witnesses([(spend_index, merkle_path)])
-            .map_err(WalletProveError::Witness)?
-            .set_ironwood_anchor(Anchor::empty_tree())
-            .map_err(WalletProveError::Anchor)?
-            .finish();
-
-        // Prove both bundles with the single post-NU6.3 Orchard proving key.
-        let pk = post_nu6_3_orchard_proving_key();
-        let proven = Prover::new(updated)
-            .create_orchard_proof(pk)
-            .map_err(|e| WalletProveError::Prove(alloc::format!("orchard proof: {e:?}")))?
-            .create_ironwood_proof(pk)
-            .map_err(|e| WalletProveError::Prove(alloc::format!("ironwood proof: {e:?}")))?
-            .finish();
-
-        Ok(proven)
+    fn prove_preparation(
+        &mut self,
+        pczt: ::pczt::Pczt,
+        anchor: BlockHeight,
+    ) -> Result<::pczt::Pczt, Self::Error> {
+        self.prove_orchard(pczt, anchor)
     }
 }
 

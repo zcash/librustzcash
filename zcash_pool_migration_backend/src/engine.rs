@@ -1093,6 +1093,25 @@ pub trait MigrationProver {
         pczt: pczt::Pczt,
         anchor_boundary: BlockHeight,
     ) -> Result<pczt::Pczt, Self::Error>;
+
+    /// Prove a pre-signed PREPARATION transaction against a checkpoint at which its spent notes are
+    /// witnessable.
+    ///
+    /// Like a transfer, a preparation transaction defers its Orchard anchor and its spends'
+    /// witnesses to proving time (ZIP 374), but it carries NO drawn
+    /// [`anchor_boundary`](MigrationTransaction::anchor_boundary) (it anchors to its already-mined
+    /// dependencies, not to a bucketed boundary), so the `anchor` height is passed in: the caller
+    /// proves a preparation once its inputs are mined and picks a checkpoint at or after that (for
+    /// example the current chain tip). A preparation spends the wallet's own notes (layer 0) or
+    /// feeder notes minted by an earlier layer — one or MANY, unlike a transfer's single funding
+    /// note — and produces only an Orchard bundle (no Ironwood output), so the implementation
+    /// installs the anchor and every real spend's witness through the PCZT `Updater` role and proves
+    /// the single Orchard bundle.
+    fn prove_preparation(
+        &mut self,
+        pczt: pczt::Pczt,
+        anchor: BlockHeight,
+    ) -> Result<pczt::Pczt, Self::Error>;
 }
 
 /// Why committing a migration's preparation failed.
@@ -1169,6 +1188,9 @@ pub enum ProveError<E> {
     /// The transaction is a preparation transaction, not a transfer; only transfers are proved
     /// against a drawn anchor boundary (a preparation transaction carries no boundary).
     NotATransfer(MigrationTxId),
+    /// The transaction is a transfer, not a preparation transaction; only preparation transactions
+    /// are proved against a caller-supplied anchor (a transfer proves against its drawn boundary).
+    NotAPreparation(MigrationTxId),
     /// The transaction is not in the [`Signed`](MigrationTxState::Signed) state, so it is not ready
     /// to prove (it is unsigned, already proved, or already broadcast).
     NotReady(MigrationTxId),
@@ -1193,6 +1215,11 @@ impl<E: fmt::Display> fmt::Display for ProveError<E> {
             ProveError::NotATransfer(id) => write!(
                 f,
                 "transaction {} is a preparation transaction, not a transfer",
+                u32::from(*id)
+            ),
+            ProveError::NotAPreparation(id) => write!(
+                f,
+                "transaction {} is a transfer, not a preparation transaction",
                 u32::from(*id)
             ),
             ProveError::NotReady(id) => {
@@ -1259,6 +1286,54 @@ where
     let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
     let proven = prover
         .prove_transfer(pczt, anchor_boundary)
+        .map_err(ProveError::Prover)?;
+    let bytes = proven.serialize().map_err(ProveError::Serialize)?;
+
+    state.set_transaction_proved(id, bytes);
+    Ok(())
+}
+
+/// Prove a pre-signed migration PREPARATION transaction against a checkpoint at which its spent
+/// notes are witnessable, moving it `Signed -> Proved`.
+///
+/// A preparation transaction carries no drawn
+/// [`anchor_boundary`](MigrationTransaction::anchor_boundary) (it anchors to its already-mined
+/// dependencies, not to a bucketed boundary), so the `anchor` height is supplied by the caller: it
+/// proves a preparation once the notes it spends are mined and picks a checkpoint at or after that
+/// (for example the current chain tip). It hands the stored PCZT and the `anchor` to
+/// [`MigrationProver::prove_preparation`], which installs the Orchard source anchor and every real
+/// spend's witness against that checkpoint (through the PCZT `Updater` role) and proves the single
+/// Orchard bundle. The proven PCZT replaces the stored one and the transaction becomes
+/// [`Proved`](MigrationTxState::Proved), ready to broadcast.
+///
+/// A transaction not in [`Signed`](MigrationTxState::Signed) is rejected with
+/// [`ProveError::NotReady`] rather than re-proved; a transfer is rejected with
+/// [`ProveError::NotAPreparation`].
+#[cfg(feature = "orchard")]
+pub fn prove_preparation<P>(
+    prover: &mut P,
+    state: &mut MigrationState,
+    id: MigrationTxId,
+    anchor: BlockHeight,
+) -> Result<(), ProveError<P::Error>>
+where
+    P: MigrationProver,
+{
+    let tx = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == id)
+        .ok_or(ProveError::UnknownTransaction(id))?;
+    if !matches!(tx.kind(), MigrationTxKind::Preparation { .. }) {
+        return Err(ProveError::NotAPreparation(id));
+    }
+    if !matches!(tx.state(), MigrationTxState::Signed) {
+        return Err(ProveError::NotReady(id));
+    }
+
+    let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
+    let proven = prover
+        .prove_preparation(pczt, anchor)
         .map_err(ProveError::Prover)?;
     let bytes = proven.serialize().map_err(ProveError::Serialize)?;
 
@@ -1425,7 +1500,7 @@ where
         rng,
         Signing::InProcess,
     )
-    .map(|(state, _unsigned)| state)
+    .map(|(state, _unsigned, _funding)| state)
 }
 
 /// Commit a planned migration for an EXTERNAL signer: build EVERY transaction exactly as
@@ -1459,6 +1534,7 @@ where
     R: RngCore + rand_core::CryptoRng,
 {
     commit_preparation_inner(params, target_height, backend, plan, rng, Signing::External)
+        .map(|(state, unsigned, _funding)| (state, unsigned))
 }
 
 /// Shared body of [`commit_preparation`] (with [`Signing::InProcess`]) and
@@ -1472,7 +1548,7 @@ fn commit_preparation_inner<P, B, R>(
     plan: &MigrationPlan,
     rng: &mut R,
     signing: Signing,
-) -> Result<(MigrationState, Vec<UnsignedMigrationTx>), CommitError<<B as MigrationBackend>::Error>>
+) -> Result<CommitOutput, CommitError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters + Clone,
     B: MigrationBackend
@@ -1487,11 +1563,43 @@ where
     committer.build_transfers(plan)?;
     // `into_state` consumes the committer, releasing its `&mut backend` reborrow, so the store
     // write below can borrow `backend` again.
-    let (state, unsigned) = committer.into_state(plan);
+    let (state, unsigned, transfer_funding) = committer.into_state(plan);
     backend
         .replace_migration(&state)
         .map_err(CommitError::Backend)?;
-    Ok((state, unsigned))
+    Ok((state, unsigned, transfer_funding))
+}
+
+/// Commit a planned migration in-process (as [`commit_preparation`]) and additionally return each
+/// transfer paired with the funding note it spends. The funding notes are what a prover needs to
+/// locate each transfer's spend in the wallet's Orchard commitment tree at proving time; a
+/// production consumer recovers them from its own scanned note store, so this entry point exists
+/// for tests (and downstream test harnesses) that drive real proving without a scanning wallet.
+#[cfg(any(test, feature = "test-dependencies"))]
+pub fn commit_preparation_with_funding<P, B, R>(
+    params: &P,
+    target_height: BlockHeight,
+    backend: &mut B,
+    plan: &MigrationPlan,
+    rng: &mut R,
+) -> Result<(MigrationState, TransferFunding), CommitError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
+    R: RngCore + rand_core::CryptoRng,
+{
+    commit_preparation_inner(
+        params,
+        target_height,
+        backend,
+        plan,
+        rng,
+        Signing::InProcess,
+    )
+    .map(|(state, _unsigned, funding)| (state, funding))
 }
 
 /// Hosts the shared mutable state that building a whole committed migration threads through its
@@ -1519,6 +1627,12 @@ struct Committer<'a, P, B, R> {
     next_id: u32,
     layer_ids: Vec<Vec<MigrationTxId>>,
     minted: Vec<MintedNote>,
+    /// Each transfer paired with the funding note it spends, captured as the transfer is built.
+    /// The commit path already recovers every funding note's plaintext to build the transfer; a
+    /// prover needs it at proving time to locate the note in the wallet's commitment tree (in
+    /// production the wallet finds it by nullifier in its own note store). Surfaced through
+    /// [`commit_preparation_with_funding`]; the normal commit path drops it.
+    transfer_funding: TransferFunding,
 }
 
 #[cfg(feature = "orchard")]
@@ -1565,6 +1679,7 @@ where
             next_id: 0,
             layer_ids: Vec::new(),
             minted: Vec::new(),
+            transfer_funding: Vec::new(),
         })
     }
 
@@ -1864,23 +1979,36 @@ where
                 anchor_boundary: Some(anchor_boundary),
                 state: tx_state,
             });
+            self.transfer_funding.push((id, note));
         }
         Ok(())
     }
 
     /// Assemble the committed [`MigrationState`] from the accumulated transactions and return it
-    /// with the unsigned PCZTs. Consuming `self` releases the `&mut backend` reborrow, so the
-    /// caller can persist the state through the backend afterward.
-    fn into_state(self, plan: &MigrationPlan) -> (MigrationState, Vec<UnsignedMigrationTx>) {
+    /// with the unsigned PCZTs and each transfer's funding note. Consuming `self` releases the
+    /// `&mut backend` reborrow, so the caller can persist the state through the backend afterward.
+    fn into_state(self, plan: &MigrationPlan) -> CommitOutput {
         let state = MigrationState {
             status: MigrationStatus::Committed,
             note_split: plan.note_split().clone(),
             preparation: plan.preparation().clone(),
             transactions: self.transactions,
         };
-        (state, self.unsigned)
+        (state, self.unsigned, self.transfer_funding)
     }
 }
+
+/// Each transfer paired with the funding note it spends, recovered from the built preparation
+/// bundles during a commit pass. A prover needs it to locate each transfer's spend in the wallet's
+/// commitment tree at proving time.
+#[cfg(feature = "orchard")]
+type TransferFunding = Vec<(MigrationTxId, orchard::note::Note)>;
+
+/// What one commit pass produces: the persisted [`MigrationState`], the unsigned PCZTs (empty for
+/// the in-process signing path), and each transfer paired with the funding note it spends. The
+/// public commit entry points drop the parts they do not surface.
+#[cfg(feature = "orchard")]
+type CommitOutput = (MigrationState, Vec<UnsignedMigrationTx>, TransferFunding);
 
 #[cfg(test)]
 mod tests {
@@ -2393,6 +2521,18 @@ mod commit_tests {
             // returns the PCZT unchanged; the engine's `prove_transfer` orchestration (reading and
             // passing the persisted `anchor_boundary`, and the Signed -> Proved transition) is what
             // the tests exercise.
+            Ok(pczt)
+        }
+
+        fn prove_preparation(
+            &mut self,
+            pczt: pczt::Pczt,
+            _anchor: BlockHeight,
+        ) -> Result<pczt::Pczt, Self::Error> {
+            // A stand-in for proving, as `prove_transfer` above: a real prover installs the Orchard
+            // anchor and every spend's witness and runs the Orchard prover (see
+            // `WalletMigrationProver`). This mock models no commitment tree, so it returns the PCZT
+            // unchanged; the engine's `prove_preparation` orchestration is what the tests exercise.
             Ok(pczt)
         }
     }
