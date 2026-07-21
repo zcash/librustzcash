@@ -19,9 +19,11 @@ categories.workspace = true
 all-features = true
 
 [dependencies]
+corez.workspace = true
 getset.workspace = true
 libm.workspace = true
 rand_core.workspace = true
+zcash_encoding.workspace = true
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 
@@ -45,6 +47,8 @@ incrementalmerkletree = { workspace = true, optional = true }
 incrementalmerkletree.workspace = true
 proptest.workspace = true
 rand_chacha.workspace = true
+# The `testing` module (round-trip codec helpers) is used by the serialization proptests.
+zcash_encoding = { workspace = true, features = ["test-dependencies"] }
 # The `local-consensus` feature exposes `LocalNetwork`, used to build the migration transactions
 # against regtest params with the relevant network upgrades (including NU6.3) active.
 zcash_protocol = { workspace = true, features = ["local-consensus"] }

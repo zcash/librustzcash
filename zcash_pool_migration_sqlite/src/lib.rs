@@ -9,11 +9,13 @@
 //! # Structure: one generic store, one public submodule per pool
 //!
 //! The generic, pool-agnostic store machinery (the DDL builders and the SQL store logic) lives in a
-//! private `store` module, parameterized over the per-pool table names; the blob (de)serialization of
-//! the engine types to and from their stored form lives in a separate private `codec` module, and the
-//! [`Error`](orchard_ironwood::Error) type in a private `error` module. Each pool migration is a
-//! public submodule that
-//! instantiates the store with its own table names and
+//! private `store` module, parameterized over the per-pool table names, and the
+//! [`Error`](orchard_ironwood::Error) type in a private `error` module. The canonical byte
+//! (de)serialization of the engine types is a property of those types and lives on them in
+//! [`zcash_pool_migration_backend`] (`NoteSplitPlan::write`/`read`, `PreparationPlan::write`/`read`,
+//! and the `PrepInput`/`PrepOutput`/`PrepTransaction` codecs); the `store` module only maps those
+//! blobs and the scalar values to and from SQLite columns. Each pool migration is a public submodule
+//! that instantiates the store with its own table names and
 //! exposes the concrete API; the generic store type never appears in the public surface. This lets
 //! future pool migrations reuse the same machinery under their own tables. Currently the only such
 //! submodule is [`orchard_ironwood`] (the Orchard -> Ironwood migration), whose tables are
@@ -39,7 +41,6 @@
 //! table. The pool's `PoolMigrations` type is the store: construct it over a `rusqlite::Connection`
 //! (the same one `WalletDb` uses).
 
-mod codec;
 mod error;
 mod store;
 

@@ -2,11 +2,13 @@
 //!
 //! This module is entirely crate-internal: it holds the machinery shared by every pool migration
 //! (the DDL builders and the [`Store`] type that carries the [`PoolMigrationRead`] /
-//! [`PoolMigrationWrite`] SQL logic), parameterized over the table names in [`Tables`]. The blob
-//! (de)serialization of the engine types to and from their stored form lives in a separate module,
-//! [`crate::codec`]. Each concrete migration lives in its own public submodule (currently only
-//! [`crate::orchard_ironwood`]) that instantiates [`Store`] with its own [`Tables`]; the generic
-//! type never leaks into the public API. Only [`Error`] is re-exported by a facade.
+//! [`PoolMigrationWrite`] SQL logic), parameterized over the table names in [`Tables`]. The canonical
+//! byte (de)serialization of the engine types is a property of those types and lives on them in
+//! [`zcash_pool_migration_backend`] (`NoteSplitPlan::write`/`read`, `PreparationPlan::write`/`read`);
+//! this module only maps those blobs and the scalar values to and from SQLite columns. Each concrete
+//! migration lives in its own public submodule (currently only [`crate::orchard_ironwood`]) that
+//! instantiates [`Store`] with its own [`Tables`]; the generic type never leaks into the public API.
+//! Only [`Error`] is re-exported by a facade.
 //!
 //! The blob encodings and the column set are the same for every pool: only the table and index
 //! names change from one migration to the next.
@@ -15,17 +17,18 @@ use std::borrow::{Borrow, BorrowMut};
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 
+use corez::io::{Read, Write};
+use zcash_encoding::Vector;
+
 use zcash_pool_migration_backend::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxState,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
+    MigrationTxState,
 };
 use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
+use zcash_pool_migration_backend::preparation::PreparationPlan;
 use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::value::Zatoshis;
 
-use crate::codec::{
-    decode_dep_ids, decode_preparation, decode_tx_kind, decode_tx_state, decode_zatoshis,
-    encode_dep_ids, encode_preparation, encode_tx_kind, encode_tx_state, encode_zatoshis,
-    zatoshis_from_i64,
-};
 use crate::error::Error;
 
 /// The per-pool table and index names a [`Store`] operates over. A concrete migration submodule
@@ -45,22 +48,19 @@ pub(crate) struct Tables {
 pub(crate) const SINGLETON_ID: i64 = 0;
 
 /// DDL for the migrations table: the note-split decomposition and overall status of the single active
-/// migration. The `*_values` / `funding_notes` columns hold little-endian `u64` arrays (see
-/// [`encode_zatoshis`]); the `preparation` column holds the tagged encoding of the preparation plan
-/// (see [`encode_preparation`]), retained so deferred preparation layers can be rebuilt after their
-/// prior layer mines; zatoshi and height scalars fit in SQLite's signed 64-bit integer.
+/// migration. The `note_split` column holds the whole [`NoteSplitPlan`] blob (its crossing values,
+/// fee buffer, change, and totals), the `funding_notes` column a [`Vector`] of little-endian `u64`
+/// amounts, and the `preparation` column the [`PreparationPlan`] blob (retained so deferred
+/// preparation layers can be rebuilt after their prior layer mines). The canonical byte encodings all
+/// live on the backend types (`NoteSplitPlan::write`, `PreparationPlan::write`); the store only maps
+/// them to and from these columns.
 pub(crate) fn create_migrations_sql(t: &Tables) -> String {
     format!(
         "
     CREATE TABLE IF NOT EXISTS {} (
         id INTEGER PRIMARY KEY,
         status TEXT NOT NULL,
-        note_fee_buffer_zatoshi INTEGER NOT NULL,
-        crossing_values BLOB NOT NULL,
-        change INTEGER,
-        prep_fee_zatoshi INTEGER NOT NULL,
-        total_input_zatoshi INTEGER NOT NULL,
-        total_migratable_zatoshi INTEGER NOT NULL,
+        note_split BLOB NOT NULL,
         funding_notes BLOB NOT NULL,
         preparation BLOB NOT NULL
     )",
@@ -70,20 +70,22 @@ pub(crate) fn create_migrations_sql(t: &Tables) -> String {
 
 /// DDL for the transactions table: one row per migration transaction, its pre-signed PCZT (`pczt`,
 /// always present: every transaction is built when the migration is committed, under one-phase
-/// signing), its dependency graph
-/// (`depends_on`, a little-endian `u32` array of transaction ids), schedule, and lifecycle `state`.
-/// `kind` is `'preparation'` (with `layer`/`tx_index`) or `'transfer'` (with `crossing`); `state`
-/// carries `txid`/`mined_height` for the `broadcast`/`mined` states.
+/// signing), its dependency graph (`depends_on`, a serialized vector of `u32` transaction ids),
+/// schedule, and lifecycle `state`. `kind` holds the whole [`MigrationTxKind`] blob (its canonical
+/// [`MigrationTxKind::write`]); `state` is the queryable-and-indexed lifecycle discriminant (the
+/// [`MigrationTxState`] `AsRef<str>` value) with `txid`/`mined_height` carrying the `broadcast`/`mined`
+/// payloads.
+///
+/// [`MigrationTxKind`]: zcash_pool_migration_backend::engine::MigrationTxKind
+/// [`MigrationTxKind::write`]: zcash_pool_migration_backend::engine::MigrationTxKind::write
+/// [`MigrationTxState`]: zcash_pool_migration_backend::engine::MigrationTxState
 pub(crate) fn create_transactions_sql(t: &Tables) -> String {
     format!(
         "
     CREATE TABLE IF NOT EXISTS {} (
         migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
         tx_id INTEGER NOT NULL,
-        kind TEXT NOT NULL,
-        layer INTEGER,
-        tx_index INTEGER,
-        crossing INTEGER,
+        kind BLOB NOT NULL,
         pczt BLOB NOT NULL,
         depends_on BLOB NOT NULL,
         scheduled_height INTEGER NOT NULL,
@@ -169,7 +171,6 @@ impl<C: BorrowMut<Connection>> Store<C> {
         id: MigrationTxId,
         state: MigrationTxState,
     ) -> Result<(), Error> {
-        let (state_str, txid, mined_height) = encode_tx_state(&state);
         let updated = self.conn.borrow_mut().execute(
             &format!(
                 "UPDATE {}
@@ -178,9 +179,9 @@ impl<C: BorrowMut<Connection>> Store<C> {
                 self.tables.transactions
             ),
             named_params! {
-                ":state": state_str,
-                ":txid": txid,
-                ":mined_height": mined_height,
+                ":state": state.as_ref(),
+                ":txid": state.broadcast_txid().map(|b| b.to_vec()),
+                ":mined_height": state.mined_height().map(u32::from),
                 ":migration_id": SINGLETON_ID,
                 ":tx_id": u32::from(id),
             },
@@ -197,8 +198,7 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
     let row = conn
         .query_row(
             &format!(
-                "SELECT status, note_fee_buffer_zatoshi, crossing_values, change, prep_fee_zatoshi,
-                        total_input_zatoshi, total_migratable_zatoshi, funding_notes, preparation
+                "SELECT status, note_split, funding_notes, preparation
                    FROM {} WHERE id = ?",
                 t.migrations
             ),
@@ -206,44 +206,20 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
+                    row.get::<_, Vec<u8>>(1)?,
                     row.get::<_, Vec<u8>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, Vec<u8>>(7)?,
-                    row.get::<_, Vec<u8>>(8)?,
+                    row.get::<_, Vec<u8>>(3)?,
                 ))
             },
         )
         .optional()?;
 
-    let Some((
-        status,
-        note_fee_buffer,
-        crossing_values,
-        change,
-        prep_fee,
-        total_input,
-        total_migratable,
-        funding_notes,
-        preparation,
-    )) = row
-    else {
+    let Some((status, note_split, funding_notes, preparation)) = row else {
         return Ok(None);
     };
 
-    let change = change.map(|c| zatoshis_from_i64(c, "change")).transpose()?;
-    let note_split = NoteSplitPlan::from_stored_parts(
-        decode_zatoshis(&crossing_values, "crossing_values")?,
-        zatoshis_from_i64(note_fee_buffer, "note_fee_buffer")?,
-        change,
-        zatoshis_from_i64(prep_fee, "prep_fee")?,
-        zatoshis_from_i64(total_input, "total_input")?,
-        zatoshis_from_i64(total_migratable, "total_migratable")?,
-    )
-    .map_err(|_| Error::Corrupt("note_split"))?;
+    let note_split =
+        NoteSplitPlan::read(note_split.as_slice()).map_err(|_| Error::Corrupt("note_split"))?;
 
     let transactions = read_transactions(conn, t)?;
 
@@ -253,7 +229,7 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
         status,
         note_split,
         decode_zatoshis(&funding_notes, "funding_notes")?,
-        decode_preparation(&preparation)?,
+        PreparationPlan::read(preparation.as_slice()).map_err(|_| Error::Corrupt("preparation"))?,
         transactions,
     )))
 }
@@ -261,7 +237,7 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
 /// Read the transactions of the single active migration from the table named by `t`.
 fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTransaction>, Error> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT tx_id, kind, layer, tx_index, crossing, pczt, depends_on, scheduled_height,
+        "SELECT tx_id, kind, pczt, depends_on, scheduled_height,
                 expiry_height, anchor_boundary, state, txid, mined_height
            FROM {}
           WHERE migration_id = ?
@@ -270,19 +246,16 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
     ))?;
     let rows = stmt.query_map(params![SINGLETON_ID], |row| {
         Ok((
-            row.get::<_, i64>(0)?,              // tx_id
-            row.get::<_, String>(1)?,           // kind
-            row.get::<_, Option<i64>>(2)?,      // layer
-            row.get::<_, Option<i64>>(3)?,      // tx_index
-            row.get::<_, Option<i64>>(4)?,      // crossing
-            row.get::<_, Vec<u8>>(5)?,          // pczt
-            row.get::<_, Vec<u8>>(6)?,          // depends_on
-            row.get::<_, i64>(7)?,              // scheduled_height
-            row.get::<_, i64>(8)?,              // expiry_height
-            row.get::<_, Option<i64>>(9)?,      // anchor_boundary
-            row.get::<_, String>(10)?,          // state
-            row.get::<_, Option<Vec<u8>>>(11)?, // txid
-            row.get::<_, Option<i64>>(12)?,     // mined_height
+            row.get::<_, u32>(0)?,             // tx_id
+            row.get::<_, Vec<u8>>(1)?,         // kind
+            row.get::<_, Vec<u8>>(2)?,         // pczt
+            row.get::<_, Vec<u8>>(3)?,         // depends_on
+            row.get::<_, u32>(4)?,             // scheduled_height
+            row.get::<_, u32>(5)?,             // expiry_height
+            row.get::<_, Option<u32>>(6)?,     // anchor_boundary
+            row.get::<_, String>(7)?,          // state
+            row.get::<_, Option<Vec<u8>>>(8)?, // txid
+            row.get::<_, Option<u32>>(9)?,     // mined_height
         ))
     })?;
 
@@ -291,9 +264,6 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
         let (
             tx_id,
             kind,
-            layer,
-            tx_index,
-            crossing,
             pczt,
             depends_on,
             scheduled_height,
@@ -304,30 +274,31 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
             mined_height,
         ) = row?;
 
-        let id = MigrationTxId::new(u32::try_from(tx_id).map_err(|_| Error::Corrupt("tx_id"))?);
-        let scheduled_height = BlockHeight::from_u32(
-            u32::try_from(scheduled_height).map_err(|_| Error::Corrupt("scheduled_height"))?,
-        );
-        let expiry_height = BlockHeight::from_u32(
-            u32::try_from(expiry_height).map_err(|_| Error::Corrupt("expiry_height"))?,
-        );
-        let anchor_boundary = anchor_boundary
-            .map(|h| {
-                u32::try_from(h)
-                    .map(BlockHeight::from_u32)
-                    .map_err(|_| Error::Corrupt("anchor_boundary"))
-            })
+        // Heights are `u32` in the domain; SQLite stores integers as a signed 64-bit `INTEGER`, and
+        // rusqlite maps `u32` to and from that column transparently (erroring on an out-of-range
+        // value), so no manual `i64` widening is needed here.
+        let id = MigrationTxId::new(tx_id);
+        let scheduled_height = BlockHeight::from_u32(scheduled_height);
+        let expiry_height = BlockHeight::from_u32(expiry_height);
+        let anchor_boundary = anchor_boundary.map(BlockHeight::from_u32);
+
+        let kind = MigrationTxKind::read(kind.as_slice()).map_err(|_| Error::Corrupt("kind"))?;
+        let txid = txid
+            .map(|b| <[u8; 32]>::try_from(b.as_slice()).map_err(|_| Error::Corrupt("state.txid")))
             .transpose()?;
+        let mined_height = mined_height.map(BlockHeight::from_u32);
+        let state = MigrationTxState::from_stored(&state, txid, mined_height)
+            .map_err(|_| Error::Corrupt("state"))?;
 
         out.push(MigrationTransaction::from_parts(
             id,
-            decode_tx_kind(&kind, layer, tx_index, crossing)?,
+            kind,
             pczt,
             decode_dep_ids(&depends_on)?,
             scheduled_height,
             expiry_height,
             anchor_boundary,
-            decode_tx_state(&state, txid, mined_height)?,
+            state,
         ));
     }
     Ok(out)
@@ -350,41 +321,52 @@ fn write_migration(
         params![SINGLETON_ID],
     )?;
 
-    let plan = state.note_split();
+    // Each type serializes itself through its own `write`; writing to a `Vec` is infallible, so
+    // `map(|()| buf)` just yields the filled buffer.
+    let mut buf = Vec::new();
+    let note_split = state
+        .note_split()
+        .write(&mut buf)
+        .map(|()| buf)
+        .expect("writing to a Vec is infallible");
+    let mut buf = Vec::new();
+    let preparation = state
+        .preparation()
+        .write(&mut buf)
+        .map(|()| buf)
+        .expect("writing to a Vec is infallible");
     tx.execute(
         &format!(
             "INSERT INTO {}
-                (id, status, note_fee_buffer_zatoshi, crossing_values, change, prep_fee_zatoshi,
-                 total_input_zatoshi, total_migratable_zatoshi, funding_notes, preparation)
+                (id, status, note_split, funding_notes, preparation)
              VALUES
-                (:id, :status, :note_fee_buffer, :crossing_values, :change, :prep_fee,
-                 :total_input, :total_migratable, :funding_notes, :preparation)",
+                (:id, :status, :note_split, :funding_notes, :preparation)",
             t.migrations
         ),
         named_params! {
             ":id": SINGLETON_ID,
             ":status": state.status().as_ref(),
-            ":note_fee_buffer": plan.note_fee_buffer().into_u64() as i64,
-            ":crossing_values": encode_zatoshis(plan.crossing_values()),
-            ":change": plan.change().map(|c| c.into_u64() as i64),
-            ":prep_fee": plan.prep_fees().into_u64() as i64,
-            ":total_input": plan.total_input().into_u64() as i64,
-            ":total_migratable": plan.total_migratable().into_u64() as i64,
+            ":note_split": note_split,
             ":funding_notes": encode_zatoshis(state.funding_notes()),
-            ":preparation": encode_preparation(state.preparation()),
+            ":preparation": preparation,
         },
     )?;
 
     for mtx in state.transactions() {
-        let (kind, layer, tx_index, crossing) = encode_tx_kind(mtx.kind());
-        let (tx_state, txid, mined_height) = encode_tx_state(&mtx.state());
+        let tx_state = mtx.state();
+        let mut buf = Vec::new();
+        let kind = mtx
+            .kind()
+            .write(&mut buf)
+            .map(|()| buf)
+            .expect("writing to a Vec is infallible");
         tx.execute(
             &format!(
                 "INSERT INTO {}
-                    (migration_id, tx_id, kind, layer, tx_index, crossing, pczt, depends_on,
+                    (migration_id, tx_id, kind, pczt, depends_on,
                      scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height)
                  VALUES
-                    (:migration_id, :tx_id, :kind, :layer, :tx_index, :crossing, :pczt, :depends_on,
+                    (:migration_id, :tx_id, :kind, :pczt, :depends_on,
                      :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
                      :mined_height)",
                 t.transactions
@@ -393,19 +375,51 @@ fn write_migration(
                 ":migration_id": SINGLETON_ID,
                 ":tx_id": u32::from(mtx.id()),
                 ":kind": kind,
-                ":layer": layer,
-                ":tx_index": tx_index,
-                ":crossing": crossing,
                 ":pczt": mtx.pczt().as_slice(),
                 ":depends_on": encode_dep_ids(mtx.depends_on()),
-                ":scheduled_height": i64::from(u32::from(mtx.scheduled_height())),
-                ":expiry_height": i64::from(u32::from(mtx.expiry_height())),
-                ":anchor_boundary": mtx.anchor_boundary().map(|h| i64::from(u32::from(h))),
-                ":state": tx_state,
-                ":txid": txid,
-                ":mined_height": mined_height,
+                ":scheduled_height": u32::from(mtx.scheduled_height()),
+                ":expiry_height": u32::from(mtx.expiry_height()),
+                ":anchor_boundary": mtx.anchor_boundary().map(u32::from),
+                ":state": tx_state.as_ref(),
+                ":txid": tx_state.broadcast_txid().map(|b| b.to_vec()),
+                ":mined_height": tx_state.mined_height().map(u32::from),
             },
         )?;
     }
     Ok(())
+}
+
+// --- vector blob columns: the element codecs live on the backend types; the store frames them ---
+
+/// Encode a slice of [`Zatoshis`] as a [`Vector`] of little-endian `u64` values (the `funding_notes`
+/// column). Writing to a `Vec` is infallible, so the `io::Result` is unwrapped.
+fn encode_zatoshis(values: &[Zatoshis]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    Vector::write(&mut buf, values, |w, v| v.write(w)).expect("writing to a Vec is infallible");
+    buf
+}
+
+/// Decode a blob produced by [`encode_zatoshis`], naming `field` on a corrupt or out-of-range value.
+fn decode_zatoshis(blob: &[u8], field: &'static str) -> Result<Vec<Zatoshis>, Error> {
+    Vector::read(blob, |r| Zatoshis::read(r)).map_err(|_| Error::Corrupt(field))
+}
+
+/// Encode transaction ids (the `depends_on` graph) as a [`Vector`] of little-endian `u32` values.
+fn encode_dep_ids(ids: &[MigrationTxId]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    Vector::write(&mut buf, ids, |w, id| {
+        w.write_all(&u32::from(*id).to_le_bytes())
+    })
+    .expect("writing to a Vec is infallible");
+    buf
+}
+
+/// Decode a blob produced by [`encode_dep_ids`].
+fn decode_dep_ids(blob: &[u8]) -> Result<Vec<MigrationTxId>, Error> {
+    Vector::read(blob, |r| {
+        let mut bytes = [0u8; 4];
+        r.read_exact(&mut bytes)?;
+        Ok(MigrationTxId::new(u32::from_le_bytes(bytes)))
+    })
+    .map_err(|_| Error::Corrupt("depends_on"))
 }

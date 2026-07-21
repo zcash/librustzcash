@@ -45,8 +45,10 @@ use alloc::vec::Vec;
 
 use core::fmt;
 
+use corez::io::{self, Read, Write};
 use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
+use zcash_encoding::CompactSize;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{BalanceError, Zatoshis};
@@ -146,6 +148,48 @@ pub enum MigrationTxKind {
     Transfer { crossing: usize },
 }
 
+/// The tag byte for a [`MigrationTxKind::Preparation`] in the canonical serialization.
+const KIND_TAG_PREPARATION: u8 = 0;
+/// The tag byte for a [`MigrationTxKind::Transfer`] in the canonical serialization.
+const KIND_TAG_TRANSFER: u8 = 1;
+
+impl MigrationTxKind {
+    /// Serialize this kind: a `u8` tag (`0` for `Preparation`, `1` for `Transfer`) then its
+    /// `CompactSize` indices. The inverse of [`read`](Self::read).
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        match self {
+            MigrationTxKind::Preparation { layer, index } => {
+                writer.write_all(&[KIND_TAG_PREPARATION])?;
+                CompactSize::write(&mut writer, *layer)?;
+                CompactSize::write(&mut writer, *index)
+            }
+            MigrationTxKind::Transfer { crossing } => {
+                writer.write_all(&[KIND_TAG_TRANSFER])?;
+                CompactSize::write(&mut writer, *crossing)
+            }
+        }
+    }
+
+    /// Deserialize a kind written by [`write`](Self::write), erroring on an unknown tag.
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut tag = [0u8; 1];
+        reader.read_exact(&mut tag)?;
+        match tag[0] {
+            KIND_TAG_PREPARATION => Ok(MigrationTxKind::Preparation {
+                layer: CompactSize::read(&mut reader)? as usize,
+                index: CompactSize::read(&mut reader)? as usize,
+            }),
+            KIND_TAG_TRANSFER => Ok(MigrationTxKind::Transfer {
+                crossing: CompactSize::read(&mut reader)? as usize,
+            }),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown MigrationTxKind tag",
+            )),
+        }
+    }
+}
+
 /// Where a migration transaction is in its lifecycle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MigrationTxState {
@@ -164,6 +208,76 @@ pub enum MigrationTxState {
     Broadcast { txid: TxId },
     /// Mined at the given height.
     Mined { height: BlockHeight },
+}
+
+impl AsRef<str> for MigrationTxState {
+    /// The stable lowercase wire name of this state's lifecycle stage, parsed back by
+    /// [`from_stored`](Self::from_stored). Mirrors [`MigrationStatus`]'s `AsRef<str>`: a store keeps it
+    /// in a queryable (and indexable) column so due transactions can be found without deserializing
+    /// every row. The [`Broadcast`](Self::Broadcast) txid and [`Mined`](Self::Mined) height payloads
+    /// are carried separately (see [`broadcast_txid`](Self::broadcast_txid) and
+    /// [`mined_height`](Self::mined_height)). Borrow-free: it returns a `&'static str`.
+    fn as_ref(&self) -> &str {
+        match self {
+            MigrationTxState::AwaitingSignature => "awaiting_signature",
+            MigrationTxState::Signed => "signed",
+            MigrationTxState::Proved => "proved",
+            MigrationTxState::Broadcast { .. } => "broadcast",
+            MigrationTxState::Mined { .. } => "mined",
+        }
+    }
+}
+
+impl MigrationTxState {
+    /// The raw transaction-id bytes carried by [`Broadcast`](Self::Broadcast), or `None` for any
+    /// other state.
+    pub fn broadcast_txid(&self) -> Option<[u8; 32]> {
+        match self {
+            MigrationTxState::Broadcast { txid } => Some(*txid.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// The block height carried by [`Mined`](Self::Mined), or `None` for any other state.
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        match self {
+            MigrationTxState::Mined { height } => Some(*height),
+            _ => None,
+        }
+    }
+
+    /// Reconstruct a state from the stored discriminant (see the [`AsRef<str>`](AsRef) impl) and its
+    /// payload: `txid` must be present exactly for `"broadcast"` and `mined_height` exactly for
+    /// `"mined"`. Errors on an unknown discriminant or a missing payload.
+    pub fn from_stored(
+        state: &str,
+        txid: Option<[u8; 32]>,
+        mined_height: Option<BlockHeight>,
+    ) -> Result<Self, ParseMigrationTxStateError> {
+        Ok(match state {
+            "awaiting_signature" => MigrationTxState::AwaitingSignature,
+            "signed" => MigrationTxState::Signed,
+            "proved" => MigrationTxState::Proved,
+            "broadcast" => MigrationTxState::Broadcast {
+                txid: TxId::from_bytes(txid.ok_or(ParseMigrationTxStateError)?),
+            },
+            "mined" => MigrationTxState::Mined {
+                height: mined_height.ok_or(ParseMigrationTxStateError)?,
+            },
+            _ => return Err(ParseMigrationTxStateError),
+        })
+    }
+}
+
+/// The error returned when a stored discriminant plus payload does not name a valid
+/// [`MigrationTxState`] (its [`from_stored`](MigrationTxState::from_stored) constructor).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseMigrationTxStateError;
+
+impl fmt::Display for ParseMigrationTxStateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unrecognized or malformed migration transaction state")
+    }
 }
 
 /// One transaction of a committed migration: its pre-signed PCZT plus the metadata the consuming
@@ -1894,5 +2008,30 @@ mod commit_tests {
             ),
             Err(CommitError::StalePlan)
         ));
+    }
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use super::MigrationTxKind;
+
+    use proptest::prelude::*;
+    use zcash_encoding::testing::check_roundtrip;
+
+    /// An arbitrary [`MigrationTxKind`], exercising both variants.
+    fn arb_migration_tx_kind() -> impl Strategy<Value = MigrationTxKind> {
+        prop_oneof![
+            (0usize..1000, 0usize..1000)
+                .prop_map(|(layer, index)| MigrationTxKind::Preparation { layer, index }),
+            (0usize..1000).prop_map(|crossing| MigrationTxKind::Transfer { crossing }),
+        ]
+    }
+
+    proptest! {
+        /// `write` and `read` are exact inverses for every [`MigrationTxKind`].
+        #[test]
+        fn migration_tx_kind_round_trips(kind in arb_migration_tx_kind()) {
+            check_roundtrip(&kind, |v, buf| v.write(buf), |b| MigrationTxKind::read(b));
+        }
     }
 }

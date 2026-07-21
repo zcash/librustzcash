@@ -26,6 +26,11 @@ zcash_pool_migration_backend = { version = "0.1.0", path = "../zcash_pool_migrat
 # from the SQLite columns.
 zcash_protocol.workspace = true
 
+# The canonical binary-encoding toolkit used for the blob columns: `Vector`
+# over `corez::io`, matching the codecs that now live on the backend types.
+zcash_encoding.workspace = true
+corez.workspace = true
+
 rusqlite.workspace = true
 uuid.workspace = true
 

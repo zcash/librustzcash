@@ -59,9 +59,22 @@
 
 use alloc::vec::Vec;
 
+use corez::io::{self, Read, Write};
+use zcash_encoding::{CompactSize, Vector};
 use zcash_protocol::value::Zatoshis;
 
 use core::fmt;
+
+/// The input tag byte for a [`PrepInput::Wallet`] in the canonical serialization.
+const INPUT_TAG_WALLET: u8 = 0;
+/// The input tag byte for a [`PrepInput::Prior`] in the canonical serialization.
+const INPUT_TAG_PRIOR: u8 = 1;
+/// The output tag byte for a [`PrepOutput::Funding`] in the canonical serialization.
+const OUTPUT_TAG_FUNDING: u8 = 0;
+/// The output tag byte for a [`PrepOutput::Intermediate`] in the canonical serialization.
+const OUTPUT_TAG_INTERMEDIATE: u8 = 1;
+/// The output tag byte for a [`PrepOutput::Change`] in the canonical serialization.
+const OUTPUT_TAG_CHANGE: u8 = 2;
 
 /// The exact number of Orchard actions in every note-preparation transaction ([ZIP 318]): each is
 /// padded up to this count, so no preparation transaction is distinguishable from another by its
@@ -101,6 +114,52 @@ impl PrepInput {
             PrepInput::Wallet { value, .. } | PrepInput::Prior { value, .. } => *value,
         }
     }
+
+    /// Serialize this input: a `u8` tag (`0` for `Wallet`, `1` for `Prior`), then its `CompactSize`
+    /// indices and its little-endian `u64` value.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        match self {
+            PrepInput::Wallet { index, value } => {
+                writer.write_all(&[INPUT_TAG_WALLET])?;
+                CompactSize::write(&mut writer, *index)?;
+                value.write(&mut writer)
+            }
+            PrepInput::Prior {
+                layer,
+                transaction,
+                output,
+                value,
+            } => {
+                writer.write_all(&[INPUT_TAG_PRIOR])?;
+                CompactSize::write(&mut writer, *layer)?;
+                CompactSize::write(&mut writer, *transaction)?;
+                CompactSize::write(&mut writer, *output)?;
+                value.write(&mut writer)
+            }
+        }
+    }
+
+    /// Deserialize an input written by [`write`](Self::write), erroring on an unknown tag.
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut tag = [0u8; 1];
+        reader.read_exact(&mut tag)?;
+        match tag[0] {
+            INPUT_TAG_WALLET => Ok(PrepInput::Wallet {
+                index: CompactSize::read(&mut reader)? as usize,
+                value: Zatoshis::read(&mut reader)?,
+            }),
+            INPUT_TAG_PRIOR => Ok(PrepInput::Prior {
+                layer: CompactSize::read(&mut reader)? as usize,
+                transaction: CompactSize::read(&mut reader)? as usize,
+                output: CompactSize::read(&mut reader)? as usize,
+                value: Zatoshis::read(&mut reader)?,
+            }),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown PrepInput tag",
+            )),
+        }
+    }
 }
 
 /// A note a preparation transaction produces.
@@ -119,6 +178,34 @@ impl PrepOutput {
     pub fn value(&self) -> Zatoshis {
         match self {
             PrepOutput::Funding(v) | PrepOutput::Intermediate(v) | PrepOutput::Change(v) => *v,
+        }
+    }
+
+    /// Serialize this output: a `u8` tag (`0` for `Funding`, `1` for `Intermediate`, `2` for
+    /// `Change`) then its little-endian `u64` value.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        let (tag, value) = match self {
+            PrepOutput::Funding(v) => (OUTPUT_TAG_FUNDING, *v),
+            PrepOutput::Intermediate(v) => (OUTPUT_TAG_INTERMEDIATE, *v),
+            PrepOutput::Change(v) => (OUTPUT_TAG_CHANGE, *v),
+        };
+        writer.write_all(&[tag])?;
+        value.write(&mut writer)
+    }
+
+    /// Deserialize an output written by [`write`](Self::write), erroring on an unknown tag.
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut tag = [0u8; 1];
+        reader.read_exact(&mut tag)?;
+        let value = Zatoshis::read(&mut reader)?;
+        match tag[0] {
+            OUTPUT_TAG_FUNDING => Ok(PrepOutput::Funding(value)),
+            OUTPUT_TAG_INTERMEDIATE => Ok(PrepOutput::Intermediate(value)),
+            OUTPUT_TAG_CHANGE => Ok(PrepOutput::Change(value)),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown PrepOutput tag",
+            )),
         }
     }
 }
@@ -153,6 +240,20 @@ impl PrepTransaction {
     /// The logical Orchard action count before padding (`inputs + outputs`).
     pub fn action_count(&self) -> usize {
         self.inputs.len() + self.outputs.len()
+    }
+
+    /// Serialize this transaction: its inputs then its outputs, each as a `CompactSize`-prefixed
+    /// [`Vector`] (see [`PrepInput::write`] and [`PrepOutput::write`]).
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        Vector::write(&mut writer, self.inputs(), |w, i| i.write(w))?;
+        Vector::write(&mut writer, self.outputs(), |w, o| o.write(w))
+    }
+
+    /// Deserialize a transaction written by [`write`](Self::write).
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let inputs = Vector::read(&mut reader, |r| PrepInput::read(r))?;
+        let outputs = Vector::read(&mut reader, |r| PrepOutput::read(r))?;
+        Ok(PrepTransaction::from_parts(inputs, outputs))
     }
 }
 
@@ -243,6 +344,37 @@ impl PreparationPlan {
     /// [`residual_notes`](Self::residual_notes)).
     pub fn residual_count(&self) -> usize {
         self.residual_notes().len()
+    }
+
+    /// Serialize this plan into the canonical binary form: the direct-funding notes as a [`Vector`]
+    /// of `(CompactSize index, little-endian u64 value)`, then the layers as a [`Vector`] of layers,
+    /// each a [`Vector`] of [`PrepTransaction`]. The inverse of [`read`](Self::read).
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        Vector::write(
+            &mut writer,
+            self.direct_funding_notes(),
+            |w, &(index, value)| {
+                CompactSize::write(&mut *w, index)?;
+                value.write(w)
+            },
+        )?;
+        Vector::write(&mut writer, self.layers(), |w, layer| {
+            Vector::write(w, layer, |w, tx| tx.write(w))
+        })
+    }
+
+    /// Deserialize a plan written by [`write`](Self::write), rebuilding it through
+    /// [`from_parts`](Self::from_parts).
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let direct_funding = Vector::read(&mut reader, |r| {
+            let index = CompactSize::read(&mut *r)? as usize;
+            let value = Zatoshis::read(r)?;
+            Ok((index, value))
+        })?;
+        let layers = Vector::read(&mut reader, |r| {
+            Vector::read(r, |r| PrepTransaction::read(r))
+        })?;
+        Ok(PreparationPlan::from_parts(layers, direct_funding))
     }
 }
 
@@ -755,7 +887,82 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    use zcash_encoding::testing::check_roundtrip;
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+
+    /// A [`Zatoshis`] amount well within the money supply, for round-trip fixtures.
+    fn arb_zatoshis() -> impl Strategy<Value = Zatoshis> {
+        (0u64..100_000_000).prop_map(zat)
+    }
+
+    /// An arbitrary [`PrepInput`], exercising both tags.
+    fn arb_prep_input() -> impl Strategy<Value = PrepInput> {
+        prop_oneof![
+            (0usize..1000, arb_zatoshis())
+                .prop_map(|(index, value)| PrepInput::Wallet { index, value }),
+            (0usize..1000, 0usize..1000, 0usize..1000, arb_zatoshis()).prop_map(
+                |(layer, transaction, output, value)| PrepInput::Prior {
+                    layer,
+                    transaction,
+                    output,
+                    value,
+                }
+            ),
+        ]
+    }
+
+    /// An arbitrary [`PrepOutput`], exercising all three tags.
+    fn arb_prep_output() -> impl Strategy<Value = PrepOutput> {
+        prop_oneof![
+            arb_zatoshis().prop_map(PrepOutput::Funding),
+            arb_zatoshis().prop_map(PrepOutput::Intermediate),
+            arb_zatoshis().prop_map(PrepOutput::Change),
+        ]
+    }
+
+    /// An arbitrary [`PrepTransaction`] (possibly with no inputs or outputs).
+    fn arb_prep_transaction() -> impl Strategy<Value = PrepTransaction> {
+        (
+            prop::collection::vec(arb_prep_input(), 0..6),
+            prop::collection::vec(arb_prep_output(), 0..6),
+        )
+            .prop_map(|(inputs, outputs)| PrepTransaction::from_parts(inputs, outputs))
+    }
+
+    /// An arbitrary [`PreparationPlan`]: arbitrary layers of transactions plus direct-funding notes.
+    fn arb_preparation_plan() -> impl Strategy<Value = PreparationPlan> {
+        (
+            prop::collection::vec(prop::collection::vec(arb_prep_transaction(), 0..4), 0..4),
+            prop::collection::vec((0usize..1000, arb_zatoshis()), 0..5),
+        )
+            .prop_map(|(layers, direct)| PreparationPlan::from_parts(layers, direct))
+    }
+
+    proptest! {
+        /// `write` and `read` are exact inverses for every [`PrepInput`].
+        #[test]
+        fn prep_input_round_trips(input in arb_prep_input()) {
+            check_roundtrip(&input, |v, buf| v.write(buf), |b| PrepInput::read(b));
+        }
+
+        /// `write` and `read` are exact inverses for every [`PrepOutput`].
+        #[test]
+        fn prep_output_round_trips(output in arb_prep_output()) {
+            check_roundtrip(&output, |v, buf| v.write(buf), |b| PrepOutput::read(b));
+        }
+
+        /// `write` and `read` are exact inverses for every [`PrepTransaction`].
+        #[test]
+        fn prep_transaction_round_trips(tx in arb_prep_transaction()) {
+            check_roundtrip(&tx, |v, buf| v.write(buf), |b| PrepTransaction::read(b));
+        }
+
+        /// `write` and `read` are exact inverses for every [`PreparationPlan`].
+        #[test]
+        fn preparation_plan_round_trips(plan in arb_preparation_plan()) {
+            check_roundtrip(&plan, |v, buf| v.write(buf), |b| PreparationPlan::read(b));
+        }
+    }
 
     /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
     /// action costs one ZIP-317 marginal fee). The planner treats it opaquely.

@@ -591,18 +591,14 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 
 /// Stores the note-split decomposition and status of the single in-progress Orchard -> Ironwood
 /// pool migration (ZIP 318). The table DDL and store live in the `zcash_pool_migration_sqlite`
-/// crate; this golden copy tracks the schema those tables install into `wallet.db`. The
-/// `crossing_values` / `funding_notes` columns hold little-endian `u64` arrays.
+/// crate; this golden copy tracks the schema those tables install into `wallet.db`. The `note_split`
+/// column holds the whole serialized note-split plan; the `funding_notes` column holds a serialized
+/// vector of little-endian `u64` amounts; `preparation` holds the serialized preparation plan.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
 CREATE TABLE orchard_ironwood_migrations (
     id INTEGER PRIMARY KEY,
     status TEXT NOT NULL,
-    note_fee_buffer_zatoshi INTEGER NOT NULL,
-    crossing_values BLOB NOT NULL,
-    change INTEGER,
-    prep_fee_zatoshi INTEGER NOT NULL,
-    total_input_zatoshi INTEGER NOT NULL,
-    total_migratable_zatoshi INTEGER NOT NULL,
+    note_split BLOB NOT NULL,
     funding_notes BLOB NOT NULL,
     preparation BLOB NOT NULL
 )";
@@ -613,10 +609,7 @@ pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
 CREATE TABLE orchard_ironwood_migration_transactions (
     migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
     tx_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    layer INTEGER,
-    tx_index INTEGER,
-    crossing INTEGER,
+    kind BLOB NOT NULL,
     pczt BLOB NOT NULL,
     depends_on BLOB NOT NULL,
     scheduled_height INTEGER NOT NULL,

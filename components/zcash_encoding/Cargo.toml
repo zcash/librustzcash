@@ -26,6 +26,9 @@ proptest.workspace = true
 [features]
 default = ["std"]
 std = ["corez/std"]
+## Exposes the `testing` module: helpers (e.g. `check_roundtrip`) for exercising
+## binary codecs built with this crate. Enable it as a dev-dependency feature.
+test-dependencies = []
 
 [lib]
 bench = false
