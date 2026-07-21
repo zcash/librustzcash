@@ -9,13 +9,13 @@ use corez::io::{self, Read, Write};
 
 use zcash_tachyon::TachyonBundle;
 
-/// Reads a tachyon bundle from v6 transaction format.
-pub fn read_v6_bundle<R: Read>(reader: R) -> io::Result<Option<TachyonBundle>> {
+/// Reads a tachyon bundle from a v7 (tachyon) transaction.
+pub fn read_v7_bundle<R: Read>(reader: R) -> io::Result<Option<TachyonBundle>> {
     TachyonBundle::read(reader)
 }
 
-/// Writes a tachyon bundle in v6 transaction format.
-pub fn write_v6_bundle<W: Write>(bundle: Option<&TachyonBundle>, mut writer: W) -> io::Result<()> {
+/// Writes a tachyon bundle in a v7 (tachyon) transaction.
+pub fn write_v7_bundle<W: Write>(bundle: Option<&TachyonBundle>, mut writer: W) -> io::Result<()> {
     match bundle {
         None => writer.write_all(&[0u8]),
         Some(bundle) => bundle.write(&mut writer),
