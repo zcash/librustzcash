@@ -138,6 +138,17 @@ since Mermaid layout is hard to reason about in plain text.
   `DENOM_CAP`, ...) rather than re-deriving their values. This applies to
   production code, tests, and fixtures alike.
 
+- **Public APIs use semantic types, never bare primitives.** A `pub` function,
+  trait method, struct field accessor, or constructor must not represent a
+  domain quantity as a bare integer, byte array, or string: monetary values are
+  `Zatoshis` (or `ZatBalance` where signed), block heights are `BlockHeight`,
+  transaction ids are `TxId`, and so on — reuse the workspace's existing
+  newtype wrappers, or introduce one when none exists. Bare primitives are
+  acceptable only for genuinely unitless quantities (counts, indices) and in
+  module-internal arithmetic, converting at the public boundary; a conversion
+  that cannot fail there must say why in a comment, and one that can fail must
+  return a typed error rather than panic.
+
 ## Build & Test Commands
 
 For the most part we follow standard Rust `cargo` practices.
