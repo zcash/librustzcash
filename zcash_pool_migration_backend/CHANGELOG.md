@@ -119,7 +119,12 @@ and this library adheres to Rust's notion of
   replaces only the sign step; the rest of the lifecycle is identical. The status view surfaces an
   awaiting transaction as blocked on `Blocker::Signature`.
 - Canonical binary codecs on the migration types (`PreparationPlan`, `NoteSplitPlan`,
-  `PrepInput`/`PrepOutput`/`PrepTransaction`, and `MigrationTxKind`), plus `MigrationTxState`'s
-  `AsRef<str>` discriminant and `from_stored` reconstruction, all built on `zcash_encoding` over
-  `corez::io`, so a persistence backend serializes the types through their own `write`/`read` rather
-  than a bespoke codec.
+  `PrepInput`/`PrepOutput`/`PrepTransaction`, `MigrationTxKind`, and `MigrationTxId`), plus
+  `MigrationTxState`'s `AsRef<str>` discriminant and `from_stored` reconstruction, all built on
+  `zcash_encoding` over `corez::io`, so a persistence backend serializes the types through their own
+  `write`/`read` rather than a bespoke codec.
+- A `testing` module (behind the `test-dependencies` feature) with reusable proptest strategies
+  (`arb_migration_state` and the per-type `arb_*` it composes) and a store-conformance suite
+  (`assert_empty_is_none`, `assert_put_get_roundtrip`, `assert_put_replaces`,
+  `assert_update_transaction`) that exercises any `PoolMigrationRead` / `PoolMigrationWrite`
+  implementation, so every store shares one test suite.
