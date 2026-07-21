@@ -4,10 +4,11 @@
 //! [`build_transfer_pczt`] spends a single self-funding note (one the note split minted, worth its
 //! crossing value plus a fee buffer) and outputs that crossing value into the destination Ironwood
 //! pool, to the account's own internal (change) address as ZIP 318 requires. It has no change output:
-//! the self-funding note's buffer funds the transfer's fee exactly
-//! (the Orchard spend and the Ironwood output each pad to the two-action minimum, so the transfer is
-//! four logical actions, matching the buffer of `2 source + 2 destination` actions). The transfer
-//! only exists post-NU6.3, when the Ironwood pool is live.
+//! the self-funding note's buffer funds the transfer's fee exactly. The Orchard spend pads to the
+//! two-action minimum, but the Ironwood side is a SINGLE unpadded action (the builder permits it,
+//! and it saves proving bandwidth on hardware signers), so the transfer is three logical actions,
+//! matching the buffer of `2 source + 1 destination` actions. The transfer only exists post-NU6.3,
+//! when the Ironwood pool is live.
 
 use core::convert::Infallible;
 
@@ -104,7 +105,12 @@ mod tests {
     use zcash_protocol::value::COIN;
 
     use crate::build::test_util::{account, regtest_network, single_note_witness};
-    use crate::note_splitting::{FeePolicy, RESIDUAL_MIGRATION_MIN_ZATOSHI, Zip317FeePolicy};
+    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+
+    use crate::note_splitting::{
+        DESTINATION_ACTIONS_PER_TRANSFER, RESIDUAL_MIGRATION_MIN_ZATOSHI,
+        SOURCE_ACTIONS_PER_TRANSFER,
+    };
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
@@ -119,7 +125,9 @@ mod tests {
             note_seed in any::<u64>(),
         ) {
             let fvk = account(account_seed);
-            let buffer = Zip317FeePolicy.transfer_fee_buffer_zatoshi();
+            let buffer = (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER)
+                as u64
+                * MARGINAL_FEE.into_u64();
             let note_value = crossing_value + buffer;
             let (note, path, anchor) = single_note_witness(&fvk, note_value, note_seed);
 

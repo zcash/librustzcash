@@ -50,8 +50,8 @@ mod tests {
     use crate::build::test_util::{
         TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
     };
-    use crate::note_splitting::{FeePolicy, Zip317FeePolicy};
     use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
+    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
     /// Builds a note-preparation PCZT spending one note owned by `fvk`. Deterministic in `note_seed`.
     /// It uses one spend and `PREP_TX_ACTIONS - 1` outputs so the bundle fills the action budget
@@ -61,7 +61,7 @@ mod tests {
         let per = 4 * COIN;
         let outputs = [PrepOutput::Funding(per); PREP_TX_ACTIONS - 1];
         // The spent note funds the outputs plus the padded 16-action fee.
-        let fee = PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi();
+        let fee = PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64();
         let note_value = (PREP_TX_ACTIONS as u64 - 1) * per + fee;
         let (note, path, anchor) = single_note_witness(fvk, note_value, note_seed);
         let params = regtest_network(true);

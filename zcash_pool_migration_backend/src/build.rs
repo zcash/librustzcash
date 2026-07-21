@@ -53,7 +53,10 @@ impl core::error::Error for BuildError {}
 
 /// The [`BuildConfig`] shared by the migration transactions: an Orchard-anchored bundle, with the
 /// destination-pool (Ironwood) bundle anchored only when that phase produces a crossing output
-/// (`None` for the same-pool note split).
+/// (`None` for the same-pool note split). The Ironwood bundle is UNPADDED (`pad_to_minimum: 1`):
+/// the canonical transfer carries exactly one Ironwood action, saving proving bandwidth on hardware
+/// signers, and since every migration transfer shares this canonical shape the one-action bundle
+/// reveals nothing extra.
 pub(crate) fn build_config(
     orchard_anchor: orchard::Anchor,
     ironwood_anchor: Option<orchard::Anchor>,
@@ -63,7 +66,10 @@ pub(crate) fn build_config(
         orchard_anchor: Some(orchard_anchor),
         ironwood_anchor,
         orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-        ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+        ironwood_bundle_type: orchard::builder::BundleType::Transactional {
+            bundle_required: false,
+            pad_to_minimum: Some(1),
+        },
     }
 }
 

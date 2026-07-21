@@ -15,9 +15,8 @@ use zcash_protocol::value::COIN;
 
 use super::utils::largest_one_two_five;
 use super::{
-    DenominationStrategy, FeePolicy, MIGRATION_MAX_DENOMINATION_ZEC,
-    MIGRATION_MAX_PREPARED_NOTES_PER_RUN, NoteSplitPlan, RESIDUAL_MIGRATION_MIN_ZATOSHI,
-    Zip317FeePolicy,
+    DenominationStrategy, MIGRATION_MAX_DENOMINATION_ZEC, MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+    NoteSplitPlan, RESIDUAL_MIGRATION_MIN_ZATOSHI,
 };
 
 /// The canonical `{1, 2, 5} * 10^k` quantization of [ZIP 318]: at each step it takes the largest such
@@ -42,30 +41,31 @@ pub struct CanonicalOneTwoFive {
 
 impl CanonicalOneTwoFive {
     /// A strategy with an explicit note cap, maximum denomination (in whole ZEC), minimum denomination (in
-    /// zatoshi, which MUST be a power of ten), and fee model.
+    /// zatoshi, which MUST be a power of ten), and per-note transfer-fee buffer (the ZIP-317 fee of
+    /// the canonical transfer shape, computed by the caller).
     pub fn new(
         max_notes: usize,
         max_denomination_zec: u64,
         min_denomination_zatoshi: u64,
-        fee: &impl FeePolicy,
+        transfer_fee_buffer_zatoshi: u64,
     ) -> Self {
         Self {
             max_notes,
             max_denomination_zatoshi: max_denomination_zec.saturating_mul(COIN),
             min_denomination_zatoshi,
-            buffer_zatoshi: fee.transfer_fee_buffer_zatoshi(),
+            buffer_zatoshi: transfer_fee_buffer_zatoshi,
         }
     }
 
     /// The recommended configuration: [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes,
-    /// [`MIGRATION_MAX_DENOMINATION_ZEC`] cap, [`RESIDUAL_MIGRATION_MIN_ZATOSHI`] minimum denomination, ZIP-317
-    /// fees.
-    pub fn recommended() -> Self {
+    /// [`MIGRATION_MAX_DENOMINATION_ZEC`] cap, [`RESIDUAL_MIGRATION_MIN_ZATOSHI`] minimum
+    /// denomination, and the caller-computed transfer-fee buffer.
+    pub fn recommended(transfer_fee_buffer_zatoshi: u64) -> Self {
         Self::new(
             MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
             MIGRATION_MAX_DENOMINATION_ZEC,
             RESIDUAL_MIGRATION_MIN_ZATOSHI,
-            &Zip317FeePolicy,
+            transfer_fee_buffer_zatoshi,
         )
     }
 }
@@ -74,37 +74,80 @@ impl DenominationStrategy for CanonicalOneTwoFive {
     fn plan<R: RngCore>(
         &self,
         total_input_zatoshi: u64,
-        prep_fee_zatoshi: u64,
+        prep_tx_fee_zatoshi: u64,
+        prep_tx_count: &dyn Fn(&[u64]) -> Option<usize>,
         _rng: &mut R,
     ) -> NoteSplitPlan {
-        if total_input_zatoshi <= prep_fee_zatoshi {
-            return NoteSplitPlan::empty(total_input_zatoshi, prep_fee_zatoshi, None);
-        }
         let buffer = self.buffer_zatoshi;
         // Smallest self-funding note: the minimum denomination plus its transfer buffer.
         let min_note = self.min_denomination_zatoshi + buffer;
-        let mut budget = total_input_zatoshi - prep_fee_zatoshi;
 
-        let mut crossing_values = Vec::new();
-        while budget >= min_note && crossing_values.len() < self.max_notes {
-            // Largest `{1, 2, 5} * 10^k` denomination whose note fits the budget, capped.
-            let affordable = (budget - buffer).min(self.max_denomination_zatoshi);
-            let crossing = largest_one_two_five(affordable, self.min_denomination_zatoshi);
-            if crossing < self.min_denomination_zatoshi {
+        // The chosen crossings, their prepared-note values (`crossing + buffer`), and the
+        // preparation transaction count for the CURRENT multiset. The capability is consulted at
+        // every step, so consolidation and fan-out costs are reserved exactly as they arise.
+        let mut crossing_values: Vec<u64> = Vec::new();
+        let mut notes: Vec<u64> = Vec::new();
+        let mut n_txs = prep_tx_count(&notes).unwrap_or(0);
+
+        while crossing_values.len() < self.max_notes {
+            let committed = notes.iter().sum::<u64>() + n_txs as u64 * prep_tx_fee_zatoshi;
+            let budget = total_input_zatoshi.saturating_sub(committed);
+            if budget < min_note {
                 break;
             }
-            // The prepared note is `crossing + buffer`; only the crossing is stored (the buffer is
-            // constant), but the whole note is what the budget must fund.
-            budget -= crossing + buffer;
-            crossing_values.push(crossing);
+            // Try the largest `{1, 2, 5} * 10^k` denomination that fits the budget under the
+            // CURRENT preparation cost; a candidate whose minting raises that cost past the budget
+            // steps down the series.
+            let mut affordable = (budget - buffer).min(self.max_denomination_zatoshi);
+            let mut accepted = false;
+            while affordable >= self.min_denomination_zatoshi {
+                let crossing = largest_one_two_five(affordable, self.min_denomination_zatoshi);
+                if crossing < self.min_denomination_zatoshi {
+                    break;
+                }
+                notes.push(crossing + buffer);
+                let fits = prep_tx_count(&notes).filter(|&n| {
+                    notes
+                        .iter()
+                        .sum::<u64>()
+                        .checked_add(n as u64 * prep_tx_fee_zatoshi)
+                        .is_some_and(|c| c <= total_input_zatoshi)
+                });
+                match fits {
+                    Some(n) => {
+                        n_txs = n;
+                        crossing_values.push(crossing);
+                        accepted = true;
+                        break;
+                    }
+                    None => {
+                        notes.pop();
+                        if crossing == self.min_denomination_zatoshi {
+                            break;
+                        }
+                        affordable = crossing - 1;
+                    }
+                }
+            }
+            if !accepted {
+                break;
+            }
         }
 
+        // Nothing migrated means no preparation happens, so nothing is reserved for its fees.
+        if crossing_values.is_empty() {
+            n_txs = 0;
+        }
+        let prep_fees_zatoshi = n_txs as u64 * prep_tx_fee_zatoshi;
+        let remaining = total_input_zatoshi
+            .saturating_sub(notes.iter().sum::<u64>())
+            .saturating_sub(prep_fees_zatoshi);
         NoteSplitPlan::from_notes(
             total_input_zatoshi,
-            prep_fee_zatoshi,
+            prep_fees_zatoshi,
             crossing_values,
             buffer,
-            budget,
+            remaining,
         )
     }
 }
@@ -115,7 +158,25 @@ mod tests {
     use proptest::prelude::*;
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
+    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
     use zcash_protocol::value::MAX_MONEY;
+
+    use crate::note_splitting::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
+    use crate::preparation::FUNDING_OUTPUTS_PER_TX;
+
+    /// The ZIP-317 transfer-fee buffer of the canonical transfer shape (all four actions exceed the
+    /// grace allowance, so each pays the marginal fee).
+    fn zip317_buffer() -> u64 {
+        (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER) as u64
+            * MARGINAL_FEE.into_u64()
+    }
+
+    /// A count-only preparation-layout stub: one padded transaction per [`FUNDING_OUTPUTS_PER_TX`]
+    /// funding notes. Tests exercising the split in isolation use this in place of the real
+    /// preparation planner.
+    fn prep_tx_count_stub(notes: &[u64]) -> Option<usize> {
+        Some(notes.len().div_ceil(FUNDING_OUTPUTS_PER_TX))
+    }
 
     /// Upper bound on the prep fee sampled by [`arb_plan_input`], in zatoshi.
     const MAX_SAMPLED_PREP_FEE_ZATOSHI: u64 = 1_000_000;
@@ -145,34 +206,29 @@ mod tests {
         matches!(n, 1 | 2 | 5)
     }
 
-    /// A zero-fee policy, so the canonical digit expansion is exact (no buffer eats into the budget).
-    struct NoFeePolicy;
-    impl FeePolicy for NoFeePolicy {
-        fn marginal_fee_zatoshi(&self) -> u64 {
-            0
-        }
-    }
-
-    /// The canonical strategy with the given note cap and ZIP-317 fees.
+    /// The canonical strategy with the given note cap and the ZIP-317 transfer buffer.
     fn canonical(max_notes: usize) -> CanonicalOneTwoFive {
         CanonicalOneTwoFive::new(
             max_notes,
             MIGRATION_MAX_DENOMINATION_ZEC,
             RESIDUAL_MIGRATION_MIN_ZATOSHI,
-            &Zip317FeePolicy,
+            zip317_buffer(),
         )
     }
 
-    /// The exact fee-free crossing decomposition of `total`, for the golden vectors.
+    /// The exact fee-free crossing decomposition of `total` (no buffer, no preparation fee), for
+    /// the golden vectors.
     fn crossings(total: u64) -> Vec<u64> {
         let s = CanonicalOneTwoFive::new(
             64,
             MIGRATION_MAX_DENOMINATION_ZEC,
             RESIDUAL_MIGRATION_MIN_ZATOSHI,
-            &NoFeePolicy,
+            0,
         );
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        s.plan(total, 0, &mut rng).crossing_values().to_vec()
+        s.plan(total, 0, &prep_tx_count_stub, &mut rng)
+            .crossing_values()
+            .to_vec()
     }
 
     proptest! {
@@ -183,19 +239,23 @@ mod tests {
         #[test]
         fn honours_the_contract((total, fee, max_notes) in arb_plan_input()) {
             let s = canonical(max_notes);
-            let buffer = Zip317FeePolicy.transfer_fee_buffer_zatoshi();
+            let buffer = zip317_buffer();
             let cap = MIGRATION_MAX_DENOMINATION_ZEC * COIN;
             let floor = RESIDUAL_MIGRATION_MIN_ZATOSHI;
             let mut rng = ChaCha8Rng::seed_from_u64(0);
-            let p = s.plan(total, fee, &mut rng);
+            let p = s.plan(total, fee, &prep_tx_count_stub, &mut rng);
 
+            // Value is conserved exactly: the prepared notes, the stepwise-reserved preparation
+            // fees, and the change partition the balance; and the reserved fees are the per-tx fee
+            // times the layout's transaction count (zero when nothing migrates).
             let notes: u64 = p.migration_outputs().iter().sum();
             let change = p.change().unwrap_or(0);
-            if total <= fee {
-                prop_assert!(p.migration_outputs().is_empty());
-                prop_assert_eq!(change, 0);
+            prop_assert_eq!(notes + p.prep_fees_zatoshi() + change, total);
+            if p.migration_outputs().is_empty() {
+                prop_assert_eq!(p.prep_fees_zatoshi(), 0);
             } else {
-                prop_assert_eq!(notes + change, total - fee);
+                let expected_txs = prep_tx_count_stub(p.migration_outputs().as_slice()).unwrap();
+                prop_assert_eq!(p.prep_fees_zatoshi(), expected_txs as u64 * fee);
             }
 
             prop_assert_eq!(p.migration_outputs().len(), p.crossing_values().len());
@@ -214,12 +274,14 @@ mod tests {
                 prop_assert!(w[0] >= w[1], "crossings must be non-increasing");
             }
             if p.migration_outputs().len() < max_notes {
-                prop_assert!(change < floor + buffer, "residual {}", change);
+                // The loop stops when not even a minimum note fits — where fitting includes any
+                // preparation-fee step the extra note would trigger.
+                prop_assert!(change < floor + buffer + fee, "residual {}", change);
             }
 
             // The RNG is ignored: a different seed yields the same plan.
             let mut other = ChaCha8Rng::seed_from_u64(1);
-            prop_assert_eq!(&p, &s.plan(total, fee, &mut other));
+            prop_assert_eq!(&p, &s.plan(total, fee, &prep_tx_count_stub, &mut other));
         }
     }
 
@@ -229,7 +291,7 @@ mod tests {
     fn whale_is_capped_and_rolls_over() {
         let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        let p = s.plan(MAX_MONEY, 0, &mut rng);
+        let p = s.plan(MAX_MONEY, 0, &prep_tx_count_stub, &mut rng);
         let per_run_cap =
             MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * MIGRATION_MAX_DENOMINATION_ZEC * COIN;
         assert!(p.total_migratable_zatoshi() <= per_run_cap);
@@ -240,10 +302,10 @@ mod tests {
     #[test]
     fn below_min_note_migrates_nothing() {
         let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
-        let buffer = Zip317FeePolicy.transfer_fee_buffer_zatoshi();
+        let buffer = zip317_buffer();
         let below = RESIDUAL_MIGRATION_MIN_ZATOSHI + buffer - 1;
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        let p = s.plan(below, 0, &mut rng);
+        let p = s.plan(below, 0, &prep_tx_count_stub, &mut rng);
         assert!(p.crossing_values().is_empty());
         assert_eq!(p.change(), Some(below));
     }
@@ -304,21 +366,21 @@ mod tests {
     ///   `crossing + transfer buffer` (the output that funds one migration-transfer transaction),
     /// - the source-pool change left behind.
     ///
-    /// The transfer buffer is the ZIP-317 [`FeePolicy`] buffer, so this exercises the fee model the
+    /// The transfer buffer is the canonical ZIP-317 transfer fee, so this exercises the fee model the
     /// fee-free [`crossings`] helper deliberately skips.
     fn check_user_preparation(
         balance_zatoshi: u64,
         expected_crossings_zatoshi: &[u64],
         expected_change_zatoshi: Option<u64>,
     ) {
-        let buffer = Zip317FeePolicy.transfer_fee_buffer_zatoshi();
+        let buffer = zip317_buffer();
         let expected_notes: Vec<u64> = expected_crossings_zatoshi
             .iter()
             .map(|&c| c + buffer)
             .collect();
-        let s = CanonicalOneTwoFive::recommended();
+        let s = CanonicalOneTwoFive::recommended(zip317_buffer());
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        let plan = s.plan(balance_zatoshi, 0, &mut rng);
+        let plan = s.plan(balance_zatoshi, 0, &prep_tx_count_stub, &mut rng);
         assert_eq!(
             plan.crossing_values(),
             expected_crossings_zatoshi,
@@ -338,8 +400,9 @@ mod tests {
 
     /// Golden vectors for the full migration preparation (the planned transaction set, fees included)
     /// of many different users' messy, non-round balances. Each note the plan creates is a real
-    /// transaction output holding `crossing + transfer buffer` (20,000 zat under ZIP-317), and the
-    /// leftover that cannot form a whole self-funding note stays as source-pool change.
+    /// transaction output holding `crossing + transfer buffer` (15,000 zat under ZIP-317: two
+    /// Orchard actions plus the single unpadded Ironwood action), and the leftover that cannot form
+    /// a whole self-funding note stays as source-pool change.
     ///
     /// Every expected split is derived BY HAND from the canonical `{1, 2, 5} * 10^k` greedy rule
     /// (digit expansion: 1->[1], 2->[2], 3->[2,1], 4->[2,2], 5->[5], 6->[5,1], 7->[5,2], 8->[5,2,1],
@@ -352,7 +415,7 @@ mod tests {
         // `(balance in zatoshi, expected crossings in zatoshi, expected source-pool change)`.
         let cases: Vec<(u64, Vec<u64>, Option<u64>)> = vec![
             // Ari, 3748.6174 ZEC: 3->[2,1] 7->[5,2] 4->[2,2] 8->[5,2,1] .6->[.5,.1] .01->[.01],
-            // 12 notes + 0.005 ZEC sub-floor change.
+            // 12 notes + 0.0056 ZEC sub-floor change (0.0174 - 12 * 0.00015 buffers - 0.01).
             (
                 374_861_740_000,
                 vec![
@@ -369,10 +432,11 @@ mod tests {
                     COIN / 10,
                     COIN / 100,
                 ],
-                Some(500_000),
+                Some(560_000),
             ),
-            // Bo, 9631.8827 ZEC: 9->[5,2,2] 6->[5,1] 3->[2,1] 1->[1] .8->[.5,.2,.1] .07->[.05,.02],
-            // 13 notes + 0.0101 ZEC change (at/above the minimum denomination but too small to self-fund).
+            // Bo, 9631.8827 ZEC: 9->[5,2,2] 6->[5,1] 3->[2,1] 1->[1] .8->[.5,.2,.1] .07->[.05,.02];
+            // the residual 0.0127 less 13 buffers (0.00195) still affords a 14th self-funding 0.01
+            // note, leaving 0.0006 ZEC sub-floor change.
             (
                 963_188_270_000,
                 vec![
@@ -389,11 +453,13 @@ mod tests {
                     COIN / 10,
                     COIN / 20,
                     COIN / 50,
+                    COIN / 100,
                 ],
-                Some(1_010_000),
+                Some(60_000),
             ),
             // Cleo, 27853.4226 ZEC: above the cap -> two 10,000; then 7853.42 = 7->[5,2] 8->[5,2,1]
-            // 5->[5] 3->[2,1] .4->[.2,.2] .02->[.02]. 13 notes, no change.
+            // 5->[5] 3->[2,1] .4->[.2,.2] .02->[.02]. 13 notes + 0.00065 ZEC sub-floor change
+            // (0.0026 less 13 buffers).
             (
                 2_785_342_260_000,
                 vec![
@@ -411,10 +477,11 @@ mod tests {
                     COIN / 5,
                     COIN / 50,
                 ],
-                None,
+                Some(65_000),
             ),
             // Dex, 61337.5028 ZEC: above the cap -> six 10,000; then 1337.5 = 1->[1] 3->[2,1]
-            // 3->[2,1] 7->[5,2] .5->[.5]. 14 notes, no change.
+            // 3->[2,1] 7->[5,2] .5->[.5]. 14 notes + 0.0007 ZEC sub-floor change (0.0028 less
+            // 14 buffers).
             (
                 6_133_750_280_000,
                 vec![
@@ -433,25 +500,27 @@ mod tests {
                     2 * COIN,
                     COIN / 2,
                 ],
-                None,
+                Some(70_000),
             ),
-            // Evie, 0.794 ZEC: .7->[.5,.2] .9->[.05,.02,.02], 5 notes + 0.003 ZEC sub-floor change.
+            // Evie, 0.794 ZEC: .7->[.5,.2] .9->[.05,.02,.02], 5 notes + 0.00325 ZEC sub-floor
+            // change (0.004 less 5 buffers).
             (
                 79_400_000,
                 vec![COIN / 2, COIN / 5, COIN / 20, COIN / 50, COIN / 50],
-                Some(300_000),
+                Some(325_000),
             ),
-            // Fin, 0.381 ZEC: .3->[.2,.1] .8->[.05,.02,.01] (down to the 0.01 minimum denomination), 5 notes,
-            // no change.
+            // Fin, 0.381 ZEC: .3->[.2,.1] .8->[.05,.02,.01] (down to the 0.01 minimum
+            // denomination), 5 notes + 0.00025 ZEC sub-floor change (0.001 less 5 buffers).
             (
                 38_100_000,
                 vec![COIN / 5, COIN / 10, COIN / 20, COIN / 50, COIN / 100],
-                None,
+                Some(25_000),
             ),
-            // Gwen, 0.0152 ZEC: a single 0.01 minimum-denomination note + 0.005 ZEC sub-floor change.
-            (1_520_000, vec![COIN / 100], Some(500_000)),
+            // Gwen, 0.0152 ZEC: a single 0.01 minimum-denomination note + 0.00505 ZEC sub-floor
+            // change.
+            (1_520_000, vec![COIN / 100], Some(505_000)),
             // Ivan, 142.5314 ZEC (typical wallet): 1->[1] 4->[2,2] 2->[2] .5->[.5] .03->[.02,.01],
-            // 7 notes, no change.
+            // 7 notes + 0.00035 ZEC sub-floor change (0.0014 less 7 buffers).
             (
                 14_253_140_000,
                 vec![
@@ -463,10 +532,10 @@ mod tests {
                     COIN / 50,
                     COIN / 100,
                 ],
-                None,
+                Some(35_000),
             ),
             // Jia, 76.1986 ZEC (typical wallet): 7->[5,2] 6->[5,1] .1->[.1] .09->[.05,.02,.02],
-            // 8 notes + 0.007 ZEC sub-floor change.
+            // 8 notes + 0.0074 ZEC sub-floor change (0.0086 less 8 buffers).
             (
                 7_619_860_000,
                 vec![
@@ -479,10 +548,11 @@ mod tests {
                     COIN / 50,
                     COIN / 50,
                 ],
-                Some(700_000),
+                Some(740_000),
             ),
             // Kai, 999.993 ZEC (every digit a 9 -> every place expands [5,2,2]): 999.99 =
-            // 9->[5,2,2] 9->[5,2,2] 9->[5,2,2] .9->[.5,.2,.2] .09->[.05,.02,.02]. 15 notes, no change.
+            // 9->[5,2,2] 9->[5,2,2] 9->[5,2,2] .9->[.5,.2,.2] .09->[.05,.02,.02]. 15 notes +
+            // 0.00075 ZEC sub-floor change (0.003 less 15 buffers).
             (
                 99_999_300_000,
                 vec![
@@ -502,10 +572,11 @@ mod tests {
                     COIN / 50,
                     COIN / 50,
                 ],
-                None,
+                Some(75_000),
             ),
             // Lex, 32222.2218 ZEC: above the cap -> three 10,000; then 2222.22 (every digit a 2 ->
-            // [2]): 2->[2] 2->[2] 2->[2] 2->[2] .2->[.2] .02->[.02]. 9 notes, no change.
+            // [2]): 2->[2] 2->[2] 2->[2] 2->[2] .2->[.2] .02->[.02]. 9 notes + 0.00045 ZEC
+            // sub-floor change (0.0018 less 9 buffers).
             (
                 3_222_222_180_000,
                 vec![
@@ -519,18 +590,18 @@ mod tests {
                     COIN / 5,
                     COIN / 50,
                 ],
-                None,
+                Some(45_000),
             ),
             // Mira, 4050.0735 ZEC (interior zero digits skipped): 4->[2,2] 0->[] 5->[5] 0->[] 0->[]
-            // .07->[.05,.02], 5 notes + 0.0025 ZEC sub-floor change.
+            // .07->[.05,.02], 5 notes + 0.00275 ZEC sub-floor change (0.0035 less 5 buffers).
             (
                 405_007_350_000,
                 vec![2_000 * COIN, 2_000 * COIN, 50 * COIN, COIN / 20, COIN / 50],
-                Some(250_000),
+                Some(275_000),
             ),
             // Ozan, 88.884 ZEC (independently chosen): 88.88 = 8->[5,2,1] 8->[5,2,1] .8->[.5,.2,.1]
             // .08->[.05,.02,.01]. The 0.004 ZEC fee-free residual exceeds the 12 notes' buffers
-            // (12 * 0.0002 = 0.0024 ZEC), so all 12 notes self-fund and 0.0016 ZEC stays as change.
+            // (12 * 0.00015 = 0.0018 ZEC), so all 12 notes self-fund and 0.0022 ZEC stays as change.
             (
                 8_888_400_000,
                 vec![
@@ -547,16 +618,16 @@ mod tests {
                     COIN / 50,
                     COIN / 100,
                 ],
-                Some(160_000),
+                Some(220_000),
             ),
             // Priya, 7.1101 ZEC (independently chosen): the fee-free split is 7->[5,2] .1->[.1]
             // .01->[.01], but only 0.0001 ZEC of residual is left for the buffers, so the 0.01
-            // crossing cannot self-fund (it needs 0.01 + 0.0002 ZEC). It is dropped: the plan is
-            // [5, 2, 0.1] and the unspent 0.0095 ZEC stays as change.
+            // crossing cannot self-fund (it needs 0.01 + 0.00015 ZEC). It is dropped: the plan is
+            // [5, 2, 0.1] and the unspent 0.00965 ZEC stays as change.
             (
                 711_010_000,
                 vec![5 * COIN, 2 * COIN, COIN / 10],
-                Some(950_000),
+                Some(965_000),
             ),
         ];
 

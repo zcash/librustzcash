@@ -712,7 +712,13 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    use crate::note_splitting::{FeePolicy, Zip317FeePolicy};
+    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+
+    /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
+    /// action costs one ZIP-317 marginal fee). The planner treats it opaquely.
+    fn fee_per_tx() -> u64 {
+        PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64()
+    }
 
     /// The funding values a plan mints, sorted, for multiset comparison against the request.
     fn sorted_funding(plan: &PreparationPlan) -> Vec<u64> {
@@ -838,9 +844,7 @@ mod tests {
     fn arb_sufficient() -> impl Strategy<Value = (Vec<u64>, Vec<u64>)> {
         prop::collection::vec(1u64..500_000, 1..20).prop_flat_map(|funding| {
             let need: u64 = funding.iter().sum();
-            let big = need
-                + (funding.len() as u64 + 64) * Zip317FeePolicy.prep_transaction_fee_zatoshi()
-                + 1;
+            let big = need + (funding.len() as u64 + 64) * fee_per_tx() + 1;
             (prop::collection::vec(1u64..100_000, 0..8), Just(funding)).prop_map(
                 move |(mut extra, funding)| {
                     extra.push(big);
@@ -854,8 +858,8 @@ mod tests {
         /// Whenever a plan is produced over arbitrary inputs, every structural invariant holds.
         #[test]
         fn valid_whenever_planned((available, funding) in arb_input()) {
-            if let Ok(plan) = plan_preparation(&available, &funding, Zip317FeePolicy.prep_transaction_fee_zatoshi()) {
-                assert_plan_valid(&plan, &available, &funding, Zip317FeePolicy.prep_transaction_fee_zatoshi());
+            if let Ok(plan) = plan_preparation(&available, &funding, fee_per_tx()) {
+                assert_plan_valid(&plan, &available, &funding, fee_per_tx());
             }
         }
 
@@ -863,9 +867,9 @@ mod tests {
         /// plan (the planner never gives up when the value is amply present).
         #[test]
         fn always_plans_when_amply_funded((available, funding) in arb_sufficient()) {
-            let plan = plan_preparation(&available, &funding, Zip317FeePolicy.prep_transaction_fee_zatoshi())
+            let plan = plan_preparation(&available, &funding, fee_per_tx())
                 .expect("ample funding must plan");
-            assert_plan_valid(&plan, &available, &funding, Zip317FeePolicy.prep_transaction_fee_zatoshi());
+            assert_plan_valid(&plan, &available, &funding, fee_per_tx());
             // The leftover is far larger than a fee, so it collapses to a single residual note.
             prop_assert!(plan.residual_count() <= 1, "{} residual notes", plan.residual_count());
         }
@@ -878,23 +882,12 @@ mod tests {
     #[test]
     fn common_case_is_one_layer_one_tx() {
         let funding = [500u64, 200, 100, 20, 5];
-        let total: u64 =
-            funding.iter().sum::<u64>() + Zip317FeePolicy.prep_transaction_fee_zatoshi() + 10_000;
-        let plan = plan_preparation(
-            &[total],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
+        let total: u64 = funding.iter().sum::<u64>() + fee_per_tx() + 10_000;
+        let plan = plan_preparation(&[total], &funding, fee_per_tx()).unwrap();
         assert_eq!(plan.layer_count(), 1);
         assert_eq!(plan.transaction_count(), 1);
         assert_eq!(plan.residual_count(), 1, "one residual note");
-        assert_plan_valid(
-            &plan,
-            &[total],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        assert_plan_valid(&plan, &[total], &funding, fee_per_tx());
     }
 
     /// One large note fanning out into more funding notes than a single transaction holds needs more
@@ -902,25 +895,14 @@ mod tests {
     #[test]
     fn whale_single_note_fans_out_across_layers() {
         let funding: Vec<u64> = (0..40).map(|_| 100u64).collect();
-        let total: u64 =
-            funding.iter().sum::<u64>() + 60 * Zip317FeePolicy.prep_transaction_fee_zatoshi();
-        let plan = plan_preparation(
-            &[total],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
+        let total: u64 = funding.iter().sum::<u64>() + 60 * fee_per_tx();
+        let plan = plan_preparation(&[total], &funding, fee_per_tx()).unwrap();
         assert!(
             plan.layer_count() >= 2,
             "40 funding notes cannot fit one tx"
         );
         assert_eq!(plan.residual_count(), 1, "one residual note");
-        assert_plan_valid(
-            &plan,
-            &[total],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        assert_plan_valid(&plan, &[total], &funding, fee_per_tx());
     }
 
     /// A sub-quantum note (smaller than any funding note) is consolidated into a feeder before it can
@@ -928,26 +910,16 @@ mod tests {
     #[test]
     fn sub_quantum_is_consolidated_first() {
         // Twenty notes each far below the single 100-unit funding note (plus fees).
-        let per = Zip317FeePolicy.prep_transaction_fee_zatoshi() + 20;
+        let per = fee_per_tx() + 20;
         let available: Vec<u64> = core::iter::repeat_n(per, 20).collect();
         let funding = [100u64];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
         assert!(
             plan.layer_count() >= 2,
             "sub-quantum notes must consolidate first"
         );
         assert_eq!(plan.residual_count(), 1, "one residual note");
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
     }
 
     /// When several notes each strand a sub-fee remainder whose total is below one transaction fee, the
@@ -957,37 +929,25 @@ mod tests {
     #[test]
     fn sub_fee_remainders_leave_multiple_residuals() {
         // Three notes, each funding one 100_000 note and stranding a 100-zatoshi remainder; the three
-        // remainders total 300 < Zip317FeePolicy.prep_transaction_fee_zatoshi(), so no consolidation can merge them.
+        // remainders total 300 < fee_per_tx(), so no consolidation can merge them.
         let f = 100_000u64;
         let eps = 100u64;
-        let note = f + Zip317FeePolicy.prep_transaction_fee_zatoshi() + eps;
+        let note = f + fee_per_tx() + eps;
         let available = [note, note, note];
         let funding = [f, f, f];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         let changes = plan.residual_notes();
         assert!(
             changes.len() > 1,
             "expected multiple sub-fee residuals: {changes:?}"
         );
         assert!(
-            changes
-                .iter()
-                .all(|&v| v < Zip317FeePolicy.prep_transaction_fee_zatoshi()),
+            changes.iter().all(|&v| v < fee_per_tx()),
             "all residuals sub-fee"
         );
         assert!(
-            changes.iter().sum::<u64>() < Zip317FeePolicy.prep_transaction_fee_zatoshi(),
+            changes.iter().sum::<u64>() < fee_per_tx(),
             "total residual sub-fee"
         );
     }
@@ -996,21 +956,13 @@ mod tests {
     #[test]
     fn edge_cases() {
         assert_eq!(
-            plan_preparation(
-                &[1_000_000],
-                &[],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            )
-            .unwrap()
-            .layer_count(),
+            plan_preparation(&[1_000_000], &[], fee_per_tx())
+                .unwrap()
+                .layer_count(),
             0
         );
         assert_eq!(
-            plan_preparation(
-                &[10],
-                &[100],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            ),
+            plan_preparation(&[10], &[100], fee_per_tx()),
             Err(PrepError::InsufficientFunds)
         );
     }
@@ -1036,14 +988,10 @@ mod tests {
     #[test]
     fn many_tiny_notes_insufficient() {
         // 5 x 30_000 = 150_000 available. Funding one 100_000 note costs at least the note plus one
-        // fee: 100_000 + Zip317FeePolicy.prep_transaction_fee_zatoshi() (80_000) = 180_000. Since 150_000 < 180_000, it is unfundable.
+        // fee: 100_000 + fee_per_tx() (80_000) = 180_000. Since 150_000 < 180_000, it is unfundable.
         let available = vec![30_000u64; 5];
         assert_eq!(
-            plan_preparation(
-                &available,
-                &[100_000],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            ),
+            plan_preparation(&available, &[100_000], fee_per_tx()),
             Err(PrepError::InsufficientFunds)
         );
     }
@@ -1057,18 +1005,8 @@ mod tests {
             // Each note is below the 100_000 funding note, so the whole first layer is consolidation.
             let available = vec![50_000u64; n];
             let funding = [100_000u64];
-            let plan = plan_preparation(
-                &available,
-                &funding,
-                Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-            )
-            .unwrap();
-            assert_plan_valid(
-                &plan,
-                &available,
-                &funding,
-                Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-            );
+            let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+            assert_plan_valid(&plan, &available, &funding, fee_per_tx());
             let mut got: Vec<usize> = plan.layers()[0]
                 .iter()
                 .map(|tx| tx.inputs().len())
@@ -1088,18 +1026,8 @@ mod tests {
         let mut available = vec![40_000u64; 10]; // sub-quantum: needed to fund the 100_000 note
         available.push(400_000); // funds the 300_000 note directly, but not also the 100_000 note
         let funding = [300_000u64, 100_000];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         let layer0 = &plan.layers()[0];
         assert!(
             layer0.iter().any(|tx| tx.inputs().len() == 1),
@@ -1119,11 +1047,7 @@ mod tests {
         // Two 90_000 notes: one consolidation nets 100_000, still short of 100_000 + a funding fee.
         let available = vec![90_000u64; 2];
         assert_eq!(
-            plan_preparation(
-                &available,
-                &[100_000],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            ),
+            plan_preparation(&available, &[100_000], fee_per_tx()),
             Err(PrepError::InsufficientFunds)
         );
     }
@@ -1133,21 +1057,13 @@ mod tests {
     #[test]
     fn lone_sub_quantum_note() {
         assert_eq!(
-            plan_preparation(
-                &[50_000],
-                &[100_000],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            ),
+            plan_preparation(&[50_000], &[100_000], fee_per_tx()),
             Err(PrepError::InsufficientFunds)
         );
         assert_eq!(
-            plan_preparation(
-                &[50_000],
-                &[],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            )
-            .unwrap()
-            .layer_count(),
+            plan_preparation(&[50_000], &[], fee_per_tx())
+                .unwrap()
+                .layer_count(),
             0
         );
     }
@@ -1157,29 +1073,15 @@ mod tests {
     #[test]
     fn threshold_notes() {
         let f = 100_000u64;
-        let exact = f + Zip317FeePolicy.prep_transaction_fee_zatoshi();
-        let plan = plan_preparation(
-            &[exact],
-            &[f],
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &[exact],
-            &[f],
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let exact = f + fee_per_tx();
+        let plan = plan_preparation(&[exact], &[f], fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &[exact], &[f], fee_per_tx());
         assert_eq!(plan.transaction_count(), 1);
         assert_eq!(plan.residual_count(), 0, "exact funding leaves no residual");
 
         // A note worth only the fee has zero spendable budget; on its own it cannot fund anything.
         assert_eq!(
-            plan_preparation(
-                &[Zip317FeePolicy.prep_transaction_fee_zatoshi()],
-                &[f],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            ),
+            plan_preparation(&[fee_per_tx()], &[f], fee_per_tx()),
             Err(PrepError::InsufficientFunds)
         );
     }
@@ -1191,18 +1093,8 @@ mod tests {
     fn deep_consolidation_layer_count() {
         let available = vec![50_000u64; 300];
         let funding = [1_000_000u64];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         assert_eq!(
             plan.layer_count(),
             4,
@@ -1218,18 +1110,8 @@ mod tests {
     fn thousands_of_sub_quantum_notes_layer_count() {
         let available = vec![50_000u64; 3_000];
         let funding = [10_000_000u64];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         assert_eq!(
             plan.layer_count(),
             4,
@@ -1246,20 +1128,9 @@ mod tests {
         for p in [1usize, 14, 15, 28, 100, 196, 197, 500] {
             let funding = vec![100u64; p];
             // The balanced tree costs more than a linear chain; fund exactly that plus a small residual.
-            let whale =
-                subtree_cost(&funding, Zip317FeePolicy.prep_transaction_fee_zatoshi()).1 + 9_999;
-            let plan = plan_preparation(
-                &[whale],
-                &funding,
-                Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-            )
-            .unwrap();
-            assert_plan_valid(
-                &plan,
-                &[whale],
-                &funding,
-                Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-            );
+            let whale = subtree_cost(&funding, fee_per_tx()).1 + 9_999;
+            let plan = plan_preparation(&[whale], &funding, fee_per_tx()).unwrap();
+            assert_plan_valid(&plan, &[whale], &funding, fee_per_tx());
             assert_eq!(plan.layer_count(), split_depth(p), "p={p} layers");
         }
     }
@@ -1271,9 +1142,9 @@ mod tests {
         fn whale_fan_out_is_balanced_and_valid(
             funding in prop::collection::vec(1u64..10_000_000, 1..300),
         ) {
-            let whale = subtree_cost(&funding, Zip317FeePolicy.prep_transaction_fee_zatoshi()).1 + 12_345;
-            let plan = plan_preparation(&[whale], &funding, Zip317FeePolicy.prep_transaction_fee_zatoshi()).unwrap();
-            assert_plan_valid(&plan, &[whale], &funding, Zip317FeePolicy.prep_transaction_fee_zatoshi());
+            let whale = subtree_cost(&funding, fee_per_tx()).1 + 12_345;
+            let plan = plan_preparation(&[whale], &funding, fee_per_tx()).unwrap();
+            assert_plan_valid(&plan, &[whale], &funding, fee_per_tx());
             prop_assert_eq!(plan.layer_count(), split_depth(funding.len()));
         }
     }
@@ -1302,19 +1173,9 @@ mod tests {
     #[test]
     fn exact_split_no_residual() {
         let funding = vec![100u64; 15];
-        let whale = subtree_cost(&funding, Zip317FeePolicy.prep_transaction_fee_zatoshi()).1; // exact cost, no leftover
-        let plan = plan_preparation(
-            &[whale],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &[whale],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let whale = subtree_cost(&funding, fee_per_tx()).1; // exact cost, no leftover
+        let plan = plan_preparation(&[whale], &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &[whale], &funding, fee_per_tx());
         assert_eq!(plan.layer_count(), split_depth(15));
         assert_eq!(plan.residual_count(), 0, "exact split leaves no residual");
     }
@@ -1325,18 +1186,8 @@ mod tests {
     fn many_sub_quantum_fund_many_notes() {
         let available = vec![50_000u64; 100];
         let funding = vec![100_000u64; 30];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         assert_eq!(
             plan.layer_count(),
             3,
@@ -1349,11 +1200,7 @@ mod tests {
     #[test]
     fn empty_available_insufficient() {
         assert_eq!(
-            plan_preparation(
-                &[],
-                &[100_000],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            ),
+            plan_preparation(&[], &[100_000], fee_per_tx()),
             Err(PrepError::InsufficientFunds)
         );
     }
@@ -1362,23 +1209,15 @@ mod tests {
     #[test]
     fn zero_value_funding_is_empty() {
         assert_eq!(
-            plan_preparation(
-                &[1_000_000],
-                &[0],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            )
-            .unwrap()
-            .layer_count(),
+            plan_preparation(&[1_000_000], &[0], fee_per_tx())
+                .unwrap()
+                .layer_count(),
             0
         );
         assert_eq!(
-            plan_preparation(
-                &[1_000_000],
-                &[0, 0],
-                Zip317FeePolicy.prep_transaction_fee_zatoshi()
-            )
-            .unwrap()
-            .layer_count(),
+            plan_preparation(&[1_000_000], &[0, 0], fee_per_tx())
+                .unwrap()
+                .layer_count(),
             0
         );
     }
@@ -1387,19 +1226,9 @@ mod tests {
     #[test]
     fn duplicate_funding_values() {
         let funding = [100u64, 100, 100, 100];
-        let whale = 400 + 3 * Zip317FeePolicy.prep_transaction_fee_zatoshi();
-        let plan = plan_preparation(
-            &[whale],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &[whale],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let whale = 400 + 3 * fee_per_tx();
+        let plan = plan_preparation(&[whale], &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &[whale], &funding, fee_per_tx());
         assert_eq!(sorted_funding(&plan), vec![100, 100, 100, 100]);
     }
 
@@ -1408,18 +1237,8 @@ mod tests {
     fn deterministic() {
         let available = vec![500_000u64, 300_000, 120_000, 60_000, 9_000];
         let funding = vec![100_000u64, 50_000, 50_000, 20_000, 5_000];
-        let a = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        let b = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
+        let a = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        let b = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
         assert_eq!(a, b);
     }
 
@@ -1429,14 +1248,8 @@ mod tests {
     #[test]
     fn note_equal_to_funding_value_is_used_directly() {
         let f = 100_000u64;
-        let plan =
-            plan_preparation(&[f], &[f], Zip317FeePolicy.prep_transaction_fee_zatoshi()).unwrap();
-        assert_plan_valid(
-            &plan,
-            &[f],
-            &[f],
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&[f], &[f], fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &[f], &[f], fee_per_tx());
         assert_eq!(plan.transaction_count(), 0, "no transaction needed");
         assert_eq!(plan.direct_funding_notes(), &[(0, f)]);
         assert_eq!(plan.funding_notes(), vec![f]);
@@ -1450,18 +1263,8 @@ mod tests {
         // Note 0 exactly matches a funding value; note 1 (large) mints the other two.
         let available = vec![f, 10_000_000];
         let funding = vec![f, 50_000, 20_000];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         assert_eq!(
             plan.direct_funding_notes(),
             &[(0, f)],
@@ -1478,18 +1281,8 @@ mod tests {
     fn all_exact_matches_need_no_transactions() {
         let funding = vec![100_000u64, 50_000, 50_000];
         let available = funding.clone();
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         assert_eq!(plan.transaction_count(), 0);
         assert_eq!(plan.layer_count(), 0);
         assert_eq!(plan.direct_funding_notes().len(), 3);
@@ -1501,20 +1294,9 @@ mod tests {
     #[test]
     fn varied_funding_from_one_whale() {
         let funding = [500_000u64, 200_000, 100_000, 20_000, 5_000, 2_000];
-        let whale =
-            funding.iter().sum::<u64>() + Zip317FeePolicy.prep_transaction_fee_zatoshi() + 12_345;
-        let plan = plan_preparation(
-            &[whale],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &[whale],
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let whale = funding.iter().sum::<u64>() + fee_per_tx() + 12_345;
+        let plan = plan_preparation(&[whale], &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &[whale], &funding, fee_per_tx());
         assert_eq!(plan.layer_count(), 1);
         assert_eq!(plan.transaction_count(), 1);
     }
@@ -1525,20 +1307,10 @@ mod tests {
     fn parallel_funding_across_notes() {
         let f = 100_000u64;
         let n = 20usize;
-        let available = vec![f + Zip317FeePolicy.prep_transaction_fee_zatoshi(); n]; // each note funds exactly one f note
+        let available = vec![f + fee_per_tx(); n]; // each note funds exactly one f note
         let funding = vec![f; n];
-        let plan = plan_preparation(
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        )
-        .unwrap();
-        assert_plan_valid(
-            &plan,
-            &available,
-            &funding,
-            Zip317FeePolicy.prep_transaction_fee_zatoshi(),
-        );
+        let plan = plan_preparation(&available, &funding, fee_per_tx()).unwrap();
+        assert_plan_valid(&plan, &available, &funding, fee_per_tx());
         assert_eq!(plan.layer_count(), 1, "independent notes fund in one layer");
         assert_eq!(plan.transaction_count(), n, "one transaction per note");
         assert_eq!(

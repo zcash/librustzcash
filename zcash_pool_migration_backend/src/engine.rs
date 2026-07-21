@@ -48,6 +48,9 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{BalanceError, Zatoshis};
 
+use zcash_primitives::transaction::fees::FeeRule as _;
+use zcash_primitives::transaction::fees::{transparent, zip317};
+
 use crate::note_splitting::{NoteSplitPlan, plan_note_split};
 use crate::preparation::{PrepError, PreparationPlan, plan_preparation};
 use crate::scheduling::{self, Schedule};
@@ -372,6 +375,8 @@ pub enum MigrationError<E> {
     /// The backend's note values do not form a valid balance (their sum exceeds the maximum money
     /// supply).
     InvalidBalance(BalanceError),
+    /// Computing the canonical ZIP-317 fees from the canonical transaction shapes failed.
+    Fee(zip317::FeeError),
 }
 
 impl<E: fmt::Display> fmt::Display for MigrationError<E> {
@@ -381,6 +386,7 @@ impl<E: fmt::Display> fmt::Display for MigrationError<E> {
             MigrationError::Preparation(e) => write!(f, "cannot prepare the migration: {e}"),
             MigrationError::NothingToMigrate => f.write_str("no migratable balance"),
             MigrationError::InvalidBalance(e) => write!(f, "invalid balance: {e}"),
+            MigrationError::Fee(e) => write!(f, "fee computation failed: {e}"),
         }
     }
 }
@@ -391,29 +397,69 @@ impl<E: core::error::Error + 'static> core::error::Error for MigrationError<E> {
             MigrationError::Backend(e) => Some(e),
             MigrationError::Preparation(e) => Some(e),
             MigrationError::NothingToMigrate => None,
-            // `BalanceError` implements `Error` only with `zcash_protocol/std`; the Display text
-            // above carries its message instead.
+            // `BalanceError` (and `FeeError`, which wraps it) implements `Error` only with
+            // `zcash_protocol/std`; the Display text above carries their messages instead.
             MigrationError::InvalidBalance(_) => None,
+            MigrationError::Fee(_) => None,
         }
     }
 }
 
+/// The two canonical ZIP-317 fees of a migration, computed from the canonical transaction shapes:
+/// the fee of one padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation
+/// transaction, and the transfer-fee buffer each prepared note carries (the fee of the canonical
+/// 2-Orchard + 2-Ironwood-action transfer).
+fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
+    params: &P,
+    height: BlockHeight,
+) -> Result<(Zatoshis, Zatoshis), zip317::FeeError> {
+    use crate::note_splitting::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
+    use crate::preparation::PREP_TX_ACTIONS;
+
+    let fee_rule = zip317::FeeRule::standard();
+    let prep_tx_fee = fee_rule.fee_required(
+        params,
+        height,
+        core::iter::empty::<transparent::InputSize>(),
+        core::iter::empty::<usize>(),
+        0,
+        0,
+        PREP_TX_ACTIONS,
+        0,
+    )?;
+    let transfer_fee_buffer = fee_rule.fee_required(
+        params,
+        height,
+        core::iter::empty::<transparent::InputSize>(),
+        core::iter::empty::<usize>(),
+        0,
+        0,
+        SOURCE_ACTIONS_PER_TRANSFER,
+        DESTINATION_ACTIONS_PER_TRANSFER,
+    )?;
+    Ok((prep_tx_fee, transfer_fee_buffer))
+}
+
 /// Plan a migration for the account the `backend` represents: decompose its spendable balance into
 /// canonical denominations, plan the preparation transactions that mint the self-funding notes, and
-/// schedule the phase-2 transfers. `prep_fee` is the ZIP-317 fee of a padded 16-action preparation
-/// transaction, which the note split and the preparation planner both reserve. `rng` must be a
-/// cryptographically secure RNG (the schedule's shuffle, delays, and the note split's optional
-/// randomization draw from it).
+/// schedule the phase-2 transfers. The canonical ZIP-317 fees are computed here, once, from the two
+/// canonical transaction shapes — the padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation transaction and
+/// the 2+2-action transfer — and reused throughout planning; the fee rule is fixed (ZIP 318 requires
+/// the canonical fee, since a nonstandard fee would partition the anonymity set), so it is not a
+/// parameter. The decomposition reserves the TRUE preparation cost at each step, consulting the
+/// preparation planner as it grows the split. `rng` must be a cryptographically secure RNG (the
+/// schedule's shuffle, delays, and the note split's optional randomization draw from it).
 ///
 /// This is pure orchestration of the note-split, preparation, and scheduling planners: no cryptography,
 /// and nothing is built, signed, or persisted. The result is the [`MigrationPlan`] preview to present
 /// for user consent before committing the migration.
-pub fn plan_migration<B, R>(
+pub fn plan_migration<P, B, R>(
+    params: &P,
     backend: &B,
-    prep_fee: Zatoshis,
     rng: &mut R,
 ) -> Result<MigrationPlan, MigrationError<B::Error>>
 where
+    P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
     R: RngCore,
 {
@@ -434,28 +480,35 @@ where
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
 
+    // The canonical fees, computed once from the canonical transaction shapes and reused throughout.
+    let (prep_tx_fee, transfer_fee_buffer) =
+        canonical_fees(params, commit_height).map_err(MigrationError::Fee)?;
+
     let note_values: Vec<u64> = notes.iter().map(|&n| u64::from(n)).collect();
-    let note_split = plan_note_split(u64::from(balance), u64::from(prep_fee), rng);
-    if note_split.migration_outputs().is_empty() {
+    // The preparation-layout capability the decomposition consults at each step: how many
+    // preparation transactions minting a candidate funding multiset takes, or `None` when the
+    // wallet's notes cannot mint it (so the split stops or steps down a denomination).
+    let prep_tx_count = |funding: &[u64]| {
+        plan_preparation(&note_values, funding, u64::from(prep_tx_fee))
+            .ok()
+            .map(|plan| plan.transaction_count())
+    };
+    let note_split = plan_note_split(
+        u64::from(balance),
+        u64::from(transfer_fee_buffer),
+        u64::from(prep_tx_fee),
+        &prep_tx_count,
+        rng,
+    );
+    let funding_notes: Vec<u64> = note_split.migration_outputs();
+    if funding_notes.is_empty() {
         return Err(MigrationError::NothingToMigrate);
     }
 
-    // Reconcile the note split against the preparation fees. The split reserves for a single prep
-    // transaction, but preparation may need several; when its fees do not fit the balance, drop the
-    // smallest funding note (leaving that denomination in the source pool) and retry until it does.
-    let mut funding_notes: Vec<u64> = note_split.migration_outputs().to_vec();
-    funding_notes.sort_unstable(); // ascending, so the smallest is dropped first
-    let preparation = loop {
-        if funding_notes.is_empty() {
-            return Err(MigrationError::Preparation(PrepError::InsufficientFunds));
-        }
-        match plan_preparation(&note_values, &funding_notes, u64::from(prep_fee)) {
-            Ok(preparation) => break preparation,
-            Err(PrepError::InsufficientFunds) => {
-                funding_notes.remove(0);
-            }
-        }
-    };
+    // The decomposition verified this multiset against the preparation planner at every step, so
+    // this final planning pass succeeds by construction; the error path is kept for safety.
+    let preparation = plan_preparation(&note_values, &funding_notes, u64::from(prep_tx_fee))
+        .map_err(MigrationError::Preparation)?;
 
     let schedule = scheduling::schedule(commit_height, funding_notes.len(), rng);
 
@@ -1194,13 +1247,39 @@ mod tests {
     use rand_core::SeedableRng;
     use zcash_protocol::value::COIN;
 
-    use crate::note_splitting::{FeePolicy, Zip317FeePolicy};
-    use crate::preparation::PREP_TX_ACTIONS;
+    use zcash_protocol::local_consensus::LocalNetwork;
 
-    /// The ZIP-317 fee of a padded preparation transaction, as the engine's caller would compute it.
-    fn prep_fee() -> Zatoshis {
-        Zatoshis::from_u64(PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi())
-            .expect("the preparation fee is far below the money-supply cap")
+    use crate::preparation::FUNDING_OUTPUTS_PER_TX;
+
+    /// A local network with NU6.3 active at a low height, matching the build test network, so the
+    /// canonical fees and activation checks compute in planning tests.
+    fn test_net() -> LocalNetwork {
+        LocalNetwork {
+            overwinter: Some(BlockHeight::from_u32(1)),
+            sapling: Some(BlockHeight::from_u32(2)),
+            blossom: Some(BlockHeight::from_u32(3)),
+            heartwood: Some(BlockHeight::from_u32(4)),
+            canopy: Some(BlockHeight::from_u32(5)),
+            nu5: Some(BlockHeight::from_u32(6)),
+            nu6: Some(BlockHeight::from_u32(7)),
+            nu6_1: Some(BlockHeight::from_u32(8)),
+            nu6_2: Some(BlockHeight::from_u32(9)),
+            nu6_3: Some(BlockHeight::from_u32(10)),
+            #[cfg(zcash_unstable = "nu7")]
+            nu7: None,
+        }
+    }
+
+    /// The canonical fees on the test network, computed exactly as `plan_migration` computes them.
+    fn test_fees() -> (Zatoshis, Zatoshis) {
+        canonical_fees(&test_net(), BlockHeight::from_u32(2_000_000))
+            .expect("the canonical fees compute")
+    }
+
+    /// A count-only preparation-layout stub for tests that exercise the split in isolation: one
+    /// padded transaction per [`FUNDING_OUTPUTS_PER_TX`] funding notes.
+    fn prep_tx_count_stub(notes: &[u64]) -> Option<usize> {
+        Some(notes.len().div_ceil(FUNDING_OUTPUTS_PER_TX))
     }
 
     /// A minimal in-memory backend: a fixed set of note values and a chain tip.
@@ -1268,7 +1347,7 @@ mod tests {
         let backend = MockBackend::new(vec![100 * COIN, 40 * COIN], 2_000_000);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let plan =
-            plan_migration(&backend, prep_fee(), &mut rng).expect("a fundable balance plans");
+            plan_migration(&test_net(), &backend, &mut rng).expect("a fundable balance plans");
 
         // Something is migrated; the schedule has one entry per funding note; the preparation mints
         // exactly the (reconciled) funding notes; and reconciliation only ever drops, never adds.
@@ -1286,7 +1365,7 @@ mod tests {
         let backend = MockBackend::new(Vec::new(), 2_000_000);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         assert!(matches!(
-            plan_migration(&backend, prep_fee(), &mut rng),
+            plan_migration(&test_net(), &backend, &mut rng),
             Err(MigrationError::NothingToMigrate)
         ));
     }
@@ -1297,8 +1376,14 @@ mod tests {
         assert!(backend.get_migration().unwrap().is_none());
 
         let mut rng = ChaCha8Rng::seed_from_u64(1);
-        let note_split =
-            crate::note_splitting::plan_note_split(100 * COIN, u64::from(prep_fee()), &mut rng);
+        let (prep_tx_fee, transfer_buffer) = test_fees();
+        let note_split = crate::note_splitting::plan_note_split(
+            100 * COIN,
+            u64::from(transfer_buffer),
+            u64::from(prep_tx_fee),
+            &prep_tx_count_stub,
+            &mut rng,
+        );
         let tx = MigrationTransaction {
             id: MigrationTxId(0),
             kind: MigrationTxKind::Transfer { crossing: 0 },
@@ -1358,12 +1443,18 @@ mod commit_tests {
     use crate::build::test_util::{
         TARGET_HEIGHT, regtest_network, shared_anchor_witnesses, single_note_witness, spending_key,
     };
-    use crate::note_splitting::{FeePolicy, NoteSplitPlan, Zip317FeePolicy};
-    use crate::preparation::{PREP_TX_ACTIONS, PrepInput, plan_preparation};
+    use crate::note_splitting::NoteSplitPlan;
+    use crate::preparation::{PrepInput, plan_preparation};
+
+    /// The canonical fees on the regtest network at the build height, computed exactly as
+    /// `plan_migration` computes them.
+    fn commit_test_fees() -> (Zatoshis, Zatoshis) {
+        canonical_fees(&regtest_network(true), BlockHeight::from_u32(TARGET_HEIGHT))
+            .expect("the canonical fees compute")
+    }
 
     fn prep_fee() -> Zatoshis {
-        Zatoshis::from_u64(PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi())
-            .expect("the preparation fee is far below the money-supply cap")
+        commit_test_fees().0
     }
 
     /// A wallet holding the account's key and a set of note witnesses against one anchor: index 0 is the
@@ -1475,7 +1566,7 @@ mod commit_tests {
                 stored: None,
             };
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            plan_migration(&planner, prep_fee(), &mut rng).expect("plans a migration")
+            plan_migration(&regtest_network(true), &planner, &mut rng).expect("plans a migration")
         };
         // A single note funding a handful of denominations needs one preparation layer.
         assert_eq!(plan.preparation().layers().len(), 1);
@@ -1697,7 +1788,7 @@ mod commit_tests {
         // 15 funding notes (one more than a single transaction's FUNDING_OUTPUTS_PER_TX) force a
         // two-layer balanced fan-out. Each is a valid self-funding note (a crossing value plus the
         // transfer fee buffer), so its transfer balances.
-        let buffer = Zip317FeePolicy.transfer_fee_buffer_zatoshi();
+        let buffer = u64::from(commit_test_fees().1);
         let crossing = COIN; // 1 ZEC crossing per note
         let funding_note = crossing + buffer;
         let funding: Vec<u64> = core::iter::repeat_n(funding_note, 15).collect();
@@ -1719,7 +1810,7 @@ mod commit_tests {
             crossings.clone(),
             buffer,
             None,
-            u64::from(prep_fee()),
+            preparation.transaction_count() as u64 * u64::from(prep_fee()),
             whale,
             crossings.iter().sum(),
         );

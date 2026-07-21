@@ -182,12 +182,12 @@ mod tests {
     use crate::build::test_util::{
         TARGET_HEIGHT, account, regtest_network, shared_anchor_witnesses, single_note_witness,
     };
-    use crate::note_splitting::{FeePolicy, Zip317FeePolicy};
+    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
     /// The ZIP-317 fee of a padded [`PREP_TX_ACTIONS`]-action preparation transaction (each action
     /// costs one marginal fee), which the planner reserves per transaction.
     fn prep_fee() -> u64 {
-        PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi()
+        PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64()
     }
 
     /// The number of Orchard actions in the built transaction.

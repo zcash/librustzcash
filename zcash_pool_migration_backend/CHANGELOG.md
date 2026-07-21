@@ -22,10 +22,13 @@ and this library adheres to Rust's notion of
   self-funding notes (each holding its crossing value plus a fee buffer), mints denominations from a
   maximum (ZIP 318's `DENOM_CAP`, bounding a whale's crossings to the shared denomination set) down to
   a sub-1-ZEC dust floor (ZIP 318's `MAX_RESIDUAL_VALUE`), and leaves any residual below that floor as
-  source-pool change rather than folded into a fee. The fee model is pluggable via the `FeePolicy`
-  trait (`Zip317FeePolicy` provided), and the maximum denomination, dust floor, and note cap are
-  strategy parameters. `plan_note_split` is a convenience wrapper over the recommended
-  `CanonicalOneTwoFive`. The crate is `no_std` (it needs only `alloc`), depending on
+  source-pool change rather than folded into a fee. The canonical fees come from the ZIP-317 fee
+  rule applied to the canonical transaction shapes, computed once by the caller (the engine) and
+  passed in: the strategy takes the per-note transfer-fee buffer, the per-transaction preparation
+  fee, and a preparation-layout capability it consults at each step of the decomposition, so the
+  true preparation cost (consolidation and fan-out layers included) is reserved as the split grows.
+  The maximum denomination, dust floor, and note cap are strategy parameters. `plan_note_split` is a
+  convenience wrapper over the recommended `CanonicalOneTwoFive`. The crate is `no_std` (it needs only `alloc`), depending on
   `zcash_protocol`, `zcash_primitives`, and `rand_core`.
 - The pure PCZT transfer builder (`build::build_transfer_pczt`, behind the `orchard` feature): spends
   one self-funding note the note split minted and outputs its crossing value into the Ironwood pool as
@@ -83,10 +86,11 @@ and this library adheres to Rust's notion of
   since the crate is `no_std` and `std`'s `f64::ln` is unavailable.
 - The migration engine (the `engine` module): orchestration of a pool migration through a
   `MigrationBackend` trait. `plan_migration` reads the account's spendable note values and the chain
-  tip from the backend, decomposes the balance into denominations (`note_splitting`), plans the
-  preparation transactions (`preparation`), schedules the transfers (`scheduling`), and reconciles the
-  split against the preparation fees (dropping the smallest denominations when they do not fit the
-  balance), returning a `MigrationPlan` preview for user consent. It defines the persisted state model
+  tip from the backend, computes the canonical ZIP-317 fees once from the canonical transaction
+  shapes (the fee rule is fixed, since ZIP 318 requires the canonical fee), decomposes the balance
+  into denominations (`note_splitting`) with the preparation planner (`preparation`) consulted at
+  each step for the true fee cost, schedules the transfers (`scheduling`), and returns a
+  `MigrationPlan` preview for user consent. It defines the persisted state model
   - a `MigrationState` (status, the note split, the reconciled funding-note values, and the
   transactions) of `MigrationTransaction`s (each a stable id, kind, the pre-signed PCZT as bytes or
   `None` until built, dependencies, scheduled and expiry heights, drawn anchor boundary, and lifecycle
