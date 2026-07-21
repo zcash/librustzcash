@@ -140,3 +140,14 @@ and this library adheres to Rust's notion of
   boundary's commitment-tree checkpoint to still exist at proving time, so the `WalletMigration`
   adapter's leg is gated on migration anchor-checkpoint retention (issue #2700); the in-memory mock
   exercises the engine flow in the meantime.
+- `commit_preparation` (and `build_preparation_unsigned`) report a malformed migration plan - one
+  whose parallel structures disagree, such as a preparation layer with no matching scheduled height -
+  as a typed `CommitError::InconsistentPlan` rather than panicking on an out-of-bounds index, so an
+  unvalidated plan built through `from_parts` fails at the boundary instead of aborting.
+- `CommitError` no longer funnels every build-time failure through an opaque `Build(String)`: it
+  now carries the structured `build::BuildError` in `Build`, the PCZT `EncodingError` in a new
+  `Serialize` variant, and models the NU6.3-not-active condition as `Nu63NotActive` (mirroring
+  `MigrationError::Nu63NotActive`). The "the schedule has advanced past every candidate anchor
+  boundary" case now shares the `StalePlan` variant with the note-value mismatch, and the remaining
+  internal-invariant failures use `InconsistentPlan`, so a caller can match on the condition rather
+  than parsing a message.
