@@ -14,7 +14,6 @@ members = [
     "zcash_history",
     "zcash_keys",
     "zcash_pool_migration_backend",
-    "zcash_pool_migration_memory",
     "zcash_primitives",
     "zcash_proofs",
     "zcash_transparent",
