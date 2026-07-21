@@ -250,7 +250,7 @@ fn external_signing_batches_by_action_budget() {
             assert!(state.apply_signature(id, signed.serialize().expect("serializes")));
         }
     }
-    backend.put_migration(&state).unwrap();
+    backend.replace_migration(&state).unwrap();
     for tx in state.transactions() {
         assert_eq!(tx.state(), MigrationTxState::Signed);
     }

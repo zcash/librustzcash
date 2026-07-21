@@ -285,7 +285,7 @@ impl PoolMigrationRead for MockBackend {
 }
 
 impl PoolMigrationWrite for MockBackend {
-    fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+    fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
         self.stored = Some(state.clone());
         Ok(())
     }
@@ -363,7 +363,7 @@ impl PoolMigrationRead for CommitMock {
 }
 
 impl PoolMigrationWrite for CommitMock {
-    fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+    fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
         self.stored = Some(state.clone());
         Ok(())
     }
