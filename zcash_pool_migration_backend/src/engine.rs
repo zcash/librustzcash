@@ -1922,6 +1922,107 @@ mod commit_tests {
         );
     }
 
+    /// Consolidating many small notes needs a DEEP preparation — here four layers — and the state
+    /// machine still walks the broadcasts strictly layer by layer: each preparation layer depends on
+    /// the whole layer before it and broadcasts only once that predecessor mines, and the transfers
+    /// come only after the last layer.
+    #[test]
+    fn commits_a_deep_multi_layer_migration() {
+        let seed = 11u64;
+        // Thirty 100-ZEC notes consolidate through four preparation layers.
+        let mut backend = CommitMock::new(seed, &[100 * COIN; 30]);
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let layer_count = plan.preparation().layers().len();
+        assert_eq!(
+            layer_count, 4,
+            "deep consolidation fans through four layers"
+        );
+
+        let mut rng2 = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng2,
+        )
+        .expect("commits the migration");
+
+        let layer_ids = |s: &MigrationState, layer: usize| -> Vec<MigrationTxId> {
+            s.transactions
+                .iter()
+                .filter(|t| {
+                    matches!(t.kind, MigrationTxKind::Preparation { layer: l, .. } if l == layer)
+                })
+                .map(|t| t.id)
+                .collect()
+        };
+
+        // Every preparation layer after the first depends on the WHOLE layer before it.
+        for layer in 1..layer_count {
+            let prev = layer_ids(&state, layer - 1);
+            for tx in state.transactions.iter().filter(
+                |t| matches!(t.kind, MigrationTxKind::Preparation { layer: l, .. } if l == layer),
+            ) {
+                assert_eq!(
+                    tx.depends_on,
+                    prev,
+                    "layer {layer} depends on the whole layer {}",
+                    layer - 1
+                );
+            }
+        }
+
+        // The state machine broadcasts each preparation layer in order — a layer only once its
+        // predecessor has mined — then, once the last layer mines, the transfers.
+        let mut state = state;
+        let target = BlockHeight::from_u32(2_100_000);
+        let mut height = 2_000_000u32;
+        for layer in 0..layer_count {
+            let ids = layer_ids(&state, layer);
+            match state.next_step(target) {
+                crate::state::AdvanceStep::Broadcast { id } => assert!(
+                    ids.contains(&id),
+                    "layer {layer} broadcasts once its predecessor has mined"
+                ),
+                other => panic!("expected a layer-{layer} broadcast, got {other:?}"),
+            }
+            // The others stay BLOCKED: every LATER preparation layer still depends (transitively)
+            // on a layer that has not mined, so none of them is broadcastable yet.
+            for later in (layer + 1)..layer_count {
+                for later_id in layer_ids(&state, later) {
+                    let deps = state
+                        .transactions
+                        .iter()
+                        .find(|t| t.id == later_id)
+                        .expect("a stored preparation transaction")
+                        .depends_on
+                        .clone();
+                    assert!(
+                        !state.deps_mined(&deps),
+                        "layer {later} must not be broadcastable before layer {layer} mines"
+                    );
+                }
+            }
+            height += 10;
+            for id in &ids {
+                state.mark_mined(*id, BlockHeight::from_u32(height));
+            }
+        }
+        match state.next_step(target) {
+            crate::state::AdvanceStep::Broadcast { id } => {
+                let tx = state.transactions.iter().find(|t| t.id == id).unwrap();
+                assert!(
+                    matches!(tx.kind, MigrationTxKind::Transfer { .. }),
+                    "the transfers broadcast after the last preparation layer mines"
+                );
+            }
+            other => panic!("expected a transfer broadcast, got {other:?}"),
+        }
+    }
+
     /// The EXTERNAL path builds the whole migration unsigned in the same one pass, and the
     /// unsigned transactions split into signing sessions bounded by the device's action budget —
     /// consecutive topological prefixes, never gated on mining.
