@@ -234,7 +234,7 @@ where
     type Error = AdapterError<W, St>;
 
     fn prove_transfer(
-        &self,
+        &mut self,
         _pczt: ::pczt::Pczt,
         _anchor_boundary: zcash_protocol::consensus::BlockHeight,
     ) -> Result<::pczt::Pczt, Self::Error> {
