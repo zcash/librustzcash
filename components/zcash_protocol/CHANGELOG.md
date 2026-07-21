@@ -17,6 +17,14 @@ workspace.
   block size and therefore the maximum size of any single transaction.
 - `zcash_protocol::value::Zatoshis::{write, read, to_u64_le_bytes}`, a canonical
   little-endian `u64` binary codec for amounts.
+- `zcash_protocol::testing::arb_txid` (behind the `test-dependencies` feature)
+- `zcash_protocol::consensus::testing::`
+  - `arb_block_height` 
+  - `arb_height_for_branch` 
+
+### Deprecated
+- `zcash_protocol::consensus::testing::arb_height` has been deprecated; use
+  `arb_height_for_branch` instead.
 
 ## [0.10.0] - 2026-07-09
 

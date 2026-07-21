@@ -42,8 +42,9 @@
 //! [`scheduling`]: crate::scheduling
 
 use alloc::vec::Vec;
-
 use core::fmt;
+
+use corez::io;
 
 use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
@@ -128,6 +129,18 @@ impl MigrationTxId {
     /// migration back).
     pub const fn new(index: u32) -> Self {
         MigrationTxId(index)
+    }
+
+    /// Writes this id as an unsigned 32-bit little-endian integer.
+    pub fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.0.to_le_bytes())
+    }
+
+    /// Reads an id written by [`write`](Self::write).
+    pub fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
+        let mut bytes = [0u8; 4];
+        reader.read_exact(&mut bytes)?;
+        Ok(MigrationTxId::new(u32::from_le_bytes(bytes)))
     }
 }
 
@@ -296,7 +309,7 @@ impl TryFrom<&str> for MigrationStatus {
 /// The persisted state of a migration: the note split (for the preview and residual accounting) and
 /// every transaction, each as its pre-signed PCZT and metadata. A wallet resumes a migration entirely
 /// from this state after being closed or restarted; this is what a [`MigrationBackend`] stores.
-#[derive(Clone, Debug, Getters, CopyGetters)]
+#[derive(Clone, Debug, PartialEq, Eq, Getters, CopyGetters)]
 pub struct MigrationState {
     /// The overall status.
     #[getset(get_copy = "pub")]
