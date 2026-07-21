@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_encoding::testing::check_roundtrip` (behind the new `test-dependencies`
+  feature), a helper that asserts a `write`/`read` codec pair are exact inverses
+  and that the encoding is stable across a round-trip.
+
 ### Changed
 - MSRV is now 1.88
 
