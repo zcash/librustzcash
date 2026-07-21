@@ -799,6 +799,21 @@ where
     }
 }
 
+/// A spendable note recovered from an already-built preparation transaction, or a direct-funding
+/// wallet note, tracked by the commit so a later transaction can spend it BY VALUE before it is
+/// mined. Its signable plaintext is fixed at build time (its `rho` is the paired spend's nullifier
+/// and its `rseed` is drawn by the builder); only its tree position awaits mining, and that matters
+/// only to the proof (deferred to proving time, ZIP 374). `consumed` guards against spending it
+/// twice, and `producer` is the preparation transaction that mints it (or `None` for a
+/// direct-funding wallet note), so a transfer depends only on its own funding note's producer.
+#[cfg(feature = "orchard")]
+struct MintedNote {
+    value: Zatoshis,
+    note: orchard::note::Note,
+    consumed: bool,
+    producer: Option<MigrationTxId>,
+}
+
 /// Commit a planned migration: build and pre-sign EVERY transaction — each preparation layer, in
 /// topological order, then every transfer — in this one pass, and persist the whole committed
 /// migration through the backend. Anchors and witnesses are deferred to proving time (ZIP 374), so
@@ -925,14 +940,13 @@ where
     // BROADCAST order only: every transaction is built and signed here, in this one pass.
     let mut layer_ids: Vec<Vec<MigrationTxId>> = Vec::new();
 
-    // The spendable notes minted by already-built preparation transactions, RECOVERED from their
-    // built bundles (a minted note's plaintext is fixed at build time — its rho is the paired
-    // spend's nullifier and its rseed is drawn by the builder; mining only assigns its tree
-    // position, which matters only to the proof). A later layer's Prior spends and the transfers'
-    // funding notes draw from this pool by value, each note spent at most once. This is what
-    // makes the WHOLE migration signable in topological order before anything is broadcast:
-    // signing sessions are bounded by the signer's action budget, never by mining.
-    let mut minted: Vec<(Zatoshis, orchard::note::Note, bool)> = Vec::new();
+    // The pool of notes minted by already-built preparation transactions (and the direct-funding
+    // wallet notes), which later layers' `Prior` spends and the transfers draw from BY VALUE, each
+    // spent at most once (see [`MintedNote`]). Because a minted note is signable before it is
+    // mined, this pool is what lets the WHOLE migration be built and signed in one topological pass,
+    // before anything is broadcast — signing sessions bounded by the signer's action budget, never
+    // by mining.
+    let mut minted: Vec<MintedNote> = Vec::new();
 
     for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
         let mut this_layer_ids: Vec<MigrationTxId> = Vec::with_capacity(prep_layer.len());
@@ -962,9 +976,9 @@ where
                     PrepInput::Prior { value, .. } => {
                         // A feeder minted by an earlier layer, recovered when that layer was
                         // built above (the plan's layers are in topological order).
-                        let pos = minted
-                            .iter()
-                            .position(|(v, _, used)| !used && v == value)
+                        let feeder = minted
+                            .iter_mut()
+                            .find(|m| !m.consumed && m.value == *value)
                             .ok_or_else(|| {
                                 CommitError::InconsistentPlan(format!(
                                     "layer {layer} spends a feeder note of value {} that no \
@@ -972,8 +986,8 @@ where
                                     u64::from(*value)
                                 ))
                             })?;
-                        minted[pos].2 = true;
-                        spends.push(minted[pos].1);
+                        feeder.consumed = true;
+                        spends.push(feeder.note);
                     }
                 }
             }
@@ -1017,7 +1031,12 @@ where
             for (_action_index, output, note) in placed {
                 match output {
                     PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
-                        minted.push((value, note, false));
+                        minted.push(MintedNote {
+                            value,
+                            note,
+                            consumed: false,
+                            producer: Some(id),
+                        });
                     }
                     PrepOutput::Change(_) => {}
                 }
@@ -1054,14 +1073,29 @@ where
         if note.value().inner() != u64::from(value) {
             return Err(CommitError::StalePlan);
         }
-        minted.push((value, note, false));
+        // A direct-funding wallet note already exists on-chain, so its transfer has no producer to
+        // wait on.
+        minted.push(MintedNote {
+            value,
+            note,
+            consumed: false,
+            producer: None,
+        });
     }
 
-    // Every transfer waits for the last preparation layer to be MINED before it broadcasts (a
-    // layer broadcasts only after its predecessor mines, so the last layer mining implies every
-    // funding note is on-chain); its PCZT, though, is built and signed right here. An empty
-    // preparation (every funding note used directly) leaves the dependency set empty.
-    let last_layer_ids: Vec<MigrationTxId> = layer_ids.last().cloned().unwrap_or_default();
+    // Each transfer waits only for the preparation transaction that MINTS ITS OWN funding note to
+    // be mined (recorded as that note's producer in `minted`), not for the whole last layer: as
+    // soon as a transfer's own funding note is on-chain it may broadcast at its scheduled height,
+    // independently of the other crossings' preparation. This follows ZIP 318's per-note
+    // availability MUST ("wait until the boundary that closes the anchor-height bucket in which a
+    // note-preparation transaction was mined has passed before treating ITS output notes as
+    // available for migration") and consciously RELAXES the more conservative SHOULD that all note
+    // preparation complete before Phase 2 begins. The relaxation is safe: the schedule is already
+    // floored at the estimated last-preparation height, and the boundary-passed half of the MUST is
+    // still enforced downstream, since `draw_anchor_boundary` yields an anchor only once a boundary
+    // at or after the note's creation exists, so a transfer cannot be proved (hence broadcast)
+    // before then. A funding note used directly from the wallet has no producer, so that transfer's
+    // dependency set is empty.
 
     // The boundary anchor each transfer will PROVE against is drawn here, at scheduling time,
     // because the schedule fully determines it: the candidate set lies strictly above the NU6.3
@@ -1088,16 +1122,20 @@ where
         let funding_value = *funding_notes.get(crossing).ok_or_else(|| {
             CommitError::InconsistentPlan(format!("no funding note value for crossing {crossing}"))
         })?;
-        let pos = minted
-            .iter()
-            .position(|(v, _, used)| !used && *v == funding_value)
+        let funding_note = minted
+            .iter_mut()
+            .find(|m| !m.consumed && m.value == funding_value)
             .ok_or_else(|| {
                 CommitError::InconsistentPlan(format!(
                     "no minted funding note for crossing {crossing}"
                 ))
             })?;
-        minted[pos].2 = true;
-        let note = minted[pos].1;
+        funding_note.consumed = true;
+        let note = funding_note.note;
+        let producer = funding_note.producer;
+        // Depend only on the preparation transaction that mints this funding note (or nothing, for a
+        // direct-funding wallet note), so this crossing releases as soon as its own note is mined.
+        let depends_on: Vec<MigrationTxId> = producer.into_iter().collect();
         let crossing_value = *plan
             .note_split()
             .crossing_values()
@@ -1131,7 +1169,7 @@ where
             id,
             kind: MigrationTxKind::Transfer { crossing },
             pczt: bytes,
-            depends_on: last_layer_ids.clone(),
+            depends_on,
             scheduled_height: schedule.broadcast_height(),
             expiry_height: schedule.expiry_height(),
             anchor_boundary: Some(
@@ -1597,9 +1635,19 @@ mod commit_tests {
                     assert!(tx.anchor_boundary.is_none());
                 }
                 MigrationTxKind::Transfer { .. } => {
+                    // A transfer depends only on the ONE preparation transaction that mints its
+                    // funding note, so it releases as soon as its own note is mined, not once the
+                    // whole last layer mines.
+                    assert_eq!(
+                        tx.depends_on.len(),
+                        1,
+                        "a transfer waits on exactly its funding note's producer"
+                    );
+                    let producer = tx.depends_on[0];
                     assert!(
-                        !tx.depends_on.is_empty(),
-                        "a transfer BROADCASTS only after the preparation mines"
+                        state.transactions.iter().any(|p| p.id == producer
+                            && matches!(p.kind, MigrationTxKind::Preparation { .. })),
+                        "the dependency is a preparation transaction"
                     );
                     // The boundary anchor the transfer will PROVE against is drawn at commit
                     // time: on the boundary grid, strictly above the NU6.3 activation, at or
@@ -1754,7 +1802,8 @@ mod commit_tests {
         }
 
         // The state machine walks the broadcasts in dependency order: layer 0 first; layer 1
-        // only once layer 0 mines; the transfers only once the whole preparation mines.
+        // only once layer 0 mines; each transfer once its own funding note's producer mines (here
+        // the whole last layer is mined at once, so every transfer becomes broadcastable).
         let mut state = state;
         let target = BlockHeight::from_u32(2_100_000);
         match state.next_step(target) {
@@ -1793,10 +1842,184 @@ mod commit_tests {
                     .expect("the step names a stored transaction");
                 assert!(
                     matches!(tx.kind, MigrationTxKind::Transfer { .. }),
-                    "the transfers broadcast once the whole preparation mines"
+                    "a transfer broadcasts once its funding note's producer mines"
                 );
             }
             other => panic!("expected a broadcast step, got {other:?}"),
+        }
+    }
+
+    /// A crossing releases as soon as ITS OWN funding note's producer mines — not once the whole
+    /// preparation completes. A two-layer whale's funding notes come from more than one producer, so
+    /// mining ONE producer makes the crossings it funds releasable while the crossings funded by the
+    /// other, still-unmined producer stay blocked.
+    #[test]
+    fn a_crossing_releases_when_its_own_producer_mines() {
+        let seed = 11u64;
+        let (mut backend, plan) = single_note_setup(seed, 1_000 * COIN);
+        assert_eq!(
+            plan.preparation().layers().len(),
+            2,
+            "the whale fans out across two layers"
+        );
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration");
+
+        // The crossings are funded by more than one preparation transaction (each transfer depends
+        // on exactly its own producer).
+        let mut producers: Vec<MigrationTxId> = state
+            .transactions
+            .iter()
+            .filter(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
+            .map(|t| t.depends_on[0])
+            .collect();
+        producers.sort_by_key(|p| u32::from(*p));
+        producers.dedup();
+        assert!(
+            producers.len() >= 2,
+            "the whale's crossings come from at least two producers, got {}",
+            producers.len()
+        );
+        let (p1, p2) = (producers[0], producers[1]);
+        // Each producer funds at least one crossing.
+        assert!(
+            state
+                .transactions
+                .iter()
+                .any(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }) && t.depends_on == [p1])
+        );
+        assert!(
+            state
+                .transactions
+                .iter()
+                .any(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }) && t.depends_on == [p2])
+        );
+
+        // Before anything mines, crossings from neither producer are releasable.
+        assert!(!state.deps_mined(&[p1]));
+        assert!(!state.deps_mined(&[p2]));
+
+        // Mine ONLY the first producer.
+        state.mark_mined(p1, BlockHeight::from_u32(2_000_000));
+
+        // Crossings funded by p1 are releasable; crossings funded by the still-unmined p2 stay
+        // blocked — a crossing does NOT wait for the whole preparation.
+        assert!(
+            state.deps_mined(&[p1]),
+            "a crossing releases once its own producer mines"
+        );
+        assert!(
+            !state.deps_mined(&[p2]),
+            "a crossing whose producer has not mined stays blocked"
+        );
+    }
+
+    /// Consolidating many small notes needs a DEEP preparation — here four layers — and the state
+    /// machine still walks the broadcasts strictly layer by layer: each preparation layer depends on
+    /// the whole layer before it and broadcasts only once that predecessor mines, and the transfers
+    /// come only after the last layer.
+    #[test]
+    fn commits_a_deep_multi_layer_migration() {
+        let seed = 11u64;
+        // Thirty 100-ZEC notes consolidate through four preparation layers.
+        let mut backend = CommitMock::new(seed, &[100 * COIN; 30]);
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let layer_count = plan.preparation().layers().len();
+        assert_eq!(
+            layer_count, 4,
+            "deep consolidation fans through four layers"
+        );
+
+        let mut rng2 = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng2,
+        )
+        .expect("commits the migration");
+
+        let layer_ids = |s: &MigrationState, layer: usize| -> Vec<MigrationTxId> {
+            s.transactions
+                .iter()
+                .filter(|t| {
+                    matches!(t.kind, MigrationTxKind::Preparation { layer: l, .. } if l == layer)
+                })
+                .map(|t| t.id)
+                .collect()
+        };
+
+        // Every preparation layer after the first depends on the WHOLE layer before it.
+        for layer in 1..layer_count {
+            let prev = layer_ids(&state, layer - 1);
+            for tx in state.transactions.iter().filter(
+                |t| matches!(t.kind, MigrationTxKind::Preparation { layer: l, .. } if l == layer),
+            ) {
+                assert_eq!(
+                    tx.depends_on,
+                    prev,
+                    "layer {layer} depends on the whole layer {}",
+                    layer - 1
+                );
+            }
+        }
+
+        // The state machine broadcasts each preparation layer in order — a layer only once its
+        // predecessor has mined — then, once the last layer mines, the transfers.
+        let mut state = state;
+        let target = BlockHeight::from_u32(2_100_000);
+        let mut height = 2_000_000u32;
+        for layer in 0..layer_count {
+            let ids = layer_ids(&state, layer);
+            match state.next_step(target) {
+                crate::state::AdvanceStep::Broadcast { id } => assert!(
+                    ids.contains(&id),
+                    "layer {layer} broadcasts once its predecessor has mined"
+                ),
+                other => panic!("expected a layer-{layer} broadcast, got {other:?}"),
+            }
+            // The others stay BLOCKED: every LATER preparation layer still depends (transitively)
+            // on a layer that has not mined, so none of them is broadcastable yet.
+            for later in (layer + 1)..layer_count {
+                for later_id in layer_ids(&state, later) {
+                    let deps = state
+                        .transactions
+                        .iter()
+                        .find(|t| t.id == later_id)
+                        .expect("a stored preparation transaction")
+                        .depends_on
+                        .clone();
+                    assert!(
+                        !state.deps_mined(&deps),
+                        "layer {later} must not be broadcastable before layer {layer} mines"
+                    );
+                }
+            }
+            height += 10;
+            for id in &ids {
+                state.mark_mined(*id, BlockHeight::from_u32(height));
+            }
+        }
+        match state.next_step(target) {
+            crate::state::AdvanceStep::Broadcast { id } => {
+                let tx = state.transactions.iter().find(|t| t.id == id).unwrap();
+                assert!(
+                    matches!(tx.kind, MigrationTxKind::Transfer { .. }),
+                    "the transfers broadcast after the last preparation layer mines"
+                );
+            }
+            other => panic!("expected a transfer broadcast, got {other:?}"),
         }
     }
 
