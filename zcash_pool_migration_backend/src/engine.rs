@@ -799,6 +799,21 @@ where
     }
 }
 
+/// A spendable note recovered from an already-built preparation transaction, or a direct-funding
+/// wallet note, tracked by the commit so a later transaction can spend it BY VALUE before it is
+/// mined. Its signable plaintext is fixed at build time (its `rho` is the paired spend's nullifier
+/// and its `rseed` is drawn by the builder); only its tree position awaits mining, and that matters
+/// only to the proof (deferred to proving time, ZIP 374). `consumed` guards against spending it
+/// twice, and `producer` is the preparation transaction that mints it (or `None` for a
+/// direct-funding wallet note), so a transfer depends only on its own funding note's producer.
+#[cfg(feature = "orchard")]
+struct MintedNote {
+    value: Zatoshis,
+    note: orchard::note::Note,
+    consumed: bool,
+    producer: Option<MigrationTxId>,
+}
+
 /// Commit a planned migration: build and pre-sign EVERY transaction — each preparation layer, in
 /// topological order, then every transfer — in this one pass, and persist the whole committed
 /// migration through the backend. Anchors and witnesses are deferred to proving time (ZIP 374), so
@@ -925,18 +940,13 @@ where
     // BROADCAST order only: every transaction is built and signed here, in this one pass.
     let mut layer_ids: Vec<Vec<MigrationTxId>> = Vec::new();
 
-    // The spendable notes minted by already-built preparation transactions, RECOVERED from their
-    // built bundles (a minted note's plaintext is fixed at build time — its rho is the paired
-    // spend's nullifier and its rseed is drawn by the builder; mining only assigns its tree
-    // position, which matters only to the proof). A later layer's Prior spends and the transfers'
-    // funding notes draw from this pool by value, each note spent at most once. This is what
-    // makes the WHOLE migration signable in topological order before anything is broadcast:
-    // signing sessions are bounded by the signer's action budget, never by mining.
-    // Each entry is `(value, recovered note, consumed?, producer)`. `producer` is the id of the
-    // preparation transaction that mints the note, or `None` for a direct-funding wallet note that
-    // needs no preparation; a transfer then depends only on its own funding note's producer, rather
-    // than on the whole last layer.
-    let mut minted: Vec<(Zatoshis, orchard::note::Note, bool, Option<MigrationTxId>)> = Vec::new();
+    // The pool of notes minted by already-built preparation transactions (and the direct-funding
+    // wallet notes), which later layers' `Prior` spends and the transfers draw from BY VALUE, each
+    // spent at most once (see [`MintedNote`]). Because a minted note is signable before it is
+    // mined, this pool is what lets the WHOLE migration be built and signed in one topological pass,
+    // before anything is broadcast — signing sessions bounded by the signer's action budget, never
+    // by mining.
+    let mut minted: Vec<MintedNote> = Vec::new();
 
     for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
         let mut this_layer_ids: Vec<MigrationTxId> = Vec::with_capacity(prep_layer.len());
@@ -966,9 +976,9 @@ where
                     PrepInput::Prior { value, .. } => {
                         // A feeder minted by an earlier layer, recovered when that layer was
                         // built above (the plan's layers are in topological order).
-                        let pos = minted
-                            .iter()
-                            .position(|(v, _, used, _)| !used && v == value)
+                        let feeder = minted
+                            .iter_mut()
+                            .find(|m| !m.consumed && m.value == *value)
                             .ok_or_else(|| {
                                 CommitError::InconsistentPlan(format!(
                                     "layer {layer} spends a feeder note of value {} that no \
@@ -976,8 +986,8 @@ where
                                     u64::from(*value)
                                 ))
                             })?;
-                        minted[pos].2 = true;
-                        spends.push(minted[pos].1);
+                        feeder.consumed = true;
+                        spends.push(feeder.note);
                     }
                 }
             }
@@ -1021,7 +1031,12 @@ where
             for (_action_index, output, note) in placed {
                 match output {
                     PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
-                        minted.push((value, note, false, Some(id)));
+                        minted.push(MintedNote {
+                            value,
+                            note,
+                            consumed: false,
+                            producer: Some(id),
+                        });
                     }
                     PrepOutput::Change(_) => {}
                 }
@@ -1060,7 +1075,12 @@ where
         }
         // A direct-funding wallet note already exists on-chain, so its transfer has no producer to
         // wait on.
-        minted.push((value, note, false, None));
+        minted.push(MintedNote {
+            value,
+            note,
+            consumed: false,
+            producer: None,
+        });
     }
 
     // Each transfer waits only for the preparation transaction that MINTS ITS OWN funding note to
@@ -1102,19 +1122,20 @@ where
         let funding_value = *funding_notes.get(crossing).ok_or_else(|| {
             CommitError::InconsistentPlan(format!("no funding note value for crossing {crossing}"))
         })?;
-        let pos = minted
-            .iter()
-            .position(|(v, _, used, _)| !used && *v == funding_value)
+        let funding_note = minted
+            .iter_mut()
+            .find(|m| !m.consumed && m.value == funding_value)
             .ok_or_else(|| {
                 CommitError::InconsistentPlan(format!(
                     "no minted funding note for crossing {crossing}"
                 ))
             })?;
-        minted[pos].2 = true;
-        let note = minted[pos].1;
+        funding_note.consumed = true;
+        let note = funding_note.note;
+        let producer = funding_note.producer;
         // Depend only on the preparation transaction that mints this funding note (or nothing, for a
         // direct-funding wallet note), so this crossing releases as soon as its own note is mined.
-        let depends_on: Vec<MigrationTxId> = minted[pos].3.into_iter().collect();
+        let depends_on: Vec<MigrationTxId> = producer.into_iter().collect();
         let crossing_value = *plan
             .note_split()
             .crossing_values()
