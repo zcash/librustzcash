@@ -5416,6 +5416,11 @@ pub(crate) fn lock_outputs(
     outputs: impl Iterator<Item = OutputRef>,
     lock_expiry_height: BlockHeight,
 ) -> Result<usize, LockError> {
+    // When the chain tip is unknown, `:chain_tip` binds to SQL NULL and the
+    // `lock_expiry_height <= :chain_tip` clause evaluates to NULL (falsy). In that case only
+    // outputs that are not already locked (`lock_expiry_height IS NULL`) can be locked; an
+    // existing lock cannot be treated as expired because we have no height against which to
+    // judge expiry. This is the conservative choice: locking generally requires a synced wallet.
     let chain_tip = chain_tip_height(conn)?.map(u32::from);
 
     let mut rows_updated = 0;
@@ -5537,6 +5542,37 @@ pub(crate) fn unlock_output(
         )?,
     };
     Ok(rows_updated > 0)
+}
+
+/// Unlocks every currently-locked output belonging to the given account, across all pools,
+/// regardless of lock expiry height. Returns the total number of outputs unlocked.
+///
+/// This is the storage-layer implementation of [`WalletWrite::clear_locked_outputs`], and is
+/// intended as a recovery mechanism for callers that have lost track of their in-flight proposals.
+///
+/// [`WalletWrite::clear_locked_outputs`]: zcash_client_backend::data_api::WalletWrite::clear_locked_outputs
+pub(crate) fn clear_locked_outputs(
+    conn: &rusqlite::Transaction,
+    account: AccountUuid,
+) -> Result<usize, SqliteClientError> {
+    let mut rows_updated = 0;
+    for table in [
+        "sapling_received_notes",
+        "orchard_received_notes",
+        "ironwood_received_notes",
+        "transparent_received_outputs",
+    ] {
+        rows_updated += conn.execute(
+            &format!(
+                "UPDATE {table} SET lock_expiry_height = NULL
+                 WHERE lock_expiry_height IS NOT NULL
+                   AND account_id = (SELECT id FROM accounts WHERE uuid = :account_uuid)"
+            ),
+            named_params![":account_uuid": account.0],
+        )?;
+    }
+
+    Ok(rows_updated)
 }
 
 /// Unlocks all notes that have been recorded as spent by the given transaction.

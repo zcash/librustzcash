@@ -3392,6 +3392,10 @@ impl WalletWrite for MockWalletDb {
         Ok(false)
     }
 
+    fn clear_locked_outputs(&mut self, _account: Self::AccountId) -> Result<usize, Self::Error> {
+        Ok(0)
+    }
+
     fn store_transactions_to_be_sent(
         &mut self,
         _transactions: &[SentTransaction<Self::AccountId>],
