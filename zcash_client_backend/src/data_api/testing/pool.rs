@@ -3466,6 +3466,79 @@ pub fn explicit_note_locking<T: ShieldedPoolTester>(
     );
 }
 
+/// Exercises the exact height boundary of the note-locking semantics.
+///
+/// A lock with `lock_expiry_height == target_height` must keep the output locked (excluded from
+/// selection, counted as locked balance), whereas a lock with `lock_expiry_height ==
+/// target_height - 1` must leave the output spendable. Balance computation uses
+/// `target_height = chain_tip + 1`, so we derive the boundary from the current chain tip.
+pub fn note_locking_height_boundary<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(50000);
+    let (_, _, _) = st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    // Balance computation targets `chain_tip + 1`.
+    let chain_tip = st.latest_cached_block().unwrap().height();
+    let target_height = chain_tip + 1;
+
+    // Find the received note and construct an OutputRef for it
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), 1);
+    let note = &notes[0];
+    let output_ref = OutputRef::new(
+        *note.txid(),
+        PoolType::Shielded(note.note().pool()),
+        u32::from(note.output_index()),
+    );
+
+    // Lock with expiry exactly at the target height: the output must be treated as locked.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), target_height)
+            .unwrap(),
+        1
+    );
+    assert_eq!(st.get_locked_balance(account_id), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO
+    );
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![output_ref]
+    );
+
+    // Re-lock with expiry one block below the target height. Because the existing lock is not
+    // yet expired as of the chain tip, we must first unlock it explicitly.
+    assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), target_height - 1)
+            .unwrap(),
+        1
+    );
+
+    // With expiry strictly below the target height, the output is spendable again.
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty()
+    );
+}
 pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,

@@ -819,6 +819,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn note_locking_height_boundary() {
+        testing::pool::note_locking_height_boundary::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn proposal_level_note_locking() {
         testing::pool::proposal_level_note_locking::<OrchardPoolTester>()
     }

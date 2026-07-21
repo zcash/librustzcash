@@ -141,15 +141,21 @@ pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
 
 /// Generates an SQL condition that filters out locked notes/outputs.
 ///
-/// A note is considered locked when its `lock_expiry_height` is set and greater than the
-/// target height. Locks expire automatically when the chain advances past the expiry height.
+/// A note is considered locked when its `lock_expiry_height` is set and greater than or equal
+/// to the target height; equivalently, an output is only selectable once the target height has
+/// advanced strictly beyond its `lock_expiry_height`. This matches the [`WalletWrite::lock_outputs`]
+/// contract, which prevents selection "at any height less than or equal to" the lock expiry
+/// height, and is the exact complement of the locked-balance condition (`lock_expiry_height >=
+/// target_height`) used in balance computation.
 ///
 /// # Usage requirements
 /// - `tbl` must be set to the SQL alias for the received notes/outputs table.
 /// - The parent must provide `:target_height` and `:include_locked` as named arguments.
+///
+/// [`WalletWrite::lock_outputs`]: zcash_client_backend::data_api::WalletWrite::lock_outputs
 pub(crate) fn output_unlocked_condition(tbl: &str) -> String {
     format!(
-        "{tbl}.lock_expiry_height IS NULL OR {tbl}.lock_expiry_height <= :target_height OR :include_locked"
+        "{tbl}.lock_expiry_height IS NULL OR {tbl}.lock_expiry_height < :target_height OR :include_locked"
     )
 }
 
