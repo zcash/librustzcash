@@ -53,13 +53,15 @@ mod tests {
     use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
+    use crate::note_splitting::zat;
+
     /// Builds a note-preparation PCZT spending one note owned by `fvk`. Deterministic in `note_seed`.
     /// It uses one spend and `PREP_TX_ACTIONS - 1` outputs so the bundle fills the action budget
     /// exactly, with no fabricated-only padding actions (which foreign-key signing would otherwise
     /// touch, since a padding spend is not the account's).
     fn build_prep(fvk: &FullViewingKey, note_seed: u64) -> pczt::Pczt {
         let per = 4 * COIN;
-        let outputs = [PrepOutput::Funding(per); PREP_TX_ACTIONS - 1];
+        let outputs = [PrepOutput::Funding(zat(per)); PREP_TX_ACTIONS - 1];
         // The spent note funds the outputs plus the padded 16-action fee.
         let fee = PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64();
         let note_value = (PREP_TX_ACTIONS as u64 - 1) * per + fee;

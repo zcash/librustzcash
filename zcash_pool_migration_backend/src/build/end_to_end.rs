@@ -12,6 +12,7 @@ use super::{build_prep_tx, build_transfer_pczt, sign_pczt};
 use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::value::Zatoshis;
 
 use crate::note_splitting::{
     DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER, plan_note_split,
@@ -33,24 +34,33 @@ fn migration_pipeline_end_to_end() {
 
     // 1. Note split: decompose the balance into canonical self-funding denominations, accounting
     //    the true preparation cost (via the real preparation planner) at each step.
-    let prep_fee = PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64();
-    let buffer = (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER) as u64
-        * MARGINAL_FEE.into_u64();
-    let prep_tx_count = |funding: &[u64]| {
-        plan_preparation(&[balance], funding, prep_fee)
+    let prep_fee = Zatoshis::const_from_u64(PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64());
+    let buffer = Zatoshis::const_from_u64(
+        (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER) as u64
+            * MARGINAL_FEE.into_u64(),
+    );
+    let balance_zats = [Zatoshis::const_from_u64(balance)];
+    let prep_tx_count = |funding: &[Zatoshis]| {
+        plan_preparation(&balance_zats, funding, prep_fee)
             .ok()
             .map(|p| p.transaction_count())
     };
     let split = {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        plan_note_split(balance, buffer, prep_fee, &prep_tx_count, &mut rng)
+        plan_note_split(
+            Zatoshis::const_from_u64(balance),
+            buffer,
+            prep_fee,
+            &prep_tx_count,
+            &mut rng,
+        )
     };
     let funding = split.migration_outputs();
     assert!(!funding.is_empty(), "the balance yields funding notes");
 
     // 2. Preparation: plan the send-to-self transactions that mint those funding notes. A typical
     //    wallet (one note, a handful of funding notes) prepares in a single transaction.
-    let prep = plan_preparation(&[balance], &funding, prep_fee)
+    let prep = plan_preparation(&balance_zats, &funding, prep_fee)
         .expect("the balance funds the preparation");
     assert_eq!(prep.layer_count(), 1);
     assert_eq!(prep.transaction_count(), 1);
@@ -95,8 +105,7 @@ fn migration_pipeline_end_to_end() {
         )
         .expect("the canonical preparation fee computes");
     assert_eq!(
-        u64::from(expected_prep_fee),
-        prep_fee,
+        expected_prep_fee, prep_fee,
         "the planner's per-transaction reserve is the rule's fee for the padded shape"
     );
     // The transaction's only spend is the wallet note supplied above (`balance`); its outputs
@@ -114,10 +123,10 @@ fn migration_pipeline_end_to_end() {
     //    denomination into the Ironwood pool.
     let crossing = split.crossing_values()[0];
     let funding_value = funding[0];
-    let (fnote, fpath, fanchor) = single_note_witness(&fvk, funding_value, seed + 2);
+    let (fnote, fpath, fanchor) = single_note_witness(&fvk, u64::from(funding_value), seed + 2);
     // A recent Ironwood note-commitment-tree root (a one-note tree here) to anchor the transfer's
-    // padding dummy spends, as the wallet backend would supply from the live pool.
-    let (_, _, ironwood_anchor) = single_note_witness(&fvk, crossing, seed + 4);
+    // dummy spend half, as the wallet backend would supply from the live pool.
+    let (_, _, ironwood_anchor) = single_note_witness(&fvk, u64::from(crossing), seed + 4);
     let transfer_pczt = build_transfer_pczt(
         &params,
         TARGET_HEIGHT,
@@ -148,8 +157,7 @@ fn migration_pipeline_end_to_end() {
         )
         .expect("the canonical transfer fee computes");
     assert_eq!(
-        u64::from(expected_transfer_fee),
-        buffer,
+        expected_transfer_fee, buffer,
         "the per-note buffer is the rule's fee for the transfer shape"
     );
     // The transfer's only spend is the funding note supplied above (`funding_value`); the value
@@ -167,11 +175,12 @@ fn migration_pipeline_end_to_end() {
         "the transfer's Ironwood bundle is a single unpadded action"
     );
     assert_eq!(
-        ironwood_out, crossing,
+        ironwood_out,
+        u64::from(crossing),
         "the value crossing the turnstile is exactly the planned canonical denomination"
     );
     assert_eq!(
-        funding_value - orchard_out - ironwood_out,
+        u64::from(funding_value) - orchard_out - ironwood_out,
         u64::from(expected_transfer_fee),
         "the built transfer pays exactly the canonical fee"
     );

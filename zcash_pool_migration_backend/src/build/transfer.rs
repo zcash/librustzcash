@@ -57,7 +57,7 @@ pub fn build_transfer_pczt<P, R>(
     note: orchard::note::Note,
     merkle_path: orchard::tree::MerklePath,
     ironwood_anchor: orchard::Anchor,
-    crossing_value: u64,
+    crossing_value: Zatoshis,
     rng: R,
 ) -> Result<pczt::Pczt, BuildError>
 where
@@ -83,7 +83,7 @@ where
     // cannot misdirect the crossing.
     let internal_ovk = orchard_fvk.to_ovk(Scope::Internal);
     let recipient = orchard_fvk.address_at(0u32, Scope::Internal);
-    let crossing = Zatoshis::const_from_u64(crossing_value);
+    let crossing = crossing_value;
     let memo = MemoBytes::empty();
     builder
         .add_ironwood_output::<Infallible>(Some(internal_ovk), recipient, crossing, memo)
@@ -108,8 +108,7 @@ mod tests {
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
     use crate::note_splitting::{
-        DESTINATION_ACTIONS_PER_TRANSFER, RESIDUAL_MIGRATION_MIN_ZATOSHI,
-        SOURCE_ACTIONS_PER_TRANSFER,
+        DESTINATION_ACTIONS_PER_TRANSFER, RESIDUAL_MIGRATION_MIN, SOURCE_ACTIONS_PER_TRANSFER, zat,
     };
 
     proptest! {
@@ -120,7 +119,7 @@ mod tests {
         /// buffer funds the transfer fee exactly, since the transfer has no change output.
         #[test]
         fn self_funding_notes_build_balanced_transfers(
-            crossing_value in RESIDUAL_MIGRATION_MIN_ZATOSHI..=(1_000 * COIN),
+            crossing_value in u64::from(RESIDUAL_MIGRATION_MIN)..=(1_000 * COIN),
             account_seed in any::<u64>(),
             note_seed in any::<u64>(),
         ) {
@@ -147,7 +146,7 @@ mod tests {
                 note,
                 path,
                 ironwood_anchor,
-                crossing_value,
+                zat(crossing_value),
                 rng,
             );
 

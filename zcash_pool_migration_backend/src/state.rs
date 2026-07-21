@@ -370,6 +370,8 @@ impl MigrationState {
 mod tests {
     use super::*;
     use crate::engine::MigrationTransaction;
+    use zcash_protocol::value::Zatoshis;
+
     use crate::note_splitting::NoteSplitPlan;
     use crate::preparation::PreparationPlan;
     use alloc::vec;
@@ -400,7 +402,15 @@ mod tests {
     fn state_with(transactions: Vec<MigrationTransaction>) -> MigrationState {
         MigrationState {
             status: MigrationStatus::Committed,
-            note_split: NoteSplitPlan::from_stored_parts(Vec::new(), 0, None, 0, 0, 0),
+            note_split: NoteSplitPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
             funding_notes: Vec::new(),
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,

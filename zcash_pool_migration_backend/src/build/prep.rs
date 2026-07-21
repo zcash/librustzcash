@@ -63,7 +63,6 @@ use zcash_primitives::transaction::builder::{BuildConfig, Builder};
 use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
 use zcash_protocol::consensus::{BlockHeight, Parameters};
 use zcash_protocol::memo::MemoBytes;
-use zcash_protocol::value::Zatoshis;
 
 use super::{BuildError, finalize_pczt, output_action_index};
 use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
@@ -149,7 +148,7 @@ where
                 orchard_fvk.clone(),
                 Some(internal_ovk.clone()),
                 change_address,
-                Zatoshis::const_from_u64(output.value()),
+                output.value(),
                 MemoBytes::empty(),
             )
             .map_err(|e| BuildError::Build(format!("preparation: add output: {e:?}")))?;
@@ -183,6 +182,8 @@ mod tests {
         TARGET_HEIGHT, account, regtest_network, shared_anchor_witnesses, single_note_witness,
     };
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+
+    use crate::note_splitting::zat;
 
     /// The ZIP-317 fee of a padded [`PREP_TX_ACTIONS`]-action preparation transaction (each action
     /// costs one marginal fee), which the planner reserves per transaction.
@@ -222,7 +223,7 @@ mod tests {
             let fvk = account(account_seed);
             let (spends, anchor) = shared_anchor_witnesses(&fvk, &spend_values, note_seed);
             let outputs: Vec<PrepOutput> =
-                out_zats.iter().map(|&v| PrepOutput::Funding(v)).collect();
+                out_zats.iter().map(|&v| PrepOutput::Funding(zat(v))).collect();
 
             let params = regtest_network(true);
             let rng = ChaCha8Rng::seed_from_u64(note_seed);
@@ -252,7 +253,7 @@ mod tests {
         ) {
             let fvk = account(account_seed);
             let outputs: Vec<PrepOutput> =
-                output_zats.iter().map(|&v| PrepOutput::Funding(v)).collect();
+                output_zats.iter().map(|&v| PrepOutput::Funding(zat(v))).collect();
             // One spend that funds every output plus the padded fee.
             let spend_value = output_zats.iter().sum::<u64>() + prep_fee();
             let (note, path, anchor) = single_note_witness(&fvk, spend_value, note_seed);
@@ -272,7 +273,8 @@ mod tests {
 
             prop_assert_eq!(action_count(&pczt), PREP_TX_ACTIONS);
             prop_assert_eq!(placed.len(), outputs.len());
-            let placed_values: Vec<u64> = placed.iter().map(|(_, o)| o.value()).collect();
+            let placed_values: Vec<u64> =
+                placed.iter().map(|(_, o)| u64::from(o.value())).collect();
             prop_assert_eq!(placed_values, output_zats);
             // Every output maps to a distinct action index.
             let mut indices: Vec<u32> = placed.iter().map(|&(i, _)| i).collect();
@@ -286,7 +288,7 @@ mod tests {
     #[test]
     fn pads_a_minimal_prep_tx_to_the_action_budget() {
         let fvk = account(1);
-        let outputs = [PrepOutput::Intermediate(10 * COIN)];
+        let outputs = [PrepOutput::Intermediate(zat(10 * COIN))];
         let spend_value = 10 * COIN + prep_fee();
         let (note, path, anchor) = single_note_witness(&fvk, spend_value, 7);
         let params = regtest_network(true);
@@ -311,7 +313,7 @@ mod tests {
         let fvk = account(2);
         let params = regtest_network(true);
         let anchor = orchard::Anchor::empty_tree();
-        let one_output = [PrepOutput::Funding(COIN)];
+        let one_output = [PrepOutput::Funding(zat(COIN))];
 
         let no_spends = build_prep_tx(
             &params,
@@ -338,7 +340,7 @@ mod tests {
 
         // One spend plus more outputs than the remaining action budget.
         let too_many: Vec<PrepOutput> = (0..PREP_TX_ACTIONS)
-            .map(|_| PrepOutput::Funding(COIN))
+            .map(|_| PrepOutput::Funding(zat(COIN)))
             .collect();
         let (note2, path2, anchor2) = single_note_witness(&fvk, 1_000 * COIN, 4);
         let over_budget = build_prep_tx(

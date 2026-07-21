@@ -14,9 +14,11 @@ use rand_core::RngCore;
 use zcash_protocol::value::COIN;
 
 use super::utils::largest_one_two_five;
+use zcash_protocol::value::Zatoshis;
+
 use super::{
     DenominationStrategy, MIGRATION_MAX_DENOMINATION_ZEC, MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
-    NoteSplitPlan, RESIDUAL_MIGRATION_MIN_ZATOSHI,
+    NoteSplitPlan, RESIDUAL_MIGRATION_MIN, zat,
 };
 
 /// The canonical `{1, 2, 5} * 10^k` quantization of [ZIP 318]: at each step it takes the largest such
@@ -46,26 +48,26 @@ impl CanonicalOneTwoFive {
     pub fn new(
         max_notes: usize,
         max_denomination_zec: u64,
-        min_denomination_zatoshi: u64,
-        transfer_fee_buffer_zatoshi: u64,
+        min_denomination: Zatoshis,
+        transfer_fee_buffer: Zatoshis,
     ) -> Self {
         Self {
             max_notes,
             max_denomination_zatoshi: max_denomination_zec.saturating_mul(COIN),
-            min_denomination_zatoshi,
-            buffer_zatoshi: transfer_fee_buffer_zatoshi,
+            min_denomination_zatoshi: u64::from(min_denomination),
+            buffer_zatoshi: u64::from(transfer_fee_buffer),
         }
     }
 
     /// The recommended configuration: [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes,
-    /// [`MIGRATION_MAX_DENOMINATION_ZEC`] cap, [`RESIDUAL_MIGRATION_MIN_ZATOSHI`] minimum
+    /// [`MIGRATION_MAX_DENOMINATION_ZEC`] cap, [`RESIDUAL_MIGRATION_MIN`] minimum
     /// denomination, and the caller-computed transfer-fee buffer.
-    pub fn recommended(transfer_fee_buffer_zatoshi: u64) -> Self {
+    pub fn recommended(transfer_fee_buffer: Zatoshis) -> Self {
         Self::new(
             MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
             MIGRATION_MAX_DENOMINATION_ZEC,
-            RESIDUAL_MIGRATION_MIN_ZATOSHI,
-            transfer_fee_buffer_zatoshi,
+            RESIDUAL_MIGRATION_MIN,
+            transfer_fee_buffer,
         )
     }
 }
@@ -73,11 +75,16 @@ impl CanonicalOneTwoFive {
 impl DenominationStrategy for CanonicalOneTwoFive {
     fn plan<R: RngCore>(
         &self,
-        total_input_zatoshi: u64,
-        prep_tx_fee_zatoshi: u64,
-        prep_tx_count: &dyn Fn(&[u64]) -> Option<usize>,
+        total_input: Zatoshis,
+        prep_tx_fee: Zatoshis,
+        prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
         _rng: &mut R,
     ) -> NoteSplitPlan {
+        // The greedy partition arithmetic below runs in the u64 domain; every value it derives is
+        // bounded by the validated total input, so `zat` conversions at the capability boundary and
+        // in `from_notes` are infallible.
+        let total_input_zatoshi = u64::from(total_input);
+        let prep_tx_fee_zatoshi = u64::from(prep_tx_fee);
         let buffer = self.buffer_zatoshi;
         // Smallest self-funding note: the minimum denomination plus its transfer buffer.
         let min_note = self.min_denomination_zatoshi + buffer;
@@ -87,7 +94,8 @@ impl DenominationStrategy for CanonicalOneTwoFive {
         // every step, so consolidation and fan-out costs are reserved exactly as they arise.
         let mut crossing_values: Vec<u64> = Vec::new();
         let mut notes: Vec<u64> = Vec::new();
-        let mut n_txs = prep_tx_count(&notes).unwrap_or(0);
+        let typed = |notes: &[u64]| notes.iter().map(|&v| zat(v)).collect::<Vec<Zatoshis>>();
+        let mut n_txs = prep_tx_count(&typed(&notes)).unwrap_or(0);
 
         while crossing_values.len() < self.max_notes {
             let committed = notes.iter().sum::<u64>() + n_txs as u64 * prep_tx_fee_zatoshi;
@@ -106,7 +114,7 @@ impl DenominationStrategy for CanonicalOneTwoFive {
                     break;
                 }
                 notes.push(crossing + buffer);
-                let fits = prep_tx_count(&notes).filter(|&n| {
+                let fits = prep_tx_count(&typed(&notes)).filter(|&n| {
                     notes
                         .iter()
                         .sum::<u64>()
@@ -174,8 +182,13 @@ mod tests {
     /// A count-only preparation-layout stub: one padded transaction per [`FUNDING_OUTPUTS_PER_TX`]
     /// funding notes. Tests exercising the split in isolation use this in place of the real
     /// preparation planner.
-    fn prep_tx_count_stub(notes: &[u64]) -> Option<usize> {
+    fn prep_tx_count_stub(notes: &[Zatoshis]) -> Option<usize> {
         Some(notes.len().div_ceil(FUNDING_OUTPUTS_PER_TX))
+    }
+
+    /// Read a plan's crossing values back into the tests' u64 domain.
+    fn crossings_u64(p: &NoteSplitPlan) -> Vec<u64> {
+        p.crossing_values().iter().map(|&v| u64::from(v)).collect()
     }
 
     /// Upper bound on the prep fee sampled by [`arb_plan_input`], in zatoshi.
@@ -211,8 +224,8 @@ mod tests {
         CanonicalOneTwoFive::new(
             max_notes,
             MIGRATION_MAX_DENOMINATION_ZEC,
-            RESIDUAL_MIGRATION_MIN_ZATOSHI,
-            zip317_buffer(),
+            RESIDUAL_MIGRATION_MIN,
+            zat(zip317_buffer()),
         )
     }
 
@@ -222,13 +235,11 @@ mod tests {
         let s = CanonicalOneTwoFive::new(
             64,
             MIGRATION_MAX_DENOMINATION_ZEC,
-            RESIDUAL_MIGRATION_MIN_ZATOSHI,
-            0,
+            RESIDUAL_MIGRATION_MIN,
+            Zatoshis::ZERO,
         );
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        s.plan(total, 0, &prep_tx_count_stub, &mut rng)
-            .crossing_values()
-            .to_vec()
+        crossings_u64(&s.plan(zat(total), Zatoshis::ZERO, &prep_tx_count_stub, &mut rng))
     }
 
     proptest! {
@@ -241,39 +252,42 @@ mod tests {
             let s = canonical(max_notes);
             let buffer = zip317_buffer();
             let cap = MIGRATION_MAX_DENOMINATION_ZEC * COIN;
-            let floor = RESIDUAL_MIGRATION_MIN_ZATOSHI;
+            let floor = u64::from(RESIDUAL_MIGRATION_MIN);
             let mut rng = ChaCha8Rng::seed_from_u64(0);
-            let p = s.plan(total, fee, &prep_tx_count_stub, &mut rng);
+            let p = s.plan(zat(total), zat(fee), &prep_tx_count_stub, &mut rng);
 
             // Value is conserved exactly: the prepared notes, the stepwise-reserved preparation
             // fees, and the change partition the balance; and the reserved fees are the per-tx fee
             // times the layout's transaction count (zero when nothing migrates).
-            let notes: u64 = p.migration_outputs().iter().sum();
-            let change = p.change().unwrap_or(0);
-            prop_assert_eq!(notes + p.prep_fees_zatoshi() + change, total);
-            if p.migration_outputs().is_empty() {
-                prop_assert_eq!(p.prep_fees_zatoshi(), 0);
+            let outputs = p.migration_outputs();
+            let notes: u64 = outputs.iter().map(|&v| u64::from(v)).sum();
+            let change = p.change().map(u64::from).unwrap_or(0);
+            let prep_fees = u64::from(p.prep_fees());
+            prop_assert_eq!(notes + prep_fees + change, total);
+            if outputs.is_empty() {
+                prop_assert_eq!(prep_fees, 0);
             } else {
-                let expected_txs = prep_tx_count_stub(p.migration_outputs().as_slice()).unwrap();
-                prop_assert_eq!(p.prep_fees_zatoshi(), expected_txs as u64 * fee);
+                let expected_txs = prep_tx_count_stub(&outputs).unwrap();
+                prop_assert_eq!(prep_fees, expected_txs as u64 * fee);
             }
 
-            prop_assert_eq!(p.migration_outputs().len(), p.crossing_values().len());
-            for (n, c) in p.migration_outputs().iter().zip(p.crossing_values()) {
-                prop_assert_eq!(*n, c + buffer);
+            let cvs = crossings_u64(&p);
+            prop_assert_eq!(outputs.len(), cvs.len());
+            for (&n, &c) in outputs.iter().zip(&cvs) {
+                prop_assert_eq!(u64::from(n), c + buffer);
             }
-            prop_assert!(p.migration_outputs().len() <= max_notes);
-            let sum: u64 = p.crossing_values().iter().sum();
-            prop_assert_eq!(p.total_migratable_zatoshi(), sum);
+            prop_assert!(outputs.len() <= max_notes);
+            let sum: u64 = cvs.iter().sum();
+            prop_assert_eq!(u64::from(p.total_migratable()), sum);
 
-            for &cv in p.crossing_values() {
+            for &cv in &cvs {
                 prop_assert!(is_one_two_five_zat(cv), "invalid denom {}", cv);
                 prop_assert!(cv >= floor && cv <= cap, "out of bounds {}", cv);
             }
-            for w in p.crossing_values().windows(2) {
+            for w in cvs.windows(2) {
                 prop_assert!(w[0] >= w[1], "crossings must be non-increasing");
             }
-            if p.migration_outputs().len() < max_notes {
+            if outputs.len() < max_notes {
                 // The loop stops when not even a minimum note fits — where fitting includes any
                 // preparation-fee step the extra note would trigger.
                 prop_assert!(change < floor + buffer + fee, "residual {}", change);
@@ -281,7 +295,7 @@ mod tests {
 
             // The RNG is ignored: a different seed yields the same plan.
             let mut other = ChaCha8Rng::seed_from_u64(1);
-            prop_assert_eq!(&p, &s.plan(total, fee, &prep_tx_count_stub, &mut other));
+            prop_assert_eq!(&p, &s.plan(zat(total), zat(fee), &prep_tx_count_stub, &mut other));
         }
     }
 
@@ -291,11 +305,19 @@ mod tests {
     fn whale_is_capped_and_rolls_over() {
         let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        let p = s.plan(MAX_MONEY, 0, &prep_tx_count_stub, &mut rng);
+        let p = s.plan(
+            zat(MAX_MONEY),
+            Zatoshis::ZERO,
+            &prep_tx_count_stub,
+            &mut rng,
+        );
         let per_run_cap =
             MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * MIGRATION_MAX_DENOMINATION_ZEC * COIN;
-        assert!(p.total_migratable_zatoshi() <= per_run_cap);
-        assert!(p.change().unwrap_or(0) > per_run_cap, "should roll over");
+        assert!(u64::from(p.total_migratable()) <= per_run_cap);
+        assert!(
+            p.change().map(u64::from).unwrap_or(0) > per_run_cap,
+            "should roll over"
+        );
     }
 
     /// A balance below the smallest self-funding note migrates nothing and keeps it all as change.
@@ -303,11 +325,11 @@ mod tests {
     fn below_min_note_migrates_nothing() {
         let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
         let buffer = zip317_buffer();
-        let below = RESIDUAL_MIGRATION_MIN_ZATOSHI + buffer - 1;
+        let below = u64::from(RESIDUAL_MIGRATION_MIN) + buffer - 1;
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        let p = s.plan(below, 0, &prep_tx_count_stub, &mut rng);
+        let p = s.plan(zat(below), Zatoshis::ZERO, &prep_tx_count_stub, &mut rng);
         assert!(p.crossing_values().is_empty());
-        assert_eq!(p.change(), Some(below));
+        assert_eq!(p.change(), Some(zat(below)));
     }
 
     /// The ZIP 318 worked examples: canonical `{1, 2, 5} * 10^k` quantization.
@@ -378,21 +400,29 @@ mod tests {
             .iter()
             .map(|&c| c + buffer)
             .collect();
-        let s = CanonicalOneTwoFive::recommended(zip317_buffer());
+        let s = CanonicalOneTwoFive::recommended(zat(zip317_buffer()));
         let mut rng = ChaCha8Rng::seed_from_u64(0);
-        let plan = s.plan(balance_zatoshi, 0, &prep_tx_count_stub, &mut rng);
+        let plan = s.plan(
+            zat(balance_zatoshi),
+            Zatoshis::ZERO,
+            &prep_tx_count_stub,
+            &mut rng,
+        );
         assert_eq!(
-            plan.crossing_values(),
+            crossings_u64(&plan),
             expected_crossings_zatoshi,
             "unexpected crossings for balance {balance_zatoshi} zat",
         );
         assert_eq!(
-            plan.migration_outputs(),
-            expected_notes.as_slice(),
+            plan.migration_outputs()
+                .iter()
+                .map(|&v| u64::from(v))
+                .collect::<Vec<u64>>(),
+            expected_notes,
             "unexpected prepared notes for balance {balance_zatoshi} zat",
         );
         assert_eq!(
-            plan.change(),
+            plan.change().map(u64::from),
             expected_change_zatoshi,
             "unexpected change for balance {balance_zatoshi} zat",
         );

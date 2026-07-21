@@ -484,39 +484,32 @@ where
     let (prep_tx_fee, transfer_fee_buffer) =
         canonical_fees(params, commit_height).map_err(MigrationError::Fee)?;
 
-    let note_values: Vec<u64> = notes.iter().map(|&n| u64::from(n)).collect();
     // The preparation-layout capability the decomposition consults at each step: how many
     // preparation transactions minting a candidate funding multiset takes, or `None` when the
     // wallet's notes cannot mint it (so the split stops or steps down a denomination).
-    let prep_tx_count = |funding: &[u64]| {
-        plan_preparation(&note_values, funding, u64::from(prep_tx_fee))
+    let prep_tx_count = |funding: &[Zatoshis]| {
+        plan_preparation(&notes, funding, prep_tx_fee)
             .ok()
             .map(|plan| plan.transaction_count())
     };
     let note_split = plan_note_split(
-        u64::from(balance),
-        u64::from(transfer_fee_buffer),
-        u64::from(prep_tx_fee),
+        balance,
+        transfer_fee_buffer,
+        prep_tx_fee,
         &prep_tx_count,
         rng,
     );
-    let funding_notes: Vec<u64> = note_split.migration_outputs();
+    let funding_notes = note_split.migration_outputs();
     if funding_notes.is_empty() {
         return Err(MigrationError::NothingToMigrate);
     }
 
     // The decomposition verified this multiset against the preparation planner at every step, so
     // this final planning pass succeeds by construction; the error path is kept for safety.
-    let preparation = plan_preparation(&note_values, &funding_notes, u64::from(prep_tx_fee))
+    let preparation = plan_preparation(&notes, &funding_notes, prep_tx_fee)
         .map_err(MigrationError::Preparation)?;
 
     let schedule = scheduling::schedule(commit_height, funding_notes.len(), rng);
-
-    let funding_notes = funding_notes
-        .into_iter()
-        .map(Zatoshis::from_u64)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(MigrationError::InvalidBalance)?;
 
     Ok(MigrationPlan {
         note_split,
@@ -1019,7 +1012,7 @@ where
     // resolve them together so each feeder note (distinct by tree position, even at equal value) is
     // matched to exactly one spend across the layer. Wallet inputs (not expected past layer 0) resolve
     // individually.
-    let mut prior_values: Vec<u64> = Vec::new();
+    let mut prior_values: Vec<Zatoshis> = Vec::new();
     for &(_, plan_index) in &targets {
         for input in state.preparation.layers()[ready_layer][plan_index].inputs() {
             if let PrepInput::Prior { value, .. } = input {
@@ -1027,11 +1020,6 @@ where
             }
         }
     }
-    let prior_values = prior_values
-        .into_iter()
-        .map(Zatoshis::from_u64)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| CommitError::Build("prior input value out of range".into()))?;
     let mut prior_notes = backend
         .resolve_funding_notes(&prior_values, anchor_height)
         .map_err(CommitError::Backend)?
@@ -1191,8 +1179,12 @@ where
         state.note_split.migration_outputs().first(),
         state.note_split.crossing_values().first(),
     ) {
-        (Some(funding), Some(crossing)) => funding.saturating_sub(*crossing),
-        _ => 0,
+        // A prepared note is its crossing plus the buffer by construction, so the checked
+        // subtraction underflows only for an inconsistently stored plan.
+        (Some(&funding), Some(&crossing)) => (funding - crossing).ok_or_else(|| {
+            CommitError::Build("stored note split has a crossing exceeding its note".into())
+        })?,
+        _ => Zatoshis::ZERO,
     };
 
     for tx in state.transactions.iter_mut() {
@@ -1207,7 +1199,10 @@ where
         let (note, merkle_path) = witnesses.get(crossing).cloned().ok_or_else(|| {
             CommitError::Build(format!("no funding note for crossing {crossing}"))
         })?;
-        let crossing_value = u64::from(state.funding_notes[crossing]).saturating_sub(buffer);
+        // The funding note is its crossing plus the buffer by construction (see above).
+        let crossing_value = (state.funding_notes[crossing] - buffer).ok_or_else(|| {
+            CommitError::Build("stored funding note is smaller than the fee buffer".into())
+        })?;
 
         let pczt = build_transfer_pczt(
             params,
@@ -1278,7 +1273,7 @@ mod tests {
 
     /// A count-only preparation-layout stub for tests that exercise the split in isolation: one
     /// padded transaction per [`FUNDING_OUTPUTS_PER_TX`] funding notes.
-    fn prep_tx_count_stub(notes: &[u64]) -> Option<usize> {
+    fn prep_tx_count_stub(notes: &[Zatoshis]) -> Option<usize> {
         Some(notes.len().div_ceil(FUNDING_OUTPUTS_PER_TX))
     }
 
@@ -1378,9 +1373,9 @@ mod tests {
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let (prep_tx_fee, transfer_buffer) = test_fees();
         let note_split = crate::note_splitting::plan_note_split(
-            100 * COIN,
-            u64::from(transfer_buffer),
-            u64::from(prep_tx_fee),
+            Zatoshis::from_u64(100 * COIN).expect("test balance is valid"),
+            transfer_buffer,
+            prep_tx_fee,
             &prep_tx_count_stub,
             &mut rng,
         );
@@ -1795,7 +1790,12 @@ mod commit_tests {
 
         // A whale generously larger than the balanced-tree cost, so the fan-out fast path triggers.
         let whale = funding.iter().sum::<u64>() + 16 * u64::from(prep_fee());
-        let preparation = plan_preparation(&[whale], &funding, u64::from(prep_fee()))
+        let whale_zats = [Zatoshis::from_u64(whale).expect("test whale is valid")];
+        let funding_zats: Vec<Zatoshis> = funding
+            .iter()
+            .map(|&v| Zatoshis::from_u64(v).expect("test funding values are valid"))
+            .collect();
+        let preparation = plan_preparation(&whale_zats, &funding_zats, prep_fee())
             .expect("a fundable whale plans");
         assert_eq!(
             preparation.layers().len(),
@@ -1807,22 +1807,24 @@ mod commit_tests {
         // buffer, so the engine derives the same buffer and each transfer crosses one ZEC.
         let crossings: Vec<u64> = funding.iter().map(|&f| f - buffer).collect();
         let note_split = NoteSplitPlan::from_stored_parts(
-            crossings.clone(),
-            buffer,
+            crossings
+                .iter()
+                .map(|&v| Zatoshis::from_u64(v).expect("test crossings are valid"))
+                .collect(),
+            Zatoshis::from_u64(buffer).expect("the buffer is valid"),
             None,
-            preparation.transaction_count() as u64 * u64::from(prep_fee()),
-            whale,
-            crossings.iter().sum(),
-        );
+            Zatoshis::from_u64(preparation.transaction_count() as u64 * u64::from(prep_fee()))
+                .expect("the reserved fees are valid"),
+            whale_zats[0],
+            Zatoshis::from_u64(crossings.iter().sum()).expect("the crossing total is valid"),
+        )
+        .expect("a consistent stored plan reconstructs");
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let schedule =
             crate::scheduling::schedule(BlockHeight::from_u32(2_000_000), funding.len(), &mut rng);
         let plan = MigrationPlan {
             note_split,
-            funding_notes: funding
-                .iter()
-                .map(|&v| Zatoshis::from_u64(v).expect("test funding values are valid"))
-                .collect(),
+            funding_notes: funding_zats,
             preparation,
             schedule,
         };
@@ -1838,7 +1840,7 @@ mod commit_tests {
             for tx in layer {
                 for input in tx.inputs() {
                     if let PrepInput::Prior { value, .. } = input {
-                        feeder_values.push(*value);
+                        feeder_values.push(u64::from(*value));
                     }
                 }
             }
