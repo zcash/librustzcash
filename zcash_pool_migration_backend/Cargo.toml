@@ -25,6 +25,10 @@ rand_core.workspace = true
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 
+# Enabled by the `test-dependencies` feature: the `testing` module's proptest strategies and
+# conformance suite, reusable by downstream store crates.
+proptest = { workspace = true, optional = true }
+
 # Enabled by the `orchard` feature.
 orchard = { workspace = true, optional = true }
 pczt = { workspace = true, optional = true, features = [
@@ -47,7 +51,7 @@ proptest.workspace = true
 rand_chacha.workspace = true
 # The `local-consensus` feature exposes `LocalNetwork`, used to build the migration transactions
 # against regtest params with the relevant network upgrades (including NU6.3) active.
-zcash_protocol = { workspace = true, features = ["local-consensus"] }
+zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
 
 [features]
 ## Builds the pure PCZT transaction builder (the `build` module), which turns a note-split plan and
@@ -65,6 +69,10 @@ wallet = [
     "dep:shardtree",
     "dep:incrementalmerkletree",
 ]
+## Exposes the `testing` module: reusable `proptest` strategies for the engine's persisted types and
+## a backend-agnostic conformance suite for the `PoolMigrationRead` / `PoolMigrationWrite` store
+## traits. A downstream store crate enables it as a dev-dependency feature to reuse them.
+test-dependencies = ["dep:proptest", "zcash_protocol/test-dependencies"]
 
 [lints]
 workspace = true
