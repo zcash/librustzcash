@@ -238,6 +238,13 @@ pub(crate) fn explicit_note_locking<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn note_locking_height_boundary<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_locking_height_boundary::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn proposal_level_note_locking<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::proposal_level_note_locking::<T>(
         TestDbFactory::default(),
