@@ -252,6 +252,7 @@ sync-decryptor = [
 ## operations.
 tor = [
     "dep:arti-client",
+    "arti-client/onion-service-client",
     "dep:dynosaur",
     "dep:fs-mistrust",
     "dep:futures-util",

@@ -6,7 +6,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use arti_client::DataStream;
+use arti_client::{DataStream, StreamPrefs, config::BoolOrAuto};
 use hyper_util::rt::TokioIo;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint, Uri};
 use tower::Service;
@@ -70,7 +70,9 @@ impl Service<Uri> for HttpTcpConnector {
             let (_, host, port) = parsed?;
 
             debug!("Connecting through Tor to {}:{}", host, port);
-            let stream = client.inner.connect((host.as_str(), port)).await?;
+            let mut prefs = StreamPrefs::new();
+            prefs.connect_to_onion_services(BoolOrAuto::Explicit(true));
+            let stream = client.inner.connect_with_prefs((host.as_str(), port), &prefs).await?;
 
             Ok(TokioIo::new(stream))
         };
