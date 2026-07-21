@@ -174,6 +174,17 @@ since Mermaid layout is hard to reason about in plain text.
   backend calls the canonical codec for its blob columns and maps only the
   queryable scalar fields to its own columns.
 
+- **A `proptest` strategy lives with the type it generates.** An `arb_*`
+  strategy for a type belongs in that type's own crate, in its `testing` module
+  behind the `test-dependencies` feature (e.g. `arb_zatoshis` in
+  `zcash_protocol::value::testing`, `arb_txid` next to `TxId`), NOT redefined in
+  each consumer's test module. Before writing an `arb_*`, search the repository
+  for an existing one and reuse it; if the type has none, add the strategy to the
+  type's crate (adding the `testing` module / `test-dependencies` feature there
+  if needed) rather than to the consumer. A downstream crate composes these
+  canonical leaf strategies into strategies for its own types; it does not
+  re-derive the leaves.
+
 ## Build & Test Commands
 
 For the most part we follow standard Rust `cargo` practices.
