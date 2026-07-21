@@ -913,290 +913,406 @@ where
         + PoolMigrationWrite,
     R: RngCore + rand_core::CryptoRng,
 {
-    use crate::build::{build_prep_tx, build_transfer_pczt};
-    use crate::preparation::{PrepInput, PrepOutput};
-    use zcash_protocol::consensus::NetworkUpgrade;
-
-    // A committed migration is resumed from the store (or cancelled), never rebuilt over (see
-    // [`MigrationState::is_terminal`]): checked FIRST, before any signing work, so a crashed or
-    // re-run consumer cannot orphan in-flight pre-signed transactions by re-committing.
-    if backend
-        .get_migration()
-        .map_err(CommitError::Backend)?
-        .is_some_and(|existing| !existing.is_terminal())
-    {
-        return Err(CommitError::MigrationInProgress);
-    }
-
-    let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
-    let nu63_activation = params
-        .activation_height(NetworkUpgrade::Nu6_3)
-        .ok_or(CommitError::Nu63NotActive)?;
-
-    let mut transactions: Vec<MigrationTransaction> = Vec::new();
-    let mut unsigned: Vec<UnsignedMigrationTx> = Vec::new();
-    let mut next_id = 0u32;
-    // The transaction ids assigned to each preparation layer, so a later layer can depend on the
-    // whole layer before it, and the transfers on the last preparation layer. Dependencies gate
-    // BROADCAST order only: every transaction is built and signed here, in this one pass.
-    let mut layer_ids: Vec<Vec<MigrationTxId>> = Vec::new();
-
-    // The pool of notes minted by already-built preparation transactions (and the direct-funding
-    // wallet notes), which later layers' `Prior` spends and the transfers draw from BY VALUE, each
-    // spent at most once (see [`MintedNote`]). Because a minted note is signable before it is
-    // mined, this pool is what lets the WHOLE migration be built and signed in one topological pass,
-    // before anything is broadcast — signing sessions bounded by the signer's action budget, never
-    // by mining.
-    let mut minted: Vec<MintedNote> = Vec::new();
-
-    for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
-        let mut this_layer_ids: Vec<MigrationTxId> = Vec::with_capacity(prep_layer.len());
-        for (index, prep_tx) in prep_layer.iter().enumerate() {
-            let id = MigrationTxId(next_id);
-            next_id += 1;
-            this_layer_ids.push(id);
-
-            let mut spends = Vec::with_capacity(prep_tx.inputs().len());
-            for input in prep_tx.inputs() {
-                match input {
-                    PrepInput::Wallet { index, value } => {
-                        let note = backend
-                            .resolve_wallet_note(*index)
-                            .map_err(CommitError::Backend)?;
-                        // The plan captured this note by its index into the spendable set at
-                        // PLANNING time; any receipt or spend since then shifts the indices,
-                        // so a resolved note whose value differs from the planned one means
-                        // the plan is stale — caught here as a typed error rather than as an
-                        // opaque balance failure (or, for an equal-valued interloper, a
-                        // silently signed spend of a note the plan reserved elsewhere).
-                        if note.value().inner() != u64::from(*value) {
-                            return Err(CommitError::StalePlan);
-                        }
-                        spends.push(note);
-                    }
-                    PrepInput::Prior { value, .. } => {
-                        // A feeder minted by an earlier layer, recovered when that layer was
-                        // built above (the plan's layers are in topological order).
-                        let feeder = minted
-                            .iter_mut()
-                            .find(|m| !m.consumed && m.value == *value)
-                            .ok_or_else(|| {
-                                CommitError::InconsistentPlan(format!(
-                                    "layer {layer} spends a feeder note of value {} that no \
-                                     earlier layer mints",
-                                    u64::from(*value)
-                                ))
-                            })?;
-                        feeder.consumed = true;
-                        spends.push(feeder.note);
-                    }
-                }
-            }
-
-            let depends_on = if layer == 0 {
-                Vec::new()
-            } else {
-                layer_ids
-                    .last()
-                    .cloned()
-                    .expect("a layer after layer 0 has a preceding layer")
-            };
-            // The drawn preparation schedule temporally decouples the transactions of a layer
-            // from one another (see `MigrationPlan::prep_schedule`). The expiry the
-            // pre-signature commits to must match that schedule, not the build height: the
-            // canonical rolling window at the scheduled height.
-            let scheduled_height = *plan
-                .prep_schedule()
-                .get(layer)
-                .and_then(|layer_schedule| layer_schedule.get(index))
-                .ok_or_else(|| {
-                    CommitError::InconsistentPlan(format!(
-                        "preparation schedule has no entry for layer {layer} transaction {index}"
-                    ))
-                })?;
-            let expiry_height = crate::scheduling::expiry_height(scheduled_height);
-            let (pczt, placed) = build_prep_tx(
-                params,
-                u32::from(target_height),
-                u32::from(expiry_height),
-                &fvk,
-                spends,
-                prep_tx.outputs(),
-                &mut *rng,
-            )
-            .map_err(CommitError::Build)?;
-
-            // Grow the minted pool with this transaction's recovered spendable outputs. Change
-            // outputs are excluded: they stay in the source pool and must never be matched to a
-            // feeder or funding request of a coincidentally equal value.
-            for (_action_index, output, note) in placed {
-                match output {
-                    PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
-                        minted.push(MintedNote {
-                            value,
-                            note,
-                            consumed: false,
-                            producer: Some(id),
-                        });
-                    }
-                    PrepOutput::Change(_) => {}
-                }
-            }
-
-            let (bytes, tx_state) = finish_built_pczt(backend, pczt, signing)?;
-            if matches!(signing, Signing::External) {
-                unsigned.push(UnsignedMigrationTx {
-                    id,
-                    pczt: bytes.clone(),
-                    actions: crate::preparation::PREP_TX_ACTIONS,
-                });
-            }
-            transactions.push(MigrationTransaction {
-                id,
-                kind: MigrationTxKind::Preparation { layer, index },
-                pczt: bytes,
-                depends_on,
-                scheduled_height,
-                expiry_height,
-                anchor_boundary: None,
-                state: tx_state,
-            });
-        }
-        layer_ids.push(this_layer_ids);
-    }
-
-    // Direct-funding wallet notes (already exactly a funding value; no preparation transaction
-    // mints them) join the pool the transfers draw from.
-    for &(wallet_index, value) in plan.preparation().direct_funding_notes() {
-        let note = backend
-            .resolve_wallet_note(wallet_index)
-            .map_err(CommitError::Backend)?;
-        if note.value().inner() != u64::from(value) {
-            return Err(CommitError::StalePlan);
-        }
-        // A direct-funding wallet note already exists on-chain, so its transfer has no producer to
-        // wait on.
-        minted.push(MintedNote {
-            value,
-            note,
-            consumed: false,
-            producer: None,
-        });
-    }
-
-    // Each transfer waits only for the preparation transaction that MINTS ITS OWN funding note to
-    // be mined (recorded as that note's producer in `minted`), not for the whole last layer: as
-    // soon as a transfer's own funding note is on-chain it may broadcast at its scheduled height,
-    // independently of the other crossings' preparation. This follows ZIP 318's per-note
-    // availability MUST ("wait until the boundary that closes the anchor-height bucket in which a
-    // note-preparation transaction was mined has passed before treating ITS output notes as
-    // available for migration") and consciously RELAXES the more conservative SHOULD that all note
-    // preparation complete before Phase 2 begins. The relaxation is safe: the schedule is already
-    // floored at the estimated last-preparation height, and the boundary-passed half of the MUST is
-    // still enforced downstream, since `draw_anchor_boundary` yields an anchor only once a boundary
-    // at or after the note's creation exists, so a transfer cannot be proved (hence broadcast)
-    // before then. A funding note used directly from the wallet has no producer, so that transfer's
-    // dependency set is empty.
-
-    // The boundary anchor each transfer will PROVE against is drawn here, at scheduling time,
-    // because the schedule fully determines it: the candidate set lies strictly above the NU6.3
-    // activation, at or after the height the funding notes exist on-chain (the last drawn
-    // preparation height plus the mining margin — the estimate `plan_migration` floored the
-    // schedule on), and strictly below the most recent boundary at the transfer's scheduled
-    // broadcast height. The anchor and the funding note's witness are installed against that
-    // boundary through the PCZT Updater role at proving time (ZIP 374); nothing here needs them.
-    //
-    // `plan_migration` floors the first scheduled transfer on this same estimate, so every
-    // transfer has a candidate boundary by construction; an empty draw therefore means the plan
-    // has gone STALE (committed at a height far past the estimate the schedule was floored on)
-    // and must be re-planned — it is an error, never a deferred fallback.
-    let est_last_prep_height = plan
-        .prep_schedule()
-        .last()
-        .and_then(|layer| layer.last())
-        .map_or(target_height, |&h| h + EST_PREP_LAYER_MINING_BLOCKS);
-    let funding_notes = plan.funding_notes().to_vec();
-    for (crossing, schedule) in plan.schedule().iter().enumerate() {
-        let id = MigrationTxId(next_id);
-        next_id += 1;
-
-        let funding_value = *funding_notes.get(crossing).ok_or_else(|| {
-            CommitError::InconsistentPlan(format!("no funding note value for crossing {crossing}"))
-        })?;
-        let funding_note = minted
-            .iter_mut()
-            .find(|m| !m.consumed && m.value == funding_value)
-            .ok_or_else(|| {
-                CommitError::InconsistentPlan(format!(
-                    "no minted funding note for crossing {crossing}"
-                ))
-            })?;
-        funding_note.consumed = true;
-        let note = funding_note.note;
-        let producer = funding_note.producer;
-        // Depend only on the preparation transaction that mints this funding note (or nothing, for a
-        // direct-funding wallet note), so this crossing releases as soon as its own note is mined.
-        let depends_on: Vec<MigrationTxId> = producer.into_iter().collect();
-        let crossing_value = *plan
-            .note_split()
-            .crossing_values()
-            .get(crossing)
-            .ok_or_else(|| {
-                CommitError::InconsistentPlan(format!(
-                    "no stored crossing value for transfer {crossing}"
-                ))
-            })?;
-
-        let pczt = build_transfer_pczt(
-            params,
-            u32::from(target_height),
-            u32::from(schedule.expiry_height()),
-            &fvk,
-            note,
-            crossing_value,
-            &mut *rng,
-        )
-        .map_err(CommitError::Build)?;
-        let (bytes, tx_state) = finish_built_pczt(backend, pczt, signing)?;
-        if matches!(signing, Signing::External) {
-            unsigned.push(UnsignedMigrationTx {
-                id,
-                pczt: bytes.clone(),
-                actions: crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
-                    + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER,
-            });
-        }
-        transactions.push(MigrationTransaction {
-            id,
-            kind: MigrationTxKind::Transfer { crossing },
-            pczt: bytes,
-            depends_on,
-            scheduled_height: schedule.broadcast_height(),
-            expiry_height: schedule.expiry_height(),
-            anchor_boundary: Some(
-                scheduling::draw_anchor_boundary(
-                    nu63_activation,
-                    est_last_prep_height,
-                    schedule.broadcast_height(),
-                    rng,
-                )
-                .ok_or(CommitError::StalePlan)?,
-            ),
-            state: tx_state,
-        });
-    }
-
-    let state = MigrationState {
-        status: MigrationStatus::Committed,
-        note_split: plan.note_split().clone(),
-        funding_notes,
-        preparation: plan.preparation().clone(),
-        transactions,
-    };
+    let mut committer = Committer::start(params, target_height, backend, rng, signing)?;
+    committer.build_preparation_layers(plan)?;
+    committer.add_direct_funding(plan)?;
+    committer.build_transfers(plan)?;
+    // `into_state` consumes the committer, releasing its `&mut backend` reborrow, so the store
+    // write below can borrow `backend` again.
+    let (state, unsigned) = committer.into_state(plan);
     backend
         .replace_migration(&state)
         .map_err(CommitError::Backend)?;
     Ok((state, unsigned))
+}
+
+/// Hosts the shared mutable state that building a whole committed migration threads through its
+/// stages: the accumulating `transactions`/`unsigned` outputs, the `next_id` counter, the per-layer
+/// `layer_ids` (so a later layer, and the transfers, can depend on the layer before them), and the
+/// `minted` pool of notes that already-built preparation transactions (and direct-funding wallet
+/// notes) mint for later spends. Owning the backend, rng, and resolved `fvk` lets each stage of
+/// [`commit_preparation_inner`] be a method: [`Committer::start`] then
+/// [`Committer::build_preparation_layers`], [`Committer::add_direct_funding`],
+/// [`Committer::build_transfers`], and finally [`Committer::into_state`], which consumes the
+/// committer and returns the assembled state (releasing the `&mut backend` reborrow so the caller
+/// can persist it). `plan` is deliberately NOT a field: passing it as a method parameter avoids
+/// borrowing `self` both immutably (to iterate the plan) and mutably (to call `next_id`/the
+/// resolvers) at once.
+#[cfg(feature = "orchard")]
+struct Committer<'a, P, B, R> {
+    params: &'a P,
+    target_height: BlockHeight,
+    backend: &'a mut B,
+    rng: &'a mut R,
+    signing: Signing,
+    fvk: orchard::keys::FullViewingKey,
+    transactions: Vec<MigrationTransaction>,
+    unsigned: Vec<UnsignedMigrationTx>,
+    next_id: u32,
+    layer_ids: Vec<Vec<MigrationTxId>>,
+    minted: Vec<MintedNote>,
+}
+
+#[cfg(feature = "orchard")]
+impl<'a, P, B, R> Committer<'a, P, B, R>
+where
+    P: zcash_protocol::consensus::Parameters + Clone,
+    B: MigrationBackend
+        + MigrationCrypto<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationRead<Error = <B as MigrationBackend>::Error>
+        + PoolMigrationWrite,
+    R: RngCore + rand_core::CryptoRng,
+{
+    /// Open a commit: guard against overwriting a live migration, resolve the account's Orchard FVK,
+    /// and initialize the empty accumulators.
+    fn start(
+        params: &'a P,
+        target_height: BlockHeight,
+        backend: &'a mut B,
+        rng: &'a mut R,
+        signing: Signing,
+    ) -> Result<Self, CommitError<<B as MigrationBackend>::Error>> {
+        // A committed migration is resumed from the store (or cancelled), never rebuilt over (see
+        // [`MigrationState::is_terminal`]): checked FIRST, before any signing work, so a crashed or
+        // re-run consumer cannot orphan in-flight pre-signed transactions by re-committing.
+        if backend
+            .get_migration()
+            .map_err(CommitError::Backend)?
+            .is_some_and(|existing| !existing.is_terminal())
+        {
+            return Err(CommitError::MigrationInProgress);
+        }
+
+        let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
+
+        Ok(Self {
+            params,
+            target_height,
+            backend,
+            rng,
+            signing,
+            fvk,
+            transactions: Vec::new(),
+            unsigned: Vec::new(),
+            next_id: 0,
+            layer_ids: Vec::new(),
+            minted: Vec::new(),
+        })
+    }
+
+    /// Assign and consume the next sequential transaction id.
+    fn next_id(&mut self) -> MigrationTxId {
+        let id = MigrationTxId(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    /// Resolve the Orchard notes a preparation transaction spends: wallet notes from the backend
+    /// (checking each against its planned value), and feeder notes from the `minted` pool (marking
+    /// each consumed).
+    fn resolve_prep_spends(
+        &mut self,
+        prep_tx: &crate::preparation::PrepTransaction,
+        layer: usize,
+    ) -> Result<Vec<orchard::note::Note>, CommitError<<B as MigrationBackend>::Error>> {
+        use crate::preparation::PrepInput;
+
+        let mut spends = Vec::with_capacity(prep_tx.inputs().len());
+        for input in prep_tx.inputs() {
+            match input {
+                PrepInput::Wallet { index, value } => {
+                    let note = self
+                        .backend
+                        .resolve_wallet_note(*index)
+                        .map_err(CommitError::Backend)?;
+                    // The plan captured this note by its index into the spendable set at
+                    // PLANNING time; any receipt or spend since then shifts the indices,
+                    // so a resolved note whose value differs from the planned one means
+                    // the plan is stale — caught here as a typed error rather than as an
+                    // opaque balance failure (or, for an equal-valued interloper, a
+                    // silently signed spend of a note the plan reserved elsewhere).
+                    if note.value().inner() != u64::from(*value) {
+                        return Err(CommitError::StalePlan);
+                    }
+                    spends.push(note);
+                }
+                PrepInput::Prior { value, .. } => {
+                    // A feeder minted by an earlier layer, recovered when that layer was
+                    // built above (the plan's layers are in topological order).
+                    let feeder = self
+                        .minted
+                        .iter_mut()
+                        .find(|m| !m.consumed && m.value == *value)
+                        .ok_or_else(|| {
+                            CommitError::InconsistentPlan(format!(
+                                "layer {layer} spends a feeder note of value {} that no \
+                                 earlier layer mints",
+                                u64::from(*value)
+                            ))
+                        })?;
+                    feeder.consumed = true;
+                    spends.push(feeder.note);
+                }
+            }
+        }
+        Ok(spends)
+    }
+
+    /// Build and pre-sign every preparation transaction, layer by layer in topological order,
+    /// growing the `minted` pool with each transaction's recovered spendable outputs.
+    fn build_preparation_layers(
+        &mut self,
+        plan: &MigrationPlan,
+    ) -> Result<(), CommitError<<B as MigrationBackend>::Error>> {
+        use crate::build::build_prep_tx;
+        use crate::preparation::PrepOutput;
+
+        for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
+            let mut this_layer_ids: Vec<MigrationTxId> = Vec::with_capacity(prep_layer.len());
+            for (index, prep_tx) in prep_layer.iter().enumerate() {
+                let id = self.next_id();
+                this_layer_ids.push(id);
+
+                let spends = self.resolve_prep_spends(prep_tx, layer)?;
+
+                let depends_on = if layer == 0 {
+                    Vec::new()
+                } else {
+                    self.layer_ids
+                        .last()
+                        .cloned()
+                        .expect("a layer after layer 0 has a preceding layer")
+                };
+                // The drawn preparation schedule temporally decouples the transactions of a layer
+                // from one another (see `MigrationPlan::prep_schedule`). The expiry the
+                // pre-signature commits to must match that schedule, not the build height: the
+                // canonical rolling window at the scheduled height.
+                let scheduled_height = *plan
+                    .prep_schedule()
+                    .get(layer)
+                    .and_then(|layer_schedule| layer_schedule.get(index))
+                    .ok_or_else(|| {
+                        CommitError::InconsistentPlan(format!(
+                            "preparation schedule has no entry for layer {layer} transaction {index}"
+                        ))
+                    })?;
+                let expiry_height = crate::scheduling::expiry_height(scheduled_height);
+                // The field accesses `self.params`/`self.fvk`/`self.rng` are DISJOINT, so the
+                // borrow checker accepts them together here — as long as no whole-`self` method
+                // call (like `next_id`/`resolve_prep_spends` above) is interleaved.
+                let (pczt, placed) = build_prep_tx(
+                    self.params,
+                    u32::from(self.target_height),
+                    u32::from(expiry_height),
+                    &self.fvk,
+                    spends,
+                    prep_tx.outputs(),
+                    &mut *self.rng,
+                )
+                .map_err(CommitError::Build)?;
+
+                // Grow the minted pool with this transaction's recovered spendable outputs. Change
+                // outputs are excluded: they stay in the source pool and must never be matched to a
+                // feeder or funding request of a coincidentally equal value.
+                for (_action_index, output, note) in placed {
+                    match output {
+                        PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
+                            self.minted.push(MintedNote {
+                                value,
+                                note,
+                                consumed: false,
+                                producer: Some(id),
+                            });
+                        }
+                        PrepOutput::Change(_) => {}
+                    }
+                }
+
+                let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
+                if matches!(self.signing, Signing::External) {
+                    self.unsigned.push(UnsignedMigrationTx {
+                        id,
+                        pczt: bytes.clone(),
+                        actions: crate::preparation::PREP_TX_ACTIONS,
+                    });
+                }
+                self.transactions.push(MigrationTransaction {
+                    id,
+                    kind: MigrationTxKind::Preparation { layer, index },
+                    pczt: bytes,
+                    depends_on,
+                    scheduled_height,
+                    expiry_height,
+                    anchor_boundary: None,
+                    state: tx_state,
+                });
+            }
+            self.layer_ids.push(this_layer_ids);
+        }
+        Ok(())
+    }
+
+    /// Add the direct-funding wallet notes (already exactly a funding value; no preparation
+    /// transaction mints them) to the `minted` pool the transfers draw from.
+    fn add_direct_funding(
+        &mut self,
+        plan: &MigrationPlan,
+    ) -> Result<(), CommitError<<B as MigrationBackend>::Error>> {
+        for &(wallet_index, value) in plan.preparation().direct_funding_notes() {
+            let note = self
+                .backend
+                .resolve_wallet_note(wallet_index)
+                .map_err(CommitError::Backend)?;
+            if note.value().inner() != u64::from(value) {
+                return Err(CommitError::StalePlan);
+            }
+            // A direct-funding wallet note already exists on-chain, so its transfer has no producer
+            // to wait on.
+            self.minted.push(MintedNote {
+                value,
+                note,
+                consumed: false,
+                producer: None,
+            });
+        }
+        Ok(())
+    }
+
+    /// Build and pre-sign every transfer, spending each crossing's funding note out of the `minted`
+    /// pool and drawing the boundary anchor it will prove against.
+    fn build_transfers(
+        &mut self,
+        plan: &MigrationPlan,
+    ) -> Result<(), CommitError<<B as MigrationBackend>::Error>> {
+        use crate::build::build_transfer_pczt;
+
+        // Each transfer waits only for the preparation transaction that MINTS ITS OWN funding note
+        // to be mined (recorded as that note's producer in `minted`), not for the whole last layer:
+        // as soon as a transfer's own funding note is on-chain it may broadcast at its scheduled
+        // height, independently of the other crossings' preparation. This follows ZIP 318's
+        // per-note availability MUST ("wait until the boundary that closes the anchor-height bucket
+        // in which a note-preparation transaction was mined has passed before treating ITS output
+        // notes as available for migration") and consciously RELAXES the more conservative SHOULD
+        // that all note preparation complete before Phase 2 begins. The relaxation is safe: the
+        // schedule is already floored at the estimated last-preparation height, and the
+        // boundary-passed half of the MUST is still enforced downstream, since `draw_anchor_boundary`
+        // yields an anchor only once a boundary at or after the note's creation exists, so a transfer
+        // cannot be proved (hence broadcast) before then. A funding note used directly from the
+        // wallet has no producer, so that transfer's dependency set is empty.
+
+        // The boundary anchor each transfer will PROVE against is drawn here, at scheduling time,
+        // because the schedule fully determines it: the candidate set lies strictly above the NU6.3
+        // activation, at or after the height the funding notes exist on-chain (the last drawn
+        // preparation height plus the mining margin — the estimate `plan_migration` floored the
+        // schedule on), and strictly below the most recent boundary at the transfer's scheduled
+        // broadcast height. The anchor and the funding note's witness are installed against that
+        // boundary through the PCZT Updater role at proving time (ZIP 374); nothing here needs them.
+        //
+        // `plan_migration` floors the first scheduled transfer on this same estimate, so every
+        // transfer has a candidate boundary by construction; an empty draw therefore means the plan
+        // has gone STALE (committed at a height far past the estimate the schedule was floored on)
+        // and must be re-planned — it is an error, never a deferred fallback.
+        let est_last_prep_height = plan
+            .prep_schedule()
+            .last()
+            .and_then(|layer| layer.last())
+            .map_or(self.target_height, |&h| h + EST_PREP_LAYER_MINING_BLOCKS);
+        // The anchor draw needs the NU6.3 activation height; derive it from `params` here rather
+        // than carrying it as a field (it is a pure function of the network).
+        let nu63_activation = self
+            .params
+            .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
+            .ok_or(CommitError::Nu63NotActive)?;
+        for (crossing, schedule) in plan.schedule().iter().enumerate() {
+            let id = self.next_id();
+
+            let funding_value = *plan.funding_notes().get(crossing).ok_or_else(|| {
+                CommitError::InconsistentPlan(format!(
+                    "no funding note value for crossing {crossing}"
+                ))
+            })?;
+            // Copy `note`/`producer` (both `Copy`) out of the `minted` borrow so it ends before the
+            // disjoint-field build call below.
+            let (note, producer) = {
+                let funding_note = self
+                    .minted
+                    .iter_mut()
+                    .find(|m| !m.consumed && m.value == funding_value)
+                    .ok_or_else(|| {
+                        CommitError::InconsistentPlan(format!(
+                            "no minted funding note for crossing {crossing}"
+                        ))
+                    })?;
+                funding_note.consumed = true;
+                (funding_note.note, funding_note.producer)
+            };
+            // Depend only on the preparation transaction that mints this funding note (or nothing,
+            // for a direct-funding wallet note), so this crossing releases as soon as its own note
+            // is mined.
+            let depends_on: Vec<MigrationTxId> = producer.into_iter().collect();
+            let crossing_value = *plan
+                .note_split()
+                .crossing_values()
+                .get(crossing)
+                .ok_or_else(|| {
+                    CommitError::InconsistentPlan(format!(
+                        "no stored crossing value for transfer {crossing}"
+                    ))
+                })?;
+
+            let pczt = build_transfer_pczt(
+                self.params,
+                u32::from(self.target_height),
+                u32::from(schedule.expiry_height()),
+                &self.fvk,
+                note,
+                crossing_value,
+                &mut *self.rng,
+            )
+            .map_err(CommitError::Build)?;
+            let anchor_boundary = scheduling::draw_anchor_boundary(
+                nu63_activation,
+                est_last_prep_height,
+                schedule.broadcast_height(),
+                self.rng,
+            )
+            .ok_or(CommitError::StalePlan)?;
+            let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
+            if matches!(self.signing, Signing::External) {
+                self.unsigned.push(UnsignedMigrationTx {
+                    id,
+                    pczt: bytes.clone(),
+                    actions: crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
+                        + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER,
+                });
+            }
+            self.transactions.push(MigrationTransaction {
+                id,
+                kind: MigrationTxKind::Transfer { crossing },
+                pczt: bytes,
+                depends_on,
+                scheduled_height: schedule.broadcast_height(),
+                expiry_height: schedule.expiry_height(),
+                anchor_boundary: Some(anchor_boundary),
+                state: tx_state,
+            });
+        }
+        Ok(())
+    }
+
+    /// Assemble the committed [`MigrationState`] from the accumulated transactions and return it
+    /// with the unsigned PCZTs. Consuming `self` releases the `&mut backend` reborrow, so the
+    /// caller can persist the state through the backend afterward.
+    fn into_state(self, plan: &MigrationPlan) -> (MigrationState, Vec<UnsignedMigrationTx>) {
+        let state = MigrationState {
+            status: MigrationStatus::Committed,
+            note_split: plan.note_split().clone(),
+            funding_notes: plan.funding_notes().to_vec(),
+            preparation: plan.preparation().clone(),
+            transactions: self.transactions,
+        };
+        (state, self.unsigned)
+    }
 }
 
 #[cfg(test)]
@@ -1891,18 +2007,14 @@ mod commit_tests {
         );
         let (p1, p2) = (producers[0], producers[1]);
         // Each producer funds at least one crossing.
-        assert!(
-            state
-                .transactions
-                .iter()
-                .any(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }) && t.depends_on == [p1])
-        );
-        assert!(
-            state
-                .transactions
-                .iter()
-                .any(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }) && t.depends_on == [p2])
-        );
+        assert!(state
+            .transactions
+            .iter()
+            .any(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }) && t.depends_on == [p1]));
+        assert!(state
+            .transactions
+            .iter()
+            .any(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }) && t.depends_on == [p2]));
 
         // Before anything mines, crossings from neither producer are releasable.
         assert!(!state.deps_mined(&[p1]));
