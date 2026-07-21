@@ -3539,6 +3539,66 @@ pub fn note_locking_height_boundary<T: ShieldedPoolTester>(
             .is_empty()
     );
 }
+
+/// Verifies that [`WalletWrite::clear_locked_outputs`] unlocks every locked output for an account
+/// regardless of expiry height, as required by the lost-proposal recovery path.
+///
+/// [`WalletWrite::clear_locked_outputs`]: crate::data_api::WalletWrite::clear_locked_outputs
+pub fn clear_locked_outputs<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(50000);
+    let (_, _, _) = st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    // Find the received note and construct an OutputRef for it
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), 1);
+    let note = &notes[0];
+    let output_ref = OutputRef::new(
+        *note.txid(),
+        PoolType::Shielded(note.note().pool()),
+        u32::from(note.output_index()),
+    );
+
+    // Lock the note with a far-future expiry.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+            .unwrap(),
+        1
+    );
+    assert_eq!(st.get_locked_balance(account_id), value);
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![output_ref]
+    );
+
+    // Clearing all locks for the account unlocks the output even though its expiry height is far
+    // in the future.
+    assert_eq!(st.wallet_mut().clear_locked_outputs(account_id).unwrap(), 1);
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    // Clearing again is a no-op and reports zero unlocked outputs.
+    assert_eq!(st.wallet_mut().clear_locked_outputs(account_id).unwrap(), 0);
+}
+
 pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,

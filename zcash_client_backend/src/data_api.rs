@@ -3662,6 +3662,18 @@ pub trait WalletWrite: WalletRead {
     /// output exists.
     fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error>;
 
+    /// Unlocks every currently-locked output belonging to the specified account, regardless of
+    /// lock expiry height.
+    ///
+    /// This is intended as a recovery mechanism for callers that have lost track of their
+    /// in-flight proposals or PCZTs (for example, because the application was terminated by the
+    /// operating system before the corresponding transactions could be built). By clearing all
+    /// locks for the account, the caller declares that it has no pending proposals holding those
+    /// outputs.
+    ///
+    /// Returns the number of outputs that were unlocked.
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error>;
+
     /// Saves information about transactions constructed by the wallet to the persistent
     /// wallet store.
     ///

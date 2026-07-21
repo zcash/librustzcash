@@ -588,6 +588,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn clear_locked_outputs() {
+        testing::pool::clear_locked_outputs::<SaplingPoolTester>()
+    }
+
+    #[test]
     fn proposal_level_note_locking() {
         testing::pool::proposal_level_note_locking::<SaplingPoolTester>()
     }

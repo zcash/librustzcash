@@ -1700,6 +1700,10 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wallet::unlock_output(wdb.conn.0, output))
     }
 
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
+        self.transactionally(|wdb| wallet::clear_locked_outputs(wdb.conn.0, account))
+    }
+
     fn store_transactions_to_be_sent(
         &mut self,
         transactions: &[SentTransaction<Self::AccountId>],
@@ -2104,6 +2108,10 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error> {
         wallet::unlock_output(self.conn.0, output)
+    }
+
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
+        wallet::clear_locked_outputs(self.conn.0, account)
     }
 
     fn store_transactions_to_be_sent(
