@@ -640,6 +640,12 @@ pub enum CommitError<E> {
     /// and possibly already broadcast — transactions, and a rebuilt layer 0 would double-spend
     /// the same wallet notes.
     MigrationInProgress,
+    /// The migration plan is internally inconsistent: two of its parallel structures disagree
+    /// (for example a preparation layer has no matching entry in the preparation schedule), so
+    /// it cannot be committed. A plan assembled through `from_parts` is not validated, so a
+    /// malformed one reaches the commit boundary as this typed error rather than a panic; the
+    /// string names which structure and index disagreed, for diagnosis.
+    InconsistentPlan(alloc::string::String),
 }
 
 #[cfg(feature = "orchard")]
@@ -659,6 +665,9 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
                 "a non-terminal migration is already stored; resume or cancel it instead of \
                  committing a new one",
             ),
+            CommitError::InconsistentPlan(m) => {
+                write!(f, "the migration plan is internally inconsistent: {m}")
+            }
         }
     }
 }
@@ -963,7 +972,15 @@ where
             // from one another (see `MigrationPlan::prep_schedule`). The expiry the
             // pre-signature commits to must match that schedule, not the build height: the
             // canonical rolling window at the scheduled height.
-            let scheduled_height = plan.prep_schedule()[layer][index];
+            let scheduled_height = *plan
+                .prep_schedule()
+                .get(layer)
+                .and_then(|layer_schedule| layer_schedule.get(index))
+                .ok_or_else(|| {
+                    CommitError::InconsistentPlan(format!(
+                        "preparation schedule has no entry for layer {layer} transaction {index}"
+                    ))
+                })?;
             let expiry_height = crate::scheduling::expiry_height(scheduled_height);
             let (pczt, placed) = build_prep_tx(
                 params,
