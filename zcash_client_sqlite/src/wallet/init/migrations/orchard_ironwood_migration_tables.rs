@@ -22,6 +22,14 @@ use super::ironwood_received_notes;
 
 pub(super) const MIGRATION_ID: Uuid = zcash_pool_migration_sqlite::orchard_ironwood::MIGRATION_ID;
 
+// The pool-migration tables have no foreign keys into the note or shardtree tables, but the engine
+// works over both pools at runtime: it spends Orchard source notes (and their witnesses) and crosses
+// into Ironwood. `ironwood_received_notes` is chosen as the single frontier dependency because its DAG
+// closure transitively guarantees the whole stack the engine needs (Orchard received notes and
+// shardtree, Ironwood received notes and shardtree), so listing those explicitly would be redundant
+// under the codebase's minimal-frontier convention. If a future migration reshuffles the DAG such that
+// `ironwood_received_notes` no longer pulls in the Orchard source infrastructure, add the Orchard
+// dependencies here explicitly.
 const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
