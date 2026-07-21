@@ -199,7 +199,7 @@ impl MigrationState {
     /// external-signing seam: after
     /// [`build_preparation_unsigned`](crate::engine::build_preparation_unsigned) exports the unsigned PCZT,
     /// the caller has it signed out of band and returns the signed PCZT here, matched by `id`. Persist
-    /// the state afterwards (`put_migration`).
+    /// the state afterwards (`replace_migration`).
     ///
     /// Returns `true` if the signature was applied. Returns `false`, leaving the state unchanged, if no
     /// transaction has that `id` or it is not awaiting a signature (already signed, still an unbuilt

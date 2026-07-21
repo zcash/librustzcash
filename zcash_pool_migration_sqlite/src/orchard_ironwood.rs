@@ -66,8 +66,8 @@ impl<C: Borrow<Connection>> PoolMigrationRead for PoolMigrations<C> {
 }
 
 impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
-    fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
-        self.0.put_migration(state)
+    fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+        self.0.replace_migration(state)
     }
 
     fn update_transaction(
@@ -145,7 +145,7 @@ mod tests {
         #[test]
         fn update_unknown_transaction_errors(state in arb_migration_state()) {
             let mut s = fresh_store();
-            s.put_migration(&state).expect("write");
+            s.replace_migration(&state).expect("write");
             // Generated ids are `0..transactions.len()` (< 6), so `u32::MAX` is always absent.
             let err = s
                 .update_transaction(MigrationTxId::new(u32::MAX), MigrationTxState::Proved)

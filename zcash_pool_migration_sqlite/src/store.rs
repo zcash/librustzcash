@@ -155,11 +155,11 @@ impl<C: Borrow<Connection>> Store<C> {
 }
 
 impl<C: BorrowMut<Connection>> Store<C> {
-    /// Persist `state` as the single active migration, replacing any existing one, atomically.
-    pub(crate) fn put_migration(&mut self, state: &MigrationState) -> Result<(), Error> {
+    /// Replace the single active migration with `state`, atomically (deletes any existing one first).
+    pub(crate) fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Error> {
         let tables = self.tables;
         let tx = self.conn.borrow_mut().transaction()?;
-        write_migration(&tx, tables, state)?;
+        replace_migration(&tx, tables, state)?;
         tx.commit()?;
         Ok(())
     }
@@ -305,9 +305,9 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
     Ok(out)
 }
 
-/// Persist `state` as the single active migration in the tables named by `t`, replacing any existing
-/// one. Runs inside the caller's transaction so the replacement is atomic.
-fn write_migration(
+/// Replace the single active migration in the tables named by `t` with `state` (deletes any existing
+/// migration and its transactions first). Runs inside the caller's transaction so the replacement is atomic.
+fn replace_migration(
     tx: &rusqlite::Transaction,
     t: &Tables,
     state: &MigrationState,

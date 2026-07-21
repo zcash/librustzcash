@@ -106,7 +106,7 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
     /// Persist a committed migration: every transaction as its pre-signed PCZT plus the metadata the
     /// application needs to prove, schedule, and broadcast it. Storing the pre-signed transactions, not
     /// just the plan, is what lets a wallet resume a migration after being closed or restarted.
-    fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error>;
+    fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error>;
 
     /// Advance one stored transaction's lifecycle state (for example after the application broadcasts
     /// it, or the chain mines it).
@@ -952,7 +952,7 @@ where
 ///
 /// After the device signs, call [`MigrationState::apply_signature`] for each returned PCZT (matched by
 /// [`UnsignedMigrationTx::id`]) to move it to [`Signed`](MigrationTxState::Signed), persist with
-/// `put_migration`, and drive the broadcasts through the normal state machine (proving remains a
+/// `replace_migration`, and drive the broadcasts through the normal state machine (proving remains a
 /// consumer responsibility, at broadcast time).
 ///
 /// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3), and
@@ -1248,7 +1248,7 @@ where
         transactions,
     };
     backend
-        .put_migration(&state)
+        .replace_migration(&state)
         .map_err(CommitError::Backend)?;
     Ok((state, unsigned))
 }
@@ -1336,7 +1336,7 @@ mod tests {
     }
 
     impl PoolMigrationWrite for MockBackend {
-        fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+        fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
             self.stored = Some(state.clone());
             Ok(())
         }
@@ -1475,7 +1475,7 @@ mod tests {
             preparation: crate::preparation::PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions: vec![tx],
         };
-        backend.put_migration(&state).unwrap();
+        backend.replace_migration(&state).unwrap();
 
         // The stored transactions round-trip, and a state update persists.
         let loaded = backend
@@ -1585,7 +1585,7 @@ mod commit_tests {
     }
 
     impl PoolMigrationWrite for CommitMock {
-        fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+        fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
             self.stored = Some(state.clone());
             Ok(())
         }
@@ -1945,7 +1945,7 @@ mod commit_tests {
                 assert!(state.apply_signature(id, signed.serialize().expect("serializes")));
             }
         }
-        backend.put_migration(&state).unwrap();
+        backend.replace_migration(&state).unwrap();
         for tx in &state.transactions {
             assert_eq!(tx.state, MigrationTxState::Signed);
         }
@@ -1986,7 +1986,7 @@ mod commit_tests {
         // A terminal (cancelled) migration may be replaced.
         let mut stored = backend.get_migration().unwrap().expect("stored");
         stored.status = MigrationStatus::Failed;
-        backend.put_migration(&stored).unwrap();
+        backend.replace_migration(&stored).unwrap();
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 3);
         commit_preparation(
             &params,
