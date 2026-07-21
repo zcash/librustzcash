@@ -18,9 +18,14 @@ use core::fmt::Debug;
 
 use proptest::prelude::*;
 
-use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
+
+// Reuse the canonical upstream leaf strategies (a `proptest` strategy lives with the type it
+// generates) rather than redefining them here: `arb_zatoshis` from `zcash_protocol`, `arb_txid`
+// from `zcash_primitives`.
+pub use zcash_primitives::transaction::testing::arb_txid;
+pub use zcash_protocol::value::testing::arb_zatoshis;
 
 use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
@@ -36,19 +41,9 @@ fn zat(value: u64) -> Zatoshis {
 
 // --- leaf strategies ---
 
-/// A [`Zatoshis`] amount well within the money supply, for round-trip fixtures.
-pub fn arb_zatoshis() -> impl Strategy<Value = Zatoshis> {
-    (0u64..100_000_000).prop_map(zat)
-}
-
 /// An arbitrary [`BlockHeight`], within the range heights realistically take.
 pub fn arb_block_height() -> impl Strategy<Value = BlockHeight> {
     (0u32..5_000_000).prop_map(BlockHeight::from_u32)
-}
-
-/// An arbitrary transaction id (32 random bytes), for the [`MigrationTxState::Broadcast`] payload.
-pub fn arb_txid() -> impl Strategy<Value = TxId> {
-    any::<[u8; 32]>().prop_map(TxId::from_bytes)
 }
 
 /// An arbitrary [`MigrationTxId`] row key.

@@ -81,7 +81,12 @@ wallet = [
 ## Exposes the `testing` module: reusable `proptest` strategies for the engine's persisted types and
 ## a backend-agnostic conformance suite for the `PoolMigrationRead` / `PoolMigrationWrite` store
 ## traits. A downstream store crate enables it as a dev-dependency feature to reuse them.
-test-dependencies = ["dep:proptest", "zcash_encoding/test-dependencies"]
+test-dependencies = [
+    "dep:proptest",
+    "zcash_encoding/test-dependencies",
+    "zcash_protocol/test-dependencies",
+    "zcash_primitives/test-dependencies",
+]
 
 [lints]
 workspace = true
