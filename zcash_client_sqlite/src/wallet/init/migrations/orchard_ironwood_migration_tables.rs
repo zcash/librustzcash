@@ -9,6 +9,11 @@
 //! migration is the thin registration that runs its DDL inside the wallet schema. It depends on
 //! [`ironwood_received_notes`] because the migration writes Ironwood notes, whose tables must exist.
 //!
+//! `init_migration_tables` always emits the store crate's current DDL, so a fresh database gets the
+//! current (account-keyed) shape directly from this migration; the successor
+//! `orchard_ironwood_migration_account_key` re-keys databases that were created at the original
+//! singleton shape and is a no-op for everyone else.
+//!
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
 use std::collections::HashSet;
