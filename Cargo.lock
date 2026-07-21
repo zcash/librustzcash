@@ -7260,6 +7260,7 @@ dependencies = [
 name = "zcash_pool_migration_backend"
 version = "0.1.0"
 dependencies = [
+ "corez",
  "getset",
  "incrementalmerkletree",
  "libm",
@@ -7271,7 +7272,21 @@ dependencies = [
  "shardtree",
  "zcash_client_backend",
  "zcash_keys",
+ "zcash_pool_migration_memory",
  "zcash_primitives",
+ "zcash_protocol",
+]
+
+[[package]]
+name = "zcash_pool_migration_memory"
+version = "0.1.0"
+dependencies = [
+ "incrementalmerkletree",
+ "orchard",
+ "pczt",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "zcash_pool_migration_backend",
  "zcash_protocol",
 ]
 

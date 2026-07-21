@@ -1,0 +1,34 @@
+[package]
+name = "zcash_pool_migration_memory"
+description = "In-memory, test-only implementations of the zcash_pool_migration_backend engine traits"
+version = "0.1.0"
+authors = [
+    "Danny Willems <be.danny.willems@gmail.com>",
+    "John Boyd <john@coldnoise.net>",
+    "Michal Fousek <michal.fousek@chlup.info>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[dependencies]
+# The engine traits and types these mocks implement. The crypto mocks and the witness helpers need
+# the backend's Orchard surface (`MigrationCrypto`, `build::sign_pczt`), so enable its `orchard`
+# feature unconditionally: this crate exists only to support the backend's tests.
+zcash_pool_migration_backend = { path = "../zcash_pool_migration_backend", features = [
+    "orchard",
+] }
+
+orchard = { workspace = true }
+pczt = { workspace = true }
+rand_chacha.workspace = true
+rand_core.workspace = true
+incrementalmerkletree.workspace = true
+# `local-consensus` exposes `LocalNetwork`, used to build regtest params with NU6.3 active.
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
+
+[lints]
+workspace = true
