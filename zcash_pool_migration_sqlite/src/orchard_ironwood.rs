@@ -30,7 +30,7 @@ static TABLES: Tables = Tables {
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7b2f6a41_9c3d_4e58_8a17_2f6b9d0c4e11);
 
 /// A failure reading or writing the pool-migration store.
-pub use crate::store::Error;
+pub use crate::error::Error;
 
 /// Create the Orchard -> Ironwood pool-migration tables (and the due-transaction index) on `conn`.
 /// This is the body a `zcash_client_sqlite` `schemerz` migration's `up()` calls; it is idempotent
@@ -97,7 +97,7 @@ mod tests {
     use zcash_protocol::consensus::BlockHeight;
     use zcash_protocol::value::Zatoshis;
 
-    use crate::store::Error;
+    use crate::error::Error;
 
     fn store() -> PoolMigrations<Connection> {
         let conn = Connection::open_in_memory().expect("in-memory db");
