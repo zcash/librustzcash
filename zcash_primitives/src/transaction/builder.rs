@@ -109,6 +109,11 @@ pub enum Error<FE> {
     /// The builder was constructed with a target height before NU6.3 activation,
     /// or without an Ironwood anchor, but an Ironwood spend or output was added.
     IronwoodBuilderNotAvailable,
+    /// Anchors can be deferred to proving time only under a transaction version whose
+    /// txid and sighash exclude shielded anchors (V6, NU6.3 onward); this version commits
+    /// its signatures to the anchors, so they must be supplied at build time (use
+    /// [`Builder`]).
+    AnchorDeferralUnsupported(TxVersion),
     /// An error occurred in constructing a coinbase transaction.
     Coinbase(coinbase::Error),
     /// A coinbase transaction's expiry height does not match its target block height.
@@ -160,6 +165,10 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::IronwoodBuilderNotAvailable => write!(
                 f,
                 "Cannot create Ironwood transactions without an Ironwood anchor, or before NU6.3 activation"
+            ),
+            Error::AnchorDeferralUnsupported(version) => write!(
+                f,
+                "Transaction version {version:?} commits its signatures to shielded anchors, so anchors cannot be deferred to proving time"
             ),
             Error::Coinbase(err) => write!(
                 f,
@@ -385,6 +394,294 @@ fn orchard_action_count(
     };
 
     bundle_type.num_actions(flags, num_spends, num_outputs)
+}
+
+/// A builder for V6 (NU6.3 onward) transactions constructed as PCZTs with their
+/// Orchard-family anchors DEFERRED to proving time, per [ZIP 374].
+///
+/// [`Builder`] requires each shielded pool's anchor in its [`BuildConfig`] and a Merkle
+/// witness rooting to it for every spend it adds. This builder takes no anchors at all:
+/// spends are added as bare `(fvk, note)` pairs through the `orchard` crate's own
+/// deferred-anchor support ([`orchard::builder::Builder::new_with_anchor_deferred`]), and the
+/// emitted PCZT carries ABSENT anchor and witness fields, which the PCZT Updater role
+/// (`set_{orchard,ironwood}_anchor` / `set_*_spend_witnesses`) fills in at proving time,
+/// after the transaction has been finalized and SIGNED. This is sound exactly for the V6
+/// transaction format, whose txid and sighash exclude shielded anchors (they are
+/// committed only by the authorizing-data digest), so neither the transaction id nor any
+/// signature commits to the deferred values; [`Self::new`] refuses any earlier format.
+/// The witness-to-anchor consistency check that [`Builder`] performs per spend at
+/// add-spend time is performed instead by the PCZT Prover role, once the real anchor and
+/// witnesses are present.
+///
+/// The builder is deliberately restricted to the two Orchard-family pools (Orchard and
+/// Ironwood): their nullifiers are derived from the note alone, so a spend can be signed
+/// before its witness is known. A Sapling nullifier commits to the note's tree position,
+/// so Sapling spends can never defer their witnesses, and transparent inputs are out of
+/// scope for the pre-signing flows this builder serves; use [`Builder`] for those.
+///
+/// [ZIP 374]: https://zips.z.cash/zip-0374
+pub struct DeferredPcztBuilder<P> {
+    params: P,
+    tx_version: TxVersion,
+    consensus_branch_id: BranchId,
+    target_height: BlockHeight,
+    expiry_height: BlockHeight,
+    orchard_builder: orchard::builder::Builder,
+    orchard_bundle_version: orchard::bundle::BundleVersion,
+    ironwood_builder: orchard::builder::Builder,
+}
+
+impl<P: consensus::Parameters> DeferredPcztBuilder<P> {
+    /// Creates a builder targeting the block at `target_height`, with the given
+    /// transactional bundle type for each Orchard-family pool.
+    ///
+    /// The expiry height defaults to `target_height` plus the default transaction expiry
+    /// delta; override it with [`Self::with_expiry_height`].
+    ///
+    /// Returns [`Error::AnchorDeferralUnsupported`] if the consensus branch in effect at
+    /// `target_height` does not use the V6 transaction format, whose txid and sighash
+    /// exclude shielded anchors; under any earlier format the anchors cannot outlive
+    /// signing.
+    pub fn new<FE>(
+        params: P,
+        target_height: BlockHeight,
+        orchard_bundle_type: orchard::builder::BundleType,
+        ironwood_bundle_type: orchard::builder::BundleType,
+    ) -> Result<Self, Error<FE>> {
+        let consensus_branch_id = BranchId::for_height(&params, target_height);
+        let tx_version = TxVersion::suggested_for_branch(consensus_branch_id);
+        if !tx_version.has_ironwood() {
+            return Err(Error::AnchorDeferralUnsupported(tx_version));
+        }
+        let orchard_bundle_version =
+            bundle_version_for_branch(consensus_branch_id, orchard::ValuePool::Orchard)
+                .expect("a branch with the V6 format supports the Orchard pool");
+        let orchard_builder = orchard::builder::Builder::new_with_anchor_deferred(
+            orchard_bundle_type,
+            orchard_bundle_version,
+            orchard_bundle_version.default_flags(),
+            orchard::bundle::TxVersion::V6,
+        )
+        .map_err(Error::OrchardBuild)?;
+        let ironwood_bundle_version = orchard::bundle::BundleVersion::ironwood_v3();
+        let ironwood_builder = orchard::builder::Builder::new_with_anchor_deferred(
+            ironwood_bundle_type,
+            ironwood_bundle_version,
+            ironwood_bundle_version.default_flags(),
+            orchard::bundle::TxVersion::V6,
+        )
+        .map_err(Error::IronwoodBuild)?;
+        Ok(DeferredPcztBuilder {
+            params,
+            tx_version,
+            consensus_branch_id,
+            target_height,
+            expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
+            orchard_builder,
+            orchard_bundle_version,
+            ironwood_builder,
+        })
+    }
+
+    /// Overrides the expiry height for the transaction under construction.
+    ///
+    /// A pre-signed transaction is often broadcast well after it is built, so the caller
+    /// typically sets an expiry derived from the intended broadcast schedule rather than
+    /// the build height; the signatures commit to it.
+    pub fn with_expiry_height(mut self, expiry_height: BlockHeight) -> Self {
+        self.expiry_height = expiry_height;
+        self
+    }
+
+    /// Adds an Orchard note to be spent in this bundle, WITHOUT a witness: the witness,
+    /// like the bundle's anchor, is installed at proving time through the PCZT Updater
+    /// role.
+    pub fn add_orchard_spend<FE>(
+        &mut self,
+        fvk: orchard::keys::FullViewingKey,
+        note: orchard::Note,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder.add_spend_unwitnessed(fvk, note)?;
+        Ok(())
+    }
+
+    /// Adds an Orchard recipient to the transaction.
+    pub fn add_orchard_output<FE>(
+        &mut self,
+        ovk: Option<orchard::keys::OutgoingViewingKey>,
+        recipient: orchard::Address,
+        value: Zatoshis,
+        memo: MemoBytes,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder
+            .add_output(
+                ovk,
+                recipient,
+                orchard::value::NoteValue::from_raw(value.into()),
+                memo.into_bytes(),
+            )
+            .map_err(Error::OrchardRecipient)
+    }
+
+    /// Adds a wallet-controlled Orchard change output to the transaction.
+    pub fn add_orchard_change_output<FE>(
+        &mut self,
+        fvk: orchard::keys::FullViewingKey,
+        ovk: Option<orchard::keys::OutgoingViewingKey>,
+        recipient: orchard::Address,
+        value: Zatoshis,
+        memo: MemoBytes,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder
+            .add_change_output(
+                fvk,
+                ovk,
+                recipient,
+                orchard::value::NoteValue::from_raw(value.into()),
+                memo.into_bytes(),
+            )
+            .map_err(Error::OrchardRecipient)
+    }
+
+    /// Adds an Ironwood note to be spent in this bundle, WITHOUT a witness (see
+    /// [`Self::add_orchard_spend`]).
+    ///
+    /// The note must use [`orchard::note::NoteVersion::V3`], the Ironwood note plaintext
+    /// format.
+    pub fn add_ironwood_spend<FE>(
+        &mut self,
+        fvk: orchard::keys::FullViewingKey,
+        note: orchard::Note,
+    ) -> Result<(), Error<FE>> {
+        if note.version() != orchard::note::NoteVersion::V3 {
+            return Err(Error::IronwoodSpendUnsupportedNoteVersion(note.version()));
+        }
+        self.ironwood_builder
+            .add_spend_unwitnessed(fvk, note)
+            .map_err(Error::IronwoodSpend)
+    }
+
+    /// Adds an Ironwood recipient to the transaction.
+    ///
+    /// This uses [`orchard::note::NoteVersion::V3`], the Ironwood note plaintext format.
+    pub fn add_ironwood_output<FE>(
+        &mut self,
+        ovk: Option<orchard::keys::OutgoingViewingKey>,
+        recipient: orchard::Address,
+        value: Zatoshis,
+        memo: MemoBytes,
+    ) -> Result<(), Error<FE>> {
+        self.ironwood_builder
+            .add_output(
+                ovk,
+                recipient,
+                orchard::value::NoteValue::from_raw(value.into()),
+                memo.into_bytes(),
+            )
+            .map_err(Error::IronwoodRecipient)
+    }
+
+    /// Reports the calculated fee given the specified fee rule, as a function of the
+    /// spends and outputs added so far (each pool's action count includes the padding its
+    /// bundle type prescribes).
+    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<Zatoshis, FeeError<FR::Error>> {
+        fee_rule
+            .fee_required(
+                &self.params,
+                self.target_height,
+                core::iter::empty::<crate::transaction::fees::transparent::InputSize>(),
+                core::iter::empty::<usize>(),
+                0,
+                0,
+                orchard_action_count(&self.orchard_builder, false, self.orchard_bundle_version)
+                    .map_err(FeeError::Bundle)?,
+                orchard_action_count(
+                    &self.ironwood_builder,
+                    false,
+                    orchard::bundle::BundleVersion::ironwood_v3(),
+                )
+                .map_err(FeeError::Bundle)?,
+            )
+            .map_err(FeeError::FeeRule)
+    }
+
+    /// Builds the added spends and outputs into the parts of an unproven PCZT whose
+    /// anchors and real-spend witnesses are ABSENT, deferred to proving time: pass the
+    /// result to the PCZT Creator (`build_from_parts`), then finalize, sign, and — at
+    /// proving time — install the real anchor and witnesses through the PCZT Updater
+    /// role before proving.
+    pub fn build_for_pczt<R: RngCore + CryptoRng, FR: FeeRule>(
+        self,
+        mut rng: R,
+        fee_rule: &FR,
+    ) -> Result<PcztResult<P>, Error<FR::Error>> {
+        fn in_use(builder: &orchard::builder::Builder) -> bool {
+            !builder.spends().is_empty()
+                || !builder.outputs().is_empty()
+                || !builder.changes().is_empty()
+        }
+
+        let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+
+        // After fees are accounted for, the value balance of the transaction must be zero.
+        let value_balance = [
+            self.orchard_builder
+                .value_balance::<ZatBalance>()
+                .map_err(|_| BalanceError::Overflow)?,
+            self.ironwood_builder
+                .value_balance::<ZatBalance>()
+                .map_err(|_| BalanceError::Overflow)?,
+        ]
+        .into_iter()
+        .sum::<Option<ZatBalance>>()
+        .ok_or(BalanceError::Overflow)?;
+        let balance_after_fees = (value_balance - fee).ok_or(BalanceError::Underflow)?;
+        match balance_after_fees.cmp(&ZatBalance::zero()) {
+            Ordering::Less => {
+                return Err(Error::InsufficientFunds(-balance_after_fees));
+            }
+            Ordering::Greater => {
+                return Err(Error::ChangeRequired(balance_after_fees));
+            }
+            Ordering::Equal => (),
+        };
+
+        let (orchard_bundle, orchard_meta) = if in_use(&self.orchard_builder) {
+            let (bundle, meta) = self
+                .orchard_builder
+                .build_for_pczt(&mut rng)
+                .map_err(Error::OrchardBuild)?;
+            (Some(bundle), meta)
+        } else {
+            (None, orchard::builder::BundleMetadata::empty())
+        };
+        let (ironwood_bundle, ironwood_meta) = if in_use(&self.ironwood_builder) {
+            let (bundle, meta) = self
+                .ironwood_builder
+                .build_for_pczt(&mut rng)
+                .map_err(Error::IronwoodBuild)?;
+            (Some(bundle), meta)
+        } else {
+            (None, orchard::builder::BundleMetadata::empty())
+        };
+
+        Ok(PcztResult {
+            pczt_parts: PcztParts {
+                params: self.params,
+                version: self.tx_version,
+                consensus_branch_id: self.consensus_branch_id,
+                lock_time: 0,
+                expiry_height: self.expiry_height,
+                transparent: None,
+                sapling: None,
+                orchard: orchard_bundle,
+                ironwood: ironwood_bundle,
+            },
+            sapling_meta: SaplingMetadata::empty(),
+            orchard_meta,
+            ironwood_meta,
+        })
+    }
 }
 
 /// The result of a transaction build operation, which includes the resulting transaction along

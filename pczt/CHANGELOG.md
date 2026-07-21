@@ -11,9 +11,17 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `pczt::Pczt`'s Orchard/Ironwood bundle spends now expose their `witness` field
+  via a getter.
 - `pczt::roles::redactor::orchard::OrchardRedactor::compact_resolvable_fields`,
   behind the `orchard` feature, which compacts the Orchard-protocol (Orchard and
   Ironwood) action fields that `pczt::orchard::Bundle::resolve_fields` can restore.
+
+### Changed
+- Serializing an Orchard-protocol bundle built with its anchor deferred to
+  proving time (`orchard`'s `Builder::new_with_anchor_deferred`, ZIP 374) now
+  emits the bundle's anchor as ABSENT (its real spends' witnesses are already
+  absent), for the `Updater` role to install at proving time.
 
 ## [0.8.0-rc.1] - 2026-07-12
 

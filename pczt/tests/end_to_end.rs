@@ -2343,3 +2343,172 @@ fn redacted_anchor_is_not_resolved() {
     redacted.resolve_fields().unwrap();
     assert!(redacted.orchard().anchor().is_none());
 }
+
+#[test]
+fn builder_can_defer_anchors_until_proving() {
+    use zcash_primitives::transaction::builder::DeferredPcztBuilder;
+
+    let mut rng = OsRng;
+
+    let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
+    let orchard_ask = orchard::keys::SpendAuthorizingKey::from(&orchard_sk);
+    let orchard_fvk = orchard::keys::FullViewingKey::from(&orchard_sk);
+    let orchard_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::External);
+    let orchard_ovk = orchard_fvk.to_ovk(orchard::keys::Scope::External);
+    let recipient = orchard_fvk.address_at(0u32, orchard::keys::Scope::External);
+
+    // Pretend we already received an Orchard note.
+    let value = orchard::value::NoteValue::from_raw(1_000_000);
+    let note = {
+        let orchard_bundle_version = orchard::bundle::BundleVersion::orchard_v2();
+        let mut orchard_builder = orchard::builder::Builder::new(
+            orchard::builder::BundleType::DEFAULT,
+            orchard_bundle_version,
+            orchard_bundle_version.default_flags(),
+            orchard::Anchor::empty_tree(),
+        )
+        .unwrap();
+        orchard_builder
+            .add_output(None, recipient, value, Memo::Empty.encode().into_bytes())
+            .unwrap();
+        let (bundle, meta) = orchard_builder.build::<i64>(&mut rng).unwrap().unwrap();
+        let action = bundle
+            .actions()
+            .get(meta.output_action_index(0).unwrap())
+            .unwrap();
+        let domain = orchard::note_encryption::OrchardDomain::for_action(action);
+        let (note, _, _) = try_note_decryption(&domain, &orchard_ivk.prepare(), action).unwrap();
+        note
+    };
+
+    // The REAL tree state, available only at "proving time": the builder below never sees
+    // it, and neither does the signer.
+    let (anchor, merkle_path): (orchard::Anchor, orchard::tree::MerklePath) = {
+        let cmx: orchard::note::ExtractedNoteCommitment = note.commitment().into();
+        let leaf = MerkleHashOrchard::from_cmx(&cmx);
+        let mut tree =
+            ShardTree::<_, 32, 16>::new(MemoryShardStore::<MerkleHashOrchard, u32>::empty(), 100);
+        tree.append(leaf, incrementalmerkletree::Retention::Marked)
+            .unwrap();
+        tree.checkpoint(9_999_999).unwrap();
+        let position = 0.into();
+        let merkle_path = tree
+            .witness_at_checkpoint_depth(position, 0)
+            .unwrap()
+            .unwrap();
+        let anchor = merkle_path.root(leaf);
+        (anchor.into(), merkle_path.into())
+    };
+
+    // Build the transaction with BOTH shielded anchors deferred to proving time (ZIP 374):
+    // no anchor and no witness is supplied at build time.
+    let mut builder = DeferredPcztBuilder::new::<zip317::FeeRule>(
+        nu6_3_test_network(),
+        10_000_000.into(),
+        orchard::builder::BundleType::DEFAULT,
+        orchard::builder::BundleType::DEFAULT,
+    )
+    .unwrap();
+    builder
+        .add_orchard_spend::<zip317::FeeRule>(orchard_fvk.clone(), note)
+        .unwrap();
+    builder
+        .add_ironwood_output::<zip317::FeeRule>(
+            Some(orchard_ovk),
+            recipient,
+            Zatoshis::const_from_u64(980_000),
+            MemoBytes::empty(),
+        )
+        .unwrap();
+    let PcztResult {
+        pczt_parts,
+        orchard_meta,
+        ..
+    } = builder
+        .build_for_pczt(OsRng, &zip317::FeeRule::standard())
+        .unwrap();
+    // The Creator strips the builder's internal placeholders: both anchors and the real
+    // spend's witness are ABSENT. The fabricated dummy spends keep their (dummy) witnesses:
+    // the prover needs a path for every spend, and any path is valid for a zero-valued
+    // note.
+    let pczt = Creator::build_from_parts(pczt_parts).unwrap();
+    assert!(pczt.orchard().anchor().is_none());
+    assert!(pczt.ironwood().anchor().is_none());
+    let index = orchard_meta.spend_action_index(0).unwrap();
+    for (i, action) in pczt.orchard().actions().iter().enumerate() {
+        if i == index {
+            assert!(action.spend().witness().is_none());
+        } else {
+            assert!(action.spend().witness().is_some());
+        }
+    }
+    check_v2_round_trip(&pczt);
+
+    // I/O finalization and signing need neither anchors nor witnesses under V6.
+    let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+    let mut signer = Signer::new(pczt).unwrap();
+    let sighash = signer.shielded_sighash();
+    signer.sign_orchard(index, &orchard_ask).unwrap();
+    let signed = signer.finish();
+
+    // Proving without the real anchor fails: the deferral cannot be silently ignored.
+    assert!(
+        Prover::new(signed.clone())
+            .create_orchard_proof(post_nu6_3_orchard_proving_key())
+            .is_err()
+    );
+
+    // At proving time, install the real anchor and witness. The sighash is unchanged and
+    // the pre-made signature still verifies, because V6 signatures commit to neither
+    // shielded anchors nor witnesses.
+    let updated = Updater::new(signed)
+        .set_orchard_anchor(anchor)
+        .unwrap()
+        .set_orchard_spend_witnesses([(index, merkle_path)])
+        .unwrap()
+        .set_ironwood_anchor(orchard::Anchor::empty_tree())
+        .unwrap()
+        .finish();
+    assert_eq!(updated.orchard().anchor(), &Some(anchor.to_bytes()));
+    assert_eq!(
+        Signer::new(updated.clone()).unwrap().shielded_sighash(),
+        sighash
+    );
+    let produced_sig = updated.orchard().actions()[index]
+        .spend()
+        .spend_auth_sig()
+        .expect("action was signed");
+    assert_valid_spend_auth_sig(
+        updated.orchard().actions()[index].spend().rk(),
+        sighash,
+        produced_sig,
+    );
+
+    let proved = Prover::new(updated)
+        .create_orchard_proof(post_nu6_3_orchard_proving_key())
+        .unwrap()
+        .create_ironwood_proof(post_nu6_3_orchard_proving_key())
+        .unwrap()
+        .finish();
+    check_v2_round_trip(&proved);
+
+    let tx = TransactionExtractor::new(proved).extract().unwrap();
+    assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
+}
+
+#[test]
+fn deferred_anchors_require_v6() {
+    use zcash_primitives::transaction::builder::DeferredPcztBuilder;
+
+    // Under a pre-NU6.3 branch the transaction version (V5) commits its signatures to the
+    // shielded anchors, so anchor deferral is refused at construction.
+    assert!(matches!(
+        DeferredPcztBuilder::new::<zip317::FeeRule>(
+            pre_nu6_3_test_network(),
+            10_000_000.into(),
+            orchard::builder::BundleType::DEFAULT,
+            orchard::builder::BundleType::DEFAULT,
+        ),
+        Err(zcash_primitives::transaction::builder::Error::AnchorDeferralUnsupported(_))
+    ));
+}
