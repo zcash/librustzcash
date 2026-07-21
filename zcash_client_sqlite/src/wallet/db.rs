@@ -237,6 +237,10 @@ pub(super) const INDEX_ADDRESSES_ACCOUNTS: &str = r#"
 CREATE INDEX idx_addresses_accounts ON addresses (
     account_id ASC
 )"#;
+pub(super) const INDEX_ADDRESSES_CACHED_TRANSPARENT_RECEIVER_ADDRESS: &str = r#"
+CREATE UNIQUE INDEX idx_addresses_cached_transparent_receiver_address ON addresses (
+    cached_transparent_receiver_address ASC
+)"#;
 pub(super) const INDEX_ADDRESSES_INDICES: &str = r#"
 CREATE INDEX idx_addresses_indices ON addresses (
     diversifier_index_be ASC
@@ -264,7 +268,9 @@ CREATE TABLE blocks (
     sapling_commitment_tree_size INTEGER,
     orchard_commitment_tree_size INTEGER,
     sapling_output_count INTEGER,
-    orchard_action_count INTEGER)";
+    orchard_action_count INTEGER,
+    ironwood_commitment_tree_size INTEGER,
+    ironwood_action_count INTEGER)";
 
 /// Stores the wallet's transactions.
 ///
@@ -444,6 +450,10 @@ CREATE INDEX idx_sapling_received_note_spends_transaction_id ON sapling_received
 /// - `address_id`: a foreign key to the address that this note was sent to; null in the
 ///   case that the note was sent to an internally-scoped address (we never store addresses
 ///   containing internal Orchard receivers in the `addresses` table).
+/// - `note_version`: the version of the note plaintext from which this note was obtained,
+///   matching the note plaintext lead byte. The Orchard note encryption domain accepts only
+///   version 2 note plaintexts, so this is always 2; the version is recorded rather than
+///   assumed because it determines how the note commitment trapdoor is derived from `rseed`.
 pub(super) const TABLE_ORCHARD_RECEIVED_NOTES: &str = r#"
 CREATE TABLE "orchard_received_notes" (
     id INTEGER PRIMARY KEY,
@@ -464,6 +474,7 @@ CREATE TABLE "orchard_received_notes" (
     address_id INTEGER
         REFERENCES addresses(id) ON DELETE CASCADE,
     witness_stabilized INTEGER NOT NULL DEFAULT 0,
+    note_version INTEGER NOT NULL DEFAULT 2,
     UNIQUE (transaction_id, action_index)
 )"#;
 pub(super) const INDEX_ORCHARD_RECEIVED_NOTES_ACCOUNT: &str = r#"
@@ -503,6 +514,80 @@ pub(super) const INDEX_ORCHARD_RNS_TX: &str = r#"
 CREATE INDEX idx_orchard_received_note_spends_transaction_id ON orchard_received_note_spends (
     transaction_id ASC
 )"#;
+
+/// Stores the Ironwood notes received by the wallet.
+///
+/// Ironwood notes ([ZIP 2005], NU6.3) are Orchard-protocol notes obtained from version 3 note
+/// plaintexts, carried by the Ironwood bundle of a transaction and committed to the Ironwood
+/// note commitment tree. They are stored separately from `orchard_received_notes` because the
+/// two pools have distinct note commitment trees, and because an Orchard action and an Ironwood
+/// action in the same transaction may share an action index.
+///
+/// The columns have the same semantics as those of the `orchard_received_notes` table; see
+/// [`TABLE_ORCHARD_RECEIVED_NOTES`] for details. Note spentness is tracked in
+/// [`TABLE_IRONWOOD_RECEIVED_NOTE_SPENDS`].
+///
+/// [ZIP 2005]: https://zips.z.cash/zip-2005
+pub(super) const TABLE_IRONWOOD_RECEIVED_NOTES: &str = "
+CREATE TABLE ironwood_received_notes (
+    id INTEGER PRIMARY KEY,
+    transaction_id INTEGER NOT NULL
+        REFERENCES transactions(id_tx) ON DELETE CASCADE,
+    action_index INTEGER NOT NULL,
+    account_id INTEGER NOT NULL
+        REFERENCES accounts(id) ON DELETE CASCADE,
+    diversifier BLOB NOT NULL,
+    value INTEGER NOT NULL,
+    rho BLOB NOT NULL,
+    rseed BLOB NOT NULL,
+    nf BLOB UNIQUE,
+    is_change INTEGER NOT NULL,
+    memo BLOB,
+    commitment_tree_position INTEGER,
+    recipient_key_scope INTEGER,
+    address_id INTEGER
+        REFERENCES addresses(id) ON DELETE CASCADE,
+    witness_stabilized INTEGER NOT NULL DEFAULT 0,
+    note_version INTEGER NOT NULL,
+    UNIQUE (transaction_id, action_index)
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_ACCOUNT: &str = "
+CREATE INDEX idx_ironwood_received_notes_account ON ironwood_received_notes (
+    account_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_ADDRESS: &str = "
+CREATE INDEX idx_ironwood_received_notes_address ON ironwood_received_notes (
+    address_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_TX: &str = "
+CREATE INDEX idx_ironwood_received_notes_tx ON ironwood_received_notes (
+    transaction_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RECEIVED_NOTES_WITNESS_STABILIZED: &str = "
+CREATE INDEX idx_ironwood_received_notes_witness_stabilized ON ironwood_received_notes (
+    witness_stabilized
+)";
+
+/// A junction table between received Ironwood notes and the transactions that spend them.
+///
+/// This plays the same role for Ironwood notes as [`TABLE_SAPLING_RECEIVED_NOTE_SPENDS`] does
+/// for Sapling notes; see its documentation for details.
+pub(super) const TABLE_IRONWOOD_RECEIVED_NOTE_SPENDS: &str = "
+CREATE TABLE ironwood_received_note_spends (
+    ironwood_received_note_id INTEGER NOT NULL
+        REFERENCES ironwood_received_notes(id) ON DELETE CASCADE,
+    transaction_id INTEGER NOT NULL
+        REFERENCES transactions(id_tx) ON DELETE CASCADE,
+    UNIQUE (ironwood_received_note_id, transaction_id)
+)";
+pub(super) const INDEX_IRONWOOD_RNS_NOTE: &str = "
+CREATE INDEX idx_ironwood_received_note_spends_note_id ON ironwood_received_note_spends (
+    ironwood_received_note_id ASC
+)";
+pub(super) const INDEX_IRONWOOD_RNS_TX: &str = "
+CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_received_note_spends (
+    transaction_id ASC
+)";
 
 /// Stores the transparent outputs received by the wallet.
 ///
@@ -561,6 +646,10 @@ CREATE INDEX idx_transparent_received_outputs_address ON transparent_received_ou
 pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_TX: &str = r#"
 CREATE INDEX idx_transparent_received_outputs_tx ON transparent_received_outputs (
     transaction_id
+)"#;
+pub(super) const INDEX_TRANSPARENT_RECEIVED_OUTPUTS_VALUE_ZAT: &str = r#"
+CREATE INDEX idx_transparent_received_outputs_value_zat ON transparent_received_outputs (
+    value_zat DESC
 )"#;
 
 /// A junction table between received transparent outputs and the transactions that spend them.
@@ -777,6 +866,15 @@ CREATE TABLE sapling_tree_checkpoint_marks_removed (
     CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
 )";
 
+/// Stores the identifiers of Sapling [`ShardTree`] checkpoints that have been explicitly retained
+/// as durable "anchors", exempting them from automatic pruning of excess checkpoints.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_SAPLING_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE sapling_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
+)";
+
 /// Stores the shards of a [`ShardTree`] for the Orchard commitment tree.
 ///
 /// This is identical to [`TABLE_SAPLING_TREE_SHARDS`]; see its documentation for details.
@@ -829,6 +927,84 @@ CREATE TABLE orchard_tree_checkpoint_marks_removed (
     FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
     ON DELETE CASCADE,
     CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+)";
+
+/// Stores the identifiers of Orchard [`ShardTree`] checkpoints that have been explicitly retained
+/// as durable "anchors", exempting them from automatic pruning of excess checkpoints.
+///
+/// This is identical to [`TABLE_SAPLING_TREE_RETAINED_CHECKPOINTS`]; see its documentation for
+/// details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_ORCHARD_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE orchard_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
+)";
+
+/// Stores the shards of an Ironwood [`ShardTree`].
+///
+/// Ironwood note commitments are Orchard-shaped, so this is identical to
+/// [`TABLE_ORCHARD_TREE_SHARDS`]; see its documentation for details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_SHARDS: &str = "
+CREATE TABLE ironwood_tree_shards (
+    shard_index INTEGER PRIMARY KEY,
+    subtree_end_height INTEGER,
+    root_hash BLOB,
+    shard_data BLOB,
+    contains_marked INTEGER,
+    CONSTRAINT root_unique UNIQUE (root_hash)
+)";
+
+/// Stores the "cap" of the Ironwood [`ShardTree`].
+///
+/// This is identical to [`TABLE_ORCHARD_TREE_CAP`]; see its documentation for details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_CAP: &str = "
+CREATE TABLE ironwood_tree_cap (
+    -- cap_id exists only to be able to take advantage of `ON CONFLICT`
+    -- upsert functionality; the table will only ever contain one row
+    cap_id INTEGER PRIMARY KEY,
+    cap_data BLOB NOT NULL
+)";
+
+/// Stores the checkpointed positions in the Ironwood [`ShardTree`].
+///
+/// This is identical to [`TABLE_ORCHARD_TREE_CHECKPOINTS`]; see its documentation for
+/// details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_CHECKPOINTS: &str = "
+CREATE TABLE ironwood_tree_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY,
+    position INTEGER
+)";
+
+/// Stores metadata about the positions of Ironwood notes that have been spent but for
+/// which witness information has not yet been removed from the note commitment tree.
+///
+/// This is identical to [`TABLE_ORCHARD_TREE_CHECKPOINT_MARKS_REMOVED`]; see its
+/// documentation for details.
+pub(super) const TABLE_IRONWOOD_TREE_CHECKPOINT_MARKS_REMOVED: &str = "
+CREATE TABLE ironwood_tree_checkpoint_marks_removed (
+    checkpoint_id INTEGER NOT NULL,
+    mark_removed_position INTEGER NOT NULL,
+    FOREIGN KEY (checkpoint_id) REFERENCES ironwood_tree_checkpoints(checkpoint_id)
+    ON DELETE CASCADE,
+    CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+)";
+
+/// Stores the set of Ironwood [`ShardTree`] checkpoints that are explicitly retained as anchors.
+///
+/// Ironwood note commitments are Orchard-shaped, so this is identical to
+/// [`TABLE_ORCHARD_TREE_RETAINED_CHECKPOINTS`]; see its documentation for details.
+///
+/// [`ShardTree`]: shardtree::ShardTree
+pub(super) const TABLE_IRONWOOD_TREE_RETAINED_CHECKPOINTS: &str = "
+CREATE TABLE ironwood_tree_retained_checkpoints (
+    checkpoint_id INTEGER PRIMARY KEY
 )";
 
 //
@@ -949,6 +1125,22 @@ UNION
        (orchard_received_notes.transaction_id, 3, orchard_received_notes.action_index)
 UNION
     SELECT
+        ironwood_received_notes.id AS id_within_pool_table,
+        ironwood_received_notes.transaction_id,
+        4 AS pool,
+        ironwood_received_notes.action_index AS output_index,
+        account_id,
+        ironwood_received_notes.value,
+        is_change,
+        ironwood_received_notes.memo,
+        sent_notes.id AS sent_note_id,
+        ironwood_received_notes.address_id
+    FROM ironwood_received_notes
+    LEFT JOIN sent_notes
+    ON (sent_notes.transaction_id, sent_notes.output_pool, sent_notes.output_index) =
+       (ironwood_received_notes.transaction_id, 4, ironwood_received_notes.action_index)
+UNION
+    SELECT
         u.id AS id_within_pool_table,
         u.transaction_id,
         0 AS pool,
@@ -981,6 +1173,14 @@ SELECT
     rn.account_id
 FROM orchard_received_note_spends s
 JOIN orchard_received_notes rn ON rn.id = s.orchard_received_note_id
+UNION
+SELECT
+    4 AS pool,
+    s.ironwood_received_note_id AS received_output_id,
+    s.transaction_id,
+    rn.account_id
+FROM ironwood_received_note_spends s
+JOIN ironwood_received_notes rn ON rn.id = s.ironwood_received_note_id
 UNION
 SELECT
     0 AS pool,
@@ -1131,9 +1331,10 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   - 0: Transparent
 ///   - 2: Sapling
 ///   - 3: Orchard
+///   - 4: Ironwood
 /// - `output_index`: The index of the output within the transaction bundle associated with
 ///   the `output_pool` value; that is, within `vout` for transparent, the vector of
-///   Sapling `OutputDescription` values, or the vector of Orchard actions.
+///   Sapling `OutputDescription` values, or the vector of Orchard or Ironwood actions.
 /// - `tx_mined_height`: An optional value identifying the block height at which the transaction that
 ///   produced this output was mined, or NULL if the transaction is unmined.
 /// - `tx_trust_status`: A flag indicating whether the transaction that produced this output
@@ -1383,6 +1584,87 @@ SELECT
     contains_marked,
     MAX(priority) AS max_priority
 FROM v_orchard_shard_scan_ranges
+GROUP BY
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked";
+
+/// Combines the Ironwood tree shards and scan ranges.
+///
+/// Ironwood is Orchard-shaped, so this mirrors [`view_orchard_shard_scan_ranges`], but keyed
+/// on NU6.3 (Ironwood) activation. In regtest mode when NU6.3 has no activation height, the
+/// `subtree_start_height` column defaults to `NULL` for the first shard; in that scenario there
+/// should never be any Ironwood shards, so the view should be empty and this state should be
+/// unobservable.
+pub(super) fn view_ironwood_shard_scan_ranges<P: Parameters>(params: &P) -> String {
+    format!(
+        "CREATE VIEW v_ironwood_shard_scan_ranges AS
+        SELECT
+            shard.shard_index,
+            shard.shard_index << 16 AS start_position,
+            (shard.shard_index + 1) << 16 AS end_position_exclusive,
+            IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+            shard.subtree_end_height,
+            shard.contains_marked,
+            scan_queue.block_range_start,
+            scan_queue.block_range_end,
+            scan_queue.priority
+        FROM ironwood_tree_shards shard
+        LEFT OUTER JOIN ironwood_tree_shards prev_shard
+            ON shard.shard_index = prev_shard.shard_index + 1
+        -- Join with scan ranges that overlap with the subtree's involved blocks.
+        INNER JOIN scan_queue ON (
+            subtree_start_height < scan_queue.block_range_end AND
+            (
+                scan_queue.block_range_start <= shard.subtree_end_height OR
+                shard.subtree_end_height IS NULL
+            )
+        )",
+        // NU6.3 might not be active in regtest mode.
+        params
+            .activation_height(NetworkUpgrade::Nu6_3)
+            .map(|h| u32::from(h).to_string())
+            .as_deref()
+            .unwrap_or("NULL"),
+    )
+}
+
+pub(super) fn view_ironwood_shard_unscanned_ranges() -> String {
+    format!(
+        "CREATE VIEW v_ironwood_shard_unscanned_ranges AS
+        WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+        SELECT
+            shard_index,
+            start_position,
+            end_position_exclusive,
+            subtree_start_height,
+            subtree_end_height,
+            contains_marked,
+            block_range_start,
+            block_range_end,
+            priority
+        FROM v_ironwood_shard_scan_ranges
+        INNER JOIN wallet_birthday
+        WHERE priority > {}
+        AND block_range_end > wallet_birthday.height",
+        priority_code(&ScanPriority::Scanned),
+    )
+}
+
+pub(super) const VIEW_IRONWOOD_SHARDS_SCAN_STATE: &str = "
+CREATE VIEW v_ironwood_shards_scan_state AS
+SELECT
+    shard_index,
+    start_position,
+    end_position_exclusive,
+    subtree_start_height,
+    subtree_end_height,
+    contains_marked,
+    MAX(priority) AS max_priority
+FROM v_ironwood_shard_scan_ranges
 GROUP BY
     shard_index,
     start_position,

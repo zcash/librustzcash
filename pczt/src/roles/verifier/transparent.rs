@@ -11,6 +11,7 @@ impl super::Verifier {
             transparent,
             sapling,
             orchard,
+            ironwood,
         } = self.pczt;
 
         let bundle = transparent
@@ -25,6 +26,7 @@ impl super::Verifier {
                 transparent: crate::transparent::Bundle::serialize_from(bundle),
                 sapling,
                 orchard,
+                ironwood,
             },
         })
     }

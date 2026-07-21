@@ -1,6 +1,6 @@
 [package]
 name = "pczt"
-version = "0.7.0"
+version = "0.8.0-rc.1"
 authors = ["Jack Grigg <jack@electriccoin.co>"]
 edition.workspace = true
 rust-version.workspace = true
@@ -55,6 +55,7 @@ document-features = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
+rand_chacha.workspace = true
 ripemd.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 sha2.workspace = true
@@ -64,6 +65,7 @@ zcash_primitives = { workspace = true, features = [
     "transparent-inputs",
 ] }
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zip32.workspace = true
 
 [features]
@@ -77,6 +79,7 @@ orchard = [
     "dep:nonempty",
     "dep:orchard",
     "dep:pasta_curves",
+    "dep:zcash_note_encryption",
 ]
 
 ## Enables functionality that requires Sapling protocol types.

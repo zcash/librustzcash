@@ -20,7 +20,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData},
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol, TxId,
+    ShieldedPool, TxId,
     consensus::{BlockHeight, TxIndex},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -58,6 +58,13 @@ pub trait TxMeta {
     /// Returns an iterator over the nullifiers of Orchard notes spent in this transaction.
     #[cfg(feature = "orchard")]
     fn orchard_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier>;
+
+    /// Returns an iterator over the nullifiers of Ironwood notes spent in this transaction.
+    ///
+    /// Ironwood nullifiers share the Orchard nullifier type, but identify notes in the Ironwood
+    /// pool (the transaction's Ironwood bundle, distinct from its Orchard bundle).
+    #[cfg(feature = "orchard")]
+    fn ironwood_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier>;
 
     /// Returns the fee paid by this transaction, given a function that can retrieve the value of
     /// prior transparent outputs spent in the transaction.
@@ -100,6 +107,13 @@ impl TxMeta for Transaction {
             .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier()))
     }
 
+    #[cfg(feature = "orchard")]
+    fn ironwood_spent_note_nullifiers(&self) -> impl Iterator<Item = &::orchard::note::Nullifier> {
+        self.ironwood_bundle()
+            .into_iter()
+            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier()))
+    }
+
     fn fee_paid<E, F>(&self, get_prevout: F) -> Result<Option<Zatoshis>, E>
     where
         E: From<BalanceError>,
@@ -138,6 +152,13 @@ pub trait LowLevelWalletRead {
     /// A wallet-internal transaction identifier.
     type TxRef: Copy + Eq + Hash;
 
+    /// Returns the height to which the wallet has been fully scanned: the greatest height
+    /// for which the wallet has trial-decrypted this and all preceding blocks above the
+    /// wallet's birthday height, or `Ok(None)` if no such height exists.
+    fn block_fully_scanned_height(
+        &self,
+    ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error>;
+
     /// Returns the set of account identifiers for accounts that spent notes and/or UTXOs in the
     /// construction of the given transaction.
     fn get_funding_accounts<T: TxMeta>(
@@ -153,6 +174,10 @@ pub trait LowLevelWalletRead {
 
         #[cfg(feature = "orchard")]
         funding_accounts.extend(self.detect_accounts_orchard(tx.orchard_spent_note_nullifiers())?);
+
+        #[cfg(feature = "orchard")]
+        funding_accounts
+            .extend(self.detect_accounts_ironwood(tx.ironwood_spent_note_nullifiers())?);
 
         Ok(funding_accounts)
     }
@@ -228,6 +253,20 @@ pub trait LowLevelWalletRead {
         spends: impl Iterator<Item = &'a orchard::note::Nullifier>,
     ) -> Result<HashSet<Self::AccountId>, Self::Error>;
 
+    /// Detects the set of accounts that received Ironwood outputs that, when spent, reveal(ed) the
+    /// given [`Nullifier`]s. This is used to determine which account(s) funded a given
+    /// transaction.
+    ///
+    /// Ironwood notes share the Orchard nullifier type but are tracked separately, so this is
+    /// distinct from [`LowLevelWalletRead::detect_accounts_orchard`].
+    ///
+    /// [`Nullifier`]: orchard::note::Nullifier
+    #[cfg(feature = "orchard")]
+    fn detect_accounts_ironwood<'a>(
+        &self,
+        spends: impl Iterator<Item = &'a orchard::note::Nullifier>,
+    ) -> Result<HashSet<Self::AccountId>, Self::Error>;
+
     /// Get information about a transparent output controlled by the wallet.
     ///
     /// # Parameters
@@ -268,6 +307,15 @@ pub trait LowLevelWalletRead {
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error>;
 
+    /// Finds the reference to the transaction that reveals the given Ironwood nullifier in the
+    /// backing data store, if known. Ironwood nullifiers are Orchard-shaped but are tracked as a
+    /// separate pool.
+    #[cfg(feature = "orchard")]
+    fn detect_ironwood_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error>;
+
     /// Returns the wallet-internal account reference for the given external account identifier.
     ///
     /// This is used to translate between the stable external [`AccountId`](Self::AccountId)
@@ -302,6 +350,8 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         sapling_output_count: u32,
         #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] orchard_action_count: u32,
+        #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] ironwood_action_count: u32,
     ) -> Result<(), Self::Error>;
 
     /// Add metadata about a transaction to the wallet data store.
@@ -398,6 +448,18 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         spent_in: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
 
+    /// Adds information about a received Ironwood note to the wallet, or updates any existing
+    /// record for that output. Ironwood notes are Orchard-shaped but are stored as a separate
+    /// pool.
+    #[cfg(feature = "orchard")]
+    fn put_received_ironwood_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error>;
+
     /// Updates the backing store to indicate that the Orchard output having the given nullifier is
     /// spent in the transaction referenced by `spent_in_tx`. This may result in multiple distinct
     /// transactions being recorded as having spent the note; only one of these transactions will
@@ -408,6 +470,16 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     /// Returns `Ok(true)` if a a new record was added to the data store.
     #[cfg(feature = "orchard")]
     fn mark_orchard_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error>;
+
+    /// Updates the backing store to indicate that the Ironwood output having the given nullifier is
+    /// spent in the transaction referenced by `spent_in_tx`. Behaves like
+    /// [`mark_orchard_note_spent`](Self::mark_orchard_note_spent) but for the Ironwood pool.
+    #[cfg(feature = "orchard")]
+    fn mark_ironwood_note_spent(
         &mut self,
         nf: &::orchard::note::Nullifier,
         tx_ref: Self::TxRef,
@@ -432,6 +504,16 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     ///   - The vector of nullifiers revealed by the actions in that transaction.
     #[cfg(feature = "orchard")]
     fn track_block_orchard_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error>;
+
+    /// Causes the given Ironwood output nullifiers to be tracked by the wallet. Behaves like
+    /// [`track_block_orchard_nullifiers`](Self::track_block_orchard_nullifiers) but for the
+    /// Ironwood pool.
+    #[cfg(feature = "orchard")]
+    fn track_block_ironwood_nullifiers(
         &mut self,
         block_height: BlockHeight,
         nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
@@ -580,7 +662,7 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
     fn notify_scan_complete(
         &mut self,
         range: Range<BlockHeight>,
-        wallet_note_positions: &[(ShieldedProtocol, Position)],
+        wallet_note_positions: &[(ShieldedPool, Position)],
     ) -> Result<(), Self::Error>;
 
     #[cfg(feature = "transparent-inputs")]
@@ -594,17 +676,20 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
 
 /// This trait provides a generalization over output representations.
 pub trait ReceivedShieldedOutput {
-    const POOL_TYPE: PoolType;
     type AccountId;
-    type Note: Into<crate::wallet::Note>;
+    type Note;
     type Nullifier;
 
     /// Returns the index of the output within its corresponding bundle.
     fn index(&self) -> usize;
     /// Returns the account ID for the account that received this output.
     fn account_id(&self) -> Self::AccountId;
-    /// Returns the received note.
+    /// Returns the note.
     fn note(&self) -> &Self::Note;
+    /// Returns the received note, as a [`Note`].
+    ///
+    /// [`Note`]: crate::wallet::Note
+    fn to_wallet_note(&self) -> crate::wallet::Note;
     /// Returns any memo associated with the output.
     fn memo(&self) -> Option<&MemoBytes>;
     /// Returns a [`TransferType`] value that is determined based upon what type of key was used to
@@ -634,7 +719,6 @@ impl<T: ReceivedShieldedOutput<Note = ::sapling::Note, Nullifier = ::sapling::Nu
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> {
-    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -645,8 +729,11 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
     fn account_id(&self) -> Self::AccountId {
         *WalletSaplingOutput::account_id(self)
     }
-    fn note(&self) -> &::sapling::Note {
+    fn note(&self) -> &Self::Note {
         WalletSaplingOutput::note(self)
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        crate::wallet::Note::Sapling(self.note().clone())
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
@@ -673,7 +760,6 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletSaplingOutput<AccountId> 
 }
 
 impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note, AccountId> {
-    const POOL_TYPE: PoolType = PoolType::SAPLING;
     type AccountId = AccountId;
     type Note = ::sapling::Note;
     type Nullifier = ::sapling::Nullifier;
@@ -684,8 +770,11 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::sapling::Note
     fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
-    fn note(&self) -> &::sapling::Note {
-        self.note()
+    fn note(&self) -> &Self::Note {
+        DecryptedOutput::note(self)
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        crate::wallet::Note::Sapling(self.note().clone())
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())
@@ -725,7 +814,6 @@ impl<T: ReceivedShieldedOutput<Note = ::orchard::Note, Nullifier = ::orchard::no
 
 #[cfg(feature = "orchard")]
 impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> {
-    const POOL_TYPE: PoolType = PoolType::ORCHARD;
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -736,8 +824,15 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
     fn account_id(&self) -> Self::AccountId {
         *WalletOrchardOutput::account_id(self)
     }
-    fn note(&self) -> &::orchard::note::Note {
-        WalletOrchardOutput::note(self)
+    fn note(&self) -> &Self::Note {
+        &self.note().0
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        let (note, pool) = self.note();
+        crate::wallet::Note::Orchard {
+            note: *note,
+            pool: *pool,
+        }
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
@@ -764,8 +859,9 @@ impl<AccountId: Copy> ReceivedShieldedOutput for WalletOrchardOutput<AccountId> 
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note, AccountId> {
-    const POOL_TYPE: PoolType = PoolType::ORCHARD;
+impl<AccountId: Copy> ReceivedShieldedOutput
+    for DecryptedOutput<(::orchard::Note, ::orchard::ValuePool), AccountId>
+{
     type AccountId = AccountId;
     type Note = ::orchard::Note;
     type Nullifier = ::orchard::note::Nullifier;
@@ -776,8 +872,15 @@ impl<AccountId: Copy> ReceivedShieldedOutput for DecryptedOutput<::orchard::Note
     fn account_id(&self) -> Self::AccountId {
         *self.account()
     }
-    fn note(&self) -> &orchard::note::Note {
-        self.note()
+    fn note(&self) -> &Self::Note {
+        &self.note().0
+    }
+    fn to_wallet_note(&self) -> crate::wallet::Note {
+        let (note, pool) = self.note();
+        crate::wallet::Note::Orchard {
+            note: *note,
+            pool: *pool,
+        }
     }
     fn memo(&self) -> Option<&MemoBytes> {
         Some(self.memo())

@@ -1,7 +1,9 @@
 # zcash_proofs
 
-This library contains the zk-SNARK circuits for Zcash, and the APIs for creating
-and verifying proofs.
+This library contains the Sprout zk-SNARK circuit and the APIs for creating and
+verifying Sprout proofs. The Sapling circuits have moved to the `sapling-crypto`
+crate; this crate retains helpers for loading the Sapling proving parameters
+from disk but no longer defines those circuits itself.
 
 ## License
 

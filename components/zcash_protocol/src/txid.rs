@@ -76,3 +76,14 @@ impl TxId {
         *self == Self::NULL
     }
 }
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use super::TxId;
+    use proptest::prelude::*;
+
+    /// An arbitrary transaction id (32 random bytes)
+    pub fn arb_txid() -> impl Strategy<Value = TxId> {
+        any::<[u8; 32]>().prop_map(TxId::from_bytes)
+    }
+}

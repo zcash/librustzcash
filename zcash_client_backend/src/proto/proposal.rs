@@ -17,6 +17,30 @@ pub struct Proposal {
     /// The series of transactions to be created.
     #[prost(message, repeated, tag = "4")]
     pub steps: ::prost::alloc::vec::Vec<ProposalStep>,
+    /// The confirmations policy under which the proposal was constructed. It is used to resolve the
+    /// anchor for any step that spends no shielded notes (such a step defers the choice of anchor).
+    /// Proposals serialized by older versions omit this field; they are interpreted using the
+    /// default confirmations policy.
+    #[prost(message, optional, tag = "5")]
+    pub confirmations_policy: ::core::option::Option<ConfirmationsPolicy>,
+    /// The transaction version header explicitly requested when the proposal was constructed.
+    /// Proposals serialized by older versions, or constructed without an explicit version request,
+    /// omit this field; they are built at the version implied by the target height.
+    #[prost(uint32, optional, tag = "6")]
+    pub proposed_version: ::core::option::Option<u32>,
+}
+/// The number of confirmations required before notes may be spent, per ZIP 315.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ConfirmationsPolicy {
+    /// The number of confirmations required before trusted notes may be spent.
+    #[prost(uint32, tag = "1")]
+    pub trusted: u32,
+    /// The number of confirmations required before untrusted notes may be spent.
+    #[prost(uint32, tag = "2")]
+    pub untrusted: u32,
+    /// Whether transparent inputs may be spent with zero confirmations in shielding transactions.
+    #[prost(bool, tag = "3")]
+    pub allow_zero_conf_shielding: bool,
 }
 /// A data structure that describes the inputs to be consumed and outputs to
 /// be produced in a proposed transaction.
@@ -121,6 +145,10 @@ pub struct TransactionBalance {
 /// an ephemeral output, which must be spent by a subsequent step. This is
 /// only supported for transparent outputs. Each ephemeral output will be
 /// given a unique t-address.
+///
+/// When the transparent value pool is selected and the `isEphemeral` field
+/// is not set, the value represents transparent change, which will be sent
+/// to an internal-scope (change) transparent address of the wallet.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ChangeValue {
     /// The value of a change or ephemeral output to be created, in zatoshis.
@@ -158,6 +186,10 @@ pub enum ValuePool {
     Sapling = 2,
     /// The Orchard value pool
     Orchard = 3,
+    /// The Ironwood value pool (ZIP 2005). Ironwood notes are Orchard-shaped but
+    /// belong to a distinct pool; older decoders that do not recognize this value
+    /// will reject the proposal rather than misattribute it to Orchard.
+    Ironwood = 4,
 }
 impl ValuePool {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -170,6 +202,7 @@ impl ValuePool {
             Self::Transparent => "Transparent",
             Self::Sapling => "Sapling",
             Self::Orchard => "Orchard",
+            Self::Ironwood => "Ironwood",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -179,6 +212,7 @@ impl ValuePool {
             "Transparent" => Some(Self::Transparent),
             "Sapling" => Some(Self::Sapling),
             "Orchard" => Some(Self::Orchard),
+            "Ironwood" => Some(Self::Ironwood),
             _ => None,
         }
     }

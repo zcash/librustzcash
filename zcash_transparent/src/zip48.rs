@@ -1,6 +1,7 @@
 use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use core::num::NonZeroU8;
 
 use bip32::{ChildNumber, ExtendedPrivateKey, ExtendedPublicKey, Prefix};
 use nonempty::NonEmpty;
@@ -221,7 +222,7 @@ impl AccountPubKey {
 ///
 /// [ZIP 48]: https://zips.z.cash/zip-0048
 pub struct FullViewingKey {
-    threshold: u8,
+    threshold: NonZeroU8,
     key_info: NonEmpty<AccountPubKey>,
 }
 
@@ -233,13 +234,13 @@ impl FullViewingKey {
     /// - `key_info.len() == 3`
     /// - Wallet descriptor template: `"sh(sortedmulti(2,@0/**,@1/**,@2/**))"`
     pub fn standard(
-        threshold: u8,
+        threshold: NonZeroU8,
         key_info: Vec<AccountPubKey>,
     ) -> Result<Self, FullViewingKeyError> {
         let key_info = NonEmpty::from_vec(key_info).ok_or(FullViewingKeyError::NoPubKeys)?;
         if key_info.len() > 15 {
             Err(FullViewingKeyError::TooManyPubKeys)
-        } else if usize::from(threshold) > key_info.len() {
+        } else if usize::from(threshold.get()) > key_info.len() {
             Err(FullViewingKeyError::InvalidThreshold)
         } else {
             // Verify `key_info` in a scope so we can borrow from it.
@@ -345,7 +346,7 @@ impl FullViewingKey {
         // Derive the P2SH script for the desired address. Because the only constructor
         // for `FullViewingKey` forces a specific wallet descriptor template, we can
         // fix it here.
-        let redeem_script = sortedmulti(self.threshold, &keys)
+        let redeem_script = sortedmulti(self.threshold.get(), &keys)
             .expect("child numbers are non-hardened, chance of failure is around 2^-127");
         let script_pubkey = sh(&redeem_script);
 
@@ -373,6 +374,7 @@ pub enum FullViewingKeyError {
 mod tests {
     use alloc::string::ToString;
     use alloc::vec::Vec;
+    use core::num::NonZeroU8;
 
     use bip32::Prefix;
     use zcash_protocol::consensus::{MainNetwork, Network, Parameters};
@@ -398,7 +400,7 @@ mod tests {
             })
             .collect();
 
-        let fvk = FullViewingKey::standard(2, key_info).unwrap();
+        let fvk = FullViewingKey::standard(NonZeroU8::new(2).unwrap(), key_info).unwrap();
 
         assert_eq!(
             fvk.wallet_descriptor_template(),
@@ -471,7 +473,8 @@ mod tests {
                 assert_eq!(actual.key.to_string(xpub_prefix).as_str(), *expected);
             }
 
-            let fvk = FullViewingKey::standard(tv.required, key_info).unwrap();
+            let fvk =
+                FullViewingKey::standard(NonZeroU8::new(tv.required).unwrap(), key_info).unwrap();
 
             assert_eq!(
                 fvk.wallet_descriptor_template(),

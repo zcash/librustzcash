@@ -6,7 +6,6 @@ use super::{
 };
 use ::sapling::bundle::GrothProofBytes;
 
-#[cfg(zcash_unstable = "nu7")]
 use super::sighash_v6::v6_signature_hash;
 
 pub enum SignableInput<'a> {
@@ -51,7 +50,9 @@ pub fn signature_hash<
 
         TxVersion::V5 => v5_signature_hash(tx, signable_input, txid_parts),
 
-        #[cfg(zcash_unstable = "nu7")]
         TxVersion::V6 => v6_signature_hash(tx, signable_input, txid_parts),
+
+        #[cfg(zcash_unstable = "nu7")]
+        TxVersion::V7 => v6_signature_hash(tx, signable_input, txid_parts),
     })
 }

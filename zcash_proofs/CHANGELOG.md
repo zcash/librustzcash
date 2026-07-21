@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-07-09
+
+### Changed
+- Migrated to `zcash_primitives 0.29.0`.
+
+## [0.29.0-pre.0] - 2026-06-30
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_primitives 0.29.0-pre.0`.
+
 ## [0.28.0] - 2026-06-02
 
 ### Changed

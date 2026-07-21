@@ -494,6 +494,12 @@ criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.4.5"
 notes = "New uses of unsafe look reasonable."
 
+[[audits.num-conv]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.2.1 -> 0.2.2"
+notes = "No changes to unsafe code, straightforward refactoring and cleanup."
+
 [[audits.num_enum]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
@@ -992,6 +998,12 @@ delta = "1.0.60 -> 1.0.61"
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "1.0.61 -> 1.0.63"
+
+[[audits.time-core]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.1.8 -> 0.1.9"
+notes = "No unsafe code; macro additions are straightforward refactoring changes."
 
 [[audits.tokio-stream]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
@@ -1982,6 +1994,12 @@ end = "2025-12-16"
 
 [[trusted.orchard]]
 criteria = "safe-to-deploy"
+user-id = 1244
+start = "2022-10-19"
+end = "2027-06-30"
+
+[[trusted.orchard]]
+criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
 start = "2021-01-07"
 end = "2026-12-05"
@@ -2274,6 +2292,12 @@ user-id = 6289 # Jack Grigg (str4d)
 start = "2024-03-01"
 end = "2025-04-22"
 
+[[trusted.zcash_history]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2026-07-01"
+end = "2027-07-01"
+
 [[trusted.zcash_keys]]
 criteria = "safe-to-deploy"
 user-id = 6289 # Jack Grigg (str4d)
@@ -2381,6 +2405,12 @@ criteria = "safe-to-deploy"
 user-id = 169181 # Kris Nuttycombe (nuttycom)
 start = "2024-12-17"
 end = "2026-12-18"
+
+[[trusted.zewif]]
+criteria = "safe-to-deploy"
+user-id = 169181 # Kris Nuttycombe (nuttycom)
+start = "2025-05-30"
+end = "2027-07-11"
 
 [[trusted.zip32]]
 criteria = "safe-to-deploy"

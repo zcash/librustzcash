@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{fixed::FeeRule as FixedFeeRule, transparent};
 use zcash_protocol::{
-    ShieldedProtocol, consensus,
+    ShieldedPool, consensus,
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
 };
@@ -18,6 +18,8 @@ use super::{
     sapling as sapling_fees,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
@@ -28,8 +30,10 @@ use super::orchard as orchard_fees;
 pub struct SingleOutputChangeStrategy<I> {
     fee_rule: FixedFeeRule,
     change_memo: Option<MemoBytes>,
-    fallback_change_pool: ShieldedProtocol,
+    fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
+    #[cfg(feature = "transparent-inputs")]
+    transparent_change_policy: TransparentChangePolicy,
     meta_source: PhantomData<I>,
 }
 
@@ -42,7 +46,7 @@ impl<I> SingleOutputChangeStrategy<I> {
     pub fn new(
         fee_rule: FixedFeeRule,
         change_memo: Option<MemoBytes>,
-        fallback_change_pool: ShieldedProtocol,
+        fallback_change_pool: ShieldedPool,
         dust_output_policy: DustOutputPolicy,
     ) -> Self {
         Self {
@@ -50,8 +54,25 @@ impl<I> SingleOutputChangeStrategy<I> {
             change_memo,
             fallback_change_pool,
             dust_output_policy,
+            #[cfg(feature = "transparent-inputs")]
+            transparent_change_policy: TransparentChangePolicy::ShieldChange,
             meta_source: PhantomData,
         }
+    }
+
+    /// Sets the [`TransparentChangePolicy`] to be used by this change strategy, determining
+    /// whether change may be returned to the transparent pool when the flows of the transaction
+    /// under construction are fully transparent.
+    ///
+    /// The default is [`TransparentChangePolicy::ShieldChange`]. This policy has no effect on
+    /// transactions that involve any shielded flows.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_transparent_change_policy(
+        mut self,
+        transparent_change_policy: TransparentChangePolicy,
+    ) -> Self {
+        self.transparent_change_policy = transparent_change_policy;
+        self
     }
 }
 
@@ -83,6 +104,7 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
         _wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
@@ -94,6 +116,8 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             self.fee_rule.fixed_fee(),
             &split_policy,
             self.fallback_change_pool,
+            #[cfg(feature = "transparent-inputs")]
+            self.transparent_change_policy,
             Zatoshis::ZERO,
             0,
         );
@@ -107,6 +131,11 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
+            // The fixed-fee strategy has no unpadded opt-in; keep the padded default.
+            #[cfg(feature = "orchard")]
+            ::orchard::builder::BundleType::DEFAULT,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -120,7 +149,7 @@ mod tests {
         fixed::FeeRule as FixedFeeRule, zip317::MINIMUM_FEE,
     };
     use zcash_protocol::{
-        ShieldedProtocol,
+        ShieldedPool,
         consensus::{Network, NetworkUpgrade, Parameters},
         value::Zatoshis,
     };
@@ -143,7 +172,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             fee_rule,
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::default(),
         );
 
@@ -166,6 +195,8 @@ mod tests {
             ),
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
             None,
             &(),
         );
@@ -184,7 +215,7 @@ mod tests {
         let change_strategy = SingleOutputChangeStrategy::<MockWalletDb>::new(
             fee_rule,
             None,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             DustOutputPolicy::default(),
         );
 
@@ -212,6 +243,8 @@ mod tests {
                 ][..],
                 &[SaplingPayment::new(Zatoshis::const_from_u64(40000))][..],
             ),
+            #[cfg(feature = "orchard")]
+            &orchard_fees::EmptyBundleView,
             #[cfg(feature = "orchard")]
             &orchard_fees::EmptyBundleView,
             None,

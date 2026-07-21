@@ -47,7 +47,16 @@ mod tests {
             tx_extractor::{self, TransactionExtractor},
         };
 
-        let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32]).build();
+        let pczt = Creator::new(
+            BranchId::Nu6.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
 
         // Extraction fails because we haven't run the IO Finalizer.
         // Extraction fails in Sapling because we happen to extract it before Orchard.
@@ -69,7 +78,16 @@ mod tests {
             io_finalizer::{self, IoFinalizer},
         };
 
-        let pczt = Creator::new(BranchId::Nu6.into(), 10_000_000, 133, [0; 32], [0; 32]).build();
+        let pczt = Creator::new(
+            BranchId::Nu6.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
 
         // IO finalization fails on spends because we happen to check them first.
         assert!(matches!(

@@ -8,9 +8,295 @@ indicated by the `PLANNED` status in order to make it possible to correctly
 represent the transitive `semver` implications of changes within the enclosing
 workspace.
 
-## [0.24.0] - PLANNED
+## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::wallet::{redact_pczt_for_signer,
+  redact_pczt_for_batch_signer}`, which create compact signer views of a
+  wallet-created PCZT. The batch variant additionally removes fields that a
+  Signer that obtains its full viewing key independently and returns only new
+  Orchard-protocol signatures does not need. These are available behind the
+  `pczt` feature.
+- `zcash_client_backend::proposal::Step::ironwood_action_count`, the Ironwood-pool
+  counterpart to `Step::orchard_action_count`. Requires the `orchard` feature.
+- `zip-233` feature flag, forwarding to `zcash_primitives/zip-233`. It gates no
+  API of this crate; it exists so code in this crate that constructs
+  `zcash_primitives` transactions can pass the feature-gated ZIP 233 arguments
+  exactly when the underlying crate expects them.
+
+### Changed
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
+  takes an `expiry_height: Option<BlockHeight>` parameter, mirroring the
+  one already accepted by `create_pczt_from_proposal`. This lets callers
+  override the builder-derived expiry height for non-PCZT transaction
+  construction too — useful when a caller's view of the chain tip used to
+  derive `min_target_height` may lag the real tip by more than the default
+  expiry buffer covers.
+- `zcash_client_backend::data_api::AccountBalance` now tracks transparent funds
+  in two separate buckets: regular (non-coinbase) funds and funds in coinbase
+  outputs, replacing its single internal unshielded balance:
+  - New accessors `AccountBalance::unshielded_regular_balance` and
+    `AccountBalance::unshielded_coinbase_balance`, and new mutators
+    `AccountBalance::with_unshielded_regular_balance_mut` and
+    `AccountBalance::with_unshielded_coinbase_balance_mut`. Transparent outputs
+    whose transaction index within their block is unknown are classified as
+    regular (non-coinbase) funds.
+  - `AccountBalance::unshielded_balance` now returns a `Balance` by value,
+    computed as the sum of the regular and coinbase buckets, instead of a
+    `&Balance` reference.
+  - Value in immature transparent coinbase outputs is now expected to be
+    reported in the `value_pending_spendability` field of the coinbase bucket
+    rather than as spendable value; it becomes spendable only once the output
+    reaches coinbase maturity.
+- `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
+  `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
+  error type, so that `propose_send_max_transfer` can report
+  `GreedyInputSelectorError::UnsupportedTexAddress` — consistent with
+  `propose_transfer` — when a TEX recipient is requested and the
+  `transparent-inputs` feature is not enabled. Balance errors encountered
+  during send-max input selection are now wrapped in
+  `GreedyInputSelectorError::Balance`.
+- `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
+  `orchard::builder::BundleType` and `orchard::bundle::BundleVersion` that the
+  transaction builder will be configured with, and returns a `Result`. It
+  previously hardcoded the pre-NU6.3 `max(spends, outputs)` formula, which
+  understates the action count for an Orchard-pool bundle constructed for a
+  target height at or after NU6.3: such a bundle disables cross-address
+  transfers, and so requires `spends + outputs` actions. The method now also
+  accounts for the bundle type's padding, and is gated on the `orchard`
+  feature.
+
+### Fixed
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  correctly constructs proposals paying a transparent (non-TEX) recipient — a
+  bare transparent address, or a unified address having no shielded receiver.
+  Previously, such proposals failed validation with
+  `ProposalError::PaymentPoolsMismatch` because no output pool was assigned to
+  the payment.
+- When the `transparent-inputs` feature is not enabled,
+  `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  rejects TEX recipients up front with
+  `GreedyInputSelectorError::UnsupportedTexAddress` instead of constructing an
+  internally inconsistent proposal that failed validation with a misleading
+  error.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `Error::InsufficientFunds` when the wallet's entire spendable balance
+  would be consumed by fees. Previously it proposed a transaction delivering
+  zero value to a shielded recipient (spending the whole balance as fee), and
+  reported `PaymentError::ZeroValuedTransparentOutput` for transparent
+  recipients.
+- When the `orchard` feature is not enabled,
+  `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  delivers a payment to a unified address having both Sapling and Orchard
+  receivers via the Sapling receiver, instead of failing with
+  `ProposalError::PaymentPoolsMismatch`. A unified address containing no
+  receiver that the build is able to pay is now rejected with
+  `GreedyInputSelectorError::UnsupportedAddress` instead of the same misleading
+  error.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  returns `GreedyInputSelectorError::Balance` instead of panicking when a
+  custom fee rule produces per-transaction fees whose sum exceeds the maximum
+  monetary amount.
+
+### Removed
+- `zcash_client_backend::data_api::AccountBalance::`
+  - `with_unshielded_balance_mut`; use `with_unshielded_regular_balance_mut` or
+    `with_unshielded_coinbase_balance_mut` instead as appropriate.
+
+## [0.24.0-rc.1] - 2026-07-12
+
+### Added
+- `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (with the
+  `PutBlocksRows` result type and the `PutBlocksRowsDbT` trait alias): the
+  row-writing stage of `put_blocks`, extracted as a public function over
+  `LowLevelWalletWrite` so that wallet stores that maintain their note
+  commitment trees by other means can reuse it without also implementing
+  `WalletCommitmentTrees`. `put_blocks` is now expressed as `put_blocks_rows`
+  followed by the note commitment tree updates.
+- `zcash_client_backend::data_api::ll::wallet::NULLIFIER_MAP_RETENTION_BLOCKS`, the
+  trailing window of blocks whose nullifier-map entries `put_blocks_rows` always
+  inserts.
+- The helper functions used by the note commitment tree stage of `put_blocks`
+  are now `pub`, so that alternative `ShardStore`-backed stores can reuse the
+  exact tree-update logic: `zcash_client_backend::data_api::ll::wallet::`
+  `{build_subtrees, checkpoint_positions, ensure_checkpoints,
+  cross_pool_ensure_heights, update_tree}`.
+- `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_pubkeys`
+  (behind the `transparent-key-import` feature flag), a batch variant of
+  `import_standalone_transparent_pubkey` that lets implementations validate the
+  target account once for the whole batch. The default implementation imports
+  each pubkey individually.
+- `zcash_client_backend::data_api::WalletCommitmentTrees::put_sapling_shards`
+  (and `put_orchard_shards` / `put_ironwood_shards` under the `orchard`
+  feature): provided methods that bulk-write a batch of note commitment tree
+  changes — shards, an optional replacement tree cap, and a checkpoint delta —
+  to the backing store, for wallet stores that maintain their note commitment
+  trees outside the backing store (e.g. in memory) and flush in batches. The
+  default implementations apply the changes through the corresponding
+  `with_*_tree_mut` methods, so existing implementations of the trait are
+  unaffected.
+- `zcash_client_backend::proposal::Proposal::proposed_version` and
+  `with_proposed_version`. The transaction version requested when a proposal is
+  constructed is now recorded on the proposal (and preserved across
+  serialization) so that transaction building honors it.
+- `zcash_client_backend::proto::ProposalDecodingError::ProposedVersionInvalid`,
+  returned when a serialized proposal specifies an unrecognized transaction
+  version header.
+- Received Ironwood notes can now be selected and spent. `InputSource`
+  implementations select Ironwood notes when the Ironwood pool is active at the
+  target height, the greedy input selector spends them (attributing each spent
+  note to the Ironwood bundle for correct fee and action accounting), and the
+  proposal represents Orchard-receiver payments and Ironwood-spend change as
+  Ironwood-pool outputs that the transaction builder places in the Ironwood
+  bundle. `zcash_client_backend::data_api::ReceivedNotes` gains an
+  `ironwood` accessor and `take_ironwood`/`ironwood_value` methods, and
+  `NoteRetention` gains `should_retain_ironwood` (behind the `orchard` feature
+  flag).
+- The greedy input selector may combine shielded inputs from any of the pools
+  that are spendable at the target height (Sapling and Orchard, plus Ironwood
+  once it is active). It spends from a single pool when one can cover the
+  required amount by itself — preferring the pool matching the payment's
+  outputs, to avoid unnecessary pool crossings — and otherwise accumulates
+  pools in preference order, drawing upon the legacy Orchard pool last. The
+  Orchard turnstile (see `ProposalError::OrchardPoolValueCreation`) is enforced
+  by the change strategies and by proposal validation rather than by
+  restricting input selection.
+- `zcash_client_backend::wallet::Note::pool`, which returns the shielded value
+  pool (`Sapling`, `Orchard`, or `Ironwood`) to which a note belongs, classifying
+  version-3 Orchard notes as belonging to the Ironwood pool. This replaces the
+  removed `Note::protocol` accessor, which reported only the cryptographic
+  protocol (Sapling or Orchard).
+- `zcash_client_backend::proposal::Proposal::input_count_in_pool`, which returns
+  the total number of inputs from a given pool across all steps of the proposal.
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::anchor_height`,
+  which returns the shielded anchor height for a given target height under the
+  policy. It is used to resolve the anchor of a purely transparent proposal step,
+  which produces no shielded bundle and therefore defers its anchor choice.
+- `zcash_client_backend::data_api::AccountBalance::ironwood_balance` and
+  `AccountBalance::with_ironwood_balance_mut`, exposing the balance of Ironwood
+  funds in an account. Received Ironwood notes are now included in the account's
+  total, spendable, pending, and uneconomic balances alongside Sapling and
+  Orchard.
+- `zcash_client_backend::scanning::ScanningKeys::ironwood` (behind the `orchard`
+  feature flag), an accessor for the Ironwood scanning keys. Ironwood outputs
+  are trial-decrypted with the account's Orchard viewing keys but are tracked as
+  a pool distinct from Orchard. `ScanningKeys::new` now also takes the Ironwood
+  key map.
+- The block scanner now tracks Ironwood outputs as a pool distinct from Orchard
+  (behind the `orchard` feature flag). `ScannedBlock::ironwood`,
+  `ScannedBlockCommitments::ironwood`, `BlockMetadata::ironwood_tree_size`,
+  `WalletTx::ironwood_spends`/`ironwood_outputs`, and `Nullifiers::ironwood`
+  expose the Ironwood note commitments, tree size, and detected notes. The
+  `BlockMetadata::from_parts` and `WalletTx::new` constructors now also take the
+  corresponding Ironwood arguments.
+- Received Ironwood notes are now stored during `put_blocks`, and Ironwood
+  nullifiers are tracked for spend detection (behind the `orchard` feature
+  flag). `WalletRead::get_ironwood_nullifiers` and the low-level
+  `detect_ironwood_spend`/`put_received_ironwood_note`/`mark_ironwood_note_spent`/
+  `track_block_ironwood_nullifiers` methods mirror their Orchard counterparts.
+  `WalletRead::get_ironwood_nullifiers` is a required method (it is called on the
+  scan path, so it does not default to a panic); backends must implement it.
+- `zcash_client_backend::data_api::chain::ChainState::final_ironwood_tree` and
+  `zcash_client_backend::proto::service::TreeState::ironwood_tree` (behind the
+  `orchard` feature flag), exposing the Ironwood note commitment tree frontier
+  as a pool distinct from Orchard. `ChainState::new` now also takes the final
+  Ironwood tree frontier. An absent `ironwood_tree` treestate field parses as an
+  empty tree, which is the correct Ironwood treestate at pool activation.
+- `put_blocks` now persists the Ironwood note commitment tree and Ironwood block
+  metadata, mirroring the Orchard handling. Checkpoint reconciliation across the
+  note commitment trees now spans all three shielded pools, so each tree gains a
+  checkpoint at every height checkpointed in any other pool.
+- `zcash_client_backend::data_api::WalletCommitmentTrees::with_ironwood_tree_mut`,
+  an optional accessor that wallet backends can override to provide the Ironwood
+  anchors and witnesses used by the transaction builder.
+- `zcash_client_backend::data_api::WalletCommitmentTrees::put_ironwood_subtree_roots`,
+  the Ironwood counterpart of `put_orchard_subtree_roots` for populating the
+  Ironwood note commitment tree from a subtree-root source. It defaults to a
+  no-op for backends that do not track an Ironwood tree, mirroring
+  `with_ironwood_tree_mut`.
+- `zcash_client_backend::data_api::WalletSummary::next_ironwood_subtree_index`,
+  the Ironwood counterpart of `next_orchard_subtree_index`. `WalletSummary::new`
+  now also takes the next Ironwood subtree index when the `orchard` feature is
+  enabled.
+- `zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT`, the shard height of
+  the Ironwood note commitment tree (equal to the Orchard shard height).
+- `zcash_client_backend::fees::TransparentChangePolicy` (behind the
+  `transparent-inputs` feature flag): expresses whether change for a
+  transaction whose net flows are fully transparent should be shielded (the
+  default, `ShieldChange`) or returned to the transparent pool
+  (`TransparentChangeAllowed`) at an internal-scope (change) transparent
+  address of the wallet, as described under the BIP 44 `change` path level.
+  The policy has no effect on transactions that involve any shielded flows;
+  change for such transactions is always shielded. This enables `zallet` to
+  replicate `zcashd`'s `z_sendmany` behavior for fully-transparent spends.
+- `with_transparent_change_policy` builder methods (behind
+  `transparent-inputs`) on the ZIP 317 change strategies
+  `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}`
+  and on `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy`.
+  When transparent change is produced it is always emitted as a single
+  output; the `SplitPolicy` configured for `MultiOutputChangeStrategy`
+  applies only to shielded change.
+- `zcash_client_backend::fees::ChangeValue::transparent` (behind
+  `transparent-inputs`): constructs a non-ephemeral transparent change value,
+  distinct from the ephemeral (ZIP 320) transparent output value constructed
+  by `ChangeValue::ephemeral_transparent`. In the proposal protobuf encoding,
+  such a change value is represented by the existing transparent `valuePool`
+  with `isEphemeral` unset; decoding this combination previously returned
+  `ProposalDecodingError::InvalidChangeRecipient`.
+- `zcash_client_backend::fees::ChangeValue::ironwood` (behind `orchard`):
+  constructs an Ironwood change value, parallel to `ChangeValue::sapling` and
+  `ChangeValue::orchard`.
+- `zcash_client_backend::data_api::WalletWrite::reserve_next_n_internal_addresses`
+  (behind `transparent-inputs`): reserves the next `n` available
+  internal-scope (change) transparent addresses for an account, parallel to
+  the existing `reserve_next_n_ephemeral_addresses` method.
+  `create_proposed_transactions` uses this to allocate the recipient
+  address(es) for non-ephemeral transparent change outputs, which it records
+  using the existing `Recipient::InternalTransparent` variant.
+- `zcash_client_backend::data_api::NoteCommitmentTree`
+- `zcash_client_backend::data_api::SentTransactionOutput::note_commitment_tree`
+- `zcash_client_backend::proto::proposal::ValuePool::Ironwood`, so that a proposal
+  that spends Ironwood notes can be serialized to and parsed back from the
+  protobuf proposal format.
+- `zcash_client_backend::fees::orchard::BundleView::bundle_version`, replacing
+  the `bundle_type` accessor; it returns the `orchard::bundle::BundleVersion`
+  used to compute the Orchard action count.
+- `zcash_client_backend::data_api::wallet::input_selection::SpendPolicy`:
+  expresses which sources of funds an input selector may draw upon to satisfy a
+  transfer. It names the shielded pools notes may be selected from and, behind
+  the `transparent-inputs` feature flag, an optional `TransparentSpendPolicy`.
+  The default permits every shielded pool present in the build and no transparent
+  spending, preserving the historical fully-shielded behavior; a caller restricts
+  the shielded set (e.g. to `{Orchard}`) to forbid pool crossing, since combining
+  notes across shielded pools reduces privacy and must be an explicit choice.
+- `zcash_client_backend::data_api::wallet::input_selection::TransparentSpendPolicy`
+  (behind the `transparent-inputs` feature flag): specifies how transparent UTXOs
+  may be spent when a `SpendPolicy` permits it — a `TransparentSource`
+  (`AnyAccountAddr`, the legacy `ANY_TADDR` behavior; or `FromAddresses`, an
+  explicitly named set) together with a `CoinbasePolicy`. Constructed via
+  `any_account_addr`, `from_addresses`, or `from_one_address` (all spending
+  non-coinbase UTXOs by default) and refined with `with_coinbase`.
+- `zcash_client_backend::data_api::wallet::input_selection::CoinbasePolicy`
+  (`OnlyCoinbase` / `NonCoinbase`): the caller's choice of which coinbase
+  transparent outputs a transparent spend may draw upon.
+- `zcash_client_backend::data_api::wallet::input_selection::NonEmptyBTreeSet`
+  (behind the `transparent-inputs` feature flag): a minimal non-empty
+  `BTreeSet` wrapper used by `TransparentSource::FromAddresses` to hold
+  the explicit set of transparent addresses to spend from.
+- `zcash_client_backend::data_api::CoinbaseFilter::NonCoinbaseOnly` (behind
+  `transparent-inputs`): a selection control (not an encoding of any
+  consensus rule) that excludes coinbase UTXOs from input selection, so that
+  general (non-shielding) transfers do not spend them; coinbase funds are
+  shielded separately via `propose_shielding_coinbase`.
+- `zcash_client_backend::data_api::InputSource::select_spendable_transparent_outputs`
+  (behind `transparent-inputs`), a value-bounded counterpart to
+  `get_spendable_transparent_outputs[_for_addresses]` used by
+  `GreedyInputSelector::propose_transaction` when the `TransparentSpendPolicy`
+  requires spending the account's transparent UTXOs. It returns a set of outputs
+  covering a requested `TargetValue`, ordered by descending value and bounded by
+  a `max_inputs` cap and an optional `address_allow_list`; an insufficient result
+  (from either bound) is surfaced as `InsufficientFunds`. See the method
+  documentation for the fee-estimation heuristic used to size the gather.
 - A new `spend-index` feature flag, for consumers whose chain-data source can
   resolve the spend of an individual transparent output (e.g. a full node with a
   spent-outpoint index). It gates:
@@ -20,16 +306,41 @@ workspace.
     which records that a transparent outpoint was confirmed unspent as of a given
     height.
 - `zcash_client_backend::data_api::error::RewindError`
+- `zcash_client_backend::data_api::InputSource::get_spendable_transparent_outputs_for_addresses`,
+  a batched equivalent of `get_spendable_transparent_outputs` that returns the spendable
+  transparent outputs for a set of addresses. It has a default implementation that queries each
+  address individually, so existing implementors are unaffected; data stores may override it to
+  satisfy the request with a single query. Shielding now uses this method, avoiding a per-address
+  database round-trip when gathering inputs from wallets with many transparent addresses.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::with_shielding_block_space_percent`,
+  which caps the fraction of a block's space (an integer percentage, default 10)
+  that a transaction's gathered transparent inputs may occupy, bounding
+  transaction size for wallets holding very large numbers of transparent UTXOs.
+  When the cap is reached the highest-value outputs are selected first; the
+  remainder are left for a later transaction (when shielding), or the proposal
+  fails with `InsufficientFunds` (for general transfers).
 - `zcash_client_backend::data_api::ll::wallet::PutBlocksError::ShardTreeForBlockRange`,
   a new variant that wraps a `shardtree` insertion error together with the
   shielded pool whose note commitment tree was being updated and the range of
   block heights that were being added to the wallet when the error occurred.
   This makes it possible to identify which pool and which scanned blocks
   triggered a note commitment tree conflict during `put_blocks`.
+- `zcash_client_backend::data_api::WalletCommitmentTrees::remove_retained_checkpoints_below`,
+  which releases retained "anchor" checkpoints with height below a given
+  threshold so that they may be pruned normally.
+- During scanning, checkpoints on a fixed interval (every 288 blocks, roughly
+  four per day) at or above the NU6.3 (Ironwood) activation height are now
+  retained as durable "anchors", exempting them from automatic pruning of
+  excess checkpoints so that their roots and the witnesses anchored to them
+  remain computable after they age beyond the checkpoint window. Anchor
+  retention is inactive until NU6.3 has an assigned activation height.
+  `zcash_client_backend::data_api::ll::wallet::put_blocks` takes a new
+  `anchor_retention_height: Option<BlockHeight>` argument that controls this.
 - `zcash_client_backend::wallet::WalletTransparentOutput`:
   - `recipient_account`
   - `recipient_key_scope`
   - `funding_account`
+  - `transfer_type`
 - `zcash_client_backend::wallet::Recipient::InternalTransparent` (behind
   the `transparent-inputs` feature flag): a new variant for recording the
   send side of a transparent output whose recipient address belongs to a
@@ -44,6 +355,19 @@ workspace.
 - `zcash_client_backend::proposal::ProposalError::ShieldingRequiresShieldedRecipient`,
   returned by `propose_shielding_coinbase` when the supplied `to_address` is
   a transparent or TEX address.
+- `zcash_client_backend::proposal::ProposalError::OrchardPoolValueCreation`
+  (behind the `orchard` feature flag), returned by proposal construction when a
+  step proposed for a post-NU6.3 target height would return as much or more
+  value to the Orchard pool as change than the step's Orchard inputs remove.
+  (A payment directed to the Orchard pool after NU6.3 activation is a
+  programming error, which step construction enforces by assertion: payment
+  classification always delivers such payments via the Ironwood bundle.)
+- `zcash_client_backend::proposal::ProposalError::OrchardReceiverRequiresIronwood`,
+  returned by proposal construction when a transaction version that cannot carry an
+  Ironwood bundle is explicitly requested for a payment to an Orchard receiver at a
+  post-NU6.3 target height. Such a payment must be delivered through the Ironwood pool
+  (a version 6 transaction feature), as the Orchard turnstile forbids adding value to
+  the Orchard pool after NU6.3.
 - `zcash_client_backend::data_api::wallet::ProposeShieldingCoinbaseErrT` type
   alias, parallel to `ProposeShieldingErrT` but parameterized on a `FeeRule`
   instead of a `ChangeStrategy`.
@@ -57,17 +381,127 @@ workspace.
 - `zcash_client_backend::sync`:
   - `decryptor` module, behind the `sync-decryptor` feature flag, providing a
     Tokio-based batch decryption engine for full blocks and transactions.
+- `zcash_client_backend::proposal::Step` predicates and counters for classifying
+  a step's inputs, outputs, and change by pool. Ironwood inputs (version-3
+  Orchard notes) are counted for `PoolType::Ironwood`, and the Orchard variants
+  exclude them:
+  - `input_in_pool`, `output_in_pool`, `change_in_pool`
+  - `input_count_in_pool`, `output_count_in_pool`, `change_count_in_pool`
+  - `orchard_action_count`, the number of Orchard actions a step requires
+    (the greater of its Orchard spends and its Orchard outputs plus change).
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}`
+  gained `with_unpadded_orchard_pool_bundles`, which makes fee and change
+  calculation count Orchard and Ironwood bundles without the 2-action padding
+  minimum. The default behavior is unchanged (padded). Proposals created with
+  this option must be executed with a matching unpadded builder configuration.
 
 ### Changed
+- Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
+  `zcash_address 0.13.0`, `zcash_transparent 0.9.0`, `zip321 0.9.0-rc.1`,
+  `zcash_keys 0.15.0`, `orchard 0.15`, `zcash_primitives 0.29.0`,
+  `zcash_proofs 0.29.0`, `zip321 0.9.0-rc.1`, `pczt 0.8.0-rc.1`, `shardtree 0.7`. 
+- `zcash_client_backend::data_api::ll::LowLevelWalletRead` has an added
+  `block_fully_scanned_height` method, returning the height to which the wallet
+  has been fully scanned.
+- `zcash_client_backend::data_api::ll::wallet::put_blocks_rows` (and therefore
+  `put_blocks`) now skips nullifier-map insertion for entries it can prove are
+  unobservable: when a batch extends the wallet's contiguous fully-scanned
+  frontier, only the trailing `NULLIFIER_MAP_RETENTION_BLOCKS` blocks' nullifiers
+  are inserted. Out-of-order scan ranges are unaffected and continue to track
+  the nullifiers of every block.
+- `zcash_client_backend::proposal::Step::from_parts` now takes its `anchor_height`
+  as `Option<BlockHeight>` instead of `BlockHeight`. Any step that produces a
+  shielded bundle — it spends shielded notes, pays to a shielded pool, or returns
+  shielded change — must provide `Some` (the checkpoint selected during input
+  selection); only a purely transparent step may pass `None`. A `None` anchor on a
+  step that produces a shielded bundle is rejected with a new
+  `ProposalError::MissingShieldedAnchor` variant, and the protobuf decoder rejects
+  the equivalent zero-anchor encoding at parse time with a new
+  `zcash_client_backend::proto::ProposalDecodingError::MissingShieldedAnchor`
+  variant.
+- `zcash_client_backend::wallet::Recipient::InternalAccount` has been renamed
+  to `Recipient::InternalShielded`, for symmetry with `Recipient::InternalTransparent`
+  and to clarify that the distinguishing feature of this variant is that its
+  payload is a shielded note, not that it is somehow more "the account" than the
+  other internal variant.
+- MSRV is now 1.88
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes an
+  `orchard_pool_bundle_type` argument (behind the `pczt` feature flag) selecting
+  the transactional bundle type for the Orchard and Ironwood bundles; it must
+  match the change strategy used to create the proposal. Pass
+  `orchard::builder::BundleType::DEFAULT` for the previous (padded) behavior.
+- The `proposed_version: Option<TxVersion>` parameter of
+  `zcash_client_backend::data_api::wallet::propose_transfer`,
+  `propose_standard_transfer_to_address`, and
+  `input_selection::InputSelector::propose_transaction`, along with the
+  `ProposalError::IncompatibleTxVersion` variant, is no longer gated behind the
+  `unstable` feature flag. Callers that did not previously enable `unstable` must now
+  pass this argument explicitly; pass `None` to retain the previous behavior of
+  selecting the transaction version from the target height.
+- The migration to `lightwallet-protocol v0.5.0` changes `zcash_client_backend::proto`:
+  - Adds the `service::PoolType::Ironwood` and `service::ShieldedProtocol::Ironwood`
+    variants.
+  - Adds the `compact_formats::ChainMetadata::ironwood_commitment_tree_size` and
+    `compact_formats::CompactTx::ironwood_actions` fields.
+  - Removes the `compact_formats::CompactBlock::proto_version` field.
+- Many APIs that previously identified a shielded pool by
+  `zcash_protocol::ShieldedProtocol` (Sapling or Orchard) now take or return
+  `zcash_protocol::ShieldedPool` (Sapling, Orchard, or Ironwood). Affected items
+  include `InputSource::{get_spendable_note, select_spendable_notes, select_unspent_notes}`,
+  `wallet::NoteId::{new, protocol}`, `data_api::AccountMeta::note_count`,
+  `fees::ChangeValue::shielded`, the `fees` change-strategy constructors, and the
+  `scanning::ScanError` pool fields.
+- `zcash_client_backend::data_api::AccountMeta` now tracks Ironwood notes:
+  `AccountMeta::new` takes an additional `ironwood` argument, an `ironwood`
+  accessor has been added, and `total_note_count`, `total_value`, and
+  `note_count(ShieldedPool::Ironwood)` now include Ironwood notes, so
+  change-output splitting accounts for the account's Ironwood holdings.
+- Fee and change calculation now derive the Orchard bundle version — and hence
+  the Orchard action-count policy — from the proposal's target height, instead
+  of unconditionally using the legacy (pre-NU6.3) policy. Proposals targeting
+  heights at or beyond NU6.3 activation now count one action per Orchard spend
+  or output, matching the post-NU6.3 transaction builder.
+- `zcash_client_backend::fees::ChangeStrategy::compute_balance` now takes an
+  additional `ironwood` bundle view (behind the `orchard` feature flag),
+  alongside the existing `orchard` view. A V6 transaction carries a separate
+  Ironwood bundle that is charged its own actions, so the built-in change
+  strategies count Ironwood spends, outputs, and change against that bundle.
+  Pass an empty view when nothing targets the Ironwood pool.
+- `zcash_client_backend::fees::ChangeError::DustInputs` has an additional
+  `ironwood` field (behind the `orchard` feature flag) identifying Ironwood
+  inputs that would cost more to spend than they are worth; the built-in
+  change strategies now model Ironwood dust the same way as Orchard dust.
+  Exhaustive matches on the variant must bind or ignore the new field.
+- Once Ironwood is active, input selection represents Orchard-receiver payments
+  and the change from Ironwood spends as Ironwood-pool outputs in the proposal
+  (each delivered to the recipient's Orchard receiver via the Ironwood bundle), so
+  that a proposal a user inspects reflects the Ironwood outputs being created.
+  `zcash_client_backend::data_api::wallet::create_proposed_transactions` builds
+  those outputs through the Ironwood transaction builder.
+- `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now builds
+  the transaction at the version implied by its target height (version 6 from
+  NU6.3 onward) instead of always version 5, and constructs the Ironwood bundle
+  for payments delivered through the Ironwood pool. A post-NU6.3 payment to an
+  Orchard receiver is therefore realized as a version 6 PCZT carrying an Ironwood
+  bundle.
+- `zcash_client_backend::data_api::wallet::create_proposed_transactions` no longer
+  takes a `proposed_version` argument; the transaction version is now carried on the
+  `Proposal` (set when the proposal is constructed) and read from it during building.
+  Remove the argument from calls; to constrain the version, pass it to
+  `propose_transfer`/`propose_standard_transfer_to_address` when constructing the
+  proposal.
+- Renamed `zcash_client_backend::data_api::TransparentOutputFilter` to
+  `CoinbaseFilter`, and its `All` variant to `AllTransparentOutputs`.
 - During scanning, transparent `OP_RETURN` (nulldata) outputs are now recognized as
   unspendable data outputs and skipped silently, instead of being logged as
   unsupported script kinds. Other unrecognized transparent script kinds continue to
   be logged.
 - `zcash_client_backend::data_api`:
   - Changes to the `InputSource` trait:
-    - The result types of `InputSource::get_unspent_transparent_output` and
-      `InputSource::get_unspent_transparent_outputs` have each changed; these
-      have reverted to returning `WalletTransparentOutput`.
+    - `InputSource::get_unspent_transparent_output` and
+      `InputSource::get_spendable_transparent_outputs` have reverted to returning
+      `WalletTransparentOutput` (now carrying an account id) instead of
+      `WalletUtxo`.
 - `zcash_client_backend::data_api::SentTransaction`: the `account_id` field
   and accessor have been renamed to `funding_account`, to disambiguate from
   the recipient-account terminology now used by `WalletTransparentOutput`.
@@ -80,9 +514,64 @@ workspace.
     fail with `RewindError::RewindBeyondBirthdays`; the caller should re-try
     with the affected account ids included in the `reset_account_birthdays`
     argument to acknowledge that those birthdays will be lowered.
+- `zcash_client_backend::DecryptedOutput` now records the value pool of the
+  decrypted output: `DecryptedOutput::new` takes an additional
+  `zcash_protocol::ShieldedPool` argument, a `value_pool` accessor has been added,
+  and the `DecryptedOrchardOutput` associated type now carries the Orchard
+  `ValuePool` so Ironwood outputs are distinguished from Orchard.
+- `zcash_client_backend::decrypt_transaction` now decrypts the transaction's
+  Ironwood bundle under the Ironwood note-encryption domain, so
+  `decrypt_and_store_transaction` detects and stores received Ironwood notes
+  (previously the Ironwood bundle was decrypted under the Orchard domain and no
+  Ironwood note was found). `zcash_client_backend::data_api::DecryptedTransaction`
+  tracks these separately: `DecryptedTransaction::new` takes an additional
+  `ironwood_outputs` argument and an `ironwood_outputs` accessor has been added,
+  both behind the `orchard` feature flag.
 - `zcash_client_backend::proposal`:
   - `Proposal::single_step` and `Step::from_parts` now take transparent inputs
     as `Vec<WalletTransparentOutput<()>>` (explicitly with no account ID).
+  - `Proposal::single_step` and `Step::from_parts` also take an
+    `ironwood_active` flag (behind the `orchard` feature flag) indicating
+    whether the Ironwood pool is active at the target height; when set, the
+    step is validated against the Orchard turnstile (see
+    `ProposalError::OrchardPoolValueCreation`).
+  - `Proposal::single_step` and `Proposal::multi_step` now take the
+    `ConfirmationsPolicy` under which the proposal was constructed, exposed by
+    the new `Proposal::confirmations_policy` accessor. It is used to resolve the
+    anchor of a step that defers its anchor choice (see `Step::anchor_height`).
+  - The shielded anchor height has moved from `ShieldedInputs` to `Step`:
+    `Step::anchor_height` is new and returns `Option<BlockHeight>`. It is `Some`
+    for any step that produces a shielded bundle (one that spends shielded notes,
+    pays to a shielded pool, or returns shielded change); only a purely
+    transparent step returns `None`, deferring its anchor to interpretation time
+    where it is resolved from the proposal's confirmations policy and target
+    height. `ShieldedInputs::from_parts` no longer takes an anchor height, and
+    `ShieldedInputs::anchor_height` has been removed.
+- `zcash_client_backend::proto::proposal::Proposal::try_into_standard_proposal`
+  now takes the network parameters as an additional argument, in order to
+  validate decoded proposals against the Orchard turnstile when Ironwood is
+  active at the proposal's target height. It rejects a proposal that directs a
+  payment to the Orchard pool once Ironwood is active with the new
+  `ProposalDecodingError::OrchardPaymentProhibited` (returning an error rather
+  than panicking on untrusted or legacy input). The serialized proposal format
+  gains a `confirmationsPolicy` field; a proposal serialized without it (by an
+  earlier version) decodes using the default confirmations policy, and a step's
+  zero anchor height decodes as a deferred anchor.
+- The change strategies in `zcash_client_backend::fees` now enforce the Orchard
+  turnstile when selecting the change pool for a proposal with a post-NU6.3
+  target height: change is directed to the Orchard pool only when the
+  transaction spends Orchard notes and strictly less value would return to the
+  pool than the notes remove; otherwise Orchard-pool change is directed to the
+  Ironwood pool.
+- `zcash_client_backend::data_api::wallet::propose_transfer` and
+  `zcash_client_backend::data_api::wallet::input_selection::InputSelector::propose_transaction`
+  now take an additional `&SpendPolicy` argument (no longer behind the
+  `transparent-inputs` feature flag) that controls which shielded pools notes may
+  be selected from and whether and how the account's transparent UTXOs may be
+  spent. The default policy preserves the previous behavior (every shielded pool
+  permitted, no transparent spending); a pool the policy does not name is never
+  drawn upon, so restricting the policy causes input selection to report
+  `InsufficientFunds` rather than crossing into a non-permitted pool.
 - `zcash_client_backend::TransferType::WalletInternal` semantics have
   narrowed: it now specifically indicates a cross-account internal transfer
   (recipient and funder are distinct wallet accounts). Code that previously
@@ -98,10 +587,18 @@ workspace.
   addition to `propose_shielding`.
 - `zcash_client_backend::wallet::WalletTx::new` now takes a `transparent_outputs`
   argument.
+- `zcash_client_backend::fees::StandardFeeRule` tracks the new
+  `ironwood_action_count: usize` argument added to
+  `zcash_primitives::transaction::fees::FeeRule::fee_required`. Code that calls
+  `fee_required` directly or implements the trait must thread through the number
+  of Ironwood actions, passing `0` for transactions without an Ironwood bundle.
 
 ### Removed
 - `zcash_client_backend::data_api::WalletUtxo` (use `WalletTransparentOutput`
   instead).
+- `zcash_client_backend::wallet::Note::protocol` (use `Note::pool` instead).
+- `zcash_client_backend::ShieldedProtocol` re-export (use
+  `zcash_client_backend::ShieldedPool` instead).
 
 ## [0.23.0] - 2026-06-02
 

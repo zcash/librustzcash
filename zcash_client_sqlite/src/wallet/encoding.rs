@@ -14,7 +14,7 @@ use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, ReceiverRequirements},
 };
-use zcash_protocol::{PoolType, ShieldedProtocol, consensus::NetworkType, memo::MemoBytes};
+use zcash_protocol::{PoolType, ShieldedPool, consensus::NetworkType, memo::MemoBytes};
 use zip32::DiversifierIndex;
 
 use crate::error::SqliteClientError;
@@ -37,8 +37,9 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // implementation detail.
     match pool_type {
         PoolType::Transparent => 0i64,
-        PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
-        PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
+        PoolType::Shielded(ShieldedPool::Sapling) => 2i64,
+        PoolType::Shielded(ShieldedPool::Orchard) => 3i64,
+        PoolType::Shielded(ShieldedPool::Ironwood) => 4i64,
     }
 }
 
@@ -47,6 +48,7 @@ pub(crate) fn parse_pool_code(code: i64) -> Result<PoolType, SqliteClientError> 
         0i64 => Ok(PoolType::Transparent),
         2i64 => Ok(PoolType::SAPLING),
         3i64 => Ok(PoolType::ORCHARD),
+        4i64 => Ok(PoolType::IRONWOOD),
         _ => Err(SqliteClientError::CorruptedData(format!(
             "Invalid pool code: {code}"
         ))),
@@ -379,4 +381,35 @@ pub(crate) fn encode_legacy_account_index(
     legacy_account_index
         .map(u32::from)
         .map_or(LEGACY_ADDRESS_INDEX_NULL, i64::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use zcash_protocol::{PoolType, ShieldedPool};
+
+    use super::{parse_pool_code, pool_code};
+
+    #[test]
+    fn pool_code_round_trips() {
+        for pool in [
+            PoolType::Transparent,
+            PoolType::Shielded(ShieldedPool::Sapling),
+            PoolType::Shielded(ShieldedPool::Orchard),
+            PoolType::Shielded(ShieldedPool::Ironwood),
+        ] {
+            assert_eq!(parse_pool_code(pool_code(pool)).unwrap(), pool);
+        }
+    }
+
+    #[test]
+    fn ironwood_pool_code_is_distinct() {
+        let codes = [
+            pool_code(PoolType::Transparent),
+            pool_code(PoolType::Shielded(ShieldedPool::Sapling)),
+            pool_code(PoolType::Shielded(ShieldedPool::Orchard)),
+            pool_code(PoolType::Shielded(ShieldedPool::Ironwood)),
+        ];
+        let unique: std::collections::BTreeSet<_> = codes.iter().collect();
+        assert_eq!(unique.len(), codes.len(), "pool codes must be distinct");
+    }
 }

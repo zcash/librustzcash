@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.23.0"
+version = "0.24.0-rc.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -72,7 +72,7 @@ subtle.workspace = true
 # - Shielded protocols
 bls12_381.workspace = true
 group.workspace = true
-orchard = { workspace = true, optional = true }
+orchard.workspace = true
 sapling.workspace = true
 
 # - Transparent protocol
@@ -136,9 +136,6 @@ serde = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 webpki-roots = { workspace = true, optional = true }
 
-# Workaround for https://anonticket.torproject.org/user/projects/arti/issues/pending/4028/
-time-core.workspace = true
-
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Boilerplate
@@ -169,6 +166,7 @@ zcash_protocol = { workspace = true, features = ["local-consensus", "test-depend
 
 [features]
 default = ["time/default"]
+zip-233 = ["zcash_primitives/zip-233"]
 
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic", "dep:tonic-prost", "hyper-util?/tokio"]
@@ -196,14 +194,19 @@ transparent-key-import = ["transparent-inputs"]
 
 ## Enables per-outpoint transparent spend queries, for consumers that have access
 ## to a spent-outpoint index (e.g. a full node's spend index). Adds the
-## `TransactionDataRequest::SpendsOfTransparentOutput` request variant and the
-## `WalletWrite::notify_outpoint_unspent_checked` method, and is what a wallet
+## `TransactionDataRequest::GetSpendingTx` request variant and the
+## `WalletWrite::notify_output_verified_unspent` method, and is what a wallet
 ## targeting such a data source enables instead of relying on address-based
 ## `TransactionsInvolvingAddress` requests for transparent spend detection.
 spend-index = ["transparent-inputs"]
 
 ## Enables receiving and spending Orchard funds.
-orchard = ["dep:orchard", "dep:pasta_curves", "zcash_keys/orchard"]
+##
+## The `orchard` crate itself is an unconditional dependency (via
+## `zcash_primitives`, which always requires it because every v5+ transaction
+## carries an Orchard bundle type); this feature gates the wallet's
+## Orchard note-handling code, not the crate linkage.
+orchard = ["dep:pasta_curves", "zcash_keys/orchard"]
 
 ## Enables compatibility with legacy zcashd wallet data
 zcashd-compat = ["zcash_keys/zcashd-compat"]
@@ -249,6 +252,7 @@ sync-decryptor = [
 ## operations.
 tor = [
     "dep:arti-client",
+    "arti-client/onion-service-client",
     "dep:dynosaur",
     "dep:fs-mistrust",
     "dep:futures-util",
@@ -279,7 +283,7 @@ test-dependencies = [
     "dep:rand",
     "dep:rand_chacha",
     "transparent/test-dependencies",
-    "orchard?/test-dependencies",
+    "orchard/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_proofs/bundled-prover",

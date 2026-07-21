@@ -17,7 +17,7 @@ use zcash_client_backend::{
 };
 use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
 use zcash_protocol::{
-    ShieldedProtocol, TxId,
+    ShieldedPool, TxId,
     consensus::{self, BlockHeight},
 };
 use zip32::Scope;
@@ -30,9 +30,10 @@ use super::{
 
 pub(crate) fn to_received_note<P: consensus::Parameters>(
     params: &P,
+    pool: ShieldedPool,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get("id")?);
+    let note_id = ReceivedNoteId(pool, row.get("id")?);
     let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
     let output_index = row.get("output_index")?;
     let diversifier = {
@@ -144,7 +145,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         params,
         txid,
         index,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         target_height,
         to_received_note,
     )
@@ -172,7 +173,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         target_height,
         confirmations_policy,
         exclude,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         to_received_note,
     )
 }
@@ -184,7 +185,7 @@ pub(crate) fn select_unspent_note_meta(
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
     super::common::select_unspent_note_meta(
         conn,
-        ShieldedProtocol::Sapling,
+        ShieldedPool::Sapling,
         wallet_birthday,
         anchor_height,
     )
@@ -200,7 +201,7 @@ pub(crate) fn get_sapling_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
 ) -> Result<Vec<(AccountUuid, Nullifier)>, SqliteClientError> {
-    super::common::get_nullifiers(conn, ShieldedProtocol::Sapling, query, |nf_bytes| {
+    super::common::get_nullifiers(conn, ShieldedPool::Sapling, query, |nf_bytes| {
         sapling::Nullifier::from_slice(nf_bytes).map_err(|_| {
             SqliteClientError::CorruptedData("unable to parse Sapling nullifier".to_string())
         })
@@ -450,6 +451,48 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "transparent-inputs")]
+    fn send_max_spendable_to_transparent() {
+        testing::pool::send_max_spendable_to_transparent::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(not(feature = "transparent-inputs"))]
+    fn send_max_to_tex_fails_without_transparent_inputs() {
+        testing::pool::send_max_to_tex_fails_without_transparent_inputs::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_max_fee_overflow_is_an_error() {
+        testing::pool::send_max_fee_overflow_is_an_error::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn send_max_spends_inputs_across_pools() {
+        testing::pool::send_max_spends_inputs_across_pools::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    fn send_max_fails_when_balance_is_consumed_by_fees() {
+        testing::pool::send_max_fails_when_balance_is_consumed_by_fees::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_delivers_via_sapling_when_orchard_is_unavailable() {
+        testing::pool::send_max_delivers_via_sapling_when_orchard_is_unavailable::<SaplingPoolTester>(
+        )
+    }
+
+    #[test]
+    #[cfg(not(feature = "orchard"))]
+    fn send_max_to_orchard_only_ua_fails_without_orchard() {
+        testing::pool::send_max_to_orchard_only_ua_fails_without_orchard::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
     fn fails_to_send_max_to_transparent_with_memo() {
         testing::pool::fails_to_send_max_to_transparent_with_memo::<SaplingPoolTester>()
     }
@@ -626,13 +669,13 @@ pub(crate) mod tests {
     #[cfg(feature = "pczt-tests")]
     #[test]
     fn pczt_single_step_sapling_only() {
-        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>()
+        testing::pool::pczt_single_step::<SaplingPoolTester, SaplingPoolTester>(None)
     }
 
     #[cfg(all(feature = "orchard", feature = "pczt-tests"))]
     #[test]
     fn pczt_single_step_sapling_to_orchard() {
-        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>()
+        testing::pool::pczt_single_step::<SaplingPoolTester, OrchardPoolTester>(None)
     }
 
     #[cfg(feature = "transparent-inputs")]

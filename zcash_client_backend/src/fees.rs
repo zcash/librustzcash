@@ -11,7 +11,7 @@ use zcash_primitives::transaction::fees::{
     zip317::{self as prim_zip317},
 };
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -46,6 +46,7 @@ impl FeeRule for StandardFeeRule {
         sapling_input_count: usize,
         sapling_output_count: usize,
         orchard_action_count: usize,
+        ironwood_action_count: usize,
     ) -> Result<Zatoshis, Self::Error> {
         #[allow(deprecated)]
         match self {
@@ -57,26 +58,66 @@ impl FeeRule for StandardFeeRule {
                 sapling_input_count,
                 sapling_output_count,
                 orchard_action_count,
+                ironwood_action_count,
             ),
         }
     }
 }
 
+/// A policy that determines how change should be returned to the wallet when the net flows of a
+/// transaction under construction are fully transparent.
+///
+/// This policy has no effect on transactions that have any shielded inputs or outputs; change
+/// for such transactions is always returned to a shielded pool, irrespective of the policy in
+/// use. When the flows of a transaction are fully transparent, shielding change (the default)
+/// reveals the change amount as the value of the shielded output(s) in an otherwise-transparent
+/// transaction; returning the change to the transparent pool matches the behavior of
+/// transparent-only wallets (including `zcashd`) at the cost of the change remaining unshielded.
+///
+/// Transparent change is currently always sent to a P2PKH address derived under the wallet
+/// account's internal scope; returning change to the originating address when spending from a
+/// P2SH (e.g. multisig) address is not yet supported. See [zcash/librustzcash#2570] for
+/// details.
+///
+/// [zcash/librustzcash#2570]: https://github.com/zcash/librustzcash/issues/2570
+#[cfg(feature = "transparent-inputs")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TransparentChangePolicy {
+    /// Change is always returned to a shielded pool, even when the net flows of the transaction
+    /// are fully transparent.
+    ///
+    /// This is the default policy.
+    #[default]
+    ShieldChange,
+    /// When the net flows of the transaction are fully transparent, change is returned to the
+    /// transparent pool at an internal-scope (change) transparent address of the wallet, as
+    /// described in [BIP 44].
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+    TransparentChangeAllowed,
+}
+
 /// `ChangeValue` represents either a proposed change output to a shielded pool
 /// (with an optional change memo), or if the "transparent-inputs" feature is
-/// enabled, an ephemeral output to the transparent pool.
+/// enabled, an output to the transparent pool: either an ephemeral output as
+/// part of a [ZIP 320] transaction pair, or a change output to an
+/// internal-scope (change) transparent address of the wallet.
+///
+/// [ZIP 320]: https://zips.z.cash/zip-0320
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeValue(ChangeValueInner);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ChangeValueInner {
     Shielded {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         value: Zatoshis,
         memo: Option<MemoBytes>,
     },
     #[cfg(feature = "transparent-inputs")]
     EphemeralTransparent { value: Zatoshis },
+    #[cfg(feature = "transparent-inputs")]
+    Transparent { value: Zatoshis },
 }
 
 impl ChangeValue {
@@ -86,8 +127,15 @@ impl ChangeValue {
         Self(ChangeValueInner::EphemeralTransparent { value })
     }
 
+    /// Constructs a new change value that will be created as a non-ephemeral transparent output
+    /// sent to an internal-scope (change) transparent address of the wallet.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent(value: Zatoshis) -> Self {
+        Self(ChangeValueInner::Transparent { value })
+    }
+
     /// Constructs a new change value that will be created as a shielded output.
-    pub fn shielded(protocol: ShieldedProtocol, value: Zatoshis, memo: Option<MemoBytes>) -> Self {
+    pub fn shielded(protocol: ShieldedPool, value: Zatoshis, memo: Option<MemoBytes>) -> Self {
         Self(ChangeValueInner::Shielded {
             protocol,
             value,
@@ -97,13 +145,19 @@ impl ChangeValue {
 
     /// Constructs a new change value that will be created as a Sapling output.
     pub fn sapling(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
-        Self::shielded(ShieldedProtocol::Sapling, value, memo)
+        Self::shielded(ShieldedPool::Sapling, value, memo)
     }
 
     /// Constructs a new change value that will be created as an Orchard output.
     #[cfg(feature = "orchard")]
     pub fn orchard(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
-        Self::shielded(ShieldedProtocol::Orchard, value, memo)
+        Self::shielded(ShieldedPool::Orchard, value, memo)
+    }
+
+    /// Constructs a new change value that will be created as an Ironwood output.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(value: Zatoshis, memo: Option<MemoBytes>) -> Self {
+        Self::shielded(ShieldedPool::Ironwood, value, memo)
     }
 
     /// Returns the pool to which the change or ephemeral output should be sent.
@@ -112,6 +166,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { protocol, .. } => PoolType::Shielded(*protocol),
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => PoolType::Transparent,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => PoolType::Transparent,
         }
     }
 
@@ -121,6 +177,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { value, .. } => *value,
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { value } => *value,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { value } => *value,
         }
     }
 
@@ -130,6 +188,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { memo, .. } => memo.as_ref(),
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => None,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => None,
         }
     }
 
@@ -144,6 +204,8 @@ impl ChangeValue {
             ChangeValueInner::Shielded { .. } => false,
             #[cfg(feature = "transparent-inputs")]
             ChangeValueInner::EphemeralTransparent { .. } => true,
+            #[cfg(feature = "transparent-inputs")]
+            ChangeValueInner::Transparent { .. } => false,
         }
     }
 }
@@ -231,6 +293,10 @@ pub enum ChangeError<E, NoteRefT> {
         /// have economic value in the context of this input selection.
         #[cfg(feature = "orchard")]
         orchard: Vec<NoteRefT>,
+        /// The identifiers for Ironwood inputs that could not be determined to
+        /// have economic value in the context of this input selection.
+        #[cfg(feature = "orchard")]
+        ironwood: Vec<NoteRefT>,
     },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
@@ -255,9 +321,11 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                 sapling,
                 #[cfg(feature = "orchard")]
                 orchard,
+                #[cfg(feature = "orchard")]
+                ironwood,
             } => {
                 #[cfg(feature = "orchard")]
-                let orchard_len = orchard.len();
+                let orchard_len = orchard.len() + ironwood.len();
                 #[cfg(not(feature = "orchard"))]
                 let orchard_len = 0;
 
@@ -556,6 +624,10 @@ pub trait ChangeStrategy {
     /// inputs from most to least preferred to spend within each pool, so that the most
     /// preferred ones are less likely to be indicated to remove.
     ///
+    /// - `ironwood`: the Ironwood bundle view (behind the `orchard` feature). A V6
+    ///   transaction carries a separate Ironwood bundle, distinct from `orchard`,
+    ///   with its own action count; pass an empty view when nothing targets the
+    ///   Ironwood pool.
     /// - `ephemeral_balance`: if the transaction is to be constructed with either an
     ///   ephemeral transparent input or an ephemeral transparent output this argument
     ///   may be used to provide the value of that input or output. The value of this
@@ -563,7 +635,7 @@ pub trait ChangeStrategy {
     /// - `wallet_meta`: Additional wallet metadata that the change strategy may use
     ///   in determining how to construct change outputs. This wallet metadata value
     ///   should be computed excluding the inputs provided in the `transparent_inputs`,
-    ///   `sapling`, and `orchard` arguments.
+    ///   `sapling`, `orchard`, and `ironwood` arguments.
     ///
     /// [ZIP 320]: https://zips.z.cash/zip-0320
     #[allow(clippy::too_many_arguments)]
@@ -575,6 +647,7 @@ pub trait ChangeStrategy {
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,
         #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] ironwood: &impl orchard::BundleView<NoteRefT>,
         ephemeral_balance: Option<EphemeralBalance>,
         wallet_meta: &Self::AccountMetaT,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
@@ -609,6 +682,22 @@ pub(crate) mod tests {
     }
 
     impl sapling::InputView<u32> for TestSaplingInput {
+        fn note_id(&self) -> &u32 {
+            &self.note_id
+        }
+        fn value(&self) -> Zatoshis {
+            self.value
+        }
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) struct TestOrchardInput {
+        pub note_id: u32,
+        pub value: Zatoshis,
+    }
+
+    #[cfg(feature = "orchard")]
+    impl super::orchard::InputView<u32> for TestOrchardInput {
         fn note_id(&self) -> &u32 {
             &self.note_id
         }
