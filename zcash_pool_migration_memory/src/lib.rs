@@ -36,8 +36,8 @@ use zcash_protocol::value::Zatoshis;
 
 use zcash_pool_migration_backend::build::sign_pczt;
 use zcash_pool_migration_backend::engine::{
-    MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTxId,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationBackend, MigrationCrypto, MigrationState, MigrationTxId, MigrationTxState,
+    PoolMigrationRead, PoolMigrationWrite,
 };
 
 /// A post-NU6.3 height (past the regtest NU6.3 activation) at which the migration transactions are
@@ -206,40 +206,6 @@ pub fn shared_anchor_witnesses(
     (witnesses, anchor)
 }
 
-/// Rebuild `stored` with the transaction identified by `id` moved to `state`, leaving the rest
-/// untouched. The engine's [`MigrationState`] keeps its transactions behind read-only accessors, so
-/// an external test backend advances one transaction's lifecycle by reconstructing the state from
-/// its public parts.
-fn set_transaction_state(stored: &mut MigrationState, id: MigrationTxId, state: MigrationTxState) {
-    let transactions: Vec<MigrationTransaction> = stored
-        .transactions()
-        .iter()
-        .map(|t| {
-            if t.id() == id {
-                MigrationTransaction::from_parts(
-                    t.id(),
-                    t.kind(),
-                    t.pczt().clone(),
-                    t.depends_on().clone(),
-                    t.scheduled_height(),
-                    t.expiry_height(),
-                    t.anchor_boundary(),
-                    state,
-                )
-            } else {
-                t.clone()
-            }
-        })
-        .collect();
-    *stored = MigrationState::from_parts(
-        stored.status(),
-        stored.note_split().clone(),
-        stored.funding_notes().clone(),
-        stored.preparation().clone(),
-        transactions,
-    );
-}
-
 /// A minimal in-memory backend: a fixed set of note values and a chain tip. Implements the planning
 /// traits ([`MigrationBackend`], [`PoolMigrationRead`], [`PoolMigrationWrite`]); it holds no keys and
 /// cannot sign, so it is used for the plan/store tests, not the commit tests.
@@ -296,7 +262,7 @@ impl PoolMigrationWrite for MockBackend {
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         if let Some(stored) = &mut self.stored {
-            set_transaction_state(stored, id, state);
+            stored.set_transaction_state(id, state);
         }
         Ok(())
     }
@@ -374,7 +340,7 @@ impl PoolMigrationWrite for CommitMock {
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         if let Some(stored) = &mut self.stored {
-            set_transaction_state(stored, id, state);
+            stored.set_transaction_state(id, state);
         }
         Ok(())
     }

@@ -463,6 +463,18 @@ impl MigrationState {
             transactions,
         }
     }
+
+    /// Move the transaction identified by `id` to `state`, leaving every other transaction and the
+    /// rest of the migration untouched. A store advances one transaction's lifecycle through this
+    /// rather than rebuilding the whole state from its public parts.
+    pub fn set_transaction_state(&mut self, id: MigrationTxId, state: MigrationTxState) {
+        for tx in &mut self.transactions {
+            if tx.id() == id {
+                tx.state = state;
+                break;
+            }
+        }
+    }
 }
 
 /// A planned migration, before anything is built, signed, or broadcast: the denomination split, the
