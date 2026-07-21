@@ -118,3 +118,8 @@ and this library adheres to Rust's notion of
   remains a consumer responsibility, as for in-process signing). External signing therefore
   replaces only the sign step; the rest of the lifecycle is identical. The status view surfaces an
   awaiting transaction as blocked on `Blocker::Signature`.
+- Canonical binary codecs on the migration types (`PreparationPlan`, `NoteSplitPlan`,
+  `PrepInput`/`PrepOutput`/`PrepTransaction`, and `MigrationTxKind`), plus `MigrationTxState`'s
+  `AsRef<str>` discriminant and `from_stored` reconstruction, all built on `zcash_encoding` over
+  `corez::io`, so a persistence backend serializes the types through their own `write`/`read` rather
+  than a bespoke codec.
