@@ -74,7 +74,7 @@ workspace.
   required to unlock any locked outputs that are recorded as spent by
   the stored transactions.
 - `zcash_client_backend::data_api::WalletWrite` has added methods
-  `lock_outputs` and `unlock_output`.
+  `lock_outputs`, `unlock_output`, and `clear_locked_outputs`.
 - `zcash_client_backend::data_api::WalletTest` has added method
   `get_locked_outputs`.
 - The following `zcash_client_backend::data_api::wallet::` proposal creation
