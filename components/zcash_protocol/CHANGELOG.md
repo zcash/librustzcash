@@ -15,6 +15,8 @@ workspace.
 - `zcash_protocol::consensus::BLOCKS_PER_HOUR`
 - `zcash_protocol::constants::MAX_BLOCK_BYTES`, the Zcash consensus maximum
   block size and therefore the maximum size of any single transaction.
+- `zcash_protocol::value::Zatoshis::{write, read, to_u64_le_bytes}`, a canonical
+  little-endian `u64` binary codec for amounts.
 
 ## [0.10.0] - 2026-07-09
 
