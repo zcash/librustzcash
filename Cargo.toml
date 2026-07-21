@@ -234,10 +234,10 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [patch.crates-io]
-# ZIP 374 deferred-anchor builder support: orchard #534 (now merged) plus the
-# PCZT Updater setters (`set_anchor`/`set_spend_witness`), Prover guard, and the
-# `arb_shared_anchor_notes` testing fixture from orchard PR #535 (branch
-# `test/2534-deferred-anchor-arb-fixtures`) that the migration needs to install
-# the drawn anchor + witnesses at proving time. Drop once it lands in an orchard
+# ZIP 374 deferred-anchor builder support: orchard #534 and #535, both now merged
+# into orchard main — the deferred-anchor builder, the PCZT Updater setters
+# (`set_anchor`/`set_spend_witness`), the Prover guard, and the
+# `arb_shared_anchor_notes` testing fixture the migration needs to install the
+# drawn anchor + witnesses at proving time. Drop once it lands in an orchard
 # release.
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "63f4101" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "fa6e5fee02ce38b54193005a35289ec705d4f5b2" }
