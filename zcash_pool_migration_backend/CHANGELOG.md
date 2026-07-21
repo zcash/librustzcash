@@ -129,3 +129,14 @@ and this library adheres to Rust's notion of
   (`assert_empty_is_none`, `assert_put_get_roundtrip`, `assert_put_replaces`,
   `assert_update_transaction`) that exercises any `PoolMigrationRead` / `PoolMigrationWrite`
   implementation, so every store shares one test suite.
+- Proving a transfer against the boundary its schedule drew (behind the `orchard` feature). The
+  `MigrationCrypto` trait gains `prove_transfer`, and the engine gains a `prove_transfer` step (with
+  a `ProveError`) that reads a transfer's PERSISTED `anchor_boundary` — drawn at scheduling time and
+  previously never consulted — and hands the stored PCZT and that boundary to the crypto backend,
+  which installs the Orchard source anchor and the funding note's witness against it and the Ironwood
+  destination anchor (through the PCZT `Updater` role, ZIP 374), proves both bundles, and returns the
+  proven PCZT. `MigrationState::set_transaction_proved` then stores it and moves the transaction
+  `Signed -> Proved`, ready to broadcast. Resolving the funding note's witness needs the drawn
+  boundary's commitment-tree checkpoint to still exist at proving time, so the `WalletMigration`
+  adapter's leg is gated on migration anchor-checkpoint retention (issue #2700); the in-memory mock
+  exercises the engine flow in the meantime.
