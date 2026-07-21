@@ -667,6 +667,11 @@ pub enum CommitError<E> {
     Build(alloc::string::String),
     /// No committed migration was found to build the transfers for (nothing was loaded from storage).
     NoMigrationInProgress,
+    /// A non-terminal migration is already stored. A committed migration is resumed from the
+    /// store (or cancelled), never rebuilt over: overwriting it would orphan its pre-signed —
+    /// and possibly already broadcast — transactions, and a rebuilt layer 0 would double-spend
+    /// the same wallet notes.
+    MigrationInProgress,
 }
 
 #[cfg(feature = "orchard")]
@@ -678,6 +683,10 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
             CommitError::NoMigrationInProgress => {
                 f.write_str("no committed migration is in progress")
             }
+            CommitError::MigrationInProgress => f.write_str(
+                "a non-terminal migration is already stored; resume or cancel it instead of \
+                 committing a new one",
+            ),
         }
     }
 }
@@ -770,6 +779,10 @@ where
 /// For an EXTERNAL signer (a hardware wallet), use [`build_preparation_unsigned`] instead, which builds
 /// the same layer-0 transactions but leaves them unsigned for the device and returns their PCZTs.
 ///
+/// Refuses to overwrite a stored non-terminal migration
+/// ([`CommitError::MigrationInProgress`]): a committed migration is resumed from the store, or
+/// cancelled, never rebuilt over.
+///
 /// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3), and
 /// `rng` a cryptographically secure RNG.
 #[cfg(feature = "orchard")]
@@ -854,6 +867,17 @@ where
     use crate::build::build_prep_tx;
     use crate::preparation::PrepInput;
     use zcash_protocol::consensus::NetworkUpgrade;
+
+    // A committed migration is resumed from the store (or cancelled), never rebuilt over (see
+    // [`MigrationState::is_terminal`]): checked FIRST, before any signing work, so a crashed or
+    // re-run consumer cannot orphan in-flight pre-signed transactions by re-committing.
+    if backend
+        .get_migration()
+        .map_err(CommitError::Backend)?
+        .is_some_and(|existing| !existing.is_terminal())
+    {
+        return Err(CommitError::MigrationInProgress);
+    }
 
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
     // Preparations witness against the ORDINARY near-tip anchor (see [`PREP_ANCHOR_DEPTH`]); only
@@ -1869,6 +1893,80 @@ mod commit_tests {
             }
         }
         assert!(backend.get_migration().unwrap().is_some());
+    }
+
+    /// A committed migration must be resumed, never rebuilt over: a second commit while the
+    /// stored migration is non-terminal is refused (its pre-signed transactions may already be
+    /// broadcast, and a rebuilt layer 0 would double-spend the same notes); a terminal
+    /// (failed/cancelled) migration may be replaced.
+    #[test]
+    fn commit_preparation_refuses_to_overwrite_a_live_migration() {
+        let seed = 13u64;
+        let sk = spending_key(seed);
+        let fvk = FullViewingKey::from(&sk);
+        let balance = 78 * COIN;
+
+        let plan = {
+            let (note, path, anchor) = single_note_witness(&fvk, balance, seed);
+            let planner = CommitMock {
+                notes: vec![Zatoshis::from_u64(balance).expect("test balance is valid")],
+                witnesses: vec![(note, path)],
+                anchor,
+                fvk: fvk.clone(),
+                ask: SpendAuthorizingKey::from(&sk),
+                stored: None,
+            };
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            plan_migration(&regtest_network(true), &planner, &mut rng).expect("plans a migration")
+        };
+        let mut values = vec![balance];
+        values.extend(plan.funding_notes().iter().map(|&v| u64::from(v)));
+        let (witnesses, anchor) = shared_anchor_witnesses(&fvk, &values, seed);
+        let mut backend = CommitMock {
+            notes: vec![Zatoshis::from_u64(balance).expect("test balance is valid")],
+            witnesses,
+            anchor,
+            fvk,
+            ask: SpendAuthorizingKey::from(&sk),
+            stored: None,
+        };
+        let params = regtest_network(true);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the preparation");
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        assert!(matches!(
+            commit_preparation(
+                &params,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut backend,
+                &plan,
+                &mut rng,
+            ),
+            Err(CommitError::MigrationInProgress)
+        ));
+
+        // A terminal (cancelled) migration may be replaced.
+        let mut stored = backend.get_migration().unwrap().expect("stored");
+        stored.status = MigrationStatus::Failed;
+        backend.put_migration(&stored).unwrap();
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 3);
+        commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("replaces a terminal migration");
     }
 
     /// A wallet mock for the MULTI-LAYER preparation test. The first `n_wallet` witnesses are the
