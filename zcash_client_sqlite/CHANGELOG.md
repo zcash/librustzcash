@@ -26,6 +26,10 @@ workspace.
 - `zewif::ZewifImportReport::addresses_never_exposed` counts transparent
   addresses recorded in a ZeWIF document that are not known to have been
   exposed, and which are therefore deliberately left unexposed on import.
+- `zcash_client_sqlite::pool_migration` implements `zcash_pool_migration_backend`'s
+  `PoolMigrationRead` / `PoolMigrationWrite` store traits over tables in the
+  wallet database, persisting an in-progress Orchard -> Ironwood value-pool
+  migration (ZIP 318).
 
 ### Fixed
 - The `zewif` importer no longer marks transparent addresses that have no

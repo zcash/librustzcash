@@ -1,11 +1,10 @@
 //! SQLite persistence for value-pool migrations (ZIP 318).
 //!
-//! This module is the SQLite persistence for an in-progress value-pool migration: it owns the
-//! schema and (in a follow-up) implements `zcash_pool_migration_backend`'s `PoolMigrationRead` /
-//! `PoolMigrationWrite` store traits over it, mirroring how this crate implements
-//! `zcash_client_backend`'s `WalletRead` / `WalletWrite`. A committed migration is a set of
-//! pre-signed PCZTs plus their schedule and lifecycle state, so a wallet resumes a migration
-//! entirely from these tables after being closed or restarted.
+//! This module implements [`zcash_pool_migration_backend`]'s [`PoolMigrationRead`] /
+//! [`PoolMigrationWrite`] store traits over a set of SQLite tables in the wallet database,
+//! mirroring how this crate implements `zcash_client_backend`'s `WalletRead` / `WalletWrite`. A
+//! committed migration is a set of pre-signed PCZTs plus their schedule and lifecycle state, so a
+//! wallet resumes a migration entirely from these tables after being closed or restarted.
 //!
 //! The schema is fully NORMALIZED: every structured value (the note-split plan, the preparation
 //! plan's transaction inputs/outputs and direct-funding notes, the transaction kind, and the
@@ -20,13 +19,16 @@
 //!
 //! # Structure: one generic store, one public submodule per pool
 //!
-//! The generic, pool-agnostic machinery (the DDL builders, and in a follow-up the SQL store logic)
-//! lives in a private `store` submodule, parameterized over the per-pool table names. Each pool
-//! migration is a public submodule that instantiates the machinery with its own table names and
-//! exposes the concrete API (its `init_migration_tables`); the generic types never appear in the
-//! public surface. This lets future pool migrations reuse the same machinery under their own
-//! tables. Currently the only such submodule is [`orchard_ironwood`] (the Orchard -> Ironwood
-//! migration), whose tables are all prefixed `orchard_ironwood_migration[s]_`.
+//! The generic, pool-agnostic store machinery (the DDL builders and the SQL store logic) lives in
+//! a private `store` submodule, parameterized over the per-pool table names, with the error type
+//! in a private `error` submodule. Because the schema is normalized, the store maps the engine
+//! types to and from typed columns and child-table rows directly (only the opaque `pczt` is stored
+//! as bytes), rather than through a blob codec. Each pool migration is a public submodule that
+//! instantiates the store with its own table names and exposes the concrete API; the generic store
+//! type never appears in the public surface. This lets future pool migrations reuse the same
+//! machinery under their own tables. Currently the only such submodule is [`orchard_ironwood`]
+//! (the Orchard -> Ironwood migration), whose tables are all prefixed
+//! `orchard_ironwood_migration[s]_`.
 //!
 //! # Schema registration
 //!
@@ -35,12 +37,17 @@
 //! Ironwood, `orchard_ironwood_migration_tables`) runs that DDL inside the wallet schema, so the
 //! pool-migration tables live in the same `wallet.db` and share its schema versioning.
 //!
-//! # Scope
+//! # Model
 //!
-//! This module currently defines only the schema. The store logic that reads and writes these
-//! tables (the `PoolMigrationRead` / `PoolMigrationWrite` implementation over the engine types) is
-//! added separately.
+//! There is at most one migration in progress per pool, stored as a single row in the pool's
+//! migrations table keyed by the singleton id, with its transactions, note split, and preparation
+//! plan in the pool's child tables. The pool's `PoolMigrations` type is the store: construct it
+//! over a `rusqlite::Connection` (the same one [`WalletDb`](crate::WalletDb) uses).
+//!
+//! [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
+//! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
 
+mod error;
 mod store;
 
 pub mod orchard_ironwood;

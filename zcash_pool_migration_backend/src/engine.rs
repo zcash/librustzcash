@@ -88,10 +88,11 @@ pub trait MigrationBackend {
 }
 
 /// Read access to a persisted pool migration: the store side of the migration interface, mirroring
-/// `zcash_client_backend`'s `WalletRead`. A store implements this over its own tables (the
-/// `zcash_pool_migration_sqlite` crate does so as a migration registered into `zcash_client_sqlite`'s
-/// `WalletDb`). The committed migration is a set of pre-signed PCZTs plus their schedule and lifecycle
-/// state, so a wallet resumes a migration entirely from the store after being closed or restarted.
+/// `zcash_client_backend`'s `WalletRead`. A store implements this over its own tables
+/// (`zcash_client_sqlite`'s `pool_migration` module does so over tables registered into its
+/// `WalletDb` schema). The committed migration is a set of pre-signed PCZTs plus their schedule and
+/// lifecycle state, so a wallet resumes a migration entirely from the store after being closed or
+/// restarted.
 pub trait PoolMigrationRead {
     /// The store's own error type.
     type Error;

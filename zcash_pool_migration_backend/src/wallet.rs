@@ -5,8 +5,9 @@
 //! and a [`PoolMigrationRead`] / [`PoolMigrationWrite`] store. This module supplies the first two
 //! for free over the traits a `zcash_client_backend` wallet already implements ([`WalletRead`],
 //! [`InputSource`]) plus the account's [`UnifiedSpendingKey`], and delegates the store to a value
-//! the caller supplies (for example `zcash_pool_migration_sqlite`'s store over the same wallet
-//! database). A consuming application (zallet, or any other `zcash_client_backend` wallet) then
+//! the caller supplies (for example `zcash_client_sqlite`'s `pool_migration` store over the same
+//! wallet database). A consuming application (zallet, or any other `zcash_client_backend` wallet)
+//! then
 //! runs [`commit_preparation`] with no hand-wired cryptography.
 //!
 //! No note commitment tree access appears here: every migration transaction is built and signed
