@@ -55,6 +55,16 @@ use crate::note_splitting::{NoteSplitPlan, plan_note_split};
 use crate::preparation::{PrepError, PreparationPlan, plan_preparation};
 use crate::scheduling::{self, Schedule};
 
+/// The estimated number of blocks for one preparation layer to mine and become spendable: mining
+/// latency plus the wallet's witness-sync and next-layer broadcast turnaround, a few 75-second
+/// block intervals. Preparation transactions are fully shielded self-sends, so successive layers
+/// need only TEMPORAL decoupling (the predecessor mined and witnessable) — they do not wait for
+/// anchor-bucket boundaries, which only the pool-crossing transfers anchor to. Used solely to
+/// lower-bound the transfer schedule (see [`plan_migration`]); an under-estimate is self-healing
+/// (the commit-time anchor draw re-checks and reports a stale plan), an over-estimate merely delays
+/// the first transfer.
+const EST_PREP_LAYER_MINING_BLOCKS: u32 = 10;
+
 /// What the migration engine needs from a wallet to PLAN a migration: the account's spendable notes and
 /// the chain state. Following the `zcash_client_backend` pattern, a later slice replaces this with the
 /// wallet's own note-source and chain-view traits (`WalletRead` / `InputSource`), so any such wallet is a
@@ -186,9 +196,9 @@ pub struct MigrationTransaction {
     #[getset(get_copy = "pub")]
     pub(crate) expiry_height: BlockHeight,
     /// The boundary height whose tree state the transaction proves against. For a transfer this is
-    /// drawn at SCHEDULING time (the schedule fully determines the candidate set; see
-    /// [`commit_preparation`]); `None` for a preparation transaction, or when no candidate boundary
-    /// exists at the scheduled height (the application then draws against its proving-time view).
+    /// always present, drawn at SCHEDULING time: `plan_migration` floors the schedule so a
+    /// candidate boundary exists for every transfer. `None` only for a preparation transaction
+    /// (which waits on its dependencies rather than anchoring to a drawn boundary).
     #[getset(get_copy = "pub")]
     pub(crate) anchor_boundary: Option<BlockHeight>,
     /// The transaction's lifecycle state.
@@ -377,6 +387,9 @@ pub enum MigrationError<E> {
     InvalidBalance(BalanceError),
     /// Computing the canonical ZIP-317 fees from the canonical transaction shapes failed.
     Fee(zip317::FeeError),
+    /// NU6.3 is not active on this network, so there is no destination pool to migrate into (and
+    /// no anchor bucket above its activation to schedule against).
+    Nu63NotActive,
 }
 
 impl<E: fmt::Display> fmt::Display for MigrationError<E> {
@@ -387,6 +400,7 @@ impl<E: fmt::Display> fmt::Display for MigrationError<E> {
             MigrationError::NothingToMigrate => f.write_str("no migratable balance"),
             MigrationError::InvalidBalance(e) => write!(f, "invalid balance: {e}"),
             MigrationError::Fee(e) => write!(f, "fee computation failed: {e}"),
+            MigrationError::Nu63NotActive => f.write_str("NU6.3 is not active on this network"),
         }
     }
 }
@@ -401,6 +415,7 @@ impl<E: core::error::Error + 'static> core::error::Error for MigrationError<E> {
             // `zcash_protocol/std`; the Display text above carries their messages instead.
             MigrationError::InvalidBalance(_) => None,
             MigrationError::Fee(_) => None,
+            MigrationError::Nu63NotActive => None,
         }
     }
 }
@@ -509,7 +524,24 @@ where
     let preparation = plan_preparation(&notes, &funding_notes, prep_tx_fee)
         .map_err(MigrationError::Preparation)?;
 
-    let schedule = scheduling::schedule(commit_height, funding_notes.len(), rng);
+    // Lower-bound the FIRST scheduled transfer so that every transfer is guaranteed a candidate
+    // anchor boundary: the preparation must mine first (a few blocks per layer — the layers are
+    // fully shielded self-sends that serialize only on mined-and-witnessable, not on anchor
+    // buckets; see [`EST_PREP_LAYER_MINING_BLOCKS`]), and a boundary must then exist above the
+    // funding notes' creation (see [`scheduling::earliest_broadcast_height`]). Basing the schedule
+    // at this bound, rather than the raw commit height, keeps the drawn inter-arrival gaps intact
+    // while making an empty candidate set impossible for a plan committed at (or reasonably near)
+    // its planning height.
+    let nu63_activation = params
+        .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
+        .ok_or(MigrationError::Nu63NotActive)?;
+    let est_last_prep_height =
+        commit_height + preparation.layer_count() as u32 * EST_PREP_LAYER_MINING_BLOCKS;
+    let schedule_base = commit_height.max(scheduling::earliest_broadcast_height(
+        nu63_activation,
+        est_last_prep_height,
+    ));
+    let schedule = scheduling::schedule(schedule_base, funding_notes.len(), rng);
 
     Ok(MigrationPlan {
         note_split,
@@ -880,8 +912,12 @@ where
     // funding preparation is built to mine (`target_height` bounds the funding notes' creation from
     // below), and strictly below the most recent boundary at the transfer's scheduled broadcast
     // height (the chain view the wallet will have observed when it proves, just before broadcast).
-    // `None` means no candidate boundary exists at that scheduled height (a transfer scheduled very
-    // close to activation); the application then draws against the proving-time view instead.
+    //
+    // `plan_migration` floors the first scheduled transfer on an estimate of the last preparation
+    // transaction's mining height, so every transfer has a candidate boundary by construction; an
+    // empty draw therefore means the plan has gone STALE (the preparation is being committed at a
+    // height far past the estimate the schedule was floored on) and must be re-planned — it is an
+    // error, never a deferred fallback.
     let funding_notes = plan.funding_notes().to_vec();
     for (crossing, schedule) in plan.schedule().iter().enumerate() {
         transactions.push(MigrationTransaction {
@@ -891,11 +927,20 @@ where
             depends_on: last_layer_ids.clone(),
             scheduled_height: schedule.broadcast_height(),
             expiry_height: schedule.expiry_height(),
-            anchor_boundary: scheduling::draw_anchor_boundary(
-                nu63_activation,
-                target_height,
-                schedule.broadcast_height(),
-                rng,
+            anchor_boundary: Some(
+                scheduling::draw_anchor_boundary(
+                    nu63_activation,
+                    target_height,
+                    schedule.broadcast_height(),
+                    rng,
+                )
+                .ok_or_else(|| {
+                    CommitError::Build(
+                        "transfer scheduled before any candidate anchor boundary; the plan is \
+                         stale relative to the build height and must be re-planned"
+                            .into(),
+                    )
+                })?,
             ),
             state: MigrationTxState::Planned,
         });
@@ -1348,6 +1393,20 @@ mod tests {
         // exactly the (reconciled) funding notes; and reconciliation only ever drops, never adds.
         assert!(!plan.funding_notes().is_empty());
         assert_eq!(plan.schedule().len(), plan.funding_notes().len());
+
+        // The schedule floor: no transfer is scheduled before the earliest height at which a
+        // candidate anchor boundary exists, given the estimated preparation mining time (a few
+        // blocks per layer past the commit height).
+        let est_last_prep = BlockHeight::from_u32(2_000_000)
+            + plan.preparation().layer_count() as u32 * EST_PREP_LAYER_MINING_BLOCKS;
+        let earliest =
+            crate::scheduling::earliest_broadcast_height(BlockHeight::from_u32(10), est_last_prep);
+        assert!(
+            plan.schedule()
+                .iter()
+                .all(|s| s.broadcast_height() >= earliest),
+            "every scheduled transfer is at or after the anchor-viability floor"
+        );
         assert_eq!(
             plan.preparation().funding_notes().len(),
             plan.funding_notes().len()
@@ -1614,7 +1673,10 @@ mod commit_tests {
                     // it lies on the boundary grid, strictly above the NU6.3 activation, at or
                     // after the funding preparation's build height, and strictly below the most
                     // recent boundary at the scheduled broadcast height.
-                    if let Some(b) = tx.anchor_boundary {
+                    {
+                        let b = tx
+                            .anchor_boundary
+                            .expect("every transfer carries its boundary");
                         let b = u32::from(b);
                         assert_eq!(b % crate::scheduling::BOUNDARY_MODULUS, 0);
                         assert!(b > 10, "boundary above the regtest NU6.3 activation");

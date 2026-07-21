@@ -389,6 +389,22 @@ fn boundary_at_or_after(height: u32) -> u32 {
     }
 }
 
+/// The first chain height at which a transfer's candidate anchor set (see
+/// [`draw_anchor_boundary`]) is non-empty: one full boundary interval past the LOWEST candidate,
+/// which is the first boundary strictly above `nu63_activation` and at or after
+/// `funding_creation_height`. A transfer whose observed chain tip is at or after this height always
+/// has at least one boundary to anchor to, so a schedule that places every broadcast at or after it
+/// never needs an anchor fallback; the scheduler MUST NOT place a transfer before it.
+pub fn earliest_broadcast_height(
+    nu63_activation: BlockHeight,
+    funding_creation_height: BlockHeight,
+) -> BlockHeight {
+    let lowest = most_recent_boundary_u32(u32::from(nu63_activation))
+        .saturating_add(BOUNDARY_MODULUS)
+        .max(boundary_at_or_after(u32::from(funding_creation_height)));
+    BlockHeight::from_u32(lowest.saturating_add(BOUNDARY_MODULUS))
+}
+
 /// Like [`draw_anchor_boundary`], but additionally enforces the provisional per-wallet multiplicity
 /// cap [`K_MAX`] (ZIP 318 SHOULD / OPEN ISSUE): `chosen_counts` maps each boundary height already
 /// chosen by THIS wallet to how many of its parts landed there. A fresh draw whose boundary already
@@ -931,6 +947,28 @@ mod tests {
             draw_anchor_boundary(bh(0), bh(0), bh(2 * BOUNDARY_MODULUS - 1), &mut r),
             None
         );
+    }
+
+    proptest! {
+        /// [`earliest_broadcast_height`] is the exact viability threshold: a tip at that height
+        /// always yields an anchor, and a tip one block earlier never does.
+        #[test]
+        fn earliest_broadcast_height_is_the_viability_threshold(act in 0u32..1_000_000,
+                                                               funding_offset in 0u32..2_000,
+                                                               seed in any::<u64>()) {
+            let funding = act + funding_offset;
+            let earliest = earliest_broadcast_height(bh(act), bh(funding));
+            let mut r = rng(seed);
+            prop_assert!(
+                draw_anchor_boundary(bh(act), bh(funding), earliest, &mut r).is_some(),
+                "a tip at the earliest broadcast height must have a candidate boundary"
+            );
+            let mut r = rng(seed);
+            prop_assert!(
+                draw_anchor_boundary(bh(act), bh(funding), earliest - 1, &mut r).is_none(),
+                "a tip below the earliest broadcast height must not"
+            );
+        }
     }
 
     #[test]
