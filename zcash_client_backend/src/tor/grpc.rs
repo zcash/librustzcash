@@ -17,20 +17,21 @@ use crate::proto::service::compact_tx_streamer_client::CompactTxStreamerClient;
 
 impl Client {
     /// Connects to the `lightwalletd` server at the given endpoint.
+    ///
+    /// If `allow_onion_services` is `true`, the connection will be permitted to reach
+    /// Tor hidden services (`.onion` addresses). The caller is responsible for deciding
+    /// whether onion connections are appropriate for the given endpoint; this crate
+    /// does not infer that from the endpoint host.
     pub async fn connect_to_lightwalletd(
         &self,
         endpoint: Uri,
+        allow_onion_services: bool,
     ) -> Result<CompactTxStreamerClient<Channel>, Error> {
         self.ensure_bootstrapped().await?;
 
         let is_https = http::url_is_https(&endpoint)?;
 
-        let is_onion = endpoint
-            .host()
-            .map(|h| h.ends_with(".onion"))
-            .unwrap_or(false);
-
-        let connector = if is_onion {
+        let connector = if allow_onion_services {
             HttpTcpConnector::with_onion_services(self.clone())
         } else {
             HttpTcpConnector::new(self.clone())
