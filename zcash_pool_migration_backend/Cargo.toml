@@ -49,8 +49,20 @@ incrementalmerkletree = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
+pczt = { workspace = true, features = ["orchard", "tx-extractor"] }
+prost.workspace = true
 proptest.workspace = true
 rand_chacha.workspace = true
+rusqlite.workspace = true
+shardtree.workspace = true
+tempfile.workspace = true
+# The wallet-backed real-proving E2E (`tests/prove_chain_sim.rs`) drives a real in-memory
+# `WalletDb` through the `zcash_client_backend` testing framework: fund an account, commit a
+# migration, then prove + mine + scan the preparation and prove the transfer against the wallet's
+# own Orchard commitment tree. `zcash_proofs` supplies the halo2 proving parameters.
+zcash_client_backend = { workspace = true, features = ["orchard", "test-dependencies"] }
+zcash_client_sqlite = { workspace = true, features = ["orchard", "test-dependencies"] }
+zcash_proofs.workspace = true
 
 # The `local-consensus` feature exposes `LocalNetwork`, used to build the migration transactions
 # against regtest params with the relevant network upgrades (including NU6.3) active.
@@ -86,6 +98,13 @@ test-dependencies = [
     "zcash_primitives/test-dependencies",
     "zcash_protocol/test-dependencies",
 ]
+## A marker that tracks `zcash_client_backend`'s `transparent-inputs` feature so the funded-wallet
+## end-to-end test's `DataStoreFactory` implementation matches the trait, whose `new_data_store`
+## gains a `gap_limits` parameter under `transparent-inputs`. It intentionally enables nothing on its
+## own: under a `--workspace` build (all workspace members get `transparent-inputs` together) and
+## under `--all-features`, this is on exactly when the wallet crates' `transparent-inputs` is, which
+## is the only build that compiles that test (it needs `wallet` too).
+transparent-inputs = []
 
 [lints]
 workspace = true
