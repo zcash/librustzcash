@@ -491,7 +491,16 @@ New features and non-fix changes should branch from `main`.
 
 ## Changelog & Commit Discipline
 
-- Update the crate's `CHANGELOG.md` for any public API change, bug fix, or semantic change.
+- Update the crate's `CHANGELOG.md` for any public API change, bug fix, or
+  semantic change. CHANGELOG updates must **only** reflect completed changes.
+  since the last release, and never interstitial changes in APIs that have been
+  changed multiple times since the last release. The CHANGELOG entry **MUST** be
+  part of the commit that makes the API change. For newly added crates, the CHANGELOG
+  should include **ONLY** a line indicating the initial release; as there is no prior
+  release, there are no API changes for a user to adapt to. CHANGELOG entries should
+  provide **only** the information needed for end users to adapt to API changes, and
+  **never** describe implementation details or contracts that are not visible to
+  a user of the public API.
 - Commits must be discrete semantic changes — no WIP commits in final PR history.
 - Each commit that alters public API must also update docs and changelog in the same commit.
 - Use `git revise` to maintain clean history within a PR.

@@ -79,6 +79,8 @@ pub mod testing {
 
     use super::ShieldedPool;
 
+    pub use crate::txid::testing::arb_txid;
+
     /// A [`proptest`] strategy that yields a [`ShieldedPool`] variant uniformly at
     /// random.
     ///

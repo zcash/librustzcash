@@ -996,7 +996,14 @@ pub mod testing {
         ])
     }
 
-    pub fn arb_height<P: Parameters>(
+    /// An arbitrary [`BlockHeight`], within the range heights realistically take.
+    pub fn arb_block_height() -> impl Strategy<Value = BlockHeight> {
+        (0u32..5_000_000).prop_map(BlockHeight::from_u32)
+    }
+
+    /// An arbitrary [`BlockHeight`], within the range of heights for the given consensus branch on
+    /// the specified network.
+    pub fn arb_height_for_branch<P: Parameters>(
         branch_id: BranchId,
         params: &P,
     ) -> impl Strategy<Value = Option<BlockHeight>> {
@@ -1007,6 +1014,16 @@ pub mod testing {
                     (lower.0..upper.map_or(u32::MAX, |u| u.0)).prop_map(|h| Some(BlockHeight(h))),
                 )
             })
+    }
+
+    /// An arbitrary [`BlockHeight`], within the range of heights for the given consensus branch on
+    /// the specified network.
+    #[deprecated(note = "Use arb_height_for_branch instead.")]
+    pub fn arb_height<P: Parameters>(
+        branch_id: BranchId,
+        params: &P,
+    ) -> impl Strategy<Value = Option<BlockHeight>> {
+        arb_height_for_branch(branch_id, params)
     }
 
     #[cfg(feature = "test-dependencies")]

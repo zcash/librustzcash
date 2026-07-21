@@ -17,8 +17,9 @@
 #[macro_use]
 extern crate alloc;
 // The `wallet` adapter integrates with `zcash_client_backend`, which is a `std` crate; link `std`
-// whenever that feature (or the test harness) is active.
-#[cfg(any(test, feature = "wallet"))]
+// whenever that feature (or the test harness) is active. The `testing` module leans on `proptest`
+// (a `std` crate), so its feature links `std` too.
+#[cfg(any(test, feature = "wallet", feature = "test-dependencies"))]
 extern crate std;
 
 #[cfg(feature = "orchard")]
@@ -30,3 +31,6 @@ pub mod scheduling;
 pub mod state;
 #[cfg(feature = "wallet")]
 pub mod wallet;
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing;
