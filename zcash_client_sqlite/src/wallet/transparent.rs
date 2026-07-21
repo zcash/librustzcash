@@ -22,10 +22,11 @@ use transparent::{
 use zcash_address::unified::{Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{
-        Account, AccountBalance, Balance, OutputStatusFilter, TransactionDataRequest,
-        TransactionStatusFilter, TransparentBalances, TransparentOutputFilter,
+        Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
+        TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
+    fees::StandardFeeRule,
     wallet::{
         Exposure, GapMetadata, TransparentAddressMetadata, TransparentAddressSource,
         WalletTransparentOutput,
@@ -42,7 +43,11 @@ use zcash_keys::{
 };
 #[cfg(not(feature = "spend-index"))]
 use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-use zcash_primitives::transaction::fees::zip317;
+use zcash_primitives::transaction::fees::{
+    FeeRule,
+    transparent::{InputSize, InputView},
+    zip317,
+};
 use zcash_protocol::{
     TxId,
     consensus::{self, BlockHeight, COINBASE_MATURITY_BLOCKS},
@@ -208,8 +213,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             .map(|address_index| {
                 NonHardenedChildIndex::from_index(address_index).ok_or(
                     SqliteClientError::CorruptedData(format!(
-                        "{} is not a valid transparent child index",
-                        address_index
+                        "{address_index} is not a valid transparent child index"
                     )),
                 )
             })
@@ -272,7 +276,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                                     })
                                 })?;
                         let pubkey = PublicKey::from_bytes(pubkey_bytes).map_err(|e| {
-                            SqliteClientError::CorruptedData(format!("Invalid public key: {}", e))
+                            SqliteClientError::CorruptedData(format!("Invalid public key: {e}"))
                         })?;
                         Ok(TransparentAddressMetadata::standalone_p2pkh(
                             pubkey,
@@ -309,8 +313,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     let imported_transparent_receiver_script =
                         script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
                             SqliteClientError::CorruptedData(format!(
-                                "Invalid redeem script: {:?}",
-                                e
+                                "Invalid redeem script: {e:?}"
                             ))
                         })?;
 
@@ -721,6 +724,31 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
     key_scope: TransparentKeyScope,
     address_list: Vec<(Address, TransparentAddress, NonHardenedChildIndex)>,
 ) -> Result<(), SqliteClientError> {
+    // If the address being derived was previously imported as a standalone (`Foreign`)
+    // receiver, upgrade that row in place to its derived form rather than inserting a second row
+    // for the same transparent receiver (which the UNIQUE index on
+    // `cached_transparent_receiver_address` forbids). The row `id` is preserved, so any UTXOs,
+    // exposure, and spend-search state already attached to the imported receiver carry over and
+    // become spendable.
+    //
+    // The import may have been made under a *different* account: deriving the address is itself
+    // proof that the deriving account owns it, so in that case the row's account attribution
+    // (and that of any outputs received at the address) moves to the deriving account. The
+    // receiver-uniqueness index guarantees at most one row per receiver, and the deriving
+    // account cannot already hold a row at this (key scope, child index) — such a row would be
+    // this same receiver — so retargeting the row cannot violate the address-tuple constraint.
+    //
+    // The lookup below reads only columns present at every schema version at which
+    // `store_address_range` runs, so it is safe when this function is called from a migration.
+    // The upgrade `UPDATE` clears the `imported_transparent_receiver_*` columns, so it is only
+    // ever prepared and executed when a `Foreign` row exists — which cannot occur before those
+    // columns have been added.
+    let mut stmt_lookup_foreign = conn.prepare_cached(
+        "SELECT id, account_id FROM addresses
+         WHERE cached_transparent_receiver_address = :transparent_address
+           AND key_scope = :foreign_scope",
+    )?;
+
     // exposed_at_height is initially NULL
     let mut stmt_insert_address = conn.prepare_cached(
         "INSERT INTO addresses (
@@ -743,15 +771,77 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
             .convert::<ReceiverFlags>()
             .expect("address is valid");
 
-        stmt_insert_address.execute(named_params![
-            ":account_id": account_id.0,
-            ":diversifier_index_be": encode_diversifier_index_be(transparent_child_index.into()),
-            ":key_scope": KeyScope::try_from(key_scope)?.encode(),
-            ":address": zcash_address.encode(),
-            ":transparent_child_index": transparent_child_index.index(),
-            ":transparent_address": transparent_address.encode(params),
-            ":receiver_flags": receiver_flags.bits()
-        ])?;
+        let derived_scope = KeyScope::try_from(key_scope)?.encode();
+        let diversifier_index_be = encode_diversifier_index_be(transparent_child_index.into());
+        let transparent_address_enc = transparent_address.encode(params);
+        let address_enc = zcash_address.encode();
+        let child_index = transparent_child_index.index();
+        let flags = receiver_flags.bits();
+
+        let foreign_row: Option<(i64, i64)> = stmt_lookup_foreign
+            .query_row(
+                named_params![
+                    ":transparent_address": transparent_address_enc,
+                    ":foreign_scope": KeyScope::Foreign.encode(),
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        if let Some((foreign_id, foreign_account)) = foreign_row {
+            conn.execute(
+                "UPDATE addresses
+                 SET account_id = :account_id,
+                     key_scope = :key_scope,
+                     diversifier_index_be = :diversifier_index_be,
+                     address = :address,
+                     transparent_child_index = :transparent_child_index,
+                     receiver_flags = :receiver_flags,
+                     imported_transparent_receiver_pubkey = NULL,
+                     imported_transparent_receiver_script = NULL
+                 WHERE id = :id",
+                named_params![
+                    ":account_id": account_id.0,
+                    ":key_scope": derived_scope,
+                    ":diversifier_index_be": diversifier_index_be,
+                    ":address": address_enc,
+                    ":transparent_child_index": child_index,
+                    ":receiver_flags": flags,
+                    ":id": foreign_id,
+                ],
+            )?;
+
+            // If the import was recorded under a different account, the outputs received at
+            // the address follow the (derivation-proven) attribution to this account.
+            if foreign_account != account_id.0 {
+                for table in [
+                    "transparent_received_outputs",
+                    "sapling_received_notes",
+                    "orchard_received_notes",
+                ] {
+                    conn.execute(
+                        &format!(
+                            "UPDATE {table} SET account_id = :account_id
+                             WHERE address_id = :address_id"
+                        ),
+                        named_params![
+                            ":account_id": account_id.0,
+                            ":address_id": foreign_id,
+                        ],
+                    )?;
+                }
+            }
+        } else {
+            stmt_insert_address.execute(named_params![
+                ":account_id": account_id.0,
+                ":diversifier_index_be": diversifier_index_be,
+                ":key_scope": derived_scope,
+                ":address": address_enc,
+                ":transparent_child_index": child_index,
+                ":transparent_address": transparent_address_enc,
+                ":receiver_flags": flags,
+            ])?;
+        }
     }
     Ok(())
 }
@@ -1229,6 +1319,56 @@ pub(crate) fn get_wallet_transparent_output(
     result
 }
 
+/// Builds the SQL query body shared by `get_spendable_transparent_outputs[_for_addresses]`
+/// and `select_spendable_transparent_outputs`.
+///
+/// The query body is parameterized over the address-predicate SQL fragment and the
+/// `ORDER BY` fragment, so callers can match on a single address, a set of addresses, or
+/// an account; and can order by address+index (per-address determinism) or by value
+/// descending (value-bounded selection).
+fn spendable_transparent_outputs_query(address_predicate_sql: &str, order_by_sql: &str) -> String {
+    format!(
+        "SELECT t.txid, u.output_index, u.script,
+                u.value_zat, addresses.key_scope,
+                accounts.uuid AS account_uuid,
+                u.transaction_id AS creating_tx_id,
+                addresses.imported_transparent_receiver_script,
+                t.mined_height AS received_height
+         FROM transparent_received_outputs u
+         JOIN transactions t ON t.id_tx = u.transaction_id
+         JOIN accounts ON accounts.id = u.account_id
+         JOIN addresses ON addresses.id = u.address_id
+         WHERE {address_predicate_sql}
+         AND u.value_zat > :min_value
+         AND ({}) -- the transaction is mined or unexpired with minconf 0
+         AND u.id NOT IN ({}) -- and the output is unspent
+         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
+         AND ({}) -- exclude immature coinbase outputs
+         AND (
+             :coinbase_filter == 0
+             OR (:coinbase_filter == 1 AND IFNULL(t.tx_index, 1) == 0)
+             OR (:coinbase_filter == 2 AND IFNULL(t.tx_index, 1) != 0)
+         ) -- coinbase filter: 0 = all, 1 = coinbase-only, 2 = non-coinbase-only;
+           -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
+           -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
+         ORDER BY {order_by_sql}",
+        tx_unexpired_condition_minconf_0("t"),
+        spent_utxos_clause(),
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        excluding_immature_coinbase_outputs("t"),
+    )
+}
+
+/// Encodes the common `CoinbaseFilter` encoding used by the transparent-output SQL queries:
+/// 0 = all transparent outputs, 1 = coinbase outputs only, 2 = non-coinbase outputs only.
+fn coinbase_filter_encoding(output_filter: CoinbaseFilter) -> i32 {
+    match output_filter {
+        CoinbaseFilter::AllTransparentOutputs => 0i32,
+        CoinbaseFilter::CoinbaseOnly => 1i32,
+        CoinbaseFilter::NonCoinbaseOnly => 2i32,
+    }
+}
+
 /// Returns the list of spendable transparent outputs received by this wallet at `address`
 /// such that, at height `target_height`:
 /// * the transaction that produced the output had or will have at least the number of
@@ -1249,44 +1389,55 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     address: &TransparentAddress,
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
-    output_filter: TransparentOutputFilter,
+    output_filter: CoinbaseFilter,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
-    let coinbase_only = match output_filter {
-        TransparentOutputFilter::All => 0i32,
-        TransparentOutputFilter::CoinbaseOnly => 1i32,
-    };
+    // Defer to the batched query with a singleton address set, so that there is a single query
+    // body to maintain. `transparent_received_outputs.address` is always equal to the
+    // `cached_transparent_receiver_address` of the joined `addresses` row (both are written from
+    // the same recipient address on insert, and the gap-limit migration backfilled this invariant
+    // for pre-existing rows), so matching on the latter for a single address selects the same
+    // outputs as the former.
+    get_spendable_transparent_outputs_for_addresses(
+        conn,
+        params,
+        core::slice::from_ref(address),
+        target_height,
+        confirmations_policy,
+        output_filter,
+    )
+}
 
-    // This statement is re-run once per source address when shielding, so it is prepared via
-    // `prepare_cached` to avoid recompiling it on each call. The address is matched against
-    // `addresses.cached_transparent_receiver_address` (rather than the denormalized
-    // `transparent_received_outputs.address`) so that the lookup is served by an index on the
-    // `addresses` table and joined to the outputs via `idx_transparent_received_outputs_address`,
-    // instead of scanning the full `transparent_received_outputs` table.
-    let mut stmt_utxos = conn.prepare_cached(&format!(
-        "SELECT t.txid, u.output_index, u.script,
-                u.value_zat, addresses.key_scope,
-                accounts.uuid AS account_uuid,
-                u.transaction_id AS creating_tx_id,
-                addresses.imported_transparent_receiver_script,
-                t.mined_height AS received_height
-         FROM transparent_received_outputs u
-         JOIN transactions t ON t.id_tx = u.transaction_id
-         JOIN accounts ON accounts.id = u.account_id
-         JOIN addresses ON addresses.id = u.address_id
-         WHERE addresses.cached_transparent_receiver_address = :address
-         AND u.value_zat > :min_value
-         AND ({}) -- the transaction is mined or unexpired with minconf 0
-         AND u.id NOT IN ({}) -- and the output is unspent
-         AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         AND ({}) -- exclude immature coinbase outputs
-         AND (:coinbase_only == 0 OR IFNULL(t.tx_index, 1) == 0) -- coinbase filter: unknown tx_index defaults to 1 (non-coinbase) to avoid false positives",
-        tx_unexpired_condition_minconf_0("t"),
-        spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
-        excluding_immature_coinbase_outputs("t"),
+/// Returns the list of spendable transparent outputs received by this wallet at any of the
+/// given `addresses`, under the same spendability conditions as
+/// [`get_spendable_transparent_outputs`].
+///
+/// This is the batched equivalent of [`get_spendable_transparent_outputs`]: it issues a single
+/// query over the entire set of provided addresses rather than one query per address, which avoids
+/// a per-address database round-trip (and, for each empty address, a wasted query) when shielding
+/// from a wallet that holds large numbers of transparent addresses. Each returned output
+/// identifies its receiving address, so a caller that needs to group results by address can do so
+/// from the returned values.
+///
+/// The query body mirrors that of [`get_spendable_transparent_outputs`], differing only in that
+/// the receiving address is matched against a set via `rarray` rather than a single value.
+pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    addresses: &[TransparentAddress],
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    output_filter: CoinbaseFilter,
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    if addresses.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let coinbase_filter = coinbase_filter_encoding(output_filter);
+
+    let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        "addresses.cached_transparent_receiver_address IN rarray(:addresses)",
+        "addresses.cached_transparent_receiver_address, u.output_index",
     ))?;
-
-    let addr_str = address.encode(params);
 
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
     // is enabled, we set the minimum number of confirmations to zero.
@@ -1296,29 +1447,171 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         u32::from(confirmations_policy.untrusted())
     };
 
+    let address_values: Vec<Value> = addresses
+        .iter()
+        .map(|addr| Value::Text(addr.encode(params)))
+        .collect();
+    let addresses_ptr = Rc::new(address_values);
+
     let mut rows = stmt_utxos.query(named_params![
-        ":address": addr_str,
+        ":addresses": &addresses_ptr,
         ":target_height": u32::from(target_height),
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":coinbase_only": coinbase_only,
+        ":coinbase_filter": coinbase_filter,
     ])?;
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     while let Some(row) = rows.next()? {
         let mut output = to_unspent_transparent_output(conn, row)?;
-
         // If the address has a redeem script, compute the known input size for fee
         // estimation so that the ZIP 317 fee calculator can handle P2SH inputs.
-        let imported_transparent_receiver_script_bytes: Option<Vec<u8>> =
-            row.get("imported_transparent_receiver_script")?;
-        if let Some(rs_bytes) = imported_transparent_receiver_script_bytes
+        if let Ok(Some(rs_bytes)) =
+            row.get::<_, Option<Vec<u8>>>("imported_transparent_receiver_script")
             && let Ok(from_chain) = script::FromChain::parse(&script::Code(rs_bytes))
             && let Some(input_size) = transparent::builder::p2sh_input_serialized_len(&from_chain)
         {
             output = output.with_known_input_size(input_size);
         }
+        utxos.push(output);
+    }
 
+    Ok(utxos)
+}
+
+/// Returns the spendable transparent outputs received by the given `account` whose total
+/// post-fee value (sum of values minus the cumulative marginal fee cost of the gathered
+/// inputs themselves, per `fee_rule`) is at least `target_value`, or `max_inputs` outputs
+/// (whichever is reached first).
+///
+/// The query is a single SQL statement that orders eligible UTXOs by descending value (using
+/// the `idx_transparent_received_outputs_value_zat` index) and lets the Rust side accumulate
+/// values until the post-fee bound (or the `max_inputs` cap) is met. This bounds the work
+/// done in SQLite to the prefix of the table that can possibly satisfy the request, which is
+/// important for wallets that hold large numbers of transparent UTXOs (e.g. a recovered
+/// `zcashd` import).
+///
+/// The cumulative fee is recomputed via `fee_rule` at each step. To keep this loop linear in
+/// the number of UTXOs examined (rather than quadratic), we maintain a running total of the
+/// serialized transparent input sizes seen so far and pass that single collapsed total to
+/// `FeeRule::fee_required` on each iteration, rather than re-summing the whole prefix each
+/// time. This is valid for ZIP 317, whose transparent-input fee contribution depends only on
+/// the sum of input sizes.
+///
+/// For `TargetValue::AllFunds`, no value bound is applied and the gather returns every
+/// eligible output up to `max_inputs`.
+///
+/// When `address_allow_list` is `Some`, the eligible set is additionally restricted (within
+/// the query, so that ineligible outputs do not consume the value bound) to outputs received
+/// at one of the given transparent addresses.
+#[cfg(feature = "transparent-inputs")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account: AccountUuid,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    output_filter: CoinbaseFilter,
+    address_allow_list: Option<&[TransparentAddress]>,
+    target_value: TargetValue,
+    max_inputs: usize,
+    fee_rule: &StandardFeeRule,
+) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
+    // The post-fee bound for `TargetValue::AtLeast`. `TargetValue::AllFunds` has no bound; we
+    // return every eligible output in that case.
+    let target_zat: Option<u64> = match target_value {
+        TargetValue::AtLeast(z) => Some(u64::from(z)),
+        TargetValue::AllFunds(_) => None,
+    };
+
+    let coinbase_filter = coinbase_filter_encoding(output_filter);
+
+    // `:has_address_allow_list` and `:addresses` are always bound (the latter to an empty
+    // array when there is no allow list), following the same always-bound-flag idiom as
+    // `:coinbase_filter`, so that there is a single query text regardless of whether an
+    // allow list is present.
+    let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
+        "accounts.uuid = :account_uuid
+         AND (
+             :has_address_allow_list = 0
+             OR addresses.cached_transparent_receiver_address IN rarray(:addresses)
+         )",
+        "u.value_zat DESC, u.output_index",
+    ))?;
+
+    // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
+    // is enabled, we set the minimum number of confirmations to zero.
+    let min_confirmations = if confirmations_policy.allow_zero_conf_shielding() {
+        0u32
+    } else {
+        u32::from(confirmations_policy.untrusted())
+    };
+
+    let address_values: Vec<Value> = address_allow_list
+        .unwrap_or(&[])
+        .iter()
+        .map(|addr| Value::Text(addr.encode(params)))
+        .collect();
+    let addresses_ptr = Rc::new(address_values);
+
+    let mut rows = stmt_utxos.query(named_params![
+        ":account_uuid": account.0,
+        ":target_height": u32::from(target_height),
+        ":min_confirmations": min_confirmations,
+        ":min_value": u64::from(zip317::MARGINAL_FEE),
+        ":coinbase_filter": coinbase_filter,
+        ":has_address_allow_list": address_allow_list.is_some(),
+        ":addresses": &addresses_ptr,
+    ])?;
+
+    let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
+    let mut accumulated_value: u64 = 0;
+    // Running total of the serialized size of the transparent inputs gathered so far.
+    // Maintained incrementally so that the fee re-computation below is O(1) per candidate
+    // UTXO rather than O(prefix length), keeping the overall gather linear.
+    let mut cumulative_input_size: usize = 0;
+    while let Some(row) = rows.next()? {
+        // Stop once the cap on the number of transparent inputs is reached, regardless of
+        // whether the value target has been met. This bounds the size of the resulting
+        // transaction independent of `target_value`, since a wallet holding a very large
+        // number of small (e.g. dust) UTXOs could otherwise require an unbounded number of
+        // inputs to satisfy even a modest request.
+        if utxos.len() >= max_inputs {
+            break;
+        }
+
+        let output = to_unspent_transparent_output(conn, row)?;
+
+        // If we have a target bound, stop once the post-fee accumulated value reaches it.
+        if let Some(target) = target_zat {
+            let cumulative_fee = fee_rule
+                .fee_required(
+                    params,
+                    BlockHeight::from(target_height),
+                    [InputSize::Known(cumulative_input_size)],
+                    std::iter::empty::<usize>(),
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+                .map_err(SqliteClientError::from)?;
+            if accumulated_value.saturating_sub(u64::from(cumulative_fee)) >= target {
+                break;
+            }
+        }
+
+        let input_size = match output.serialized_size() {
+            InputSize::Known(size) => size,
+            // Fall back to the standard P2PKH size for inputs whose exact serialized size is
+            // not known (e.g. a P2SH output with an unrecognized redeem script). This is an
+            // estimate for the purposes of this gather only; the real fee is computed by the
+            // caller's actual change strategy once the transaction is built.
+            InputSize::Unknown(_) => zip317::P2PKH_STANDARD_INPUT_SIZE,
+        };
+        cumulative_input_size += input_size;
+        accumulated_value = accumulated_value.saturating_add(u64::from(output.value()));
         utxos.push(output);
     }
 
@@ -1457,7 +1750,10 @@ pub(crate) fn add_transparent_account_balances(
     };
 
     let mut stmt_account_spendable_balances = conn.prepare(&format!(
-        "SELECT accounts.uuid, SUM(u.value_zat)
+        "SELECT accounts.uuid, SUM(u.value_zat),
+            (IFNULL(t.tx_index, 1) == 0) AS is_coinbase,
+            (t.mined_height IS NOT NULL
+             AND :target_height - t.mined_height >= {COINBASE_MATURITY_BLOCKS}) AS is_mature
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1465,7 +1761,7 @@ pub(crate) fn add_transparent_account_balances(
          WHERE ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the received txo is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         GROUP BY accounts.uuid",
+         GROUP BY accounts.uuid, is_coinbase, is_mature",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
@@ -1482,17 +1778,33 @@ pub(crate) fn add_transparent_account_balances(
         let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
             SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
         })?;
+        let is_coinbase: bool = row.get("is_coinbase")?;
+        let is_mature: bool = row.get("is_mature")?;
 
-        account_balances
+        let balance = account_balances
             .entry(account)
-            .or_insert(AccountBalance::ZERO)
-            .with_unshielded_balance_mut(|bal| {
+            .or_insert(AccountBalance::ZERO);
+        if is_coinbase {
+            balance.with_unshielded_coinbase_balance_mut(|bal| {
+                if value <= zip317::MARGINAL_FEE {
+                    bal.add_uneconomic_value(value)
+                } else if is_mature {
+                    bal.add_spendable_value(value)
+                } else {
+                    // Immature coinbase value may not yet be spent (by shielding); report it
+                    // as pending until the coinbase output reaches maturity.
+                    bal.add_pending_spendable_value(value)
+                }
+            })?;
+        } else {
+            balance.with_unshielded_regular_balance_mut(|bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
                 } else {
                     bal.add_spendable_value(value)
                 }
             })?;
+        }
     }
 
     // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
@@ -1501,7 +1813,8 @@ pub(crate) fn add_transparent_account_balances(
     // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
     if min_confirmations > 0 {
         let mut stmt_account_unconfirmed_balances = conn.prepare(&format!(
-            "SELECT accounts.uuid, SUM(u.value_zat)
+            "SELECT accounts.uuid, SUM(u.value_zat),
+                (IFNULL(t.tx_index, 1) == 0) AS is_coinbase
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
              JOIN transactions t ON t.id_tx = u.transaction_id
@@ -1520,7 +1833,7 @@ pub(crate) fn add_transparent_account_balances(
              )
              AND u.id NOT IN ({}) -- and the received txo is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-             GROUP BY accounts.uuid",
+             GROUP BY accounts.uuid, is_coinbase",
             spent_utxos_clause(),
             excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
         ))?;
@@ -1536,17 +1849,23 @@ pub(crate) fn add_transparent_account_balances(
             let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
             })?;
+            let is_coinbase: bool = row.get("is_coinbase")?;
 
-            account_balances
+            let add_pending = |bal: &mut Balance| {
+                if value <= zip317::MARGINAL_FEE {
+                    bal.add_uneconomic_value(value)
+                } else {
+                    bal.add_pending_spendable_value(value)
+                }
+            };
+            let balance = account_balances
                 .entry(account)
-                .or_insert(AccountBalance::ZERO)
-                .with_unshielded_balance_mut(|bal| {
-                    if value <= zip317::MARGINAL_FEE {
-                        bal.add_uneconomic_value(value)
-                    } else {
-                        bal.add_pending_spendable_value(value)
-                    }
-                })?;
+                .or_insert(AccountBalance::ZERO);
+            if is_coinbase {
+                balance.with_unshielded_coinbase_balance_mut(add_pending)?;
+            } else {
+                balance.with_unshielded_regular_balance_mut(add_pending)?;
+            }
         }
     }
     Ok(())
@@ -2121,8 +2440,7 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                                     let imported_transparent_receiver_script =
                                         script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
                                             SqliteClientError::CorruptedData(format!(
-                                                "Invalid redeem script: {:?}",
-                                                e
+                                                "Invalid redeem script: {e:?}"
                                             ))
                                         })?;
 
@@ -2302,7 +2620,11 @@ pub(crate) fn put_transparent_output<P: consensus::Parameters>(
          VALUES (:txid, :block, :mined_height, :observation_height)
          ON CONFLICT (txid) DO UPDATE
          SET block = IFNULL(block, :block),
-             mined_height = :mined_height,
+             -- A NULL :mined_height means the height is unknown to the caller (e.g. the
+             -- output was observed in the mempool), not that the transaction is unmined;
+             -- it must not discard a previously-recorded mined height. Un-mining is the
+             -- responsibility of `truncate_to_height`.
+             mined_height = IFNULL(:mined_height, mined_height),
              min_observed_height = MIN(min_observed_height, :observation_height),
              confirmed_unmined_at_height = CASE
                 WHEN :mined_height IS NOT NULL THEN NULL
@@ -2485,6 +2807,97 @@ mod tests {
         );
     }
 
+    /// Re-storing a transparent output with an unknown mined height (`None`) must not discard
+    /// the mined height already recorded for its transaction. A `None` height means "we do not
+    /// yet know this to have been mined" — for example, an output re-observed via the mempool
+    /// or a transaction fetched from a backend that could not locate it on the best chain — and
+    /// carries no evidence that a previously-recorded height is wrong. (Genuine un-mining is the
+    /// responsibility of `truncate_to_height`.)
+    #[test]
+    fn put_received_transparent_utxo_preserves_mined_height() {
+        use transparent::bundle::{OutPoint, TxOut};
+        use zcash_client_backend::{data_api::WalletRead as _, wallet::WalletTransparentOutput};
+        use zcash_keys::keys::UnifiedAddressRequest;
+        use zcash_protocol::value::Zatoshis;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let birthday = st.test_account().unwrap().birthday().height();
+        let taddr = *st
+            .wallet()
+            .get_last_generated_address_matching(
+                account_id,
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .unwrap()
+            .transparent()
+            .unwrap();
+
+        let mined_at = birthday + 100;
+        st.wallet_mut().update_chain_tip(mined_at + 10).unwrap();
+
+        let outpoint = OutPoint::fake();
+        let txout = TxOut::new(Zatoshis::const_from_u64(100_000), taddr.script().into());
+
+        // Store the output as mined at `mined_at`.
+        let mined_utxo = WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            txout.clone(),
+            Some(mined_at),
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&mined_utxo)
+            .unwrap();
+
+        let mined_height: Option<u32> = st
+            .wallet()
+            .db()
+            .conn
+            .query_row(
+                "SELECT mined_height FROM transactions WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mined_height, Some(u32::from(mined_at)));
+
+        // Re-store the same output with an unknown mined height.
+        let unknown_height_utxo = WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            txout,
+            None,
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&unknown_height_utxo)
+            .unwrap();
+
+        // The previously-recorded mined height must be preserved.
+        let mined_height: Option<u32> = st
+            .wallet()
+            .db()
+            .conn
+            .query_row(
+                "SELECT mined_height FROM transactions WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mined_height, Some(u32::from(mined_at)));
+    }
+
     #[test]
     fn transparent_balance_across_shielding() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_across_shielding(
@@ -2502,8 +2915,118 @@ mod tests {
     }
 
     #[test]
+    fn get_spendable_transparent_outputs_for_addresses() {
+        zcash_client_backend::data_api::testing::transparent::get_spendable_transparent_outputs_for_addresses(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn shielding_transparent_input_cap() {
+        zcash_client_backend::data_api::testing::transparent::shielding_transparent_input_cap(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_shielded_only_is_insufficient() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_shielded_only_is_insufficient(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_any_account_taddr() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_any_account_taddr(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_from_addresses() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_from_addresses(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn reserve_next_n_internal_addresses_gap_limit() {
+        zcash_client_backend::data_api::testing::transparent::reserve_next_n_internal_addresses_gap_limit(
+            TestDbFactory::default(),
+            BlockCache::new(),
+            |e, _, expected_bad_index| {
+                matches!(
+                    e,
+                    SqliteClientError::ReachedGapLimit(scope, bad_index)
+                    if scope == &TransparentKeyScope::INTERNAL && bad_index == &expected_bad_index
+                )
+            },
+        );
+    }
+
+    #[test]
+    fn propose_t2t_with_transparent_change() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_with_transparent_change(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2t_transparent_change_exact_match() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2t_transparent_change_exact_match(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_t2shielded_requires_transparent_regather() {
+        zcash_client_backend::data_api::testing::transparent::propose_t2shielded_requires_transparent_regather(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn propose_transfer_transparent_input_cap() {
+        zcash_client_backend::data_api::testing::transparent::propose_transfer_transparent_input_cap(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn value_bounded_transparent_gather() {
+        zcash_client_backend::data_api::testing::transparent::value_bounded_transparent_gather(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
     fn transparent_balance_spendability() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_spendability(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn transparent_coinbase_balance_split() {
+        zcash_client_backend::data_api::testing::transparent::transparent_coinbase_balance_split(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
+    #[test]
+    fn transparent_coinbase_balance_dust() {
+        zcash_client_backend::data_api::testing::transparent::transparent_coinbase_balance_dust(
             TestDbFactory::default(),
             BlockCache::new(),
         );
@@ -2516,6 +3039,247 @@ mod tests {
             BlockCache::new(),
             GapLimits::default(),
         );
+    }
+
+    /// Deriving an address that already exists as a standalone (`Foreign`) import upgrades the
+    /// existing row in place — same `id`, derived scope, import columns cleared — rather than
+    /// inserting a duplicate row for the same transparent receiver, and any UTXO already
+    /// attached to the imported row carries over.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn store_address_range_upgrades_imported_receiver() {
+        use rusqlite::named_params;
+        use transparent::address::TransparentAddress;
+        use zcash_keys::{address::Address, encoding::AddressCodec};
+
+        use crate::wallet::encoding::KeyScope;
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        // An address we pretend was imported standalone and is also derivable at child index 100
+        // (beyond the default external gap of 10, so no real derived row occupies that index).
+        let taddr = TransparentAddress::PublicKeyHash([0x11; 20]);
+        let taddr_enc = taddr.encode(&network);
+        let child_index = NonHardenedChildIndex::from_index(100).unwrap();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+        // A standalone (`Foreign`) row for the receiver, exposed at height 55.
+        tx.execute(
+            "INSERT INTO addresses
+                 (account_id, key_scope, address, cached_transparent_receiver_address,
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+             VALUES (:account_id, :foreign, :address, :taddr,
+                  X'020000000000000000000000000000000000000000000000000000000000000001', 1, 55)",
+            named_params! {
+                ":account_id": account_id.0,
+                ":foreign": KeyScope::Foreign.encode(),
+                ":address": &taddr_enc,
+                ":taddr": &taddr_enc,
+            },
+        )
+        .unwrap();
+        let foreign_id = tx.last_insert_rowid();
+
+        // A UTXO attached to the imported row.
+        tx.execute(
+            "INSERT INTO transactions (id_tx, txid, min_observed_height) VALUES (1, X'00', 1)",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO transparent_received_outputs
+                 (transaction_id, output_index, account_id, address, script, value_zat, address_id)
+             VALUES (1, 0, :account_id, :taddr, X'00', 100000, :addr_id)",
+            named_params! { ":account_id": account_id.0, ":taddr": &taddr_enc, ":addr_id": foreign_id },
+        )
+        .unwrap();
+
+        // Derive the same address at child index 100 via the gap-generation storage entry point.
+        super::store_address_range(
+            &tx,
+            &network,
+            account_id,
+            TransparentKeyScope::EXTERNAL,
+            vec![(Address::from(taddr), taddr, child_index)],
+        )
+        .unwrap();
+
+        // Exactly one row remains for the receiver: the upgraded former-import row.
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, key_scope, transparent_child_index,
+                        imported_transparent_receiver_pubkey IS NULL
+                 FROM addresses WHERE cached_transparent_receiver_address = :taddr",
+            )
+            .unwrap();
+        let rows: Vec<(i64, i64, Option<u32>, bool)> = stmt
+            .query_map(named_params! { ":taddr": &taddr_enc }, |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        drop(stmt);
+
+        assert_eq!(rows.len(), 1);
+        let (id, key_scope, child, pubkey_is_null) = rows[0];
+        assert_eq!(id, foreign_id, "upgraded in place, same id");
+        assert_eq!(key_scope, KeyScope::EXTERNAL.encode());
+        assert_eq!(child, Some(100));
+        assert!(pubkey_is_null, "standalone-import column cleared");
+
+        // The UTXO still references the (now-derived) row.
+        let utxo_addr_id: i64 = tx
+            .query_row(
+                "SELECT address_id FROM transparent_received_outputs
+                 WHERE transaction_id = 1 AND output_index = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(utxo_addr_id, foreign_id);
+
+        tx.commit().unwrap();
+    }
+
+    /// Deriving an address that was imported as a standalone (`Foreign`) receiver under a
+    /// *different* account also upgrades the existing row in place: deriving the address is
+    /// itself proof that the deriving account owns it, so the row's account attribution moves
+    /// to the deriving account, along with the account attribution of any outputs received at
+    /// the address. Without this, the derive would fail on the receiver-uniqueness index.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn store_address_range_upgrades_receiver_imported_under_other_account() {
+        use rusqlite::named_params;
+        use transparent::address::TransparentAddress;
+        use zcash_client_backend::data_api::{AccountBirthday, chain::ChainState};
+        use zcash_keys::{address::Address, encoding::AddressCodec};
+        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+        use crate::wallet::encoding::KeyScope;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_a_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        // A second account, under which the address will be imported.
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                network.activation_height(NetworkUpgrade::Sapling).unwrap() - 1,
+                BlockHash([0; 32]),
+            ),
+            None,
+        );
+        let seed_b = Secret::new(vec![42u8; 32]);
+        let (account_b_uuid, _) = st
+            .wallet_mut()
+            .create_account("b", &seed_b, &birthday, None)
+            .unwrap();
+
+        // An address we pretend was imported standalone under account B, and is derivable by
+        // account A at child index 100 (beyond the default external gap of 10).
+        let taddr = TransparentAddress::PublicKeyHash([0x22; 20]);
+        let taddr_enc = taddr.encode(&network);
+        let child_index = NonHardenedChildIndex::from_index(100).unwrap();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_a = get_account_ref(&tx, account_a_uuid).unwrap();
+        let account_b = get_account_ref(&tx, account_b_uuid).unwrap();
+
+        // The standalone (`Foreign`) row under account B.
+        tx.execute(
+            "INSERT INTO addresses
+                 (account_id, key_scope, address, cached_transparent_receiver_address,
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+             VALUES (:account_id, :foreign, :address, :taddr,
+                  X'020000000000000000000000000000000000000000000000000000000000000004', 1, 55)",
+            named_params! {
+                ":account_id": account_b.0,
+                ":foreign": KeyScope::Foreign.encode(),
+                ":address": &taddr_enc,
+                ":taddr": &taddr_enc,
+            },
+        )
+        .unwrap();
+        let foreign_id = tx.last_insert_rowid();
+
+        // A UTXO attached to the imported row, attributed to account B.
+        tx.execute(
+            "INSERT INTO transactions (id_tx, txid, min_observed_height) VALUES (1, X'00', 1)",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO transparent_received_outputs
+                 (transaction_id, output_index, account_id, address, script, value_zat, address_id)
+             VALUES (1, 0, :account_id, :taddr, X'00', 100000, :addr_id)",
+            named_params! { ":account_id": account_b.0, ":taddr": &taddr_enc, ":addr_id": foreign_id },
+        )
+        .unwrap();
+
+        // Account A derives the same address.
+        super::store_address_range(
+            &tx,
+            &network,
+            account_a,
+            TransparentKeyScope::EXTERNAL,
+            vec![(Address::from(taddr), taddr, child_index)],
+        )
+        .unwrap();
+
+        // Exactly one row remains for the receiver: the upgraded former-import row, now
+        // belonging to account A.
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, account_id, key_scope, transparent_child_index,
+                        imported_transparent_receiver_pubkey IS NULL
+                 FROM addresses WHERE cached_transparent_receiver_address = :taddr",
+            )
+            .unwrap();
+        let rows: Vec<(i64, i64, i64, Option<u32>, bool)> = stmt
+            .query_map(named_params! { ":taddr": &taddr_enc }, |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        drop(stmt);
+
+        assert_eq!(rows.len(), 1);
+        let (id, account_id, key_scope, child, pubkey_is_null) = rows[0];
+        assert_eq!(id, foreign_id, "upgraded in place, same id");
+        assert_eq!(
+            account_id, account_a.0,
+            "attribution moved to the deriving account"
+        );
+        assert_eq!(key_scope, KeyScope::EXTERNAL.encode());
+        assert_eq!(child, Some(100));
+        assert!(pubkey_is_null, "standalone-import column cleared");
+
+        // The UTXO followed the row, and its account attribution moved with it.
+        let (utxo_addr_id, utxo_account_id): (i64, i64) = tx
+            .query_row(
+                "SELECT address_id, account_id FROM transparent_received_outputs
+                 WHERE transaction_id = 1 AND output_index = 0",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((utxo_addr_id, utxo_account_id), (foreign_id, account_a.0));
+
+        tx.commit().unwrap();
     }
 
     /// Smoke test that the `spend-index` feature's SQL is valid: `transaction_data_requests`
@@ -2549,6 +3313,279 @@ mod tests {
         )
         .unwrap();
         tx.commit().unwrap();
+    }
+
+    /// Importing a standalone (`Foreign`) receiver whose address is already present as a derived
+    /// account receiver inserts nothing (returns 0) rather than failing the transparent-receiver
+    /// uniqueness invariant. This is the import-direction counterpart of
+    /// `store_address_range_upgrades_imported_receiver`.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey_noop_when_address_derived() {
+        use proptest::prelude::*;
+        use rusqlite::named_params;
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+        use transparent::address::TransparentAddress;
+        use zcash_keys::{address::Address, encoding::AddressCodec};
+
+        proptest!(
+            ProptestConfig::with_cases(16),
+            |(
+                sk in any::<[u8; 32]>()
+                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()),
+                // Above the account's default external gap (10) so store_address_range actually
+                // inserts our receiver rather than skipping an already-derived index.
+                child_index in 16u32..0x8000_0000u32,
+            )| {
+                let st = TestBuilder::new()
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account_uuid = st.test_account().unwrap().id();
+                let network = *st.network();
+
+                // A real pubkey and the transparent receiver it hashes to.
+                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let taddr = TransparentAddress::from_pubkey(&pubkey);
+                let taddr_enc = taddr.encode(&network);
+                let child = NonHardenedChildIndex::from_index(child_index).unwrap();
+
+                let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+                let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+                // Derive the receiver into `addresses` (as the account-import path would), so a
+                // row with a NULL `imported_transparent_receiver_pubkey` already holds this
+                // receiver address.
+                super::store_address_range(
+                    &tx,
+                    &network,
+                    account_id,
+                    TransparentKeyScope::EXTERNAL,
+                    vec![(Address::from(taddr), taddr, child)],
+                )
+                .unwrap();
+
+                // Importing the same receiver as a standalone pubkey inserts nothing: the pubkey
+                // lookup does not match the derived (NULL-pubkey) row, but the address-existence
+                // check does.
+                let inserted = crate::wallet::import_standalone_transparent_pubkey(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    pubkey,
+                )
+                .unwrap();
+                prop_assert_eq!(inserted, 0);
+
+                // Exactly one row remains for the receiver.
+                let count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM addresses \
+                         WHERE cached_transparent_receiver_address = :taddr",
+                        named_params! { ":taddr": &taddr_enc },
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                prop_assert_eq!(count, 1);
+            }
+        );
+    }
+
+    /// Importing a standalone receiver that is not yet recorded inserts exactly one row (returns
+    /// 1); importing the same pubkey again is a no-op (returns 0). Together with
+    /// `import_standalone_transparent_pubkey_noop_when_address_derived` this covers both return
+    /// values.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey_returns_rows_inserted() {
+        use proptest::prelude::*;
+        use rusqlite::named_params;
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+        use transparent::address::TransparentAddress;
+        use zcash_keys::encoding::AddressCodec;
+
+        proptest!(
+            ProptestConfig::with_cases(16),
+            |(sk in any::<[u8; 32]>()
+                .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()))| {
+                let st = TestBuilder::new()
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account_uuid = st.test_account().unwrap().id();
+                let network = *st.network();
+
+                let pubkey = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+                let taddr_enc = TransparentAddress::from_pubkey(&pubkey).encode(&network);
+
+                let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+
+                // The receiver is not yet recorded: the first import inserts exactly one row.
+                let inserted = crate::wallet::import_standalone_transparent_pubkey(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    pubkey,
+                )
+                .unwrap();
+                prop_assert_eq!(inserted, 1);
+
+                // Re-importing the same pubkey inserts nothing.
+                let reinserted = crate::wallet::import_standalone_transparent_pubkey(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    pubkey,
+                )
+                .unwrap();
+                prop_assert_eq!(reinserted, 0);
+
+                // Exactly one row exists for the receiver.
+                let count: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM addresses \
+                         WHERE cached_transparent_receiver_address = :taddr",
+                        named_params! { ":taddr": &taddr_enc },
+                        |r| r.get(0),
+                    )
+                    .unwrap();
+                prop_assert_eq!(count, 1);
+            }
+        );
+    }
+
+    /// Importing into an account that does not exist returns `AccountUnknown`, resolved
+    /// explicitly up front rather than inferred from a zero-row insert.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey_unknown_account() {
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let network = *st.network();
+        let pubkey = PublicKey::from_secret_key(
+            &Secp256k1::new(),
+            &SecretKey::from_slice(&[0x11; 32]).unwrap(),
+        );
+
+        // A uuid that matches no account in the wallet.
+        let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xff; 16]));
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let result =
+            crate::wallet::import_standalone_transparent_pubkey(&tx, &network, unknown, pubkey);
+        assert!(matches!(
+            result,
+            Err(crate::error::SqliteClientError::AccountUnknown)
+        ));
+    }
+
+    /// The batch import resolves the account once and imports every pubkey: the returned count is
+    /// the number of distinct receivers inserted, all receivers are present, and re-importing the
+    /// same batch inserts nothing.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys_batch() {
+        use proptest::prelude::*;
+        use rusqlite::named_params;
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+        use std::collections::HashSet;
+        use transparent::address::TransparentAddress;
+        use zcash_keys::encoding::AddressCodec;
+
+        proptest!(
+            ProptestConfig::with_cases(12),
+            |(sks in proptest::collection::vec(
+                any::<[u8; 32]>()
+                    .prop_filter_map("valid secp256k1 secret key", |b| SecretKey::from_slice(&b).ok()),
+                1..8usize,
+            ))| {
+                let st = TestBuilder::new()
+                    .with_data_store_factory(TestDbFactory::default())
+                    .with_account_from_sapling_activation(BlockHash([0; 32]))
+                    .build();
+
+                let account_uuid = st.test_account().unwrap().id();
+                let network = *st.network();
+                let secp = Secp256k1::new();
+
+                let pubkeys: Vec<PublicKey> =
+                    sks.iter().map(|sk| PublicKey::from_secret_key(&secp, sk)).collect();
+                let distinct: HashSet<String> = pubkeys
+                    .iter()
+                    .map(|pk| TransparentAddress::from_pubkey(pk).encode(&network))
+                    .collect();
+
+                let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+
+                // Resolves the account once and inserts one row per distinct receiver.
+                let inserted = crate::wallet::import_standalone_transparent_pubkeys(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    &pubkeys,
+                )
+                .unwrap();
+                prop_assert_eq!(inserted, distinct.len());
+
+                // Every receiver is present, exactly once.
+                for addr in &distinct {
+                    let count: i64 = tx
+                        .query_row(
+                            "SELECT COUNT(*) FROM addresses \
+                             WHERE cached_transparent_receiver_address = :a",
+                            named_params! { ":a": addr },
+                            |r| r.get(0),
+                        )
+                        .unwrap();
+                    prop_assert_eq!(count, 1);
+                }
+
+                // Re-importing the same batch inserts nothing.
+                let again = crate::wallet::import_standalone_transparent_pubkeys(
+                    &tx,
+                    &network,
+                    account_uuid,
+                    &pubkeys,
+                )
+                .unwrap();
+                prop_assert_eq!(again, 0);
+            }
+        );
+    }
+
+    /// The batch import resolves the account up front, so a batch targeting an account that does
+    /// not exist returns `AccountUnknown`.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys_unknown_account() {
+        use secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let network = *st.network();
+        let pubkey = PublicKey::from_secret_key(
+            &Secp256k1::new(),
+            &SecretKey::from_slice(&[0x22; 32]).unwrap(),
+        );
+        let unknown = crate::AccountUuid::from_uuid(uuid::Uuid::from_bytes([0xfe; 16]));
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let result =
+            crate::wallet::import_standalone_transparent_pubkeys(&tx, &network, unknown, &[pubkey]);
+        assert!(matches!(
+            result,
+            Err(crate::error::SqliteClientError::AccountUnknown)
+        ));
     }
 
     #[test]

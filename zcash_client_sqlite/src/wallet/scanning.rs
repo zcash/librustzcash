@@ -11,7 +11,7 @@ use zcash_client_backend::data_api::{
     scanning::{ScanPriority, ScanRange, spanning_tree::SpanningTree},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
 };
 
@@ -26,7 +26,7 @@ use super::common::table_constants;
 use super::{block_max_scanned, wallet_birthday};
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
 
 #[cfg(not(feature = "orchard"))]
 use zcash_protocol::PoolType;
@@ -225,11 +225,11 @@ fn extend_range(
     conn: &rusqlite::Transaction<'_>,
     range: &Range<BlockHeight>,
     required_subtree_indices: BTreeSet<u64>,
-    protocol: ShieldedProtocol,
+    pool: ShieldedPool,
     fallback_start_height: Option<BlockHeight>,
     birthday_height: Option<BlockHeight>,
 ) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
-    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
+    let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(pool)?;
 
     // we'll either have both min and max bounds, or we'll have neither
     let subtree_index_bounds = required_subtree_indices
@@ -287,7 +287,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
     range: Range<BlockHeight>,
-    wallet_note_positions: &[(ShieldedProtocol, Position)],
+    wallet_note_positions: &[(ShieldedPool, Position)],
 ) -> Result<(), SqliteClientError> {
     // Read the wallet birthday (if known).
     // TODO: use per-pool birthdays?
@@ -302,17 +302,32 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         let mut required_sapling_subtrees = BTreeSet::new();
         #[cfg(feature = "orchard")]
         let mut required_orchard_subtrees = BTreeSet::new();
+        // Ironwood note commitments are Orchard-shaped and use the Orchard shard height, but are
+        // tracked in a separate commitment tree.
+        #[cfg(feature = "orchard")]
+        let mut required_ironwood_subtrees = BTreeSet::new();
         for (protocol, position) in wallet_note_positions {
             match protocol {
-                ShieldedProtocol::Sapling => {
+                ShieldedPool::Sapling => {
                     required_sapling_subtrees.insert(
                         Address::above_position(SAPLING_SHARD_HEIGHT.into(), *position).index(),
                     );
                 }
-                ShieldedProtocol::Orchard => {
+                ShieldedPool::Orchard => {
                     #[cfg(feature = "orchard")]
                     required_orchard_subtrees.insert(
                         Address::above_position(ORCHARD_SHARD_HEIGHT.into(), *position).index(),
+                    );
+
+                    #[cfg(not(feature = "orchard"))]
+                    return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                        *protocol,
+                    )));
+                }
+                ShieldedPool::Ironwood => {
+                    #[cfg(feature = "orchard")]
+                    required_ironwood_subtrees.insert(
+                        Address::above_position(IRONWOOD_SHARD_HEIGHT.into(), *position).index(),
                     );
 
                     #[cfg(not(feature = "orchard"))]
@@ -327,7 +342,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             &range,
             required_sapling_subtrees,
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             params.activation_height(NetworkUpgrade::Sapling),
             wallet_birthday,
         )?;
@@ -337,8 +352,20 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             conn,
             extended_range.as_ref().unwrap_or(&range),
             required_orchard_subtrees,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             params.activation_height(NetworkUpgrade::Nu5),
+            wallet_birthday,
+        )?
+        .or(extended_range);
+
+        // Ironwood's commitment tree activates at NU6.3.
+        #[cfg(feature = "orchard")]
+        let extended_range = extend_range(
+            conn,
+            extended_range.as_ref().unwrap_or(&range),
+            required_ironwood_subtrees,
+            ShieldedPool::Ironwood,
+            params.activation_height(NetworkUpgrade::Nu6_3),
             wallet_birthday,
         )?
         .or(extended_range);
@@ -370,8 +397,18 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
     replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
 
-    // Check for any newly stabilized notes, and mark them as stabilized
-    mark_stabilized_notes(conn, params)?;
+    // Check for any newly stabilized notes, and mark them as stabilized.
+    mark_stabilized_notes(
+        conn,
+        params,
+        &[
+            ShieldedPool::Sapling,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard,
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood,
+        ],
+    )?;
 
     Ok(())
 }
@@ -381,28 +418,38 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 ///
 /// This means that a note within the chain-tip shard can not be marked as `witness_stabilized`,
 /// because the tip shard is by definition not complete or confirmed to the `PRUNING_DEPTH`.
+///
+/// Only the pools listed in `pools` are processed. Callers must restrict this to pools whose
+/// received-note tables exist in the schema at the point of the call; in particular the
+/// `witness_stabilized_notes` migration runs before the Ironwood received-note table is created,
+/// so it must not request the Ironwood pool.
 pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
+    pools: &[ShieldedPool],
 ) -> Result<(), SqliteClientError> {
     fn mark_pool(
         conn: &rusqlite::Transaction<'_>,
-        pool: &str,
-        shard_height: u8,
+        pool: ShieldedPool,
         pruning_floor: u32,
     ) -> Result<(), SqliteClientError> {
+        let TableConstants {
+            table_prefix,
+            shard_height,
+            ..
+        } = table_constants::<SqliteClientError>(pool)?;
         let sql = format!(
-            "UPDATE {pool}_received_notes
+            "UPDATE {table_prefix}_received_notes
              SET witness_stabilized = 1
              WHERE witness_stabilized = 0
                AND commitment_tree_position IS NOT NULL
                AND EXISTS (
-                   SELECT 1 FROM {pool}_tree_shards shard
+                   SELECT 1 FROM {table_prefix}_tree_shards shard
                    WHERE shard.subtree_end_height IS NOT NULL
                      AND shard.subtree_end_height <= :pruning_floor
                      AND (commitment_tree_position >> :shard_height) = shard.shard_index
                      AND shard.shard_index NOT IN (
-                         SELECT shard_index FROM v_{pool}_shard_unscanned_ranges
+                         SELECT shard_index FROM v_{table_prefix}_shard_unscanned_ranges
                      )
                )",
         );
@@ -416,10 +463,10 @@ pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
     if let Some(max_scanned_height) = block_max_scanned(conn, params)?.map(|m| m.block_height()) {
         let pruning_floor: u32 = u32::from(max_scanned_height).saturating_sub(PRUNING_DEPTH - 1);
 
-        // Mark stabilized notes in each pool
-        mark_pool(conn, "sapling", SAPLING_SHARD_HEIGHT, pruning_floor)?;
-        #[cfg(feature = "orchard")]
-        mark_pool(conn, "orchard", ORCHARD_SHARD_HEIGHT, pruning_floor)?;
+        // Mark stabilized notes in each requested pool.
+        for pool in pools {
+            mark_pool(conn, *pool, pruning_floor)?;
+        }
     }
 
     Ok(())
@@ -427,7 +474,7 @@ pub(crate) fn mark_stabilized_notes<P: consensus::Parameters>(
 
 fn tip_shard_end_height(
     conn: &rusqlite::Transaction<'_>,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
     conn.query_row(
@@ -475,20 +522,21 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from each of the shards tables. The minimum of the two
-    // gives the start of a height range that covers the last incomplete shard of both the
-    // Sapling and Orchard pools.
-    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Sapling)?;
+    // Read the maximum height from each of the shards tables. The minimum across the pools gives
+    // the start of a height range that covers the last incomplete shard of every pool, so that
+    // none is left behind. The Ironwood pool is included: post-NU6.3 it is sparse, so its last
+    // shard can end well below the Sapling and Orchard tips.
+    let sapling_shard_tip = tip_shard_end_height(conn, ShieldedPool::Sapling)?;
     #[cfg(feature = "orchard")]
-    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedProtocol::Orchard)?;
+    let orchard_shard_tip = tip_shard_end_height(conn, ShieldedPool::Orchard)?;
+    #[cfg(feature = "orchard")]
+    let ironwood_shard_tip = tip_shard_end_height(conn, ShieldedPool::Ironwood)?;
 
     #[cfg(feature = "orchard")]
-    let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {
-        (None, None) => None,
-        (None, Some(o)) => Some(o),
-        (Some(s), None) => Some(s),
-        (Some(s), Some(o)) => Some(std::cmp::min(s, o)),
-    };
+    let min_shard_tip = [sapling_shard_tip, orchard_shard_tip, ironwood_shard_tip]
+        .into_iter()
+        .flatten()
+        .min();
     #[cfg(not(feature = "orchard"))]
     let min_shard_tip = sapling_shard_tip;
 
@@ -645,6 +693,49 @@ pub(crate) mod tests {
         wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
     };
 
+    /// `extend_range` for the Ironwood pool must query the `ironwood_tree_shards` table (rather
+    /// than the Orchard tree), extending the scan range to cover the subtrees containing the
+    /// discovered notes.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn extend_range_uses_ironwood_tree_shards() {
+        use rusqlite::Connection;
+        use std::collections::BTreeSet;
+        use zcash_protocol::ShieldedPool;
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ironwood_tree_shards (
+                shard_index INTEGER PRIMARY KEY,
+                subtree_end_height INTEGER
+            );
+            INSERT INTO ironwood_tree_shards (shard_index, subtree_end_height)
+            VALUES (0, 100), (1, 200);",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        let range = BlockHeight::from_u32(50)..BlockHeight::from_u32(60);
+        let required = BTreeSet::from([1u64]);
+
+        let extended = super::extend_range(
+            &tx,
+            &range,
+            required,
+            ShieldedPool::Ironwood,
+            Some(BlockHeight::from_u32(10)),
+            Some(BlockHeight::from_u32(5)),
+        )
+        .unwrap();
+
+        // Subtree 1 spans from the end of subtree 0 (height 100) to its own end (height 200), so
+        // the scan range is extended to cover [50, 201).
+        assert_eq!(
+            extended,
+            Some(BlockHeight::from_u32(50)..BlockHeight::from_u32(201))
+        );
+    }
+
     #[cfg(feature = "orchard")]
     use {
         incrementalmerkletree::Level,
@@ -721,6 +812,12 @@ pub(crate) mod tests {
                     })
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         sapling_activation_height + initial_height_offset - 1,
@@ -728,6 +825,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -752,6 +851,7 @@ pub(crate) mod tests {
             )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            0,
             false,
         );
 
@@ -878,6 +978,12 @@ pub(crate) mod tests {
                         NonZeroU8::new(16).unwrap(),
                     );
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height,
@@ -885,6 +991,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots: if insert_prior_roots {
                         prior_sapling_roots
@@ -1136,6 +1244,12 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
@@ -1143,6 +1257,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1191,6 +1307,7 @@ pub(crate) mod tests {
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
+            0,
             false,
         );
         st.scan_cached_blocks(max_scanned, 1);
@@ -1329,6 +1446,12 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // No Ironwood notes are involved in this test, so its chain state carries an
+                // empty Ironwood tree.
+
+                #[cfg(feature = "orchard")]
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
@@ -1336,6 +1459,8 @@ pub(crate) mod tests {
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots,
                     #[cfg(feature = "orchard")]
@@ -1395,6 +1520,7 @@ pub(crate) mod tests {
             )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
+            0,
             false,
         );
         st.scan_cached_blocks(max_scanned, 1);
@@ -1659,12 +1785,17 @@ pub(crate) mod tests {
                     .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
                     .collect::<Vec<_>>();
 
+                // The Sapling and Ironwood trees are unused in this test.
+                let sapling_initial_tree = Frontier::empty();
+                let ironwood_initial_tree = Frontier::empty();
+
                 InitialChainState {
                     chain_state: ChainState::new(
                         birthday_height - 1,
                         birthday_prior_block_hash,
-                        Frontier::empty(), // the Sapling tree is unused in this test
+                        sapling_initial_tree,
                         orchard_initial_tree,
+                        ironwood_initial_tree,
                     ),
                     prior_sapling_roots: vec![],
                     prior_orchard_roots,
@@ -1954,5 +2085,103 @@ pub(crate) mod tests {
         );
 
         assert_matches!(proposal, Ok(_));
+    }
+
+    /// `put_ironwood_subtree_roots` records Ironwood subtree roots (and their end heights) in the
+    /// wallet's Ironwood shard table, exactly as the Sapling and Orchard equivalents do for their
+    /// pools. Without it, a wallet restoring from a subtree-root source cannot populate its
+    /// Ironwood tree at all.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots_records_the_shard_end_height() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let shard_end = st.sapling_activation_height() + 500;
+        st.wallet_mut()
+            .put_ironwood_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    shard_end,
+                    MerkleHashOrchard::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        let stored: Option<u32> = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT MAX(subtree_end_height) FROM ironwood_tree_shards",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            Some(u32::from(shard_end)),
+            "put_ironwood_subtree_roots must record the subtree end height in ironwood_tree_shards",
+        );
+    }
+
+    /// `update_chain_tip` must fold the Ironwood shard tip into the ChainTip-priority scan range,
+    /// alongside the Sapling and Orchard shard tips. Post-NU6.3 the Ironwood pool is sparse, so
+    /// its last shard can end well below the others; if it is omitted from the minimum, the
+    /// ChainTip range starts at the higher Sapling/Orchard tip and the incomplete Ironwood shard
+    /// is not scheduled for scanning at ChainTip priority.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn update_chain_tip_covers_the_ironwood_shard_tip() {
+        use ScanPriority::*;
+
+        let (mut st, _, birthday, _sap_active) =
+            test_with_nu5_birthday_offset::<OrchardPoolTester>(76, 1000, BlockHash([0; 32]), true);
+        let b = birthday.height();
+
+        // Sapling and Orchard complete a shard high above the birthday; the Ironwood shard ends
+        // at a lower height (the sparse-pool reality).
+        let high = b + 1000;
+        let low = b + 400;
+        st.put_subtree_roots(
+            1,
+            &[CommitmentTreeRoot::from_parts(
+                high,
+                ::sapling::Node::empty_leaf(),
+            )],
+            1,
+            &[CommitmentTreeRoot::from_parts(
+                high,
+                MerkleHashOrchard::empty_leaf(),
+            )],
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_ironwood_subtree_roots(
+                1,
+                &[CommitmentTreeRoot::from_parts(
+                    low,
+                    MerkleHashOrchard::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        st.wallet_mut().update_chain_tip(high + 20).unwrap();
+
+        // The lowest-starting ChainTip range must reach down to the Ironwood shard tip, not stop
+        // at the higher Sapling/Orchard tip.
+        let ranges = suggest_scan_ranges(st.wallet().conn(), Ignored).unwrap();
+        let chain_tip_start = ranges
+            .iter()
+            .filter(|r| r.priority() == ChainTip)
+            .map(|r| r.block_range().start)
+            .min()
+            .expect("there must be a ChainTip scan range");
+        assert!(
+            chain_tip_start <= low,
+            "the ChainTip range must cover the Ironwood shard tip {low:?}, but started at \
+             {chain_tip_start:?}",
+        );
     }
 }

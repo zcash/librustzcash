@@ -10,8 +10,26 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-09
+
+### Changed
+- Migrated to `zcash_protocol 0.10.0`, `zcash_address 0.13.0`.
+
+## [0.9.0-pre.0] - 2026-06-30
+
 ### Added
 - `transparent::bundle::OutPoint` now implements `std::hash::Hash`.
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.0-pre.0`, `zcash_address 0.13.0-pre.0`.
+
+### Changed
+- `zcash_transparent::zip48::FullViewingKey::standard` now takes its `threshold`
+  argument as a `NonZeroU8` instead of a `u8`. This makes the
+  threshold-must-be-nonzero invariant explicit in the type and unrepresentable
+  by construction. Previously a zero threshold was accepted, producing a 0-of-N
+  (anyone-can-spend) P2SH multisig redeem script.
 
 ## [0.8.0] - 2026-06-02
 

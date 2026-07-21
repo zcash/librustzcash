@@ -1,21 +1,8 @@
 //! Functions for wallet support of ephemeral transparent addresses.
-use std::{ops::Range, time::SystemTime};
-
 use rand::{RngCore, seq::SliceRandom};
-use rusqlite::{OptionalExtension, named_params};
+use rusqlite::named_params;
 
-use ::transparent::{
-    address::TransparentAddress,
-    keys::{NonHardenedChildIndex, TransparentKeyScope},
-};
-use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
-use zcash_keys::encoding::AddressCodec;
-use zcash_protocol::consensus::{self, BlockHeight};
-
-#[cfg(any(test, feature = "test-dependencies"))]
-use crate::GapLimits;
 use crate::{
-    AccountRef, AccountUuid,
     error::SqliteClientError,
     util::Clock,
     wallet::{
@@ -24,10 +11,42 @@ use crate::{
     },
 };
 
+// Imports used only by the address-metadata helpers, which are compiled only
+// for tests and the `test-dependencies` feature.
+#[cfg(any(test, feature = "test-dependencies"))]
+use crate::{AccountRef, GapLimits};
+#[cfg(any(test, feature = "test-dependencies"))]
+use ::transparent::{
+    address::TransparentAddress,
+    keys::{NonHardenedChildIndex, TransparentKeyScope},
+};
+#[cfg(any(test, feature = "test-dependencies"))]
+use std::{ops::Range, time::SystemTime};
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_keys::encoding::AddressCodec;
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_protocol::consensus::{self, BlockHeight};
+
+// Imports used only by `find_account_for_ephemeral_address_str`, which is
+// compiled only for the transparent-inputs test surface.
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
+use crate::AccountUuid;
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
+use rusqlite::OptionalExtension;
+
 use super::next_check_time;
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
+#[cfg(any(test, feature = "test-dependencies"))]
 pub(crate) fn metadata(
     address_index: NonHardenedChildIndex,
     exposure: Exposure,
@@ -132,6 +151,10 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
 }
 
 /// If this is a known ephemeral address in any account, return its account id.
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
 pub(crate) fn find_account_for_ephemeral_address_str(
     conn: &rusqlite::Connection,
     address_str: &str,

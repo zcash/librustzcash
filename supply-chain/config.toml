@@ -34,8 +34,17 @@ audit-as-crates-io = true
 [policy.f4jumble]
 audit-as-crates-io = true
 
+[policy.incrementalmerkletree]
+
+[policy.incrementalmerkletree-testing]
+
+[policy.orchard]
+audit-as-crates-io = false
+
 [policy.pczt]
 audit-as-crates-io = true
+
+[policy.shardtree]
 
 [policy.zcash]
 audit-as-crates-io = true
@@ -71,6 +80,8 @@ audit-as-crates-io = true
 
 [policy.zcash_transparent]
 audit-as-crates-io = true
+
+[policy.zewif]
 
 [policy.zip321]
 audit-as-crates-io = true
@@ -763,6 +774,14 @@ criteria = "safe-to-deploy"
 version = "3.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.minicbor]]
+version = "2.2.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.minicbor-derive]]
+version = "0.19.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.minimal-lexical]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
@@ -1068,15 +1087,7 @@ version = "1.11.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-automata]]
-version = "0.1.10"
-criteria = "safe-to-deploy"
-
-[[exemptions.regex-automata]]
 version = "0.4.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.regex-syntax]]
-version = "0.6.26"
 criteria = "safe-to-deploy"
 
 [[exemptions.retry-error]]
@@ -1144,7 +1155,7 @@ version = "0.101.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.1"
+version = "0.103.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusty-fork]]
@@ -1324,7 +1335,11 @@ version = "2.0.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.time]]
-version = "0.3.23"
+version = "0.3.53"
+criteria = "safe-to-deploy"
+
+[[exemptions.time-macros]]
+version = "0.2.31"
 criteria = "safe-to-deploy"
 
 [[exemptions.tinytemplate]]
@@ -1464,6 +1479,10 @@ version = "0.28.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tor-guardmgr]]
+version = "0.35.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tor-hsclient]]
 version = "0.35.0"
 criteria = "safe-to-deploy"
 

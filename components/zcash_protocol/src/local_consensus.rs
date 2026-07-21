@@ -30,6 +30,9 @@ use crate::consensus::{BlockHeight, NetworkType, NetworkUpgrade, Parameters};
 ///         nu6: Some(BlockHeight::from_u32(1)),
 ///         nu6_1: Some(BlockHeight::from_u32(1)),
 ///         nu6_2: Some(BlockHeight::from_u32(1)),
+///         nu6_3: Some(BlockHeight::from_u32(1)),
+///         #[cfg(zcash_unstable = "nu7")]
+///         nu7: Some(BlockHeight::from_u32(1)),
 ///     };
 ///     ```
 ///
@@ -44,6 +47,7 @@ pub struct LocalNetwork {
     pub nu6: Option<BlockHeight>,
     pub nu6_1: Option<BlockHeight>,
     pub nu6_2: Option<BlockHeight>,
+    pub nu6_3: Option<BlockHeight>,
     #[cfg(zcash_unstable = "nu7")]
     pub nu7: Option<BlockHeight>,
 }
@@ -65,6 +69,7 @@ impl Parameters for LocalNetwork {
             NetworkUpgrade::Nu6 => self.nu6,
             NetworkUpgrade::Nu6_1 => self.nu6_1,
             NetworkUpgrade::Nu6_2 => self.nu6_2,
+            NetworkUpgrade::Nu6_3 => self.nu6_3,
             #[cfg(zcash_unstable = "nu7")]
             NetworkUpgrade::Nu7 => self.nu7,
         }
@@ -90,8 +95,9 @@ mod tests {
         let expected_nu6 = BlockHeight::from_u32(7);
         let expected_nu6_1 = BlockHeight::from_u32(8);
         let expected_nu6_2 = BlockHeight::from_u32(9);
+        let expected_nu6_3 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "nu7")]
-        let expected_nu7 = BlockHeight::from_u32(10);
+        let expected_nu7 = BlockHeight::from_u32(11);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
@@ -103,6 +109,7 @@ mod tests {
             nu6: Some(expected_nu6),
             nu6_1: Some(expected_nu6_1),
             nu6_2: Some(expected_nu6_2),
+            nu6_3: Some(expected_nu6_3),
             #[cfg(zcash_unstable = "nu7")]
             nu7: Some(expected_nu7),
         };
@@ -116,9 +123,10 @@ mod tests {
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6, expected_nu6));
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6_1, expected_nu6_1));
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6_2, expected_nu6_2));
-        // nu7 must not be activated at or below the nu6_2 height
+        assert!(regtest.is_nu_active(NetworkUpgrade::Nu6_3, expected_nu6_3));
+        // nu7 must not be activated at or below the nu6_3 height
         #[cfg(zcash_unstable = "nu7")]
-        assert!(!regtest.is_nu_active(NetworkUpgrade::Nu7, expected_nu6_2));
+        assert!(!regtest.is_nu_active(NetworkUpgrade::Nu7, expected_nu6_3));
     }
 
     #[test]
@@ -132,8 +140,9 @@ mod tests {
         let expected_nu6 = BlockHeight::from_u32(7);
         let expected_nu6_1 = BlockHeight::from_u32(8);
         let expected_nu6_2 = BlockHeight::from_u32(9);
+        let expected_nu6_3 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "nu7")]
-        let expected_nu7 = BlockHeight::from_u32(10);
+        let expected_nu7 = BlockHeight::from_u32(11);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
@@ -145,6 +154,7 @@ mod tests {
             nu6: Some(expected_nu6),
             nu6_1: Some(expected_nu6_1),
             nu6_2: Some(expected_nu6_2),
+            nu6_3: Some(expected_nu6_3),
             #[cfg(zcash_unstable = "nu7")]
             nu7: Some(expected_nu7),
         };
@@ -185,6 +195,10 @@ mod tests {
             regtest.activation_height(NetworkUpgrade::Nu6_2),
             Some(expected_nu6_2)
         );
+        assert_eq!(
+            regtest.activation_height(NetworkUpgrade::Nu6_3),
+            Some(expected_nu6_3)
+        );
         #[cfg(zcash_unstable = "nu7")]
         assert_eq!(
             regtest.activation_height(NetworkUpgrade::Nu7),
@@ -203,8 +217,9 @@ mod tests {
         let expected_nu6 = BlockHeight::from_u32(7);
         let expected_nu6_1 = BlockHeight::from_u32(8);
         let expected_nu6_2 = BlockHeight::from_u32(9);
+        let expected_nu6_3 = BlockHeight::from_u32(10);
         #[cfg(zcash_unstable = "nu7")]
-        let expected_nu7 = BlockHeight::from_u32(10);
+        let expected_nu7 = BlockHeight::from_u32(11);
 
         let regtest = LocalNetwork {
             overwinter: Some(expected_overwinter),
@@ -216,6 +231,7 @@ mod tests {
             nu6: Some(expected_nu6),
             nu6_1: Some(expected_nu6_1),
             nu6_2: Some(expected_nu6_2),
+            nu6_3: Some(expected_nu6_3),
             #[cfg(zcash_unstable = "nu7")]
             nu7: Some(expected_nu7),
         };

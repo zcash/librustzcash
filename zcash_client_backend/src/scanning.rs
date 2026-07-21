@@ -13,7 +13,7 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight},
 };
 use zip32::Scope;
@@ -210,6 +210,51 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
     }
 }
 
+/// The note-encryption domain used to trial-decrypt Ironwood outputs.
+///
+/// Ironwood ([ZIP 2005], NU6.3) is a distinct shielded pool. Its notes are Orchard-shaped and use
+/// the Orchard commitment and nullifier types, and are decrypted with the same Orchard viewing
+/// keys, but they carry version 3 note plaintexts and so require the Ironwood note-encryption
+/// domain, which is distinct from [`OrchardDomain`] (that domain accepts only version 2
+/// plaintexts). This is why Ironwood is a separate pool rather than a variant of Orchard.
+///
+/// [ZIP 2005]: https://zips.z.cash/zip-2005
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodDomain = orchard::note_encryption::IronwoodDomain;
+
+/// The nullifier type for Ironwood notes. This is the Orchard nullifier type, which does not
+/// depend on the note plaintext version. See [`IronwoodDomain`].
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodNullifier = orchard::note::Nullifier;
+
+/// An Orchard viewing key trial-decrypts Ironwood outputs under the Ironwood note-encryption
+/// domain. The key material is the same as for Orchard; only the domain (and thus the accepted
+/// note plaintext version) differs.
+#[cfg(feature = "orchard")]
+impl<AccountId> ScanningKeyOps<IronwoodDomain, AccountId, orchard::note::Nullifier>
+    for ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>
+{
+    fn prepare(&self) -> orchard::keys::PreparedIncomingViewingKey {
+        orchard::keys::PreparedIncomingViewingKey::new(&self.ivk)
+    }
+
+    fn nf(
+        &self,
+        note: &orchard::note::Note,
+        _position: Position,
+    ) -> Option<orchard::note::Nullifier> {
+        self.nk.as_ref().map(|key| note.nullifier(key))
+    }
+
+    fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.key_scope
+    }
+}
+
 /// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
     sapling: HashMap<
@@ -220,6 +265,11 @@ pub struct ScanningKeys<AccountId, IvkTag> {
     orchard: HashMap<
         IvkTag,
         Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
+    >,
+    #[cfg(feature = "orchard")]
+    ironwood: HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
     >,
 }
 
@@ -238,11 +288,17 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
                     + Sync,
             >,
         >,
+        #[cfg(feature = "orchard")] ironwood: HashMap<
+            IvkTag,
+            Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
+        >,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -252,6 +308,8 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
             sapling: HashMap::new(),
             #[cfg(feature = "orchard")]
             orchard: HashMap::new(),
+            #[cfg(feature = "orchard")]
+            ironwood: HashMap::new(),
         }
     }
 
@@ -274,6 +332,20 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
         Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier> + Send + Sync>,
     > {
         &self.orchard
+    }
+
+    /// Returns the Ironwood keys to be used for incoming note detection.
+    ///
+    /// Ironwood outputs are trial-decrypted with the account's Orchard viewing keys (see
+    /// [`IronwoodDomain`]), but are tracked as a separate pool from Orchard.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(
+        &self,
+    ) -> &HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
+    > {
+        &self.ironwood
     }
 }
 
@@ -299,6 +371,11 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
                     + Send
                     + Sync,
             >,
+        > = HashMap::new();
+        #[cfg(feature = "orchard")]
+        let mut ironwood: HashMap<
+            (AccountId, Scope),
+            Box<dyn ScanningKeyOps<IronwoodDomain, AccountId, IronwoodNullifier> + Send + Sync>,
         > = HashMap::new();
 
         for (account_id, ufvk) in ufvks {
@@ -329,6 +406,20 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
                         }),
                     );
                 }
+
+                // Ironwood outputs are decrypted with the same Orchard viewing keys, but are
+                // tracked as a separate pool.
+                for scope in [Scope::External, Scope::Internal] {
+                    ironwood.insert(
+                        (account_id, scope),
+                        Box::new(ScanningKey {
+                            ivk: fvk.to_ivk(scope),
+                            nk: Some(fvk.clone()),
+                            account_id,
+                            key_scope: Some(scope),
+                        }),
+                    );
+                }
             }
         }
 
@@ -336,6 +427,8 @@ impl<AccountId: Copy + Eq + Hash + Send + Sync + 'static>
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 }
@@ -345,6 +438,8 @@ pub struct Nullifiers<AccountId> {
     sapling: Vec<(AccountId, sapling::Nullifier)>,
     #[cfg(feature = "orchard")]
     orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+    #[cfg(feature = "orchard")]
+    ironwood: Vec<(AccountId, IronwoodNullifier)>,
 }
 
 impl<AccountId> Nullifiers<AccountId> {
@@ -354,6 +449,8 @@ impl<AccountId> Nullifiers<AccountId> {
             sapling: vec![],
             #[cfg(feature = "orchard")]
             orchard: vec![],
+            #[cfg(feature = "orchard")]
+            ironwood: vec![],
         }
     }
 
@@ -365,6 +462,8 @@ impl<AccountId> Nullifiers<AccountId> {
             db_data.get_sapling_nullifiers(NullifierQuery::Unspent)?,
             #[cfg(feature = "orchard")]
             db_data.get_orchard_nullifiers(NullifierQuery::Unspent)?,
+            #[cfg(feature = "orchard")]
+            db_data.get_ironwood_nullifiers(NullifierQuery::Unspent)?,
         ))
     }
 
@@ -372,11 +471,14 @@ impl<AccountId> Nullifiers<AccountId> {
     pub(crate) fn new(
         sapling: Vec<(AccountId, sapling::Nullifier)>,
         #[cfg(feature = "orchard")] orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+        #[cfg(feature = "orchard")] ironwood: Vec<(AccountId, IronwoodNullifier)>,
     ) -> Self {
         Self {
             sapling,
             #[cfg(feature = "orchard")]
             orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
         }
     }
 
@@ -389,6 +491,12 @@ impl<AccountId> Nullifiers<AccountId> {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &[(AccountId, orchard::note::Nullifier)] {
         self.orchard.as_ref()
+    }
+
+    /// Returns the Ironwood nullifiers for notes that the wallet is tracking.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(&self) -> &[(AccountId, IronwoodNullifier)] {
+        self.ironwood.as_ref()
     }
 
     /// Discards Sapling nullifiers from the tracked nullifier set, retaining only those that
@@ -419,6 +527,19 @@ impl<AccountId> Nullifiers<AccountId> {
         nfs: impl IntoIterator<Item = (AccountId, orchard::note::Nullifier)>,
     ) {
         self.orchard.extend(nfs);
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn retain_ironwood(&mut self, f: impl Fn(&(AccountId, IronwoodNullifier)) -> bool) {
+        self.ironwood.retain(f);
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn extend_ironwood(
+        &mut self,
+        nfs: impl IntoIterator<Item = (AccountId, IronwoodNullifier)>,
+    ) {
+        self.ironwood.extend(nfs);
     }
 }
 
@@ -461,6 +582,19 @@ impl<AccountId: Copy> Nullifiers<AccountId> {
                     .iter()
                     .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
             }));
+
+            let ironwood_spent_nf: Vec<&IronwoodNullifier> = scanned_block
+                .transactions()
+                .iter()
+                .flat_map(|tx| tx.ironwood_spends().iter().map(|spend| spend.nf()))
+                .collect();
+
+            self.retain_ironwood(|(_, nf)| !ironwood_spent_nf.contains(&nf));
+            self.extend_ironwood(scanned_block.transactions().iter().flat_map(|tx| {
+                tx.ironwood_outputs()
+                    .iter()
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+            }));
         }
     }
 }
@@ -472,7 +606,7 @@ pub enum ScanError {
     EncodingInvalid {
         at_height: BlockHeight,
         txid: TxId,
-        pool_type: ShieldedProtocol,
+        pool_type: ShieldedPool,
         index: usize,
     },
 
@@ -490,7 +624,7 @@ pub enum ScanError {
     /// The note commitment tree size for the given protocol at the proposed new block is not equal
     /// to the size at the previous block plus the count of this block's outputs.
     TreeSizeMismatch {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
         given: u32,
         computed: u32,
@@ -500,7 +634,7 @@ pub enum ScanError {
     /// [`CompactBlock`] being scanned, making it impossible to construct the nullifier for a
     /// detected note.
     TreeSizeUnknown {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
     },
 
@@ -508,14 +642,14 @@ pub enum ScanError {
     /// that is invalidated by the data in the block itself. This may be caused by the presence
     /// of default values in the chain metadata.
     TreeSizeInvalid {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
     },
 
     /// The size of the note commitment tree for the given protocol would exceed the
     /// `u32` range as a result of applying the outputs in the block being scanned.
     TreeSizeOverflow {
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         at_height: BlockHeight,
     },
 }
@@ -639,7 +773,7 @@ where
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + Sync + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
-    compact::scan_block_with_runners::<_, _, _, (), ()>(
+    compact::scan_block_with_runners::<_, _, _, (), (), ()>(
         params,
         block,
         scanning_keys,
@@ -661,6 +795,10 @@ struct PositionTracker {
     orchard_tree_position: u32,
     #[cfg(feature = "orchard")]
     orchard_final_tree_size: u32,
+    #[cfg(feature = "orchard")]
+    ironwood_tree_position: u32,
+    #[cfg(feature = "orchard")]
+    ironwood_final_tree_size: u32,
 }
 
 impl PositionTracker {
@@ -674,6 +812,13 @@ impl PositionTracker {
     fn orchard_note_position(&self, output_idx: usize) -> Position {
         Position::from(u64::from(
             self.orchard_tree_position + u32::try_from(output_idx).unwrap(),
+        ))
+    }
+
+    #[cfg(feature = "orchard")]
+    fn ironwood_note_position(&self, output_idx: usize) -> Position {
+        Position::from(u64::from(
+            self.ironwood_tree_position + u32::try_from(output_idx).unwrap(),
         ))
     }
 }
@@ -735,6 +880,7 @@ fn find_received<
     SK: ScanningKeyOps<D, AccountId, Nf>,
     Output: ShieldedOutput<D, CIPHERTEXT_SIZE>,
     NoteCommitment,
+    Note,
     const CIPHERTEXT_SIZE: usize,
 >(
     block_height: BlockHeight,
@@ -750,8 +896,9 @@ fn find_received<
         &[(D, Output)],
     ) -> Vec<Option<((D::Note, D::Recipient, M), usize)>>,
     extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
+    enrich_note: impl Fn(D::Note) -> Note,
 ) -> (
-    Vec<WalletOutput<D::Note, Nf, AccountId>>,
+    Vec<WalletOutput<Note, Nf, AccountId>>,
     Vec<(NoteCommitment, Retention<BlockHeight>)>,
 ) {
     // Check for incoming notes while incrementing tree and witnesses
@@ -831,7 +978,7 @@ fn find_received<
             shielded_outputs.push(WalletOutput::from_parts(
                 output_idx,
                 output.ephemeral_key(),
-                note,
+                enrich_note(note),
                 is_change,
                 note_commitment_tree_position,
                 nf,
@@ -987,6 +1134,8 @@ pub mod testing {
                         + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
                     orchard_commitment_tree_size: initial_orchard_tree_size
                         + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
+                    // The test framework does not generate Ironwood notes.
+                    ironwood_commitment_tree_size: 0,
                 }
             });
 

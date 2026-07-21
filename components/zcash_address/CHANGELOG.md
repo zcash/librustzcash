@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-09
+
+### Changed
+- Migrated to `zcash_protocol 0.10.0`.
+
+## [0.13.0-pre.0] - 2026-06-30
+
+### Changed
+- MSRV is now 1.88
+- Migrated to `zcash_protocol 0.10.0-pre.0`.
+
 ## [0.12.0] - 2026-06-02
 
 ### Changed

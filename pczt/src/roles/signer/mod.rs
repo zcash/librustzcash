@@ -13,6 +13,8 @@
 //!   - Signatures (RedJubjub / RedPallas)
 //!   - A source of randomness.
 
+use alloc::vec::Vec;
+
 use blake2b_simd::Hash as Blake2bHash;
 use orchard::primitives::redpallas;
 use rand_core::OsRng;
@@ -33,11 +35,93 @@ use crate::{
 pub use crate::EffectsOnly;
 use crate::sighash;
 
+pub mod batch;
+
+/// A spend authorization signature for an action in an Orchard-protocol value pool.
+///
+/// This type only represents signatures for the Orchard and Ironwood value pools; it
+/// does not represent Sapling spend authorization signatures. It can be used by external
+/// signers that return signatures separately from a PCZT. The value pool and action index
+/// identify where the signature belongs when it is later applied with
+/// [`Signer::apply_orchard_spend_auth_signature`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpendAuthSignature {
+    value_pool: orchard::ValuePool,
+    action_index: usize,
+    signature: [u8; 64],
+}
+
+impl SpendAuthSignature {
+    /// Constructs a spend authorization signature for the action at `action_index`
+    /// in `value_pool`.
+    pub fn from_parts(
+        value_pool: orchard::ValuePool,
+        action_index: usize,
+        signature: [u8; 64],
+    ) -> Self {
+        Self {
+            value_pool,
+            action_index,
+            signature,
+        }
+    }
+
+    /// Returns the Orchard-protocol value pool containing the signed action.
+    pub fn value_pool(&self) -> orchard::ValuePool {
+        self.value_pool
+    }
+
+    /// Returns the index of the signed action within its value pool's bundle.
+    pub fn action_index(&self) -> usize {
+        self.action_index
+    }
+
+    /// Returns the raw RedPallas spend authorization signature bytes.
+    pub fn signature(&self) -> &[u8; 64] {
+        &self.signature
+    }
+}
+
+/// Extracts the Orchard-protocol spend authorization signatures present in `pczt`.
+///
+/// The returned signatures are tagged with their Orchard or Ironwood value pool and
+/// action index, so they can be transported independently and later applied to a
+/// corresponding PCZT with [`Signer::apply_orchard_spend_auth_signature`]. Actions
+/// without a spend authorization signature are omitted.
+pub fn extract_orchard_spend_auth_signatures(pczt: &Pczt) -> Vec<SpendAuthSignature> {
+    fn extract_from_bundle(
+        signatures: &mut Vec<SpendAuthSignature>,
+        value_pool: orchard::ValuePool,
+        bundle: &crate::orchard::Bundle,
+    ) {
+        for (action_index, action) in bundle.actions().iter().enumerate() {
+            if let Some(signature) = action.spend().spend_auth_sig() {
+                signatures.push(SpendAuthSignature::from_parts(
+                    value_pool,
+                    action_index,
+                    *signature,
+                ));
+            }
+        }
+    }
+
+    let mut signatures = Vec::new();
+    extract_from_bundle(&mut signatures, orchard::ValuePool::Orchard, pczt.orchard());
+    extract_from_bundle(
+        &mut signatures,
+        orchard::ValuePool::Ironwood,
+        pczt.ironwood(),
+    );
+    signatures
+}
+
 pub struct Signer {
     global: Global,
     transparent: transparent::pczt::Bundle,
-    sapling: sapling::pczt::Bundle,
-    orchard: orchard::pczt::Bundle,
+    sapling: crate::sapling::Parsed,
+    orchard: crate::orchard::Parsed,
+    ironwood: crate::orchard::Parsed,
+    empty_ironwood: Option<crate::orchard::Bundle>,
     /// Cached across multiple signatures.
     tx_data: TransactionData<EffectsOnly>,
     txid_parts: TxDigests<Blake2bHash>,
@@ -48,19 +132,30 @@ pub struct Signer {
 impl Signer {
     /// Instantiates the Signer role with the given PCZT.
     pub fn new(pczt: Pczt) -> Result<Self, Error> {
+        let anchor_requirement =
+            crate::common::AnchorRequirement::for_pre_authorization(pczt.global.tx_version);
+        let empty_ironwood = pczt
+            .ironwood
+            .actions
+            .is_empty()
+            .then(|| pczt.ironwood.clone());
+
         let ParsedPczt {
             global,
             transparent,
             sapling,
             orchard,
+            ironwood,
             tx_data,
         } = pczt.extract_tx_data(
+            anchor_requirement,
             |t| {
                 t.extract_effects()
                     .map_err(ExtractError::TransparentExtract)
             },
             |s| s.extract_effects().map_err(ExtractError::SaplingExtract),
             |o| o.extract_effects().map_err(ExtractError::OrchardExtract),
+            |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )?;
         let txid_parts = tx_data.digest(TxIdDigester);
         let shielded_sighash = sighash(&tx_data, &SignableInput::Shielded, &txid_parts);
@@ -70,6 +165,8 @@ impl Signer {
             transparent,
             sapling,
             orchard,
+            ironwood,
+            empty_ironwood,
             tx_data,
             txid_parts,
             shielded_sighash,
@@ -237,6 +334,7 @@ impl Signer {
     {
         let spend = self
             .sapling
+            .bundle
             .spends_mut()
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
@@ -296,12 +394,37 @@ impl Signer {
         })
     }
 
+    /// Applies an externally produced Orchard-protocol spend authorization signature.
+    ///
+    /// The signature's value pool selects the Orchard or Ironwood bundle, and its
+    /// action index selects the spend within that bundle. The signature is verified
+    /// against the action's randomized verification key before it is stored.
+    ///
+    /// Returns an error if the action index is invalid, the action data is
+    /// inconsistent, or the signature does not verify.
+    pub fn apply_orchard_spend_auth_signature(
+        &mut self,
+        signature: &SpendAuthSignature,
+    ) -> Result<(), Error> {
+        let spend_auth_sig =
+            redpallas::Signature::<redpallas::SpendAuth>::from(*signature.signature());
+        match signature.value_pool() {
+            orchard::ValuePool::Orchard => {
+                self.apply_orchard_signature(signature.action_index(), spend_auth_sig)
+            }
+            orchard::ValuePool::Ironwood => {
+                self.apply_ironwood_signature(signature.action_index(), spend_auth_sig)
+            }
+        }
+    }
+
     fn generate_or_apply_orchard_signature<F>(&mut self, index: usize, f: F) -> Result<(), Error>
     where
         F: FnOnce(&mut orchard::pczt::Action, [u8; 32]) -> Result<(), orchard::pczt::SignerError>,
     {
         let action = self
             .orchard
+            .bundle
             .actions_mut()
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
@@ -330,13 +453,94 @@ impl Signer {
         Ok(())
     }
 
+    /// Signs the Ironwood spend at the given index with the given spend authorizing key.
+    ///
+    /// Requires the spend's `fvk` field to be set (because the API does not take an FVK).
+    ///
+    /// It is the caller's responsibility to perform any semantic validity checks on the
+    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// this method.
+    pub fn sign_ironwood(
+        &mut self,
+        index: usize,
+        ask: &orchard::keys::SpendAuthorizingKey,
+    ) -> Result<(), Error> {
+        self.generate_or_apply_ironwood_signature(index, |spend, shielded_sighash| {
+            spend.sign(shielded_sighash, ask, OsRng)
+        })
+    }
+
+    /// Applies the given signature to the Ironwood spend.
+    ///
+    /// It is the caller's responsibility to perform any semantic validity checks on the
+    /// PCZT (for example, comfirming that the change amounts are correct) before calling
+    /// this method.
+    pub fn apply_ironwood_signature(
+        &mut self,
+        index: usize,
+        signature: redpallas::Signature<redpallas::SpendAuth>,
+    ) -> Result<(), Error> {
+        self.generate_or_apply_ironwood_signature(index, |action, shielded_sighash| {
+            action.apply_signature(shielded_sighash, signature)
+        })
+    }
+
+    fn generate_or_apply_ironwood_signature<F>(&mut self, index: usize, f: F) -> Result<(), Error>
+    where
+        F: FnOnce(&mut orchard::pczt::Action, [u8; 32]) -> Result<(), orchard::pczt::SignerError>,
+    {
+        let action = self
+            .ironwood
+            .bundle
+            .actions_mut()
+            .get_mut(index)
+            .ok_or(Error::InvalidIndex)?;
+
+        // Check consistency of the input being signed if we have its note components.
+        match action.spend().verify_nullifier(None) {
+            Err(
+                orchard::pczt::VerifyError::MissingRecipient
+                | orchard::pczt::VerifyError::MissingValue
+                | orchard::pczt::VerifyError::MissingRho
+                | orchard::pczt::VerifyError::MissingRandomSeed,
+            ) => Ok(()),
+            r => r,
+        }
+        .map_err(Error::IronwoodVerify)?;
+
+        // Generate or apply the signature.
+        f(action, self.shielded_sighash).map_err(Error::IronwoodSign)?;
+
+        // Update transaction modifiability: all transaction effects have been committed
+        // to by the signature.
+        self.global.tx_modifiable &= !(FLAG_TRANSPARENT_INPUTS_MODIFIABLE
+            | FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE
+            | FLAG_SHIELDED_MODIFIABLE);
+
+        Ok(())
+    }
+
     /// Finishes the Signer role, returning the updated PCZT.
     pub fn finish(self) -> Pczt {
+        let Self {
+            global,
+            transparent,
+            sapling,
+            orchard,
+            ironwood,
+            empty_ironwood,
+            tx_data: _,
+            txid_parts: _,
+            shielded_sighash: _,
+            secp: _,
+        } = self;
+
         Pczt {
-            global: self.global,
-            transparent: crate::transparent::Bundle::serialize_from(self.transparent),
-            sapling: crate::sapling::Bundle::serialize_from(self.sapling),
-            orchard: crate::orchard::Bundle::serialize_from(self.orchard),
+            global,
+            transparent: crate::transparent::Bundle::serialize_from(transparent),
+            sapling: sapling.reserialize(),
+            orchard: orchard.reserialize(),
+            ironwood: empty_ironwood.unwrap_or_else(|| ironwood.reserialize()),
         }
     }
 }
@@ -346,6 +550,8 @@ impl Signer {
 pub enum Error {
     Extract(crate::ExtractError),
     InvalidIndex,
+    IronwoodSign(orchard::pczt::SignerError),
+    IronwoodVerify(orchard::pczt::VerifyError),
     OrchardSign(orchard::pczt::SignerError),
     OrchardVerify(orchard::pczt::VerifyError),
     SaplingSign(sapling::pczt::SignerError),
@@ -356,5 +562,82 @@ pub enum Error {
 impl From<crate::ExtractError> for Error {
     fn from(e: crate::ExtractError) -> Self {
         Error::Extract(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ff::{Field, PrimeField};
+    use pasta_curves::pallas;
+    use zcash_protocol::consensus::BranchId;
+
+    use super::Signer;
+    use crate::{
+        orchard::{Action, Spend},
+        roles::{creator::Creator, io_finalizer::IoFinalizer, updater::Updater},
+    };
+
+    /// Builds a fully-dummy (zero-valued, freshly-random-key) Ironwood action, whose
+    /// spend the IO Finalizer signs itself via `dummy_sk`. This lets the IO Finalizer
+    /// and Signer roles be exercised without going through the transaction builder
+    /// (which requires a concrete anchor to add any real spend).
+    fn dummy_action() -> Action {
+        let sk = orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap();
+        let alpha = pallas::Scalar::ONE;
+        let base = crate::orchard::testing::dummy_action();
+
+        Action {
+            spend: Spend {
+                alpha: Some(alpha.to_repr()),
+                dummy_sk: Some(*sk.to_bytes()),
+                ..base.spend
+            },
+            rcv: Some([3; 32]),
+            ..base
+        }
+    }
+
+    /// [ZIP 374] "Anchors and pre-authorization" requires that, for a v6 transaction,
+    /// signing (including the IO Finalizer's dummy-spend signing) works even while a
+    /// shielded bundle's anchor is absent. The Ironwood bundle here is built by
+    /// hand (rather than via the transaction builder, which requires a concrete
+    /// anchor up front to add any spend) specifically to exercise that state; the
+    /// full sign-then-prove-then-extract pipeline is covered by the end-to-end
+    /// Ironwood tests, whose transaction builder requires the anchor to be set at the
+    /// point the spend is added.
+    ///
+    /// [ZIP 374]: https://zips.z.cash/zip-0374#anchors-and-pre-authorization
+    #[test]
+    fn io_finalizer_and_signer_succeed_with_absent_ironwood_anchor() {
+        let mut pczt = Creator::new(BranchId::Nu6_3.into(), 100, 133, None, None)
+            .unwrap()
+            .build()
+            .unwrap();
+        pczt.ironwood.actions.push(dummy_action());
+
+        assert!(pczt.ironwood.anchor.is_none());
+
+        let pczt = IoFinalizer::new(pczt).finalize_io().unwrap();
+        assert!(pczt.ironwood.anchor.is_none());
+        assert!(pczt.ironwood.bsk.is_some());
+        // The IO Finalizer signs and clears the dummy spending key.
+        assert!(pczt.ironwood.actions[0].spend.dummy_sk.is_none());
+        assert!(pczt.ironwood.actions[0].spend.spend_auth_sig.is_some());
+
+        // `Signer::new` computes the shielded sighash and extracts transaction
+        // effects; this must succeed with the anchor still absent (a v6 sighash
+        // does not commit to it).
+        let signer = Signer::new(pczt).unwrap();
+        let pczt = signer.finish();
+        assert!(pczt.ironwood.anchor.is_none());
+
+        // The anchor may now be set by an Updater, at any point before the Prover
+        // runs; nothing about signing required it to be present.
+        let anchor = orchard::Anchor::empty_tree();
+        let pczt = Updater::new(pczt)
+            .set_ironwood_anchor(anchor)
+            .unwrap()
+            .finish();
+        assert_eq!(pczt.ironwood.anchor, Some(anchor.to_bytes()));
     }
 }

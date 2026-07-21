@@ -33,7 +33,7 @@ impl TryFrom<(u32, &[u8])> for Receiver {
             }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid address for typecode {}: {}", typecode, e))
+            ParseError::InvalidEncoding(format!("Invalid address for typecode {typecode}: {e}"))
         })
     }
 }

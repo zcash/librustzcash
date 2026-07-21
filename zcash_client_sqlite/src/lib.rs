@@ -82,7 +82,7 @@ use zcash_primitives::{
     transaction::{Transaction, TxId},
 };
 use zcash_protocol::{
-    ShieldedProtocol,
+    ShieldedPool,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
 };
@@ -102,8 +102,8 @@ use wallet::{
 
 #[cfg(feature = "orchard")]
 use {
-    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
     zcash_client_backend::data_api::ll::ReceivedOrchardOutput,
+    zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT},
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -117,16 +117,22 @@ use {
     std::time::SystemTime,
     zcash_client_backend::{
         data_api::{
-            TransactionsInvolvingAddress, TransparentBalances, TransparentOutputFilter,
+            CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
             ll::wallet::generate_transparent_gap_addresses,
         },
+        fees::StandardFeeRule,
         wallet::TransparentAddressMetadata,
     },
-    zcash_keys::{
-        encoding::AddressCodec,
-        keys::transparent::gap_limits::{AddressStore, GapLimits},
-    },
+    zcash_keys::keys::transparent::gap_limits::{AddressStore, GapLimits},
 };
+
+// `AddressCodec` is used only by `find_account_for_ephemeral_address`, which is
+// part of the `WalletTest` surface.
+#[cfg(all(
+    any(test, feature = "test-dependencies"),
+    feature = "transparent-inputs"
+))]
+use zcash_keys::encoding::AddressCodec;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 use {
@@ -151,6 +157,8 @@ pub mod chain;
 pub mod error;
 pub mod util;
 pub mod wallet;
+#[cfg(feature = "zewif")]
+pub mod zewif;
 
 #[cfg(test)]
 mod testing;
@@ -167,6 +175,9 @@ pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
 #[cfg(feature = "orchard")]
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
+
+#[cfg(feature = "orchard")]
+pub(crate) const IRONWOOD_TABLES_PREFIX: &str = "ironwood";
 
 #[cfg(not(feature = "orchard"))]
 pub(crate) const UA_ORCHARD: ReceiverRequirement = ReceiverRequirement::Omit;
@@ -241,7 +252,7 @@ impl ConditionallySelectable for AccountRef {
 
 /// An opaque type for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ReceivedNoteId(pub(crate) ShieldedProtocol, pub(crate) i64);
+pub struct ReceivedNoteId(pub(crate) ShieldedPool, pub(crate) i64);
 
 impl fmt::Display for ReceivedNoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -287,6 +298,139 @@ impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
 impl<'a> Borrow<rusqlite::Transaction<'a>> for SqlTransaction<'a> {
     fn borrow(&self) -> &rusqlite::Transaction<'a> {
         self.0
+    }
+}
+
+/// The prefix reserved for schema (tables, indices, views, ...) created by external
+/// migrations.
+///
+/// The `zcash_client_sqlite` schema promises never to use this prefix for any of its own
+/// names, so any object whose name begins with it is owned by an application rather than
+/// by the wallet.
+const EXTENSION_SCHEMA_PREFIX: &str = "ext_";
+
+/// A restricted statement executor for writing to application-owned extension tables
+/// within a wallet database transaction.
+///
+/// A handle of this type is provided by [`WalletDb::transactionally_with_extension`]
+/// alongside the wallet handle, and shares the same database transaction: statements run
+/// through it either commit atomically with the wallet operations performed in the same
+/// closure, or are rolled back together with them.
+///
+/// # Authorization policy
+///
+/// Every statement executed through this type runs under a SQLite authorizer that is
+/// installed only for the duration of that single statement. The authorizer:
+///
+/// - **allows** reads (`SELECT`, and reads of individual rows and columns) against any
+///   table, so that extension statements may reference wallet data (for example, to
+///   satisfy a foreign key into an account row);
+/// - **allows** `INSERT`, `UPDATE`, and `DELETE` only against tables whose names begin
+///   with the `ext_` prefix reserved for external migrations (see
+///   [`WalletMigrator::with_external_migrations`]); and
+/// - **denies** everything else, including all schema changes (DDL), `PRAGMA`,
+///   `ATTACH`/`DETACH`, and transaction-control actions (`BEGIN`, `COMMIT`, `ROLLBACK`,
+///   `SAVEPOINT`, `RELEASE`), so that extension statements cannot alter the wallet schema
+///   or interfere with the enclosing transaction.
+///
+/// Because writes are restricted to the `ext_` prefix, a statement that inserts into an
+/// `AUTOINCREMENT` extension table is denied: SQLite services `AUTOINCREMENT` by writing
+/// to the internal `sqlite_sequence` table, which does not carry the prefix. Extension
+/// tables that must be written through this API should therefore avoid `AUTOINCREMENT`
+/// (an ordinary `INTEGER PRIMARY KEY` rowid, or an explicitly supplied key, works
+/// without it).
+///
+/// [`WalletMigrator::with_external_migrations`]: crate::wallet::init::WalletMigrator::with_external_migrations
+pub struct ExtensionTransaction<'conn> {
+    conn: &'conn rusqlite::Connection,
+}
+
+/// Removes the extension authorizer from a connection when dropped, ensuring the wallet's
+/// own statements are never subject to it (including when an extension statement fails).
+struct AuthorizerGuard<'conn> {
+    conn: &'conn rusqlite::Connection,
+}
+
+impl Drop for AuthorizerGuard<'_> {
+    fn drop(&mut self) {
+        self.conn.authorizer(
+            None::<fn(rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization>,
+        );
+    }
+}
+
+/// The authorizer callback enforcing the [`ExtensionTransaction`] policy.
+fn extension_authorizer(ctx: rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization {
+    use rusqlite::hooks::{AuthAction, Authorization};
+
+    let allow_if_extension = |table: &str| {
+        if table.starts_with(EXTENSION_SCHEMA_PREFIX) {
+            Authorization::Allow
+        } else {
+            Authorization::Deny
+        }
+    };
+
+    match ctx.action {
+        // Reads are permitted everywhere so that extension statements may reference wallet
+        // data (e.g. account foreign keys). `Function` and `Recursive` accompany read-only
+        // expression and CTE evaluation.
+        AuthAction::Select
+        | AuthAction::Read { .. }
+        | AuthAction::Function { .. }
+        | AuthAction::Recursive => Authorization::Allow,
+        // Writes are restricted to application-owned extension tables.
+        AuthAction::Insert { table_name } | AuthAction::Delete { table_name } => {
+            allow_if_extension(table_name)
+        }
+        AuthAction::Update { table_name, .. } => allow_if_extension(table_name),
+        // Everything else (DDL, PRAGMA, ATTACH/DETACH, transaction control, ...) is denied.
+        _ => Authorization::Deny,
+    }
+}
+
+impl<'conn> ExtensionTransaction<'conn> {
+    /// Runs `f` with the extension authorizer installed on the connection, removing it
+    /// again (even on error or panic) before returning.
+    fn with_authorizer<T>(
+        &self,
+        f: impl FnOnce() -> Result<T, rusqlite::Error>,
+    ) -> Result<T, rusqlite::Error> {
+        self.conn.authorizer(Some(extension_authorizer));
+        let _guard = AuthorizerGuard { conn: self.conn };
+        f()
+    }
+
+    /// Executes a single non-query SQL statement against an extension table, returning the
+    /// number of rows that were changed.
+    ///
+    /// The statement is subject to the authorization policy documented on
+    /// [`ExtensionTransaction`]; a statement that touches wallet-owned schema, or that
+    /// attempts a denied action, fails with an authorization error and makes no changes.
+    pub fn execute(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> Result<usize, rusqlite::Error> {
+        self.with_authorizer(|| self.conn.execute(sql, params))
+    }
+
+    /// Executes a SQL query that is expected to return a single row, and applies `f` to
+    /// that row to produce a result.
+    ///
+    /// The statement is subject to the authorization policy documented on
+    /// [`ExtensionTransaction`]. As with [`rusqlite::Connection::query_row`], this returns
+    /// [`rusqlite::Error::QueryReturnedNoRows`] if the query selects no rows.
+    pub fn query_row<T, F>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        f: F,
+    ) -> Result<T, rusqlite::Error>
+    where
+        F: FnOnce(&rusqlite::Row<'_>) -> Result<T, rusqlite::Error>,
+    {
+        self.with_authorizer(|| self.conn.query_row(sql, params, f))
     }
 }
 
@@ -392,6 +536,65 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
         Ok(result)
     }
 
+    /// Performs wallet database operations and writes to application-owned extension tables
+    /// atomically within a single database transaction.
+    ///
+    /// This behaves like [`WalletDb::transactionally`], but additionally provides an
+    /// [`ExtensionTransaction`] handle sharing the same transaction. This allows an
+    /// application to pair a wallet operation (such as importing an account) with writes to
+    /// its own tables created via [`WalletMigrator::with_external_migrations`], so that
+    /// either both take effect or neither does.
+    ///
+    /// The extension handle restricts the statements it will execute; see
+    /// [`ExtensionTransaction`] for the exact authorization policy. In particular, writes
+    /// are permitted only against tables whose names begin with the `ext_` prefix.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// wallet_db.transactionally_with_extension(|wdb, ext| {
+    ///     let account = wdb.import_account_ufvk(
+    ///         "external account",
+    ///         &ufvk,
+    ///         &birthday,
+    ///         AccountPurpose::ViewOnly,
+    ///         None,
+    ///     )?;
+    ///     ext.execute(
+    ///         "INSERT INTO ext_myapp_accounts (account_uuid, label) VALUES (?1, ?2)",
+    ///         (account.id().expose_uuid(), "external account"),
+    ///     )?;
+    ///     Ok::<_, SqliteClientError>(account)
+    /// })?;
+    /// ```
+    ///
+    /// [`WalletMigrator::with_external_migrations`]: crate::wallet::init::WalletMigrator::with_external_migrations
+    pub fn transactionally_with_extension<F, A, E: From<rusqlite::Error>>(
+        &mut self,
+        f: F,
+    ) -> Result<A, E>
+    where
+        F: FnOnce(
+            &mut WalletDb<SqlTransaction<'_>, &P, &CL, &mut R>,
+            &ExtensionTransaction<'_>,
+        ) -> Result<A, E>,
+    {
+        let tx = self.conn.borrow_mut().transaction()?;
+        let mut wdb = WalletDb {
+            conn: SqlTransaction(&tx),
+            params: &self.params,
+            clock: &self.clock,
+            rng: &mut self.rng,
+            #[cfg(feature = "transparent-inputs")]
+            gap_limits: self.gap_limits,
+        };
+        // Both handles hold shared references to the same transaction, so aliasing is fine.
+        let ext = ExtensionTransaction { conn: &tx };
+        let result = f(&mut wdb, &ext)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
     /// Attempts to construct a witness for each note belonging to the wallet that is believed by
     /// the wallet to currently be spendable, and returns a vector of the ranges that must be
     /// rescanned in order to correct missing witness data.
@@ -466,12 +669,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn get_spendable_note(
         &self,
         txid: &TxId,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
         index: u32,
         target_height: TargetHeight,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         match protocol {
-            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+            ShieldedPool::Sapling => wallet::sapling::get_spendable_sapling_note(
                 self.conn.borrow(),
                 &self.params,
                 txid,
@@ -479,7 +682,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 target_height,
             )
             .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
-            ShieldedProtocol::Orchard => {
+            ShieldedPool::Orchard => {
                 #[cfg(feature = "orchard")]
                 return wallet::orchard::get_spendable_orchard_note(
                     self.conn.borrow(),
@@ -488,10 +691,38 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     index,
                     target_height,
                 )
-                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Orchard,
+                        })
+                    })
+                });
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::ORCHARD));
+            }
+            ShieldedPool::Ironwood => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_ironwood_note(
+                    self.conn.borrow(),
+                    &self.params,
+                    txid,
+                    index,
+                    target_height,
+                )
+                .map(|opt| {
+                    opt.map(|n| {
+                        n.map_note(|note| Note::Orchard {
+                            note,
+                            pool: ::orchard::ValuePool::Ironwood,
+                        })
+                    })
+                });
+
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::IRONWOOD));
             }
         }
     }
@@ -500,13 +731,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         account: Self::AccountId,
         target_value: TargetValue,
-        sources: &[ShieldedProtocol],
+        sources: &[ShieldedPool],
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
-            if sources.contains(&ShieldedProtocol::Sapling) {
+            if sources.contains(&ShieldedPool::Sapling) {
                 wallet::sapling::select_spendable_sapling_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -520,8 +751,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedProtocol::Orchard) {
+            if sources.contains(&ShieldedPool::Orchard) {
                 wallet::orchard::select_spendable_orchard_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_value,
+                    target_height,
+                    confirmations_policy,
+                    exclude,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::orchard::select_spendable_ironwood_notes(
                     self.conn.borrow(),
                     &self.params,
                     account,
@@ -539,12 +784,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
-        sources: &[ShieldedProtocol],
+        sources: &[ShieldedPool],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
-            if sources.contains(&ShieldedProtocol::Sapling) {
+            if sources.contains(&ShieldedPool::Sapling) {
                 wallet::common::select_unspent_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -552,7 +797,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     ConfirmationsPolicy::MIN,
                     exclude,
-                    ShieldedProtocol::Sapling,
+                    ShieldedPool::Sapling,
                     wallet::sapling::to_received_note,
                     wallet::common::NoteRequest::Unspent,
                 )?
@@ -560,7 +805,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
             #[cfg(feature = "orchard")]
-            if sources.contains(&ShieldedProtocol::Orchard) {
+            if sources.contains(&ShieldedPool::Orchard) {
                 wallet::common::select_unspent_notes(
                     self.conn.borrow(),
                     &self.params,
@@ -568,7 +813,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     ConfirmationsPolicy::MIN,
                     exclude,
-                    ShieldedProtocol::Orchard,
+                    ShieldedPool::Orchard,
+                    wallet::orchard::to_received_note,
+                    wallet::common::NoteRequest::Unspent,
+                )?
+            } else {
+                vec![]
+            },
+            #[cfg(feature = "orchard")]
+            if sources.contains(&ShieldedPool::Ironwood) {
+                wallet::common::select_unspent_notes(
+                    self.conn.borrow(),
+                    &self.params,
+                    account,
+                    target_height,
+                    ConfirmationsPolicy::MIN,
+                    exclude,
+                    ShieldedPool::Ironwood,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
                 )?
@@ -597,7 +858,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         address: &TransparentAddress,
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
-        output_filter: TransparentOutputFilter,
+        output_filter: CoinbaseFilter,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -606,6 +867,50 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_height,
             confirmations_policy,
             output_filter,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_spendable_transparent_outputs_for_addresses(
+        &self,
+        addresses: &[TransparentAddress],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        wallet::transparent::get_spendable_transparent_outputs_for_addresses(
+            self.conn.borrow(),
+            &self.params,
+            addresses,
+            target_height,
+            confirmations_policy,
+            output_filter,
+        )
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn select_spendable_transparent_outputs(
+        &self,
+        account: Self::AccountId,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        output_filter: CoinbaseFilter,
+        address_allow_list: Option<&[TransparentAddress]>,
+        target_value: TargetValue,
+        max_inputs: usize,
+        fee_rule: &StandardFeeRule,
+    ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
+        wallet::transparent::select_spendable_transparent_outputs(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            target_height,
+            confirmations_policy,
+            output_filter,
+            address_allow_list,
+            target_value,
+            max_inputs,
+            fee_rule,
         )
     }
 
@@ -619,7 +924,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
     ) -> Result<AccountMeta, Self::Error> {
         let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             target_height,
             account_id,
             selector,
@@ -629,7 +934,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(feature = "orchard")]
         let orchard_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
             target_height,
             account_id,
             selector,
@@ -638,7 +943,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         #[cfg(not(feature = "orchard"))]
         let orchard_pool_meta = None;
 
-        Ok(AccountMeta::new(sapling_pool_meta, orchard_pool_meta))
+        #[cfg(feature = "orchard")]
+        let ironwood_pool_meta = unspent_notes_meta(
+            self.conn.borrow(),
+            ShieldedPool::Ironwood,
+            target_height,
+            account_id,
+            selector,
+            exclude,
+        )?;
+        #[cfg(not(feature = "orchard"))]
+        let ironwood_pool_meta = None;
+
+        Ok(AccountMeta::new(
+            sapling_pool_meta,
+            orchard_pool_meta,
+            ironwood_pool_meta,
+        ))
     }
 }
 
@@ -876,6 +1197,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::orchard::get_orchard_nullifiers(self.conn.borrow(), query)
     }
 
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
+        wallet::orchard::get_ironwood_nullifiers(self.conn.borrow(), query)
+    }
+
     #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
@@ -1006,7 +1335,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     fn get_sent_note_ids(
         &self,
         txid: &TxId,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
     ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error> {
         use crate::wallet::encoding::pool_code;
 
@@ -1102,7 +1431,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
 
     fn get_checkpoint_history(
         &self,
-        protocol: &ShieldedProtocol,
+        protocol: &ShieldedPool,
     ) -> Result<
         Vec<(BlockHeight, Option<incrementalmerkletree::Position>)>,
         <Self as WalletRead>::Error,
@@ -1128,7 +1457,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
 
     fn get_notes(
         &self,
-        protocol: ShieldedProtocol,
+        protocol: ShieldedPool,
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, <Self as InputSource>::Error> {
         let (target_height, _) = self
             .get_target_and_anchor_heights(NonZeroU32::MIN)?
@@ -1254,6 +1583,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     }
 
     #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys(
+        &mut self,
+        account: Self::AccountId,
+        pubkeys: &[secp256k1::PublicKey],
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.import_standalone_transparent_pubkeys(account, pubkeys))
+    }
+
+    #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_script(
         &mut self,
         account: Self::AccountId,
@@ -1364,6 +1702,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         n: usize,
     ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
         self.transactionally(|wdb| wdb.reserve_next_n_ephemeral_addresses(account_id, n))
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        self.transactionally(|wdb| wdb.reserve_next_n_internal_addresses(account_id, n))
     }
 
     fn set_transaction_status(
@@ -1540,6 +1887,17 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         pubkey: secp256k1::PublicKey,
     ) -> Result<(), Self::Error> {
         wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
+            .map(|_inserted| ())
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkeys(
+        &mut self,
+        account: Self::AccountId,
+        pubkeys: &[secp256k1::PublicKey],
+    ) -> Result<(), Self::Error> {
+        wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
+            .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]
@@ -1612,12 +1970,21 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
+        // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
+        // retention interval are retained as durable anchors. The activation height is `None`
+        // (and so anchor retention is inactive) on networks that do not yet have an assigned
+        // NU6.3 activation height.
+        let anchor_retention_height = self
+            .params
+            .activation_height(consensus::NetworkUpgrade::Nu6_3);
+
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
             #[cfg(feature = "transparent-inputs")]
             self.gap_limits,
             from_state,
             blocks,
+            anchor_retention_height,
         )
         .map_err(SqliteClientError::from)
     }
@@ -1742,6 +2109,25 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn reserve_next_n_internal_addresses(
+        &mut self,
+        account_id: Self::AccountId,
+        n: usize,
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+        let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
+        let reserved = wallet::transparent::reserve_next_n_addresses(
+            self.conn.0,
+            &self.params,
+            account_id,
+            TransparentKeyScope::INTERNAL,
+            self.gap_limits.internal(),
+            n,
+        )?;
+
+        Ok(reserved.into_iter().map(|(_, a, m)| (a, m)).collect())
+    }
+
     fn set_transaction_status(
         &mut self,
         txid: TxId,
@@ -1832,6 +2218,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     type Error = SqliteClientError;
     type TxRef = TxRef;
 
+    fn block_fully_scanned_height(
+        &self,
+    ) -> Result<Option<zcash_protocol::consensus::BlockHeight>, Self::Error> {
+        Ok(
+            wallet::block_fully_scanned(self.conn.borrow(), &self.params)?
+                .map(|meta| meta.block_height()),
+        )
+    }
+
     fn select_receiving_address(
         &self,
         account: Self::AccountId,
@@ -1886,8 +2281,21 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
     ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
-        wallet::orchard::detect_spending_accounts(self.conn.borrow(), spends)
+        wallet::orchard::detect_spending_accounts(self.conn.borrow(), ORCHARD_TABLES_PREFIX, spends)
             .map_err(SqliteClientError::from)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn detect_accounts_ironwood<'t>(
+        &self,
+        spends: impl Iterator<Item = &'t orchard::note::Nullifier>,
+    ) -> Result<std::collections::HashSet<Self::AccountId>, Self::Error> {
+        wallet::orchard::detect_spending_accounts(
+            self.conn.borrow(),
+            IRONWOOD_TABLES_PREFIX,
+            spends,
+        )
+        .map_err(SqliteClientError::from)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1914,7 +2322,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::sapling::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(self.conn.borrow(), ShieldedProtocol::Sapling, nf)
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Sapling, nf)
     }
 
     #[cfg(feature = "orchard")]
@@ -1922,11 +2330,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         &self,
         nf: &::orchard::note::Nullifier,
     ) -> Result<Option<Self::TxRef>, Self::Error> {
-        wallet::query_nullifier_map(
-            self.conn.borrow(),
-            ShieldedProtocol::Orchard,
-            &nf.to_bytes(),
-        )
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Orchard, &nf.to_bytes())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn detect_ironwood_spend(
+        &self,
+        nf: &::orchard::note::Nullifier,
+    ) -> Result<Option<Self::TxRef>, Self::Error> {
+        wallet::query_nullifier_map(self.conn.borrow(), ShieldedPool::Ironwood, &nf.to_bytes())
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -1958,6 +2370,8 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         sapling_output_count: u32,
         #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
         #[cfg(feature = "orchard")] orchard_action_count: u32,
+        #[cfg(feature = "orchard")] ironwood_commitment_tree_size: u32,
+        #[cfg(feature = "orchard")] ironwood_action_count: u32,
     ) -> Result<(), Self::Error> {
         wallet::put_block(
             self.conn.borrow(),
@@ -1970,6 +2384,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
             orchard_commitment_tree_size,
             #[cfg(feature = "orchard")]
             orchard_action_count,
+            #[cfg(feature = "orchard")]
+            ironwood_commitment_tree_size,
+            #[cfg(feature = "orchard")]
+            ironwood_action_count,
         )
     }
 
@@ -2046,12 +2464,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         block_height: BlockHeight,
         nfs: &[(TxIndex, TxId, Vec<::sapling::Nullifier>)],
     ) -> Result<(), Self::Error> {
-        wallet::insert_nullifier_map(
-            self.conn.borrow(),
-            block_height,
-            ShieldedProtocol::Sapling,
-            nfs,
-        )
+        wallet::insert_nullifier_map(self.conn.borrow(), block_height, ShieldedPool::Sapling, nfs)
     }
 
     #[cfg(feature = "orchard")]
@@ -2065,6 +2478,28 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::orchard::put_received_note(
             self.conn.borrow(),
             &self.params,
+            ShieldedPool::Orchard,
+            output,
+            tx_ref,
+            target_or_mined_height,
+            spent_in,
+        )?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_received_ironwood_note<T: ReceivedOrchardOutput<AccountId = Self::AccountId>>(
+        &mut self,
+        output: &T,
+        tx_ref: Self::TxRef,
+        target_or_mined_height: Option<BlockHeight>,
+        spent_in: Option<Self::TxRef>,
+    ) -> Result<(), Self::Error> {
+        wallet::orchard::put_received_note(
+            self.conn.borrow(),
+            &self.params,
+            ShieldedPool::Ironwood,
             output,
             tx_ref,
             target_or_mined_height,
@@ -2084,6 +2519,15 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     }
 
     #[cfg(feature = "orchard")]
+    fn mark_ironwood_note_spent(
+        &mut self,
+        nf: &::orchard::note::Nullifier,
+        tx_ref: Self::TxRef,
+    ) -> Result<bool, Self::Error> {
+        wallet::orchard::mark_ironwood_note_spent(self.conn.borrow(), tx_ref, nf)
+    }
+
+    #[cfg(feature = "orchard")]
     fn track_block_orchard_nullifiers(
         &mut self,
         block_height: BlockHeight,
@@ -2092,7 +2536,23 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::insert_nullifier_map(
             self.conn.borrow(),
             block_height,
-            ShieldedProtocol::Orchard,
+            ShieldedPool::Orchard,
+            &nfs.iter()
+                .map(|(idx, txid, nfs)| (*idx, *txid, nfs.iter().map(|n| n.to_bytes()).collect()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn track_block_ironwood_nullifiers(
+        &mut self,
+        block_height: BlockHeight,
+        nfs: &[(TxIndex, TxId, Vec<::orchard::note::Nullifier>)],
+    ) -> Result<(), Self::Error> {
+        wallet::insert_nullifier_map(
+            self.conn.borrow(),
+            block_height,
+            ShieldedPool::Ironwood,
             &nfs.iter()
                 .map(|(idx, txid, nfs)| (*idx, *txid, nfs.iter().map(|n| n.to_bytes()).collect()))
                 .collect::<Vec<_>>(),
@@ -2218,7 +2678,7 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
     fn notify_scan_complete(
         &mut self,
         range: Range<BlockHeight>,
-        wallet_note_positions: &[(ShieldedProtocol, Position)],
+        wallet_note_positions: &[(ShieldedPool, Position)],
     ) -> Result<(), Self::Error> {
         wallet::scanning::scan_complete(
             self.conn.borrow(),
@@ -2283,6 +2743,38 @@ where
 {
     Ok(ShardTree::new(
         SqliteShardStore::from_connection(conn, ORCHARD_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+        PRUNING_DEPTH.try_into().unwrap(),
+    ))
+}
+
+/// The shard store backing the Ironwood note commitment tree.
+///
+/// Ironwood note commitments are Orchard-shaped, so this reuses the Orchard hash type and shard
+/// height; only the backing table prefix differs (see [`IRONWOOD_TABLES_PREFIX`]). It is defined
+/// as a distinct alias to make Ironwood usage self-documenting at call sites.
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodShardStore<C> =
+    SqliteShardStore<C, orchard::tree::MerkleHashOrchard, IRONWOOD_SHARD_HEIGHT>;
+
+#[cfg(feature = "orchard")]
+pub(crate) type IronwoodCommitmentTree<C> = ShardTree<
+    IronwoodShardStore<C>,
+    { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+    IRONWOOD_SHARD_HEIGHT,
+>;
+
+/// Returns a handle to the Ironwood note commitment tree.
+#[cfg(feature = "orchard")]
+pub(crate) fn ironwood_tree<C>(
+    conn: C,
+) -> Result<IronwoodCommitmentTree<C>, ShardTreeError<commitment_tree::Error>>
+where
+    IronwoodShardStore<C>:
+        ShardStore<H = orchard::tree::MerkleHashOrchard, CheckpointId = BlockHeight>,
+{
+    Ok(ShardTree::new(
+        SqliteShardStore::from_connection(conn, IRONWOOD_TABLES_PREFIX)
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
         PRUNING_DEPTH.try_into().unwrap(),
     ))
@@ -2386,6 +2878,50 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         Ok(())
     }
+
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        let tx = self
+            .conn
+            .borrow_mut()
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        put_shard_roots::<_, { ORCHARD_SHARD_HEIGHT * 2 }, ORCHARD_SHARD_HEIGHT>(
+            &tx,
+            IRONWOOD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
+    where
+        for<'a> F:
+            FnMut(&'a mut IronwoodCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        let tx = self
+            .conn
+            .borrow_mut()
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let result = {
+            let mut shardtree = ironwood_tree(&tx)?;
+            callback(&mut shardtree)?
+        };
+
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(Some(result))
+    }
 }
 
 impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
@@ -2447,6 +2983,33 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
             start_index,
             roots,
         )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_ironwood_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
+            self.conn.0,
+            IRONWOOD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn with_ironwood_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<Option<A>, E>
+    where
+        for<'a> F:
+            FnMut(&'a mut IronwoodCommitmentTree<&'a rusqlite::Transaction<'a>>) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        let mut shardtree = ironwood_tree(self.conn.0)?;
+        let result = callback(&mut shardtree)?;
+
+        Ok(Some(result))
     }
 }
 
@@ -2511,6 +3074,27 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
         )
     }
 
+    /// Returns every Ironwood note received by `height` that was unspent at that height.
+    ///
+    /// This does not apply transaction construction filters or check witness availability.
+    /// Use [`Self::generate_ironwood_witnesses_at_historical_height`] to check the latter.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails or a note cannot be reconstructed.
+    pub fn get_unspent_ironwood_notes_at_historical_height(
+        &self,
+        account: AccountUuid,
+        height: BlockHeight,
+    ) -> Result<Vec<ReceivedNote<ReceivedNoteId, orchard::note::Note>>, SqliteClientError> {
+        wallet::orchard::get_unspent_ironwood_notes_at_historical_height(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            height,
+        )
+    }
+
     /// Generates Orchard Merkle witnesses at a historical height.
     ///
     /// Loads the wallet's Orchard shard data into an ephemeral in-memory
@@ -2551,6 +3135,53 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<
         SqliteClientError,
     > {
         wallet::commitment_tree::generate_orchard_witnesses_at_historical_height(
+            self.conn.borrow(),
+            note_positions,
+            frontier_at_height,
+            height,
+        )
+    }
+
+    /// Generates Ironwood Merkle witnesses at a historical height.
+    ///
+    /// Loads the wallet's Ironwood shard data into an ephemeral in-memory
+    /// `ShardStore`, inserts the provided frontier at `height` as a checkpoint,
+    /// and generates a witness for each of the given note positions.
+    ///
+    /// The caller must provide the valid frontier at the given height. The wallet DB
+    /// is strictly read-only; shard data is read but not modified.
+    ///
+    /// # Errors
+    ///
+    /// Returns:
+    /// - [`SqliteClientError::CommitmentTree`] if reading the wallet's shard
+    ///   or cap data fails, or if the shard data reconstructed from the
+    ///   wallet is internally inconsistent at a node the computation
+    ///   requires.
+    /// - [`SqliteClientError::HistoricalFrontierInvalid`] if
+    ///   `frontier_at_height` is inconsistent with the shard data
+    ///   reconstructed from the wallet at `height`.
+    /// - [`SqliteClientError::HistoricalWitnessUnavailable`] if a witness
+    ///   cannot be generated for one of `note_positions` at `height` (most
+    ///   commonly because the wallet has not yet synced through that
+    ///   height).
+    pub fn generate_ironwood_witnesses_at_historical_height(
+        &self,
+        note_positions: &[Position],
+        frontier_at_height: incrementalmerkletree::frontier::NonEmptyFrontier<
+            orchard::tree::MerkleHashOrchard,
+        >,
+        height: BlockHeight,
+    ) -> Result<
+        Vec<
+            incrementalmerkletree::MerklePath<
+                orchard::tree::MerkleHashOrchard,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >,
+        >,
+        SqliteClientError,
+    > {
+        wallet::commitment_tree::generate_ironwood_witnesses_at_historical_height(
             self.conn.borrow(),
             note_positions,
             frontier_at_height,
@@ -2856,6 +3487,165 @@ mod tests {
     #[cfg(feature = "unstable")]
     use zcash_keys::keys::sapling;
     use zcash_protocol::local_consensus::LocalNetwork;
+
+    /// Builds a test wallet with a single account and an application-owned extension
+    /// table (`ext_test_notes`), simulating an external migration having created it.
+    fn ext_test_state() -> TestState<(), TestDb, LocalNetwork> {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        st.wallet_mut()
+            .conn_mut()
+            .execute_batch(
+                "CREATE TABLE ext_test_notes (account_uuid BLOB NOT NULL, note TEXT NOT NULL);",
+            )
+            .unwrap();
+        st
+    }
+
+    /// Returns an owned seed and birthday suitable for creating a second account, released
+    /// from any borrow of `st` so the wallet may be borrowed mutably afterwards.
+    fn account_creation_inputs(
+        st: &TestState<(), TestDb, LocalNetwork>,
+    ) -> (SecretVec<u8>, AccountBirthday) {
+        let birthday = st.test_account().unwrap().birthday().clone();
+        let seed = SecretVec::new(st.test_seed().unwrap().expose_secret().to_vec());
+        (seed, birthday)
+    }
+
+    #[test]
+    fn transactionally_with_extension_commits_both() {
+        let mut st = ext_test_state();
+        let (seed, birthday) = account_creation_inputs(&st);
+
+        let new_account = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension::<_, _, SqliteClientError>(|wdb, ext| {
+                let (account_id, _usk) = wdb.create_account("second", &seed, &birthday, None)?;
+                ext.execute(
+                    "INSERT INTO ext_test_notes (account_uuid, note) VALUES (?1, ?2)",
+                    (account_id.expose_uuid(), "hello"),
+                )?;
+                Ok(account_id)
+            })
+            .unwrap();
+
+        // The wallet write persisted.
+        let account_exists: bool = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM accounts WHERE uuid = ?1)",
+                [new_account.expose_uuid()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(account_exists);
+
+        // The extension write persisted, in the same transaction.
+        let note: String = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT note FROM ext_test_notes WHERE account_uuid = ?1",
+                [new_account.expose_uuid()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(note, "hello");
+    }
+
+    #[test]
+    fn transactionally_with_extension_rolls_back_on_error() {
+        let mut st = ext_test_state();
+        let (seed, birthday) = account_creation_inputs(&st);
+
+        let accounts_before: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+
+        let result: Result<(), SqliteClientError> = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension(|wdb, ext| {
+                let (account_id, _usk) = wdb.create_account("second", &seed, &birthday, None)?;
+                ext.execute(
+                    "INSERT INTO ext_test_notes (account_uuid, note) VALUES (?1, ?2)",
+                    (account_id.expose_uuid(), "hello"),
+                )?;
+                // Fail after both writes; everything in this transaction must roll back.
+                Err(SqliteClientError::AccountUnknown)
+            });
+        assert_matches!(result, Err(SqliteClientError::AccountUnknown));
+
+        // Neither the wallet write nor the extension write persisted.
+        let accounts_after: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(accounts_before, accounts_after);
+        let ext_rows: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM ext_test_notes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(ext_rows, 0);
+    }
+
+    #[test]
+    fn transactionally_with_extension_denies_wallet_table_write() {
+        let mut st = ext_test_state();
+
+        let accounts_before: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+
+        let result: Result<(), SqliteClientError> = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension(|_wdb, ext| {
+                // Deleting from a wallet-owned table is denied by the authorizer.
+                ext.execute("DELETE FROM accounts", [])?;
+                Ok(())
+            });
+        assert!(result.is_err());
+
+        // The wallet handle remains usable, and the denied statement had no effect: the
+        // account is still present and a fresh wallet read succeeds.
+        let accounts_after: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(accounts_before, accounts_after);
+        assert!(!st.wallet().get_account_ids().unwrap().is_empty());
+    }
+
+    #[test]
+    fn transactionally_with_extension_denies_transaction_control() {
+        let mut st = ext_test_state();
+
+        let result: Result<(), SqliteClientError> = st
+            .wallet_mut()
+            .db_mut()
+            .transactionally_with_extension(|_wdb, ext| {
+                // Transaction-control statements are denied so extension SQL cannot break
+                // out of the enclosing transaction.
+                ext.execute("COMMIT", [])?;
+                Ok(())
+            });
+        assert!(result.is_err());
+
+        // The wallet handle remains usable afterwards.
+        assert!(!st.wallet().get_account_ids().unwrap().is_empty());
+    }
 
     #[test]
     fn validate_seed() {

@@ -175,7 +175,7 @@ impl fmt::Display for ZcashAddress {
             AddressKind::P2sh(data) => encode_b58(self.net.b58_script_address_prefix(), data),
             AddressKind::Tex(data) => encode_bech32::<Bech32m>(self.net.hrp_tex_address(), data),
         };
-        write!(f, "{}", encoded)
+        write!(f, "{encoded}")
     }
 }
 

@@ -1,0 +1,86 @@
+[package]
+name = "zcash_pool_migration_backend"
+description = "Backend-agnostic value-pool migration engine for Zcash wallets"
+version = "0.1.0"
+authors = [
+    "Danny Willems <be.danny.willems@gmail.com>",
+    "John Boyd <john@coldnoise.net>",
+    "Michal Fousek <michal.fousek@chlup.info>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+corez.workspace = true
+getset.workspace = true
+libm.workspace = true
+rand_core.workspace = true
+zcash_primitives.workspace = true
+zcash_protocol.workspace = true
+
+# Enabled by the `test-dependencies` feature: the `testing` module's proptest strategies and
+# conformance suite, reusable by downstream store crates.
+proptest = { workspace = true, optional = true }
+
+# Enabled by the `orchard` feature.
+orchard = { workspace = true, optional = true }
+pczt = { workspace = true, optional = true, features = [
+    "io-finalizer",
+    "orchard",
+    "signer",
+    "zcp-builder",
+] }
+
+# Enabled by the `wallet` feature: the wallet-backed adapter, sourcing the migration's cryptographic
+# ingredients from a `zcash_client_backend` wallet instead of a hand-written `MigrationCrypto`.
+zcash_client_backend = { workspace = true, optional = true, features = ["orchard"] }
+zcash_keys = { workspace = true, optional = true, features = ["orchard"] }
+shardtree = { workspace = true, optional = true }
+incrementalmerkletree = { workspace = true, optional = true }
+
+[dev-dependencies]
+incrementalmerkletree.workspace = true
+proptest.workspace = true
+rand_chacha.workspace = true
+
+# The `local-consensus` feature exposes `LocalNetwork`, used to build the migration transactions
+# against regtest params with the relevant network upgrades (including NU6.3) active.
+zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
+
+# Shared, test-only in-memory backends (`MockBackend`, `CommitMock`) and witness
+# helpers the engine tests use. The dev-dependency cycle back onto this crate is fine: dev-deps do
+# not enter the normal build graph (the same relationship zcash_client_memory has with
+# zcash_client_backend).
+zcash_pool_migration_memory = { path = "../zcash_pool_migration_memory" }
+
+[features]
+## Builds the pure PCZT transaction builder (the `build` module), which turns a note-split plan and
+## the cryptographic ingredients a wallet supplies into an unproven migration PCZT. Requires the
+## Orchard pool; pulls in `orchard` and `pczt`. The caller supplies the RNG, so no `rand` dependency
+## is added.
+orchard = ["dep:orchard", "dep:pczt"]
+## Builds the wallet-backed adapter (`wallet` module): a `WalletMigration` that implements the
+## engine's backend/crypto/store traits over a `zcash_client_backend` wallet, so any such wallet is a
+## migration wallet with no hand-wired crypto. Implies `orchard`.
+wallet = [
+    "orchard",
+    "dep:zcash_client_backend",
+    "dep:zcash_keys",
+    "dep:shardtree",
+    "dep:incrementalmerkletree",
+]
+## Exposes the `testing` module: reusable `proptest` strategies for the engine's persisted types and
+## a backend-agnostic conformance suite for the `PoolMigrationRead` / `PoolMigrationWrite` store
+## traits. A downstream store crate enables it as a dev-dependency feature to reuse them.
+test-dependencies = ["dep:proptest", "zcash_protocol/test-dependencies"]
+
+[lints]
+workspace = true

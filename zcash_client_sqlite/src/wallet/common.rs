@@ -14,7 +14,7 @@ use zcash_client_backend::{
 };
 use zcash_primitives::transaction::{TxId, builder::DEFAULT_TX_EXPIRY_DELTA, fees::zip317};
 use zcash_protocol::{
-    PoolType, ShieldedProtocol,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     value::{BalanceError, Zatoshis},
 };
@@ -29,7 +29,11 @@ use crate::{
 };
 
 #[cfg(feature = "orchard")]
-use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+use {
+    crate::IRONWOOD_TABLES_PREFIX, crate::ORCHARD_TABLES_PREFIX,
+    zcash_client_backend::data_api::IRONWOOD_SHARD_HEIGHT,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+};
 
 pub(crate) struct TableConstants {
     pub(crate) table_prefix: &'static str,
@@ -52,8 +56,19 @@ const ORCHARD_TABLE_CONSTANTS: TableConstants = TableConstants {
     table_prefix: ORCHARD_TABLES_PREFIX,
     output_index_col: "action_index",
     output_count_col: "orchard_action_count",
-    note_reconstruction_cols: "rho, rseed",
+    note_reconstruction_cols: "rho, rseed, note_version",
     shard_height: ORCHARD_SHARD_HEIGHT,
+};
+
+// Ironwood notes are Orchard-shaped, so the Ironwood tables mirror the Orchard tables; they differ
+// only in the table prefix and the block-level action-count column.
+#[cfg(feature = "orchard")]
+const IRONWOOD_TABLE_CONSTANTS: TableConstants = TableConstants {
+    table_prefix: IRONWOOD_TABLES_PREFIX,
+    output_index_col: "action_index",
+    output_count_col: "ironwood_action_count",
+    note_reconstruction_cols: "rho, rseed, note_version",
+    shard_height: IRONWOOD_SHARD_HEIGHT,
 };
 
 #[allow(dead_code)]
@@ -62,14 +77,18 @@ pub(crate) trait ErrUnsupportedPool {
 }
 
 pub(crate) fn table_constants<E: ErrUnsupportedPool>(
-    shielded_protocol: ShieldedProtocol,
+    shielded_protocol: ShieldedPool,
 ) -> Result<TableConstants, E> {
     match shielded_protocol {
-        ShieldedProtocol::Sapling => Ok(SAPLING_TABLE_CONSTANTS),
+        ShieldedPool::Sapling => Ok(SAPLING_TABLE_CONSTANTS),
         #[cfg(feature = "orchard")]
-        ShieldedProtocol::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
+        ShieldedPool::Orchard => Ok(ORCHARD_TABLE_CONSTANTS),
         #[cfg(not(feature = "orchard"))]
-        ShieldedProtocol::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
+        ShieldedPool::Orchard => Err(E::unsupported_pool_type(PoolType::ORCHARD)),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => Ok(IRONWOOD_TABLE_CONSTANTS),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Ironwood => Err(E::unsupported_pool_type(PoolType::IRONWOOD)),
     }
 }
 
@@ -154,7 +173,7 @@ fn unscanned_tip_exists(
 /// select a few too many nullifiers, it's not a big deal.
 pub(crate) fn get_nullifiers<N, F: Fn(&[u8]) -> Result<N, SqliteClientError>>(
     conn: &Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     query: NullifierQuery,
     parse_nf: F,
 ) -> Result<Vec<(AccountUuid, N)>, SqliteClientError> {
@@ -205,12 +224,16 @@ pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     params: &P,
     txid: &TxId,
     index: u32,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     target_height: TargetHeight,
     to_spendable_note: F,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -251,7 +274,7 @@ where
            ":output_index": index,
            ":target_height": u32::from(target_height),
         ],
-        |row| to_spendable_note(params, row),
+        |row| to_spendable_note(params, protocol, row),
     );
 
     // `OptionalExtension` doesn't work here because the error type of `Result` is already
@@ -304,11 +327,15 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_spendable_note: F,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let Some(anchor_height) =
         get_anchor_height(conn, target_height, confirmations_policy.trusted())?
@@ -361,12 +388,16 @@ pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_received_note: F,
     note_request: NoteRequest,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -433,7 +464,7 @@ where
             ":min_value": u64::from(zip317::MARGINAL_FEE)
         ],
         |row| -> Result<_, SqliteClientError> {
-            let result_note = to_received_note(params, row)?;
+            let result_note = to_received_note(params, protocol, row)?;
             let max_priority_raw = row.get::<_, Option<i64>>("max_priority")?;
             let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
@@ -520,11 +551,15 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     anchor_height: BlockHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     to_spendable_note: F,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
-    F: Fn(&P, &Row) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
 {
     let TableConstants {
         table_prefix,
@@ -644,7 +679,7 @@ where
                 .map(BlockHeight::from);
             let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
             let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
-            let note = to_spendable_note(params, row)?;
+            let note = to_spendable_note(params, protocol, row)?;
 
             Ok(note.map(|n| {
                 (
@@ -726,7 +761,7 @@ impl UnspentNoteMeta {
 
 pub(crate) fn select_unspent_note_meta(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     wallet_birthday: BlockHeight,
     anchor_height: BlockHeight,
 ) -> Result<Vec<UnspentNoteMeta>, SqliteClientError> {
@@ -788,7 +823,7 @@ pub(crate) fn select_unspent_note_meta(
 
 pub(crate) fn unspent_notes_meta(
     conn: &rusqlite::Connection,
-    protocol: ShieldedProtocol,
+    protocol: ShieldedPool,
     target_height: TargetHeight,
     account: AccountUuid,
     filter: &NoteFilter,
@@ -971,7 +1006,7 @@ mod tests {
         AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
     };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{ShieldedProtocol, value::Zatoshis};
+    use zcash_protocol::{ShieldedPool, value::Zatoshis};
 
     use crate::testing::{BlockCache, db::TestDbFactory};
 
@@ -994,7 +1029,7 @@ mod tests {
 
         let unspent_note_meta = super::select_unspent_note_meta(
             st.wallet().conn(),
-            ShieldedProtocol::Sapling,
+            ShieldedPool::Sapling,
             birthday_height,
             h,
         )

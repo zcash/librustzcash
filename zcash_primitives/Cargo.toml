@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.28.0"
+version = "0.29.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -85,6 +85,7 @@ features = ["pre-zip-212"]
 zcash_tachyon.workspace = true
 
 [dev-dependencies]
+bls12_381.workspace = true
 chacha20poly1305 = "0.10"
 criterion.workspace = true
 incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
@@ -94,7 +95,7 @@ rand_xorshift.workspace = true
 transparent = { workspace = true, features = ["test-dependencies"] }
 sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
-zcash_protocol = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus", "test-dependencies"] }
 zip32.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
