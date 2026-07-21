@@ -140,6 +140,13 @@ and this library adheres to Rust's notion of
   boundary's commitment-tree checkpoint to still exist at proving time, so the `WalletMigration`
   adapter's leg is gated on migration anchor-checkpoint retention (issue #2700); the in-memory mock
   exercises the engine flow in the meantime.
+- Each pool-crossing transfer now depends only on the ONE preparation transaction that mints its own
+  funding note, rather than on the whole last preparation layer, so a crossing broadcasts at its
+  scheduled height as soon as its own funding note is mined instead of waiting for every other
+  crossing's preparation. This follows ZIP 318's per-note availability MUST and consciously relaxes
+  the more conservative SHOULD that all preparation complete before Phase 2 begins; the
+  boundary-passed constraint is still enforced downstream by the proving-time anchor draw. A funding
+  note used directly from the wallet has no producer, so its transfer has an empty dependency set.
 - `commit_preparation` (and `build_preparation_unsigned`) report a malformed migration plan - one
   whose parallel structures disagree, such as a preparation layer with no matching scheduled height -
   as a typed `CommitError::InconsistentPlan` rather than panicking on an out-of-bounds index, so an
