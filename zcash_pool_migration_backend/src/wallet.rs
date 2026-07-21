@@ -33,8 +33,8 @@ use zcash_protocol::value::Zatoshis;
 
 use crate::build::sign_pczt;
 use crate::engine::{
-    MigrationBackend, MigrationCrypto, MigrationState, MigrationTxId, MigrationTxState,
-    PoolMigrationRead, PoolMigrationWrite,
+    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTxId,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 
 /// A failure of the wallet-backed migration adapter. Parameterized by the error types of the two
@@ -57,6 +57,12 @@ pub enum Error<WRE, ISE, SE> {
     /// The spendable note at this index has a value that is not a valid [`Zatoshis`] amount
     /// (it exceeds the money-supply cap).
     InvalidNoteValue(usize),
+    /// Proving a transfer requires resolving the funding note's witness against the drawn anchor
+    /// boundary checkpoint, which the wallet keeps alive through migration anchor-checkpoint
+    /// retention (issue #2700). Until that retention lands, the wallet adapter cannot prove a
+    /// transfer; the engine's [`prove_transfer`](crate::engine::prove_transfer) flow and the
+    /// in-memory mock exercise the path in the meantime.
+    ProvingUnsupported,
 }
 
 impl<WRE: fmt::Display, ISE: fmt::Display, SE: fmt::Display> fmt::Display for Error<WRE, ISE, SE> {
@@ -71,6 +77,10 @@ impl<WRE: fmt::Display, ISE: fmt::Display, SE: fmt::Display> fmt::Display for Er
             Error::InvalidNoteValue(i) => {
                 write!(f, "spendable note {i} has an invalid (out-of-range) value")
             }
+            Error::ProvingUnsupported => f.write_str(
+                "proving a migration transfer is not yet supported by the wallet adapter; it \
+                 requires migration anchor-checkpoint retention (issue #2700)",
+            ),
         }
     }
 }
@@ -212,6 +222,33 @@ where
     fn sign(&self, pczt: ::pczt::Pczt) -> Result<::pczt::Pczt, Self::Error> {
         let ask = SpendAuthorizingKey::from(self.usk.orchard());
         sign_pczt(pczt, &ask).map_err(Error::Sign)
+    }
+}
+
+impl<'a, W, St> MigrationProver for WalletMigration<'a, W, St>
+where
+    W: WalletRead + InputSource,
+    <W as InputSource>::AccountId: Copy,
+    St: PoolMigrationRead,
+{
+    type Error = AdapterError<W, St>;
+
+    fn prove_transfer(
+        &self,
+        _pczt: ::pczt::Pczt,
+        _anchor_boundary: zcash_protocol::consensus::BlockHeight,
+    ) -> Result<::pczt::Pczt, Self::Error> {
+        // Resolving the funding note's witness against the drawn boundary requires that boundary's
+        // checkpoint to still exist in the wallet's Orchard commitment tree at proving time, via
+        // `WalletCommitmentTrees::with_orchard_tree_mut` at the retained checkpoint. That retention
+        // is migration anchor-checkpoint retention (issue #2700), which is not yet wired here; until
+        // it lands, the wallet adapter cannot prove a transfer. The engine `prove_transfer` step and
+        // the in-memory mock exercise the flow in the meantime.
+        //
+        // This stub stays on `WalletMigration` because the adapter borrows the wallet immutably
+        // (`&W`); the real body needs `&mut W` plus proving keys, so it will move to a dedicated
+        // mutable prover adapter when #2700 lands.
+        Err(Error::ProvingUnsupported)
     }
 }
 
