@@ -25,6 +25,17 @@ impl Client {
 
         let is_https = http::url_is_https(&endpoint)?;
 
+        let is_onion = endpoint
+            .host()
+            .map(|h| h.ends_with(".onion"))
+            .unwrap_or(false);
+
+        let connector = if is_onion {
+            HttpTcpConnector::with_onion_services(self.clone())
+        } else {
+            HttpTcpConnector::new(self.clone())
+        };
+
         let channel = Endpoint::from(endpoint);
         let channel = if is_https {
             channel
@@ -35,22 +46,40 @@ impl Client {
         };
 
         let conn = channel
-            .connect_with_connector(self.http_tcp_connector())
+            .connect_with_connector(connector)
             .await
             .map_err(GrpcError::Tonic)?;
 
         Ok(CompactTxStreamerClient::new(conn))
     }
-
-    fn http_tcp_connector(&self) -> HttpTcpConnector {
-        HttpTcpConnector {
-            client: self.clone(),
-        }
-    }
 }
 
 struct HttpTcpConnector {
     client: Client,
+    prefs: StreamPrefs,
+}
+
+impl HttpTcpConnector {
+    /// Creates a new `HttpTcpConnector` with default [`StreamPrefs`].
+    ///
+    /// Connections made through this connector will not attempt to connect to `.onion`
+    /// services.
+    fn new(client: Client) -> Self {
+        HttpTcpConnector {
+            client,
+            prefs: StreamPrefs::new(),
+        }
+    }
+
+    /// Creates a new `HttpTcpConnector` that enables connections to `.onion` services.
+    ///
+    /// Use this constructor when the endpoint host is a Tor hidden service (`.onion`
+    /// address). For regular clearnet endpoints, use [`HttpTcpConnector::new`] instead.
+    fn with_onion_services(client: Client) -> Self {
+        let mut prefs = StreamPrefs::new();
+        prefs.connect_to_onion_services(BoolOrAuto::Explicit(true));
+        HttpTcpConnector { client, prefs }
+    }
 }
 
 impl Service<Uri> for HttpTcpConnector {
@@ -65,13 +94,12 @@ impl Service<Uri> for HttpTcpConnector {
     fn call(&mut self, endpoint: Uri) -> Self::Future {
         let parsed = http::parse_url(&endpoint);
         let client = self.client.clone();
+        let prefs = self.prefs.clone();
 
         let fut = async move {
             let (_, host, port) = parsed?;
 
             debug!("Connecting through Tor to {}:{}", host, port);
-            let mut prefs = StreamPrefs::new();
-            prefs.connect_to_onion_services(BoolOrAuto::Explicit(true));
             let stream = client
                 .inner
                 .connect_with_prefs((host.as_str(), port), &prefs)
