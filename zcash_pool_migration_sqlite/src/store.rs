@@ -17,7 +17,6 @@ use std::borrow::{Borrow, BorrowMut};
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 
-use corez::io::{Read, Write};
 use zcash_encoding::Vector;
 
 use zcash_pool_migration_backend::engine::{
@@ -228,7 +227,8 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
     Ok(Some(MigrationState::from_parts(
         status,
         note_split,
-        decode_zatoshis(&funding_notes, "funding_notes")?,
+        Vector::read(funding_notes.as_slice(), |r| Zatoshis::read(r))
+            .map_err(|_| Error::Corrupt("funding_notes"))?,
         PreparationPlan::read(preparation.as_slice()).map_err(|_| Error::Corrupt("preparation"))?,
         transactions,
     )))
@@ -294,7 +294,8 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
             id,
             kind,
             pczt,
-            decode_dep_ids(&depends_on)?,
+            Vector::read(depends_on.as_slice(), |r| MigrationTxId::read(r))
+                .map_err(|_| Error::Corrupt("depends_on"))?,
             scheduled_height,
             expiry_height,
             anchor_boundary,
@@ -335,6 +336,10 @@ fn write_migration(
         .write(&mut buf)
         .map(|()| buf)
         .expect("writing to a Vec is infallible");
+    let mut buf = Vec::new();
+    let funding_notes = Vector::write(&mut buf, state.funding_notes(), |w, v| v.write(w))
+        .map(|()| buf)
+        .expect("writing to a Vec is infallible");
     tx.execute(
         &format!(
             "INSERT INTO {}
@@ -347,7 +352,7 @@ fn write_migration(
             ":id": SINGLETON_ID,
             ":status": state.status().as_ref(),
             ":note_split": note_split,
-            ":funding_notes": encode_zatoshis(state.funding_notes()),
+            ":funding_notes": funding_notes,
             ":preparation": preparation,
         },
     )?;
@@ -358,6 +363,10 @@ fn write_migration(
         let kind = mtx
             .kind()
             .write(&mut buf)
+            .map(|()| buf)
+            .expect("writing to a Vec is infallible");
+        let mut buf = Vec::new();
+        let depends_on = Vector::write(&mut buf, mtx.depends_on(), |w, id| id.write(w))
             .map(|()| buf)
             .expect("writing to a Vec is infallible");
         tx.execute(
@@ -376,7 +385,7 @@ fn write_migration(
                 ":tx_id": u32::from(mtx.id()),
                 ":kind": kind,
                 ":pczt": mtx.pczt().as_slice(),
-                ":depends_on": encode_dep_ids(mtx.depends_on()),
+                ":depends_on": depends_on,
                 ":scheduled_height": u32::from(mtx.scheduled_height()),
                 ":expiry_height": u32::from(mtx.expiry_height()),
                 ":anchor_boundary": mtx.anchor_boundary().map(u32::from),
@@ -387,39 +396,4 @@ fn write_migration(
         )?;
     }
     Ok(())
-}
-
-// --- vector blob columns: the element codecs live on the backend types; the store frames them ---
-
-/// Encode a slice of [`Zatoshis`] as a [`Vector`] of little-endian `u64` values (the `funding_notes`
-/// column). Writing to a `Vec` is infallible, so the `io::Result` is unwrapped.
-fn encode_zatoshis(values: &[Zatoshis]) -> Vec<u8> {
-    let mut buf = Vec::new();
-    Vector::write(&mut buf, values, |w, v| v.write(w)).expect("writing to a Vec is infallible");
-    buf
-}
-
-/// Decode a blob produced by [`encode_zatoshis`], naming `field` on a corrupt or out-of-range value.
-fn decode_zatoshis(blob: &[u8], field: &'static str) -> Result<Vec<Zatoshis>, Error> {
-    Vector::read(blob, |r| Zatoshis::read(r)).map_err(|_| Error::Corrupt(field))
-}
-
-/// Encode transaction ids (the `depends_on` graph) as a [`Vector`] of little-endian `u32` values.
-fn encode_dep_ids(ids: &[MigrationTxId]) -> Vec<u8> {
-    let mut buf = Vec::new();
-    Vector::write(&mut buf, ids, |w, id| {
-        w.write_all(&u32::from(*id).to_le_bytes())
-    })
-    .expect("writing to a Vec is infallible");
-    buf
-}
-
-/// Decode a blob produced by [`encode_dep_ids`].
-fn decode_dep_ids(blob: &[u8]) -> Result<Vec<MigrationTxId>, Error> {
-    Vector::read(blob, |r| {
-        let mut bytes = [0u8; 4];
-        r.read_exact(&mut bytes)?;
-        Ok(MigrationTxId::new(u32::from_le_bytes(bytes)))
-    })
-    .map_err(|_| Error::Corrupt("depends_on"))
 }

@@ -27,6 +27,10 @@ zcash_encoding.workspace = true
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 
+# Enabled by the `test-dependencies` feature: the `testing` module's proptest strategies and
+# conformance suite, reusable by downstream store crates.
+proptest = { workspace = true, optional = true }
+
 # Enabled by the `orchard` feature.
 orchard = { workspace = true, optional = true }
 pczt = { workspace = true, optional = true, features = [
@@ -69,6 +73,10 @@ wallet = [
     "dep:shardtree",
     "dep:incrementalmerkletree",
 ]
+## Exposes the `testing` module: reusable `proptest` strategies for the engine's persisted types and
+## a backend-agnostic conformance suite for the `PoolMigrationRead` / `PoolMigrationWrite` store
+## traits. A downstream store crate enables it as a dev-dependency feature to reuse them.
+test-dependencies = ["dep:proptest", "zcash_encoding/test-dependencies"]
 
 [lints]
 workspace = true

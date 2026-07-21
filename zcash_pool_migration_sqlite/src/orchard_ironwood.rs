@@ -83,212 +83,74 @@ impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
 mod tests {
     use super::{PoolMigrations, init_migration_tables};
 
+    use proptest::prelude::*;
     use rusqlite::Connection;
 
     use zcash_pool_migration_backend::engine::{
-        MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
-        MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+        MigrationTxId, MigrationTxState, PoolMigrationWrite,
     };
-    use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
-    use zcash_pool_migration_backend::preparation::{
-        PrepInput, PrepOutput, PrepTransaction, PreparationPlan,
+    use zcash_pool_migration_backend::testing::{
+        arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
+        assert_put_get_roundtrip, assert_put_replaces, assert_update_transaction,
+        first_transaction_id,
     };
-    use zcash_protocol::TxId;
-    use zcash_protocol::consensus::BlockHeight;
-    use zcash_protocol::value::Zatoshis;
 
     use crate::error::Error;
 
-    fn store() -> PoolMigrations<Connection> {
+    /// A fresh, empty store over a new in-memory database with the migration tables created. Each
+    /// proptest case and test gets its own, so writes never bleed between cases.
+    fn fresh_store() -> PoolMigrations<Connection> {
         let conn = Connection::open_in_memory().expect("in-memory db");
         init_migration_tables(&conn).expect("create tables");
         PoolMigrations::new(conn)
     }
 
-    /// A representable amount, for terse test fixtures.
-    fn zat(n: u64) -> Zatoshis {
-        Zatoshis::from_u64(n).expect("valid amount")
-    }
-
-    /// A two-layer preparation plan exercising every input tag (Wallet, Prior), every output tag
-    /// (Funding, Intermediate, Change), multiple layers, and a direct-funding note.
-    fn sample_preparation() -> PreparationPlan {
-        let layer0 = vec![PrepTransaction::from_parts(
-            vec![PrepInput::Wallet {
-                index: 0,
-                value: zat(224_321),
-            }],
-            vec![
-                PrepOutput::Intermediate(zat(220_000)),
-                PrepOutput::Change(zat(4_321)),
-            ],
-        )];
-        let layer1 = vec![PrepTransaction::from_parts(
-            vec![PrepInput::Prior {
-                layer: 0,
-                transaction: 0,
-                output: 0,
-                value: zat(220_000),
-            }],
-            vec![
-                PrepOutput::Funding(zat(120_000)),
-                PrepOutput::Funding(zat(100_000)),
-            ],
-        )];
-        PreparationPlan::from_parts(vec![layer0, layer1], vec![(2, zat(220_000))])
-    }
-
-    fn sample_state() -> MigrationState {
-        let note_split = NoteSplitPlan::from_stored_parts(
-            vec![zat(100_000), zat(200_000)], // crossing_values
-            zat(20_000),                      // note_fee_buffer (outputs = crossings + buffer)
-            Some(zat(4_321)),                 // change
-            zat(10_000),                      // prep_fees
-            zat(424_321),                     // total_input
-            zat(300_000),                     // total_migratable
-        )
-        .expect("valid note split");
-        MigrationState::from_parts(
-            MigrationStatus::Committed,
-            note_split,
-            vec![zat(120_000), zat(220_000)],
-            sample_preparation(),
-            vec![
-                MigrationTransaction::from_parts(
-                    MigrationTxId::new(0),
-                    MigrationTxKind::Preparation { layer: 0, index: 0 },
-                    vec![1, 2, 3, 4],
-                    vec![],
-                    BlockHeight::from_u32(210),
-                    BlockHeight::from_u32(250),
-                    None,
-                    MigrationTxState::Signed,
-                ),
-                MigrationTransaction::from_parts(
-                    MigrationTxId::new(1),
-                    MigrationTxKind::Transfer { crossing: 0 },
-                    vec![5, 6, 7],
-                    vec![MigrationTxId::new(0)],
-                    BlockHeight::from_u32(260),
-                    BlockHeight::from_u32(300),
-                    Some(BlockHeight::from_u32(255)),
-                    MigrationTxState::AwaitingSignature,
-                ),
-            ],
-        )
-    }
-
     #[test]
     fn get_migration_empty_is_none() {
-        assert!(store().get_migration().expect("read").is_none());
+        assert_empty_is_none(&fresh_store());
     }
 
-    #[test]
-    fn put_then_get_round_trips() {
-        let mut s = store();
-        let state = sample_state();
-        s.put_migration(&state).expect("write");
+    proptest! {
+        /// Any generated migration round-trips through the SQLite store unchanged: the shared
+        /// put/get conformance property, proving the SQLite backend satisfies the suite.
+        #[test]
+        fn put_then_get_round_trips(state in arb_migration_state()) {
+            assert_put_get_roundtrip(&mut fresh_store(), &state);
+        }
 
-        let read = s.get_migration().expect("read").expect("some migration");
-        assert_eq!(read.status(), state.status());
-        assert_eq!(read.funding_notes(), state.funding_notes());
-        assert_eq!(
-            read.note_split().migration_outputs(),
-            state.note_split().migration_outputs()
-        );
-        assert_eq!(
-            read.note_split().crossing_values(),
-            state.note_split().crossing_values()
-        );
-        assert_eq!(read.note_split().change(), state.note_split().change());
-        assert_eq!(
-            read.note_split().prep_fees(),
-            state.note_split().prep_fees()
-        );
-        assert_eq!(
-            read.note_split().total_input(),
-            state.note_split().total_input()
-        );
-        assert_eq!(
-            read.note_split().total_migratable(),
-            state.note_split().total_migratable()
-        );
-        assert_eq!(read.transactions(), state.transactions());
-        assert_eq!(read.preparation(), state.preparation());
-    }
+        /// A second put replaces the first migration (the shared replace property).
+        #[test]
+        fn put_replaces_previous_migration(
+            first in arb_migration_state(),
+            second in arb_migration_state(),
+        ) {
+            assert_put_replaces(&mut fresh_store(), &first, &second);
+        }
 
-    #[test]
-    fn put_replaces_previous_migration() {
-        let mut s = store();
-        s.put_migration(&sample_state()).expect("first write");
+        /// Updating a stored transaction's lifecycle state persists (the shared update property),
+        /// exercised across every state variant, including the `Mined` and `Broadcast` payloads.
+        #[test]
+        fn update_transaction_advances_state(
+            state in arb_migration_state(),
+            new in arb_migration_tx_state(),
+        ) {
+            // The shared assertion needs an id the migration contains; skip the (valid) empty case.
+            prop_assume!(!state.transactions().is_empty());
+            let id = first_transaction_id(&state).expect("non-empty by the assumption above");
+            assert_update_transaction(&mut fresh_store(), &state, id, new);
+        }
 
-        let base = sample_state();
-        let mut txs = base.transactions().to_vec();
-        txs.truncate(1);
-        let second = MigrationState::from_parts(
-            MigrationStatus::Complete,
-            base.note_split().clone(),
-            base.funding_notes().to_vec(),
-            base.preparation().clone(),
-            txs,
-        );
-        s.put_migration(&second).expect("second write");
-
-        let read = s.get_migration().expect("read").expect("some migration");
-        assert_eq!(read.status(), MigrationStatus::Complete);
-        assert_eq!(read.transactions().len(), 1);
-    }
-
-    #[test]
-    fn update_transaction_advances_state() {
-        let mut s = store();
-        s.put_migration(&sample_state()).expect("write");
-
-        let txid = TxId::from_bytes([7u8; 32]);
-        s.update_transaction(MigrationTxId::new(1), MigrationTxState::Broadcast { txid })
-            .expect("update");
-
-        let read = s.get_migration().expect("read").expect("some migration");
-        let transfer = read
-            .transactions()
-            .iter()
-            .find(|t| t.id() == MigrationTxId::new(1))
-            .expect("transfer present");
-        assert_eq!(transfer.state(), MigrationTxState::Broadcast { txid });
-    }
-
-    #[test]
-    fn update_unknown_transaction_errors() {
-        let mut s = store();
-        s.put_migration(&sample_state()).expect("write");
-        let err = s
-            .update_transaction(MigrationTxId::new(99), MigrationTxState::Proved)
-            .expect_err("no such transaction");
-        assert!(matches!(err, Error::Corrupt(_)));
-    }
-
-    #[test]
-    fn mined_state_round_trips() {
-        let mut s = store();
-        s.put_migration(&sample_state()).expect("write");
-        s.update_transaction(
-            MigrationTxId::new(0),
-            MigrationTxState::Mined {
-                height: BlockHeight::from_u32(231),
-            },
-        )
-        .expect("update");
-        let read = s.get_migration().expect("read").expect("some migration");
-        let prep = read
-            .transactions()
-            .iter()
-            .find(|t| t.id() == MigrationTxId::new(0))
-            .expect("prep present");
-        assert_eq!(
-            prep.state(),
-            MigrationTxState::Mined {
-                height: BlockHeight::from_u32(231)
-            }
-        );
+        /// Updating a transaction the stored migration does not contain is a store error. This is
+        /// SQLite-specific (the shared conformance suite covers only the success path).
+        #[test]
+        fn update_unknown_transaction_errors(state in arb_migration_state()) {
+            let mut s = fresh_store();
+            s.put_migration(&state).expect("write");
+            // Generated ids are `0..transactions.len()` (< 6), so `u32::MAX` is always absent.
+            let err = s
+                .update_transaction(MigrationTxId::new(u32::MAX), MigrationTxState::Proved)
+                .expect_err("no such transaction");
+            prop_assert!(matches!(err, Error::Corrupt(_)));
+        }
     }
 }

@@ -389,44 +389,7 @@ mod tests {
 
     use zcash_encoding::testing::check_roundtrip;
 
-    /// A [`Zatoshis`] amount well within the money supply, for round-trip fixtures.
-    fn arb_zatoshis() -> impl Strategy<Value = Zatoshis> {
-        (0u64..100_000_000).prop_map(zat)
-    }
-
-    /// An arbitrary [`NoteSplitPlan`], covering all stored fields (an empty or populated crossing
-    /// set, present or absent change). Bounded so every `crossing + note_fee_buffer` is
-    /// representable, which is what [`NoteSplitPlan::from_stored_parts`] requires.
-    fn arb_note_split_plan() -> impl Strategy<Value = NoteSplitPlan> {
-        (
-            prop::collection::vec(arb_zatoshis(), 0..8),
-            (0u64..1_000_000).prop_map(zat),
-            prop::option::of(arb_zatoshis()),
-            (0u64..1_000_000).prop_map(zat),
-            (0u64..1_000_000_000).prop_map(zat),
-            (0u64..1_000_000_000).prop_map(zat),
-        )
-            .prop_map(
-                |(
-                    crossing_values,
-                    note_fee_buffer,
-                    change,
-                    prep_fees,
-                    total_input,
-                    total_migratable,
-                )| {
-                    NoteSplitPlan::from_stored_parts(
-                        crossing_values,
-                        note_fee_buffer,
-                        change,
-                        prep_fees,
-                        total_input,
-                        total_migratable,
-                    )
-                    .expect("crossing + buffer within the money supply")
-                },
-            )
-    }
+    use crate::testing::arb_note_split_plan;
 
     proptest! {
         /// `write` and `read` are exact inverses for every [`NoteSplitPlan`].

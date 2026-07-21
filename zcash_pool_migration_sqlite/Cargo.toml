@@ -35,3 +35,10 @@ rusqlite.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# The backend's shared conformance suite and proptest strategies, enabled via its
+# `test-dependencies` feature, so this store is exercised by the ONE per-backend framework
+# instead of hand-rolled fixtures.
+zcash_pool_migration_backend = { path = "../zcash_pool_migration_backend", features = [
+    "test-dependencies",
+] }
+proptest.workspace = true

@@ -7283,6 +7283,7 @@ name = "zcash_pool_migration_sqlite"
 version = "0.1.0"
 dependencies = [
  "corez",
+ "proptest",
  "rusqlite",
  "uuid",
  "zcash_encoding",

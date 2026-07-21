@@ -890,53 +890,9 @@ mod tests {
     use zcash_encoding::testing::check_roundtrip;
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    /// A [`Zatoshis`] amount well within the money supply, for round-trip fixtures.
-    fn arb_zatoshis() -> impl Strategy<Value = Zatoshis> {
-        (0u64..100_000_000).prop_map(zat)
-    }
-
-    /// An arbitrary [`PrepInput`], exercising both tags.
-    fn arb_prep_input() -> impl Strategy<Value = PrepInput> {
-        prop_oneof![
-            (0usize..1000, arb_zatoshis())
-                .prop_map(|(index, value)| PrepInput::Wallet { index, value }),
-            (0usize..1000, 0usize..1000, 0usize..1000, arb_zatoshis()).prop_map(
-                |(layer, transaction, output, value)| PrepInput::Prior {
-                    layer,
-                    transaction,
-                    output,
-                    value,
-                }
-            ),
-        ]
-    }
-
-    /// An arbitrary [`PrepOutput`], exercising all three tags.
-    fn arb_prep_output() -> impl Strategy<Value = PrepOutput> {
-        prop_oneof![
-            arb_zatoshis().prop_map(PrepOutput::Funding),
-            arb_zatoshis().prop_map(PrepOutput::Intermediate),
-            arb_zatoshis().prop_map(PrepOutput::Change),
-        ]
-    }
-
-    /// An arbitrary [`PrepTransaction`] (possibly with no inputs or outputs).
-    fn arb_prep_transaction() -> impl Strategy<Value = PrepTransaction> {
-        (
-            prop::collection::vec(arb_prep_input(), 0..6),
-            prop::collection::vec(arb_prep_output(), 0..6),
-        )
-            .prop_map(|(inputs, outputs)| PrepTransaction::from_parts(inputs, outputs))
-    }
-
-    /// An arbitrary [`PreparationPlan`]: arbitrary layers of transactions plus direct-funding notes.
-    fn arb_preparation_plan() -> impl Strategy<Value = PreparationPlan> {
-        (
-            prop::collection::vec(prop::collection::vec(arb_prep_transaction(), 0..4), 0..4),
-            prop::collection::vec((0usize..1000, arb_zatoshis()), 0..5),
-        )
-            .prop_map(|(layers, direct)| PreparationPlan::from_parts(layers, direct))
-    }
+    use crate::testing::{
+        arb_prep_input, arb_prep_output, arb_prep_transaction, arb_preparation_plan,
+    };
 
     proptest! {
         /// `write` and `read` are exact inverses for every [`PrepInput`].

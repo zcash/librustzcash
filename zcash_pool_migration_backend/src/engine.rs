@@ -131,6 +131,18 @@ impl MigrationTxId {
     pub const fn new(index: u32) -> Self {
         MigrationTxId(index)
     }
+
+    /// Writes this id as an unsigned 32-bit little-endian integer.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.0.to_le_bytes())
+    }
+
+    /// Reads an id written by [`write`](Self::write).
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut bytes = [0u8; 4];
+        reader.read_exact(&mut bytes)?;
+        Ok(MigrationTxId::new(u32::from_le_bytes(bytes)))
+    }
 }
 
 impl From<MigrationTxId> for u32 {
@@ -410,7 +422,7 @@ impl TryFrom<&str> for MigrationStatus {
 /// The persisted state of a migration: the note split (for the preview and residual accounting) and
 /// every transaction, each as its pre-signed PCZT and metadata. A wallet resumes a migration entirely
 /// from this state after being closed or restarted; this is what a [`MigrationBackend`] stores.
-#[derive(Clone, Debug, Getters, CopyGetters)]
+#[derive(Clone, Debug, PartialEq, Eq, Getters, CopyGetters)]
 pub struct MigrationState {
     /// The overall status.
     #[getset(get_copy = "pub")]
@@ -2018,14 +2030,7 @@ mod codec_tests {
     use proptest::prelude::*;
     use zcash_encoding::testing::check_roundtrip;
 
-    /// An arbitrary [`MigrationTxKind`], exercising both variants.
-    fn arb_migration_tx_kind() -> impl Strategy<Value = MigrationTxKind> {
-        prop_oneof![
-            (0usize..1000, 0usize..1000)
-                .prop_map(|(layer, index)| MigrationTxKind::Preparation { layer, index }),
-            (0usize..1000).prop_map(|crossing| MigrationTxKind::Transfer { crossing }),
-        ]
-    }
+    use crate::testing::arb_migration_tx_kind;
 
     proptest! {
         /// `write` and `read` are exact inverses for every [`MigrationTxKind`].
