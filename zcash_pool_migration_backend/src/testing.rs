@@ -69,19 +69,23 @@ pub fn arb_prep_output() -> impl Strategy<Value = PrepOutput> {
     ]
 }
 
-/// An arbitrary [`PrepTransaction`] (possibly with no inputs or outputs).
+/// An arbitrary [`PrepTransaction`]. Like every transaction a real plan produces, it has at least
+/// one input and one output (it spends notes and mints funding or change); a store may rely on this
+/// to reconstruct the plan's layers/transactions grid from the input and output rows alone.
 pub fn arb_prep_transaction() -> impl Strategy<Value = PrepTransaction> {
     (
-        prop::collection::vec(arb_prep_input(), 0..6),
-        prop::collection::vec(arb_prep_output(), 0..6),
+        prop::collection::vec(arb_prep_input(), 1..6),
+        prop::collection::vec(arb_prep_output(), 1..6),
     )
         .prop_map(|(inputs, outputs)| PrepTransaction::from_parts(inputs, outputs))
 }
 
-/// An arbitrary [`PreparationPlan`]: arbitrary layers of transactions plus direct-funding notes.
+/// An arbitrary [`PreparationPlan`]: layers of transactions plus direct-funding notes. Like every
+/// real plan, each layer is non-empty (a layer exists because transactions were placed in it),
+/// though the plan may have no layers at all (all funding notes used directly).
 pub fn arb_preparation_plan() -> impl Strategy<Value = PreparationPlan> {
     (
-        prop::collection::vec(prop::collection::vec(arb_prep_transaction(), 0..4), 0..4),
+        prop::collection::vec(prop::collection::vec(arb_prep_transaction(), 1..4), 0..4),
         prop::collection::vec((0usize..1000, arb_zatoshis()), 0..5),
     )
         .prop_map(|(layers, direct)| PreparationPlan::from_parts(layers, direct))
@@ -198,18 +202,17 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
 }
 
 /// An arbitrary whole [`MigrationState`], built through [`MigrationState::from_parts`]: a status, a
-/// note split, funding-note values, a preparation plan, and a small set of transactions re-keyed
-/// with sequential [`MigrationTxId`]s (so their row keys are unique, as a store requires). Generated
-/// values are self-consistent enough to persist and read back unchanged.
+/// note split (from which the funding-note values derive), a preparation plan, and a small set of
+/// transactions re-keyed with sequential [`MigrationTxId`]s (so their row keys are unique, as a
+/// store requires). Generated values are self-consistent enough to persist and read back unchanged.
 pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
     (
         arb_migration_status(),
         arb_note_split_plan(),
-        prop::collection::vec(arb_zatoshis(), 0..6),
         arb_preparation_plan(),
         prop::collection::vec(arb_migration_transaction(), 0..6),
     )
-        .prop_map(|(status, note_split, funding_notes, preparation, txs)| {
+        .prop_map(|(status, note_split, preparation, txs)| {
             // Re-key the transactions with sequential ids so their row keys are unique; a store
             // keys transaction rows by id and returns them in id order.
             let transactions = txs
@@ -228,7 +231,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                     )
                 })
                 .collect();
-            MigrationState::from_parts(status, note_split, funding_notes, preparation, transactions)
+            MigrationState::from_parts(status, note_split, preparation, transactions)
         })
 }
 

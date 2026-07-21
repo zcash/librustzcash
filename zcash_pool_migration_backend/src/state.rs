@@ -344,7 +344,6 @@ mod tests {
                 Zatoshis::ZERO,
             )
             .expect("an empty stored plan reconstructs"),
-            funding_notes: Vec::new(),
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,
         }
