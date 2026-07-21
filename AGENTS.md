@@ -160,6 +160,20 @@ since Mermaid layout is hard to reason about in plain text.
   straight back on read; a persisted store is then the only code that ever sees
   the primitive.
 
+- **Canonical binary serialization lives with the type, via `zcash_encoding`.**
+  A type's on-disk / on-wire byte format is a property of the type, not of any
+  one consumer, so define it next to the definition: `read<R: Read>(r) ->
+  io::Result<Self>` and `write<W: Write>(&self, w) -> io::Result<()>`, built
+  from `zcash_encoding` (`Vector` for length-prefixed lists, `CompactSize` for
+  counts and indices, `Optional` for options) over `corez::io::{Read, Write}`
+  so it stays `no_std` (see `zcash_primitives::merkle_tree`,
+  `zcash_protocol::txid`). Serialize an amount as `Zatoshis` -> `u64` LE
+  (`Zatoshis::from_u64(reader.read_u64_le()?)` on read). Do NOT hand-roll a
+  bespoke byte codec inside a downstream (storage) crate, and do NOT use `serde`
+  for a canonical binary format (reserve `serde` for JSON/config). A persistence
+  backend calls the canonical codec for its blob columns and maps only the
+  queryable scalar fields to its own columns.
+
 ## Build & Test Commands
 
 For the most part we follow standard Rust `cargo` practices.
@@ -338,6 +352,15 @@ Type safety is paramount. This is a security-critical codebase.
 - **`from_parts` constructors**: Preferred over public struct fields.
 - **`testing` submodules**: Exposed via `test-dependencies` feature for cross-crate
   test utilities (proptest strategies, mock implementations).
+- **Instance-parameterized store crates**: a persistence crate keeps its generic
+  machinery crate-internal (DDL builders parameterized by table names, the
+  connection wrapper) and exposes ONE public submodule per concrete
+  instantiation that binds the table names, so nothing generic leaks and the
+  table names reflect the instance (e.g. `zcash_pool_migration_sqlite::orchard_ironwood`
+  over `orchard_ironwood_migrations`). A second instance is a sibling submodule,
+  not a fork. The blob (de)serialization is not defined here: it is the canonical
+  codec on the types (see the serialization convention above), which the store
+  calls.
 
 ## Database Write Atomicity (`zcash_client_sqlite`)
 
