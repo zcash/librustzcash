@@ -19,6 +19,9 @@ use corez::io::{self, Read, Write};
 
 use nonempty::NonEmpty;
 
+#[cfg(feature = "test-dependencies")]
+pub mod testing;
+
 /// The maximum allowed value representable as a `[CompactSize]`
 pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
 
