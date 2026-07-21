@@ -1118,33 +1118,10 @@ where
         .map_err(CommitError::Backend)?
         .ok_or(CommitError::NoMigrationInProgress)?;
 
-    // A stored transaction is Mined iff its state says so; a layer is ready once every dependency is.
-    let is_mined = |id: MigrationTxId, txs: &[MigrationTransaction]| -> bool {
-        txs.iter()
-            .find(|t| t.id == id)
-            .is_some_and(|t| matches!(t.state, MigrationTxState::Mined { .. }))
-    };
-
-    // Find the earliest still-Planned preparation layer (layer > 0) whose dependencies are all mined.
-    let ready_layer = state
-        .transactions
-        .iter()
-        .filter_map(|tx| match tx.kind {
-            MigrationTxKind::Preparation { layer, .. }
-                if layer > 0
-                    && matches!(tx.state, MigrationTxState::Planned)
-                    && tx
-                        .depends_on
-                        .iter()
-                        .all(|d| is_mined(*d, &state.transactions)) =>
-            {
-                Some(layer)
-            }
-            _ => None,
-        })
-        .min();
-
-    let Some(ready_layer) = ready_layer else {
+    // The layer-readiness policy lives on the state machine (`next_step` dispatches
+    // `BuildPreparationLayer` from the same method), so the driver and this builder can
+    // never disagree about which layer is ready.
+    let Some(ready_layer) = state.ready_prep_layer() else {
         // Nothing to build this step (the next layer is not mined yet, or all layers are built).
         return Ok(state);
     };
@@ -1172,9 +1149,25 @@ where
     // resolve them together so each feeder note (distinct by tree position, even at equal value) is
     // matched to exactly one spend across the layer. Wallet inputs (not expected past layer 0) resolve
     // individually.
+    // The `Preparation { layer, index }` coordinates come from the STORE; a row whose
+    // coordinates fall outside the stored plan is an inconsistently persisted migration, and
+    // reports as an error rather than an out-of-bounds panic.
+    let plan_tx = |layer: usize, index: usize| {
+        state
+            .preparation
+            .layers()
+            .get(layer)
+            .and_then(|txs| txs.get(index))
+            .ok_or_else(|| {
+                CommitError::Build(format!(
+                    "stored migration references preparation transaction {layer}/{index}, \
+                     which the stored plan does not contain"
+                ))
+            })
+    };
     let mut prior_values: Vec<Zatoshis> = Vec::new();
     for &(_, plan_index) in &targets {
-        for input in state.preparation.layers()[ready_layer][plan_index].inputs() {
+        for input in plan_tx(ready_layer, plan_index)?.inputs() {
             if let PrepInput::Prior { value, .. } = input {
                 prior_values.push(*value);
             }
@@ -1186,7 +1179,7 @@ where
         .into_iter();
 
     for &(ti, plan_index) in &targets {
-        let prep_tx = &state.preparation.layers()[ready_layer][plan_index];
+        let prep_tx = plan_tx(ready_layer, plan_index)?;
         let mut spends = Vec::with_capacity(prep_tx.inputs().len());
         for input in prep_tx.inputs() {
             match input {
@@ -1338,20 +1331,6 @@ where
         .resolve_funding_notes(&state.funding_notes)
         .map_err(CommitError::Backend)?;
 
-    // The fee buffer each self-funding note carries (its value minus the value that crosses) is constant
-    // across notes, so a funding note's crossing value is its value minus that buffer.
-    let buffer = match (
-        state.note_split.migration_outputs().first(),
-        state.note_split.crossing_values().first(),
-    ) {
-        // A prepared note is its crossing plus the buffer by construction, so the checked
-        // subtraction underflows only for an inconsistently stored plan.
-        (Some(&funding), Some(&crossing)) => (funding - crossing).ok_or_else(|| {
-            CommitError::Build("stored note split has a crossing exceeding its note".into())
-        })?,
-        _ => Zatoshis::ZERO,
-    };
-
     for tx in state.transactions.iter_mut() {
         let crossing = match tx.kind {
             MigrationTxKind::Transfer { crossing } => crossing,
@@ -1364,10 +1343,15 @@ where
         let note = notes.get(crossing).copied().ok_or_else(|| {
             CommitError::Build(format!("no funding note for crossing {crossing}"))
         })?;
-        // The funding note is its crossing plus the buffer by construction (see above).
-        let crossing_value = (state.funding_notes[crossing] - buffer).ok_or_else(|| {
-            CommitError::Build("stored funding note is smaller than the fee buffer".into())
-        })?;
+        // The value that crosses is stored on the note split itself; the funding note is this
+        // plus the split's constant fee buffer by construction.
+        let crossing_value = *state
+            .note_split
+            .crossing_values()
+            .get(crossing)
+            .ok_or_else(|| {
+                CommitError::Build(format!("no stored crossing value for transfer {crossing}"))
+            })?;
 
         let pczt = build_transfer_pczt(
             params,
