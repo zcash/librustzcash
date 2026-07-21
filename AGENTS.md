@@ -149,6 +149,17 @@ since Mermaid layout is hard to reason about in plain text.
   that cannot fail there must say why in a comment, and one that can fail must
   return a typed error rather than panic.
 
+- **Keep domain types whole, and convert only at the storage edge.** A newtype
+  must hide its inner primitive (`pub(crate)` field plus `::new` and a
+  `From`/accessor), so no caller can pass a raw `u32`/`u64` where an id or an
+  amount is meant. Collections and options carry the newtype too
+  (`Vec<Zatoshis>` and `Option<Zatoshis>`, never `Vec<u64>`/`Option<u64>`), and
+  reconstruction constructors (`from_parts`, `from_stored_parts`) take and
+  return it. Down-convert to a bare primitive in exactly one place, the storage
+  or wire boundary (binding a SQLite integer, writing a byte blob), and convert
+  straight back on read; a persisted store is then the only code that ever sees
+  the primitive.
+
 ## Build & Test Commands
 
 For the most part we follow standard Rust `cargo` practices.
