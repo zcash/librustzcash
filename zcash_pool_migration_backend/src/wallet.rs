@@ -233,8 +233,8 @@ where
     <W as InputSource>::AccountId: Copy,
     St: PoolMigrationWrite,
 {
-    fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
-        self.store.put_migration(state).map_err(Error::Store)
+    fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+        self.store.replace_migration(state).map_err(Error::Store)
     }
 
     fn update_transaction(

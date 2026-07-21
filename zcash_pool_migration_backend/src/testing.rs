@@ -7,8 +7,8 @@
 //!   [`Zatoshis`] up to a whole [`MigrationState`]. The crate's own codec proptests consume these,
 //!   and so does any downstream store crate.
 //! - a backend-agnostic conformance suite (`assert_*`) over the [`PoolMigrationRead`] /
-//!   [`PoolMigrationWrite`] store traits: an empty store reads back nothing, a put/get round-trips,
-//!   a second put replaces the first, and a transaction state update persists. Point any store
+//!   [`PoolMigrationWrite`] store traits: an empty store reads back nothing, a replace/get round-trips,
+//!   a second replace overwrites the first, and a transaction state update persists. Point any store
 //!   (the SQLite store, a future in-memory backend) at these and it inherits the same coverage.
 //!
 //! Enabled by the `test-dependencies` feature (and by the crate's own `test` build), so a
@@ -249,13 +249,15 @@ where
     );
 }
 
-/// Assert a put/get round-trip: after [`put_migration`](PoolMigrationWrite::put_migration), the
+/// Assert a replace/get round-trip: after [`replace_migration`](PoolMigrationWrite::replace_migration), the
 /// store reads back exactly the migration that was written.
 pub fn assert_put_get_roundtrip<S: PoolMigrationWrite>(store: &mut S, state: &MigrationState)
 where
     S::Error: Debug,
 {
-    store.put_migration(state).expect("put_migration succeeds");
+    store
+        .replace_migration(state)
+        .expect("replace_migration succeeds");
     let loaded = store.get_migration().expect("get_migration succeeds");
     assert_eq!(
         loaded,
@@ -264,7 +266,7 @@ where
     );
 }
 
-/// Assert that a second put replaces the first: after putting `first` then `second`, the store holds
+/// Assert that a second replace overwrites the first: after putting `first` then `second`, the store holds
 /// exactly `second`.
 pub fn assert_put_replaces<S: PoolMigrationWrite>(
     store: &mut S,
@@ -274,11 +276,11 @@ pub fn assert_put_replaces<S: PoolMigrationWrite>(
     S::Error: Debug,
 {
     store
-        .put_migration(first)
-        .expect("first put_migration succeeds");
+        .replace_migration(first)
+        .expect("first replace_migration succeeds");
     store
-        .put_migration(second)
-        .expect("second put_migration succeeds");
+        .replace_migration(second)
+        .expect("second replace_migration succeeds");
     assert_eq!(
         store.get_migration().expect("get_migration succeeds"),
         Some(second.clone()),
@@ -300,7 +302,9 @@ pub fn assert_update_transaction<S: PoolMigrationWrite>(
 ) where
     S::Error: Debug,
 {
-    store.put_migration(state).expect("put_migration succeeds");
+    store
+        .replace_migration(state)
+        .expect("replace_migration succeeds");
     store
         .update_transaction(id, new)
         .expect("update_transaction succeeds");
