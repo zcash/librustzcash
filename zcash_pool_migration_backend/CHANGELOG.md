@@ -101,7 +101,8 @@ and this library adheres to Rust's notion of
   signing) and follow ZIP 318's two-phase signing (more than one signing session is permitted):
   `commit_preparation` builds and pre-signs the preparation transactions and records each transfer as a
   planned placeholder carrying its schedule; `commit_transfers`, once the preparation is mined and the
-  funding notes are witnessable, builds and pre-signs the transfers into those placeholders.
+  funding notes exist, builds and pre-signs the transfers into those placeholders with their
+  anchors and witnesses deferred to proving time (ZIP 374).
   `commit_preparation` handles single-layer preparation, the common case, and reports
   `UnsupportedMultiLayer` for a plan whose later layers spend earlier, still unmined layers' outputs
   (full one-session pre-signing awaits a public pczt output-recovery API). Planning is pure (`no_std`);

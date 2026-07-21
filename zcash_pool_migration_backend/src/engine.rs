@@ -29,8 +29,10 @@
 //! predecessor mines, and to an external hardware signer, which builds each transaction UNSIGNED and signs
 //! it out of band before it is applied back.) The durable artifact is therefore each transaction's PCZT
 //! plus its schedule and state, not just the plan. The consuming application later reads the due
-//! transactions back from the store, proves each against a fresh boundary anchor, broadcasts them at
-//! their scheduled heights, and reports the outcome so the engine can advance each transaction's state. A
+//! transactions back from the store, proves each transfer against its drawn boundary anchor —
+//! installing the anchor and the funding note's witness through the PCZT Updater role (ZIP 374
+//! defers both past signing) — broadcasts them at their scheduled heights, and reports the outcome
+//! so the engine can advance each transaction's state. A
 //! wallet closed between planning and broadcast, or restarted partway through, resumes from the stored
 //! PCZTs.
 //!
@@ -595,18 +597,13 @@ pub trait MigrationCrypto {
     /// The account's Orchard full viewing key.
     fn orchard_fvk(&self) -> Result<orchard::keys::FullViewingKey, Self::Error>;
 
-    /// The Orchard anchor at the tree state of `anchor_height`; every spend's witness resolves
-    /// against this same tree state. The engine passes a BOUNDARY height (see
-    /// [`crate::scheduling::most_recent_boundary`]) so witnesses are computed against the bucketed
-    /// anchor rather than whatever the wallet's default confirmation policy would choose. The proof
-    /// is re-anchored to the drawn boundary at proving time, and the anchor is not in the sighash.
+    /// The Orchard anchor at the tree state of `anchor_height`, for building the PREPARATION
+    /// transactions; every preparation spend's witness resolves against this same tree state. The
+    /// engine passes an ordinary near-tip height (a few confirmations below the build height):
+    /// preparations are fully shielded self-sends, and only they anchor at build time — a
+    /// transfer's anchors and witness are DEFERRED to proving time (ZIP 374), when the consumer
+    /// installs the drawn boundary anchor through the PCZT Updater role.
     fn orchard_anchor(&self, anchor_height: BlockHeight) -> Result<orchard::Anchor, Self::Error>;
-
-    /// The Ironwood anchor at the tree state of `anchor_height`, for a transfer's destination
-    /// bundle: the output-only bundle's dummy spends carry this anchor, and consensus requires a
-    /// recent Ironwood note-commitment-tree root (the empty-tree root is valid only until the pool
-    /// holds notes).
-    fn ironwood_anchor(&self, anchor_height: BlockHeight) -> Result<orchard::Anchor, Self::Error>;
 
     /// Resolve the spendable wallet note at `index` (into `spendable_orchard_note_values`) to its note
     /// and a witness against `anchor`.
@@ -616,16 +613,29 @@ pub trait MigrationCrypto {
         anchor_height: BlockHeight,
     ) -> Result<(orchard::note::Note, orchard::tree::MerklePath), Self::Error>;
 
-    /// Resolve the self-funding notes minted by the preparation, one per requested value, each to its
-    /// note and a witness against `anchor`. Called after the preparation is mined, when these notes are
-    /// spendable: `values[crossing]` is the funding note for crossing `crossing`, and the backend
-    /// returns a DISTINCT note for each requested value (funding notes of equal value are
-    /// interchangeable).
-    fn resolve_funding_notes(
+    /// Resolve the FEEDER notes an earlier preparation layer minted, one per requested value, each
+    /// to its note and a witness against the tree state at `anchor_height`. Called by
+    /// [`commit_pending_preparation`] after the prior layer is mined, when its feeder notes are
+    /// spendable; the backend returns a DISTINCT note for each requested value (notes of equal
+    /// value are interchangeable). Preparations anchor at build time, so their spends are
+    /// witnessed here, unlike the transfers'.
+    fn resolve_feeder_notes(
         &self,
         values: &[Zatoshis],
         anchor_height: BlockHeight,
     ) -> Result<Vec<(orchard::note::Note, orchard::tree::MerklePath)>, Self::Error>;
+
+    /// Resolve the self-funding notes minted by the preparation, one per requested value. Called
+    /// after the whole preparation is mined, when these notes are spendable: `values[crossing]` is
+    /// the funding note for crossing `crossing`, and the backend returns a DISTINCT note for each
+    /// requested value (funding notes of equal value are interchangeable). NO witness is resolved:
+    /// a transfer is built and pre-signed with its anchors and witness DEFERRED to proving time
+    /// (ZIP 374), when the consumer installs the drawn boundary anchor and a witness against it
+    /// through the PCZT Updater role.
+    fn resolve_funding_notes(
+        &self,
+        values: &[Zatoshis],
+    ) -> Result<Vec<orchard::note::Note>, Self::Error>;
 
     /// Add the account's Orchard spend-authorization signatures to a finalized, unproven PCZT.
     fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
@@ -1022,7 +1032,7 @@ where
 /// returns the migration unchanged, so a caller can poll it. Call it once per newly-mined layer until
 /// the whole preparation is built, then [`commit_transfers`] for the transfers.
 ///
-/// All the transactions of the one ready layer are resolved together in a single funding-note lookup,
+/// All the transactions of the one ready layer are resolved together in a single feeder-note lookup,
 /// so each feeder note is assigned to exactly one transaction (a note is spent at most once) even when
 /// two transactions in the layer request equal-valued feeders.
 ///
@@ -1114,7 +1124,7 @@ where
         }
     }
     let mut prior_notes = backend
-        .resolve_funding_notes(&prior_values, anchor_height)
+        .resolve_feeder_notes(&prior_values, anchor_height)
         .map_err(CommitError::Backend)?
         .into_iter();
 
@@ -1256,16 +1266,14 @@ where
     let mut unsigned: Vec<UnsignedMigrationTx> = Vec::new();
 
     let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
-    // Witness against the BUCKETED anchor: the most recent boundary at the build height.
-    let anchor_height = scheduling::most_recent_boundary(target_height);
-    let anchor = backend
-        .orchard_anchor(anchor_height)
-        .map_err(CommitError::Backend)?;
-    let ironwood_anchor = backend
-        .ironwood_anchor(anchor_height)
-        .map_err(CommitError::Backend)?;
-    let witnesses = backend
-        .resolve_funding_notes(&state.funding_notes, anchor_height)
+    // A transfer is built and pre-signed with its anchors and witness DEFERRED to proving time
+    // (ZIP 374): the drawn boundary anchor it proves against (see
+    // [`MigrationTransaction::anchor_boundary`]) typically lies near its future broadcast height,
+    // whose tree state does not exist yet at build time — so only the funding NOTES are resolved
+    // here, and the transfers are buildable as soon as the preparation has mined, with no wait
+    // for a boundary to pass.
+    let notes = backend
+        .resolve_funding_notes(&state.funding_notes)
         .map_err(CommitError::Backend)?;
 
     // The fee buffer each self-funding note carries (its value minus the value that crosses) is constant
@@ -1291,7 +1299,7 @@ where
             continue;
         }
 
-        let (note, merkle_path) = witnesses.get(crossing).cloned().ok_or_else(|| {
+        let note = notes.get(crossing).copied().ok_or_else(|| {
             CommitError::Build(format!("no funding note for crossing {crossing}"))
         })?;
         // The funding note is its crossing plus the buffer by construction (see above).
@@ -1304,10 +1312,7 @@ where
             u32::from(target_height),
             u32::from(tx.expiry_height),
             &fvk,
-            anchor,
             note,
-            merkle_path,
-            ironwood_anchor,
             crossing_value,
             &mut *rng,
         )
@@ -1642,13 +1647,6 @@ mod commit_tests {
             Ok(self.anchor)
         }
 
-        fn ironwood_anchor(
-            &self,
-            _anchor_height: BlockHeight,
-        ) -> Result<orchard::Anchor, Self::Error> {
-            Ok(self.anchor)
-        }
-
         fn resolve_wallet_note(
             &self,
             index: usize,
@@ -1657,13 +1655,25 @@ mod commit_tests {
             Ok(self.witnesses[index].clone())
         }
 
-        fn resolve_funding_notes(
+        fn resolve_feeder_notes(
             &self,
             values: &[Zatoshis],
             _anchor_height: BlockHeight,
         ) -> Result<Vec<(orchard::note::Note, orchard::tree::MerklePath)>, Self::Error> {
-            // The funding notes are the witnesses after the source note (index 0).
+            // The minted notes are the witnesses after the source note (index 0).
             Ok(self.witnesses[1..1 + values.len()].to_vec())
+        }
+
+        fn resolve_funding_notes(
+            &self,
+            values: &[Zatoshis],
+        ) -> Result<Vec<orchard::note::Note>, Self::Error> {
+            // The funding notes are the witnesses after the source note (index 0); a transfer's
+            // witness is deferred to proving time, so only the notes are returned.
+            Ok(self.witnesses[1..1 + values.len()]
+                .iter()
+                .map(|(note, _)| *note)
+                .collect())
         }
 
         fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
@@ -1805,6 +1815,15 @@ mod commit_tests {
                 "every transaction is signed"
             );
             assert!(tx.pczt.as_ref().is_some_and(|b| !b.is_empty()));
+            // A transfer is pre-signed with its anchors and witness DEFERRED (ZIP 374): the
+            // stored PCZT carries ABSENT anchors, to be installed at proving time against the
+            // drawn boundary anchor.
+            if matches!(tx.kind, MigrationTxKind::Transfer { .. }) {
+                let parsed = pczt::Pczt::parse(tx.pczt.as_ref().expect("transfer is built"))
+                    .expect("the stored PCZT parses");
+                assert!(parsed.orchard().anchor().is_none());
+                assert!(parsed.ironwood().anchor().is_none());
+            }
         }
         assert!(backend.get_migration().unwrap().is_some());
     }
@@ -1883,13 +1902,6 @@ mod commit_tests {
             Ok(self.anchor)
         }
 
-        fn ironwood_anchor(
-            &self,
-            _anchor_height: BlockHeight,
-        ) -> Result<orchard::Anchor, Self::Error> {
-            Ok(self.anchor)
-        }
-
         fn resolve_wallet_note(
             &self,
             index: usize,
@@ -1898,7 +1910,7 @@ mod commit_tests {
             Ok(self.witnesses[index].clone())
         }
 
-        fn resolve_funding_notes(
+        fn resolve_feeder_notes(
             &self,
             values: &[Zatoshis],
             _anchor_height: BlockHeight,
@@ -1916,6 +1928,19 @@ mod commit_tests {
                 out.push(self.witnesses[idx].clone());
             }
             Ok(out)
+        }
+
+        fn resolve_funding_notes(
+            &self,
+            values: &[Zatoshis],
+        ) -> Result<Vec<orchard::note::Note>, Self::Error> {
+            // Draw from the same used-set as the feeder resolution, so a note consumed by a
+            // preparation layer is never handed to a transfer.
+            Ok(self
+                .resolve_feeder_notes(values, BlockHeight::from_u32(0))?
+                .into_iter()
+                .map(|(note, _)| note)
+                .collect())
         }
 
         fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {

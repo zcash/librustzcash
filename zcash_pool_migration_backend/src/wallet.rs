@@ -259,22 +259,6 @@ where
         Ok(self.witness(anchor_height, &[])?.0)
     }
 
-    fn ironwood_anchor(&self, anchor_height: BlockHeight) -> Result<Anchor, Self::Error> {
-        let mut guard = self.wallet.borrow_mut();
-        let wallet: &mut W = &mut guard;
-        let root = wallet.with_ironwood_tree_mut::<_, _, AdapterError<W, St>>(|tree| {
-            Ok(tree.root_at_checkpoint_id(&anchor_height)?)
-        })?;
-        match root {
-            // The backend tracks an Ironwood tree, so the checkpoint at the anchor height must
-            // exist in it.
-            Some(root) => Ok(root.ok_or(Error::AnchorUnavailable)?.into()),
-            // The backend tracks no Ironwood tree: as far as this wallet knows the pool holds no
-            // notes, and the empty-tree root is the valid anchor for exactly that state.
-            None => Ok(Anchor::empty_tree()),
-        }
-    }
-
     fn resolve_wallet_note(
         &self,
         index: usize,
@@ -286,7 +270,7 @@ where
         Ok((note, paths.remove(0)))
     }
 
-    fn resolve_funding_notes(
+    fn resolve_feeder_notes(
         &self,
         values: &[Zatoshis],
         anchor_height: BlockHeight,
@@ -295,7 +279,7 @@ where
         let mut used = vec![false; notes.len()];
         let mut chosen: Vec<(OrchardNote, Position)> = Vec::with_capacity(values.len());
         for (value_index, &value) in values.iter().enumerate() {
-            // Each funding value is matched to a DISTINCT spendable note of exactly that value; notes
+            // Each feeder value is matched to a DISTINCT spendable note of exactly that value; notes
             // of equal value are interchangeable, so a greedy first-unused match is correct.
             let note_index = notes
                 .iter()
@@ -312,6 +296,25 @@ where
             .map(|(note, _)| note)
             .zip(paths)
             .collect())
+    }
+
+    fn resolve_funding_notes(&self, values: &[Zatoshis]) -> Result<Vec<OrchardNote>, Self::Error> {
+        let notes = self.spendable_orchard()?;
+        let mut used = vec![false; notes.len()];
+        let mut chosen: Vec<OrchardNote> = Vec::with_capacity(values.len());
+        for (value_index, &value) in values.iter().enumerate() {
+            // Each funding value is matched to a DISTINCT spendable note of exactly that value; notes
+            // of equal value are interchangeable, so a greedy first-unused match is correct. No
+            // witness is resolved: a transfer's anchors and witness are deferred to proving time.
+            let note_index = notes
+                .iter()
+                .enumerate()
+                .position(|(i, (_, _, note_value))| !used[i] && *note_value == u64::from(value))
+                .ok_or(Error::NoteNotFound(value_index))?;
+            used[note_index] = true;
+            chosen.push(notes[note_index].0);
+        }
+        Ok(chosen)
     }
 
     fn sign(&self, pczt: ::pczt::Pczt) -> Result<::pczt::Pczt, Self::Error> {

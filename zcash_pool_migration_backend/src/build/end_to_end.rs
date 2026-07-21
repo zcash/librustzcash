@@ -127,19 +127,15 @@ fn migration_pipeline_end_to_end() {
     //    denomination into the Ironwood pool.
     let crossing = split.crossing_values()[0];
     let funding_value = funding[0];
-    let (fnote, fpath, fanchor) = single_note_witness(&fvk, u64::from(funding_value), seed + 2);
-    // A recent Ironwood note-commitment-tree root (a one-note tree here) to anchor the transfer's
-    // dummy spend half, as the wallet backend would supply from the live pool.
-    let (_, _, ironwood_anchor) = single_note_witness(&fvk, u64::from(crossing), seed + 4);
+    // Only the funding note itself is needed: the transfer's anchors and its witness are
+    // DEFERRED to proving time (ZIP 374), installed through the PCZT Updater role.
+    let (fnote, _fpath, _fanchor) = single_note_witness(&fvk, u64::from(funding_value), seed + 2);
     let transfer_pczt = build_transfer_pczt(
         &params,
         TARGET_HEIGHT,
         TARGET_HEIGHT + 40_000,
         &fvk,
-        fanchor,
         fnote,
-        fpath,
-        ironwood_anchor,
         crossing,
         ChaCha8Rng::seed_from_u64(seed + 3),
     )
