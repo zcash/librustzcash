@@ -716,9 +716,12 @@ where
     }
 }
 
+/// Unlocks all inputs selected by the given proposal, reversing the locks acquired when the
+/// proposal was created with a non-`None` `lock_for_blocks` argument.
 ///
-/// This is useful when a proposal is rejected or abandoned after its inputs
-/// were locked via [`lock_proposal_inputs`].
+/// This is useful when a proposal is rejected or abandoned after its inputs were locked, so that
+/// the outputs become available for selection and balance computation once again. Outputs that are
+/// not currently locked are left unchanged.
 pub fn unlock_proposal_inputs<DbT, FeeRuleT, NoteRef>(
     wallet_db: &mut DbT,
     proposal: &Proposal<FeeRuleT, NoteRef>,
