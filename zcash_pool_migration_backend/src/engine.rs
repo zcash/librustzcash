@@ -666,6 +666,11 @@ pub enum CommitError<E> {
     Build(alloc::string::String),
     /// No committed migration was found to build the transfers for (nothing was loaded from storage).
     NoMigrationInProgress,
+    /// A resolved wallet note's value does not match the value the plan recorded for it: the
+    /// wallet's spendable set changed between planning and commit (the plan captures notes by
+    /// their index into that set, so any receipt or spend since planning shifts them), and the
+    /// migration must be re-planned.
+    StalePlan,
     /// A non-terminal migration is already stored. A committed migration is resumed from the
     /// store (or cancelled), never rebuilt over: overwriting it would orphan its pre-signed —
     /// and possibly already broadcast — transactions, and a rebuilt layer 0 would double-spend
@@ -682,6 +687,10 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
             CommitError::NoMigrationInProgress => {
                 f.write_str("no committed migration is in progress")
             }
+            CommitError::StalePlan => f.write_str(
+                "a wallet note no longer matches the plan; the spendable set changed since \
+                 planning and the migration must be re-planned",
+            ),
             CommitError::MigrationInProgress => f.write_str(
                 "a non-terminal migration is already stored; resume or cancel it instead of \
                  committing a new one",
@@ -908,10 +917,19 @@ where
                 let mut spends = Vec::with_capacity(prep_tx.inputs().len());
                 for input in prep_tx.inputs() {
                     match input {
-                        PrepInput::Wallet { index, .. } => {
+                        PrepInput::Wallet { index, value } => {
                             let witness = backend
                                 .resolve_wallet_note(*index, anchor_height)
                                 .map_err(CommitError::Backend)?;
+                            // The plan captured this note by its index into the spendable set at
+                            // PLANNING time; any receipt or spend since then shifts the indices,
+                            // so a resolved note whose value differs from the planned one means
+                            // the plan is stale — caught here as a typed error rather than as an
+                            // opaque balance failure (or, for an equal-valued interloper, a
+                            // silently signed spend of a note the plan reserved elsewhere).
+                            if witness.0.value().inner() != u64::from(*value) {
+                                return Err(CommitError::StalePlan);
+                            }
                             spends.push(witness);
                         }
                         // A layer-0 transaction spends only wallet notes; a Prior input here is a
@@ -1172,10 +1190,15 @@ where
         let mut spends = Vec::with_capacity(prep_tx.inputs().len());
         for input in prep_tx.inputs() {
             match input {
-                PrepInput::Wallet { index, .. } => {
+                PrepInput::Wallet { index, value } => {
                     let witness = backend
                         .resolve_wallet_note(*index, anchor_height)
                         .map_err(CommitError::Backend)?;
+                    // As in `commit_preparation_inner`: a value mismatch means the spendable
+                    // set shifted since planning and the plan is stale.
+                    if witness.0.value().inner() != u64::from(*value) {
+                        return Err(CommitError::StalePlan);
+                    }
                     spends.push(witness);
                 }
                 PrepInput::Prior { .. } => {
@@ -1966,6 +1989,57 @@ mod commit_tests {
             &mut rng,
         )
         .expect("replaces a terminal migration");
+    }
+
+    /// A wallet note is resolved by its index into the CURRENT spendable set; if that set
+    /// changed since planning (the value at the planned index no longer matches), the commit
+    /// reports a stale plan instead of building against the wrong note.
+    #[test]
+    fn commit_preparation_detects_a_stale_plan() {
+        let seed = 17u64;
+        let sk = spending_key(seed);
+        let fvk = FullViewingKey::from(&sk);
+        let balance = 78 * COIN;
+
+        let plan = {
+            let (note, path, anchor) = single_note_witness(&fvk, balance, seed);
+            let planner = CommitMock {
+                notes: vec![Zatoshis::from_u64(balance).expect("test balance is valid")],
+                witnesses: vec![(note, path)],
+                anchor,
+                fvk: fvk.clone(),
+                ask: SpendAuthorizingKey::from(&sk),
+                stored: None,
+            };
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            plan_migration(&regtest_network(true), &planner, &mut rng).expect("plans a migration")
+        };
+
+        // The spendable set shifted between planning and commit: the note at index 0 now has a
+        // different value than the plan recorded.
+        let mut values = vec![balance + COIN];
+        values.extend(plan.funding_notes().iter().map(|&v| u64::from(v)));
+        let (witnesses, anchor) = shared_anchor_witnesses(&fvk, &values, seed);
+        let mut backend = CommitMock {
+            notes: vec![Zatoshis::from_u64(balance).expect("test balance is valid")],
+            witnesses,
+            anchor,
+            fvk,
+            ask: SpendAuthorizingKey::from(&sk),
+            stored: None,
+        };
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        assert!(matches!(
+            commit_preparation(
+                &regtest_network(true),
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut backend,
+                &plan,
+                &mut rng,
+            ),
+            Err(CommitError::StalePlan)
+        ));
     }
 
     /// A wallet mock for the MULTI-LAYER preparation test. The first `n_wallet` witnesses are the
