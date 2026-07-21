@@ -92,29 +92,29 @@ and this library adheres to Rust's notion of
   each step for the true fee cost, schedules the transfers (`scheduling`), and returns a
   `MigrationPlan` preview for user consent. It defines the persisted state model
   - a `MigrationState` (status, the note split, the reconciled funding-note values, and the
-  transactions) of `MigrationTransaction`s (each a stable id, kind, the pre-signed PCZT as bytes or
-  `None` until built, dependencies, scheduled and expiry heights, drawn anchor boundary, and lifecycle
-  state) - and the `MigrationBackend` persistence methods (`store_migration` / `load_migration` /
+  transactions) of `MigrationTransaction`s (each a stable id, kind, the pre-signed PCZT as bytes,
+  dependencies, scheduled and expiry heights, drawn anchor boundary, and lifecycle state) - and the
+  `MigrationBackend` persistence methods (`store_migration` / `load_migration` /
   `update_transaction`), so a committed migration is stored as the pre-signed PCZTs the consuming
   application later proves and broadcasts, and resumes after a restart. Building and signing use the
-  `orchard`-gated `MigrationCrypto` trait (the account's viewing key, note witnesses, an anchor, and
-  signing) and follow ZIP 318's two-phase signing (more than one signing session is permitted):
-  `commit_preparation` builds and pre-signs the preparation transactions and records each transfer as a
-  planned placeholder carrying its schedule; `commit_transfers`, once the preparation is mined and the
-  funding notes exist, builds and pre-signs the transfers into those placeholders with their
-  anchors and witnesses deferred to proving time (ZIP 374).
-  `commit_preparation` handles single-layer preparation, the common case, and reports
-  `UnsupportedMultiLayer` for a plan whose later layers spend earlier, still unmined layers' outputs
-  (full one-session pre-signing awaits a public pczt output-recovery API). Planning is pure (`no_std`);
-  reconciliation-on-launch is added by a later slice.
+  `orchard`-gated `MigrationCrypto` trait (the account's viewing key, its spendable notes'
+  plaintexts, and signing). Every transaction's anchors and witnesses are deferred to proving time
+  (ZIP 374), so a spent note's plaintext fully determines the signed data — including notes minted
+  by earlier, still-unmined migration transactions, recovered from their built bundles — and
+  `commit_preparation` builds and signs the WHOLE migration (every preparation layer in topological
+  order, then every transfer) in ONE signing phase, before anything is broadcast; mining gates only
+  the broadcast order. Planning is pure (`no_std`); proving (installing each transaction's anchor
+  and witnesses through the PCZT Updater role) and reconciliation-on-launch are consumer
+  responsibilities, the latter added by a later slice.
 - An external-signer seam on the `engine` module (behind the `orchard` feature), so a hardware or
-  offline signer can sign a migration's transactions out of band. `build_preparation_unsigned` and
-  `build_transfers_unsigned` mirror `commit_preparation` / `commit_transfers` but leave the transactions
-  UNSIGNED in a new `MigrationTxState::AwaitingSignature` state and return their serialized PCZTs
-  (`UnsignedMigrationTx`, paired with the transaction id) to route to the signing device. Once the
-  device returns a signed PCZT, `MigrationState::apply_signature` stores it and moves the transaction to
-  `Signed`, after which the normal state machine proves and broadcasts it unchanged (proving remains a
-  consumer responsibility, as for in-process signing). External signing therefore replaces only the
-  build-and-sign step; the rest of the lifecycle is identical. The status view surfaces an awaiting
-  transaction as blocked on `Blocker::Signature`. Deferred multi-layer preparation layers still sign in
-  process.
+  offline signer can sign a migration's transactions out of band. `build_preparation_unsigned`
+  mirrors `commit_preparation` but leaves every transaction UNSIGNED in a new
+  `MigrationTxState::AwaitingSignature` state and returns their serialized PCZTs
+  (`UnsignedMigrationTx`, paired with the transaction id and its padded action count) in
+  topological order; `batch_unsigned_by_action_budget` splits them into signing sessions bounded
+  by the device's per-interaction action budget — consecutive prefixes, never gated on mining.
+  Once the device returns a signed PCZT, `MigrationState::apply_signature` stores it and moves the
+  transaction to `Signed`, after which the normal state machine broadcasts it unchanged (proving
+  remains a consumer responsibility, as for in-process signing). External signing therefore
+  replaces only the sign step; the rest of the lifecycle is identical. The status view surfaces an
+  awaiting transaction as blocked on `Blocker::Signature`.

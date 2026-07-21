@@ -10,10 +10,11 @@
 //! [`MigrationState::next_step`] tells it to do. The decision of WHAT to do next, and the transaction
 //! status a wallet shows the user, live here.
 //!
-//! The central invariant is the multi-layer anchor bucketing: a later preparation layer spends the
-//! feeder notes an earlier layer minted, which become witnessable only once that earlier layer is
-//! mined, so each layer is built, signed, and broadcast against a distinct anchor and a later layer is
-//! never actionable until its dependencies (its whole prior layer) have mined.
+//! Every transaction is built and pre-signed when the migration is committed (one signing phase;
+//! anchors and witnesses are deferred to proving time per ZIP 374), so the state machine's only
+//! job is to ORDER the broadcasts: a transaction becomes broadcastable once its dependencies (the
+//! preparation layers that mint its inputs) have mined and its scheduled height has arrived, and
+//! the consumer proves it — installing its anchor and witnesses — just before broadcasting.
 
 use alloc::vec::Vec;
 
@@ -31,15 +32,6 @@ use crate::engine::{
 /// [`MigrationState::next_step`] again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvanceStep {
-    /// Build and pre-sign the next ready preparation layer (its predecessor has mined). The consumer
-    /// calls [`commit_pending_preparation`](crate::engine::commit_pending_preparation).
-    BuildPreparationLayer {
-        /// The layer to build.
-        layer: usize,
-    },
-    /// Build and pre-sign the transfers; the whole preparation is mined. The consumer calls
-    /// [`commit_transfers`](crate::engine::commit_transfers).
-    BuildTransfers,
     /// Prove and broadcast this pre-signed transaction: its dependencies are mined and it is due.
     Broadcast {
         /// The transaction to prove and broadcast.
@@ -55,9 +47,6 @@ pub enum AdvanceStep {
 /// The action a wallet takes next on a ready migration transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NextAction {
-    /// Build and pre-sign this placeholder now that its dependencies are mined (a later preparation
-    /// layer, or the transfers once the whole preparation is mined).
-    BuildAndSign,
     /// Prove and broadcast this pre-signed transaction now that its dependencies are mined and it is
     /// due.
     ProveAndBroadcast,
@@ -130,41 +119,6 @@ impl MigrationState {
                 .map(|t| matches!(t.state, MigrationTxState::Mined { .. }))
                 .unwrap_or(false)
         })
-    }
-
-    /// Whether all preparation transactions are mined (so the funding notes exist and the transfers can
-    /// be built).
-    pub fn all_preparations_mined(&self) -> bool {
-        self.transactions
-            .iter()
-            .filter(|t| matches!(t.kind, MigrationTxKind::Preparation { .. }))
-            .all(|t| matches!(t.state, MigrationTxState::Mined { .. }))
-    }
-
-    /// The earliest deferred preparation layer that is ready to build: a multi-layer preparation records
-    /// its later layers (`layer > 0`) as unbuilt placeholders, and one becomes buildable once its whole
-    /// prior layer (its `depends_on`) is mined and its feeder notes are witnessable. Returns the layer
-    /// number, or `None` if no later layer is ready.
-    pub fn ready_prep_layer(&self) -> Option<usize> {
-        self.transactions
-            .iter()
-            .filter_map(|t| match t.kind {
-                MigrationTxKind::Preparation { layer, .. }
-                    if layer > 0
-                        && matches!(t.state, MigrationTxState::Planned)
-                        && self.deps_mined(&t.depends_on) =>
-                {
-                    Some(layer)
-                }
-                _ => None,
-            })
-            .min()
-    }
-
-    /// Whether a deferred preparation layer is ready to build (see
-    /// [`ready_prep_layer`](MigrationState::ready_prep_layer)).
-    pub fn has_ready_prep_layer(&self) -> bool {
-        self.ready_prep_layer().is_some()
     }
 
     /// The id of the next transaction ready to prove and broadcast: pre-signed (`Signed`) or already
@@ -243,8 +197,7 @@ impl MigrationState {
     /// [`AwaitingSignature`](MigrationTxState::AwaitingSignature) to [`Signed`](MigrationTxState::Signed)
     /// so the normal state machine can prove and broadcast it. This is the second half of the
     /// external-signing seam: after
-    /// [`build_preparation_unsigned`](crate::engine::build_preparation_unsigned) or
-    /// [`build_transfers_unsigned`](crate::engine::build_transfers_unsigned) exports the unsigned PCZT,
+    /// [`build_preparation_unsigned`](crate::engine::build_preparation_unsigned) exports the unsigned PCZT,
     /// the caller has it signed out of band and returns the signed PCZT here, matched by `id`. Persist
     /// the state afterwards (`put_migration`).
     ///
@@ -260,16 +213,15 @@ impl MigrationState {
         else {
             return false;
         };
-        tx.pczt = Some(signed_pczt);
+        tx.pczt = signed_pczt;
         tx.state = MigrationTxState::Signed;
         true
     }
 
-    /// Decides the next step to advance the migration, from state alone. The priority is: prove and
-    /// broadcast the next due, dependency-satisfied transaction; else build the next ready preparation
-    /// layer; else, once the whole preparation is mined, build the transfers; else report `Complete`
-    /// when everything is mined, or `Waiting` otherwise. This is made once, here, so it is never
-    /// duplicated per consumer.
+    /// Decides the next step to advance the migration, from state alone: prove and broadcast the
+    /// next due, dependency-satisfied transaction; else report `Complete` when everything is
+    /// mined, or `Waiting` otherwise. This is made once, here, so it is never duplicated per
+    /// consumer.
     pub fn next_step(&self, target_height: BlockHeight) -> AdvanceStep {
         // A terminal migration (complete, or failed/cancelled) has no next action: never build or
         // broadcast for it, so a cancelled migration cannot be driven further.
@@ -278,16 +230,6 @@ impl MigrationState {
         }
         if let Some(id) = self.next_broadcastable(target_height) {
             return AdvanceStep::Broadcast { id };
-        }
-        if let Some(layer) = self.ready_prep_layer() {
-            return AdvanceStep::BuildPreparationLayer { layer };
-        }
-        let has_unbuilt_transfer = self.transactions.iter().any(|t| {
-            matches!(t.kind, MigrationTxKind::Transfer { .. })
-                && matches!(t.state, MigrationTxState::Planned)
-        });
-        if self.all_preparations_mined() && has_unbuilt_transfer {
-            return AdvanceStep::BuildTransfers;
         }
         if !self.transactions.is_empty()
             && self
@@ -304,27 +246,18 @@ impl MigrationState {
     /// render progress and decide, deterministically and from persisted state alone, the next
     /// transaction to sign or broadcast.
     ///
-    /// A `Planned` placeholder whose dependencies are all mined is ready to build and
-    /// sign; a `Signed` (or `Proved`) transaction whose dependencies are mined and whose scheduled
-    /// height has arrived is ready to prove and broadcast. Otherwise a waiting transaction reports what
-    /// it is blocked on: its dependencies (a prior anchor bucket still to mine) or the broadcast
-    /// schedule.
+    /// A `Signed` (or `Proved`) transaction whose dependencies are mined and whose scheduled
+    /// height has arrived is ready to prove and broadcast. Otherwise a waiting transaction reports
+    /// what it is blocked on: its dependencies (a preparation still to mine), the broadcast
+    /// schedule, or an external signature.
     pub fn transaction_statuses(&self, target_height: BlockHeight) -> Vec<TransactionStatus> {
         self.transactions
             .iter()
             .map(|t| {
                 let deps_ok = self.deps_mined(&t.depends_on);
-                // `Planned` needs building; `Signed`/`Proved` need broadcasting. In both cases
-                // a transaction is actionable only once its dependencies (the prior anchor bucket) are
-                // mined, and a broadcastable one only once it is also due.
+                // `Signed`/`Proved` transactions are actionable only once their dependencies (the
+                // preparation layers that mint their inputs) are mined and they are due.
                 let (ready, action, blocked_on) = match t.state {
-                    MigrationTxState::Planned => {
-                        if deps_ok {
-                            (true, Some(NextAction::BuildAndSign), None)
-                        } else {
-                            (false, None, Some(Blocker::Dependencies))
-                        }
-                    }
                     // Built for an external signer and waiting for its signed PCZT; the wallet's
                     // automatic driver takes no action (the external-signing caller drives it via
                     // `apply_signature`), so it is neither ready nor blocked on the chain.
@@ -381,7 +314,7 @@ mod tests {
         MigrationTransaction {
             id: MigrationTxId(id),
             kind,
-            pczt: None,
+            pczt: Vec::new(),
             depends_on: Vec::new(),
             scheduled_height: BlockHeight::from_u32(0),
             expiry_height: BlockHeight::from_u32(0),
@@ -428,19 +361,16 @@ mod tests {
         let mut state = state_with(vec![tx(0, prep(0, 0), MigrationTxState::AwaitingSignature)]);
         assert!(state.apply_signature(MigrationTxId(0), vec![1u8, 2, 3]));
         assert_eq!(state.transactions[0].state, MigrationTxState::Signed);
-        assert_eq!(
-            state.transactions[0].pczt.as_deref(),
-            Some(&[1u8, 2, 3][..])
-        );
+        assert_eq!(state.transactions[0].pczt, vec![1u8, 2, 3]);
     }
 
     #[test]
     fn apply_signature_rejects_unknown_or_wrong_state() {
         let mut state = state_with(vec![
             tx(0, prep(0, 0), MigrationTxState::AwaitingSignature),
-            tx(1, transfer(0), MigrationTxState::Planned),
+            tx(1, transfer(0), MigrationTxState::Signed),
         ]);
-        // An unknown id, and a transaction not awaiting a signature (a Planned placeholder), are both
+        // An unknown id, and a transaction not awaiting a signature (already signed), are both
         // rejected without changing any state.
         assert!(!state.apply_signature(MigrationTxId(9), vec![1u8]));
         assert!(!state.apply_signature(MigrationTxId(1), vec![1u8]));
@@ -452,7 +382,7 @@ mod tests {
         // misrouted signature cannot overwrite the stored one).
         assert!(state.apply_signature(MigrationTxId(0), vec![1u8]));
         assert!(!state.apply_signature(MigrationTxId(0), vec![2u8]));
-        assert_eq!(state.transactions[0].pczt.as_deref(), Some(&[1u8][..]));
+        assert_eq!(state.transactions[0].pczt, vec![1u8]);
     }
 
     #[test]
@@ -473,43 +403,6 @@ mod tests {
         assert!(s.deps_mined(&[MigrationTxId(0)]));
         assert!(!s.deps_mined(&[MigrationTxId(1)]));
         assert!(s.deps_mined(&[])); // empty deps are trivially satisfied
-        assert!(!s.all_preparations_mined()); // tx 1 is not mined
-    }
-
-    #[test]
-    fn ready_prep_layer_needs_prior_layer_mined() {
-        // Layer 0 half-mined: layer 1 (depending on both layer-0 txs) is not ready.
-        let mut l1 = tx(2, prep(1, 0), MigrationTxState::Planned);
-        l1.depends_on = vec![MigrationTxId(0), MigrationTxId(1)];
-        let mut s = state_with(vec![
-            tx(0, prep(0, 0), mined(10)),
-            tx(
-                1,
-                prep(0, 1),
-                MigrationTxState::Broadcast {
-                    txid: TxId::from_bytes([0; 32]),
-                },
-            ),
-            l1.clone(),
-        ]);
-        assert_eq!(s.ready_prep_layer(), None);
-        assert!(!s.has_ready_prep_layer());
-
-        // Mine the rest of layer 0: layer 1 becomes ready.
-        s.transactions[1].state = mined(11);
-        assert_eq!(s.ready_prep_layer(), Some(1));
-        assert!(s.has_ready_prep_layer());
-    }
-
-    #[test]
-    fn ready_prep_layer_picks_earliest() {
-        let mut l1 = tx(1, prep(1, 0), MigrationTxState::Planned);
-        l1.depends_on = vec![MigrationTxId(0)];
-        let mut l2 = tx(2, prep(2, 0), MigrationTxState::Planned);
-        l2.depends_on = vec![MigrationTxId(1)];
-        // Only layer 0 is mined, so only layer 1 is ready.
-        let s = state_with(vec![tx(0, prep(0, 0), mined(10)), l1, l2]);
-        assert_eq!(s.ready_prep_layer(), Some(1));
     }
 
     #[test]
@@ -543,10 +436,12 @@ mod tests {
 
     #[test]
     fn next_step_walks_the_lifecycle() {
-        // Layer 0 signed, layer 1 planned depending on it, one transfer planned depending on layer 1.
-        let mut l1 = tx(1, prep(1, 0), MigrationTxState::Planned);
+        // Every transaction is pre-signed at commit; the state machine only orders the
+        // broadcasts: layer 0, then layer 1 once layer 0 mines, then the transfer once the
+        // whole preparation mines.
+        let mut l1 = tx(1, prep(1, 0), MigrationTxState::Signed);
         l1.depends_on = vec![MigrationTxId(0)];
-        let mut xfer = tx(2, transfer(0), MigrationTxState::Planned);
+        let mut xfer = tx(2, transfer(0), MigrationTxState::Signed);
         xfer.depends_on = vec![MigrationTxId(1)];
         let mut s = state_with(vec![tx(0, prep(0, 0), MigrationTxState::Signed), l1, xfer]);
 
@@ -558,7 +453,7 @@ mod tests {
             }
         );
 
-        // 2) Layer 0 broadcast, not yet mined -> nothing ready, waiting.
+        // 2) Layer 0 broadcast, not yet mined -> its dependents stay blocked, waiting.
         s.transactions[0].state = MigrationTxState::Broadcast {
             txid: TxId::from_bytes([1; 32]),
         };
@@ -567,15 +462,8 @@ mod tests {
             AdvanceStep::Waiting
         );
 
-        // 3) Layer 0 mined -> layer 1 ready to build.
+        // 3) Layer 0 mined -> layer 1 becomes broadcastable.
         s.transactions[0].state = mined(10);
-        assert_eq!(
-            s.next_step(BlockHeight::from_u32(100)),
-            AdvanceStep::BuildPreparationLayer { layer: 1 }
-        );
-
-        // 4) Layer 1 signed and due -> broadcast it.
-        s.transactions[1].state = MigrationTxState::Signed;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
@@ -583,15 +471,8 @@ mod tests {
             }
         );
 
-        // 5) Layer 1 mined, all preparation mined -> build transfers.
+        // 4) Layer 1 mined -> the transfer becomes broadcastable.
         s.transactions[1].state = mined(11);
-        assert_eq!(
-            s.next_step(BlockHeight::from_u32(100)),
-            AdvanceStep::BuildTransfers
-        );
-
-        // 6) Transfer signed and due -> broadcast it.
-        s.transactions[2].state = MigrationTxState::Signed;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
@@ -599,7 +480,7 @@ mod tests {
             }
         );
 
-        // 7) Everything mined -> complete.
+        // 5) Everything mined -> complete.
         s.transactions[2].state = mined(12);
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
@@ -682,7 +563,7 @@ mod tests {
 
     #[test]
     fn transaction_statuses_report_ready_and_blockers() {
-        let mut l1 = tx(1, prep(1, 0), MigrationTxState::Planned);
+        let mut l1 = tx(1, prep(1, 0), MigrationTxState::Signed);
         l1.depends_on = vec![MigrationTxId(0)];
         let mut xfer = tx(2, transfer(0), MigrationTxState::Signed);
         xfer.depends_on = vec![MigrationTxId(1)];
@@ -697,9 +578,9 @@ mod tests {
         assert_eq!(views[0].blocked_on, None);
         assert_eq!(views[0].mined_height, Some(BlockHeight::from_u32(10)));
 
-        // tx 1: planned with its dependency (tx 0) mined -> ready to build.
+        // tx 1: signed with its dependency (tx 0) mined and due -> ready to broadcast.
         assert!(views[1].ready);
-        assert_eq!(views[1].action, Some(NextAction::BuildAndSign));
+        assert_eq!(views[1].action, Some(NextAction::ProveAndBroadcast));
         assert_eq!(views[1].blocked_on, None);
 
         // tx 2: signed but its dependency (tx 1) is not mined -> blocked on dependencies.

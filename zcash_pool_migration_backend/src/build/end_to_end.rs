@@ -66,11 +66,11 @@ fn migration_pipeline_end_to_end() {
     assert_eq!(prep.transaction_count(), 1);
 
     // 3. Build + pre-sign the preparation transaction. The wallet backend resolves the transaction's
-    //    single input (PrepInput::Wallet { index: 0, .. }) to the account's note and its witness
-    //    against the anchor.
+    //    single input (PrepInput::Wallet { index: 0, .. }) to the account's note plaintext; no
+    //    witness and no anchor exist at build time (ZIP 374 deferral).
     let tx = &prep.layers()[0][0];
     assert!(matches!(tx.inputs(), [PrepInput::Wallet { index: 0, .. }]));
-    let (note, path, anchor) = single_note_witness(&fvk, balance, seed);
+    let (note, _path, _anchor) = single_note_witness(&fvk, balance, seed);
     let prep_expiry = u32::from(crate::scheduling::expiry_height(BlockHeight::from_u32(
         TARGET_HEIGHT,
     )));
@@ -79,8 +79,7 @@ fn migration_pipeline_end_to_end() {
         TARGET_HEIGHT,
         prep_expiry,
         &fvk,
-        anchor,
-        vec![(note, path)],
+        vec![note],
         tx.outputs(),
         ChaCha8Rng::seed_from_u64(seed + 1),
     )

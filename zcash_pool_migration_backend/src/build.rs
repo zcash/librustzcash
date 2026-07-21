@@ -23,7 +23,7 @@ use zcash_protocol::consensus::Parameters;
 mod prep;
 mod sign;
 mod transfer;
-pub use prep::build_prep_tx;
+pub use prep::{PlacedPrepOutput, build_prep_tx};
 pub use sign::sign_pczt;
 pub use transfer::build_transfer_pczt;
 

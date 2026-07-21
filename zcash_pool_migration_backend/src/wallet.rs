@@ -1,33 +1,30 @@
 //! A wallet-backed adapter that turns any `zcash_client_backend` wallet into a migration wallet.
 //!
 //! The engine's build and commit path needs an implementation of [`MigrationBackend`] +
-//! [`MigrationCrypto`] (the account's viewing key, note witnesses, an anchor, and signing) and a
-//! [`PoolMigrationRead`] / [`PoolMigrationWrite`] store. This module supplies the first two for free
-//! over the traits a `zcash_client_backend` wallet already implements ([`WalletRead`],
-//! [`InputSource`], [`WalletCommitmentTrees`]) plus the account's [`UnifiedSpendingKey`], and
-//! delegates the store to a value the caller supplies (for example
-//! `zcash_pool_migration_sqlite`'s store over the same wallet database). A consuming application
-//! (zallet, or any other `zcash_client_backend` wallet) then runs [`commit_preparation`] /
-//! [`commit_transfers`] with no hand-wired cryptography.
+//! [`MigrationCrypto`] (the account's viewing key, its spendable notes' plaintexts, and signing)
+//! and a [`PoolMigrationRead`] / [`PoolMigrationWrite`] store. This module supplies the first two
+//! for free over the traits a `zcash_client_backend` wallet already implements ([`WalletRead`],
+//! [`InputSource`]) plus the account's [`UnifiedSpendingKey`], and delegates the store to a value
+//! the caller supplies (for example `zcash_pool_migration_sqlite`'s store over the same wallet
+//! database). A consuming application (zallet, or any other `zcash_client_backend` wallet) then
+//! runs [`commit_preparation`] with no hand-wired cryptography.
+//!
+//! No note commitment tree access appears here: every migration transaction is built and signed
+//! with its anchor and witnesses deferred to proving time (ZIP 374), so the adapter never
+//! resolves a witness — the consumer installs anchors and witnesses through the PCZT `Updater`
+//! role when it proves each transaction, just before broadcast.
 //!
 //! [`commit_preparation`]: crate::engine::commit_preparation
-//! [`commit_transfers`]: crate::engine::commit_transfers
 
-use alloc::format;
-use alloc::string::String;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use core::fmt;
 
-use ::orchard::Anchor;
 use ::orchard::keys::{FullViewingKey, SpendAuthorizingKey};
 use ::orchard::note::Note as OrchardNote;
-use ::orchard::tree::MerklePath;
 use incrementalmerkletree::Position;
-use shardtree::error::ShardTreeError;
 
 use zcash_client_backend::data_api::wallet::TargetHeight;
-use zcash_client_backend::data_api::{InputSource, WalletCommitmentTrees, WalletRead};
+use zcash_client_backend::data_api::{InputSource, WalletRead};
 use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_protocol::ShieldedPool;
 use zcash_protocol::consensus::BlockHeight;
@@ -39,28 +36,23 @@ use crate::engine::{
     PoolMigrationRead, PoolMigrationWrite,
 };
 
-/// A failure of the wallet-backed migration adapter. Parameterized by the error types of the three
+/// A failure of the wallet-backed migration adapter. Parameterized by the error types of the two
 /// wallet traits and the store, which for `zcash_client_sqlite`'s `WalletDb` are all one type but in
 /// general need not be.
 #[derive(Debug)]
 pub enum Error<WRE, ISE, SE> {
-    /// A `WalletRead` failure (chain tip or anchor-height lookup).
+    /// A `WalletRead` failure (chain-tip lookup).
     WalletRead(WRE),
     /// An `InputSource` failure (spendable-note selection).
     InputSource(ISE),
     /// A store failure (`PoolMigrationRead` / `PoolMigrationWrite`).
     Store(SE),
-    /// No spendable note matched the requested index or value (for `index`, the position into the
-    /// spendable set; for a funding value, its index into the requested values).
+    /// No spendable note exists at the requested index.
     NoteNotFound(usize),
-    /// No usable anchor could be obtained: the wallet has no chain tip, or the anchor checkpoint is
-    /// not present in the note commitment tree yet.
-    AnchorUnavailable,
+    /// The wallet has no chain tip (it has never synced), so no note selection target exists.
+    ChainTipUnknown,
     /// Signing the migration PCZT failed.
     Sign(crate::build::BuildError),
-    /// A note commitment tree (shardtree) error, rendered to a string (the tree error type is a
-    /// fourth, `WalletCommitmentTrees`-specific type, kept out of this enum's parameters).
-    Tree(String),
     /// The spendable note at this index has a value that is not a valid [`Zatoshis`] amount
     /// (it exceeds the money-supply cap).
     InvalidNoteValue(usize),
@@ -72,10 +64,9 @@ impl<WRE: fmt::Display, ISE: fmt::Display, SE: fmt::Display> fmt::Display for Er
             Error::WalletRead(e) => write!(f, "wallet read error: {e}"),
             Error::InputSource(e) => write!(f, "input source error: {e}"),
             Error::Store(e) => write!(f, "migration store error: {e}"),
-            Error::NoteNotFound(i) => write!(f, "no spendable note for index/value {i}"),
-            Error::AnchorUnavailable => f.write_str("no usable anchor checkpoint is available"),
+            Error::NoteNotFound(i) => write!(f, "no spendable note at index {i}"),
+            Error::ChainTipUnknown => f.write_str("the wallet has no chain tip"),
             Error::Sign(e) => write!(f, "signing the migration failed: {e}"),
-            Error::Tree(m) => write!(f, "note commitment tree error: {m}"),
             Error::InvalidNoteValue(i) => {
                 write!(f, "spendable note {i} has an invalid (out-of-range) value")
             }
@@ -91,12 +82,6 @@ where
 {
 }
 
-impl<WRE, ISE, SE, WCE: fmt::Debug> From<ShardTreeError<WCE>> for Error<WRE, ISE, SE> {
-    fn from(e: ShardTreeError<WCE>) -> Self {
-        Error::Tree(format!("{e:?}"))
-    }
-}
-
 /// The adapter's error type for a wallet `W` and store `St`.
 type AdapterError<W, St> =
     Error<<W as WalletRead>::Error, <W as InputSource>::Error, <St as PoolMigrationRead>::Error>;
@@ -108,15 +93,13 @@ type SpendableNote = (OrchardNote, Position, u64);
 /// A migration wallet built over a `zcash_client_backend` wallet `W`, an account, its
 /// [`UnifiedSpendingKey`], and a migration store `St`.
 ///
-/// The wallet is held by a mutable borrow behind a [`RefCell`], because
-/// [`WalletCommitmentTrees::with_orchard_tree_mut`] requires `&mut W` while the [`MigrationCrypto`]
-/// methods take `&self`. The engine calls those methods sequentially (never nested), so the
-/// `RefCell` never observes an overlapping borrow.
+/// The wallet is held by a shared borrow: the migration never touches the note commitment tree
+/// (anchors and witnesses are deferred to proving time), so nothing here needs `&mut W`.
 pub struct WalletMigration<'a, W, St>
 where
     W: WalletRead + InputSource,
 {
-    wallet: RefCell<&'a mut W>,
+    wallet: &'a W,
     account: <W as InputSource>::AccountId,
     usk: UnifiedSpendingKey,
     store: St,
@@ -124,20 +107,19 @@ where
 
 impl<'a, W, St> WalletMigration<'a, W, St>
 where
-    W: WalletRead + InputSource + WalletCommitmentTrees,
+    W: WalletRead + InputSource,
     <W as InputSource>::AccountId: Copy,
-    <W as WalletCommitmentTrees>::Error: fmt::Debug,
     St: PoolMigrationRead,
 {
     /// Wrap a wallet, an account, its spending key, and a store as a migration wallet.
     pub fn new(
-        wallet: &'a mut W,
+        wallet: &'a W,
         account: <W as InputSource>::AccountId,
         usk: UnifiedSpendingKey,
         store: St,
     ) -> Self {
         Self {
-            wallet: RefCell::new(wallet),
+            wallet,
             account,
             usk,
             store,
@@ -151,12 +133,11 @@ where
 
     /// The target height for note selection (the chain tip plus one).
     fn selection_target(&self) -> Result<TargetHeight, AdapterError<W, St>> {
-        let guard = self.wallet.borrow();
-        let wallet: &W = &guard;
-        let tip = wallet
+        let tip = self
+            .wallet
             .chain_height()
             .map_err(Error::WalletRead)?
-            .ok_or(Error::AnchorUnavailable)?;
+            .ok_or(Error::ChainTipUnknown)?;
         Ok(TargetHeight::from(u32::from(tip) + 1))
     }
 
@@ -165,9 +146,8 @@ where
     /// `spendable_orchard_note_values` back to a note by the same order).
     fn spendable_orchard(&self) -> Result<Vec<SpendableNote>, AdapterError<W, St>> {
         let target = self.selection_target()?;
-        let guard = self.wallet.borrow();
-        let wallet: &W = &guard;
-        let received = wallet
+        let received = self
+            .wallet
             .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[])
             .map_err(Error::InputSource)?;
         let mut notes: Vec<SpendableNote> = received
@@ -182,42 +162,12 @@ where
         notes.sort_by_key(|(_, pos, _)| *pos);
         Ok(notes)
     }
-
-    /// Resolve the anchor and a witness for each requested tree position, all against the single
-    /// checkpoint at `anchor_height`. The caller (the engine) names the tree state — a bucketed
-    /// boundary height — so the witnesses are certain to match the anchor the transaction proves
-    /// against; the checkpoint must exist in the note commitment tree ([`Error::AnchorUnavailable`]
-    /// otherwise).
-    fn witness(
-        &self,
-        anchor_height: BlockHeight,
-        positions: &[Position],
-    ) -> Result<(Anchor, Vec<MerklePath>), AdapterError<W, St>> {
-        let mut guard = self.wallet.borrow_mut();
-        let wallet: &mut W = &mut guard;
-        wallet.with_orchard_tree_mut::<_, (Anchor, Vec<MerklePath>), AdapterError<W, St>>(|tree| {
-            let anchor: Anchor = tree
-                .root_at_checkpoint_id(&anchor_height)?
-                .ok_or(Error::AnchorUnavailable)?
-                .into();
-            let mut paths = Vec::with_capacity(positions.len());
-            for pos in positions {
-                let path: MerklePath = tree
-                    .witness_at_checkpoint_id_caching(*pos, &anchor_height)?
-                    .ok_or_else(|| Error::Tree(String::from("checkpoint pruned")))?
-                    .into();
-                paths.push(path);
-            }
-            Ok((anchor, paths))
-        })
-    }
 }
 
 impl<'a, W, St> MigrationBackend for WalletMigration<'a, W, St>
 where
-    W: WalletRead + InputSource + WalletCommitmentTrees,
+    W: WalletRead + InputSource,
     <W as InputSource>::AccountId: Copy,
-    <W as WalletCommitmentTrees>::Error: fmt::Debug,
     St: PoolMigrationRead,
 {
     type Error = AdapterError<W, St>;
@@ -233,20 +183,17 @@ where
     }
 
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
-        let guard = self.wallet.borrow();
-        let wallet: &W = &guard;
-        wallet
+        self.wallet
             .chain_height()
             .map_err(Error::WalletRead)?
-            .ok_or(Error::AnchorUnavailable)
+            .ok_or(Error::ChainTipUnknown)
     }
 }
 
 impl<'a, W, St> MigrationCrypto for WalletMigration<'a, W, St>
 where
-    W: WalletRead + InputSource + WalletCommitmentTrees,
+    W: WalletRead + InputSource,
     <W as InputSource>::AccountId: Copy,
-    <W as WalletCommitmentTrees>::Error: fmt::Debug,
     St: PoolMigrationRead,
 {
     type Error = AdapterError<W, St>;
@@ -255,66 +202,10 @@ where
         Ok(FullViewingKey::from(self.usk.orchard()))
     }
 
-    fn orchard_anchor(&self, anchor_height: BlockHeight) -> Result<Anchor, Self::Error> {
-        Ok(self.witness(anchor_height, &[])?.0)
-    }
-
-    fn resolve_wallet_note(
-        &self,
-        index: usize,
-        anchor_height: BlockHeight,
-    ) -> Result<(OrchardNote, MerklePath), Self::Error> {
+    fn resolve_wallet_note(&self, index: usize) -> Result<OrchardNote, Self::Error> {
         let notes = self.spendable_orchard()?;
-        let &(note, position, _) = notes.get(index).ok_or(Error::NoteNotFound(index))?;
-        let (_, mut paths) = self.witness(anchor_height, &[position])?;
-        Ok((note, paths.remove(0)))
-    }
-
-    fn resolve_feeder_notes(
-        &self,
-        values: &[Zatoshis],
-        anchor_height: BlockHeight,
-    ) -> Result<Vec<(OrchardNote, MerklePath)>, Self::Error> {
-        let notes = self.spendable_orchard()?;
-        let mut used = vec![false; notes.len()];
-        let mut chosen: Vec<(OrchardNote, Position)> = Vec::with_capacity(values.len());
-        for (value_index, &value) in values.iter().enumerate() {
-            // Each feeder value is matched to a DISTINCT spendable note of exactly that value; notes
-            // of equal value are interchangeable, so a greedy first-unused match is correct.
-            let note_index = notes
-                .iter()
-                .enumerate()
-                .position(|(i, (_, _, note_value))| !used[i] && *note_value == u64::from(value))
-                .ok_or(Error::NoteNotFound(value_index))?;
-            used[note_index] = true;
-            chosen.push((notes[note_index].0, notes[note_index].1));
-        }
-        let positions: Vec<Position> = chosen.iter().map(|(_, pos)| *pos).collect();
-        let (_, paths) = self.witness(anchor_height, &positions)?;
-        Ok(chosen
-            .into_iter()
-            .map(|(note, _)| note)
-            .zip(paths)
-            .collect())
-    }
-
-    fn resolve_funding_notes(&self, values: &[Zatoshis]) -> Result<Vec<OrchardNote>, Self::Error> {
-        let notes = self.spendable_orchard()?;
-        let mut used = vec![false; notes.len()];
-        let mut chosen: Vec<OrchardNote> = Vec::with_capacity(values.len());
-        for (value_index, &value) in values.iter().enumerate() {
-            // Each funding value is matched to a DISTINCT spendable note of exactly that value; notes
-            // of equal value are interchangeable, so a greedy first-unused match is correct. No
-            // witness is resolved: a transfer's anchors and witness are deferred to proving time.
-            let note_index = notes
-                .iter()
-                .enumerate()
-                .position(|(i, (_, _, note_value))| !used[i] && *note_value == u64::from(value))
-                .ok_or(Error::NoteNotFound(value_index))?;
-            used[note_index] = true;
-            chosen.push(notes[note_index].0);
-        }
-        Ok(chosen)
+        let &(note, _, _) = notes.get(index).ok_or(Error::NoteNotFound(index))?;
+        Ok(note)
     }
 
     fn sign(&self, pczt: ::pczt::Pczt) -> Result<::pczt::Pczt, Self::Error> {
@@ -325,9 +216,8 @@ where
 
 impl<'a, W, St> PoolMigrationRead for WalletMigration<'a, W, St>
 where
-    W: WalletRead + InputSource + WalletCommitmentTrees,
+    W: WalletRead + InputSource,
     <W as InputSource>::AccountId: Copy,
-    <W as WalletCommitmentTrees>::Error: fmt::Debug,
     St: PoolMigrationRead,
 {
     type Error = AdapterError<W, St>;
@@ -339,9 +229,8 @@ where
 
 impl<'a, W, St> PoolMigrationWrite for WalletMigration<'a, W, St>
 where
-    W: WalletRead + InputSource + WalletCommitmentTrees,
+    W: WalletRead + InputSource,
     <W as InputSource>::AccountId: Copy,
-    <W as WalletCommitmentTrees>::Error: fmt::Debug,
     St: PoolMigrationWrite,
 {
     fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
@@ -366,27 +255,25 @@ mod tests {
     use rand_core::{CryptoRng, RngCore};
     use zcash_protocol::consensus::Parameters;
 
-    use crate::engine::{commit_preparation, commit_transfers};
+    use crate::engine::commit_preparation;
 
     /// Compile-time proof that `WalletMigration` over ANY `zcash_client_backend` wallet `W` and ANY
-    /// migration store `St` satisfies every trait bound `commit_preparation` / `commit_transfers`
-    /// require (backend + crypto + store, all sharing one error type). Naming the two generic
-    /// functions instantiated at `WalletMigration<W, St>` forces the type checker to verify that
-    /// instantiation's bounds hold; if the four trait impls ever stop lining up with the commit path,
-    /// this stops compiling. It is never called and needs no wallet instance, so it pulls in no
-    /// test-only wallet dependency (which would otherwise force `zcash_client_backend`'s Orchard
-    /// feature on across the whole workspace's test build).
+    /// migration store `St` satisfies every trait bound `commit_preparation` requires (backend +
+    /// crypto + store, all sharing one error type). Naming the generic function instantiated at
+    /// `WalletMigration<W, St>` forces the type checker to verify that instantiation's bounds hold;
+    /// if the four trait impls ever stop lining up with the commit path, this stops compiling. It
+    /// is never called and needs no wallet instance, so it pulls in no test-only wallet dependency
+    /// (which would otherwise force `zcash_client_backend`'s Orchard feature on across the whole
+    /// workspace's test build).
     #[allow(dead_code)]
     fn assert_commit_bounds<'a, P, W, St, R>()
     where
         P: Parameters + Clone,
-        W: WalletRead + InputSource + WalletCommitmentTrees + 'a,
+        W: WalletRead + InputSource + 'a,
         <W as InputSource>::AccountId: Copy,
-        <W as WalletCommitmentTrees>::Error: fmt::Debug,
         St: PoolMigrationWrite,
         R: RngCore + CryptoRng,
     {
         let _ = commit_preparation::<P, WalletMigration<'a, W, St>, R>;
-        let _ = commit_transfers::<P, WalletMigration<'a, W, St>, R>;
     }
 }
