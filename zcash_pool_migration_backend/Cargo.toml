@@ -35,6 +35,7 @@ orchard = { workspace = true, optional = true }
 pczt = { workspace = true, optional = true, features = [
     "io-finalizer",
     "orchard",
+    "prover",
     "signer",
     "zcp-builder",
 ] }
