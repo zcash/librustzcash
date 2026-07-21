@@ -3,10 +3,15 @@
 //!
 //! This crate provides in-memory implementations of the pool-migration engine traits
 //! ([`MigrationBackend`], [`PoolMigrationRead`], [`PoolMigrationWrite`], and [`MigrationCrypto`]) for
-//! TESTING ONLY; it is not intended for production use. The mock backends hold their notes,
-//! witnesses, and migration state in memory, sign with a hand-held Orchard spend-authorizing key, and
+//! TESTING ONLY; it is not intended for production use. The mock backends hold their notes and
+//! migration state in memory, sign with a hand-held Orchard spend-authorizing key, and
 //! deterministically derive keys and note-commitment-tree witnesses from a seed. None of this is a
 //! substitute for a real wallet backend.
+//!
+//! Two mocks are provided: [`MockBackend`], a note-values-and-store backend for the planning and
+//! store tests, and [`CommitMock`], which additionally holds the account's key and note plaintexts
+//! so it can sign, for the commit tests. The seed-derived witness helpers ([`single_note_witness`],
+//! [`shared_anchor_witnesses`]) build single-leaf and shared-anchor Orchard witnesses.
 //!
 //! It mirrors how [`zcash_client_memory`] relates to `zcash_client_backend`: a shared, test-support
 //! crate so several test suites can reuse the same mock implementations.
@@ -16,8 +21,6 @@
 //! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
 //! [`MigrationCrypto`]: zcash_pool_migration_backend::engine::MigrationCrypto
 //! [`zcash_client_memory`]: https://docs.rs/zcash_client_memory
-
-use std::cell::RefCell;
 
 use incrementalmerkletree::{Hashable, Level};
 use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
@@ -29,24 +32,17 @@ use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
+use zcash_protocol::value::Zatoshis;
 
 use zcash_pool_migration_backend::build::sign_pczt;
 use zcash_pool_migration_backend::engine::{
-    MigrationBackend, MigrationCrypto, MigrationState, MigrationTxId, MigrationTxState,
-    PoolMigrationRead, PoolMigrationWrite,
+    MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTxId,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
-use zcash_pool_migration_backend::note_splitting::{FeePolicy, Zip317FeePolicy};
-use zcash_pool_migration_backend::preparation::PREP_TX_ACTIONS;
 
 /// A post-NU6.3 height (past the regtest NU6.3 activation) at which the migration transactions are
 /// built and their fees computed.
 pub const TARGET_HEIGHT: u32 = 100;
-
-/// The ZIP-317 fee of a padded preparation transaction, as the engine's caller would compute it.
-/// Shared by the migration tests so the mock backends and their scenarios agree on the fee.
-pub fn prep_fee() -> u64 {
-    PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi()
-}
 
 /// 32 random bytes from a `seed`-derived RNG, keeping calls deterministic per case.
 fn draw_bytes(rng: &mut ChaCha8Rng) -> [u8; 32] {
@@ -210,12 +206,46 @@ pub fn shared_anchor_witnesses(
     (witnesses, anchor)
 }
 
+/// Rebuild `stored` with the transaction identified by `id` moved to `state`, leaving the rest
+/// untouched. The engine's [`MigrationState`] keeps its transactions behind read-only accessors, so
+/// an external test backend advances one transaction's lifecycle by reconstructing the state from
+/// its public parts.
+fn set_transaction_state(stored: &mut MigrationState, id: MigrationTxId, state: MigrationTxState) {
+    let transactions: Vec<MigrationTransaction> = stored
+        .transactions()
+        .iter()
+        .map(|t| {
+            if t.id() == id {
+                MigrationTransaction::from_parts(
+                    t.id(),
+                    t.kind(),
+                    t.pczt().clone(),
+                    t.depends_on().clone(),
+                    t.scheduled_height(),
+                    t.expiry_height(),
+                    t.anchor_boundary(),
+                    state,
+                )
+            } else {
+                t.clone()
+            }
+        })
+        .collect();
+    *stored = MigrationState::from_parts(
+        stored.status(),
+        stored.note_split().clone(),
+        stored.funding_notes().clone(),
+        stored.preparation().clone(),
+        transactions,
+    );
+}
+
 /// A minimal in-memory backend: a fixed set of note values and a chain tip. Implements the planning
 /// traits ([`MigrationBackend`], [`PoolMigrationRead`], [`PoolMigrationWrite`]); it holds no keys and
 /// cannot sign, so it is used for the plan/store tests, not the commit tests.
 pub struct MockBackend {
-    notes: Vec<u64>,
-    tip: u32,
+    notes: Vec<Zatoshis>,
+    tip: BlockHeight,
     stored: Option<MigrationState>,
 }
 
@@ -224,8 +254,11 @@ impl MockBackend {
     /// height, with no migration stored yet.
     pub fn new(notes: Vec<u64>, tip: u32) -> Self {
         MockBackend {
-            notes,
-            tip,
+            notes: notes
+                .into_iter()
+                .map(|v| Zatoshis::from_u64(v).expect("test note values are valid"))
+                .collect(),
+            tip: BlockHeight::from_u32(tip),
             stored: None,
         }
     }
@@ -234,11 +267,11 @@ impl MockBackend {
 impl MigrationBackend for MockBackend {
     type Error = core::convert::Infallible;
 
-    fn spendable_orchard_note_values(&self) -> Result<Vec<u64>, Self::Error> {
+    fn spendable_orchard_note_values(&self) -> Result<Vec<Zatoshis>, Self::Error> {
         Ok(self.notes.clone())
     }
 
-    fn chain_tip_height(&self) -> Result<u32, Self::Error> {
+    fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
         Ok(self.tip)
     }
 }
@@ -263,25 +296,21 @@ impl PoolMigrationWrite for MockBackend {
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         if let Some(stored) = &mut self.stored {
-            if let Some(tx) = stored.transactions.iter_mut().find(|t| t.id == id) {
-                tx.state = state;
-            }
+            set_transaction_state(stored, id, state);
         }
         Ok(())
     }
 }
 
-/// A wallet holding the account's key and a set of note witnesses against one anchor: index 0 is the
-/// source note the preparation spends, and the rest are the funding notes the transfers spend. It
-/// signs with its own spend-authorizing key and stores the migration in memory. All fields are public
-/// so a test can construct it directly for a specific scenario.
+/// A wallet mock holding the account's key and its spendable notes' PLAINTEXTS, nothing more: with
+/// anchors and witnesses deferred to proving time (ZIP 374), building and signing an entire
+/// migration needs no tree access at all. It signs with its own spend-authorizing key and stores the
+/// migration in memory. All fields are public so a test can construct it directly for a specific
+/// scenario.
 pub struct CommitMock {
-    /// The spendable Orchard note values reported to the planner.
-    pub notes: Vec<u64>,
-    /// The witnessed notes: index 0 is the preparation's source note, the rest are funding notes.
-    pub witnesses: Vec<(Note, MerklePath)>,
-    /// The shared anchor every witness in `witnesses` was built against.
-    pub anchor: Anchor,
+    /// The wallet's spendable Orchard note plaintexts (their values are reported to the planner and
+    /// resolved by index at build time).
+    pub wallet_notes: Vec<Note>,
     /// The account's Orchard full viewing key.
     pub fvk: FullViewingKey,
     /// The account's Orchard spend-authorizing key, used to sign the migration PCZTs.
@@ -290,15 +319,38 @@ pub struct CommitMock {
     pub stored: Option<MigrationState>,
 }
 
+impl CommitMock {
+    /// A mock wallet holding single notes of the given values, derived from `seed`.
+    pub fn new(seed: u64, values: &[u64]) -> Self {
+        let sk = spending_key(seed);
+        let fvk = FullViewingKey::from(&sk);
+        let wallet_notes = values
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| single_note_witness(&fvk, v, seed.wrapping_add(i as u64)).0)
+            .collect();
+        CommitMock {
+            wallet_notes,
+            fvk,
+            ask: SpendAuthorizingKey::from(&sk),
+            stored: None,
+        }
+    }
+}
+
 impl MigrationBackend for CommitMock {
     type Error = core::convert::Infallible;
 
-    fn spendable_orchard_note_values(&self) -> Result<Vec<u64>, Self::Error> {
-        Ok(self.notes.clone())
+    fn spendable_orchard_note_values(&self) -> Result<Vec<Zatoshis>, Self::Error> {
+        Ok(self
+            .wallet_notes
+            .iter()
+            .map(|n| Zatoshis::from_u64(n.value().inner()).expect("test note values are valid"))
+            .collect())
     }
 
-    fn chain_tip_height(&self) -> Result<u32, Self::Error> {
-        Ok(2_000_000)
+    fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
+        Ok(BlockHeight::from_u32(2_000_000))
     }
 }
 
@@ -318,9 +370,12 @@ impl PoolMigrationWrite for CommitMock {
 
     fn update_transaction(
         &mut self,
-        _id: MigrationTxId,
-        _state: MigrationTxState,
+        id: MigrationTxId,
+        state: MigrationTxState,
     ) -> Result<(), Self::Error> {
+        if let Some(stored) = &mut self.stored {
+            set_transaction_state(stored, id, state);
+        }
         Ok(())
     }
 }
@@ -332,135 +387,8 @@ impl MigrationCrypto for CommitMock {
         Ok(self.fvk.clone())
     }
 
-    fn orchard_anchor(&self) -> Result<Anchor, Self::Error> {
-        Ok(self.anchor)
-    }
-
-    fn resolve_wallet_note(
-        &self,
-        index: usize,
-        _anchor: Anchor,
-    ) -> Result<(Note, MerklePath), Self::Error> {
-        Ok(self.witnesses[index].clone())
-    }
-
-    fn resolve_funding_notes(
-        &self,
-        values: &[u64],
-        _anchor: Anchor,
-    ) -> Result<Vec<(Note, MerklePath)>, Self::Error> {
-        // The funding notes are the witnesses after the source note (index 0).
-        Ok(self.witnesses[1..1 + values.len()].to_vec())
-    }
-
-    fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
-        Ok(sign_pczt(pczt, &self.ask).expect("signs the migration PCZT"))
-    }
-}
-
-/// A wallet mock for the MULTI-LAYER preparation test. The first `n_wallet` witnesses are the
-/// wallet notes (resolved by index for layer 0); the rest are the notes later layers and the
-/// transfers mint (feeders, then funding notes), resolved by value. A persistent `used` set models
-/// a real wallet where a spent note leaves the spendable set, so a feeder consumed by one layer is
-/// never handed to a later resolution again. The store is real, so mining a layer persists. All
-/// fields are public so a test can construct it directly for a specific scenario.
-pub struct LayeredMock {
-    /// The number of leading witnesses that are wallet notes (resolved by index for layer 0).
-    pub n_wallet: usize,
-    /// The witnessed notes: the wallet notes first, then the minted feeders and funding notes.
-    pub witnesses: Vec<(Note, MerklePath)>,
-    /// A persistent per-witness used-set, so a note consumed by one resolution is never reused.
-    pub used: RefCell<Vec<bool>>,
-    /// The shared anchor every witness in `witnesses` was built against.
-    pub anchor: Anchor,
-    /// The account's Orchard full viewing key.
-    pub fvk: FullViewingKey,
-    /// The account's Orchard spend-authorizing key, used to sign the migration PCZTs.
-    pub ask: SpendAuthorizingKey,
-    /// The in-memory migration state (`None` until a migration is committed).
-    pub stored: Option<MigrationState>,
-}
-
-impl MigrationBackend for LayeredMock {
-    type Error = core::convert::Infallible;
-
-    fn spendable_orchard_note_values(&self) -> Result<Vec<u64>, Self::Error> {
-        Ok(self.witnesses[..self.n_wallet]
-            .iter()
-            .map(|(n, _)| n.value().inner())
-            .collect())
-    }
-
-    fn chain_tip_height(&self) -> Result<u32, Self::Error> {
-        Ok(2_000_000)
-    }
-}
-
-impl PoolMigrationRead for LayeredMock {
-    type Error = core::convert::Infallible;
-
-    fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-        Ok(self.stored.clone())
-    }
-}
-
-impl PoolMigrationWrite for LayeredMock {
-    fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
-        self.stored = Some(state.clone());
-        Ok(())
-    }
-
-    fn update_transaction(
-        &mut self,
-        id: MigrationTxId,
-        state: MigrationTxState,
-    ) -> Result<(), Self::Error> {
-        if let Some(stored) = &mut self.stored {
-            if let Some(tx) = stored.transactions.iter_mut().find(|t| t.id == id) {
-                tx.state = state;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl MigrationCrypto for LayeredMock {
-    type Error = core::convert::Infallible;
-
-    fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
-        Ok(self.fvk.clone())
-    }
-
-    fn orchard_anchor(&self) -> Result<Anchor, Self::Error> {
-        Ok(self.anchor)
-    }
-
-    fn resolve_wallet_note(
-        &self,
-        index: usize,
-        _anchor: Anchor,
-    ) -> Result<(Note, MerklePath), Self::Error> {
-        Ok(self.witnesses[index].clone())
-    }
-
-    fn resolve_funding_notes(
-        &self,
-        values: &[u64],
-        _anchor: Anchor,
-    ) -> Result<Vec<(Note, MerklePath)>, Self::Error> {
-        // By-value greedy over the minted notes (index >= n_wallet), with a persistent used-set so
-        // successive resolutions (a layer's feeders, then a later layer's, then the funding notes)
-        // never reuse a note. Notes of equal value are interchangeable, so first-unused is correct.
-        let mut used = self.used.borrow_mut();
-        let mut out = Vec::with_capacity(values.len());
-        for &v in values {
-            let idx = (self.n_wallet..self.witnesses.len())
-                .find(|&i| !used[i] && self.witnesses[i].0.value().inner() == v)
-                .expect("a minted note of the requested value exists");
-            used[idx] = true;
-            out.push(self.witnesses[idx].clone());
-        }
-        Ok(out)
+    fn resolve_wallet_note(&self, index: usize) -> Result<Note, Self::Error> {
+        Ok(self.wallet_notes[index])
     }
 
     fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
