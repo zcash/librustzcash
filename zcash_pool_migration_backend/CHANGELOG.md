@@ -158,3 +158,15 @@ and this library adheres to Rust's notion of
   boundary" case now shares the `StalePlan` variant with the note-value mismatch, and the remaining
   internal-invariant failures use `InconsistentPlan`, so a caller can match on the condition rather
   than parsing a message.
+- The SQLite store (`zcash_pool_migration_sqlite`) keys migrations by the owning account's UUID:
+  `orchard_ironwood_migrations` replaces its singleton row id with an `account_uuid` primary key,
+  `orchard_ironwood_migration_transactions` re-keys on `(account_uuid, tx_id)` (and the
+  due-transaction index gains the account column), and a store handle is scoped to one account at
+  construction — `PoolMigrations::for_account(conn, account)` replacing `PoolMigrations::new(conn)`
+  — so the engine traits stay account-agnostic while a wallet database hosting several accounts
+  (each potentially with its own seed or an imported viewing key, such as a software account next
+  to a hardware-wallet account) migrates them independently, concurrently or one after another.
+  `zcash_client_sqlite` registers the re-keying as the `orchard_ironwood_migration_account_key`
+  migration (id exported as `orchard_ironwood::ACCOUNT_KEY_MIGRATION_ID`): tables created at the
+  original singleton shape are dropped and recreated — no released crate ever wrote that shape —
+  and databases created at the current shape see a no-op.
