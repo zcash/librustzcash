@@ -84,9 +84,19 @@ fn commits_the_whole_migration_in_one_pass() {
                 assert!(tx.anchor_boundary().is_none());
             }
             MigrationTxKind::Transfer { .. } => {
+                // A transfer depends only on the ONE preparation transaction that mints its funding
+                // note, so it releases as soon as its own note is mined, not once the whole last
+                // layer mines.
+                assert_eq!(
+                    tx.depends_on().len(),
+                    1,
+                    "a transfer waits on exactly its funding note's producer"
+                );
+                let producer = tx.depends_on()[0];
                 assert!(
-                    !tx.depends_on().is_empty(),
-                    "a transfer BROADCASTS only after the preparation mines"
+                    state.transactions().iter().any(|p| p.id() == producer
+                        && matches!(p.kind(), MigrationTxKind::Preparation { .. })),
+                    "the dependency is a preparation transaction"
                 );
                 assert!(
                     tx.anchor_boundary().is_some(),

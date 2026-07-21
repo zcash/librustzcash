@@ -1200,7 +1200,11 @@ where
     // funding notes draw from this pool by value, each note spent at most once. This is what
     // makes the WHOLE migration signable in topological order before anything is broadcast:
     // signing sessions are bounded by the signer's action budget, never by mining.
-    let mut minted: Vec<(Zatoshis, orchard::note::Note, bool)> = Vec::new();
+    // Each entry is `(value, recovered note, consumed?, producer)`. `producer` is the id of the
+    // preparation transaction that mints the note, or `None` for a direct-funding wallet note that
+    // needs no preparation; a transfer then depends only on its own funding note's producer, rather
+    // than on the whole last layer.
+    let mut minted: Vec<(Zatoshis, orchard::note::Note, bool, Option<MigrationTxId>)> = Vec::new();
 
     for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
         let mut this_layer_ids: Vec<MigrationTxId> = Vec::with_capacity(prep_layer.len());
@@ -1232,7 +1236,7 @@ where
                         // built above (the plan's layers are in topological order).
                         let pos = minted
                             .iter()
-                            .position(|(v, _, used)| !used && v == value)
+                            .position(|(v, _, used, _)| !used && v == value)
                             .ok_or_else(|| {
                                 CommitError::InconsistentPlan(format!(
                                     "layer {layer} spends a feeder note of value {} that no \
@@ -1285,7 +1289,7 @@ where
             for (_action_index, output, note) in placed {
                 match output {
                     PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
-                        minted.push((value, note, false));
+                        minted.push((value, note, false, Some(id)));
                     }
                     PrepOutput::Change(_) => {}
                 }
@@ -1322,14 +1326,24 @@ where
         if note.value().inner() != u64::from(value) {
             return Err(CommitError::StalePlan);
         }
-        minted.push((value, note, false));
+        // A direct-funding wallet note already exists on-chain, so its transfer has no producer to
+        // wait on.
+        minted.push((value, note, false, None));
     }
 
-    // Every transfer waits for the last preparation layer to be MINED before it broadcasts (a
-    // layer broadcasts only after its predecessor mines, so the last layer mining implies every
-    // funding note is on-chain); its PCZT, though, is built and signed right here. An empty
-    // preparation (every funding note used directly) leaves the dependency set empty.
-    let last_layer_ids: Vec<MigrationTxId> = layer_ids.last().cloned().unwrap_or_default();
+    // Each transfer waits only for the preparation transaction that MINTS ITS OWN funding note to
+    // be mined (recorded as that note's producer in `minted`), not for the whole last layer: as
+    // soon as a transfer's own funding note is on-chain it may broadcast at its scheduled height,
+    // independently of the other crossings' preparation. This follows ZIP 318's per-note
+    // availability MUST ("wait until the boundary that closes the anchor-height bucket in which a
+    // note-preparation transaction was mined has passed before treating ITS output notes as
+    // available for migration") and consciously RELAXES the more conservative SHOULD that all note
+    // preparation complete before Phase 2 begins. The relaxation is safe: the schedule is already
+    // floored at the estimated last-preparation height, and the boundary-passed half of the MUST is
+    // still enforced downstream, since `draw_anchor_boundary` yields an anchor only once a boundary
+    // at or after the note's creation exists, so a transfer cannot be proved (hence broadcast)
+    // before then. A funding note used directly from the wallet has no producer, so that transfer's
+    // dependency set is empty. The transfer's PCZT is built and signed right here regardless.
 
     // The boundary anchor each transfer will PROVE against is drawn here, at scheduling time,
     // because the schedule fully determines it: the candidate set lies strictly above the NU6.3
@@ -1358,7 +1372,7 @@ where
         })?;
         let pos = minted
             .iter()
-            .position(|(v, _, used)| !used && *v == funding_value)
+            .position(|(v, _, used, _)| !used && *v == funding_value)
             .ok_or_else(|| {
                 CommitError::InconsistentPlan(format!(
                     "no minted funding note for crossing {crossing}"
@@ -1366,6 +1380,9 @@ where
             })?;
         minted[pos].2 = true;
         let note = minted[pos].1;
+        // Depend only on the preparation transaction that mints this funding note (or nothing, for a
+        // direct-funding wallet note), so this crossing releases as soon as its own note is mined.
+        let depends_on: Vec<MigrationTxId> = minted[pos].3.into_iter().collect();
         let crossing_value = *plan
             .note_split()
             .crossing_values()
@@ -1399,7 +1416,7 @@ where
             id,
             kind: MigrationTxKind::Transfer { crossing },
             pczt: bytes,
-            depends_on: last_layer_ids.clone(),
+            depends_on,
             scheduled_height: schedule.broadcast_height(),
             expiry_height: schedule.expiry_height(),
             anchor_boundary: Some(
