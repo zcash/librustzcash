@@ -57,7 +57,7 @@ pub enum Error<WRE, ISE, SE> {
     /// not present in the note commitment tree yet.
     AnchorUnavailable,
     /// Signing the migration PCZT failed.
-    Sign(String),
+    Sign(crate::build::BuildError),
     /// A note commitment tree (shardtree) error, rendered to a string (the tree error type is a
     /// fourth, `WalletCommitmentTrees`-specific type, kept out of this enum's parameters).
     Tree(String),
@@ -74,7 +74,7 @@ impl<WRE: fmt::Display, ISE: fmt::Display, SE: fmt::Display> fmt::Display for Er
             Error::Store(e) => write!(f, "migration store error: {e}"),
             Error::NoteNotFound(i) => write!(f, "no spendable note for index/value {i}"),
             Error::AnchorUnavailable => f.write_str("no usable anchor checkpoint is available"),
-            Error::Sign(m) => write!(f, "signing the migration failed: {m}"),
+            Error::Sign(e) => write!(f, "signing the migration failed: {e}"),
             Error::Tree(m) => write!(f, "note commitment tree error: {m}"),
             Error::InvalidNoteValue(i) => {
                 write!(f, "spendable note {i} has an invalid (out-of-range) value")
@@ -319,7 +319,7 @@ where
 
     fn sign(&self, pczt: ::pczt::Pczt) -> Result<::pczt::Pczt, Self::Error> {
         let ask = SpendAuthorizingKey::from(self.usk.orchard());
-        sign_pczt(pczt, &ask).map_err(|e| Error::Sign(format!("{e:?}")))
+        sign_pczt(pczt, &ask).map_err(Error::Sign)
     }
 }
 
