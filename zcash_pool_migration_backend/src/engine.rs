@@ -43,6 +43,7 @@
 
 use alloc::vec::Vec;
 use core::fmt;
+use core::num::NonZeroUsize;
 
 use corez::io;
 
@@ -638,6 +639,23 @@ impl RunEstimate {
     pub fn prep_transactions(&self) -> usize {
         self.prep_transactions
     }
+
+    /// The total number of transactions this run builds and signs: its preparation transactions plus
+    /// one pool-crossing transfer per funding note.
+    pub fn transactions(&self) -> usize {
+        self.prep_transactions + self.crossings
+    }
+
+    /// The number of signing sessions this run needs when an external signer (for example a Keystone
+    /// hardware wallet) can sign at most `max_per_session` transactions in one interaction:
+    /// `ceil(transactions / max_per_session)`. All of a run's transactions are built and signed
+    /// together (anchors and witnesses are deferred to proving time, [ZIP 374]), so they pool into
+    /// sessions bounded only by the signer's capacity.
+    ///
+    /// [ZIP 374]: https://zips.z.cash/zip-0374
+    pub fn signing_sessions(&self, max_per_session: NonZeroUsize) -> usize {
+        self.transactions().div_ceil(max_per_session.get())
+    }
 }
 
 /// An estimate of migrating a wallet's whole spendable balance across successive migration RUNS
@@ -648,6 +666,12 @@ impl RunEstimate {
 /// structure (see [`estimate_migration_runs`]). Each run carries BOTH sides so an application can
 /// compare them: the note-split crossings it migrates and the note-preparation layers and
 /// transactions it costs.
+///
+/// A capacity-limited external signer adds a third dimension: given how many transactions such a
+/// signer can sign in one interaction, [`total_signing_sessions`](Self::total_signing_sessions) gives
+/// the number of signing interactions the whole migration requires. That limit is a query parameter,
+/// not part of the estimate, so an SDK can evaluate it for any signer capacity without re-running the
+/// planners.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MigrationRunEstimate {
     runs: Vec<RunEstimate>,
@@ -699,6 +723,29 @@ impl MigrationRunEstimate {
     pub fn total_prep_transactions(&self) -> usize {
         self.runs.iter().map(RunEstimate::prep_transactions).sum()
     }
+
+    /// The total number of transactions the whole migration builds and signs across all runs (the sum
+    /// of each run's [`transactions`](RunEstimate::transactions); equivalently
+    /// [`total_prep_transactions`](Self::total_prep_transactions) plus
+    /// [`total_crossings`](Self::total_crossings)).
+    pub fn total_transactions(&self) -> usize {
+        self.runs.iter().map(RunEstimate::transactions).sum()
+    }
+
+    /// The total number of signing sessions the whole migration needs when an external signer can sign
+    /// at most `max_per_session` transactions in one interaction — the number of times the user must
+    /// interact with a capacity-limited hardware signer (for example a Keystone, whose limit the SDK
+    /// passes in here).
+    ///
+    /// This is the SUM of each run's [`signing_sessions`](RunEstimate::signing_sessions), NOT
+    /// `ceil(total_transactions / max_per_session)`, because signing sessions cannot span runs: a later
+    /// run's transactions spend notes an earlier run must mine first, so each run is signed on its own.
+    pub fn total_signing_sessions(&self, max_per_session: NonZeroUsize) -> usize {
+        self.runs
+            .iter()
+            .map(|run| run.signing_sessions(max_per_session))
+            .sum()
+    }
 }
 
 /// Estimate how the account the `backend` represents will migrate its whole spendable balance: the
@@ -710,11 +757,15 @@ impl MigrationRunEstimate {
 /// capacity migrates over several runs. The estimate depends on the wallet's NOTE STRUCTURE, not just
 /// its total value: each run is decomposed with the REAL preparation planner over the current notes
 /// (so its feasibility and fees are exact, exactly as [`plan_migration`] plans one run), and the notes
-/// that run spends and the residuals it leaves form the next run's structure. It excludes only any
-/// app-imposed cap on the number of transactions or actions per signing session (see
-/// [`batch_unsigned_by_action_budget`]); the run count itself is not bounded by such a cap. Because it
-/// iterates the note-split and preparation planners once per run, its cost is roughly one
-/// [`plan_migration`] per run.
+/// that run spends and the residuals it leaves form the next run's structure.
+///
+/// The note-split run count itself does NOT depend on an external signer's capacity. When a
+/// capacity-limited hardware signer (for example a Keystone) can sign only so many transactions in one
+/// interaction, pass that user-configured limit to
+/// [`MigrationRunEstimate::total_signing_sessions`] to get the number of signing interactions the
+/// migration requires (each run is signed on its own; see that method). Because this iterates the
+/// note-split and preparation planners once per run, its cost is roughly one [`plan_migration`] per
+/// run.
 ///
 /// A zero (or fully sub-quantum) balance yields a zero-run estimate rather than an error, since this
 /// is a preview. `rng` is drawn from only by a randomized note-split strategy; the recommended
@@ -1701,6 +1752,48 @@ mod tests {
             est_frag.total_prep_transactions(),
             est_one.total_prep_transactions()
         );
+    }
+
+    /// The number of signing sessions follows a capacity-limited signer's per-interaction transaction
+    /// limit (a Keystone-style hard limit): one session per transaction at capacity one, one session
+    /// per run when the capacity exceeds every run, and monotonically more sessions as the limit
+    /// tightens. Sessions are summed per run (they cannot span runs).
+    #[test]
+    fn signing_sessions_follow_the_signer_capacity() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        // A whale, so there are several runs, each with several transactions.
+        let whale = MockBackend::new(vec![1_200_000 * COIN], 2_000_000);
+        let est = estimate_migration_runs(&test_net(), &whale, &mut rng).expect("estimates");
+
+        // Total transactions reconcile with the per-side aggregates.
+        assert_eq!(
+            est.total_transactions(),
+            est.total_prep_transactions() + est.total_crossings()
+        );
+
+        let one = NonZeroUsize::new(1).unwrap();
+        let big = NonZeroUsize::new(10_000).unwrap();
+        let mid = NonZeroUsize::new(8).unwrap();
+
+        // Capacity of one transaction per session: one session per transaction.
+        assert_eq!(est.total_signing_sessions(one), est.total_transactions());
+        // Capacity larger than any single run's transaction count: one session per run.
+        assert_eq!(est.total_signing_sessions(big), est.run_count());
+        // A tighter limit never needs fewer sessions than a looser one.
+        assert!(est.total_signing_sessions(mid) >= est.total_signing_sessions(big));
+        assert!(est.total_signing_sessions(one) >= est.total_signing_sessions(mid));
+
+        // Per-run consistency: a run's sessions are the ceiling of its transaction count, and the
+        // total is the per-run sum (sessions do not span runs).
+        let summed: usize = est.runs().iter().map(|r| r.signing_sessions(mid)).sum();
+        assert_eq!(est.total_signing_sessions(mid), summed);
+        for run in est.runs() {
+            assert_eq!(
+                run.transactions(),
+                run.prep_transactions() + run.crossings()
+            );
+            assert_eq!(run.signing_sessions(mid), run.transactions().div_ceil(8));
+        }
     }
 
     #[test]
