@@ -141,7 +141,8 @@ fn migration_pipeline_end_to_end() {
     )
     .expect("the transfer builds");
 
-    // The REAL constructed transfer pays exactly the canonical fee of the 2+2-action transfer
+    // The REAL constructed transfer pays exactly the canonical fee of the 2-Orchard +
+    // 1-Ironwood-action transfer
     // shape (which is the buffer each prepared note carries), and crosses exactly the planned
     // canonical denomination into the Ironwood pool.
     let expected_transfer_fee = fee_rule

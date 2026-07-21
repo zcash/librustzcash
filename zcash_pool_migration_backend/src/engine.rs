@@ -446,7 +446,7 @@ impl<E: core::error::Error + 'static> core::error::Error for MigrationError<E> {
 /// The two canonical ZIP-317 fees of a migration, computed from the canonical transaction shapes:
 /// the fee of one padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation
 /// transaction, and the transfer-fee buffer each prepared note carries (the fee of the canonical
-/// 2-Orchard + 2-Ironwood-action transfer).
+/// 2-Orchard + 1-Ironwood-action transfer: the Ironwood side is a single unpadded action).
 fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
     params: &P,
     height: BlockHeight,
@@ -482,7 +482,7 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
 /// canonical denominations, plan the preparation transactions that mint the self-funding notes, and
 /// schedule the phase-2 transfers. The canonical ZIP-317 fees are computed here, once, from the two
 /// canonical transaction shapes — the padded [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS)-action preparation transaction and
-/// the 2+2-action transfer — and reused throughout planning; the fee rule is fixed (ZIP 318 requires
+/// the 2-Orchard + 1-Ironwood-action transfer — and reused throughout planning; the fee rule is fixed (ZIP 318 requires
 /// the canonical fee, since a nonstandard fee would partition the anonymity set), so it is not a
 /// parameter. The decomposition reserves the TRUE preparation cost at each step, consulting the
 /// preparation planner as it grows the split. `rng` must be a cryptographically secure RNG (the
