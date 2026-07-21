@@ -388,7 +388,10 @@ impl MigrationPlan {
         &self.prep_schedule
     }
 
-    /// The phase-2 transfer schedule, one entry per funding note (its broadcast height and expiry).
+    /// The phase-2 transfer schedule, one entry per funding note (its broadcast height and
+    /// expiry), in SHUFFLED broadcast order (ZIP 318): the heights are deliberately not monotone
+    /// in crossing index, so the on-chain temporal sequence of denominations is independent of
+    /// the balance.
     pub fn schedule(&self) -> &[Schedule] {
         &self.schedule
     }
@@ -574,7 +577,20 @@ where
         nu63_activation,
         est_last_prep_height,
     ));
-    let schedule = scheduling::schedule(schedule_base, funding_notes.len(), rng);
+    // SHUFFLE (ZIP 318 MUST): the cumulative broadcast heights are non-decreasing in draw
+    // order, and the split's crossing values are a non-increasing function of the balance, so
+    // pairing them in order would broadcast the denominations largest-first — an on-chain
+    // temporal sequence an observer could read the balance back out of. Drawing a uniform
+    // permutation and assigning the i-th drawn slot to the permuted crossing makes the
+    // broadcast order of denominations independent of the balance.
+    let slots = scheduling::schedule(schedule_base, funding_notes.len(), rng);
+    let mut schedule = slots.clone();
+    for (slot, &crossing) in scheduling::shuffle_indices(funding_notes.len(), rng)
+        .iter()
+        .enumerate()
+    {
+        schedule[crossing] = slots[slot];
+    }
 
     Ok(MigrationPlan {
         note_split,
@@ -1487,6 +1503,33 @@ mod tests {
             plan.funding_notes().len()
         );
         assert!(plan.funding_notes().len() <= plan.note_split().migration_outputs().len());
+    }
+
+    /// SHUFFLE (ZIP 318): the crossings are non-increasing, so an unshuffled schedule would
+    /// pair them with non-decreasing broadcast heights and the on-chain temporal sequence of
+    /// denominations would spell out the balance. The drawn permutation makes the heights
+    /// non-monotone in crossing index (deterministic for this seed).
+    #[test]
+    fn transfer_schedule_is_shuffled() {
+        // A balance that splits into several denominations, so the order is observable.
+        let backend = MockBackend::new(vec![78 * COIN], 2_000_000);
+        let mut rng = ChaCha8Rng::seed_from_u64(3);
+        let plan =
+            plan_migration(&test_net(), &backend, &mut rng).expect("a fundable balance plans");
+        assert!(
+            plan.funding_notes().len() >= 4,
+            "the balance splits into several transfers: {}",
+            plan.funding_notes().len()
+        );
+        let heights: Vec<u32> = plan
+            .schedule()
+            .iter()
+            .map(|s| u32::from(s.broadcast_height()))
+            .collect();
+        assert!(
+            heights.windows(2).any(|w| w[0] > w[1]),
+            "the transfer broadcast order is shuffled: {heights:?}"
+        );
     }
 
     #[test]
