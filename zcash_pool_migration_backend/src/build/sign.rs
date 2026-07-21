@@ -68,9 +68,13 @@ mod tests {
         let (note, path, anchor) = single_note_witness(fvk, note_value, note_seed);
         let params = regtest_network(true);
         let rng = ChaCha8Rng::seed_from_u64(note_seed);
+        let expiry = u32::from(crate::scheduling::expiry_height(
+            zcash_protocol::consensus::BlockHeight::from_u32(TARGET_HEIGHT),
+        ));
         let (pczt, _) = build_prep_tx(
             &params,
             TARGET_HEIGHT,
+            expiry,
             fvk,
             anchor,
             vec![(note, path)],

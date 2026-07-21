@@ -80,6 +80,13 @@ const INTERNAL_ADDRESS_INDEX: u32 = 0;
 /// [`PREP_TX_ACTIONS`]-action transaction (the preparation planner reserves exactly this), or the
 /// build does not balance.
 ///
+/// The transaction is signed at build time but broadcast at its drawn scheduled height, so the
+/// caller passes the `expiry_height` matching that schedule (the engine uses the canonical rolling
+/// window of [`expiry_height`](crate::scheduling::expiry_height) at the scheduled height). It is
+/// embedded as the transaction's `nExpiryHeight`, which the pre-signature commits to; relying on
+/// the builder's default (a few dozen blocks past `target_height`) would make any transaction
+/// scheduled beyond that window dead on arrival.
+///
 /// Returns the finalized PCZT and, for each requested output in order, its `(action_index, output)`
 /// so the caller can locate each note after the transaction is mined (and spend the feeder notes in a
 /// later layer). The fabricated dummy actions are not returned.
@@ -95,6 +102,7 @@ const INTERNAL_ADDRESS_INDEX: u32 = 0;
 pub fn build_prep_tx<P, R>(
     params: &P,
     target_height: u32,
+    expiry_height: u32,
     orchard_fvk: &FullViewingKey,
     anchor: orchard::Anchor,
     spends: Vec<(orchard::note::Note, orchard::tree::MerklePath)>,
@@ -133,7 +141,8 @@ where
         },
         ironwood_bundle_type: BundleType::DEFAULT,
     };
-    let mut builder = Builder::new(params.clone(), BlockHeight::from_u32(target_height), config);
+    let mut builder = Builder::new(params.clone(), BlockHeight::from_u32(target_height), config)
+        .with_expiry_height(BlockHeight::from_u32(expiry_height));
     for (note, merkle_path) in spends {
         builder
             .add_orchard_spend::<Infallible>(orchard_fvk.clone(), note, merkle_path)
@@ -191,6 +200,14 @@ mod tests {
         PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64()
     }
 
+    /// The canonical rolling-window expiry for a transaction scheduled at the build height, as the
+    /// engine embeds it.
+    fn test_expiry() -> u32 {
+        u32::from(crate::scheduling::expiry_height(BlockHeight::from_u32(
+            TARGET_HEIGHT,
+        )))
+    }
+
     /// The number of Orchard actions in the built transaction.
     fn action_count(pczt: &pczt::Pczt) -> usize {
         pczt.orchard().actions().len()
@@ -230,6 +247,7 @@ mod tests {
             let (pczt, placed) = build_prep_tx(
                 &params,
                 TARGET_HEIGHT,
+                test_expiry(),
                 &fvk,
                 anchor,
                 spends,
@@ -263,6 +281,7 @@ mod tests {
             let (pczt, placed) = build_prep_tx(
                 &params,
                 100,
+                test_expiry(),
                 &fvk,
                 anchor,
                 vec![(note, path)],
@@ -295,6 +314,7 @@ mod tests {
         let (pczt, placed) = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
             anchor,
             vec![(note, path)],
@@ -318,6 +338,7 @@ mod tests {
         let no_spends = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
             anchor,
             Vec::new(),
@@ -330,6 +351,7 @@ mod tests {
         let no_outputs = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
             real_anchor,
             vec![(note, path)],
@@ -346,6 +368,7 @@ mod tests {
         let over_budget = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
             anchor2,
             vec![(note2, path2)],
