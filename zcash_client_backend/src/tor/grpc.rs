@@ -72,7 +72,10 @@ impl Service<Uri> for HttpTcpConnector {
             debug!("Connecting through Tor to {}:{}", host, port);
             let mut prefs = StreamPrefs::new();
             prefs.connect_to_onion_services(BoolOrAuto::Explicit(true));
-            let stream = client.inner.connect_with_prefs((host.as_str(), port), &prefs).await?;
+            let stream = client
+                .inner
+                .connect_with_prefs((host.as_str(), port), &prefs)
+                .await?;
 
             Ok(TokioIo::new(stream))
         };
