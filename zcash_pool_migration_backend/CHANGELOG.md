@@ -22,10 +22,13 @@ and this library adheres to Rust's notion of
   self-funding notes (each holding its crossing value plus a fee buffer), mints denominations from a
   maximum (ZIP 318's `DENOM_CAP`, bounding a whale's crossings to the shared denomination set) down to
   a sub-1-ZEC dust floor (ZIP 318's `MAX_RESIDUAL_VALUE`), and leaves any residual below that floor as
-  source-pool change rather than folded into a fee. The fee model is pluggable via the `FeePolicy`
-  trait (`Zip317FeePolicy` provided), and the maximum denomination, dust floor, and note cap are
-  strategy parameters. `plan_note_split` is a convenience wrapper over the recommended
-  `CanonicalOneTwoFive`. The crate is `no_std` (it needs only `alloc`), depending on
+  source-pool change rather than folded into a fee. The canonical fees come from the ZIP-317 fee
+  rule applied to the canonical transaction shapes, computed once by the caller (the engine) and
+  passed in: the strategy takes the per-note transfer-fee buffer, the per-transaction preparation
+  fee, and a preparation-layout capability it consults at each step of the decomposition, so the
+  true preparation cost (consolidation and fan-out layers included) is reserved as the split grows.
+  The maximum denomination, dust floor, and note cap are strategy parameters. `plan_note_split` is a
+  convenience wrapper over the recommended `CanonicalOneTwoFive`. The crate is `no_std` (it needs only `alloc`), depending on
   `zcash_protocol`, `zcash_primitives`, and `rand_core`.
 - The pure PCZT transfer builder (`build::build_transfer_pczt`, behind the `orchard` feature): spends
   one self-funding note the note split minted and outputs its crossing value into the Ironwood pool as
@@ -81,3 +84,37 @@ and this library adheres to Rust's notion of
   engine-enforced MUSTs (sync/broadcast decoupling, and at most one overdue transfer at wallet open)
   are documented as out of scope for this pure module. The exponential draw's natural log uses `libm`,
   since the crate is `no_std` and `std`'s `f64::ln` is unavailable.
+- The migration engine (the `engine` module): orchestration of a pool migration through a
+  `MigrationBackend` trait. `plan_migration` reads the account's spendable note values and the chain
+  tip from the backend, computes the canonical ZIP-317 fees once from the canonical transaction
+  shapes (the fee rule is fixed, since ZIP 318 requires the canonical fee), decomposes the balance
+  into denominations (`note_splitting`) with the preparation planner (`preparation`) consulted at
+  each step for the true fee cost, schedules the transfers (`scheduling`), and returns a
+  `MigrationPlan` preview for user consent. It defines the persisted state model
+  - a `MigrationState` (status, the note split, the reconciled funding-note values, and the
+  transactions) of `MigrationTransaction`s (each a stable id, kind, the pre-signed PCZT as bytes,
+  dependencies, scheduled and expiry heights, drawn anchor boundary, and lifecycle state) - and the
+  `MigrationBackend` persistence methods (`store_migration` / `load_migration` /
+  `update_transaction`), so a committed migration is stored as the pre-signed PCZTs the consuming
+  application later proves and broadcasts, and resumes after a restart. Building and signing use the
+  `orchard`-gated `MigrationCrypto` trait (the account's viewing key, its spendable notes'
+  plaintexts, and signing). Every transaction's anchors and witnesses are deferred to proving time
+  (ZIP 374), so a spent note's plaintext fully determines the signed data — including notes minted
+  by earlier, still-unmined migration transactions, recovered from their built bundles — and
+  `commit_preparation` builds and signs the WHOLE migration (every preparation layer in topological
+  order, then every transfer) in ONE signing phase, before anything is broadcast; mining gates only
+  the broadcast order. Planning is pure (`no_std`); proving (installing each transaction's anchor
+  and witnesses through the PCZT Updater role) and reconciliation-on-launch are consumer
+  responsibilities, the latter added by a later slice.
+- An external-signer seam on the `engine` module (behind the `orchard` feature), so a hardware or
+  offline signer can sign a migration's transactions out of band. `build_preparation_unsigned`
+  mirrors `commit_preparation` but leaves every transaction UNSIGNED in a new
+  `MigrationTxState::AwaitingSignature` state and returns their serialized PCZTs
+  (`UnsignedMigrationTx`, paired with the transaction id and its padded action count) in
+  topological order; `batch_unsigned_by_action_budget` splits them into signing sessions bounded
+  by the device's per-interaction action budget — consecutive prefixes, never gated on mining.
+  Once the device returns a signed PCZT, `MigrationState::apply_signature` stores it and moves the
+  transaction to `Signed`, after which the normal state machine broadcasts it unchanged (proving
+  remains a consumer responsibility, as for in-process signing). External signing therefore
+  replaces only the sign step; the rest of the lifecycle is identical. The status view surfaces an
+  awaiting transaction as blocked on `Blocker::Signature`.

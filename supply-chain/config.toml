@@ -39,6 +39,7 @@ audit-as-crates-io = true
 [policy.incrementalmerkletree-testing]
 
 [policy.orchard]
+audit-as-crates-io = false
 
 [policy.pczt]
 audit-as-crates-io = true

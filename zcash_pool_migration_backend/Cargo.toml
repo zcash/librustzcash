@@ -19,6 +19,7 @@ categories.workspace = true
 all-features = true
 
 [dependencies]
+getset.workspace = true
 libm.workspace = true
 rand_core.workspace = true
 zcash_primitives.workspace = true
@@ -32,6 +33,13 @@ pczt = { workspace = true, optional = true, features = [
     "signer",
     "zcp-builder",
 ] }
+
+# Enabled by the `wallet` feature: the wallet-backed adapter, sourcing the migration's cryptographic
+# ingredients from a `zcash_client_backend` wallet instead of a hand-written `MigrationCrypto`.
+zcash_client_backend = { workspace = true, optional = true, features = ["orchard"] }
+zcash_keys = { workspace = true, optional = true, features = ["orchard"] }
+shardtree = { workspace = true, optional = true }
+incrementalmerkletree = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
@@ -47,6 +55,16 @@ zcash_protocol = { workspace = true, features = ["local-consensus"] }
 ## Orchard pool; pulls in `orchard` and `pczt`. The caller supplies the RNG, so no `rand` dependency
 ## is added.
 orchard = ["dep:orchard", "dep:pczt"]
+## Builds the wallet-backed adapter (`wallet` module): a `WalletMigration` that implements the
+## engine's backend/crypto/store traits over a `zcash_client_backend` wallet, so any such wallet is a
+## migration wallet with no hand-wired crypto. Implies `orchard`.
+wallet = [
+    "orchard",
+    "dep:zcash_client_backend",
+    "dep:zcash_keys",
+    "dep:shardtree",
+    "dep:incrementalmerkletree",
+]
 
 [lints]
 workspace = true

@@ -29,14 +29,16 @@
 //! frequency-constrained randomized substitution (which only varies which canonical denomination is
 //! chosen, never the values themselves).
 //!
-//! The other tunables are pluggable too: the per-note fee comes from a [`FeePolicy`], and the
-//! maximum denomination, minimum denomination, and note cap are constructor parameters of the strategy.
+//! The other tunables are pluggable too: the per-note transfer-fee buffer and the per-transaction
+//! preparation fee are computed by the caller from the canonical transaction shapes (using the
+//! ZIP-317 fee rule) and passed in, and the maximum denomination, minimum denomination, and note cap
+//! are constructor parameters of the strategy.
 //!
 //! # Common structure
 //!
 //! Whatever the strategy, the result is a [`NoteSplitPlan`]: a multiset of *denomination notes*,
 //! each holding `denomination + fee buffer` so that when it is later spent in a migration transfer
-//! it pays its own fee (the [`FeePolicy`] sizes the buffer). Every note is bounded by a maximum
+//! it pays its own fee (the buffer is the ZIP-317 fee of the canonical transfer shape). Every note is bounded by a maximum
 //! denomination, so even a whale crosses many bounded, collision-prone amounts rather than one
 //! distinctive one, and a balance beyond a single run's capacity migrates over several runs.
 //! Whatever cannot form a whole self-funding note is left in the source pool as change, never folded
@@ -119,8 +121,7 @@ use alloc::vec::Vec;
 
 use rand_core::RngCore;
 
-use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
-use zcash_protocol::value::COIN;
+use zcash_protocol::value::{BalanceError, COIN, Zatoshis};
 
 pub mod strategies;
 mod utils;
@@ -145,60 +146,31 @@ pub const MIGRATION_MAX_DENOMINATION_ZEC: u64 = 10_000;
 /// user as an opt-in choice: migrate the remainder too (which can compromise privacy, so it is shown
 /// with a disclaimer) or lock it to keep that privacy. Consumed by the context module in a later
 /// slice. Also the default minimum denomination of [`CanonicalOneTwoFive`] (ZIP 318's `MAX_RESIDUAL_VALUE`).
-pub const RESIDUAL_MIGRATION_MIN_ZATOSHI: u64 = COIN / 100; // 0.01 ZEC
+pub const RESIDUAL_MIGRATION_MIN: Zatoshis = Zatoshis::const_from_u64(COIN / 100); // 0.01 ZEC
 
-/// Source-pool logical actions in a migration transfer (the spend and its change), each charged the
-/// marginal fee.
-const SOURCE_ACTIONS_PER_TRANSFER: u64 = 2;
+/// Source-pool (Orchard) logical actions in a canonical migration transfer: the spend and its
+/// change. With [`DESTINATION_ACTIONS_PER_TRANSFER`], this is the canonical transfer shape whose
+/// ZIP-317 fee is the per-note transfer-fee buffer.
+pub(crate) const SOURCE_ACTIONS_PER_TRANSFER: usize = 2;
 
-/// Destination-pool logical actions in a migration transfer (the output and a dummy), each charged the
-/// marginal fee.
-const DESTINATION_ACTIONS_PER_TRANSFER: u64 = 2;
-
-/// How each prepared note is sized to fund the migration transfer that later spends it. Abstracted
-/// so the fee model can be swapped independently of the composition strategy.
-pub trait FeePolicy {
-    /// The per-logical-action fee (in zatoshi).
-    fn marginal_fee_zatoshi(&self) -> u64;
-
-    /// The fee buffer (in zatoshi) added to each prepared note so it self-funds its migration
-    /// transfer. The default charges the source-pool plus destination-pool actions of a transfer at the
-    /// marginal fee (see `SOURCE_ACTIONS_PER_TRANSFER` and `DESTINATION_ACTIONS_PER_TRANSFER`).
-    fn transfer_fee_buffer_zatoshi(&self) -> u64 {
-        (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER)
-            * self.marginal_fee_zatoshi()
-    }
-
-    /// The fee (in zatoshi) reserved for one note-preparation transaction: a transaction padded to
-    /// [`PREP_TX_ACTIONS`](crate::preparation::PREP_TX_ACTIONS) logical actions (per ZIP 318), each
-    /// charged the marginal fee. This is the per-transaction reserve
-    /// [`plan_preparation`](crate::preparation::plan_preparation) subtracts from the inputs.
-    fn prep_transaction_fee_zatoshi(&self) -> u64 {
-        crate::preparation::PREP_TX_ACTIONS as u64 * self.marginal_fee_zatoshi()
-    }
-}
-
-/// The ZIP-317 fee model: the marginal fee is the ZIP-317 [`MARGINAL_FEE`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Zip317FeePolicy;
-
-impl FeePolicy for Zip317FeePolicy {
-    fn marginal_fee_zatoshi(&self) -> u64 {
-        MARGINAL_FEE.into_u64()
-    }
-}
+/// Destination-pool (Ironwood) logical actions in a canonical migration transfer: the single
+/// canonical output, UNPADDED. The Ironwood builder permits a one-action bundle (no padding dummy),
+/// which the migration uses to save proving bandwidth on hardware signers; every migration transfer
+/// shares this shape, so the action count reveals nothing a canonical transfer does not already
+/// reveal.
+pub(crate) const DESTINATION_ACTIONS_PER_TRANSFER: usize = 1;
 
 /// The outcome of planning a note split: the self-funding notes to create, the values that will
 /// cross the turnstile, and the residual kept in the source pool. Produced by a
 /// [`DenominationStrategy`].
 ///
 /// The plan stores the [`crossing_values`](Self::crossing_values) and one constant per-note fee
-/// buffer (see [`FeePolicy::transfer_fee_buffer_zatoshi`]); the prepared-note values are derived, not
+/// buffer (the ZIP-317 fee of the canonical transfer shape); the prepared-note values are derived, not
 /// stored, since every prepared note is exactly its crossing value plus that buffer. Each index `i`
 /// describes one prepared note at the two phases of the migration:
 /// - `crossing_values[i]` is the denomination that CROSSES the turnstile into the destination pool
 ///   when the note is spent (the privacy-relevant value an observer sees; their sum is
-///   [`total_migratable_zatoshi`](Self::total_migratable_zatoshi)).
+///   [`total_migratable`](Self::total_migratable)).
 /// - [`migration_outputs`](Self::migration_outputs)`[i] == crossing_values[i] + buffer` is the note
 ///   CREATED in the source pool during the prep phase, so it self-funds its own migration transfer
 ///   (the buffer pays that transfer's fee, and the crossing value is what remains to cross).
@@ -207,60 +179,79 @@ impl FeePolicy for Zip317FeePolicy {
 /// [`change`](Self::change), left untouched in the source pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoteSplitPlan {
-    crossing_values: Vec<u64>,
-    note_fee_buffer_zatoshi: u64,
-    change: Option<u64>,
-    prep_fee_zatoshi: u64,
-    total_input_zatoshi: u64,
-    total_migratable_zatoshi: u64,
+    crossing_values: Vec<Zatoshis>,
+    note_fee_buffer: Zatoshis,
+    change: Option<Zatoshis>,
+    prep_fees: Zatoshis,
+    total_input: Zatoshis,
+    total_migratable: Zatoshis,
 }
 
 impl NoteSplitPlan {
     /// Assemble a plan from a strategy's computed `crossing_values`, the per-note fee buffer they each
-    /// carry (the prepared-note values are `crossing + note_fee_buffer_zatoshi`), and the
-    /// `remaining_budget` left after them, which becomes source-pool change.
+    /// carry (the prepared-note values are `crossing + note_fee_buffer`), and the `remaining_budget`
+    /// left after them, which becomes source-pool change. The strategy's arithmetic partitions the
+    /// validated total input, so every part converts to a valid [`Zatoshis`] amount.
     pub(crate) fn from_notes(
         total_input_zatoshi: u64,
-        prep_fee_zatoshi: u64,
+        prep_fees_zatoshi: u64,
         crossing_values: Vec<u64>,
         note_fee_buffer_zatoshi: u64,
         remaining_budget: u64,
     ) -> Self {
-        let total_migratable_zatoshi = crossing_values.iter().sum();
+        let total_migratable_zatoshi: u64 = crossing_values.iter().sum();
         Self {
+            crossing_values: crossing_values.into_iter().map(zat).collect(),
+            note_fee_buffer: zat(note_fee_buffer_zatoshi),
+            change: (remaining_budget > 0).then(|| zat(remaining_budget)),
+            prep_fees: zat(prep_fees_zatoshi),
+            total_input: zat(total_input_zatoshi),
+            total_migratable: zat(total_migratable_zatoshi),
+        }
+    }
+
+    /// Reassemble a plan from its stored fields, exactly as they were persisted. This is the inverse
+    /// of the accessors below: a store (for example `zcash_pool_migration_sqlite`) reads the columns
+    /// back and reconstructs the plan verbatim, so `total_migratable` is taken as stored
+    /// rather than recomputed (the caller is responsible for having persisted a consistent set, which
+    /// for a plan produced by `Self::from_notes` means `total_migratable` equals the sum of
+    /// `crossing_values`).
+    /// Returns [`BalanceError::Overflow`] if any stored crossing value plus the fee buffer would
+    /// exceed the maximum money supply (such a pair cannot have come from a valid plan, and the
+    /// derived [`migration_outputs`](Self::migration_outputs) would not be representable).
+    pub fn from_stored_parts(
+        crossing_values: Vec<Zatoshis>,
+        note_fee_buffer: Zatoshis,
+        change: Option<Zatoshis>,
+        prep_fees: Zatoshis,
+        total_input: Zatoshis,
+        total_migratable: Zatoshis,
+    ) -> Result<Self, BalanceError> {
+        for &crossing in &crossing_values {
+            let _ = (crossing + note_fee_buffer).ok_or(BalanceError::Overflow)?;
+        }
+        Ok(Self {
             crossing_values,
-            note_fee_buffer_zatoshi,
-            change: (remaining_budget > 0).then_some(remaining_budget),
-            prep_fee_zatoshi,
-            total_input_zatoshi,
-            total_migratable_zatoshi,
-        }
-    }
-
-    /// An empty plan (nothing migrated), with the caller-supplied residual as `change`.
-    pub(crate) fn empty(
-        total_input_zatoshi: u64,
-        prep_fee_zatoshi: u64,
-        change: Option<u64>,
-    ) -> Self {
-        Self {
-            crossing_values: Vec::new(),
-            note_fee_buffer_zatoshi: 0,
+            note_fee_buffer,
             change,
-            prep_fee_zatoshi,
-            total_input_zatoshi,
-            total_migratable_zatoshi: 0,
-        }
+            prep_fees,
+            total_input,
+            total_migratable,
+        })
     }
 
-    /// The value (in zatoshi) of each prepared note the split will create: the crossing value at the
-    /// same index plus the [fee buffer](Self::note_fee_buffer_zatoshi), so the note can later pay its
-    /// own migration-transfer fee. Derived from [`crossing_values`](Self::crossing_values); the plan
-    /// stores only the crossings and the constant buffer.
-    pub fn migration_outputs(&self) -> Vec<u64> {
+    /// The value of each prepared note the split will create: the crossing value at the same index
+    /// plus the [fee buffer](Self::note_fee_buffer), so the note can later pay its own
+    /// migration-transfer fee. Derived from [`crossing_values`](Self::crossing_values); the plan
+    /// stores only the crossings and the constant buffer. The sums are representable by
+    /// construction (both constructors establish it).
+    pub fn migration_outputs(&self) -> Vec<Zatoshis> {
         self.crossing_values
             .iter()
-            .map(|&c| c + self.note_fee_buffer_zatoshi)
+            .map(|&c| {
+                (c + self.note_fee_buffer)
+                    .expect("both constructors validate crossing + buffer sums")
+            })
             .collect()
     }
 
@@ -268,90 +259,86 @@ impl NoteSplitPlan {
     /// when the note at the same index is spent. Their exact form (a `{1, 2, 5} * 10^k` ZEC value, a
     /// power of ten, ...) depends on the strategy. Each prepared note (see
     /// [`migration_outputs`](Self::migration_outputs)) is one of these plus the fee buffer.
-    pub fn crossing_values(&self) -> &[u64] {
+    pub fn crossing_values(&self) -> &[Zatoshis] {
         &self.crossing_values
     }
 
-    /// The constant fee buffer (in zatoshi) added to every crossing value to form the prepared note,
-    /// so each note self-funds its own migration transfer. The same for every note in the plan.
-    pub fn note_fee_buffer_zatoshi(&self) -> u64 {
-        self.note_fee_buffer_zatoshi
+    /// The constant fee buffer added to every crossing value to form the prepared note, so each
+    /// note self-funds its own migration transfer. The same for every note in the plan.
+    pub fn note_fee_buffer(&self) -> Zatoshis {
+        self.note_fee_buffer
     }
 
-    /// Any residual left in the source pool (in zatoshi) because it could not form a whole
-    /// self-funding note, or the note cap was reached, or `None` if the balance was consumed
-    /// exactly. Includes dust.
-    pub fn change(&self) -> Option<u64> {
+    /// The source-pool CHANGE: value that stays in the wallet's source-pool balance, untouched by
+    /// the migration, because it could not form a whole self-funding note (or the note cap was
+    /// reached). It is neither migrated nor spent on fees; `None` when the decomposition consumed
+    /// the balance exactly. Includes dust.
+    pub fn change(&self) -> Option<Zatoshis> {
         self.change
     }
 
-    /// The fee (in zatoshi) reserved for the note-split ("prep") transaction before decomposition.
-    pub fn prep_fee_zatoshi(&self) -> u64 {
-        self.prep_fee_zatoshi
+    /// The total preparation fees this plan reserves: the per-transaction fee times the number of
+    /// preparation transactions the decomposition determined it needs. Zero when nothing is
+    /// migrated (no preparation happens) or when every funding note is an exact match for a wallet
+    /// note (used directly, with no preparation transaction).
+    pub fn prep_fees(&self) -> Zatoshis {
+        self.prep_fees
     }
 
-    /// The total spendable source-pool balance (in zatoshi) this plan decomposes.
-    pub fn total_input_zatoshi(&self) -> u64 {
-        self.total_input_zatoshi
+    /// The total spendable source-pool balance this plan decomposes.
+    pub fn total_input(&self) -> Zatoshis {
+        self.total_input
     }
 
-    /// The total value (in zatoshi) that will migrate to the destination pool: the sum of the
-    /// crossing values.
-    pub fn total_migratable_zatoshi(&self) -> u64 {
-        self.total_migratable_zatoshi
+    /// The total value that will migrate to the destination pool: the sum of the crossing values.
+    pub fn total_migratable(&self) -> Zatoshis {
+        self.total_migratable
     }
 }
 
 /// A rule for decomposing a spendable source-pool balance into the notes a migration run will prepare.
 /// See the module docs for the implementation and its denomination set.
 pub trait DenominationStrategy {
-    /// Decompose `total_input_zatoshi`, after reserving `prep_fee_zatoshi` for the note-split
-    /// transaction, into self-funding notes. `prep_fee_zatoshi` is a single constant (the fee for the
-    /// note-split transaction padded to the maximum split action count), not a fee rule, because the
-    /// migration pads that transaction to the maximum anyway; sizing the reservation to that padded
-    /// maximum lets the decomposition proceed without re-deriving a fee per candidate split. `rng` is
-    /// used by randomized strategies and ignored by deterministic ones.
+    /// Decompose `total_input_zatoshi` into self-funding notes, accounting the preparation fees at
+    /// each step of the decomposition.
+    ///
+    /// `prep_tx_fee_zatoshi` is the ZIP-317 fee of one canonical (padded) preparation transaction,
+    /// computed by the caller from the canonical shape. `prep_tx_count` is the capability that
+    /// answers, for a candidate multiset of prepared-note values (each `crossing + buffer`), how
+    /// many preparation transactions minting them will take — `None` when the wallet's notes cannot
+    /// mint that multiset at all. The engine backs it with the preparation planner, so the
+    /// decomposition reserves the TRUE preparation cost (consolidation, fan-out layers, and all) as
+    /// it grows, instead of a fixed guess repaired after the fact. `rng` is used by randomized
+    /// strategies and ignored by deterministic ones.
     fn plan<R: RngCore>(
         &self,
-        total_input_zatoshi: u64,
-        prep_fee_zatoshi: u64,
+        total_input: Zatoshis,
+        prep_tx_fee: Zatoshis,
+        prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
         rng: &mut R,
     ) -> NoteSplitPlan;
 }
 
-/// Convenience wrapper: plan with the recommended [`CanonicalOneTwoFive`] strategy (ZIP 318 canonical
-/// quantization).
-pub fn plan_note_split<R: RngCore>(
-    total_input_zatoshi: u64,
-    prep_fee_zatoshi: u64,
-    rng: &mut R,
-) -> NoteSplitPlan {
-    CanonicalOneTwoFive::recommended().plan(total_input_zatoshi, prep_fee_zatoshi, rng)
+/// Convert a strategy-internal value to [`Zatoshis`]. Infallible by construction: the strategies'
+/// arithmetic only partitions the total input, which arrives as an already-valid [`Zatoshis`]
+/// amount, so every part is bounded by it.
+pub(crate) fn zat(value: u64) -> Zatoshis {
+    Zatoshis::from_u64(value).expect("split values are bounded by the validated total input")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    proptest! {
-        /// The default fee buffer is four marginal fees (2 source-pool + 2 destination-pool
-        /// actions), for any marginal-fee model.
-        #[test]
-        fn default_buffer_is_four_marginal_fees(m in 0u64..10_000_000) {
-            struct FlatFee(u64);
-            impl FeePolicy for FlatFee {
-                fn marginal_fee_zatoshi(&self) -> u64 {
-                    self.0
-                }
-            }
-            prop_assert_eq!(FlatFee(m).transfer_fee_buffer_zatoshi(), 4 * m);
-        }
-    }
-
-    #[test]
-    fn zip317_marginal_fee_is_5000() {
-        assert_eq!(Zip317FeePolicy.marginal_fee_zatoshi(), 5_000);
-        assert_eq!(Zip317FeePolicy.transfer_fee_buffer_zatoshi(), 20_000);
-    }
+/// Convenience wrapper: plan with the recommended [`CanonicalOneTwoFive`] strategy (ZIP 318 canonical
+/// quantization), sized by the caller-computed canonical fees (see [`DenominationStrategy::plan`]).
+pub fn plan_note_split<R: RngCore>(
+    total_input: Zatoshis,
+    transfer_fee_buffer: Zatoshis,
+    prep_tx_fee: Zatoshis,
+    prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
+    rng: &mut R,
+) -> NoteSplitPlan {
+    CanonicalOneTwoFive::recommended(transfer_fee_buffer).plan(
+        total_input,
+        prep_tx_fee,
+        prep_tx_count,
+        rng,
+    )
 }

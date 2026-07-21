@@ -53,17 +53,16 @@
 
 use alloc::vec::Vec;
 
-use core::convert::Infallible;
-
 use rand_core::{CryptoRng, RngCore};
 
 use orchard::builder::BundleType;
 use orchard::keys::{FullViewingKey, Scope};
-use zcash_primitives::transaction::builder::{BuildConfig, Builder};
-use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
+use zcash_primitives::transaction::builder::DeferredPcztBuilder;
+use zcash_primitives::transaction::fees::zip317::{
+    FeeError as Zip317FeeError, FeeRule as Zip317FeeRule,
+};
 use zcash_protocol::consensus::{BlockHeight, Parameters};
 use zcash_protocol::memo::MemoBytes;
-use zcash_protocol::value::Zatoshis;
 
 use super::{BuildError, finalize_pczt, output_action_index};
 use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
@@ -71,37 +70,58 @@ use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
 /// The internal-scope diversifier index for the wallet's own preparation outputs.
 const INTERNAL_ADDRESS_INDEX: u32 = 0;
 
+/// One built preparation output: its real post-shuffle action index, the planner output it
+/// realizes, and the RECOVERED note plaintext (see [`build_prep_tx`]).
+pub type PlacedPrepOutput = (u32, PrepOutput, orchard::note::Note);
+
 /// Build one note-preparation transaction as an unproven PCZT: spend every note in `spends` and create
 /// one internal change note per output in `outputs` (a funding, feeder, or residual note), in an
 /// Orchard bundle padded to exactly [`PREP_TX_ACTIONS`] actions with fabricated dummies.
 ///
-/// The caller (the wallet backend) resolves the transaction's inputs to the `(Note, MerklePath)`
-/// witnesses in `spends` against `anchor`, and supplies the `orchard_fvk` whose internal scope every
-/// output is derived from. The spent notes must total the outputs plus the ZIP-317 fee of a padded
+/// NO anchor and NO witnesses are supplied ([ZIP 374] deferral, as for the transfers): `spends`
+/// are bare notes, the emitted PCZT carries absent anchor and witness fields, and the consumer
+/// installs the real anchor and each spent note's witness through the PCZT `Updater` role at
+/// proving time, once the spent notes are mined. This is what makes a preparation transaction —
+/// and everything downstream of it — SIGNABLE before its inputs are mined: a spent note's
+/// plaintext fully determines the signed data, and its tree position matters only to the proof.
+/// The `orchard_fvk` must own every spent note, and derives the internal scope every output is
+/// addressed to. The spent notes must total the outputs plus the ZIP-317 fee of a padded
 /// [`PREP_TX_ACTIONS`]-action transaction (the preparation planner reserves exactly this), or the
 /// build does not balance.
 ///
-/// Returns the finalized PCZT and, for each requested output in order, its `(action_index, output)`
-/// so the caller can locate each note after the transaction is mined (and spend the feeder notes in a
-/// later layer). The fabricated dummy actions are not returned.
+/// The transaction is signed at build time but broadcast at its drawn scheduled height, so the
+/// caller passes the `expiry_height` matching that schedule (the engine uses the canonical rolling
+/// window of [`expiry_height`](crate::scheduling::expiry_height) at the scheduled height). It is
+/// embedded as the transaction's `nExpiryHeight`, which the pre-signature commits to.
+///
+/// Returns the finalized PCZT and, for each requested output in order, its
+/// `(action_index, output, note)`: the real post-shuffle action index (so the caller can locate
+/// the note on-chain; the fabricated dummies are not returned) and the RECOVERED note plaintext.
+/// The recovered note is what lets the engine build and sign the transactions that spend this
+/// output — a later preparation layer or a transfer — before this transaction is ever broadcast:
+/// the note's rho is the paired spend's nullifier and its rseed is drawn here, so mining changes
+/// nothing about it.
 ///
 /// # Errors
 ///
 /// Returns [`BuildError`] if there are no spends or outputs, if the logical action count
-/// (`spends + outputs`) exceeds [`PREP_TX_ACTIONS`], or if the builder/PCZT pipeline fails (including
-/// when the spent notes do not balance the outputs plus the fee).
+/// (`spends + outputs`) exceeds [`PREP_TX_ACTIONS`], or if the builder/PCZT pipeline fails
+/// (including when the spent notes do not balance the outputs plus the fee, and when
+/// `target_height` precedes NU6.3, whose V6 format is what permits deferring the anchor).
 ///
 /// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `OsRng`; tests can
 /// pass a seeded one), keeping this builder pure.
+///
+/// [ZIP 374]: https://zips.z.cash/zip-0374
 pub fn build_prep_tx<P, R>(
     params: &P,
     target_height: u32,
+    expiry_height: u32,
     orchard_fvk: &FullViewingKey,
-    anchor: orchard::Anchor,
-    spends: Vec<(orchard::note::Note, orchard::tree::MerklePath)>,
+    spends: Vec<orchard::note::Note>,
     outputs: &[PrepOutput],
     rng: R,
-) -> Result<(pczt::Pczt, Vec<(u32, PrepOutput)>), BuildError>
+) -> Result<(pczt::Pczt, Vec<PlacedPrepOutput>), BuildError>
 where
     P: Parameters + Clone,
     R: RngCore + CryptoRng,
@@ -123,49 +143,90 @@ where
     }
 
     // An Orchard-only send-to-self whose bundle is padded to exactly PREP_TX_ACTIONS actions with
-    // orchard's fabricated dummies (`pad_to_minimum`).
-    let config = BuildConfig::Standard {
-        sapling_anchor: None,
-        orchard_anchor: Some(anchor),
-        ironwood_anchor: None,
-        orchard_bundle_type: BundleType::Transactional {
+    // orchard's fabricated dummies (`pad_to_minimum`); the Ironwood pool is unused (its bundle
+    // type is irrelevant: nothing is added to it, so no Ironwood bundle is emitted).
+    let mut builder = DeferredPcztBuilder::new::<Zip317FeeError>(
+        params.clone(),
+        BlockHeight::from_u32(target_height),
+        BundleType::Transactional {
             bundle_required: false,
             pad_to_minimum: Some(PREP_TX_ACTIONS as u8),
         },
-        ironwood_bundle_type: BundleType::DEFAULT,
-    };
-    let mut builder = Builder::new(params.clone(), BlockHeight::from_u32(target_height), config);
-    for (note, merkle_path) in spends {
+        BundleType::DEFAULT,
+    )
+    .map_err(|e| BuildError::Build(format!("preparation: builder: {e}")))?
+    .with_expiry_height(BlockHeight::from_u32(expiry_height));
+
+    for note in spends {
         builder
-            .add_orchard_spend::<Infallible>(orchard_fvk.clone(), note, merkle_path)
-            .map_err(|e| BuildError::Build(format!("preparation: add spend: {e:?}")))?;
+            .add_orchard_spend::<Zip317FeeError>(orchard_fvk.clone(), note)
+            .map_err(|e| BuildError::Build(format!("preparation: add spend: {e}")))?;
     }
 
     let change_address = orchard_fvk.address_at(INTERNAL_ADDRESS_INDEX, Scope::Internal);
     let internal_ovk = orchard_fvk.to_ovk(Scope::Internal);
     for output in outputs {
         builder
-            .add_orchard_change_output::<Infallible>(
+            .add_orchard_change_output::<Zip317FeeError>(
                 orchard_fvk.clone(),
                 Some(internal_ovk.clone()),
                 change_address,
-                Zatoshis::const_from_u64(output.value()),
+                output.value(),
                 MemoBytes::empty(),
             )
-            .map_err(|e| BuildError::Build(format!("preparation: add output: {e:?}")))?;
+            .map_err(|e| BuildError::Build(format!("preparation: add output: {e}")))?;
     }
 
     let build_result = builder
         .build_for_pczt(rng, &Zip317FeeRule::standard())
-        .map_err(|e| BuildError::Build(format!("preparation: build: {e:?}")))?;
+        .map_err(|e| BuildError::Build(format!("preparation: build: {e}")))?;
 
-    // Un-shuffle: map each requested output to its real action index (the fabricated dummies occupy
-    // the remaining actions) so the caller can store the right (action_index, output) references.
-    let placed: Vec<(u32, PrepOutput)> = outputs
+    // Un-shuffle and RECOVER: map each requested output to its real action index (the fabricated
+    // dummies occupy the remaining actions) and reconstruct its note plaintext from the built
+    // bundle — the recipient and rseed from the output, and rho from the paired spend's
+    // nullifier. The recovered note is fixed at build time (mining only assigns its tree
+    // position), which is what lets the engine sign this output's future spender now.
+    let bundle = build_result
+        .pczt_parts
+        .orchard
+        .as_ref()
+        .ok_or_else(|| BuildError::Build("preparation: no orchard bundle was built".into()))?;
+    let note_version = bundle.bundle_version().note_version();
+    let placed: Vec<PlacedPrepOutput> = outputs
         .iter()
         .enumerate()
-        .map(|(i, &out)| output_action_index(&build_result.orchard_meta, i).map(|ai| (ai, out)))
-        .collect::<Result<_, _>>()?;
+        .map(|(i, &out)| {
+            let ai = output_action_index(&build_result.orchard_meta, i)?;
+            let action = bundle.actions().get(ai as usize).ok_or_else(|| {
+                BuildError::Build(format!("preparation: no action at index {ai}"))
+            })?;
+            let recipient = action.output().recipient().ok_or_else(|| {
+                BuildError::Build("preparation: built output lacks its recipient".into())
+            })?;
+            let rseed = action.output().rseed().ok_or_else(|| {
+                BuildError::Build("preparation: built output lacks its rseed".into())
+            })?;
+            // rho of an action's output note is the action's nullifier; the two share one
+            // canonical base-field encoding, so the public byte round-trip cannot fail.
+            let rho = orchard::note::Rho::from_bytes(&action.spend().nullifier().to_bytes())
+                .into_option()
+                .ok_or_else(|| {
+                    BuildError::Build("preparation: nullifier is not a valid rho".into())
+                })?;
+            let note = orchard::note::Note::from_parts(
+                recipient,
+                orchard::value::NoteValue::from_raw(u64::from(out.value())),
+                rho,
+                rseed,
+                note_version,
+            )
+            .into_option()
+            .ok_or_else(|| {
+                BuildError::Build("preparation: recovered note parts are invalid".into())
+            })?;
+            Ok((ai, out, note))
+        })
+        .collect::<Result<_, BuildError>>()?;
 
     let finalized = finalize_pczt(build_result.pczt_parts)?;
     Ok((finalized, placed))
@@ -182,12 +243,22 @@ mod tests {
     use crate::build::test_util::{
         TARGET_HEIGHT, account, regtest_network, shared_anchor_witnesses, single_note_witness,
     };
-    use crate::note_splitting::{FeePolicy, Zip317FeePolicy};
+    use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+
+    use crate::note_splitting::zat;
 
     /// The ZIP-317 fee of a padded [`PREP_TX_ACTIONS`]-action preparation transaction (each action
     /// costs one marginal fee), which the planner reserves per transaction.
     fn prep_fee() -> u64 {
-        PREP_TX_ACTIONS as u64 * Zip317FeePolicy.marginal_fee_zatoshi()
+        PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64()
+    }
+
+    /// The canonical rolling-window expiry for a transaction scheduled at the build height, as the
+    /// engine embeds it.
+    fn test_expiry() -> u32 {
+        u32::from(crate::scheduling::expiry_height(BlockHeight::from_u32(
+            TARGET_HEIGHT,
+        )))
     }
 
     /// The number of Orchard actions in the built transaction.
@@ -220,17 +291,18 @@ mod tests {
             spend_values[0] += total_in % n_spend as u64;
 
             let fvk = account(account_seed);
-            let (spends, anchor) = shared_anchor_witnesses(&fvk, &spend_values, note_seed);
+            let (spends, _anchor) = shared_anchor_witnesses(&fvk, &spend_values, note_seed);
+            let spends: Vec<_> = spends.into_iter().map(|(note, _)| note).collect();
             let outputs: Vec<PrepOutput> =
-                out_zats.iter().map(|&v| PrepOutput::Funding(v)).collect();
+                out_zats.iter().map(|&v| PrepOutput::Funding(zat(v))).collect();
 
             let params = regtest_network(true);
             let rng = ChaCha8Rng::seed_from_u64(note_seed);
             let (pczt, placed) = build_prep_tx(
                 &params,
                 TARGET_HEIGHT,
+                test_expiry(),
                 &fvk,
-                anchor,
                 spends,
                 &outputs,
                 rng,
@@ -252,19 +324,19 @@ mod tests {
         ) {
             let fvk = account(account_seed);
             let outputs: Vec<PrepOutput> =
-                output_zats.iter().map(|&v| PrepOutput::Funding(v)).collect();
+                output_zats.iter().map(|&v| PrepOutput::Funding(zat(v))).collect();
             // One spend that funds every output plus the padded fee.
             let spend_value = output_zats.iter().sum::<u64>() + prep_fee();
-            let (note, path, anchor) = single_note_witness(&fvk, spend_value, note_seed);
+            let (note, _path, _anchor) = single_note_witness(&fvk, spend_value, note_seed);
 
             let params = regtest_network(true);
             let rng = ChaCha8Rng::seed_from_u64(note_seed);
             let (pczt, placed) = build_prep_tx(
                 &params,
                 100,
+                test_expiry(),
                 &fvk,
-                anchor,
-                vec![(note, path)],
+                vec![note],
                 &outputs,
                 rng,
             )
@@ -272,10 +344,11 @@ mod tests {
 
             prop_assert_eq!(action_count(&pczt), PREP_TX_ACTIONS);
             prop_assert_eq!(placed.len(), outputs.len());
-            let placed_values: Vec<u64> = placed.iter().map(|(_, o)| o.value()).collect();
+            let placed_values: Vec<u64> =
+                placed.iter().map(|(_, o, _)| u64::from(o.value())).collect();
             prop_assert_eq!(placed_values, output_zats);
             // Every output maps to a distinct action index.
-            let mut indices: Vec<u32> = placed.iter().map(|&(i, _)| i).collect();
+            let mut indices: Vec<u32> = placed.iter().map(|&(i, _, _)| i).collect();
             indices.sort_unstable();
             indices.dedup();
             prop_assert_eq!(indices.len(), outputs.len());
@@ -286,16 +359,16 @@ mod tests {
     #[test]
     fn pads_a_minimal_prep_tx_to_the_action_budget() {
         let fvk = account(1);
-        let outputs = [PrepOutput::Intermediate(10 * COIN)];
+        let outputs = [PrepOutput::Intermediate(zat(10 * COIN))];
         let spend_value = 10 * COIN + prep_fee();
-        let (note, path, anchor) = single_note_witness(&fvk, spend_value, 7);
+        let (note, _path, _anchor) = single_note_witness(&fvk, spend_value, 7);
         let params = regtest_network(true);
         let (pczt, placed) = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
-            anchor,
-            vec![(note, path)],
+            vec![note],
             &outputs,
             ChaCha8Rng::seed_from_u64(7),
         )
@@ -310,27 +383,26 @@ mod tests {
     fn rejects_bad_inputs() {
         let fvk = account(2);
         let params = regtest_network(true);
-        let anchor = orchard::Anchor::empty_tree();
-        let one_output = [PrepOutput::Funding(COIN)];
+        let one_output = [PrepOutput::Funding(zat(COIN))];
 
         let no_spends = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
-            anchor,
             Vec::new(),
             &one_output,
             ChaCha8Rng::seed_from_u64(0),
         );
         assert!(matches!(no_spends, Err(BuildError::Balance(_))));
 
-        let (note, path, real_anchor) = single_note_witness(&fvk, COIN + prep_fee(), 3);
+        let (note, _path, _anchor) = single_note_witness(&fvk, COIN + prep_fee(), 3);
         let no_outputs = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
-            real_anchor,
-            vec![(note, path)],
+            vec![note],
             &[],
             ChaCha8Rng::seed_from_u64(0),
         );
@@ -338,15 +410,15 @@ mod tests {
 
         // One spend plus more outputs than the remaining action budget.
         let too_many: Vec<PrepOutput> = (0..PREP_TX_ACTIONS)
-            .map(|_| PrepOutput::Funding(COIN))
+            .map(|_| PrepOutput::Funding(zat(COIN)))
             .collect();
-        let (note2, path2, anchor2) = single_note_witness(&fvk, 1_000 * COIN, 4);
+        let (note2, _path2, _anchor2) = single_note_witness(&fvk, 1_000 * COIN, 4);
         let over_budget = build_prep_tx(
             &params,
             100,
+            test_expiry(),
             &fvk,
-            anchor2,
-            vec![(note2, path2)],
+            vec![note2],
             &too_many,
             ChaCha8Rng::seed_from_u64(0),
         );

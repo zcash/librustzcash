@@ -17,13 +17,13 @@ use alloc::string::String;
 use core::fmt;
 
 use pczt::roles::{creator::Creator, io_finalizer::IoFinalizer};
-use zcash_primitives::transaction::builder::{BuildConfig, PcztParts};
+use zcash_primitives::transaction::builder::PcztParts;
 use zcash_protocol::consensus::Parameters;
 
 mod prep;
 mod sign;
 mod transfer;
-pub use prep::build_prep_tx;
+pub use prep::{PlacedPrepOutput, build_prep_tx};
 pub use sign::sign_pczt;
 pub use transfer::build_transfer_pczt;
 
@@ -50,22 +50,6 @@ impl fmt::Display for BuildError {
 }
 
 impl core::error::Error for BuildError {}
-
-/// The [`BuildConfig`] shared by the migration transactions: an Orchard-anchored bundle, with the
-/// destination-pool (Ironwood) bundle anchored only when that phase produces a crossing output
-/// (`None` for the same-pool note split).
-pub(crate) fn build_config(
-    orchard_anchor: orchard::Anchor,
-    ironwood_anchor: Option<orchard::Anchor>,
-) -> BuildConfig {
-    BuildConfig::Standard {
-        sapling_anchor: None,
-        orchard_anchor: Some(orchard_anchor),
-        ironwood_anchor,
-        orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-        ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
-    }
-}
 
 /// Finish an unproven PCZT from the transaction builder's parts: run the [`Creator`] and
 /// [`IoFinalizer`] roles.

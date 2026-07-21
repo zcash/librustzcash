@@ -74,6 +74,19 @@ pub const MEAN_DELAY: u32 = 144;
 /// an unbounded time. 576 blocks is `4 * MEAN_DELAY`, about twelve hours. See [`draw_delay`].
 pub const MAX_DELAY: u32 = 576;
 
+/// Mean of the exponential inter-arrival delay between successive PREPARATION transactions, in
+/// blocks (~30 minutes at the ~75-second target spacing). Preparation transactions are fully
+/// shielded self-sends: they need TEMPORAL decoupling from one another (a burst of identically
+/// shaped transactions from one wallet is a linkable cluster), but no anchor bucketing — only the
+/// pool-crossing transfers anchor to boundaries — so their spacing can be much tighter than the
+/// transfers' [`MEAN_DELAY`]. Provisional; not yet specified by ZIP 318.
+pub const PREP_MEAN_DELAY: u32 = 24;
+
+/// Upper bound (inclusive) on a single preparation inter-arrival delay, in blocks: `4 *
+/// PREP_MEAN_DELAY` (~2 hours), the same tail-truncation ratio as the transfers' [`MAX_DELAY`].
+/// A draw exceeding this is discarded and redrawn. Provisional; not yet specified by ZIP 318.
+pub const PREP_MAX_DELAY: u32 = 4 * PREP_MEAN_DELAY;
+
 /// Block-height modulus defining the BOUNDARY blocks: a height `h` is a boundary iff
 /// `h % BOUNDARY_MODULUS == 0`. Boundaries are the only tree states a transfer may anchor to, so
 /// many transfers share a small, common set of anchors (cohorts) rather than each pinning a unique
@@ -170,21 +183,33 @@ fn round_nonneg_to_u32(x: f64) -> u32 {
     (x + 0.5) as u64 as u32
 }
 
-/// Draw one inter-arrival delay in blocks from the truncated exponential distribution: mean
-/// [`MEAN_DELAY`], discard-and-redraw above [`MAX_DELAY`] (ZIP 318 "Transfer scheduling" MUST).
-///
-/// Samples by inverse-CDF, `delay = round(-MEAN_DELAY * ln(u))` for `u` uniform in `(0, 1]` (so the
-/// exponential rate is `1 / MEAN_DELAY`), redrawing whenever the rounded delay exceeds
-/// [`MAX_DELAY`]. The return is always in `[0, MAX_DELAY]`.
-pub fn draw_delay<R: RngCore>(rng: &mut R) -> u32 {
+/// Draw one inter-arrival delay in blocks from a truncated exponential distribution with the given
+/// `mean`, discarding and redrawing above `cap`. Samples by inverse-CDF, `delay = round(-mean *
+/// ln(u))` for `u` uniform in `(0, 1]` (so the exponential rate is `1 / mean`). The return is
+/// always in `[0, cap]`.
+fn draw_delay_with<R: RngCore>(mean: u32, cap: u32, rng: &mut R) -> u32 {
     loop {
         let u = draw_unit_left_open(rng);
-        // ln(u) <= 0 for u in (0, 1], so -MEAN_DELAY * ln(u) >= 0.
-        let delay = round_nonneg_to_u32(-(MEAN_DELAY as f64) * libm::log(u));
-        if delay <= MAX_DELAY {
+        // ln(u) <= 0 for u in (0, 1], so -mean * ln(u) >= 0.
+        let delay = round_nonneg_to_u32(-(mean as f64) * libm::log(u));
+        if delay <= cap {
             return delay;
         }
     }
+}
+
+/// Draw one TRANSFER inter-arrival delay in blocks from the truncated exponential distribution:
+/// mean [`MEAN_DELAY`], discard-and-redraw above [`MAX_DELAY`] (ZIP 318 "Transfer scheduling"
+/// MUST). The return is always in `[0, MAX_DELAY]`.
+pub fn draw_delay<R: RngCore>(rng: &mut R) -> u32 {
+    draw_delay_with(MEAN_DELAY, MAX_DELAY, rng)
+}
+
+/// Draw one PREPARATION inter-arrival delay in blocks: mean [`PREP_MEAN_DELAY`],
+/// discard-and-redraw above [`PREP_MAX_DELAY`]. See [`PREP_MEAN_DELAY`] for why preparations are
+/// spaced tighter than transfers. The return is always in `[0, PREP_MAX_DELAY]`.
+pub fn draw_prep_delay<R: RngCore>(rng: &mut R) -> u32 {
+    draw_delay_with(PREP_MEAN_DELAY, PREP_MAX_DELAY, rng)
 }
 
 /// Produce a uniformly random permutation of `0..n` using an in-place Fisher-Yates shuffle driven by
@@ -236,6 +261,26 @@ fn gen_index<R: RngCore>(rng: &mut R, bound: usize) -> usize {
     }
 }
 
+/// The cumulative-heights core shared by [`schedule_broadcast_heights`] and
+/// [`schedule_prep_broadcast_heights`]: starting at `start`, advance a running height by an
+/// independently drawn delay for each of the `n` entries. The returned vector has length `n`, is
+/// non-decreasing, and every entry is `>= start`; heights saturate at `u32::MAX` rather than
+/// overflowing (`BlockHeight`'s delta addition saturates).
+fn cumulative_broadcast_heights<R: RngCore>(
+    start: BlockHeight,
+    n: usize,
+    draw: impl Fn(&mut R) -> u32,
+    rng: &mut R,
+) -> Vec<BlockHeight> {
+    let mut heights = Vec::with_capacity(n);
+    let mut height = start;
+    for _ in 0..n {
+        height = height + draw(rng);
+        heights.push(height);
+    }
+    heights
+}
+
 /// Compute the per-part scheduled broadcast heights: starting at `commit_height`, advance a running
 /// height by an independently drawn [`draw_delay`] for each of the `n_parts` transfers (ZIP 318
 /// CUMULATIVE MUST). The returned vector has length `n_parts`, is non-decreasing, and every entry is
@@ -245,14 +290,21 @@ pub fn schedule_broadcast_heights<R: RngCore>(
     n_parts: usize,
     rng: &mut R,
 ) -> Vec<BlockHeight> {
-    let mut heights = Vec::with_capacity(n_parts);
-    let mut height = commit_height;
-    for _ in 0..n_parts {
-        // `BlockHeight`'s delta addition saturates at `u32::MAX`.
-        height = height + draw_delay(rng);
-        heights.push(height);
-    }
-    heights
+    cumulative_broadcast_heights(commit_height, n_parts, draw_delay, rng)
+}
+
+/// Compute per-transaction scheduled broadcast heights for one PREPARATION layer: starting at
+/// `start`, advance a running height by an independently drawn [`draw_prep_delay`] for each of the
+/// `n_txs` transactions. The returned vector has length `n_txs`, is non-decreasing, and every entry
+/// is `>= start`; heights saturate at `u32::MAX`. The caller (the engine) bases each later layer's
+/// `start` past the previous layer's last scheduled height plus a mining margin, so layers stay
+/// serialized while the transactions within and across layers remain temporally decoupled.
+pub fn schedule_prep_broadcast_heights<R: RngCore>(
+    start: BlockHeight,
+    n_txs: usize,
+    rng: &mut R,
+) -> Vec<BlockHeight> {
+    cumulative_broadcast_heights(start, n_txs, draw_prep_delay, rng)
 }
 
 /// The canonical rolling EXPIRY height for a transfer at `current_height` (ZIP 318 EXPIRY MUST):
@@ -387,6 +439,22 @@ fn boundary_at_or_after(height: u32) -> u32 {
     } else {
         height.saturating_add(BOUNDARY_MODULUS - r)
     }
+}
+
+/// The first chain height at which a transfer's candidate anchor set (see
+/// [`draw_anchor_boundary`]) is non-empty: one full boundary interval past the LOWEST candidate,
+/// which is the first boundary strictly above `nu63_activation` and at or after
+/// `funding_creation_height`. A transfer whose observed chain tip is at or after this height always
+/// has at least one boundary to anchor to, so a schedule that places every broadcast at or after it
+/// never needs an anchor fallback; the scheduler MUST NOT place a transfer before it.
+pub fn earliest_broadcast_height(
+    nu63_activation: BlockHeight,
+    funding_creation_height: BlockHeight,
+) -> BlockHeight {
+    let lowest = most_recent_boundary_u32(u32::from(nu63_activation))
+        .saturating_add(BOUNDARY_MODULUS)
+        .max(boundary_at_or_after(u32::from(funding_creation_height)));
+    BlockHeight::from_u32(lowest.saturating_add(BOUNDARY_MODULUS))
 }
 
 /// Like [`draw_anchor_boundary`], but additionally enforces the provisional per-wallet multiplicity
@@ -798,6 +866,48 @@ mod tests {
         check_schedule_golden(0, 6, 12_345, &[11, 17, 242, 300, 313, 341]);
     }
 
+    proptest! {
+        /// Preparation delays respect their own (tighter) bounds, and the per-layer schedule is
+        /// non-decreasing from its start.
+        #[test]
+        fn prep_schedule_bounds_and_monotone(start in 0u32..5_000_000,
+                                            n in 0usize..40,
+                                            seed in any::<u64>()) {
+            let mut r = rng(seed);
+            let hs = schedule_prep_broadcast_heights(bh(start), n, &mut r);
+            prop_assert_eq!(hs.len(), n);
+            let mut prev = bh(start);
+            for h in hs {
+                prop_assert!(h >= prev);
+                prop_assert!(u32::from(h) - u32::from(prev) <= PREP_MAX_DELAY);
+                prev = h;
+            }
+        }
+    }
+
+    /// Golden vectors for [`draw_prep_delay`]: the exact deterministic draws for fixed seeds,
+    /// pinning the tighter preparation spacing as a regression guard, with every delay within
+    /// `[0, PREP_MAX_DELAY]`. Derivable from the transfer goldens in [`draw_delay_golden`] by the
+    /// scale law: the same unit draws scaled by the mean ratio `MEAN_DELAY / PREP_MEAN_DELAY = 6`
+    /// (for example seed 1's 74, 12, 131, ... become 12, 2, 22, ...).
+    #[test]
+    fn draw_prep_delay_golden() {
+        fn check(seed: u64, expected: &[u32]) {
+            let mut r = rng(seed);
+            let got: Vec<u32> = (0..expected.len())
+                .map(|_| draw_prep_delay(&mut r))
+                .collect();
+            assert_eq!(got, expected, "draw_prep_delay(seed={seed})");
+            for &d in &got {
+                assert!(d <= PREP_MAX_DELAY, "delay {d} exceeds PREP_MAX_DELAY");
+            }
+        }
+        let exp_seed1 = [12, 2, 22, 6, 8, 30, 15, 4];
+        let exp_seed42 = [27, 72, 13, 24, 8, 4, 9, 39];
+        check(1, &exp_seed1);
+        check(42, &exp_seed42);
+    }
+
     // --- expiry_height ------------------------------------------------------------------------
 
     proptest! {
@@ -931,6 +1041,28 @@ mod tests {
             draw_anchor_boundary(bh(0), bh(0), bh(2 * BOUNDARY_MODULUS - 1), &mut r),
             None
         );
+    }
+
+    proptest! {
+        /// [`earliest_broadcast_height`] is the exact viability threshold: a tip at that height
+        /// always yields an anchor, and a tip one block earlier never does.
+        #[test]
+        fn earliest_broadcast_height_is_the_viability_threshold(act in 0u32..1_000_000,
+                                                               funding_offset in 0u32..2_000,
+                                                               seed in any::<u64>()) {
+            let funding = act + funding_offset;
+            let earliest = earliest_broadcast_height(bh(act), bh(funding));
+            let mut r = rng(seed);
+            prop_assert!(
+                draw_anchor_boundary(bh(act), bh(funding), earliest, &mut r).is_some(),
+                "a tip at the earliest broadcast height must have a candidate boundary"
+            );
+            let mut r = rng(seed);
+            prop_assert!(
+                draw_anchor_boundary(bh(act), bh(funding), earliest - 1, &mut r).is_none(),
+                "a tip below the earliest broadcast height must not"
+            );
+        }
     }
 
     #[test]

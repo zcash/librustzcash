@@ -16,6 +16,16 @@ workspace.
   the action's spend authorization signature and its share of the bundle's proof,
   which are encoded separately, so dividing a size budget by it yields an upper
   bound on the number of actions that fit within that budget.
+- `zcash_primitives::transaction::builder::DeferredPcztBuilder`, a builder for
+  V6 (NU6.3 onward) PCZTs whose Orchard-family anchors — and real-spend
+  witnesses — are deferred to proving time (ZIP 374): spends are added as bare
+  `(fvk, note)` pairs (via `orchard`'s new deferred-anchor builder support),
+  the emitted PCZT carries absent anchor and witness fields, and the real
+  values are installed after signing through the PCZT `Updater` role.
+  Restricted to the Orchard and Ironwood pools (Sapling nullifiers commit to
+  note positions, so Sapling spends cannot be signed before their witnesses
+  are final).
+- `zcash_primitives::transaction::builder::Error::AnchorDeferralUnsupported`
 
 ### Changed
 - `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries

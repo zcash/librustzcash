@@ -229,3 +229,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(zcash_unstable, values("nu7"))',
   'cfg(live_network_tests)',
 ] }
+
+[patch.crates-io]
+# ZIP 374 deferred-anchor builder support (orchard PR branch
+# `feat/deferred-anchor-builder`); to be dropped once it lands in an orchard
+# release.
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "3bd2b736d1273226595773265313fc3f3428af16" }
