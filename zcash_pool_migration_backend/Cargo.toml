@@ -48,7 +48,7 @@ rand_chacha.workspace = true
 # The `local-consensus` feature exposes `LocalNetwork`, used to build the migration transactions
 # against regtest params with the relevant network upgrades (including NU6.3) active.
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
-# Shared, test-only in-memory backends (`MockBackend`, `CommitMock`, `LayeredMock`) and witness
+# Shared, test-only in-memory backends (`MockBackend`, `CommitMock`) and witness
 # helpers the engine tests use. The dev-dependency cycle back onto this crate is fine: dev-deps do
 # not enter the normal build graph (the same relationship zcash_client_memory has with
 # zcash_client_backend).
