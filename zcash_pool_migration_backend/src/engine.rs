@@ -487,6 +487,21 @@ impl MigrationState {
     pub fn funding_notes(&self) -> Vec<Zatoshis> {
         self.note_split.migration_outputs()
     }
+
+    /// Replace transfer `id`'s stored PCZT with its proven bytes and move it to
+    /// [`Proved`](MigrationTxState::Proved). Called after [`prove_transfer`] installs the drawn
+    /// anchor and witnesses and proves the transaction, so the durable artifact becomes the proven,
+    /// ready-to-broadcast PCZT.
+    #[cfg(feature = "orchard")]
+    pub fn set_transaction_proved(&mut self, id: MigrationTxId, proven_pczt: Vec<u8>) {
+        for tx in &mut self.transactions {
+            if tx.id() == id {
+                tx.pczt = proven_pczt;
+                tx.state = MigrationTxState::Proved;
+                break;
+            }
+        }
+    }
 }
 
 /// A planned migration, before anything is built, signed, or broadcast: the denomination split, the
@@ -768,6 +783,42 @@ pub trait MigrationCrypto {
     fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
 }
 
+/// The proving seam for a migration transfer: install a transfer's deferred anchors and witnesses
+/// (ZIP 374) against the boundary its schedule drew, then prove it.
+///
+/// This is deliberately SEPARATE from [`MigrationCrypto`]. Signing needs only the account's spend
+/// authority and is a cheap, read-only (`&self`) operation; proving needs the wallet's Orchard
+/// commitment tree at a historical checkpoint plus the Orchard and Ironwood proving keys, a heavier
+/// capability with a different lifetime. Keeping proving in its own trait lets a wallet expose
+/// signing without dragging commitment-tree access and proving parameters into the same type, and
+/// lets a consumer supply a prover independently of the signer.
+#[cfg(feature = "orchard")]
+pub trait MigrationProver {
+    /// The prover's error type.
+    type Error;
+
+    /// Prove a pre-signed transfer against the boundary its schedule drew.
+    ///
+    /// This is where a transfer's DEFERRED anchors and witnesses (ZIP 374) are finally resolved and
+    /// installed: the implementation reads the Orchard source-tree root at the `anchor_boundary`
+    /// checkpoint (the source anchor) and the funding note's Merkle witness against it, installs both
+    /// through the PCZT `Updater` role (`set_anchor` / `set_spend_witness`), installs the Ironwood
+    /// destination anchor for the output bundle, then proves both bundles and returns the proven
+    /// PCZT, ready to broadcast. The `anchor_boundary` is the boundary height drawn at SCHEDULING
+    /// time and persisted on the transaction ([`MigrationTransaction::anchor_boundary`]); passing it
+    /// here is what makes the drawn boundary, not the tip, the tree state the transfer proves
+    /// against.
+    ///
+    /// Resolving the funding note's witness requires the boundary checkpoint to still exist in the
+    /// wallet's commitment tree at proving time; a wallet backend keeps it alive through migration
+    /// anchor-checkpoint retention (see issue #2700).
+    fn prove_transfer(
+        &self,
+        pczt: pczt::Pczt,
+        anchor_boundary: BlockHeight,
+    ) -> Result<pczt::Pczt, Self::Error>;
+}
+
 /// Why committing a migration's preparation failed.
 #[cfg(feature = "orchard")]
 #[derive(Debug)]
@@ -832,6 +883,112 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
 
 #[cfg(feature = "orchard")]
 impl<E: core::error::Error> core::error::Error for CommitError<E> {}
+
+/// Why proving a migration transfer failed.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+pub enum ProveError<E> {
+    /// No transaction with the given id belongs to the migration.
+    UnknownTransaction(MigrationTxId),
+    /// The transaction is a preparation transaction, not a transfer; only transfers are proved
+    /// against a drawn anchor boundary (a preparation transaction carries no boundary).
+    NotATransfer(MigrationTxId),
+    /// The transaction is not in the [`Signed`](MigrationTxState::Signed) state, so it is not ready
+    /// to prove (it is unsigned, already proved, or already broadcast).
+    NotReady(MigrationTxId),
+    /// A transfer carries no anchor boundary. Every transfer draws one at scheduling time, so this
+    /// indicates a corrupt stored state rather than a normal condition.
+    NoAnchorBoundary(MigrationTxId),
+    /// The stored PCZT could not be parsed.
+    Parse(pczt::ParseError),
+    /// The proven PCZT could not be serialized.
+    Serialize(pczt::EncodingError),
+    /// The prover failed to resolve, install, or prove the transfer.
+    Prover(E),
+}
+
+#[cfg(feature = "orchard")]
+impl<E: fmt::Display> fmt::Display for ProveError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProveError::UnknownTransaction(id) => {
+                write!(f, "no migration transaction with id {}", u32::from(*id))
+            }
+            ProveError::NotATransfer(id) => write!(
+                f,
+                "transaction {} is a preparation transaction, not a transfer",
+                u32::from(*id)
+            ),
+            ProveError::NotReady(id) => {
+                write!(
+                    f,
+                    "transaction {} is not signed and ready to prove",
+                    u32::from(*id)
+                )
+            }
+            ProveError::NoAnchorBoundary(id) => write!(
+                f,
+                "transfer {} has no drawn anchor boundary; the stored state is inconsistent",
+                u32::from(*id)
+            ),
+            ProveError::Parse(e) => write!(f, "parsing the stored PCZT failed: {e:?}"),
+            ProveError::Serialize(e) => write!(f, "serializing the proven PCZT failed: {e:?}"),
+            ProveError::Prover(e) => write!(f, "proving the transfer failed: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<E: core::error::Error> core::error::Error for ProveError<E> {}
+
+/// Prove a pre-signed migration transfer against the boundary its schedule drew, moving it
+/// `Signed -> Proved`.
+///
+/// This is the step that finally consults a transfer's PERSISTED
+/// [`anchor_boundary`](MigrationTransaction::anchor_boundary), drawn at scheduling time: it reads
+/// that boundary and hands the stored PCZT and the boundary to
+/// [`MigrationProver::prove_transfer`], which installs the Orchard source anchor and the funding
+/// note's witness against that boundary and the Ironwood destination anchor (through the PCZT
+/// `Updater` role), then proves both bundles. The proven PCZT replaces the stored one and the
+/// transaction becomes [`Proved`](MigrationTxState::Proved), ready to broadcast.
+///
+/// The CALLER decides WHEN to prove each transfer (once its funding note is mined and witnessable
+/// and its scheduled height reached); this function performs the proof for the one transfer `id`. It
+/// is idempotent only in the sense that a transaction not in [`Signed`](MigrationTxState::Signed)
+/// is rejected with [`ProveError::NotReady`] rather than re-proved.
+#[cfg(feature = "orchard")]
+pub fn prove_transfer<P>(
+    prover: &P,
+    state: &mut MigrationState,
+    id: MigrationTxId,
+) -> Result<(), ProveError<P::Error>>
+where
+    P: MigrationProver,
+{
+    let tx = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == id)
+        .ok_or(ProveError::UnknownTransaction(id))?;
+    if !matches!(tx.kind(), MigrationTxKind::Transfer { .. }) {
+        return Err(ProveError::NotATransfer(id));
+    }
+    if !matches!(tx.state(), MigrationTxState::Signed) {
+        return Err(ProveError::NotReady(id));
+    }
+    let anchor_boundary = tx
+        .anchor_boundary()
+        .ok_or(ProveError::NoAnchorBoundary(id))?;
+
+    let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
+    let proven = prover
+        .prove_transfer(pczt, anchor_boundary)
+        .map_err(ProveError::Prover)?;
+    let bytes = proven.serialize().map_err(ProveError::Serialize)?;
+
+    state.set_transaction_proved(id, bytes);
+    Ok(())
+}
 
 /// How a freshly built migration PCZT is finished by the commit functions: signed in-process with the
 /// wallet's spend authority, or left unsigned for an external (hardware or offline) signer.
@@ -1814,6 +1971,25 @@ mod commit_tests {
         }
     }
 
+    impl MigrationProver for CommitMock {
+        type Error = core::convert::Infallible;
+
+        fn prove_transfer(
+            &self,
+            pczt: pczt::Pczt,
+            _anchor_boundary: BlockHeight,
+        ) -> Result<pczt::Pczt, Self::Error> {
+            // A stand-in for proving. A real prover resolves the funding note's witness against
+            // `anchor_boundary`, installs the Orchard source and Ironwood destination anchors
+            // through the PCZT `Updater` role, and runs the Orchard + Ironwood provers. Resolving
+            // the funding note requires commitment-tree access this mock does not model, so it
+            // returns the PCZT unchanged; the engine's `prove_transfer` orchestration (reading and
+            // passing the persisted `anchor_boundary`, and the Signed -> Proved transition) is what
+            // the tests exercise.
+            Ok(pczt)
+        }
+    }
+
     /// A planned single-note migration and the mock wallet that holds the note.
     fn single_note_setup(seed: u64, balance: u64) -> (CommitMock, MigrationPlan) {
         let backend = CommitMock::new(seed, &[balance]);
@@ -2393,6 +2569,74 @@ mod commit_tests {
                 &mut rng,
             ),
             Err(CommitError::StalePlan)
+        ));
+    }
+
+    /// Proving a due transfer consults the anchor boundary the schedule DREW and persisted on the
+    /// transaction (not the tip), moving it `Signed -> Proved`. This exercises the engine
+    /// orchestration of [`prove_transfer`]: it reads the persisted `anchor_boundary`, hands it to
+    /// the crypto backend (here the in-memory mock stands in for the real prover), stores the
+    /// returned PCZT, and advances the state. It also checks the guards: a preparation transaction
+    /// is not a transfer, and an already-proved transfer is not re-proved.
+    #[test]
+    fn prove_transfer_consults_the_persisted_anchor_boundary() {
+        let seed = 7u64;
+        let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration");
+
+        // Every transfer is Signed and carries a drawn anchor boundary after commit.
+        let transfer_id = state
+            .transactions
+            .iter()
+            .find(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
+            .map(|t| {
+                assert!(
+                    t.anchor_boundary.is_some(),
+                    "a transfer carries the boundary its schedule drew"
+                );
+                assert!(matches!(t.state, MigrationTxState::Signed));
+                t.id
+            })
+            .expect("a committed migration has transfers");
+
+        // Proving reads the persisted boundary, proves, and advances Signed -> Proved.
+        prove_transfer(&backend, &mut state, transfer_id).expect("proves the due transfer");
+        let proved = state
+            .transactions
+            .iter()
+            .find(|t| t.id == transfer_id)
+            .expect("the transfer is still present");
+        assert!(
+            matches!(proved.state, MigrationTxState::Proved),
+            "the transfer is proved"
+        );
+
+        // An already-proved transfer is not re-proved.
+        assert!(matches!(
+            prove_transfer(&backend, &mut state, transfer_id),
+            Err(ProveError::NotReady(_))
+        ));
+
+        // A preparation transaction is not a transfer: it anchors to its dependencies, not a drawn
+        // boundary, so it is rejected rather than proved.
+        let prep_id = state
+            .transactions
+            .iter()
+            .find(|t| matches!(t.kind, MigrationTxKind::Preparation { .. }))
+            .expect("a committed migration has preparation transactions")
+            .id;
+        assert!(matches!(
+            prove_transfer(&backend, &mut state, prep_id),
+            Err(ProveError::NotATransfer(_))
         ));
     }
 }
