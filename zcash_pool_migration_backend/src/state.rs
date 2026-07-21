@@ -304,7 +304,7 @@ impl MigrationState {
     /// render progress and decide, deterministically and from persisted state alone, the next
     /// transaction to sign or broadcast.
     ///
-    /// A `Planned` (or `Expired`) placeholder whose dependencies are all mined is ready to build and
+    /// A `Planned` placeholder whose dependencies are all mined is ready to build and
     /// sign; a `Signed` (or `Proved`) transaction whose dependencies are mined and whose scheduled
     /// height has arrived is ready to prove and broadcast. Otherwise a waiting transaction reports what
     /// it is blocked on: its dependencies (a prior anchor bucket still to mine) or the broadcast
@@ -314,11 +314,11 @@ impl MigrationState {
             .iter()
             .map(|t| {
                 let deps_ok = self.deps_mined(&t.depends_on);
-                // `Planned`/`Expired` need building; `Signed`/`Proved` need broadcasting. In both cases
+                // `Planned` needs building; `Signed`/`Proved` need broadcasting. In both cases
                 // a transaction is actionable only once its dependencies (the prior anchor bucket) are
                 // mined, and a broadcastable one only once it is also due.
                 let (ready, action, blocked_on) = match t.state {
-                    MigrationTxState::Planned | MigrationTxState::Expired => {
+                    MigrationTxState::Planned => {
                         if deps_ok {
                             (true, Some(NextAction::BuildAndSign), None)
                         } else {

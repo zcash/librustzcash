@@ -113,7 +113,7 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
     fn put_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error>;
 
     /// Advance one stored transaction's lifecycle state (for example after the application broadcasts
-    /// it, or the chain mines it, or it expires).
+    /// it, or the chain mines it).
     fn update_transaction(
         &mut self,
         id: MigrationTxId,
@@ -172,8 +172,6 @@ pub enum MigrationTxState {
     Broadcast { txid: TxId },
     /// Mined at the given height.
     Mined { height: BlockHeight },
-    /// Expired before it could be mined, and to be rebuilt.
-    Expired,
 }
 
 /// One transaction of a committed migration: its pre-signed PCZT plus the metadata the consuming
@@ -202,7 +200,8 @@ pub struct MigrationTransaction {
     /// dependencies to mine and a boundary to pass rather than a fixed height).
     #[getset(get_copy = "pub")]
     pub(crate) scheduled_height: BlockHeight,
-    /// The height after which the transaction is invalid and must be rebuilt.
+    /// The height after which the transaction is invalid and must be rebuilt
+    /// (rebuild-on-expiry is grown by a later slice, alongside reconciliation-on-launch).
     #[getset(get_copy = "pub")]
     pub(crate) expiry_height: BlockHeight,
     /// The boundary height whose tree state the transaction proves against. For a transfer this is
