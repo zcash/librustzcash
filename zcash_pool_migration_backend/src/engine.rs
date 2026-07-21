@@ -43,7 +43,8 @@
 
 use alloc::vec::Vec;
 use core::fmt;
-use std::io::{self, Read, Write};
+
+use corez::io;
 
 use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
@@ -131,12 +132,12 @@ impl MigrationTxId {
     }
 
     /// Writes this id as an unsigned 32-bit little-endian integer.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.0.to_le_bytes())
     }
 
     /// Reads an id written by [`write`](Self::write).
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+    pub fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut bytes = [0u8; 4];
         reader.read_exact(&mut bytes)?;
         Ok(MigrationTxId::new(u32::from_le_bytes(bytes)))
