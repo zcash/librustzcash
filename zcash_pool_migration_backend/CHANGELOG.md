@@ -34,8 +34,9 @@ and this library adheres to Rust's notion of
   one self-funding note the note split minted and outputs its crossing value into the Ironwood pool as
   an unproven `pczt::Pczt`, sent to the account's own internal Ironwood change address (derived inside
   the builder, per ZIP 318). It has no change output; the note's fee buffer funds the transfer's fee
-  exactly (the Orchard spend and the Ironwood output each pad to the two-action minimum, so the
-  transfer is four logical actions, matching the buffer of `2 source + 2 destination` actions). It
+  exactly (the Orchard spend pads to the two-action minimum, hiding whether an Orchard change output
+  exists, while the Ironwood output is a single unpadded action, so the transfer is three logical
+  actions, matching the buffer of `2 source + 1 destination` actions, per ZIP 318). It
   runs post-NU6.3 (when the Ironwood pool is live), is pure (no database or wallet-backend access),
   and takes the RNG as a parameter. Adds optional `orchard` and `pczt` dependencies, enabled only by
   the feature.
@@ -118,3 +119,14 @@ and this library adheres to Rust's notion of
   remains a consumer responsibility, as for in-process signing). External signing therefore
   replaces only the sign step; the rest of the lifecycle is identical. The status view surfaces an
   awaiting transaction as blocked on `Blocker::Signature`.
+- `commit_preparation` (and `build_preparation_unsigned`) report a malformed migration plan - one
+  whose parallel structures disagree, such as a preparation layer with no matching scheduled height -
+  as a typed `CommitError::InconsistentPlan` rather than panicking on an out-of-bounds index, so an
+  unvalidated plan built through `from_parts` fails at the boundary instead of aborting.
+- `CommitError` no longer funnels every build-time failure through an opaque `Build(String)`: it
+  now carries the structured `build::BuildError` in `Build`, the PCZT `EncodingError` in a new
+  `Serialize` variant, and models the NU6.3-not-active condition as `Nu63NotActive` (mirroring
+  `MigrationError::Nu63NotActive`). The "the schedule has advanced past every candidate anchor
+  boundary" case now shares the `StalePlan` variant with the note-value mismatch, and the remaining
+  internal-invariant failures use `InconsistentPlan`, so a caller can match on the condition rather
+  than parsing a message.
