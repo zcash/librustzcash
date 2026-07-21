@@ -787,11 +787,12 @@ pub trait MigrationCrypto {
 /// (ZIP 374) against the boundary its schedule drew, then prove it.
 ///
 /// This is deliberately SEPARATE from [`MigrationCrypto`]. Signing needs only the account's spend
-/// authority and is a cheap, read-only (`&self`) operation; proving needs the wallet's Orchard
-/// commitment tree at a historical checkpoint plus the Orchard and Ironwood proving keys, a heavier
-/// capability with a different lifetime. Keeping proving in its own trait lets a wallet expose
-/// signing without dragging commitment-tree access and proving parameters into the same type, and
-/// lets a consumer supply a prover independently of the signer.
+/// authority and is a cheap, read-only (`&self`) operation; proving needs MUTABLE access to the
+/// wallet's Orchard commitment tree at a historical checkpoint (resolving a witness caches into the
+/// tree) plus the Orchard and Ironwood proving keys, a heavier capability with a different lifetime.
+/// Keeping proving in its own trait lets a wallet expose signing without dragging commitment-tree
+/// access and proving parameters into the same type, and lets a consumer supply a prover
+/// independently of the signer.
 #[cfg(feature = "orchard")]
 pub trait MigrationProver {
     /// The prover's error type.
@@ -813,7 +814,7 @@ pub trait MigrationProver {
     /// wallet's commitment tree at proving time; a wallet backend keeps it alive through migration
     /// anchor-checkpoint retention (see issue #2700).
     fn prove_transfer(
-        &self,
+        &mut self,
         pczt: pczt::Pczt,
         anchor_boundary: BlockHeight,
     ) -> Result<pczt::Pczt, Self::Error>;
@@ -958,7 +959,7 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// is rejected with [`ProveError::NotReady`] rather than re-proved.
 #[cfg(feature = "orchard")]
 pub fn prove_transfer<P>(
-    prover: &P,
+    prover: &mut P,
     state: &mut MigrationState,
     id: MigrationTxId,
 ) -> Result<(), ProveError<P::Error>>
@@ -1975,7 +1976,7 @@ mod commit_tests {
         type Error = core::convert::Infallible;
 
         fn prove_transfer(
-            &self,
+            &mut self,
             pczt: pczt::Pczt,
             _anchor_boundary: BlockHeight,
         ) -> Result<pczt::Pczt, Self::Error> {
@@ -2609,7 +2610,7 @@ mod commit_tests {
             .expect("a committed migration has transfers");
 
         // Proving reads the persisted boundary, proves, and advances Signed -> Proved.
-        prove_transfer(&backend, &mut state, transfer_id).expect("proves the due transfer");
+        prove_transfer(&mut backend, &mut state, transfer_id).expect("proves the due transfer");
         let proved = state
             .transactions
             .iter()
@@ -2622,7 +2623,7 @@ mod commit_tests {
 
         // An already-proved transfer is not re-proved.
         assert!(matches!(
-            prove_transfer(&backend, &mut state, transfer_id),
+            prove_transfer(&mut backend, &mut state, transfer_id),
             Err(ProveError::NotReady(_))
         ));
 
@@ -2635,7 +2636,7 @@ mod commit_tests {
             .expect("a committed migration has preparation transactions")
             .id;
         assert!(matches!(
-            prove_transfer(&backend, &mut state, prep_id),
+            prove_transfer(&mut backend, &mut state, prep_id),
             Err(ProveError::NotATransfer(_))
         ));
     }
