@@ -119,7 +119,9 @@
 
 use alloc::vec::Vec;
 
+use corez::io::{self, Read, Write};
 use rand_core::RngCore;
+use zcash_encoding::{Optional, Vector};
 
 use zcash_protocol::value::{BalanceError, COIN, Zatoshis};
 
@@ -294,6 +296,43 @@ impl NoteSplitPlan {
     pub fn total_migratable(&self) -> Zatoshis {
         self.total_migratable
     }
+
+    /// Serialize this plan into its canonical binary form, covering every stored field: the
+    /// [`crossing_values`](Self::crossing_values) as a [`Vector`] of little-endian `u64` amounts,
+    /// then the [`note_fee_buffer`](Self::note_fee_buffer), the optional [`change`](Self::change),
+    /// the [`prep_fees`](Self::prep_fees), the [`total_input`](Self::total_input), and the
+    /// [`total_migratable`](Self::total_migratable), each as a little-endian `u64`. The inverse of
+    /// [`read`](Self::read).
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        Vector::write(&mut writer, &self.crossing_values, |w, v| v.write(w))?;
+        self.note_fee_buffer.write(&mut writer)?;
+        Optional::write(&mut writer, self.change, |w, v| v.write(w))?;
+        self.prep_fees.write(&mut writer)?;
+        self.total_input.write(&mut writer)?;
+        self.total_migratable.write(&mut writer)
+    }
+
+    /// Deserialize a plan written by [`write`](Self::write), reconstructing it through
+    /// [`from_stored_parts`](Self::from_stored_parts) (which validates that each crossing value plus
+    /// the fee buffer is representable). Maps a [`BalanceError`] from that validation to
+    /// [`io::ErrorKind::InvalidData`].
+    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let crossing_values = Vector::read(&mut reader, |r| Zatoshis::read(r))?;
+        let note_fee_buffer = Zatoshis::read(&mut reader)?;
+        let change = Optional::read(&mut reader, Zatoshis::read)?;
+        let prep_fees = Zatoshis::read(&mut reader)?;
+        let total_input = Zatoshis::read(&mut reader)?;
+        let total_migratable = Zatoshis::read(&mut reader)?;
+        Self::from_stored_parts(
+            crossing_values,
+            note_fee_buffer,
+            change,
+            prep_fees,
+            total_input,
+            total_migratable,
+        )
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid note split"))
+    }
 }
 
 /// A rule for decomposing a spendable source-pool balance into the notes a migration run will prepare.
@@ -341,4 +380,59 @@ pub fn plan_note_split<R: RngCore>(
         prep_tx_count,
         rng,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    use zcash_encoding::testing::check_roundtrip;
+
+    /// A [`Zatoshis`] amount well within the money supply, for round-trip fixtures.
+    fn arb_zatoshis() -> impl Strategy<Value = Zatoshis> {
+        (0u64..100_000_000).prop_map(zat)
+    }
+
+    /// An arbitrary [`NoteSplitPlan`], covering all stored fields (an empty or populated crossing
+    /// set, present or absent change). Bounded so every `crossing + note_fee_buffer` is
+    /// representable, which is what [`NoteSplitPlan::from_stored_parts`] requires.
+    fn arb_note_split_plan() -> impl Strategy<Value = NoteSplitPlan> {
+        (
+            prop::collection::vec(arb_zatoshis(), 0..8),
+            (0u64..1_000_000).prop_map(zat),
+            prop::option::of(arb_zatoshis()),
+            (0u64..1_000_000).prop_map(zat),
+            (0u64..1_000_000_000).prop_map(zat),
+            (0u64..1_000_000_000).prop_map(zat),
+        )
+            .prop_map(
+                |(
+                    crossing_values,
+                    note_fee_buffer,
+                    change,
+                    prep_fees,
+                    total_input,
+                    total_migratable,
+                )| {
+                    NoteSplitPlan::from_stored_parts(
+                        crossing_values,
+                        note_fee_buffer,
+                        change,
+                        prep_fees,
+                        total_input,
+                        total_migratable,
+                    )
+                    .expect("crossing + buffer within the money supply")
+                },
+            )
+    }
+
+    proptest! {
+        /// `write` and `read` are exact inverses for every [`NoteSplitPlan`].
+        #[test]
+        fn note_split_plan_round_trips(plan in arb_note_split_plan()) {
+            check_roundtrip(&plan, |v, buf| v.write(buf), |b| NoteSplitPlan::read(b));
+        }
+    }
 }
