@@ -29,6 +29,12 @@ workspace.
 - `zcash_client_backend::wallet::OutputRef`
 - `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
 - `zcash_client_backend::data_api::wallet::unlock_proposal_inputs`
+- `zcash_client_backend::proposal::ProposalError::InputsLocked`, returned by the
+  proposal-creation functions when an input selected by the proposal is already
+  locked by a concurrent proposal or PCZT. This is a transient "account busy"
+  condition that callers should respond to by retrying, distinct from
+  `ProposalError::ChainDoubleSpend`, which continues to indicate a proposal
+  that attempts to spend the same output twice.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
