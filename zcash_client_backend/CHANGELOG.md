@@ -37,6 +37,10 @@ workspace.
 - `zcash_client_backend::data_api::wallet::LockRequest`, the
   `(owner, for_blocks)` pair accepted by the proposal-creation functions to
   lock the proposal's inputs.
+- `impl From<TxId> for zcash_client_backend::wallet::LockOwner`, for flows
+  that hold a durable transaction identity while their locks are alive (such
+  as a persisted PCZT with final effecting data), enabling the owner token to
+  be re-derived after a restart.
 - `zcash_client_backend::data_api::wallet::unlock_proposal_inputs`
 - `zcash_client_backend::proposal::ProposalError::InputsLocked`, returned by the
   proposal-creation functions when an input selected by the proposal is already
