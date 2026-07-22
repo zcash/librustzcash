@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 use ::orchard::Anchor;
 use ::orchard::circuit::{OrchardCircuitVersion, ProvingKey};
 use ::orchard::keys::{FullViewingKey, SpendAuthorizingKey};
-use ::orchard::note::Note as OrchardNote;
+use ::orchard::note::{Note as OrchardNote, Nullifier};
 use ::orchard::tree::MerklePath;
 use incrementalmerkletree::Position;
 use shardtree::error::ShardTreeError;
@@ -282,7 +282,10 @@ pub enum WalletProveError<TE, NE> {
     /// No spendable Orchard note in the wallet matches a spend's revealed nullifier, so its tree
     /// position is unknown: the note the transaction spends is not among the account's unspent
     /// notes (it was never scanned, or has already been spent).
-    UnknownSpentNote([u8; 32]),
+    UnknownSpentNote(Nullifier),
+    /// A deferred-witness Orchard spend's nullifier bytes are not a valid Orchard nullifier, so the
+    /// PCZT is not a well-formed migration transaction awaiting proof.
+    MalformedNullifier([u8; 32]),
     /// Enumerating the account's spendable Orchard notes (to locate each spend by nullifier) failed.
     Notes(NE),
     /// The Orchard commitment tree has no root at the anchor checkpoint (the checkpoint was never
@@ -320,6 +323,12 @@ impl<TE: fmt::Debug, NE: fmt::Debug> fmt::Display for WalletProveError<TE, NE> {
                 write!(
                     f,
                     "no spendable Orchard note matches spend nullifier {nf:?}"
+                )
+            }
+            WalletProveError::MalformedNullifier(bytes) => {
+                write!(
+                    f,
+                    "a spend's nullifier bytes are not a valid nullifier: {bytes:?}"
                 )
             }
             WalletProveError::Notes(e) => {
@@ -411,14 +420,19 @@ where
     ) -> Result<::pczt::Pczt, ProverError<W>> {
         // Every Orchard action whose witness is still deferred is a real spend to witness; the padded
         // dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
-        let real_spends: Vec<(usize, [u8; 32])> = pczt
+        let real_spends: Vec<(usize, Nullifier)> = pczt
             .orchard()
             .actions()
             .iter()
             .enumerate()
             .filter(|(_, action)| action.spend().witness().is_none())
-            .map(|(index, action)| (index, *action.spend().nullifier()))
-            .collect();
+            .map(|(index, action)| {
+                let bytes = action.spend().nullifier();
+                Option::<Nullifier>::from(Nullifier::from_bytes(bytes))
+                    .map(|nf| (index, nf))
+                    .ok_or(WalletProveError::MalformedNullifier(*bytes))
+            })
+            .collect::<Result<_, _>>()?;
         if real_spends.is_empty() {
             return Err(WalletProveError::NoRealSpend);
         }
@@ -430,12 +444,12 @@ where
             .wallet
             .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[])
             .map_err(WalletProveError::Notes)?;
-        let positions: BTreeMap<[u8; 32], Position> = received
+        let positions: BTreeMap<Nullifier, Position> = received
             .orchard()
             .iter()
             .map(|rn| {
                 (
-                    rn.note().nullifier(&self.fvk).to_bytes(),
+                    rn.note().nullifier(&self.fvk),
                     rn.note_commitment_tree_position(),
                 )
             })
