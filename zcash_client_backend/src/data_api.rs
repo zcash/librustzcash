@@ -3657,9 +3657,17 @@ pub trait WalletWrite: WalletRead {
     /// conflict is resolved here, at the storage layer, where the second caller's `lock_outputs`
     /// fails with [`LockError::LockFailure`] naming the already-locked output. Callers that lock
     /// via a proposal-creation function surface this as
-    /// [`ProposalError::ChainDoubleSpend`](crate::proposal::ProposalError::ChainDoubleSpend). The
+    /// [`ProposalError::InputsLocked`](crate::proposal::ProposalError::InputsLocked). The
     /// losing caller has not partially locked anything and should treat the failure as "the
     /// account is busy" and retry.
+    ///
+    /// The provided output references must be distinct: because a live lock cannot be
+    /// re-acquired, a duplicated reference fails on its second occurrence as if a concurrent
+    /// caller held the lock. (Inputs of a valid [`Proposal`] are always distinct; proposal
+    /// construction rejects duplicates as
+    /// [`ProposalError::ChainDoubleSpend`](crate::proposal::ProposalError::ChainDoubleSpend).)
+    ///
+    /// [`Proposal`]: crate::proposal::Proposal
     fn lock_outputs(
         &mut self,
         outputs: impl Iterator<Item = OutputRef>,
@@ -3681,6 +3689,13 @@ pub trait WalletWrite: WalletRead {
     /// operating system before the corresponding transactions could be built). By clearing all
     /// locks for the account, the caller declares that it has no pending proposals holding those
     /// outputs.
+    ///
+    /// # Warning
+    ///
+    /// This releases every lock for the account, including locks held by proposals that are
+    /// still legitimately in flight; those proposals' inputs immediately become selectable by
+    /// new proposals, re-creating the conflict that locking exists to prevent. Only call this
+    /// when no in-flight proposal or PCZT for the account remains.
     ///
     /// Returns the number of outputs that were unlocked.
     fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error>;
