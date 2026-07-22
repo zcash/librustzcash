@@ -31,15 +31,14 @@ use rand_core::SeedableRng;
 
 use pczt::roles::tx_extractor::TransactionExtractor;
 
-use shardtree::error::ShardTreeError;
 use zcash_client_backend::data_api::testing::{
     AddressType, TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
 };
-use zcash_client_backend::data_api::{Account, WalletCommitmentTrees, WalletRead};
-// The wallet, block cache, and DB factory come from `zcash_client_sqlite`'s own test harness,
-// exposed under its `test-dependencies` feature — no hand-rolled equivalents.
-use zcash_client_sqlite::testing::BlockCache;
-use zcash_client_sqlite::testing::db::{TestDb, TestDbFactory};
+use zcash_client_backend::data_api::{Account, WalletRead};
+// The wallet, block cache, DB factory, and Orchard-checkpoint helper come from
+// `zcash_client_sqlite`'s own test harness, exposed under its `test-dependencies` feature.
+use zcash_client_sqlite::testing::db::TestDbFactory;
+use zcash_client_sqlite::testing::{BlockCache, highest_rooted_orchard_checkpoint};
 
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::consensus::BlockHeight;
@@ -61,26 +60,6 @@ const FUNDING_ZEC: u64 = 78;
 /// Empty blocks scanned after a note is received so its commitment-tree shard completes and an
 /// anchor at that height is available.
 const SHARD_COMPLETION_BLOCKS: usize = 5;
-
-/// The highest checkpoint at or below `from` whose Orchard tree root is available. The tip
-/// checkpoint is not yet rooted right after scanning, so a spend anchors to the newest settled
-/// checkpoint below it (every note mined at or before that height is still witnessable there).
-fn highest_rooted_checkpoint(db: &mut TestDb, from: BlockHeight) -> BlockHeight {
-    let mut height = u32::from(from);
-    loop {
-        let bh = BlockHeight::from_u32(height);
-        let rooted = db
-            .with_orchard_tree_mut::<_, _, ShardTreeError<<TestDb as WalletCommitmentTrees>::Error>>(
-                |tree| Ok(tree.root_at_checkpoint_id(&bh)?.is_some()),
-            )
-            .expect("queries the Orchard tree");
-        if rooted {
-            return bh;
-        }
-        assert!(height > ACTIVATION, "no rooted Orchard checkpoint exists");
-        height -= 1;
-    }
-}
 
 /// A network with every upgrade through NU6.3 active at [`ACTIVATION`].
 fn nu63_network() -> LocalNetwork {
@@ -196,7 +175,8 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
             .chain_height()
             .expect("reads the chain height")
             .expect("the wallet has a chain tip");
-        let anchor = highest_rooted_checkpoint(st.wallet_mut(), tip);
+        let anchor = highest_rooted_orchard_checkpoint(st.wallet_mut(), tip)
+            .expect("a rooted Orchard checkpoint exists");
         {
             let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
             engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
