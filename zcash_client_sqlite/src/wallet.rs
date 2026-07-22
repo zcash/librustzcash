@@ -2757,6 +2757,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 if value <= zip317::MARGINAL_FEE {
                     (zero, zero, zero, zero, value)
                 } else if is_spendable && is_locked {
+                    // Only notes that would otherwise be spendable are counted as locked; a
+                    // locked note that is still pending confirmations is deliberately reported
+                    // in the pending buckets below, since locking only matters once the note
+                    // would enter selection. This mirrors the transparent balance computation.
                     (zero, value, zero, zero, zero)
                 } else if is_spendable {
                     (value, zero, zero, zero, zero)
@@ -5622,112 +5626,37 @@ pub(crate) fn get_locked_outputs(
 
     let mut result = Vec::new();
 
-    let mut stmt = conn.prepare_cached(
-        "SELECT t.txid, sn.output_index
-         FROM sapling_received_notes sn
-         JOIN transactions t ON t.id_tx = sn.transaction_id
-         JOIN accounts a ON a.id = sn.account_id
-         WHERE sn.lock_expiry_height > :chain_tip
-         AND a.uuid = :account_uuid",
-    )?;
-    let rows = stmt.query_map(
-        named_params![
-            ":account_uuid": account.0,
-            ":chain_tip": chain_tip
-        ],
-        |row| {
-            let txid: [u8; 32] = row.get(0)?;
-            let output_index: u32 = row.get(1)?;
-            Ok(OutputRef::new(
-                TxId::from_bytes(txid),
-                PoolType::SAPLING,
-                output_index,
-            ))
-        },
-    )?;
-    for row in rows {
-        result.push(row?);
-    }
-
-    let mut stmt = conn.prepare_cached(
-        "SELECT t.txid, orn.action_index
-         FROM orchard_received_notes orn
-         JOIN transactions t ON t.id_tx = orn.transaction_id
-         JOIN accounts a ON a.id = orn.account_id
-         WHERE orn.lock_expiry_height > :chain_tip
-         AND a.uuid = :account_uuid",
-    )?;
-    let rows = stmt.query_map(
-        named_params![
-            ":account_uuid": account.0,
-            ":chain_tip": chain_tip
-        ],
-        |row| {
-            let txid: [u8; 32] = row.get(0)?;
-            let output_index: u32 = row.get(1)?;
-            Ok(OutputRef::new(
-                TxId::from_bytes(txid),
-                PoolType::ORCHARD,
-                output_index,
-            ))
-        },
-    )?;
-    for row in rows {
-        result.push(row?);
-    }
-
-    let mut stmt = conn.prepare_cached(
-        "SELECT t.txid, irn.action_index
-         FROM ironwood_received_notes irn
-         JOIN transactions t ON t.id_tx = irn.transaction_id
-         JOIN accounts a ON a.id = irn.account_id
-         WHERE irn.lock_expiry_height > :chain_tip
-         AND a.uuid = :account_uuid",
-    )?;
-    let rows = stmt.query_map(
-        named_params![
-            ":account_uuid": account.0,
-            ":chain_tip": chain_tip
-        ],
-        |row| {
-            let txid: [u8; 32] = row.get(0)?;
-            let output_index: u32 = row.get(1)?;
-            Ok(OutputRef::new(
-                TxId::from_bytes(txid),
-                PoolType::IRONWOOD,
-                output_index,
-            ))
-        },
-    )?;
-    for row in rows {
-        result.push(row?);
-    }
-
-    let mut stmt = conn.prepare_cached(
-        "SELECT t.txid, tro.output_index
-         FROM transparent_received_outputs tro
-         JOIN transactions t ON t.id_tx = tro.transaction_id
-         JOIN accounts a ON a.id = tro.account_id
-         WHERE tro.lock_expiry_height > :chain_tip
-         AND a.uuid = :account_uuid",
-    )?;
-    let rows = stmt.query_map(
-        named_params![
-            ":account_uuid": account.0,
-            ":chain_tip": chain_tip
-        ],
-        |row| {
-            let txid: [u8; 32] = row.get(0)?;
-            let output_index: u32 = row.get(1)?;
-            Ok(OutputRef::new(
-                TxId::from_bytes(txid),
-                PoolType::TRANSPARENT,
-                output_index,
-            ))
-        },
-    )?;
-    for row in rows {
-        result.push(row?);
+    // `lock_expiry_height > chain_tip` is `lock_expiry_height >= chain_tip + 1`, i.e. the
+    // locked-balance condition evaluated at the standard target height.
+    for pool in [
+        PoolType::SAPLING,
+        PoolType::ORCHARD,
+        PoolType::IRONWOOD,
+        PoolType::TRANSPARENT,
+    ] {
+        let (table, index_col) = received_outputs_table(pool);
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT t.txid, rn.{index_col}
+             FROM {table} rn
+             JOIN transactions t ON t.id_tx = rn.transaction_id
+             JOIN accounts a ON a.id = rn.account_id
+             WHERE rn.lock_expiry_height > :chain_tip
+             AND a.uuid = :account_uuid"
+        ))?;
+        let rows = stmt.query_map(
+            named_params![
+                ":account_uuid": account.0,
+                ":chain_tip": chain_tip
+            ],
+            |row| {
+                let txid: [u8; 32] = row.get(0)?;
+                let output_index: u32 = row.get(1)?;
+                Ok(OutputRef::new(TxId::from_bytes(txid), pool, output_index))
+            },
+        )?;
+        for row in rows {
+            result.push(row?);
+        }
     }
 
     Ok(result)
