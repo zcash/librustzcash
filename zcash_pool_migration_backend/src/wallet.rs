@@ -23,10 +23,9 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
-use std::sync::OnceLock;
 
 use ::orchard::Anchor;
-use ::orchard::circuit::{OrchardCircuitVersion, ProvingKey};
+use ::orchard::circuit::OrchardCircuitVersion;
 use ::orchard::keys::{FullViewingKey, SpendAuthorizingKey};
 use ::orchard::note::{Note as OrchardNote, Nullifier};
 use ::orchard::tree::MerklePath;
@@ -38,6 +37,7 @@ use ::pczt::roles::updater::{AnchorUpdateError, SpendWitnessUpdateError, Updater
 use zcash_client_backend::data_api::wallet::TargetHeight;
 use zcash_client_backend::data_api::{InputSource, WalletCommitmentTrees, WalletRead};
 use zcash_keys::keys::UnifiedSpendingKey;
+use zcash_primitives::transaction::builder::cached_orchard_proving_key;
 use zcash_protocol::ShieldedPool;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
@@ -258,15 +258,6 @@ where
             .update_transaction(id, state)
             .map_err(Error::Store)
     }
-}
-
-/// The single Orchard proving key used for both the source (Orchard) and destination (Ironwood)
-/// bundles of a post-NU6.3 migration transfer. Building it is expensive (it materializes the halo2
-/// circuit parameters), so it is built once and cached for the process. Ironwood proofs reuse the
-/// same key as Orchard (both are the `PostNu6_3` circuit).
-fn post_nu6_3_orchard_proving_key() -> &'static ProvingKey {
-    static PROVING_KEY: OnceLock<ProvingKey> = OnceLock::new();
-    PROVING_KEY.get_or_init(|| ProvingKey::build(OrchardCircuitVersion::PostNu6_3))
 }
 
 /// Why proving a migration transaction through the wallet-backed prover failed. `TE` is the
@@ -531,7 +522,7 @@ where
 
         // Prove the Orchard bundle, and the Ironwood bundle too when present, with the single
         // post-NU6.3 Orchard proving key.
-        let pk = post_nu6_3_orchard_proving_key();
+        let pk = cached_orchard_proving_key(OrchardCircuitVersion::PostNu6_3);
         let orchard_proven = Prover::new(updated)
             .create_orchard_proof(pk)
             .map_err(|e| WalletProveError::Prove(alloc::format!("orchard proof: {e:?}")))?;
