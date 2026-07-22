@@ -150,6 +150,24 @@ impl LockOwner {
     }
 }
 
+/// A transaction id may serve as a lock owner.
+///
+/// This is the right owner choice for flows that hold a durable transaction identity while
+/// their locks are alive; most notably a persisted PCZT, whose v5 txid is fixed once its
+/// effecting data is final. Deriving the owner from the txid lets such a flow re-derive its
+/// token after a restart and release (or re-acquire) exactly its own locks.
+///
+/// It is NOT a suitable owner for proposal-time locking in general: at proposal creation no
+/// transaction exists yet, a multi-step proposal builds several transactions, and a
+/// transaction rebuilt after a crash generally has a different txid, which would defeat the
+/// idempotent same-owner re-lock. Flows without a durable transaction identity should use
+/// [`LockOwner::random`] and retain the token.
+impl From<TxId> for LockOwner {
+    fn from(txid: TxId) -> Self {
+        Self(txid.into())
+    }
+}
+
 /// A type that represents the recipient of a transaction output.
 ///
 /// Variants vary along two independent axes:
@@ -1299,6 +1317,15 @@ mod output_ref_tests {
             let other_txid = OutputRef::new(TxId::from_bytes(txid), a.pool(), a.output_index());
             prop_assert_ne!(a, other_txid);
             prop_assert_ne!(a.cmp(&other_txid), std::cmp::Ordering::Equal);
+        }
+
+        /// A txid-derived [`super::LockOwner`] preserves the txid bytes, so two owners
+        /// derived from distinct transactions are distinct (a persisted PCZT re-derives
+        /// exactly its own token after a restart).
+        #[test]
+        fn lock_owner_from_txid_preserves_bytes(txid in any::<[u8; 32]>()) {
+            let owner = super::LockOwner::from(TxId::from_bytes(txid));
+            prop_assert_eq!(*owner.as_bytes(), txid);
         }
 
         /// Two independently drawn references are equal exactly when all three components
