@@ -28,8 +28,11 @@ workspace.
   exposed, and which are therefore deliberately left unexposed on import.
 - `zcash_client_sqlite::pool_migration` implements `zcash_pool_migration_backend`'s
   `PoolMigrationRead` / `PoolMigrationWrite` store traits over tables in the
-  wallet database, persisting an in-progress Orchard -> Ironwood value-pool
-  migration (ZIP 318).
+  wallet database, persisting each account's in-progress Orchard -> Ironwood
+  value-pool migration (ZIP 318) independently. The store is constructed via
+  `PoolMigrations::for_account`, scoped to the account whose migration it
+  tracks; the underlying `orchard_ironwood_migrations` table enforces at most
+  one migration per account.
 
 ### Fixed
 - The `zewif` importer no longer marks transparent addresses that have no
