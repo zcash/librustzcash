@@ -858,6 +858,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn anchor_checkpoints_retained_across_deep_scan() {
+        testing::pool::anchor_checkpoints_retained_across_deep_scan::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
     }

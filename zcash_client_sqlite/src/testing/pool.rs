@@ -307,6 +307,13 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn anchor_checkpoints_retained_across_deep_scan<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::anchor_checkpoints_retained_across_deep_scan::<
+        T,
+        _,
+    >(TestDbFactory::default(), BlockCache::new())
+}
+
 #[cfg(feature = "orchard")]
 pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::pool_crossing_required::<P0, P1>(
