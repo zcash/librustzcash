@@ -1516,13 +1516,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
             .query_map([], |row| {
                 let txid: [u8; 32] = row.get("txid")?;
                 let output_index: u32 = row.get(output_index_col)?;
+                // The test accessor inspects wallet contents irrespective of lock state.
+                let include_locked = true;
                 let note = self
                     .get_spendable_note(
                         &TxId::from_bytes(txid),
                         protocol,
                         output_index,
                         target_height,
-                        true,
+                        include_locked,
                     )
                     .unwrap()
                     .unwrap();
