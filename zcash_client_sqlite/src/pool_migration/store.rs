@@ -23,7 +23,6 @@
 use std::borrow::{Borrow, BorrowMut};
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
-use uuid::Uuid;
 
 use zcash_pool_migration_backend::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
@@ -35,6 +34,8 @@ use zcash_pool_migration_backend::preparation::{
 };
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
+
+use crate::AccountRef;
 
 use super::error::Error;
 
@@ -59,7 +60,7 @@ pub(crate) struct Tables {
     pub transaction_deps: &'static str,
     /// The index over `(state, scheduled_height)` on the transactions table.
     pub tx_due_index: &'static str,
-    /// The unique index over `account_uuid` on the migrations table, enforcing at most one
+    /// The unique index over `account_id` on the migrations table, enforcing at most one
     /// migration per account.
     pub account_index: &'static str,
 }
@@ -69,14 +70,15 @@ pub(crate) struct Tables {
 // ---------------------------------------------------------------------------
 
 fn create_migrations_sql(t: &Tables) -> String {
-    // `account_uuid` is not a foreign key into the wallet's `accounts` table: this store is
-    // deliberately standalone and pool-agnostic (it is exercised over a connection that need not
-    // hold an `accounts` table at all). The wallet's account-deletion path removes an account's
-    // migration explicitly instead; see `orchard_ironwood::delete_account_migration`.
+    // `account_id` is a foreign key into the wallet's `accounts` table: the pool-migration tables
+    // live in the wallet database alongside `accounts`, so an account's migration is owned by its
+    // account row and removed with it. Deleting an account cascades to its migration here, whose
+    // child rows in turn cascade from the parent migration row. The `accounts` table name is the
+    // same for every pool, so it is referenced directly rather than through `Tables`.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             id INTEGER PRIMARY KEY,
-            account_uuid BLOB NOT NULL,
+            account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
             status TEXT NOT NULL,
             note_split_fee_buffer INTEGER NOT NULL,
             note_split_change INTEGER,
@@ -193,7 +195,7 @@ fn create_tx_due_index_sql(t: &Tables) -> String {
 
 fn create_account_index_sql(t: &Tables) -> String {
     format!(
-        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} (account_uuid)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} (account_id)",
         t.account_index, t.migrations
     )
 }
@@ -231,15 +233,15 @@ pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
 pub(crate) struct Store<C> {
     conn: C,
     tables: &'static Tables,
-    account: Uuid,
+    account_id: AccountRef,
 }
 
 impl<C> Store<C> {
-    pub(crate) fn new(conn: C, tables: &'static Tables, account: Uuid) -> Self {
+    pub(crate) fn new(conn: C, tables: &'static Tables, account_id: AccountRef) -> Self {
         Self {
             conn,
             tables,
-            account,
+            account_id,
         }
     }
 
@@ -250,16 +252,16 @@ impl<C> Store<C> {
 
 impl<C: Borrow<Connection>> Store<C> {
     pub(crate) fn get_migration(&self) -> Result<Option<MigrationState>, Error> {
-        read_migration(self.conn.borrow(), self.tables, &self.account)
+        read_migration(self.conn.borrow(), self.tables, self.account_id)
     }
 }
 
 impl<C: BorrowMut<Connection>> Store<C> {
     pub(crate) fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Error> {
         let tables = self.tables;
-        let account = self.account;
+        let account_id = self.account_id;
         let tx = self.conn.borrow_mut().transaction()?;
-        replace_migration(&tx, tables, &account, state)?;
+        replace_migration(&tx, tables, account_id, state)?;
         tx.commit()?;
         Ok(())
     }
@@ -270,9 +272,9 @@ impl<C: BorrowMut<Connection>> Store<C> {
         state: MigrationTxState,
     ) -> Result<(), Error> {
         let tables = self.tables;
-        let account = self.account;
+        let account_id = self.account_id;
         let conn = self.conn.borrow_mut();
-        let migration_id = resolve_migration_id(conn, tables, &account)?
+        let migration_id = resolve_migration_id(conn, tables, account_id)?
             .ok_or(Error::Corrupt("update_transaction: no such transaction"))?;
         let updated = conn.execute(
             &format!(
@@ -300,18 +302,18 @@ impl<C: BorrowMut<Connection>> Store<C> {
 // Read
 // ---------------------------------------------------------------------------
 
-/// Resolve the primary key of `account`'s row in `t.migrations`, if one exists. Every child table
-/// is addressed by this key rather than by `account_uuid` directly, so a write operation resolves
+/// Resolve the primary key of `account_id`'s row in `t.migrations`, if one exists. Every child table
+/// is addressed by this key rather than by `account_id` directly, so a write operation resolves
 /// it once and reuses it for every subsequent query.
 fn resolve_migration_id(
     conn: &Connection,
     t: &Tables,
-    account: &Uuid,
+    account_id: AccountRef,
 ) -> Result<Option<i64>, Error> {
     Ok(conn
         .query_row(
-            &format!("SELECT id FROM {} WHERE account_uuid = ?", t.migrations),
-            params![*account],
+            &format!("SELECT id FROM {} WHERE account_id = ?", t.migrations),
+            params![account_id.0],
             |row| row.get(0),
         )
         .optional()?)
@@ -320,17 +322,17 @@ fn resolve_migration_id(
 fn read_migration(
     conn: &Connection,
     t: &Tables,
-    account: &Uuid,
+    account_id: AccountRef,
 ) -> Result<Option<MigrationState>, Error> {
     let row = conn
         .query_row(
             &format!(
                 "SELECT id, status, note_split_fee_buffer, note_split_change, note_split_prep_fees,
                         note_split_total_input, note_split_total_migratable
-                   FROM {} WHERE account_uuid = ?",
+                   FROM {} WHERE account_id = ?",
                 t.migrations
             ),
-            params![*account],
+            params![account_id.0],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -644,13 +646,13 @@ fn read_deps(
 // Write
 // ---------------------------------------------------------------------------
 
-/// Replace `account`'s migration in the tables named by `t` with `state` (deletes that account's
+/// Replace `account_id`'s migration in the tables named by `t` with `state` (deletes that account's
 /// existing migration and its children first, if any). Runs inside the caller's transaction so the
 /// replacement is atomic.
 fn replace_migration(
     tx: &rusqlite::Transaction,
     t: &Tables,
-    account: &Uuid,
+    account_id: AccountRef,
     state: &MigrationState,
 ) -> Result<(), Error> {
     // The layers/transactions grid is stored only through the input and output rows, so a layer
@@ -672,7 +674,7 @@ fn replace_migration(
 
     // Replace semantics: the store holds at most one migration per account. Delete the account's
     // existing children first (in case foreign-key cascades are not enabled), then its parent row.
-    if let Some(migration_id) = resolve_migration_id(tx, t, account)? {
+    if let Some(migration_id) = resolve_migration_id(tx, t, account_id)? {
         for table in [
             t.transaction_deps,
             t.transactions,
@@ -695,13 +697,13 @@ fn replace_migration(
     let ns = state.note_split();
     tx.execute(
         &format!(
-            "INSERT INTO {} (account_uuid, status, note_split_fee_buffer, note_split_change,
+            "INSERT INTO {} (account_id, status, note_split_fee_buffer, note_split_change,
                              note_split_prep_fees, note_split_total_input, note_split_total_migratable)
-             VALUES (:account_uuid, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable)",
+             VALUES (:account_id, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable)",
             t.migrations
         ),
         named_params! {
-            ":account_uuid": *account,
+            ":account_id": account_id.0,
             ":status": state.status().as_ref(),
             ":fee_buffer": ns.note_fee_buffer().into_u64(),
             ":change": ns.change().map(Zatoshis::into_u64),

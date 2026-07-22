@@ -30,7 +30,6 @@ mod ironwood_received_notes;
 mod ironwood_shardtree;
 mod ivk_item_cache;
 mod nullifier_map;
-mod orchard_ironwood_migration_account_key;
 mod orchard_ironwood_migration_tables;
 mod orchard_note_version;
 mod orchard_received_notes;
@@ -258,7 +257,6 @@ pub(super) fn all_migrations<
         Box::new(ironwood_received_notes::Migration),
         Box::new(ironwood_pool_code_views::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
-        Box::new(orchard_ironwood_migration_account_key::Migration),
         Box::new(tree_retained_checkpoints::Migration),
     ]
 }
@@ -406,7 +404,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     add_transparent_receiver_address_index::MIGRATION_ID,
     add_transparent_value_index::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
-    orchard_ironwood_migration_account_key::MIGRATION_ID,
+    orchard_ironwood_migration_tables::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
 ];
 

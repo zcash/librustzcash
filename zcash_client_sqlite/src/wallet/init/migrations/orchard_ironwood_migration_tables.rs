@@ -3,7 +3,10 @@
 //! A pool migration ([ZIP 318]) decomposes a spendable Orchard balance into self-funding notes and
 //! crosses their value into the Ironwood pool as a set of pre-signed transactions. This migration
 //! adds the `orchard_ironwood_migrations` and `orchard_ironwood_migration_transactions` tables that
-//! persist that in-progress migration, so a wallet resumes it after being closed or restarted.
+//! persist that in-progress migration, so a wallet resumes it after being closed or restarted. Each
+//! account's migration is tracked independently: `orchard_ironwood_migrations` keys by an
+//! `account_id` foreign key into `accounts` (with `ON DELETE CASCADE`), enforced unique so an
+//! account has at most one migration in progress.
 //!
 //! The table DDL and the store implementation over it live in [`crate::pool_migration`]; this
 //! migration is the thin registration that runs that DDL inside the wallet schema. It depends on
