@@ -17,11 +17,8 @@
 //! [`WalletMigrationProver`] resolves every spend's tree position from the wallet's own note store
 //! (no hand-supplied map), so this test also covers that production lookup path. It keeps each
 //! transfer's boundary within `zcash_client_sqlite`'s checkpoint pruning window (100 blocks of the
-//! tip), so it needs no migration anchor-checkpoint retention (issue #2700), which is a wallet
-//! backend concern out of the migration crate's control.
-//!
-//! Run with `--features wallet,test-dependencies` (the latter exposes
-//! [`commit_preparation_with_funding`], which hands the test each transfer's funding note).
+//! tip), so it needs no migration anchor-checkpoint retention, which is a wallet backend concern
+//! out of the migration crate's control.
 #![cfg(all(feature = "wallet", feature = "test-dependencies"))]
 
 use std::convert::Infallible;
