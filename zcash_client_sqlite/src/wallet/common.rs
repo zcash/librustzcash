@@ -161,22 +161,25 @@ pub(crate) fn output_unlocked_condition(tbl: &str) -> String {
 
 /// Generates the SQL condition under which an output's lock may be (re)acquired.
 ///
-/// A lock may be taken when no lock exists (`lock_expiry_height IS NULL`) or when the existing
-/// lock has expired as of the chain tip (`lock_expiry_height <= :chain_tip`). Because balance and
-/// selection evaluate lock state against `target_height = chain_tip + 1`, "expired as of the
-/// chain tip" (`h <= chain_tip`) is exactly "not locked for selection" (`h < target_height`):
-/// a lock can never be stolen while the output is still excluded from selection.
+/// A lock may be taken when no lock exists (`lock_expiry_height IS NULL`), when the existing
+/// lock has expired as of the chain tip (`lock_expiry_height <= :chain_tip`), or when the
+/// existing lock is held by the requesting owner (`lock_owner = :owner`), which makes
+/// re-locking by the same owner idempotent. Because balance and selection evaluate lock state
+/// against `target_height = chain_tip + 1`, "expired as of the chain tip" (`h <= chain_tip`)
+/// is exactly "not locked for selection" (`h < target_height`): a lock can never be stolen by
+/// a DIFFERENT owner while the output is still excluded from selection.
 ///
-/// When the chain tip is unknown, `:chain_tip` binds to SQL NULL and the comparison evaluates to
-/// NULL (falsy), so only outputs with no existing lock can be locked; an existing lock cannot be
-/// judged expired without a height to compare against.
+/// When the chain tip is unknown, `:chain_tip` binds to SQL NULL and the expiry comparison
+/// evaluates to NULL (falsy), so only outputs with no existing lock, or whose lock the
+/// requesting owner already holds, can be locked; a foreign lock cannot be judged expired
+/// without a height to compare against.
 ///
 /// # Usage requirements
-/// - This condition uses the bare `lock_expiry_height` column name, so it must be used in a
-///   single-table statement (such as the `UPDATE`s in `lock_outputs`).
-/// - The parent must provide `:chain_tip` as a named argument (possibly NULL).
+/// - This condition uses the bare `lock_expiry_height` and `lock_owner` column names, so it
+///   must be used in a single-table statement (such as the `UPDATE`s in `lock_outputs`).
+/// - The parent must provide `:chain_tip` (possibly NULL) and `:owner` as named arguments.
 pub(crate) fn output_lockable_condition() -> &'static str {
-    "lock_expiry_height IS NULL OR lock_expiry_height <= :chain_tip"
+    "lock_expiry_height IS NULL OR lock_expiry_height <= :chain_tip OR lock_owner = :owner"
 }
 
 fn unscanned_tip_exists(
@@ -1110,12 +1113,13 @@ mod tests {
 ///   once the lock expiry height is passed, an expired lock is indistinguishable from no
 ///   lock for selection and balance, even though the stale column value remains until it is
 ///   replaced or cleared.
-/// - A lock may be (re)acquired only when no lock exists or the existing lock has expired as
-///   of the chain tip (`lock_expiry_height <= chain_tip`); with an unknown chain tip only
-///   unlocked outputs may be locked.
-/// - No lock stealing: whenever a lock is replaceable, the output is already selectable at
-///   the next target height, so replacing an expired lock never removes protection from a
-///   still-protected output.
+/// - A lock may be (re)acquired when no lock exists, when the existing lock has expired as of
+///   the chain tip (`lock_expiry_height <= chain_tip`), or when the existing lock is held by
+///   the requesting owner (idempotent same-owner re-lock); with an unknown chain tip a
+///   foreign lock can never be judged expired.
+/// - No lock stealing: whenever a lock held by a DIFFERENT owner is replaceable, the output
+///   is already selectable at the next target height, so replacing an expired lock never
+///   removes protection from a still-protected output.
 #[cfg(test)]
 mod lock_predicate_tests {
     use proptest::prelude::*;
@@ -1123,13 +1127,13 @@ mod lock_predicate_tests {
 
     use super::{output_lockable_condition, output_unlocked_condition};
 
-    fn lock_state_db(lock_expiry_height: Option<u32>) -> Connection {
+    fn lock_state_db(lock_expiry_height: Option<u32>, lock_owner: Option<[u8; 32]>) -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE t (lock_expiry_height INTEGER)")
+        conn.execute_batch("CREATE TABLE t (lock_expiry_height INTEGER, lock_owner BLOB)")
             .unwrap();
         conn.execute(
-            "INSERT INTO t (lock_expiry_height) VALUES (:h)",
-            named_params![":h": lock_expiry_height],
+            "INSERT INTO t (lock_expiry_height, lock_owner) VALUES (:h, :owner)",
+            named_params![":h": lock_expiry_height, ":owner": lock_owner],
         )
         .unwrap();
         conn
@@ -1142,7 +1146,7 @@ mod lock_predicate_tests {
         target_height: u32,
         include_locked: bool,
     ) -> bool {
-        let conn = lock_state_db(lock_expiry_height);
+        let conn = lock_state_db(lock_expiry_height, None);
         conn.query_row(
             &format!("SELECT ({}) FROM t", output_unlocked_condition("t")),
             named_params![
@@ -1157,11 +1161,16 @@ mod lock_predicate_tests {
 
     /// Evaluates `output_lockable_condition` in SQLite. A NULL result is falsy, as it would
     /// be in the `UPDATE ... WHERE` clause of `lock_outputs`.
-    fn sql_lockable(lock_expiry_height: Option<u32>, chain_tip: Option<u32>) -> bool {
-        let conn = lock_state_db(lock_expiry_height);
+    fn sql_lockable(
+        lock_expiry_height: Option<u32>,
+        lock_owner: Option<[u8; 32]>,
+        chain_tip: Option<u32>,
+        requesting_owner: [u8; 32],
+    ) -> bool {
+        let conn = lock_state_db(lock_expiry_height, lock_owner);
         conn.query_row(
             &format!("SELECT ({}) FROM t", output_lockable_condition()),
-            named_params![":chain_tip": chain_tip],
+            named_params![":chain_tip": chain_tip, ":owner": requesting_owner],
             |row| row.get::<_, Option<bool>>(0),
         )
         .unwrap()
@@ -1188,6 +1197,12 @@ mod lock_predicate_tests {
             1 => Just(None),
             4 => arb_height_near(target_height).prop_map(Some),
         ]
+    }
+
+    /// Owners drawn from a two-element pool, so that the requesting owner frequently matches
+    /// (and frequently differs from) the owner recorded on the row.
+    fn arb_owner() -> impl Strategy<Value = [u8; 32]> {
+        prop_oneof![Just([0xAA; 32]), Just([0xBB; 32])]
     }
 
     proptest! {
@@ -1218,32 +1233,58 @@ mod lock_predicate_tests {
         }
 
         /// The lock-acquisition predicate matches its model: a lock slot is free when no
-        /// lock exists or the existing lock has expired as of the chain tip; when the chain
-        /// tip is unknown an existing lock can never be judged expired.
+        /// lock exists, when the existing lock has expired as of the chain tip, or when the
+        /// existing lock is held by the requesting owner; when the chain tip is unknown a
+        /// foreign lock can never be judged expired.
         #[test]
         fn lockable_matches_model(
             (tip, lock) in prop::option::of(any::<u32>()).prop_flat_map(|tip| {
                 (Just(tip), arb_lock_expiry(tip.unwrap_or(u32::MAX / 2)))
             }),
+            row_owner in arb_owner(),
+            requesting_owner in arb_owner(),
         ) {
+            // A row with a lock height always records its owner; a row without one records
+            // no owner (the invariant maintained by lock/unlock/clear).
+            let row_owner = lock.map(|_| row_owner);
             let expected = match lock {
                 None => true,
-                Some(h) => tip.is_some_and(|tip| h <= tip),
+                Some(h) => {
+                    tip.is_some_and(|tip| h <= tip) || row_owner == Some(requesting_owner)
+                }
             };
-            prop_assert_eq!(sql_lockable(lock, tip), expected);
+            prop_assert_eq!(
+                sql_lockable(lock, row_owner, tip, requesting_owner),
+                expected
+            );
         }
 
-        /// No lock stealing: whenever an existing lock may be replaced (as of chain tip
-        /// `tip`), the output is already selectable at the corresponding target height
-        /// `tip + 1`. Acquiring a lock therefore never displaces a lock that still protects
-        /// its output.
+        /// Same-owner re-locking is always permitted, regardless of expiry state and even
+        /// when the chain tip is unknown: this is what makes lock acquisition idempotent for
+        /// the flow that holds the lock.
+        #[test]
+        fn same_owner_relock_always_permitted(
+            (tip, lock) in prop::option::of(any::<u32>()).prop_flat_map(|tip| {
+                (Just(tip), arb_lock_expiry(tip.unwrap_or(u32::MAX / 2)))
+            }),
+            owner in arb_owner(),
+        ) {
+            let row_owner = lock.map(|_| owner);
+            prop_assert!(sql_lockable(lock, row_owner, tip, owner));
+        }
+
+        /// No lock stealing: whenever an existing lock held by a DIFFERENT owner may be
+        /// replaced (as of chain tip `tip`), the output is already selectable at the
+        /// corresponding target height `tip + 1`. Acquiring a lock therefore never displaces
+        /// a foreign lock that still protects its output.
         #[test]
         fn lockable_implies_selectable(
             (tip, lock) in (0..u32::MAX).prop_flat_map(|tip| {
                 (Just(tip), arb_lock_expiry(tip))
             }),
         ) {
-            if sql_lockable(lock, Some(tip)) {
+            let row_owner = lock.map(|_| [0xAA; 32]);
+            if sql_lockable(lock, row_owner, Some(tip), [0xBB; 32]) {
                 prop_assert!(sql_unlocked(lock, tip + 1, false));
             }
         }

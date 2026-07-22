@@ -56,7 +56,7 @@ use crate::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule, standard::SingleOutputChangeStrategy,
     },
     proposal::{Proposal, ProposalError, Step, StepOutputIndex},
-    wallet::{Note, OutputRef, OvkPolicy, Recipient},
+    wallet::{LockOwner, Note, OutputRef, OvkPolicy, Recipient},
 };
 use sapling::{
     note_encryption::{PreparedIncomingViewingKey, try_sapling_note_decryption},
@@ -677,28 +677,67 @@ impl ConfirmationsPolicy {
 /// by that creating transaction's id, which is the stable identity the lock tables are keyed on.
 fn proposal_input_refs<FeeRuleT, NoteRef>(
     proposal: &Proposal<FeeRuleT, NoteRef>,
-) -> impl Iterator<Item = OutputRef> {
-    proposal.steps().iter().flat_map(|step| {
-        step.shielded_inputs()
-            .into_iter()
-            .flat_map(|shielded_inputs| {
-                shielded_inputs.notes().iter().map(|note| {
-                    OutputRef::new(
-                        *note.txid(),
-                        PoolType::Shielded(note.note().pool()),
-                        u32::from(note.output_index()),
-                    )
+) -> Vec<OutputRef> {
+    proposal
+        .steps()
+        .iter()
+        .flat_map(|step| {
+            step.shielded_inputs()
+                .into_iter()
+                .flat_map(|shielded_inputs| {
+                    shielded_inputs.notes().iter().map(|note| {
+                        OutputRef::new(
+                            *note.txid(),
+                            PoolType::Shielded(note.note().pool()),
+                            u32::from(note.output_index()),
+                        )
+                    })
                 })
-            })
-            .chain(step.transparent_inputs().iter().map(|utxo| {
-                let outpoint = utxo.outpoint();
-                OutputRef::new(
-                    TxId::from_bytes(*outpoint.hash()),
-                    PoolType::TRANSPARENT,
-                    outpoint.n(),
-                )
-            }))
-    })
+                .chain(step.transparent_inputs().iter().map(|utxo| {
+                    let outpoint = utxo.outpoint();
+                    OutputRef::new(
+                        TxId::from_bytes(*outpoint.hash()),
+                        PoolType::TRANSPARENT,
+                        outpoint.n(),
+                    )
+                }))
+        })
+        .collect()
+}
+
+/// A request to lock the inputs selected by a proposal, made when calling one of the
+/// proposal-creation functions ([`propose_transfer`] and friends).
+///
+/// The caller supplies the [`LockOwner`] under which the locks are taken and must retain it: the
+/// owner token is what authorizes releasing the locks with [`unlock_proposal_inputs`], and what
+/// allows the same flow to re-lock its own inputs when retrying after a crash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LockRequest {
+    owner: LockOwner,
+    for_blocks: u32,
+}
+
+impl LockRequest {
+    /// Constructs a request to lock the proposal's inputs on behalf of `owner` until
+    /// `for_blocks` blocks past the proposal's target height.
+    ///
+    /// Choose `for_blocks` conservatively with respect to the worst-case time between proposal
+    /// creation and transaction storage: once the lock expires, a concurrent proposal may
+    /// select the same inputs.
+    pub fn new(owner: LockOwner, for_blocks: u32) -> Self {
+        Self { owner, for_blocks }
+    }
+
+    /// Returns the owner under which the locks will be taken.
+    pub fn owner(&self) -> LockOwner {
+        self.owner
+    }
+
+    /// Returns the number of blocks past the proposal's target height at which the locks will
+    /// expire.
+    pub fn for_blocks(&self) -> u32 {
+        self.for_blocks
+    }
 }
 
 /// Locks all inputs selected by the given proposal, preventing them from being
@@ -707,12 +746,13 @@ fn proposal_input_refs<FeeRuleT, NoteRef>(
 fn lock_proposal_inputs<DbT, FeeRuleT, NoteRef, TE, SE, FE, CE>(
     wallet_db: &mut DbT,
     proposal: &Proposal<FeeRuleT, NoteRef>,
+    owner: LockOwner,
     lock_expiry_height: BlockHeight,
 ) -> Result<(), Error<DbT::Error, TE, SE, FE, CE, NoteRef>>
 where
     DbT: WalletWrite,
 {
-    match wallet_db.lock_outputs(proposal_input_refs(proposal), lock_expiry_height) {
+    match wallet_db.lock_outputs(&proposal_input_refs(proposal), owner, lock_expiry_height) {
         Ok(_) => Ok(()),
         Err(LockError::LockFailure(out_ref)) => {
             Err(Error::Proposal(ProposalError::InputsLocked(out_ref)))
@@ -722,28 +762,22 @@ where
 }
 
 /// Unlocks all inputs selected by the given proposal, reversing the locks acquired when the
-/// proposal was created with a non-`None` `lock_for_blocks` argument.
+/// proposal was created with a [`LockRequest`] under the same `owner`.
 ///
 /// This is useful when a proposal is rejected or abandoned after its inputs were locked, so that
-/// the outputs become available for selection and balance computation once again. Outputs that are
-/// not currently locked are left unchanged.
-///
-/// # Warning
-///
-/// Locks do not record which proposal acquired them, so this function must only be called for
-/// proposals that were created with `lock_for_blocks: Some(_)`. Calling it for an unlocked
-/// proposal that happens to share inputs with a concurrently-created locked proposal (possible
-/// when the two proposals selected inputs before either lock was taken) would release the other
-/// proposal's locks while it is still in flight.
+/// the outputs become available for selection and balance computation once again. Because
+/// unlocking is scoped to `owner`, inputs that are not locked, or whose locks are held by a
+/// different owner (for example a concurrently-created proposal), are left unchanged.
 pub fn unlock_proposal_inputs<DbT, FeeRuleT, NoteRef>(
     wallet_db: &mut DbT,
     proposal: &Proposal<FeeRuleT, NoteRef>,
+    owner: LockOwner,
 ) -> Result<(), DbT::Error>
 where
     DbT: WalletWrite,
 {
     for output_ref in proposal_input_refs(proposal) {
-        wallet_db.unlock_output(&output_ref)?;
+        wallet_db.unlock_output(&output_ref, owner)?;
     }
     Ok(())
 }
@@ -752,31 +786,33 @@ where
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
 ///
-/// When `lock_for_blocks` is `Some(n)`, every input selected by the returned proposal is locked
-/// via [`WalletWrite::lock_outputs`] with an expiry height of `target_height + n`, so that the
-/// inputs are excluded from selection by subsequent proposals until that height is reached (or
-/// until they are explicitly released; see below). When it is `None`, no locking is performed.
+/// When `lock_inputs` is `Some(request)`, every input selected by the returned proposal is
+/// locked via [`WalletWrite::lock_outputs`] on behalf of the request's [`LockOwner`], with an
+/// expiry height of `target_height + request.for_blocks()`, so that the inputs are excluded from
+/// selection by subsequent proposals until that height is reached (or until they are explicitly
+/// released; see below). When it is `None`, no locking is performed.
 ///
-/// This is the height-based generalization of the `lock_notes: bool` parameter originally
-/// proposed in [zcash/librustzcash#2161]: `Some(n)` corresponds to "lock" with an explicit expiry
-/// window, and `None` to "do not lock".
+/// This is the owner- and height-based generalization of the `lock_notes: bool` parameter
+/// originally proposed in [zcash/librustzcash#2161].
 ///
 /// # Concurrency
 ///
 /// Locking is how overlapping proposals for the same account are kept from selecting the same
-/// inputs. If a concurrent caller has already locked one of the inputs this proposal selected
-/// (a check-then-lock race resolved at the storage layer), locking fails and the error surfaces
-/// as [`ProposalError::InputsLocked`] identifying the conflicting output; the losing caller
-/// should treat this as "the account is busy" and retry. A caller that abandons a proposal whose
-/// inputs it locked should release them with [`unlock_proposal_inputs`]; locks are otherwise
-/// cleared automatically when the inputs are recorded as spent by
+/// inputs. If a concurrent caller (a different [`LockOwner`]) has already locked one of the
+/// inputs this proposal selected (a check-then-lock race resolved at the storage layer), locking
+/// fails and the error surfaces as [`ProposalError::InputsLocked`] identifying the conflicting
+/// output; the losing caller should treat this as "the account is busy" and retry. Re-locking
+/// under the SAME owner succeeds (an idempotent acquire/extend), so a flow that crashed after
+/// locking may safely retry with its original owner token. A caller that abandons a proposal
+/// whose inputs it locked should release them with [`unlock_proposal_inputs`] under the same
+/// owner; locks are otherwise cleared automatically when the inputs are recorded as spent by
 /// [`WalletWrite::store_transactions_to_be_sent`], when their expiry height is reached, or via
 /// [`WalletWrite::clear_locked_outputs`].
 ///
 /// Note that expiry re-opens the race the lock exists to prevent: if building and proving the
-/// transaction takes longer than `n` blocks, the lock expires and a concurrent proposal may
-/// select and spend the same inputs. Choose `n` conservatively with respect to the worst-case
-/// time between proposal creation and transaction storage.
+/// transaction takes longer than the requested lock window, the lock expires and a concurrent
+/// proposal may select and spend the same inputs. Choose the window conservatively with respect
+/// to the worst-case time between proposal creation and transaction storage.
 ///
 /// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
 /// [`WalletWrite::store_transactions_to_be_sent`]: crate::data_api::WalletWrite::store_transactions_to_be_sent
@@ -793,7 +829,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     request: zip321::TransactionRequest,
     confirmations_policy: ConfirmationsPolicy,
     spend_policy: &input_selection::SpendPolicy,
-    lock_for_blocks: Option<u32>,
+    lock_inputs: Option<LockRequest>,
     proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, <DbT as InputSource>::NoteRef>,
@@ -828,9 +864,9 @@ where
         spend_policy,
         proposed_version,
     )?;
-    if let Some(n) = lock_for_blocks {
-        let lock_expiry_height = target_height + n;
-        lock_proposal_inputs(wallet_db, &proposal, lock_expiry_height)?;
+    if let Some(request) = lock_inputs {
+        let lock_expiry_height = target_height + request.for_blocks();
+        lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
     }
 
     // Record the requested version on the proposal so that it is carried through to transaction
@@ -863,10 +899,10 @@ where
 /// * `change_memo`: A memo to be included in any change output that is created.
 /// * `fallback_change_pool`: The shielded pool to which change should be sent if
 ///   automatic change pool determination fails.
-/// * `lock_for_blocks`: When `Some(n)`, the inputs selected by the proposal are locked until
-///   `target_height + n` to prevent concurrent proposals from selecting them; when `None`, no
-///   locking is performed. See [`propose_transfer`] for the full semantics and concurrency
-///   behavior.
+/// * `lock_inputs`: When `Some(request)`, the inputs selected by the proposal are locked on
+///   behalf of the request's owner until `target_height + request.for_blocks()` to prevent
+///   concurrent proposals from selecting them; when `None`, no locking is performed. See
+///   [`propose_transfer`] for the full semantics and concurrency behavior.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
@@ -880,7 +916,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
-    lock_for_blocks: Option<u32>,
+    lock_inputs: Option<LockRequest>,
     proposed_version: Option<TxVersion>,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
@@ -932,7 +968,7 @@ where
         request,
         confirmations_policy,
         &input_selection::SpendPolicy::default(),
-        lock_for_blocks,
+        lock_inputs,
         proposed_version,
     )
 }
@@ -941,9 +977,10 @@ where
 /// of transactions that would spend all available funds from the given `spend_pool`s that can then
 /// be authorized and made ready for submission to the network with [`create_proposed_transactions`].
 ///
-/// When `lock_for_blocks` is `Some(n)`, the inputs selected by the proposal are locked until
-/// `target_height + n` to prevent concurrent proposals from selecting them; when `None`, no
-/// locking is performed. See [`propose_transfer`] for the full semantics and concurrency behavior.
+/// When `lock_inputs` is `Some(request)`, the inputs selected by the proposal are locked on
+/// behalf of the request's owner until `target_height + request.for_blocks()` to prevent
+/// concurrent proposals from selecting them; when `None`, no locking is performed. See
+/// [`propose_transfer`] for the full semantics and concurrency behavior.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
@@ -956,7 +993,7 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     mode: MaxSpendMode,
     confirmations_policy: ConfirmationsPolicy,
-    lock_for_blocks: Option<u32>,
+    lock_inputs: Option<LockRequest>,
 ) -> Result<
     Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
     ProposeSendMaxErrT<DbT, CommitmentTreeErrT, FeeRuleT>,
@@ -990,9 +1027,9 @@ where
         memo,
     )?;
 
-    if let Some(n) = lock_for_blocks {
-        let lock_expiry_height = target_height + n;
-        lock_proposal_inputs(wallet_db, &proposal, lock_expiry_height)?;
+    if let Some(request) = lock_inputs {
+        let lock_expiry_height = target_height + request.for_blocks();
+        lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
     }
 
     Ok(proposal)
@@ -1004,9 +1041,10 @@ where
 /// The `output_filter` parameter controls which transparent outputs are eligible for
 /// inclusion in the proposal. See [`CoinbaseFilter`] for details.
 ///
-/// When `lock_for_blocks` is `Some(n)`, the inputs selected by the proposal are locked until
-/// `target_height + n` to prevent concurrent proposals from selecting them; when `None`, no
-/// locking is performed. See [`propose_transfer`] for the full semantics and concurrency behavior.
+/// When `lock_inputs` is `Some(request)`, the inputs selected by the proposal are locked on
+/// behalf of the request's owner until `target_height + request.for_blocks()` to prevent
+/// concurrent proposals from selecting them; when `None`, no locking is performed. See
+/// [`propose_transfer`] for the full semantics and concurrency behavior.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -1020,7 +1058,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
     to_account: <DbT as InputSource>::AccountId,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
-    lock_for_blocks: Option<u32>,
+    lock_inputs: Option<LockRequest>,
 ) -> Result<
     Proposal<ChangeT::FeeRule, Infallible>,
     ProposeShieldingErrT<DbT, CommitmentTreeErrT, InputsT, ChangeT>,
@@ -1051,9 +1089,9 @@ where
         )
         .map_err(Error::from)?;
 
-    if let Some(n) = lock_for_blocks {
-        let lock_expiry_height = target_height + n;
-        lock_proposal_inputs(wallet_db, &proposal, lock_expiry_height)?;
+    if let Some(request) = lock_inputs {
+        let lock_expiry_height = target_height + request.for_blocks();
+        lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
     }
 
     Ok(proposal)
@@ -1091,6 +1129,11 @@ pub type ProposeShieldingCoinbaseErrT<DbT, CommitmentTreeErrT, InputsT, FeeRuleT
 ///   outpoint). `Some(0)` selects no inputs and therefore returns
 ///   [`InputSelectorError::InsufficientFunds`].
 ///
+/// When `lock_inputs` is `Some(request)`, the coinbase inputs selected by the proposal are
+/// locked on behalf of the request's owner until `target_height + request.for_blocks()` to
+/// prevent concurrent proposals from selecting them; when `None`, no locking is performed. See
+/// [`propose_transfer`] for the full semantics and concurrency behavior.
+///
 /// The resulting proposal carries an explicit ZIP-321 payment to `to_address` for
 /// `input_total - fee`. **No change is produced**, in either the transparent or any
 /// shielded pool: a shielded change output would let the recipient (or any chain
@@ -1112,13 +1155,14 @@ pub fn propose_shielding_coinbase<DbT, ParamsT, InputsT, FeeRuleT, CommitmentTre
     to_address: ZcashAddress,
     memo: Option<MemoBytes>,
     limit: Option<usize>,
+    lock_inputs: Option<LockRequest>,
 ) -> Result<
     Proposal<FeeRuleT, Infallible>,
     ProposeShieldingCoinbaseErrT<DbT, CommitmentTreeErrT, InputsT, FeeRuleT>,
 >
 where
     ParamsT: consensus::Parameters,
-    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletWrite + InputSource<Error = <DbT as WalletRead>::Error>,
     InputsT: ShieldingSelector<InputSource = DbT>,
     FeeRuleT: FeeRule + Clone,
 {
@@ -1127,7 +1171,7 @@ where
         .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
         .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
 
-    input_selector
+    let proposal = input_selector
         .propose_shielding_coinbase(
             params,
             wallet_db,
@@ -1140,7 +1184,14 @@ where
             target_height,
             anchor_height,
         )
-        .map_err(Error::from)
+        .map_err(Error::from)?;
+
+    if let Some(request) = lock_inputs {
+        let lock_expiry_height = target_height + request.for_blocks();
+        lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
+    }
+
+    Ok(proposal)
 }
 
 struct StepResult<AccountId> {
