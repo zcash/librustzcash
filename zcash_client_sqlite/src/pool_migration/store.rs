@@ -307,7 +307,7 @@ fn resolve_migration_id(
     Ok(conn
         .query_row(
             &format!("SELECT id FROM {} WHERE account_uuid = ?", t.migrations),
-            params![account.as_bytes().as_slice()],
+            params![*account],
             |row| row.get(0),
         )
         .optional()?)
@@ -326,7 +326,7 @@ fn read_migration(
                    FROM {} WHERE account_uuid = ?",
                 t.migrations
             ),
-            params![account.as_bytes().as_slice()],
+            params![*account],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -697,7 +697,7 @@ fn replace_migration(
             t.migrations
         ),
         named_params! {
-            ":account_uuid": account.as_bytes().as_slice(),
+            ":account_uuid": *account,
             ":status": state.status().as_ref(),
             ":fee_buffer": ns.note_fee_buffer().into_u64(),
             ":change": ns.change().map(Zatoshis::into_u64),
