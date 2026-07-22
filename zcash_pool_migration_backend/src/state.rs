@@ -50,6 +50,24 @@ pub enum AdvanceStep {
         /// The transaction to broadcast.
         id: MigrationTxId,
     },
+    /// Rebuild this TRANSFER: its [`expiry_height`](MigrationTransaction::expiry_height) has passed
+    /// without it mining, so it can no longer be included in a block (ZIP 203). The pre-signed
+    /// artifact is dead — the signature hash covers the expiry height, so no part of it can be
+    /// reused — and an entirely new transaction must be constructed and SIGNED ANEW with a fresh
+    /// anchor and expiry, its denomination unchanged. Unlike proving and broadcasting (which need
+    /// only the viewing key, the commitment tree, and the network), acting on this step needs the
+    /// account's SPEND AUTHORITY: in-process where the wallet holds it, or a new external signing
+    /// session for a hardware or offline signer.
+    ///
+    /// Only a transfer is surfaced: it is a leaf of the dependency graph, so it can be rebuilt on
+    /// its own. An expired PREPARATION is reported via [`Blocker::Expired`] but never as this step
+    /// (see [`MigrationState::expired_transactions`]). A migration is never stuck silently on an
+    /// expired transfer: this step is returned in preference to [`Waiting`](Self::Waiting) whenever
+    /// one is holding up the schedule.
+    Rebuild {
+        /// The transaction to rebuild.
+        id: MigrationTxId,
+    },
     /// Nothing to do now: waiting for one or more transactions to mine, for an anchor boundary to
     /// settle, or for a scheduled height to arrive.
     Waiting,
@@ -89,6 +107,16 @@ pub enum Blocker {
     /// [`MigrationState::apply_signature`](MigrationState::apply_signature) stores the signed PCZT
     /// returned by the device.
     Signature,
+    /// Its [`expiry_height`](MigrationTransaction::expiry_height) has passed without it mining, so it
+    /// can no longer be included in a block (ZIP 203): the pre-signed artifact is dead, and an
+    /// entirely new transaction must be constructed and signed anew (with a fresh anchor and
+    /// expiry, its denomination unchanged) before this part can advance. For a TRANSFER the
+    /// consumer performs that rebuild when [`next_step`](MigrationState::next_step) returns
+    /// [`AdvanceStep::Rebuild`]. For a PREPARATION no single-transaction rebuild exists (its
+    /// dependents' pre-signatures commit to the notes it would have minted), so this blocker is the
+    /// signal that the migration needs a new signing ceremony over the affected subtree. Reported
+    /// so a wallet can show the transaction as needing attention rather than as merely waiting.
+    Expired,
 }
 
 /// The status of one migration transaction, as a wallet renders it and decides the next step. This is
@@ -113,6 +141,11 @@ pub struct TransactionStatus {
     /// The height at or after which it is due to broadcast.
     #[getset(get_copy = "pub")]
     pub(crate) scheduled_height: BlockHeight,
+    /// The height after which the transaction can no longer be mined (ZIP 203); `0` means it never
+    /// expires. Surfaced so a wallet can show how close a transaction is to expiring, and recognize
+    /// the [`Blocker::Expired`] state.
+    #[getset(get_copy = "pub")]
+    pub(crate) expiry_height: BlockHeight,
     /// Whether the wallet can act on it right now.
     #[getset(get_copy = "pub")]
     pub(crate) ready: bool,
@@ -142,6 +175,51 @@ impl MigrationState {
         })
     }
 
+    /// Whether transaction `t` can no longer be mined at `target_height` (`chain_tip + 1`, the height
+    /// of the next block it could be included in) and so must be rebuilt. A transaction may be mined
+    /// only in a block whose height is at or below its
+    /// [`expiry_height`](MigrationTransaction::expiry_height) (ZIP 203), so it is expired once
+    /// `expiry_height < target_height`. An `expiry_height` of `0` disables expiry (the transaction
+    /// never expires), and an already-`Mined` transaction is never expired: it was included before its
+    /// expiry and is final.
+    fn is_expired(t: &MigrationTransaction, target_height: BlockHeight) -> bool {
+        if matches!(t.state, MigrationTxState::Mined { .. }) {
+            return false;
+        }
+        let expiry = u32::from(t.expiry_height);
+        expiry != 0 && expiry < u32::from(target_height)
+    }
+
+    /// The ids of every transaction that has expired at `target_height` (`chain_tip + 1`) without
+    /// mining. This is the detection a wallet runs on launch to reconcile a schedule whose
+    /// broadcast windows were missed: each id it returns is a pre-signed transaction the node would
+    /// now reject, whose part must be carried by an entirely new transaction, constructed and
+    /// signed anew with a fresh anchor and expiry while keeping its denomination. A TRANSFER here
+    /// is also surfaced as [`AdvanceStep::Rebuild`]; a PREPARATION is not (rebuilding it means
+    /// re-signing its whole dependent subtree, a remediation beyond a single advance step), so a
+    /// wallet uses this list to tell the user the migration needs a new signing ceremony.
+    pub fn expired_transactions(&self, target_height: BlockHeight) -> Vec<MigrationTxId> {
+        self.transactions
+            .iter()
+            .filter(|t| Self::is_expired(t, target_height))
+            .map(|t| t.id)
+            .collect()
+    }
+
+    /// The id of the next TRANSFER that must be rebuilt because it has expired (see
+    /// [`Self::is_expired`]). Only a transfer is surfaced: it is a leaf of the dependency graph, so
+    /// it can be reconstructed and signed anew on its own. An expired PREPARATION has no
+    /// single-transaction remediation — its dependents' pre-signatures commit to the notes it would
+    /// have minted, so rebuilding it means re-signing the whole dependent subtree (a follow-on
+    /// slice); it stays visible through [`Blocker::Expired`] and [`Self::expired_transactions`].
+    fn next_rebuildable(&self, target_height: BlockHeight) -> Option<MigrationTxId> {
+        self.transactions
+            .iter()
+            .filter(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
+            .find(|t| Self::is_expired(t, target_height))
+            .map(|t| t.id)
+    }
+
     /// Whether transaction `t` is ready to PROVE at `target_height` (`chain_tip + 1`): its
     /// dependencies are mined and its Orchard anchor is resolvable from the wallet's commitment tree
     /// right now.
@@ -155,6 +233,12 @@ impl MigrationState {
     /// anchors to a fresh checkpoint at the tip when proved, so it is prove-ready once its
     /// dependencies are mined and its scheduled height has arrived.
     fn prove_ready(&self, t: &MigrationTransaction, target_height: BlockHeight) -> bool {
+        // An expired transaction can never be mined, so proving it is wasted work: it must be rebuilt
+        // (with a fresh anchor and expiry) first. Guarding here keeps `next_provable` from ever
+        // offering an expired transaction.
+        if Self::is_expired(t, target_height) {
+            return false;
+        }
         if !self.deps_mined(&t.depends_on) {
             return false;
         }
@@ -189,6 +273,10 @@ impl MigrationState {
                 matches!(t.state, MigrationTxState::Proved)
                     && t.scheduled_height <= target_height
                     && self.deps_mined(&t.depends_on)
+                    // An expired proven transaction would be rejected by the node; it must be rebuilt,
+                    // not broadcast. This is what stops a wallet resumed after its broadcast windows
+                    // lapsed from broadcasting a stale, no-longer-includable transaction.
+                    && !Self::is_expired(t, target_height)
             })
             .map(|t| t.id)
     }
@@ -296,6 +384,13 @@ impl MigrationState {
         if let Some(id) = self.next_broadcastable(target_height) {
             return AdvanceStep::Broadcast { id };
         }
+        // Make progress on still-valid transactions first (above), then surface any expired
+        // transfer for rebuild. Reporting Rebuild in preference to Waiting is what stops the
+        // migration stalling forever on a transfer whose broadcast window lapsed: nothing else
+        // will ever make it broadcastable again.
+        if let Some(id) = self.next_rebuildable(target_height) {
+            return AdvanceStep::Rebuild { id };
+        }
         if !self.transactions.is_empty()
             && self
                 .transactions
@@ -320,44 +415,53 @@ impl MigrationState {
             .iter()
             .map(|t| {
                 let deps_ok = self.deps_mined(&t.depends_on);
-                // `Signed`/`Proved` transactions are actionable only once their dependencies (the
-                // preparation layers that mint their inputs) are mined and they are due.
-                let (ready, action, blocked_on) = match t.state {
-                    // Built for an external signer and waiting for its signed PCZT; the wallet's
-                    // automatic driver takes no action (the external-signing caller drives it via
-                    // `apply_signature`), so it is neither ready nor blocked on the chain.
-                    MigrationTxState::AwaitingSignature => (false, None, Some(Blocker::Signature)),
-                    // Pre-signed and awaiting proof: ready to PROVE once its anchor is resolvable (a
-                    // transfer's boundary has settled, or a preparation is due). Not yet proved, so
-                    // not yet broadcast.
-                    MigrationTxState::Signed => {
-                        if !deps_ok {
-                            (false, None, Some(Blocker::Dependencies))
-                        } else if self.prove_ready(t, target_height) {
-                            (true, Some(NextAction::Prove), None)
-                        } else {
-                            // Deps mined but not prove-ready: a transfer waiting for its anchor
-                            // boundary to settle, or a preparation not yet due on its schedule.
-                            let blocker = match t.anchor_boundary {
-                                Some(_) => Blocker::AnchorBoundary,
-                                None => Blocker::Schedule,
-                            };
-                            (false, None, Some(blocker))
+                // An expired transaction (not yet mined, past its expiry height) can never be mined and
+                // must be rebuilt; report that ahead of any other blocker, so a wallet shows it as
+                // needing attention rather than as waiting on a dependency or the schedule.
+                let (ready, action, blocked_on) = if Self::is_expired(t, target_height) {
+                    (false, None, Some(Blocker::Expired))
+                } else {
+                    // `Signed`/`Proved` transactions are actionable only once their dependencies (the
+                    // preparation layers that mint their inputs) are mined and they are due.
+                    match t.state {
+                        // Built for an external signer and waiting for its signed PCZT; the wallet's
+                        // automatic driver takes no action (the external-signing caller drives it via
+                        // `apply_signature`), so it is neither ready nor blocked on the chain.
+                        MigrationTxState::AwaitingSignature => {
+                            (false, None, Some(Blocker::Signature))
                         }
-                    }
-                    // Proved and awaiting broadcast: ready to BROADCAST once its scheduled height has
-                    // arrived, otherwise waiting on the broadcast schedule.
-                    MigrationTxState::Proved => {
-                        if !deps_ok {
-                            (false, None, Some(Blocker::Dependencies))
-                        } else if t.scheduled_height <= target_height {
-                            (true, Some(NextAction::Broadcast), None)
-                        } else {
-                            (false, None, Some(Blocker::Schedule))
+                        // Pre-signed and awaiting proof: ready to PROVE once its anchor is resolvable (a
+                        // transfer's boundary has settled, or a preparation is due). Not yet proved, so
+                        // not yet broadcast.
+                        MigrationTxState::Signed => {
+                            if !deps_ok {
+                                (false, None, Some(Blocker::Dependencies))
+                            } else if self.prove_ready(t, target_height) {
+                                (true, Some(NextAction::Prove), None)
+                            } else {
+                                // Deps mined but not prove-ready: a transfer waiting for its anchor
+                                // boundary to settle, or a preparation not yet due on its schedule.
+                                let blocker = match t.anchor_boundary {
+                                    Some(_) => Blocker::AnchorBoundary,
+                                    None => Blocker::Schedule,
+                                };
+                                (false, None, Some(blocker))
+                            }
                         }
+                        // Proved and awaiting broadcast: ready to BROADCAST once its scheduled height has
+                        // arrived, otherwise waiting on the broadcast schedule.
+                        MigrationTxState::Proved => {
+                            if !deps_ok {
+                                (false, None, Some(Blocker::Dependencies))
+                            } else if t.scheduled_height <= target_height {
+                                (true, Some(NextAction::Broadcast), None)
+                            } else {
+                                (false, None, Some(Blocker::Schedule))
+                            }
+                        }
+                        MigrationTxState::Broadcast { .. } => (false, None, None),
+                        MigrationTxState::Mined { .. } => (false, None, None),
                     }
-                    MigrationTxState::Broadcast { .. } => (false, None, None),
-                    MigrationTxState::Mined { .. } => (false, None, None),
                 };
                 let txid = match t.state {
                     MigrationTxState::Broadcast { txid } => Some(txid),
@@ -373,6 +477,7 @@ impl MigrationState {
                     state: t.state,
                     depends_on: t.depends_on.clone(),
                     scheduled_height: t.scheduled_height,
+                    expiry_height: t.expiry_height,
                     ready,
                     action,
                     blocked_on,
@@ -748,6 +853,189 @@ mod tests {
             AdvanceStep::Broadcast {
                 id: MigrationTxId(1)
             }
+        );
+    }
+
+    // A transaction with the given id/kind/state, no dependencies, scheduled at 0, expiring after
+    // `expiry`. An `expiry` of 0 means the transaction never expires.
+    fn tx_expiring(
+        id: u32,
+        kind: MigrationTxKind,
+        state: MigrationTxState,
+        expiry: u32,
+    ) -> MigrationTransaction {
+        let mut t = tx(id, kind, state);
+        t.expiry_height = BlockHeight::from_u32(expiry);
+        t
+    }
+
+    #[test]
+    fn zero_expiry_height_never_expires() {
+        // The default `tx` helper uses expiry_height 0; at any target the transaction is not expired,
+        // preserving the pre-expiry behaviour of every other test in this module.
+        let s = state_with(vec![tx(0, transfer(0), MigrationTxState::Proved)]);
+        assert!(
+            s.expired_transactions(BlockHeight::from_u32(1_000_000))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn expired_transaction_is_not_broadcast_or_proved() {
+        // A proved transfer valid only up to height 50. `target_height` is `tip + 1`, i.e. the height
+        // of the next block it could be mined into.
+        let mut xfer = tx_expiring(1, transfer(0), MigrationTxState::Proved, 50);
+        xfer.scheduled_height = BlockHeight::from_u32(40);
+        let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
+
+        // At target 50 (tip 49) it can still be mined -> broadcastable.
+        assert_eq!(
+            s.next_broadcastable(BlockHeight::from_u32(50)),
+            Some(MigrationTxId(1))
+        );
+        // At target 51 (tip 50) expiry has passed (51 > 50) -> not broadcastable, must be rebuilt.
+        assert_eq!(s.next_broadcastable(BlockHeight::from_u32(51)), None);
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(51)),
+            AdvanceStep::Rebuild {
+                id: MigrationTxId(1)
+            }
+        );
+
+        // The same holds for a still-`Signed` (unproved) expired transfer: it is not provable either.
+        s.transactions[1].state = MigrationTxState::Signed;
+        assert_eq!(s.next_provable(BlockHeight::from_u32(51)), None);
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(51)),
+            AdvanceStep::Rebuild {
+                id: MigrationTxId(1)
+            }
+        );
+    }
+
+    #[test]
+    fn expired_transaction_reports_blocker_and_expiry_height() {
+        let xfer = tx_expiring(1, transfer(0), MigrationTxState::Proved, 50);
+        let s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
+
+        let v = s.transaction_statuses(BlockHeight::from_u32(51));
+        assert!(!v[1].ready);
+        assert_eq!(v[1].action, None);
+        assert_eq!(v[1].blocked_on, Some(Blocker::Expired));
+        assert_eq!(v[1].expiry_height, BlockHeight::from_u32(50));
+        assert_eq!(
+            s.expired_transactions(BlockHeight::from_u32(51)),
+            vec![MigrationTxId(1)]
+        );
+    }
+
+    #[test]
+    fn mined_transaction_past_expiry_is_not_expired() {
+        // A transaction that already mined is final even once the chain passes its expiry height: it
+        // was included in time and must never be reported as expired or offered for rebuild.
+        let s = state_with(vec![tx_expiring(0, transfer(0), mined(40), 50)]);
+        assert!(
+            s.expired_transactions(BlockHeight::from_u32(1_000))
+                .is_empty()
+        );
+        let v = s.transaction_statuses(BlockHeight::from_u32(1_000));
+        assert_eq!(v[0].blocked_on, None);
+    }
+
+    #[test]
+    fn valid_work_precedes_rebuild() {
+        // One transfer is provable now; an independent, already-proved transfer has expired. The
+        // migration makes progress on the valid transfer first, and only surfaces the rebuild once no
+        // valid prove/broadcast work remains.
+        let prep0 = tx(0, prep(0, 0), mined(10));
+        let provable = tx(1, transfer(0), MigrationTxState::Signed);
+        let expired = tx_expiring(2, transfer(1), MigrationTxState::Proved, 50);
+        let mut s = state_with(vec![prep0, provable, expired]);
+
+        // Target 51: transfer 1 is provable (no boundary, deps mined, due), transfer 2 is expired.
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(51)),
+            AdvanceStep::Prove {
+                id: MigrationTxId(1)
+            }
+        );
+        // Once the valid transfer is proved and broadcast, the expired one is surfaced for rebuild.
+        s.transactions[1].state = MigrationTxState::Broadcast {
+            txid: TxId::from_bytes([3; 32]),
+        };
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(51)),
+            AdvanceStep::Rebuild {
+                id: MigrationTxId(2)
+            }
+        );
+    }
+
+    #[test]
+    fn expired_preparation_is_not_offered_for_rebuild() {
+        // An expired preparation cannot be rebuilt in isolation: its dependents' pre-signatures
+        // commit to the notes it would have minted, so its remediation (rebuilding and re-signing
+        // the whole dependent subtree) is a new signing ceremony, not a single advance step.
+        // `next_step` reports Waiting rather than an unactionable Rebuild, while the expiry stays
+        // visible through `Blocker::Expired` and `expired_transactions`.
+        let expired_prep = tx_expiring(
+            0,
+            prep(0, 0),
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([7; 32]),
+            },
+            50,
+        );
+        let mut dependent = tx(1, transfer(0), MigrationTxState::Signed);
+        dependent.depends_on = vec![MigrationTxId(0)];
+        let s = state_with(vec![expired_prep, dependent]);
+
+        assert_eq!(s.next_step(BlockHeight::from_u32(51)), AdvanceStep::Waiting);
+        let v = s.transaction_statuses(BlockHeight::from_u32(51));
+        assert_eq!(v[0].blocked_on, Some(Blocker::Expired));
+        assert_eq!(
+            s.expired_transactions(BlockHeight::from_u32(51)),
+            vec![MigrationTxId(0)]
+        );
+    }
+
+    #[test]
+    fn rebuild_surfaces_an_expired_transfer_past_an_expired_preparation() {
+        // When both a preparation and a transfer have expired, the rebuild decision surfaces the
+        // TRANSFER (the engine can rebuild it), not the preparation listed before it.
+        let expired_prep = tx_expiring(
+            0,
+            prep(0, 0),
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([7; 32]),
+            },
+            50,
+        );
+        let expired_xfer = tx_expiring(1, transfer(0), MigrationTxState::Proved, 50);
+        let s = state_with(vec![expired_prep, expired_xfer]);
+
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(51)),
+            AdvanceStep::Rebuild {
+                id: MigrationTxId(1)
+            }
+        );
+    }
+
+    #[test]
+    fn terminal_migration_is_not_offered_for_rebuild() {
+        // A cancelled (Failed) migration with an expired transaction must stay terminal: next_step
+        // reports Complete, never Rebuild, so a cancelled migration is never driven further.
+        let mut s = state_with(vec![tx_expiring(
+            0,
+            transfer(0),
+            MigrationTxState::Proved,
+            50,
+        )]);
+        s.status = MigrationStatus::Failed;
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(1_000)),
+            AdvanceStep::Complete
         );
     }
 }

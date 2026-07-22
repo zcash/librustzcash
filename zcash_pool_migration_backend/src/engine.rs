@@ -2776,7 +2776,15 @@ mod commit_tests {
         // only once layer 0 mines; each transfer once its own funding note's producer mines (here
         // the whole last layer is mined at once, so every transfer becomes broadcastable).
         let mut state = state;
-        let target = BlockHeight::from_u32(2_100_000);
+        // A height past every scheduled broadcast (so each transaction is due, not blocked on the
+        // schedule) but within every expiry window (so none is expired and offered for rebuild): the
+        // latest scheduled height. This exercises the dependency-ordering walk, not expiry handling.
+        let target = state
+            .transactions
+            .iter()
+            .map(|t| t.scheduled_height)
+            .max()
+            .expect("the committed migration has transactions");
         match state.next_step(target) {
             crate::state::AdvanceStep::Prove { id }
             | crate::state::AdvanceStep::Broadcast { id } => {
@@ -2948,7 +2956,15 @@ mod commit_tests {
         // The state machine broadcasts each preparation layer in order — a layer only once its
         // predecessor has mined — then, once the last layer mines, the transfers.
         let mut state = state;
-        let target = BlockHeight::from_u32(2_100_000);
+        // A height past every scheduled broadcast (so each transaction is due, not blocked on the
+        // schedule) but within every expiry window (so none is expired and offered for rebuild): the
+        // latest scheduled height. This exercises the dependency-ordering walk, not expiry handling.
+        let target = state
+            .transactions
+            .iter()
+            .map(|t| t.scheduled_height)
+            .max()
+            .expect("the committed migration has transactions");
         let mut height = 2_000_000u32;
         for layer in 0..layer_count {
             let ids = layer_ids(&state, layer);

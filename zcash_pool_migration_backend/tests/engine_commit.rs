@@ -154,7 +154,15 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     // The state machine walks the broadcasts in dependency order: layer 0 first; layer 1 only once
     // layer 0 mines; the transfers only once the whole preparation mines.
     let mut state = state;
-    let target = BlockHeight::from_u32(2_100_000);
+    // A height past every scheduled broadcast (so each transaction is due, not blocked on the
+    // schedule) but within every expiry window (so none is expired and offered for rebuild): the
+    // latest scheduled height. This exercises the dependency-ordering walk, not expiry handling.
+    let target = state
+        .transactions()
+        .iter()
+        .map(|t| t.scheduled_height())
+        .max()
+        .expect("the committed migration has transactions");
     match state.next_step(target) {
         AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
