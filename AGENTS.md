@@ -185,11 +185,14 @@ since Mermaid layout is hard to reason about in plain text.
   canonical leaf strategies into strategies for its own types; it does not
   re-derive the leaves.
 
-- **No issue or PR numbers in code comments.** A comment must stand on its own,
-  explaining the code in words. Do not annotate it with an issue/PR reference
-  (`issue #2700`, `see #1234`): when the patch already solves the problem the
-  reference is stale noise, and when it tracks future work that belongs in the
-  issue tracker, not the source. Name the concern instead of linking to it.
+- **No issue or PR numbers in code comments, except in TODOs.** A comment must
+  stand on its own, explaining the code in words. Do not annotate it with an
+  issue/PR reference (`issue #2700`, `see #1234`): when the patch already solves
+  the problem the reference is stale noise, and when it tracks future work that
+  belongs in the issue tracker, not the source. Name the concern instead of
+  linking to it. The exception is a `TODO`: referencing the tracking issue from
+  a `TODO` is helpful and does not go stale, because the `TODO` comment should
+  be removed at the time the issue is resolved.
 
 ## Build & Test Commands
 
