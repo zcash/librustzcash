@@ -1,3 +1,8 @@
+//! Test-support utilities exposed under the `test-dependencies` feature: an in-memory
+//! [`db::TestDbFactory`] / [`db::TestDb`] wallet for the `zcash_client_backend` testing framework, a
+//! [`BlockCache`] compact-block source, and the [`highest_rooted_orchard_checkpoint`] commitment-tree
+//! helper. Consumed by this crate's own tests and, through the feature, by downstream crates' tests.
+
 use prost::Message;
 use rusqlite::params;
 use tempfile::NamedTempFile;
@@ -12,7 +17,7 @@ use crate::{chain::init::init_cache_database, error::SqliteClientError};
 
 use super::BlockDb;
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 use {
     crate::{
         FsBlockDb, FsBlockDbError,
@@ -29,12 +34,15 @@ pub mod db;
 #[cfg(test)]
 pub(crate) mod pool;
 
+/// An in-memory compact-block cache backed by a temporary [`BlockDb`], implementing the
+/// `zcash_client_backend` testing framework's [`TestCache`].
 pub struct BlockCache {
     _cache_file: NamedTempFile,
     db_cache: BlockDb,
 }
 
 impl BlockCache {
+    /// Creates an empty cache over a fresh temporary block database.
     pub fn new() -> Self {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
@@ -53,6 +61,8 @@ impl Default for BlockCache {
     }
 }
 
+/// The result of inserting a compact block into a [`BlockCache`]: the block's transaction ids and
+/// the note commitments it added.
 pub struct BlockCacheInsertionResult {
     txids: Vec<TxId>,
     #[allow(dead_code)]
@@ -143,13 +153,13 @@ where
     }
 }
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 pub(crate) struct FsBlockCache {
     fsblockdb_root: TempDir,
     db_meta: FsBlockDb,
 }
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 impl FsBlockCache {
     pub(crate) fn new() -> Self {
         let fsblockdb_root = tempfile::tempdir().unwrap();
@@ -163,21 +173,23 @@ impl FsBlockCache {
     }
 }
 
-#[cfg(feature = "unstable")]
+/// The result of inserting a compact block into an [`FsBlockCache`]: the block's transaction ids and
+/// its on-disk block metadata.
+#[cfg(all(test, feature = "unstable"))]
 #[derive(Debug)]
 pub struct FsBlockCacheInsertionResult {
     txids: Vec<TxId>,
     pub(crate) block_meta: BlockMeta,
 }
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 impl CacheInsertionResult for FsBlockCacheInsertionResult {
     fn txids(&self) -> &[TxId] {
         &self.txids[..]
     }
 }
 
-#[cfg(feature = "unstable")]
+#[cfg(all(test, feature = "unstable"))]
 impl TestCache for FsBlockCache {
     type BsError = FsBlockDbError;
     type BlockSource = FsBlockDb;
