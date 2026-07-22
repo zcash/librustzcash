@@ -738,6 +738,32 @@ where
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transactions`].
+///
+/// When `lock_for_blocks` is `Some(n)`, every input selected by the returned proposal is locked
+/// via [`WalletWrite::lock_outputs`] with an expiry height of `target_height + n`, so that the
+/// inputs are excluded from selection by subsequent proposals until that height is reached (or
+/// until they are explicitly released; see below). When it is `None`, no locking is performed.
+///
+/// This is the height-based generalization of the `lock_notes: bool` parameter originally
+/// proposed in [zcash/librustzcash#2161]: `Some(n)` corresponds to "lock" with an explicit expiry
+/// window, and `None` to "do not lock".
+///
+/// # Concurrency
+///
+/// Locking is how overlapping proposals for the same account are kept from selecting the same
+/// inputs. If a concurrent caller has already locked one of the inputs this proposal selected
+/// (a check-then-lock race resolved at the storage layer), locking fails and the error surfaces
+/// as [`ProposalError::ChainDoubleSpend`] identifying the conflicting output; the losing caller
+/// should treat this as "the account is busy" and retry. A caller that abandons a proposal whose
+/// inputs it locked should release them with [`unlock_proposal_inputs`]; locks are otherwise
+/// cleared automatically when the inputs are recorded as spent by
+/// [`WalletWrite::store_transactions_to_be_sent`], when their expiry height is reached, or via
+/// [`WalletWrite::clear_locked_outputs`].
+///
+/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
+/// [`WalletWrite::store_transactions_to_be_sent`]: crate::data_api::WalletWrite::store_transactions_to_be_sent
+/// [`WalletWrite::clear_locked_outputs`]: crate::data_api::WalletWrite::clear_locked_outputs
+/// [zcash/librustzcash#2161]: https://github.com/zcash/librustzcash/issues/2161
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_transfer<DbT, ParamsT, InputsT, ChangeT, CommitmentTreeErrT>(
@@ -819,6 +845,10 @@ where
 /// * `change_memo`: A memo to be included in any change output that is created.
 /// * `fallback_change_pool`: The shielded pool to which change should be sent if
 ///   automatic change pool determination fails.
+/// * `lock_for_blocks`: When `Some(n)`, the inputs selected by the proposal are locked until
+///   `target_height + n` to prevent concurrent proposals from selecting them; when `None`, no
+///   locking is performed. See [`propose_transfer`] for the full semantics and concurrency
+///   behavior.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
@@ -892,6 +922,10 @@ where
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that would spend all available funds from the given `spend_pool`s that can then
 /// be authorized and made ready for submission to the network with [`create_proposed_transactions`].
+///
+/// When `lock_for_blocks` is `Some(n)`, the inputs selected by the proposal are locked until
+/// `target_height + n` to prevent concurrent proposals from selecting them; when `None`, no
+/// locking is performed. See [`propose_transfer`] for the full semantics and concurrency behavior.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
@@ -951,6 +985,10 @@ where
 ///
 /// The `output_filter` parameter controls which transparent outputs are eligible for
 /// inclusion in the proposal. See [`CoinbaseFilter`] for details.
+///
+/// When `lock_for_blocks` is `Some(n)`, the inputs selected by the proposal are locked until
+/// `target_height + n` to prevent concurrent proposals from selecting them; when `None`, no
+/// locking is performed. See [`propose_transfer`] for the full semantics and concurrency behavior.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
