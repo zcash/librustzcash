@@ -345,7 +345,9 @@ impl Run {
 
     /// Phase 4 (prove transfers): advances the chain to each transfer's drawn anchor boundary (so
     /// that checkpoint is settled and holds the funding note, within the pruning window), proves the
-    /// transfer, extracts it, and asserts both its Orchard and Ironwood bundles verify.
+    /// transfer, extracts it, and asserts both its Orchard and Ironwood bundles verify. Finally
+    /// checks the destination pool: the migration created exactly one Ironwood note per transfer,
+    /// together holding the whole migrated value.
     fn prove_transfers(&mut self, committed: &mut Committed, scenario: &Scenario) {
         let mut transfers: Vec<(MigrationTxId, BlockHeight)> = committed
             .state
@@ -367,6 +369,9 @@ impl Run {
             "{}: transfers",
             scenario.label
         );
+
+        // The Ironwood output note each transfer creates, collected to check the destination pool.
+        let mut ironwood_notes: Vec<Zatoshis> = Vec::new();
 
         for (transfer_id, boundary) in transfers {
             loop {
@@ -408,11 +413,38 @@ impl Run {
                 tx.orchard_bundle().is_some(),
                 "the transfer has an Orchard bundle"
             );
-            assert!(
-                tx.ironwood_bundle().is_some(),
-                "the transfer has an Ironwood bundle"
+            let ironwood = tx
+                .ironwood_bundle()
+                .expect("the transfer has an Ironwood bundle");
+            // A transfer creates exactly one Ironwood output: the migrated crossing note. Its value
+            // is the magnitude of the (output-only) bundle's value balance.
+            assert_eq!(
+                ironwood.actions().len(),
+                1,
+                "{}: Ironwood outputs per transfer",
+                scenario.label
+            );
+            ironwood_notes.push(
+                Zatoshis::from_u64(i64::from(ironwood.value_balance()).unsigned_abs())
+                    .expect("a valid Ironwood note value"),
             );
         }
+
+        // The destination pool holds exactly one Ironwood note per crossing, together carrying the
+        // whole migrated value.
+        assert_eq!(
+            ironwood_notes.len(),
+            scenario.expected_transfers,
+            "{}: Ironwood notes",
+            scenario.label
+        );
+        let ironwood_total: u64 = ironwood_notes.iter().map(|&v| u64::from(v)).sum();
+        assert_eq!(
+            Zatoshis::from_u64(ironwood_total).expect("a valid balance"),
+            scenario.expected_migrated,
+            "{}: Ironwood balance",
+            scenario.label
+        );
     }
 }
 
