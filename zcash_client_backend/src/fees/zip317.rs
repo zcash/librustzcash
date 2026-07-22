@@ -318,7 +318,17 @@ where
                 .unwrap_or(SplitPolicy::MIN_NOTE_VALUE),
         );
 
-        meta_source.get_account_metadata(account, &note_selector, target_height, exclude, false)
+        // Account metadata feeds change-splitting decisions, which reason about the
+        // notes that selection can actually draw on; locked notes are excluded from
+        // selection, so they are excluded here as well.
+        let include_locked = false;
+        meta_source.get_account_metadata(
+            account,
+            &note_selector,
+            target_height,
+            exclude,
+            include_locked,
+        )
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
