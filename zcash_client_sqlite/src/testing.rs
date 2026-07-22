@@ -47,6 +47,12 @@ impl BlockCache {
     }
 }
 
+impl Default for BlockCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct BlockCacheInsertionResult {
     txids: Vec<TxId>,
     #[allow(dead_code)]
