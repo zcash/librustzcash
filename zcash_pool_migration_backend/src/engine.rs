@@ -43,6 +43,7 @@
 
 use alloc::vec::Vec;
 use core::fmt;
+use core::num::NonZeroUsize;
 
 use corez::io;
 
@@ -56,7 +57,7 @@ use zcash_primitives::transaction::fees::FeeRule as _;
 use zcash_primitives::transaction::fees::{transparent, zip317};
 
 use crate::note_splitting::{NoteSplitPlan, plan_note_split};
-use crate::preparation::{PrepError, PreparationPlan, plan_preparation};
+use crate::preparation::{PrepError, PrepInput, PreparationPlan, plan_preparation};
 use crate::scheduling::{self, Schedule};
 
 /// The estimated number of blocks for a preparation layer's LAST scheduled transaction to mine and
@@ -739,6 +740,280 @@ where
         prep_schedule,
         schedule,
     })
+}
+
+/// A per-run entry of a [`MigrationRunEstimate`]: what one migration run migrates (the note-split
+/// side) and what preparing it costs (the note-preparation side), so the two can be compared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RunEstimate {
+    migratable: Zatoshis,
+    crossings: usize,
+    prep_layers: usize,
+    prep_transactions: usize,
+}
+
+impl RunEstimate {
+    /// The total value that crosses the turnstile in this run (the sum of its crossing denominations).
+    pub fn migratable(&self) -> Zatoshis {
+        self.migratable
+    }
+
+    /// The number of pool-crossing transfers this run makes: one per self-funding note the note split
+    /// produced for it.
+    pub fn crossings(&self) -> usize {
+        self.crossings
+    }
+
+    /// The number of sequential note-preparation layers this run needs — its wall-clock depth, since
+    /// each layer waits for the previous one to mine before it can be broadcast.
+    pub fn prep_layers(&self) -> usize {
+        self.prep_layers
+    }
+
+    /// The number of note-preparation transactions this run builds across all its layers.
+    pub fn prep_transactions(&self) -> usize {
+        self.prep_transactions
+    }
+
+    /// The total number of transactions this run builds and signs: its preparation transactions plus
+    /// one pool-crossing transfer per funding note.
+    pub fn transactions(&self) -> usize {
+        self.prep_transactions + self.crossings
+    }
+
+    /// The number of signing sessions this run needs when an external signer (for example a Keystone
+    /// hardware wallet) can sign at most `max_per_session` transactions in one interaction:
+    /// `ceil(transactions / max_per_session)`. All of a run's transactions are built and signed
+    /// together (anchors and witnesses are deferred to proving time, [ZIP 374]), so they pool into
+    /// sessions bounded only by the signer's capacity.
+    ///
+    /// [ZIP 374]: https://zips.z.cash/zip-0374
+    pub fn signing_sessions(&self, max_per_session: NonZeroUsize) -> usize {
+        self.transactions().div_ceil(max_per_session.get())
+    }
+}
+
+/// An estimate of migrating a wallet's whole spendable balance across successive migration RUNS
+/// ("rounds"): one [`RunEstimate`] per run and the value left un-migrated at the end.
+///
+/// A balance beyond one run's capacity (the note cap times the maximum denomination) migrates over
+/// several runs, each run's spent notes and preparation residuals forming the next run's note
+/// structure (see [`estimate_migration_runs`]). Each run carries BOTH sides so an application can
+/// compare them: the note-split crossings it migrates and the note-preparation layers and
+/// transactions it costs.
+///
+/// A capacity-limited external signer adds a third dimension: given how many transactions such a
+/// signer can sign in one interaction, [`total_signing_sessions`](Self::total_signing_sessions) gives
+/// the number of signing interactions the whole migration requires. That limit is a query parameter,
+/// not part of the estimate, so an SDK can evaluate it for any signer capacity without re-running the
+/// planners.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrationRunEstimate {
+    runs: Vec<RunEstimate>,
+    final_residual: Zatoshis,
+}
+
+impl MigrationRunEstimate {
+    /// The expected number of migration runs ("rounds") to migrate the whole balance: zero when the
+    /// balance is below the smallest self-funding note, so nothing migrates.
+    pub fn run_count(&self) -> usize {
+        self.runs.len()
+    }
+
+    /// The per-run estimates, in run order.
+    pub fn runs(&self) -> &[RunEstimate] {
+        &self.runs
+    }
+
+    /// The value left in the source pool after the last run — below the smallest self-funding note, so
+    /// it never migrates. Zero when the balance divides exactly into self-funding notes and fees.
+    pub fn final_residual(&self) -> Zatoshis {
+        self.final_residual
+    }
+
+    /// The total value that migrates across all runs (the sum of each run's
+    /// [`migratable`](RunEstimate::migratable)).
+    pub fn total_migratable(&self) -> Zatoshis {
+        self.runs
+            .iter()
+            .map(RunEstimate::migratable)
+            .sum::<Option<Zatoshis>>()
+            .expect("the per-run migratable totals sum to at most the validated balance")
+    }
+
+    /// The total number of pool-crossing transfers across all runs (the sum of each run's
+    /// [`crossings`](RunEstimate::crossings)).
+    pub fn total_crossings(&self) -> usize {
+        self.runs.iter().map(RunEstimate::crossings).sum()
+    }
+
+    /// The total number of note-preparation layers across all runs (the sum of each run's
+    /// [`prep_layers`](RunEstimate::prep_layers)).
+    pub fn total_prep_layers(&self) -> usize {
+        self.runs.iter().map(RunEstimate::prep_layers).sum()
+    }
+
+    /// The total number of note-preparation transactions across all runs (the sum of each run's
+    /// [`prep_transactions`](RunEstimate::prep_transactions)).
+    pub fn total_prep_transactions(&self) -> usize {
+        self.runs.iter().map(RunEstimate::prep_transactions).sum()
+    }
+
+    /// The total number of transactions the whole migration builds and signs across all runs (the sum
+    /// of each run's [`transactions`](RunEstimate::transactions); equivalently
+    /// [`total_prep_transactions`](Self::total_prep_transactions) plus
+    /// [`total_crossings`](Self::total_crossings)).
+    pub fn total_transactions(&self) -> usize {
+        self.runs.iter().map(RunEstimate::transactions).sum()
+    }
+
+    /// The total number of signing sessions the whole migration needs when an external signer can sign
+    /// at most `max_per_session` transactions in one interaction — the number of times the user must
+    /// interact with a capacity-limited hardware signer (for example a Keystone, whose limit the SDK
+    /// passes in here).
+    ///
+    /// This is the SUM of each run's [`signing_sessions`](RunEstimate::signing_sessions), NOT
+    /// `ceil(total_transactions / max_per_session)`, because signing sessions cannot span runs: a later
+    /// run's transactions spend notes an earlier run must mine first, so each run is signed on its own.
+    pub fn total_signing_sessions(&self, max_per_session: NonZeroUsize) -> usize {
+        self.runs
+            .iter()
+            .map(|run| run.signing_sessions(max_per_session))
+            .sum()
+    }
+}
+
+/// Estimate how the account the `backend` represents will migrate its whole spendable balance: the
+/// number of migration RUNS ("rounds") it takes, and for each run BOTH what it migrates (the
+/// note-split crossings) and what preparing it costs (the note-preparation layers and transactions),
+/// so an application can preview and compare the two before anything is planned or committed.
+///
+/// A run prepares a bounded number of capped self-funding notes, so a balance beyond one run's
+/// capacity migrates over several runs. The estimate depends on the wallet's NOTE STRUCTURE, not just
+/// its total value: each run is decomposed with the REAL preparation planner over the current notes
+/// (so its feasibility and fees are exact, exactly as [`plan_migration`] plans one run), and the notes
+/// that run spends and the residuals it leaves form the next run's structure.
+///
+/// The note-split run count itself does NOT depend on an external signer's capacity. When a
+/// capacity-limited hardware signer (for example a Keystone) can sign only so many transactions in one
+/// interaction, pass that user-configured limit to
+/// [`MigrationRunEstimate::total_signing_sessions`] to get the number of signing interactions the
+/// migration requires (each run is signed on its own; see that method). Because this iterates the
+/// note-split and preparation planners once per run, its cost is roughly one [`plan_migration`] per
+/// run.
+///
+/// A zero (or fully sub-quantum) balance yields a zero-run estimate rather than an error, since this
+/// is a preview. `rng` is drawn from only by a randomized note-split strategy; the recommended
+/// canonical strategy ignores it.
+pub fn estimate_migration_runs<P, B, R>(
+    params: &P,
+    backend: &B,
+    rng: &mut R,
+) -> Result<MigrationRunEstimate, MigrationError<B::Error>>
+where
+    P: zcash_protocol::consensus::Parameters,
+    B: MigrationBackend,
+    R: RngCore,
+{
+    let height = backend
+        .chain_tip_height()
+        .map_err(MigrationError::Backend)?;
+    let (prep_tx_fee, transfer_fee_buffer) =
+        canonical_fees(params, height).map_err(MigrationError::Fee)?;
+    // The note structure the migration works on, evolving run by run: initially the wallet's own
+    // spendable notes, then each run's unspent notes plus its preparation residuals.
+    let mut notes = backend
+        .spendable_orchard_note_values()
+        .map_err(MigrationError::Backend)?;
+
+    let mut runs: Vec<RunEstimate> = Vec::new();
+    loop {
+        let balance = notes
+            .iter()
+            .copied()
+            .sum::<Option<Zatoshis>>()
+            .ok_or(MigrationError::InvalidBalance(BalanceError::Overflow))?;
+
+        // This run's note split, decomposing the CURRENT note set. Its per-step preparation cost and
+        // feasibility are backed by the real preparation planner over the current notes, so the split
+        // — and hence the whole run count — depends on the wallet's note structure, not just its
+        // total value. The closure's borrow of `notes` is released with the block, before `notes` is
+        // reassigned below.
+        let note_split = {
+            let prep_tx_count = |funding: &[Zatoshis]| {
+                plan_preparation(&notes, funding, prep_tx_fee)
+                    .ok()
+                    .map(|plan| plan.transaction_count())
+            };
+            plan_note_split(
+                balance,
+                transfer_fee_buffer,
+                prep_tx_fee,
+                &prep_tx_count,
+                rng,
+            )
+        };
+
+        let funding = note_split.migration_outputs();
+        if funding.is_empty() {
+            // Nothing more migrates from this note set: the remaining balance is the final residual
+            // and the migration is complete.
+            return Ok(MigrationRunEstimate {
+                runs,
+                final_residual: balance,
+            });
+        }
+
+        // The preparation that mints this run's funding notes: its layer and transaction counts are
+        // the note-preparation side of the estimate, and which notes it spends and which residuals it
+        // leaves give the next run's note structure. The note split only ever proposes a funding
+        // multiset the preparation planner accepted, so this plan succeeds by construction.
+        let preparation =
+            plan_preparation(&notes, &funding, prep_tx_fee).map_err(MigrationError::Preparation)?;
+        runs.push(RunEstimate {
+            migratable: note_split.total_migratable(),
+            crossings: funding.len(),
+            prep_layers: preparation.layer_count(),
+            prep_transactions: preparation.transaction_count(),
+        });
+        notes = source_pool_notes_after_run(&notes, &preparation);
+    }
+}
+
+/// The source-pool notes that remain after a migration run, forming the next run's note structure: the
+/// wallet notes the run's preparation did not spend (and did not use directly as a funding note, which
+/// crosses out), plus the residual notes the preparation leaves behind. The run's minted funding notes
+/// are crossed out by the transfers, so they do not remain.
+fn source_pool_notes_after_run(
+    wallet: &[Zatoshis],
+    preparation: &PreparationPlan,
+) -> Vec<Zatoshis> {
+    let mut spent = vec![false; wallet.len()];
+    for layer in preparation.layers() {
+        for tx in layer {
+            for input in tx.inputs() {
+                if let PrepInput::Wallet { index, .. } = input {
+                    if let Some(flag) = spent.get_mut(*index) {
+                        *flag = true;
+                    }
+                }
+            }
+        }
+    }
+    // Notes used directly as a funding note cross out with the transfers, so they do not remain.
+    for &(index, _) in preparation.direct_funding_notes() {
+        if let Some(flag) = spent.get_mut(index) {
+            *flag = true;
+        }
+    }
+    let mut remaining: Vec<Zatoshis> = wallet
+        .iter()
+        .copied()
+        .zip(spent)
+        .filter_map(|(value, is_spent)| (!is_spent).then_some(value))
+        .collect();
+    remaining.extend(preparation.residual_notes());
+    remaining
 }
 
 /// The Orchard-specific wallet operations the engine needs to BUILD and PRE-SIGN a migration: the
@@ -1637,6 +1912,137 @@ mod tests {
             plan_migration(&test_net(), &backend, &mut rng),
             Err(MigrationError::NothingToMigrate)
         ));
+    }
+
+    /// A typical balance migrates in a single run, whose entry carries BOTH the note-split side
+    /// (migratable value and crossing count) and the note-preparation side (layers and transactions),
+    /// and the aggregates match the single run.
+    #[test]
+    fn estimates_a_single_run_with_both_sides() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let backend = MockBackend::new(vec![142 * COIN], 2_000_000);
+        let est = estimate_migration_runs(&test_net(), &backend, &mut rng)
+            .expect("a valid balance estimates");
+
+        assert_eq!(est.run_count(), 1);
+        let run = est.runs()[0];
+        // Note-split side: it crosses value in one or more canonical denominations.
+        assert!(u64::from(run.migratable()) > 0);
+        assert!(run.crossings() >= 1);
+        // Note-preparation side: minting those notes costs at least one layer and one transaction.
+        assert!(run.prep_layers() >= 1);
+        assert!(run.prep_transactions() >= 1);
+        // The aggregates reduce to the single run.
+        assert_eq!(est.total_migratable(), run.migratable());
+        assert_eq!(est.total_crossings(), run.crossings());
+        assert_eq!(est.total_prep_layers(), run.prep_layers());
+        assert_eq!(est.total_prep_transactions(), run.prep_transactions());
+    }
+
+    /// An empty (or fully sub-quantum) balance is a zero-run estimate, a preview rather than an error.
+    #[test]
+    fn empty_balance_estimates_zero_runs() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let empty = MockBackend::new(Vec::new(), 2_000_000);
+        let est = estimate_migration_runs(&test_net(), &empty, &mut rng)
+            .expect("an empty balance estimates");
+        assert_eq!(est.run_count(), 0);
+        assert!(est.runs().is_empty());
+        assert_eq!(est.total_migratable(), Zatoshis::ZERO);
+        assert_eq!(est.final_residual(), Zatoshis::ZERO);
+    }
+
+    /// A whale beyond one run's capacity migrates over several runs; its first run crosses the per-run
+    /// cap of 50 * 10,000 ZEC in 50 notes, and the aggregate crossings sum the per-run counts.
+    #[test]
+    fn whale_migrates_over_several_runs() {
+        use crate::note_splitting::{
+            MIGRATION_MAX_DENOMINATION_ZEC, MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+        };
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let whale = MockBackend::new(vec![1_200_000 * COIN], 2_000_000);
+        let est = estimate_migration_runs(&test_net(), &whale, &mut rng)
+            .expect("a whale balance estimates");
+
+        assert!(
+            est.run_count() >= 2,
+            "a whale migrates over several runs, got {}",
+            est.run_count()
+        );
+        let per_run_cap =
+            MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * MIGRATION_MAX_DENOMINATION_ZEC * COIN;
+        assert_eq!(u64::from(est.runs()[0].migratable()), per_run_cap);
+        assert_eq!(
+            est.runs()[0].crossings(),
+            MIGRATION_MAX_PREPARED_NOTES_PER_RUN
+        );
+        let summed: usize = est.runs().iter().map(|r| r.crossings()).sum();
+        assert_eq!(est.total_crossings(), summed);
+    }
+
+    /// The estimate depends on the wallet's NOTE STRUCTURE, not just its total value: the same balance
+    /// held as one note versus as many small notes migrates the same value in one run, but the
+    /// fragmented wallet costs strictly more note-preparation work (consolidation).
+    #[test]
+    fn estimate_depends_on_wallet_note_structure() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let one_note = MockBackend::new(vec![200 * COIN], 2_000_000);
+        let fragmented = MockBackend::new(vec![COIN; 200], 2_000_000); // 200 ZEC as 200 x 1 ZEC
+
+        let est_one = estimate_migration_runs(&test_net(), &one_note, &mut rng).expect("estimates");
+        let est_frag =
+            estimate_migration_runs(&test_net(), &fragmented, &mut rng).expect("estimates");
+
+        assert_eq!(est_one.run_count(), 1);
+        assert_eq!(est_frag.run_count(), 1);
+        assert!(
+            est_frag.total_prep_transactions() > est_one.total_prep_transactions(),
+            "a fragmented wallet needs more preparation: {} vs {}",
+            est_frag.total_prep_transactions(),
+            est_one.total_prep_transactions()
+        );
+    }
+
+    /// The number of signing sessions follows a capacity-limited signer's per-interaction transaction
+    /// limit (a Keystone-style hard limit): one session per transaction at capacity one, one session
+    /// per run when the capacity exceeds every run, and monotonically more sessions as the limit
+    /// tightens. Sessions are summed per run (they cannot span runs).
+    #[test]
+    fn signing_sessions_follow_the_signer_capacity() {
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        // A whale, so there are several runs, each with several transactions.
+        let whale = MockBackend::new(vec![1_200_000 * COIN], 2_000_000);
+        let est = estimate_migration_runs(&test_net(), &whale, &mut rng).expect("estimates");
+
+        // Total transactions reconcile with the per-side aggregates.
+        assert_eq!(
+            est.total_transactions(),
+            est.total_prep_transactions() + est.total_crossings()
+        );
+
+        let one = NonZeroUsize::new(1).unwrap();
+        let big = NonZeroUsize::new(10_000).unwrap();
+        let mid = NonZeroUsize::new(8).unwrap();
+
+        // Capacity of one transaction per session: one session per transaction.
+        assert_eq!(est.total_signing_sessions(one), est.total_transactions());
+        // Capacity larger than any single run's transaction count: one session per run.
+        assert_eq!(est.total_signing_sessions(big), est.run_count());
+        // A tighter limit never needs fewer sessions than a looser one.
+        assert!(est.total_signing_sessions(mid) >= est.total_signing_sessions(big));
+        assert!(est.total_signing_sessions(one) >= est.total_signing_sessions(mid));
+
+        // Per-run consistency: a run's sessions are the ceiling of its transaction count, and the
+        // total is the per-run sum (sessions do not span runs).
+        let summed: usize = est.runs().iter().map(|r| r.signing_sessions(mid)).sum();
+        assert_eq!(est.total_signing_sessions(mid), summed);
+        for run in est.runs() {
+            assert_eq!(
+                run.transactions(),
+                run.prep_transactions() + run.crossings()
+            );
+            assert_eq!(run.signing_sessions(mid), run.transactions().div_ceil(8));
+        }
     }
 
     #[test]
