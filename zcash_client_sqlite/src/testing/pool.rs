@@ -266,6 +266,27 @@ pub(crate) fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn lock_expiry_restores_spendability<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::lock_expiry_restores_spendability::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::lock_conflict_and_batch_atomicity::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::unlock_proposal_inputs_releases_locks::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::ovk_policy_prevents_recovery_from_chain::<T, _>(
         TestDbFactory::default(),
