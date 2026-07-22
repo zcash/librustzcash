@@ -998,7 +998,7 @@ impl Transaction {
             orchard::ValuePool::Ironwood,
         )?;
 
-        let tachyon_bundle = tachyon_serialization::read_v6_bundle(&mut reader)?;
+        let tachyon_bundle = tachyon_serialization::read_v7_bundle(&mut reader)?;
 
         let data = TransactionData {
             version,
@@ -1176,7 +1176,7 @@ impl Transaction {
         orchard_serialization::write_v6_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
         orchard_serialization::write_v6_bundle(self.ironwood_bundle.as_ref(), &mut writer)?;
 
-        tachyon_serialization::write_v6_bundle(self.tachyon_bundle.as_ref(), &mut writer)?;
+        tachyon_serialization::write_v7_bundle(self.tachyon_bundle.as_ref(), &mut writer)?;
 
         Ok(())
     }

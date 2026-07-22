@@ -1123,9 +1123,7 @@ fn zip_0244() {
 
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
 #[test]
-#[ignore = "tachyon test vectors were generated with the placeholder v6 version group ID and \
-            must be regenerated for the v7 (tachyon) transaction format"]
-fn tachyon_v6_test_vectors() {
+fn tachyon_v7_test_vectors() {
     use self::data::tachyon_vectors::*;
     use ff::FromUniformBytes;
     use pasta_curves::group::prime::PrimeCurveAffine;
@@ -1157,15 +1155,15 @@ fn tachyon_v6_test_vectors() {
         tx
     };
 
-    // EMPTY_V6_TX: no tachyon bundle
+    // EMPTY_V7_TX: no tachyon bundle
     {
-        let tx = read_and_roundtrip(&EMPTY_V6_TX);
+        let tx = read_and_roundtrip(&EMPTY_V7_TX);
         assert!(tx.tachyon_bundle().is_none());
     }
 
-    // V6_TX_TACHYON_STRIPPED: 1 action, Adjunct stamp (post-aggregation), value_balance = 0
+    // V7_TX_TACHYON_STRIPPED: 1 action, Adjunct stamp (post-aggregation), value_balance = 0
     {
-        let tx = read_and_roundtrip(&V6_TX_TACHYON_STRIPPED);
+        let tx = read_and_roundtrip(&V7_TX_TACHYON_STRIPPED);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stripped = match bundle {
             zcash_tachyon::TachyonBundle::Adjunct(s) => s,
@@ -1184,9 +1182,9 @@ fn tachyon_v6_test_vectors() {
         assert_eq!(<[u8; 64]>::from(stripped.stamp), [0xEEu8; 64]);
     }
 
-    // V6_TX_TACHYON_STAMPED: 1 action, stamp with 1 tachygram, value_balance = 100
+    // V7_TX_TACHYON_STAMPED: 1 action, stamp with 1 tachygram, value_balance = 100
     {
-        let tx = read_and_roundtrip(&V6_TX_TACHYON_STAMPED);
+        let tx = read_and_roundtrip(&V7_TX_TACHYON_STAMPED);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stamped = match bundle {
             zcash_tachyon::TachyonBundle::Stamped(s) => s,
@@ -1211,9 +1209,9 @@ fn tachyon_v6_test_vectors() {
         assert_eq!(stamped.stamp.anchor, expected_anchor);
     }
 
-    // V6_TX_TACHYON_MULTI_ACTION: 2 actions, stamp with 3 tachygrams, value_balance = 300
+    // V7_TX_TACHYON_MULTI_ACTION: 2 actions, stamp with 3 tachygrams, value_balance = 300
     {
-        let tx = read_and_roundtrip(&V6_TX_TACHYON_MULTI_ACTION);
+        let tx = read_and_roundtrip(&V7_TX_TACHYON_MULTI_ACTION);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stamped = match bundle {
             zcash_tachyon::TachyonBundle::Stamped(s) => s,
