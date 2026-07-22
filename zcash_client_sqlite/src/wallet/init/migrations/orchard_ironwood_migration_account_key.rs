@@ -8,8 +8,18 @@
 //! now builds the account-keyed shape directly, so a wallet created after this migration exists
 //! reaches it without `up` doing any work. For a wallet that already ran
 //! [`orchard_ironwood_migration_tables`] under the old shape, `up` reaches the new shape by dropping
-//! and recreating the pool-migration tables: there is at most one in-progress migration to replan,
-//! and these tables have not yet been part of a public release.
+//! and recreating the pool-migration tables.
+//!
+//! ## The old-shape data contract
+//!
+//! Dropping the old-shape tables DISCARDS any in-progress migration they held; it is deliberately
+//! not carried onto the new shape. The old singleton row recorded no owning account (that was the
+//! whole limitation this migration lifts), so there is no sound account to re-key it to: silently
+//! assigning it to some account could mis-attribute a migration in a multi-account wallet. The
+//! wallet instead re-plans the migration from its current on-chain state on the next run, exactly
+//! as it would for a wallet that had never started one. This loses no released behavior, because
+//! these tables have not yet been part of a public release, and there is at most one such
+//! in-progress migration per wallet to re-plan.
 //!
 //! [`orchard_ironwood_migration_tables`]: super::orchard_ironwood_migration_tables
 
@@ -160,6 +170,20 @@ mod tests {
         assert_eq!(
             migrations, 0,
             "the legacy singleton row must not survive the shape change"
+        );
+        // The in-progress migration is discarded, NOT silently carried onto the new shape under a
+        // fabricated account: no row keyed to any account survives (the wallet re-plans instead).
+        // The old singleton recorded no owning account, so any survivor would be mis-attributed.
+        let rekeyed: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM orchard_ironwood_migrations WHERE account_uuid IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            rekeyed, 0,
+            "no legacy migration may be re-keyed onto the new account-scoped shape"
         );
         let crossing_values: i64 = tx
             .query_row(
