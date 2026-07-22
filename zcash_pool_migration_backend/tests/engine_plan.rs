@@ -63,6 +63,74 @@ fn empty_balance_has_nothing_to_migrate() {
     ));
 }
 
+/// The full migration pipeline (note splitting then preparation) for the smallest migratable
+/// balance: a lone source note of exactly one quantum plus its fees. A quantum is a canonical
+/// `{1, 2, 5} * 10^k` denomination; its fees are the ZIP-317 transfer buffer that funds the crossing
+/// note plus one padded preparation-transaction fee. Such a balance migrates that one denomination
+/// as a single crossing note, minted by exactly one preparation transaction in exactly one
+/// preparation layer, leaving no source-pool change.
+#[test]
+fn full_migration_of_one_quantum_is_one_layer_one_transaction() {
+    let params = regtest_network(true);
+    let tip = 2_000_000;
+
+    // The canonical fees depend only on the network and height, not the balance. Discover them from
+    // a probe migration of a lone 0.02 ZEC note, which funds exactly one 0.01 ZEC minimum-denomination
+    // note in a single padded preparation transaction (so its reserved prep fee is one tx fee).
+    let probe = MockBackend::new(vec![2 * (COIN / 100)], tip);
+    let mut rng = ChaCha8Rng::seed_from_u64(1);
+    let probe_plan = plan_migration(&params, &probe, &mut rng).expect("the probe balance plans");
+    assert_eq!(probe_plan.preparation().transaction_count(), 1);
+    let buffer = u64::from(probe_plan.note_split().note_fee_buffer());
+    let prep_tx_fee = u64::from(probe_plan.note_split().prep_fees());
+
+    // A few example quanta spanning the series from the 0.01 ZEC minimum to the 10,000 ZEC cap.
+    let quanta = [
+        COIN / 100,    // 0.01 ZEC, the minimum denomination
+        COIN / 20,     // 0.05 ZEC
+        COIN,          // 1 ZEC
+        100 * COIN,    // 100 ZEC
+        10_000 * COIN, // 10,000 ZEC, the cap
+    ];
+    for quantum in quanta {
+        let balance = quantum + buffer + prep_tx_fee;
+        let backend = MockBackend::new(vec![balance], tip);
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let plan =
+            plan_migration(&params, &backend, &mut rng).expect("a one-quantum balance plans");
+
+        // The split: one crossing of exactly the quantum, and the whole balance consumed (no change).
+        assert_eq!(
+            plan.note_split()
+                .crossing_values()
+                .iter()
+                .map(|&v| u64::from(v))
+                .collect::<Vec<u64>>(),
+            vec![quantum],
+            "quantum {quantum}",
+        );
+        assert_eq!(plan.note_split().change(), None, "quantum {quantum}");
+
+        // The preparation: exactly one layer holding exactly one transaction, minting exactly the
+        // single funding note (the crossing plus its transfer buffer).
+        let prep = plan.preparation();
+        assert_eq!(prep.layer_count(), 1, "quantum {quantum}");
+        assert_eq!(prep.transaction_count(), 1, "quantum {quantum}");
+        assert_eq!(prep.layers()[0].len(), 1, "quantum {quantum}");
+        assert_eq!(
+            plan.funding_notes()
+                .iter()
+                .map(|&v| u64::from(v))
+                .collect::<Vec<u64>>(),
+            vec![quantum + buffer],
+            "quantum {quantum}",
+        );
+
+        // One funding note is one scheduled transfer.
+        assert_eq!(plan.schedule().len(), 1, "quantum {quantum}");
+    }
+}
+
 /// Reconciliation on a many-equal-note source (the "exchange" wallet shape). Ten identical 5-ZEC
 /// notes (50 ZEC) decompose into `[20, 20, 5, 2, 2, 0.5, ...]`, but equal source notes cannot fund
 /// that whole split: each funding note is its crossing plus a transfer buffer and costs a
