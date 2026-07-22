@@ -1,3 +1,6 @@
+//! An in-memory [`WalletDb`]-backed data store and [`DataStoreFactory`] for the
+//! `zcash_client_backend` testing framework.
+
 use ambassador::Delegate;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
@@ -66,6 +69,8 @@ pub(crate) fn test_rng() -> ChaChaRng {
     ChaChaRng::from_seed([0u8; 32])
 }
 
+/// A [`WalletDb`] wrapped as a testing-framework data store: it delegates the wallet traits to the
+/// inner database and owns the temporary file backing it.
 #[allow(clippy::duplicated_attributes, reason = "False positive")]
 #[derive(Delegate)]
 #[delegate(InputSource, target = "wallet_db")]
@@ -89,10 +94,12 @@ impl TestDb {
         }
     }
 
+    /// The wrapped wallet database.
     pub fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &self.wallet_db
     }
 
+    /// The wrapped wallet database, mutably.
     pub fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &mut self.wallet_db
     }
@@ -176,6 +183,8 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
     eprintln!("------");
 }
 
+/// A [`DataStoreFactory`] that builds fresh in-memory [`TestDb`] wallets, optionally migrated only
+/// to a given set of migrations rather than all of them.
 #[derive(Default)]
 pub struct TestDbFactory {
     target_migrations: Option<Vec<Uuid>>,

@@ -162,7 +162,6 @@ pub mod wallet;
 pub mod zewif;
 
 #[cfg(any(test, feature = "test-dependencies"))]
-#[allow(missing_docs)]
 pub mod testing;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
