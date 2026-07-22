@@ -33,12 +33,17 @@ workspace.
   `PoolMigrations::for_account`, scoped to the account whose migration it
   tracks; the underlying `orchard_ironwood_migrations` table enforces at most
   one migration per account.
-- A database migration adds `lock_expiry_height` columns to the
+- A database migration adds `lock_expiry_height` and `lock_owner` columns to the
   `sapling_received_notes`, `orchard_received_notes`, `ironwood_received_notes`,
   and `transparent_received_outputs` tables to support explicit note locking
-  during concurrent proposal creation.
+  during concurrent proposal creation: `lock_expiry_height` bounds how long a
+  lock lasts, and `lock_owner` records the flow that acquired it.
 
 ### Fixed
+- The coinbase branch of the transparent account-balance tally now classifies
+  locked value into `Balance::locked_value`: previously a mature coinbase UTXO
+  locked by an in-flight shielding proposal was still reported as spendable,
+  even though note selection (correctly) refused to select it.
 - The `InputSource::get_unspent_transparent_output` implementation now honors
   its `include_locked` parameter; previously the parameter was ignored and
   locked transparent outputs were returned regardless, diverging from the

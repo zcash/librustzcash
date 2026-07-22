@@ -28,6 +28,15 @@ workspace.
 - `zcash_client_backend::data_api::error::LockError`
 - `zcash_client_backend::wallet::OutputRef`
 - `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
+- `zcash_client_backend::wallet::LockOwner`, an opaque token identifying the
+  holder of an output lock. Locks record their owner: unlocking is scoped to
+  the owner that took the lock, and re-locking by the same owner is an
+  idempotent acquire/extend (supporting crash-retry of a flow that had already
+  locked its inputs), while an active lock held by a different owner cannot be
+  acquired or released until it expires.
+- `zcash_client_backend::data_api::wallet::LockRequest`, the
+  `(owner, for_blocks)` pair accepted by the proposal-creation functions to
+  lock the proposal's inputs.
 - `zcash_client_backend::data_api::wallet::unlock_proposal_inputs`
 - `zcash_client_backend::proposal::ProposalError::InputsLocked`, returned by the
   proposal-creation functions when an input selected by the proposal is already
@@ -84,16 +93,24 @@ workspace.
   required to unlock any locked outputs that are recorded as spent by
   the stored transactions.
 - `zcash_client_backend::data_api::WalletWrite` has added methods
-  `lock_outputs`, `unlock_output`, and `clear_locked_outputs`.
+  `lock_outputs`, `unlock_output`, and `clear_locked_outputs`. Locks are keyed
+  by a `LockOwner` token: `lock_outputs` takes the outputs as a slice together
+  with the owner and fails only on an active lock held by a different owner;
+  `unlock_output` releases only a lock held by the given owner;
+  `clear_locked_outputs` releases every lock for an account regardless of
+  owner, as a recovery mechanism.
 - `zcash_client_backend::data_api::WalletTest` has added method
   `get_locked_outputs`.
 - The following `zcash_client_backend::data_api::wallet::` proposal creation
-  functions now take a `lock_for_blocks: Option<u32>` parameter and require
-  `WalletWrite` instead of `WalletRead`:
+  functions now take a `lock_inputs: Option<LockRequest>` parameter and require
+  `WalletWrite` instead of `WalletRead`; `Some(request)` locks the proposal's
+  inputs on behalf of the request's owner until `target_height +
+  request.for_blocks()`:
   - `propose_transfer`
   - `propose_standard_transfer_to_address`
   - `propose_send_max_transfer`
   - `propose_shielding`
+  - `propose_shielding_coinbase` (under `transparent-inputs`)
 - `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
   `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
   error type, so that `propose_send_max_transfer` can report
