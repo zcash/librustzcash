@@ -1566,29 +1566,41 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
 
         // The Orchard and Ironwood circuit version is fixed by the transaction's
         // consensus branch (both pools share the post-NU6.3 circuit), so derive it
-        // once from the branch rather than from a bundle. Only build the key when
+        // once from the branch rather than from a bundle. Only obtain the key when
         // an Orchard or Ironwood bundle is actually present.
-        let orchard_proving_key = {
-            let build_proving_key = unauthed_tx.orchard_bundle.is_some();
-            let build_proving_key = build_proving_key || unauthed_tx.ironwood_bundle.is_some();
+        let orchard_circuit_version = {
+            let build_proving_key =
+                unauthed_tx.orchard_bundle.is_some() || unauthed_tx.ironwood_bundle.is_some();
             build_proving_key.then(|| {
-                orchard::circuit::ProvingKey::build(
-                    bundle_version_for_branch(
-                        unauthed_tx.consensus_branch_id,
-                        orchard::ValuePool::Orchard,
-                    )
-                    .expect("an Orchard or Ironwood bundle implies an NU5+ consensus branch")
-                    .circuit_version(),
+                bundle_version_for_branch(
+                    unauthed_tx.consensus_branch_id,
+                    orchard::ValuePool::Orchard,
                 )
+                .expect("an Orchard or Ironwood bundle implies an NU5+ consensus branch")
+                .circuit_version()
             })
         };
+
+        // Reuse a process-wide cached proving key rather than reconstructing it on
+        // every `build` call. See `cached_orchard_proving_key`.
+        #[cfg(feature = "std")]
+        let orchard_proving_key: Option<&orchard::circuit::ProvingKey> =
+            orchard_circuit_version.map(cached_orchard_proving_key);
+        // Without `std` there is no thread-safe cache; build the key once for this
+        // transaction. (Proving requires `std` in practice, so this path does not
+        // run when actually creating proofs.)
+        #[cfg(not(feature = "std"))]
+        let orchard_proving_key_storage =
+            orchard_circuit_version.map(orchard::circuit::ProvingKey::build);
+        #[cfg(not(feature = "std"))]
+        let orchard_proving_key: Option<&orchard::circuit::ProvingKey> =
+            orchard_proving_key_storage.as_ref();
 
         let orchard_bundle = unauthed_tx
             .orchard_bundle
             .map(|b| {
                 b.create_proof(
                     orchard_proving_key
-                        .as_ref()
                         .expect("proving key is built when an Orchard bundle is present"),
                     &mut rng,
                 )
@@ -1604,7 +1616,6 @@ impl<P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<P, U
             .map(|b| {
                 b.create_proof(
                     orchard_proving_key
-                        .as_ref()
                         .expect("proving key is built when an Ironwood bundle is present"),
                     &mut rng,
                 )
@@ -1742,6 +1753,38 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
             ironwood_meta,
         })
     }
+}
+
+/// Returns a process-wide cached Orchard proving key for the given circuit version.
+///
+/// Building an Orchard proving key is expensive, and the transaction builder would
+/// otherwise reconstruct it on every call to [`Builder::build`]. Callers that build
+/// many transactions in a process therefore share a single key per circuit version.
+///
+/// The cache is keyed by [`orchard::circuit::OrchardCircuitVersion`] because the
+/// verifying (and hence proving) keys differ between circuit versions; mixing them
+/// would produce proofs against the wrong key.
+///
+/// This is only available when the `std` feature is enabled, as it relies on
+/// [`std::sync::OnceLock`] for thread-safe lazy initialization. Proving requires
+/// `std` in practice, so this covers the paths that actually create proofs.
+#[cfg(all(feature = "circuits", feature = "std"))]
+fn cached_orchard_proving_key(
+    circuit_version: orchard::circuit::OrchardCircuitVersion,
+) -> &'static orchard::circuit::ProvingKey {
+    use orchard::circuit::{OrchardCircuitVersion, ProvingKey};
+    use std::sync::OnceLock;
+
+    static INSECURE_PRE_NU6_2: OnceLock<ProvingKey> = OnceLock::new();
+    static FIXED_POST_NU6_2: OnceLock<ProvingKey> = OnceLock::new();
+    static POST_NU6_3: OnceLock<ProvingKey> = OnceLock::new();
+
+    let cell = match circuit_version {
+        OrchardCircuitVersion::InsecurePreNu6_2 => &INSECURE_PRE_NU6_2,
+        OrchardCircuitVersion::FixedPostNu6_2 => &FIXED_POST_NU6_2,
+        OrchardCircuitVersion::PostNu6_3 => &POST_NU6_3,
+    };
+    cell.get_or_init(|| ProvingKey::build(circuit_version))
 }
 
 #[cfg(feature = "circuits")]
@@ -2992,5 +3035,24 @@ mod tests {
                 Some(Zatoshis::const_from_u64(15_000))
             );
         }
+    }
+
+    #[cfg(all(feature = "circuits", feature = "std"))]
+    #[test]
+    fn cached_orchard_proving_key_reuses_one_instance_per_version() {
+        use core::ptr;
+        use orchard::circuit::OrchardCircuitVersion;
+
+        use super::cached_orchard_proving_key;
+
+        // Repeated calls for the same circuit version return the very same cached
+        // key, so building many transactions does not reconstruct it each time.
+        let first = cached_orchard_proving_key(OrchardCircuitVersion::FixedPostNu6_2);
+        let second = cached_orchard_proving_key(OrchardCircuitVersion::FixedPostNu6_2);
+        assert!(ptr::eq(first, second));
+
+        // Distinct circuit versions are cached independently.
+        let other = cached_orchard_proving_key(OrchardCircuitVersion::PostNu6_3);
+        assert!(!ptr::eq(first, other));
     }
 }
