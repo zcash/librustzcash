@@ -2102,6 +2102,12 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         outputs: impl Iterator<Item = OutputRef>,
         lock_expiry_height: BlockHeight,
     ) -> Result<usize, LockError<Self::Error>> {
+        // This impl operates within an enclosing database transaction, so the
+        // all-or-nothing contract of `WalletWrite::lock_outputs` holds only if a
+        // returned error causes the enclosing transaction to be rolled back: on a
+        // mid-batch `LockFailure`, locks taken for earlier outputs in the batch
+        // remain pending in the transaction. `WalletDb::transactionally` (used by
+        // the non-transactional impl above) provides that rollback.
         Ok(wallet::lock_outputs(
             self.conn.0,
             outputs,
