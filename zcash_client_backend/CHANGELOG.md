@@ -113,6 +113,12 @@ workspace.
   feature.
 
 ### Fixed
+- Proposal decoding (`proto::proposal::Proposal::try_into_standard_proposal`)
+  now retrieves inputs with `include_locked: true`. A proposal created with
+  `lock_for_blocks: Some(_)` locks its own inputs, so the previous behavior
+  made such a proposal fail to decode from its serialized form with
+  `ProposalDecodingError::InputNotFound` for every locked shielded input,
+  breaking persist-and-restore of in-flight locking proposals.
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
   correctly constructs proposals paying a transparent (non-TEX) recipient — a
   bare transparent address, or a unified address having no shielded receiver.
