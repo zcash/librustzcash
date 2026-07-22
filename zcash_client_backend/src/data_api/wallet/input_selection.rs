@@ -26,7 +26,7 @@ use crate::{
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
     proposal::{Proposal, ProposalError, ShieldedInputs},
-    wallet::WalletTransparentOutput,
+    wallet::{LockOwner, WalletTransparentOutput},
 };
 
 use super::ConfirmationsPolicy;
@@ -428,7 +428,6 @@ impl orchard_fees::OutputView for OrchardPayment {
 #[cfg(feature = "transparent-inputs")]
 const DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT: u32 = 10;
 
-#[cfg(feature = "transparent-inputs")]
 /// A `BTreeSet` that is guaranteed to contain at least one element.
 ///
 /// Non-emptiness is maintained by construction: every constructor requires at least one
@@ -436,7 +435,6 @@ const DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT: u32 = 10;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NonEmptyBTreeSet<T>(BTreeSet<T>);
 
-#[cfg(feature = "transparent-inputs")]
 impl<T: Ord> NonEmptyBTreeSet<T> {
     /// Constructs a set containing only the given element.
     pub fn singleton(value: T) -> Self {
@@ -455,7 +453,6 @@ impl<T: Ord> NonEmptyBTreeSet<T> {
     }
 }
 
-#[cfg(feature = "transparent-inputs")]
 impl<T> NonEmptyBTreeSet<T> {
     /// Returns a reference to the wrapped set.
     pub fn as_set(&self) -> &BTreeSet<T> {
@@ -533,6 +530,48 @@ impl SpendPolicy {
     #[cfg(feature = "transparent-inputs")]
     pub fn transparent(&self) -> Option<&TransparentSpendPolicy> {
         self.transparent.as_ref()
+    }
+}
+
+/// Governs whether input selection may draw on locked outputs, and with what preference.
+///
+/// Locks are advisory. The default, [`Self::Exclude`], never selects a locked output. The
+/// overriding variants each carry the set of lock owners whose locks may be drawn upon; a locked
+/// output whose owner is not in that set is never selected, regardless of variant. This keeps an
+/// override scoped to a known reason (e.g. the wallet's own pool-migration PCZTs) and leaves every
+/// other flow's locks intact. Overriding here only *spends through* a lock during selection; it
+/// never releases the lock.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum LockedInputPolicy {
+    /// Never select locked outputs.
+    #[default]
+    Exclude,
+    /// Prefer unlocked outputs; draw on outputs locked by one of these owners only as needed to
+    /// reach the target value.
+    PreferUnlocked(NonEmptyBTreeSet<LockOwner>),
+    /// Prefer outputs locked by one of these owners; draw on unlocked outputs only as needed to
+    /// reach the target value.
+    PreferLocked(NonEmptyBTreeSet<LockOwner>),
+}
+
+impl LockedInputPolicy {
+    /// The set of lock owners whose locked outputs this policy admits (empty for `Exclude`).
+    pub fn overridable_owners(&self) -> &BTreeSet<LockOwner> {
+        static EMPTY: BTreeSet<LockOwner> = BTreeSet::new();
+        match self {
+            LockedInputPolicy::Exclude => &EMPTY,
+            LockedInputPolicy::PreferUnlocked(o) | LockedInputPolicy::PreferLocked(o) => o.as_set(),
+        }
+    }
+
+    /// Whether locked (overridable) outputs are preferred ahead of unlocked ones.
+    pub fn prefers_locked(&self) -> bool {
+        matches!(self, LockedInputPolicy::PreferLocked(_))
+    }
+
+    /// Whether any locked outputs may be selected at all.
+    pub fn admits_locked(&self) -> bool {
+        !matches!(self, LockedInputPolicy::Exclude)
     }
 }
 
@@ -2481,5 +2520,24 @@ mod spend_policy_tests {
         let policy = policy.with_coinbase(CoinbasePolicy::OnlyCoinbase);
         assert_eq!(policy.coinbase(), CoinbasePolicy::OnlyCoinbase);
         assert!(matches!(policy.source(), TransparentSource::AnyAccountAddr));
+    }
+
+    // Each variant's accessors agree with the meaning of the variant: `Exclude` admits no
+    // owners at all, while `PreferUnlocked`/`PreferLocked` admit exactly the given owners and
+    // differ only in whether locked outputs are preferred.
+    #[test]
+    fn locked_input_policy_accessors() {
+        let owner = LockOwner::new([7u8; 32]);
+        let set = BTreeSet::from([owner]);
+        let owners = NonEmptyBTreeSet::from_set(set.clone()).unwrap();
+        assert_eq!(LockedInputPolicy::default(), LockedInputPolicy::Exclude);
+        assert!(LockedInputPolicy::Exclude.overridable_owners().is_empty());
+        assert!(!LockedInputPolicy::Exclude.admits_locked());
+        let pu = LockedInputPolicy::PreferUnlocked(owners.clone());
+        assert!(pu.admits_locked() && !pu.prefers_locked());
+        assert_eq!(pu.overridable_owners(), &set);
+        let pl = LockedInputPolicy::PreferLocked(owners.clone());
+        assert!(pl.admits_locked() && pl.prefers_locked());
+        assert_eq!(pl.overridable_owners(), &set);
     }
 }
