@@ -484,6 +484,7 @@ pub struct SpendPolicy {
     shielded: BTreeSet<ShieldedPool>,
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<TransparentSpendPolicy>,
+    locked_input_policy: LockedInputPolicy,
 }
 
 impl Default for SpendPolicy {
@@ -506,6 +507,7 @@ impl SpendPolicy {
             shielded: pools.into_iter().collect(),
             #[cfg(feature = "transparent-inputs")]
             transparent: None,
+            locked_input_policy: LockedInputPolicy::Exclude,
         }
     }
 
@@ -530,6 +532,17 @@ impl SpendPolicy {
     #[cfg(feature = "transparent-inputs")]
     pub fn transparent(&self) -> Option<&TransparentSpendPolicy> {
         self.transparent.as_ref()
+    }
+
+    /// Sets how input selection treats locked outputs (default: `LockedInputPolicy::Exclude`).
+    pub fn with_locked_input_policy(mut self, policy: LockedInputPolicy) -> Self {
+        self.locked_input_policy = policy;
+        self
+    }
+
+    /// Returns the policy governing selection of locked outputs.
+    pub fn locked_input_policy(&self) -> &LockedInputPolicy {
+        &self.locked_input_policy
     }
 }
 
@@ -2539,5 +2552,20 @@ mod spend_policy_tests {
         let pl = LockedInputPolicy::PreferLocked(owners.clone());
         assert!(pl.admits_locked() && pl.prefers_locked());
         assert_eq!(pl.overridable_owners(), &set);
+    }
+
+    // The default `SpendPolicy` excludes locked inputs, and `with_locked_input_policy` overrides
+    // that choice.
+    #[test]
+    fn spend_policy_locked_input_policy_roundtrips() {
+        let default = SpendPolicy::default();
+        assert_eq!(default.locked_input_policy(), &LockedInputPolicy::Exclude);
+        let owners = NonEmptyBTreeSet::singleton(LockOwner::new([9u8; 32]));
+        let policy = SpendPolicy::default()
+            .with_locked_input_policy(LockedInputPolicy::PreferLocked(owners.clone()));
+        assert_eq!(
+            policy.locked_input_policy(),
+            &LockedInputPolicy::PreferLocked(owners)
+        );
     }
 }
