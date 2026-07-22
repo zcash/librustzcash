@@ -95,6 +95,13 @@ rand_core.workspace = true
 rand_distr.workspace = true
 rand.workspace = true
 
+# Enabled by the `test-dependencies` feature, which exposes the in-crate test harness
+# (`testing::db::TestDbFactory`, `testing::BlockCache`) to external test code. They stay in
+# `[dev-dependencies]` too so the crate's own tests build without enabling the feature.
+ambassador = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
+tempfile = { version = "3.5.0", optional = true }
+
 [dev-dependencies]
 ambassador.workspace = true
 assert_matches.workspace = true
@@ -134,6 +141,9 @@ orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
+    "dep:ambassador",
+    "dep:rand_chacha",
+    "dep:tempfile",
     "incrementalmerkletree/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_client_backend/test-dependencies",

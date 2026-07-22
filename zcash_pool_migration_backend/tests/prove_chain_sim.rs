@@ -25,37 +25,23 @@
 #![cfg(all(feature = "wallet", feature = "test-dependencies"))]
 
 use std::convert::Infallible;
-use std::time::{Duration, SystemTime};
 
-use prost::Message;
 use rand_chacha::ChaCha8Rng;
-use rand_chacha::ChaChaRng;
 use rand_core::SeedableRng;
-use rusqlite::{Connection, params};
 
 use pczt::roles::tx_extractor::TransactionExtractor;
 
 use shardtree::error::ShardTreeError;
 use zcash_client_backend::data_api::testing::{
-    AddressType, CacheInsertionResult, DataStoreFactory, TestBuilder, TestCache,
-    orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+    AddressType, TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
 };
 use zcash_client_backend::data_api::{Account, WalletCommitmentTrees, WalletRead};
-use zcash_client_backend::proto::compact_formats::CompactBlock;
-use zcash_client_sqlite::chain::init::init_cache_database;
-use zcash_client_sqlite::error::SqliteClientError;
-use zcash_client_sqlite::util::testing::FixedClock;
-use zcash_client_sqlite::wallet::init::WalletMigrator;
-use zcash_client_sqlite::{BlockDb, WalletDb};
-// Only referenced when `transparent-inputs` is active: the `DataStoreFactory::new_data_store`
-// signature grows a `gap_limits` parameter under that feature, so the impl below must match it.
-#[cfg(feature = "transparent-inputs")]
-use zcash_keys::keys::transparent::gap_limits::GapLimits;
-
-use tempfile::NamedTempFile;
+// The wallet, block cache, and DB factory come from `zcash_client_sqlite`'s own test harness,
+// exposed under its `test-dependencies` feature — no hand-rolled equivalents.
+use zcash_client_sqlite::testing::BlockCache;
+use zcash_client_sqlite::testing::db::{TestDb, TestDbFactory};
 
 use zcash_primitives::block::BlockHash;
-use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::{COIN, Zatoshis};
@@ -75,21 +61,16 @@ const FUNDING_ZEC: u64 = 78;
 /// Empty blocks scanned after a note is received so its commitment-tree shard completes and an
 /// anchor at that height is available.
 const SHARD_COMPLETION_BLOCKS: usize = 5;
-/// A deterministic wall-clock instant for the wallet's clock; the value is irrelevant to proving.
-const CLOCK_EPOCH_OFFSET_SECS: u64 = 1_700_000_000;
-
-/// The concrete in-memory wallet the harness drives.
-type MigrationWalletDb = WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng>;
 
 /// The highest checkpoint at or below `from` whose Orchard tree root is available. The tip
 /// checkpoint is not yet rooted right after scanning, so a spend anchors to the newest settled
 /// checkpoint below it (every note mined at or before that height is still witnessable there).
-fn highest_rooted_checkpoint(db: &mut MigrationWalletDb, from: BlockHeight) -> BlockHeight {
+fn highest_rooted_checkpoint(db: &mut TestDb, from: BlockHeight) -> BlockHeight {
     let mut height = u32::from(from);
     loop {
         let bh = BlockHeight::from_u32(height);
         let rooted = db
-            .with_orchard_tree_mut::<_, _, ShardTreeError<<MigrationWalletDb as WalletCommitmentTrees>::Error>>(
+            .with_orchard_tree_mut::<_, _, ShardTreeError<<TestDb as WalletCommitmentTrees>::Error>>(
                 |tree| Ok(tree.root_at_checkpoint_id(&bh)?.is_some()),
             )
             .expect("queries the Orchard tree");
@@ -110,102 +91,6 @@ fn nu63_network() -> LocalNetwork {
         nu6_2: Some(h),
         nu6_3: Some(h),
         ..TestBuilder::<(), ()>::DEFAULT_NETWORK
-    }
-}
-
-/// Builds a fresh in-memory `WalletDb` for the testing framework. `zcash_client_sqlite`'s own
-/// `TestDbFactory` is `pub(crate)`, so the harness supplies this minimal equivalent over the public
-/// `WalletDb::for_path` + `WalletMigrator` API (the same seam a future migration sqlite backend
-/// would conform to).
-struct MigrationDbFactory;
-
-impl DataStoreFactory for MigrationDbFactory {
-    type Error = ();
-    type AccountId = <MigrationWalletDb as WalletRead>::AccountId;
-    type Account = <MigrationWalletDb as WalletRead>::Account;
-    type DsError = <MigrationWalletDb as WalletRead>::Error;
-    type DataStore = MigrationWalletDb;
-
-    fn new_data_store(
-        &self,
-        network: LocalNetwork,
-        #[cfg(feature = "transparent-inputs")] _gap_limits: Option<GapLimits>,
-    ) -> Result<Self::DataStore, Self::Error> {
-        let clock =
-            FixedClock::new(SystemTime::UNIX_EPOCH + Duration::from_secs(CLOCK_EPOCH_OFFSET_SECS));
-        let mut db = WalletDb::for_path(":memory:", network, clock, ChaChaRng::seed_from_u64(0))
-            .expect("opens an in-memory wallet database");
-        WalletMigrator::new()
-            .init_or_migrate(&mut db)
-            .expect("applies the wallet migrations");
-        Ok(db)
-    }
-}
-
-/// A minimal in-memory compact-block cache for the testing framework. `zcash_client_sqlite`'s own
-/// `BlockCache` is `pub(crate)` and writes through `BlockDb`'s private connection, so the harness
-/// keeps a second connection to the same cache file to insert blocks the scanner then reads through
-/// the `BlockDb`.
-struct BlockCache {
-    _cache_file: NamedTempFile,
-    write_conn: Connection,
-    block_source: BlockDb,
-}
-
-impl BlockCache {
-    fn new() -> Self {
-        let cache_file = NamedTempFile::new().expect("creates a temporary cache file");
-        let block_source = BlockDb::for_path(cache_file.path()).expect("opens the block cache");
-        init_cache_database(&block_source).expect("initializes the block cache schema");
-        let write_conn =
-            Connection::open(cache_file.path()).expect("opens a writer to the block cache");
-        BlockCache {
-            _cache_file: cache_file,
-            write_conn,
-            block_source,
-        }
-    }
-}
-
-/// The txids inserted with one compact block; the framework needs only these.
-struct BlockCacheInsert {
-    txids: Vec<TxId>,
-}
-
-impl CacheInsertionResult for BlockCacheInsert {
-    fn txids(&self) -> &[TxId] {
-        &self.txids
-    }
-}
-
-impl TestCache for BlockCache {
-    type BsError = SqliteClientError;
-    type BlockSource = BlockDb;
-    type InsertResult = BlockCacheInsert;
-
-    fn block_source(&self) -> &Self::BlockSource {
-        &self.block_source
-    }
-
-    fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
-        self.write_conn
-            .execute(
-                "INSERT INTO compactblocks (height, data) VALUES (?, ?)",
-                params![u32::from(cb.height()), cb.encode_to_vec()],
-            )
-            .expect("inserts a compact block");
-        BlockCacheInsert {
-            txids: cb.vtx.iter().map(|tx| tx.txid()).collect(),
-        }
-    }
-
-    fn truncate_to_height(&mut self, height: BlockHeight) {
-        self.write_conn
-            .execute(
-                "DELETE FROM compactblocks WHERE height > ?",
-                params![u32::from(height)],
-            )
-            .expect("truncates the block cache");
     }
 }
 
@@ -248,7 +133,7 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
 
     let mut st = TestBuilder::new()
         .with_network(network)
-        .with_data_store_factory(MigrationDbFactory)
+        .with_data_store_factory(TestDbFactory::default())
         .with_block_cache(BlockCache::new())
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();

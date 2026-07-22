@@ -22,16 +22,20 @@ use {
     tempfile::TempDir,
 };
 
-pub(crate) mod db;
+pub mod db;
+// The shielded-pool testers are used only by this crate's own in-crate tests, not by external
+// consumers of the exposed harness, so they stay test-only and keep their heavier test-only
+// dependencies (proptest, incrementalmerkletree-testing) out of the `test-dependencies` build.
+#[cfg(test)]
 pub(crate) mod pool;
 
-pub(crate) struct BlockCache {
+pub struct BlockCache {
     _cache_file: NamedTempFile,
     db_cache: BlockDb,
 }
 
 impl BlockCache {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
@@ -43,7 +47,7 @@ impl BlockCache {
     }
 }
 
-pub(crate) struct BlockCacheInsertionResult {
+pub struct BlockCacheInsertionResult {
     txids: Vec<TxId>,
     #[allow(dead_code)]
     note_commitments: NoteCommitments,

@@ -161,8 +161,9 @@ pub mod wallet;
 #[cfg(feature = "zewif")]
 pub mod zewif;
 
-#[cfg(test)]
-mod testing;
+#[cfg(any(test, feature = "test-dependencies"))]
+#[allow(missing_docs)]
+pub mod testing;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
