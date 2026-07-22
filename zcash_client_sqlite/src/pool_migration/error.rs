@@ -7,6 +7,11 @@ use std::fmt;
 pub enum Error {
     /// A `rusqlite` (SQLite) error.
     Db(rusqlite::Error),
+    /// The account a store was requested for (by [`AccountUuid`]) does not exist in the wallet's
+    /// `accounts` table, so its migration cannot be scoped to an account row.
+    ///
+    /// [`AccountUuid`]: crate::AccountUuid
+    AccountUnknown,
     /// A stored value could not be decoded back into the engine's types (an out-of-range amount, an
     /// unrecognized discriminant, or a missing column for the stored variant). The `&'static str`
     /// names the field.
@@ -23,6 +28,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Db(e) => write!(f, "pool-migration store database error: {e}"),
+            Error::AccountUnknown => {
+                write!(f, "pool-migration store: no such account in the wallet")
+            }
             Error::Corrupt(field) => {
                 write!(f, "pool-migration store: corrupt stored value for {field}")
             }
@@ -37,7 +45,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Db(e) => Some(e),
-            Error::Corrupt(_) | Error::Unrepresentable(_) => None,
+            Error::AccountUnknown | Error::Corrupt(_) | Error::Unrepresentable(_) => None,
         }
     }
 }

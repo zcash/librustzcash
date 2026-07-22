@@ -8,13 +8,13 @@
 
 use std::borrow::{Borrow, BorrowMut};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use zcash_pool_migration_backend::engine::{
     MigrationState, MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 
-use crate::AccountUuid;
+use crate::{AccountRef, AccountUuid};
 
 use super::store::{self, Store, Tables};
 
@@ -41,37 +41,38 @@ pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
 
-/// Delete `account`'s in-progress Orchard -> Ironwood migration, if any.
-///
-/// The `orchard_ironwood_migrations` table keys by account UUID but has no foreign key into
-/// `accounts` (the store is deliberately standalone), so an account's migration is not removed by
-/// the account-deletion cascade. The wallet's `delete_account` path calls this to remove it
-/// explicitly; the migration's child rows cascade from the parent via their own `ON DELETE CASCADE`
-/// foreign keys (the wallet enforces foreign keys at runtime).
-pub(crate) fn delete_account_migration(
-    conn: &Connection,
-    account: AccountUuid,
-) -> rusqlite::Result<()> {
-    conn.execute(
-        &format!("DELETE FROM {} WHERE account_uuid = ?", TABLES.migrations),
-        rusqlite::params![account.expose_uuid()],
-    )?;
-    Ok(())
-}
-
 /// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`]
 /// over a `rusqlite::Connection`, scoped to one account's migration. Construct it with a connection
 /// borrow (`&Connection` for read-only access, `&mut Connection` to also write) over the same
 /// connection a [`WalletDb`](crate::WalletDb) uses, so the pool-migration tables share the wallet
 /// database.
+///
+/// An account's migration is owned by its row in the wallet's `accounts` table through the
+/// `account_id` foreign key, so deleting the account removes its migration automatically (via
+/// `ON DELETE CASCADE`); no explicit cleanup is required.
 pub struct PoolMigrations<C>(Store<C>);
 
-impl<C> PoolMigrations<C> {
+impl<C: Borrow<Connection>> PoolMigrations<C> {
     /// Wrap a connection borrow as the store, scoped to `account`'s migration.
-    pub fn for_account(conn: C, account: AccountUuid) -> Self {
-        Self(Store::new(conn, &TABLES, account.expose_uuid()))
+    ///
+    /// The account is resolved to its `accounts` row up front, so the store keys its migration by
+    /// that row (the foreign key the schema uses) rather than by the external UUID. Returns
+    /// [`Error::AccountUnknown`] if no account with this UUID exists in the wallet.
+    pub fn for_account(conn: C, account: AccountUuid) -> Result<Self, Error> {
+        let account_id = conn
+            .borrow()
+            .query_row(
+                "SELECT id FROM accounts WHERE uuid = ?",
+                rusqlite::params![account.expose_uuid()],
+                |row| row.get(0).map(AccountRef),
+            )
+            .optional()?
+            .ok_or(Error::AccountUnknown)?;
+        Ok(Self(Store::new(conn, &TABLES, account_id)))
     }
+}
 
+impl<C> PoolMigrations<C> {
     /// Recover the wrapped connection borrow.
     pub fn into_inner(self) -> C {
         self.0.into_inner()
@@ -121,20 +122,43 @@ mod tests {
 
     use super::Error;
 
-    /// A fresh in-memory database with the migration tables created, but not yet wrapped as a
-    /// store for any particular account. Used by tests that put more than one account's
-    /// [`PoolMigrations`] over the same connection.
+    /// A fresh in-memory database with a minimal `accounts` table (the `account_id` foreign-key
+    /// target) and the migration tables created, but not yet wrapped as a store for any particular
+    /// account. Used by tests that put more than one account's [`PoolMigrations`] over the same
+    /// connection.
     fn fresh_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
+        // A minimal stand-in for the wallet's `accounts` table: the migration tables' `account_id`
+        // foreign key references `accounts(id)`, and `for_account` resolves an `AccountUuid` to its
+        // row through `accounts(uuid)`.
+        conn.execute_batch(
+            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, uuid BLOB NOT NULL);
+             CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid);",
+        )
+        .expect("create accounts table");
         init_migration_tables(&conn).expect("create tables");
         conn
     }
 
-    /// A fresh, empty store over a new in-memory database with the migration tables created,
-    /// scoped to a fresh random account. Each proptest case and test gets its own database and
-    /// account, so writes never bleed between cases.
+    /// Insert a fresh random account into `conn`'s `accounts` table and return its UUID, so a store
+    /// can be scoped to it.
+    fn insert_account(conn: &Connection) -> AccountUuid {
+        let account = AccountUuid::from_uuid(Uuid::new_v4());
+        conn.execute(
+            "INSERT INTO accounts (uuid) VALUES (?)",
+            rusqlite::params![account.expose_uuid()],
+        )
+        .expect("insert account");
+        account
+    }
+
+    /// A fresh, empty store over a new in-memory database with the migration tables created, scoped
+    /// to a fresh account. Each proptest case and test gets its own database and account, so writes
+    /// never bleed between cases.
     fn fresh_store() -> PoolMigrations<Connection> {
-        PoolMigrations::for_account(fresh_conn(), AccountUuid::from_uuid(Uuid::new_v4()))
+        let conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(conn, account).expect("account exists")
     }
 
     #[test]
@@ -173,26 +197,27 @@ mod tests {
         assert!(matches!(err, Error::Unrepresentable(_)));
     }
 
-    /// `delete_account_migration` removes an account's in-progress migration (the cleanup the
-    /// wallet's account-deletion path performs, since the store has no foreign key into `accounts`
-    /// to cascade it). The migration's child rows cascade from the parent via their own foreign
-    /// keys, so the whole subtree is gone; a different account's migration is untouched.
+    /// Deleting an account cascades to its in-progress migration: the `account_id` foreign key
+    /// carries `ON DELETE CASCADE`, so removing the account's row removes its migration, whose child
+    /// rows cascade from it in turn. A different account's migration is untouched. This is the
+    /// cleanup the wallet's account-deletion path now relies on entirely (no explicit delete).
     #[test]
-    fn delete_account_migration_removes_only_that_account() {
-        use super::delete_account_migration;
+    fn deleting_an_account_cascades_to_its_migration() {
         use zcash_pool_migration_backend::engine::{MigrationState, MigrationStatus};
         use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
         use zcash_pool_migration_backend::preparation::PreparationPlan;
         use zcash_protocol::value::Zatoshis;
 
         let mut conn = fresh_conn();
-        // The store's tables carry `ON DELETE CASCADE` foreign keys from each child to its parent
-        // migration row; enable enforcement so deleting the parent is observed to reach the
-        // children, exactly as the wallet database does after its migrations complete.
+        // Enforce foreign keys so the account -> migration -> child cascade actually fires, exactly
+        // as the wallet database does at runtime.
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("enable foreign keys");
 
-        // A minimal but non-trivial migration (one crossing value) so the delete is observed to
+        let account_a = insert_account(&conn);
+        let account_b = insert_account(&conn);
+
+        // A minimal but non-trivial migration (one crossing value) so the cascade is observed to
         // reach a child table, not only the parent row.
         let note_split = NoteSplitPlan::from_stored_parts(
             vec![Zatoshis::const_from_u64(1)],
@@ -210,12 +235,12 @@ mod tests {
             Vec::new(),
         );
 
-        let account_a = AccountUuid::from_uuid(Uuid::new_v4());
-        let account_b = AccountUuid::from_uuid(Uuid::new_v4());
         PoolMigrations::for_account(&mut conn, account_a)
+            .expect("account A exists")
             .replace_migration(&state)
             .expect("write A's migration");
         PoolMigrations::for_account(&mut conn, account_b)
+            .expect("account B exists")
             .replace_migration(&state)
             .expect("write B's migration");
 
@@ -231,13 +256,19 @@ mod tests {
             2
         );
 
-        delete_account_migration(&conn, account_a).expect("delete A's migration");
+        // Delete account A directly, as the wallet's `delete_account` does; the cascade removes its
+        // migration and children with it, and nothing else.
+        conn.execute(
+            "DELETE FROM accounts WHERE uuid = ?",
+            rusqlite::params![account_a.expose_uuid()],
+        )
+        .expect("delete account A");
 
-        // Only A's parent row and its child rows are gone; B's migration remains intact.
+        // Only A's migration row and its child rows are gone; B's migration remains intact.
         assert_eq!(
             count(&conn, "orchard_ironwood_migrations"),
             1,
-            "only account A's migration row must be deleted"
+            "only account A's migration row must cascade away"
         );
         assert_eq!(
             count(&conn, "orchard_ironwood_migration_crossing_values"),
@@ -246,99 +277,11 @@ mod tests {
         );
         assert_eq!(
             PoolMigrations::for_account(&conn, account_b)
+                .expect("account B exists")
                 .get_migration()
                 .expect("read B"),
             Some(state),
             "account B's migration must be untouched",
-        );
-    }
-
-    /// Security: deleting an account's migration removes ONLY migration data. `account_uuid` is a
-    /// bare column, not a foreign key into `accounts`, and no other table references the migration
-    /// tables, so `delete_account_migration` can never cascade outward to delete the account itself
-    /// or disturb any unrelated table. This guards against a future foreign key (or an errant
-    /// cascade) turning a migration cleanup into account or wallet-data loss.
-    #[test]
-    fn delete_account_migration_does_not_touch_unrelated_data() {
-        use super::delete_account_migration;
-        use zcash_pool_migration_backend::engine::{MigrationState, MigrationStatus};
-        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
-        use zcash_pool_migration_backend::preparation::PreparationPlan;
-        use zcash_protocol::value::Zatoshis;
-
-        let mut conn = fresh_conn();
-        // Stand up the wallet-side tables the migration cleanup must NOT disturb: the `accounts`
-        // table the migration's account belongs to, and an unrelated table, each seeded with a row.
-        conn.execute_batch(
-            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, uuid BLOB NOT NULL, name TEXT);
-             CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid);
-             CREATE TABLE unrelated (id INTEGER PRIMARY KEY, note TEXT NOT NULL);",
-        )
-        .expect("create sibling tables");
-        // Enforce foreign keys, so that any (unintended) cascade would actually fire and be caught.
-        conn.execute_batch("PRAGMA foreign_keys = ON;")
-            .expect("enable foreign keys");
-
-        let account = AccountUuid::from_uuid(Uuid::new_v4());
-        conn.execute(
-            "INSERT INTO accounts (uuid, name) VALUES (?, 'keeper')",
-            rusqlite::params![account.expose_uuid()],
-        )
-        .expect("insert account");
-        conn.execute("INSERT INTO unrelated (note) VALUES ('keep me')", [])
-            .expect("insert unrelated row");
-
-        let note_split = NoteSplitPlan::from_stored_parts(
-            vec![Zatoshis::const_from_u64(1)],
-            Zatoshis::ZERO,
-            None,
-            Zatoshis::ZERO,
-            Zatoshis::const_from_u64(1),
-            Zatoshis::const_from_u64(1),
-        )
-        .expect("a one-crossing stored plan reconstructs");
-        let state = MigrationState::from_parts(
-            MigrationStatus::Committed,
-            note_split,
-            PreparationPlan::from_parts(Vec::new(), Vec::new()),
-            Vec::new(),
-        );
-        PoolMigrations::for_account(&mut conn, account)
-            .replace_migration(&state)
-            .expect("write the account's migration");
-
-        delete_account_migration(&conn, account).expect("delete the account's migration");
-
-        let count = |conn: &Connection, table: &str| -> i64 {
-            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
-                row.get(0)
-            })
-            .expect("count")
-        };
-        // The migration and its children are gone...
-        assert_eq!(count(&conn, "orchard_ironwood_migrations"), 0);
-        assert_eq!(
-            count(&conn, "orchard_ironwood_migration_crossing_values"),
-            0
-        );
-        // ...but the account row survives, unchanged, and so does every unrelated table.
-        assert_eq!(
-            count(&conn, "accounts"),
-            1,
-            "deleting a migration must NOT delete the account"
-        );
-        let name: String = conn
-            .query_row(
-                "SELECT name FROM accounts WHERE uuid = ?",
-                rusqlite::params![account.expose_uuid()],
-                |row| row.get(0),
-            )
-            .expect("the account row must still be readable");
-        assert_eq!(name, "keeper", "the account row must be unchanged");
-        assert_eq!(
-            count(&conn, "unrelated"),
-            1,
-            "deleting a migration must NOT affect unrelated tables"
         );
     }
 
@@ -391,21 +334,24 @@ mod tests {
         #[test]
         fn accounts_are_isolated(state in arb_migration_state()) {
             let mut conn = fresh_conn();
-            let account_a = AccountUuid::from_uuid(Uuid::new_v4());
-            let account_b = AccountUuid::from_uuid(Uuid::new_v4());
+            let account_a = insert_account(&conn);
+            let account_b = insert_account(&conn);
 
             PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
                 .replace_migration(&state)
                 .expect("write for A");
 
             prop_assert_eq!(
                 PoolMigrations::for_account(&conn, account_b)
+                    .expect("account B exists")
                     .get_migration()
                     .expect("read for B"),
                 None
             );
             prop_assert_eq!(
                 PoolMigrations::for_account(&conn, account_a)
+                    .expect("account A exists")
                     .get_migration()
                     .expect("read for A"),
                 Some(state)
@@ -421,27 +367,32 @@ mod tests {
             state_b in arb_migration_state(),
         ) {
             let mut conn = fresh_conn();
-            let account_a = AccountUuid::from_uuid(Uuid::new_v4());
-            let account_b = AccountUuid::from_uuid(Uuid::new_v4());
+            let account_a = insert_account(&conn);
+            let account_b = insert_account(&conn);
 
             PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
                 .replace_migration(&state_a_1)
                 .expect("write A first");
             PoolMigrations::for_account(&mut conn, account_b)
+                .expect("account B exists")
                 .replace_migration(&state_b)
                 .expect("write B");
             PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
                 .replace_migration(&state_a_2)
                 .expect("write A second");
 
             prop_assert_eq!(
                 PoolMigrations::for_account(&conn, account_a)
+                    .expect("account A exists")
                     .get_migration()
                     .expect("read A"),
                 Some(state_a_2)
             );
             prop_assert_eq!(
                 PoolMigrations::for_account(&conn, account_b)
+                    .expect("account B exists")
                     .get_migration()
                     .expect("read B"),
                 Some(state_b)
@@ -449,15 +400,16 @@ mod tests {
         }
 
         /// A second `replace_migration` for the same account still replaces: the per-account
-        /// singleton semantics hold (enforced by the unique index over `account_uuid`), because
+        /// singleton semantics hold (enforced by the unique index over `account_id`), because
         /// the account's existing row is deleted before the new one is inserted.
         #[test]
         fn replace_migration_replaces_same_account(
             first in arb_migration_state(),
             second in arb_migration_state(),
         ) {
-            let account = AccountUuid::from_uuid(Uuid::new_v4());
-            let mut store = PoolMigrations::for_account(fresh_conn(), account);
+            let conn = fresh_conn();
+            let account = insert_account(&conn);
+            let mut store = PoolMigrations::for_account(conn, account).expect("account exists");
             store.replace_migration(&first).expect("write first");
             store.replace_migration(&second).expect("write second");
             prop_assert_eq!(store.get_migration().expect("read"), Some(second));
@@ -475,22 +427,26 @@ mod tests {
             let id = first_transaction_id(&state).expect("non-empty by the assumption above");
 
             let mut conn = fresh_conn();
-            let account_a = AccountUuid::from_uuid(Uuid::new_v4());
-            let account_b = AccountUuid::from_uuid(Uuid::new_v4());
+            let account_a = insert_account(&conn);
+            let account_b = insert_account(&conn);
 
             PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
                 .replace_migration(&state)
                 .expect("write A");
             PoolMigrations::for_account(&mut conn, account_b)
+                .expect("account B exists")
                 .replace_migration(&state)
                 .expect("write B");
 
             PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
                 .update_transaction(id, new)
                 .expect("update A");
 
             prop_assert_eq!(
                 PoolMigrations::for_account(&conn, account_b)
+                    .expect("account B exists")
                     .get_migration()
                     .expect("read B"),
                 Some(state),

@@ -596,13 +596,13 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 
 /// One row per account's active migration: its status and the scalar fields of its note-split
 /// plan. The crossing values are an ordered list in `orchard_ironwood_migration_crossing_values`.
-/// `account_uuid` is enforced unique by `INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`, so an account
-/// has at most one migration in progress. It is not a foreign key into `accounts` (the store is
-/// standalone); the wallet's account-deletion path removes an account's migration explicitly.
+/// `account_id` is enforced unique by `INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`, so an account
+/// has at most one migration in progress. It is a foreign key into `accounts` with `ON DELETE
+/// CASCADE`, so deleting an account removes its migration (and its child rows cascade in turn).
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
 CREATE TABLE orchard_ironwood_migrations (
     id INTEGER PRIMARY KEY,
-    account_uuid BLOB NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
     note_split_fee_buffer INTEGER NOT NULL,
     note_split_change INTEGER,
@@ -697,7 +697,7 @@ CREATE INDEX idx_orchard_ironwood_migration_tx_due ON orchard_ironwood_migration
 /// Enforces at most one migration per account.
 pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT: &str = "
 CREATE UNIQUE INDEX idx_orchard_ironwood_migrations_account ON orchard_ironwood_migrations (
-    account_uuid
+    account_id
 )";
 
 /// Stores the transparent outputs received by the wallet.
