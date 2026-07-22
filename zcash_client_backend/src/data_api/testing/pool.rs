@@ -3674,6 +3674,72 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
     );
 }
 
+/// Verifies that a proposal created with `lock_for_blocks: Some(_)` round-trips through its
+/// serialized (proto) form.
+///
+/// A locking proposal locks its own inputs, and decoding re-retrieves each input from the wallet.
+/// Input retrieval during decoding must therefore not filter out locked outputs; otherwise a
+/// wallet that persists a locking proposal (for example around an app restart, while a PCZT is
+/// out for signing) could never decode it again.
+pub fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(50000);
+    let (_, _, _) = st.add_a_single_note_checking_balance(value);
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let extsk2 = T::sk(&[0xf5; 32]);
+    let to = T::sk_default_address(&extsk2);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
+
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(15000),
+    )])
+    .unwrap();
+
+    let network = *st.network();
+    let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
+        st.wallet_mut(),
+        &network,
+        account_id,
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &crate::data_api::wallet::input_selection::SpendPolicy::default(),
+        Some(100), // lock_for_blocks
+        None,
+    )
+    .unwrap();
+
+    // The proposal's input is locked.
+    assert!(
+        !st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty(),
+        "the proposal's input must be locked before the round-trip"
+    );
+
+    // The serialized proposal must decode back to an identical proposal even though its inputs
+    // are locked (a proposal legitimately references its own locked inputs).
+    let proto = crate::proto::proposal::Proposal::from_standard_proposal(&proposal);
+    let decoded = proto
+        .try_into_standard_proposal(&network, st.wallet())
+        .expect("a proposal with locked inputs must decode from its serialized form");
+    assert_eq!(decoded, proposal);
+}
+
 pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
     ds_factory: Dsf,
     cache: impl TestCache,
