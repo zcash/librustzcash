@@ -3649,6 +3649,17 @@ pub trait WalletWrite: WalletRead {
     /// provided output on success, or fail completely leaving all lock state unmodified if any of
     /// the outputs were already locked. Existing locks that have expired as of the chain tip
     /// should be replaced with new locks.
+    ///
+    /// This is the mechanism by which overlapping proposals for the same account are prevented
+    /// from selecting the same inputs. Because note selection and locking cannot be performed as a
+    /// single atomic step above the storage layer, two callers may independently select an
+    /// overlapping set of outputs before either locks them (a time-of-check/time-of-use race); the
+    /// conflict is resolved here, at the storage layer, where the second caller's `lock_outputs`
+    /// fails with [`LockError::LockFailure`] naming the already-locked output. Callers that lock
+    /// via a proposal-creation function surface this as
+    /// [`ProposalError::ChainDoubleSpend`](crate::proposal::ProposalError::ChainDoubleSpend). The
+    /// losing caller has not partially locked anything and should treat the failure as "the
+    /// account is busy" and retry.
     fn lock_outputs(
         &mut self,
         outputs: impl Iterator<Item = OutputRef>,
