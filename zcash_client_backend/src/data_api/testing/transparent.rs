@@ -43,7 +43,7 @@ use crate::{
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
-    wallet::{OutputRef, WalletTransparentOutput},
+    wallet::{LockOwner, OutputRef, WalletTransparentOutput},
 };
 
 /// Checks whether the transparent balance of the given test `account` is as `expected`
@@ -284,16 +284,18 @@ where
     );
 
     // Lock the UTXO until ten blocks past the tip.
+    let owner = LockOwner::new([1; 32]);
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), height + 10)
+            .lock_outputs(&[output_ref], owner, height + 10)
             .unwrap(),
         1
     );
 
-    // A second lock conflicts while the first is active.
+    // A lock by a different owner conflicts while the first is active.
+    let other_owner = LockOwner::new([2; 32]);
     assert_matches!(
-        st.wallet_mut().lock_outputs([output_ref].into_iter(), height + 20),
+        st.wallet_mut().lock_outputs(&[output_ref], other_owner, height + 20),
         Err(LockError::LockFailure(r)) if r == output_ref
     );
 
@@ -378,15 +380,19 @@ where
             .is_empty()
     );
 
-    // The expired lock is replaceable without an explicit unlock, and unlocking then reports
-    // the output as found.
+    // The expired lock is replaceable without an explicit unlock, even by a different owner,
+    // and the new holder can then release it.
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), height + 30)
+            .lock_outputs(&[output_ref], other_owner, height + 30)
             .unwrap(),
         1
     );
-    assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+    assert!(
+        st.wallet_mut()
+            .unlock_output(&output_ref, other_owner)
+            .unwrap()
+    );
     let balances = st
         .wallet()
         .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)

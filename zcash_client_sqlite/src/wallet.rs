@@ -98,7 +98,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
-    wallet::{Note, NoteId, OutputRef, Recipient, WalletTx},
+    wallet::{LockOwner, Note, NoteId, OutputRef, Recipient, WalletTx},
 };
 use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
@@ -5342,14 +5342,16 @@ pub(crate) fn get_locked_outputs(
 
 pub(crate) fn lock_outputs(
     conn: &rusqlite::Transaction,
-    outputs: impl Iterator<Item = OutputRef>,
+    outputs: &[OutputRef],
+    owner: LockOwner,
     lock_expiry_height: BlockHeight,
 ) -> Result<usize, LockError> {
     // When the chain tip is unknown, `:chain_tip` binds to SQL NULL and the
     // `lock_expiry_height <= :chain_tip` clause evaluates to NULL (falsy). In that case only
-    // outputs that are not already locked (`lock_expiry_height IS NULL`) can be locked; an
-    // existing lock cannot be treated as expired because we have no height against which to
-    // judge expiry. This is the conservative choice: locking generally requires a synced wallet.
+    // outputs that are not already locked (`lock_expiry_height IS NULL`) or whose lock is
+    // already held by the requesting owner can be locked; an existing lock cannot be treated
+    // as expired because we have no height against which to judge expiry. This is the
+    // conservative choice: locking generally requires a synced wallet.
     let chain_tip = chain_tip_height(conn)?.map(u32::from);
 
     let mut rows_updated = 0;
@@ -5358,7 +5360,9 @@ pub(crate) fn lock_outputs(
         let updated = conn
             .execute(
                 &format!(
-                    "UPDATE {table} SET lock_expiry_height = :expiry_height
+                    "UPDATE {table} SET
+                        lock_expiry_height = :expiry_height,
+                        lock_owner = :owner
                     WHERE {index_col} = :idx
                     AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
                     AND ({})",
@@ -5366,6 +5370,7 @@ pub(crate) fn lock_outputs(
                 ),
                 named_params![
                     ":expiry_height": u32::from(lock_expiry_height),
+                    ":owner": owner.as_bytes(),
                     ":idx": output.output_index(),
                     ":txid": output.txid().as_ref(),
                     ":chain_tip": chain_tip
@@ -5374,7 +5379,7 @@ pub(crate) fn lock_outputs(
             .map_err(LockError::Storage)?;
 
         if updated == 0 {
-            return Err(LockError::LockFailure(output));
+            return Err(LockError::LockFailure(*output));
         } else {
             rows_updated += updated;
         }
@@ -5396,17 +5401,23 @@ fn received_outputs_table(pool: PoolType) -> (&'static str, &'static str) {
 pub(crate) fn unlock_output(
     conn: &rusqlite::Transaction,
     output: &OutputRef,
+    owner: LockOwner,
 ) -> Result<bool, SqliteClientError> {
     let (table, index_col) = received_outputs_table(output.pool());
+    // Unlocking is scoped to the owner: a lock held by a different owner is left in place, so
+    // one flow cannot accidentally release another's locks. An expired lock held by the owner
+    // is still cleared (and reported as such), tidying the stale row.
     let rows_updated = conn.execute(
         &format!(
-            "UPDATE {table} SET lock_expiry_height = NULL
+            "UPDATE {table} SET lock_expiry_height = NULL, lock_owner = NULL
              WHERE {index_col} = :idx
-               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)"
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+               AND lock_owner = :owner"
         ),
         named_params![
             ":idx": output.output_index(),
             ":txid": output.txid().as_ref(),
+            ":owner": owner.as_bytes(),
         ],
     )?;
     Ok(rows_updated > 0)
@@ -5432,7 +5443,7 @@ pub(crate) fn clear_locked_outputs(
     ] {
         rows_updated += conn.execute(
             &format!(
-                "UPDATE {table} SET lock_expiry_height = NULL
+                "UPDATE {table} SET lock_expiry_height = NULL, lock_owner = NULL
                  WHERE lock_expiry_height IS NOT NULL
                    AND account_id = (SELECT id FROM accounts WHERE uuid = :account_uuid)"
             ),
@@ -5448,7 +5459,7 @@ pub(crate) fn clear_locked_outputs(
 /// since the spend records now prevent them from being selected by subsequent proposals.
 fn unlock_spent_notes(conn: &rusqlite::Connection, tx_ref: TxRef) -> Result<(), SqliteClientError> {
     conn.execute(
-        "UPDATE sapling_received_notes SET lock_expiry_height = NULL
+        "UPDATE sapling_received_notes SET lock_expiry_height = NULL, lock_owner = NULL
          WHERE id IN (
              SELECT sapling_received_note_id FROM sapling_received_note_spends
              WHERE transaction_id = :tx_ref
@@ -5457,7 +5468,7 @@ fn unlock_spent_notes(conn: &rusqlite::Connection, tx_ref: TxRef) -> Result<(), 
     )?;
 
     conn.execute(
-        "UPDATE orchard_received_notes SET lock_expiry_height = NULL
+        "UPDATE orchard_received_notes SET lock_expiry_height = NULL, lock_owner = NULL
          WHERE id IN (
              SELECT orchard_received_note_id FROM orchard_received_note_spends
              WHERE transaction_id = :tx_ref
@@ -5466,7 +5477,7 @@ fn unlock_spent_notes(conn: &rusqlite::Connection, tx_ref: TxRef) -> Result<(), 
     )?;
 
     conn.execute(
-        "UPDATE ironwood_received_notes SET lock_expiry_height = NULL
+        "UPDATE ironwood_received_notes SET lock_expiry_height = NULL, lock_owner = NULL
          WHERE id IN (
              SELECT ironwood_received_note_id FROM ironwood_received_note_spends
              WHERE transaction_id = :tx_ref
@@ -5475,7 +5486,7 @@ fn unlock_spent_notes(conn: &rusqlite::Connection, tx_ref: TxRef) -> Result<(), 
     )?;
 
     conn.execute(
-        "UPDATE transparent_received_outputs SET lock_expiry_height = NULL
+        "UPDATE transparent_received_outputs SET lock_expiry_height = NULL, lock_owner = NULL
          WHERE id IN (
              SELECT transparent_received_output_id FROM transparent_received_output_spends
              WHERE transaction_id = :tx_ref

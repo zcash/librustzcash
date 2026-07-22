@@ -71,7 +71,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
     proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
+    wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
 use zcash_keys::{
     address::UnifiedAddress,
@@ -1693,15 +1693,17 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
 
     fn lock_outputs(
         &mut self,
-        outputs: impl Iterator<Item = OutputRef>,
+        outputs: &[OutputRef],
+        owner: LockOwner,
         lock_expiry_height: BlockHeight,
     ) -> Result<usize, LockError<Self::Error>> {
-        Ok(self
-            .transactionally(|wdb| wallet::lock_outputs(wdb.conn.0, outputs, lock_expiry_height))?)
+        Ok(self.transactionally(|wdb| {
+            wallet::lock_outputs(wdb.conn.0, outputs, owner, lock_expiry_height)
+        })?)
     }
 
-    fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error> {
-        self.transactionally(|wdb| wallet::unlock_output(wdb.conn.0, output))
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
+        self.transactionally(|wdb| wallet::unlock_output(wdb.conn.0, output, owner))
     }
 
     fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
@@ -2100,7 +2102,8 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn lock_outputs(
         &mut self,
-        outputs: impl Iterator<Item = OutputRef>,
+        outputs: &[OutputRef],
+        owner: LockOwner,
         lock_expiry_height: BlockHeight,
     ) -> Result<usize, LockError<Self::Error>> {
         // This impl operates within an enclosing database transaction, so the
@@ -2112,12 +2115,13 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         Ok(wallet::lock_outputs(
             self.conn.0,
             outputs,
+            owner,
             lock_expiry_height,
         )?)
     }
 
-    fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error> {
-        wallet::unlock_output(self.conn.0, output)
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
+        wallet::unlock_output(self.conn.0, output, owner)
     }
 
     fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
