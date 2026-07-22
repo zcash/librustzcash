@@ -469,29 +469,29 @@ where
 
         // Resolve the source anchor (the tree root at the checkpoint) and each spend's Merkle witness
         // against it, mirroring `create_proposed_transactions`.
-        let (anchor_root, witnesses): (Anchor, Vec<(usize, MerklePath)>) =
-            self.wallet
-                .with_orchard_tree_mut::<_, _, ProverError<W>>(|tree| {
-                    let root: Anchor = tree
-                        .root_at_checkpoint_id(&anchor_height)?
-                        .ok_or(WalletProveError::AnchorNotFound(anchor_height))?
+        let (anchor, witnesses): (Anchor, Vec<(usize, MerklePath)>) = self
+            .wallet
+            .with_orchard_tree_mut::<_, _, ProverError<W>>(|tree| {
+                let root: Anchor = tree
+                    .root_at_checkpoint_id(&anchor_height)?
+                    .ok_or(WalletProveError::AnchorNotFound(anchor_height))?
+                    .into();
+                let mut witnesses = Vec::with_capacity(spend_positions.len());
+                for (index, position) in &spend_positions {
+                    let path: MerklePath = tree
+                        .witness_at_checkpoint_id_caching(*position, &anchor_height)?
+                        .ok_or(WalletProveError::WitnessNotFound(anchor_height))?
                         .into();
-                    let mut witnesses = Vec::with_capacity(spend_positions.len());
-                    for (index, position) in &spend_positions {
-                        let path: MerklePath = tree
-                            .witness_at_checkpoint_id_caching(*position, &anchor_height)?
-                            .ok_or(WalletProveError::WitnessNotFound(anchor_height))?
-                            .into();
-                        witnesses.push((*index, path));
-                    }
-                    Ok((root, witnesses))
-                })?;
+                    witnesses.push((*index, path));
+                }
+                Ok((root, witnesses))
+            })?;
 
         // Install the deferred data through the Updater role: the Orchard source anchor and every
         // spend's witness, plus (for a transfer) the Ironwood destination anchor (the output side
         // anchors to the empty tree; it has no spend to witness).
         let mut updater = Updater::new(pczt)
-            .set_orchard_anchor(anchor_root)
+            .set_orchard_anchor(anchor)
             .map_err(WalletProveError::Anchor)?
             .set_orchard_spend_witnesses(witnesses)
             .map_err(WalletProveError::Witness)?;
