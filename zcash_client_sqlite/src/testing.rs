@@ -12,6 +12,7 @@ use zcash_client_backend::{
     proto::compact_formats::CompactBlock,
 };
 use zcash_protocol::TxId;
+use zcash_protocol::consensus::BlockHeight;
 
 use crate::{chain::init::init_cache_database, error::SqliteClientError};
 
@@ -124,16 +125,12 @@ impl TestCache for BlockCache {
 /// rooted, so a spend anchors to the newest settled checkpoint below it (every note mined at or
 /// before that height is still witnessable there).
 #[cfg(feature = "orchard")]
-pub fn highest_rooted_orchard_checkpoint<W>(
-    db: &mut W,
-    from: zcash_protocol::consensus::BlockHeight,
-) -> Option<zcash_protocol::consensus::BlockHeight>
+pub fn highest_rooted_orchard_checkpoint<W>(db: &mut W, from: BlockHeight) -> Option<BlockHeight>
 where
     W: zcash_client_backend::data_api::WalletCommitmentTrees,
 {
     use shardtree::error::ShardTreeError;
     use zcash_client_backend::data_api::WalletCommitmentTrees;
-    use zcash_protocol::consensus::BlockHeight;
 
     let mut height = u32::from(from);
     loop {
