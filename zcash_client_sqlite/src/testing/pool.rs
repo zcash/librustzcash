@@ -287,6 +287,16 @@ pub(crate) fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn check_note_locking_model<T: ShieldedPoolTester>(
+    ops: &[zcash_client_backend::data_api::testing::pool::LockOp],
+) {
+    zcash_client_backend::data_api::testing::pool::check_note_locking_model::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        ops,
+    )
+}
+
 pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::ovk_policy_prevents_recovery_from_chain::<T, _>(
         TestDbFactory::default(),
