@@ -121,6 +121,40 @@ impl PrepOutput {
             PrepOutput::Funding(v) | PrepOutput::Intermediate(v) | PrepOutput::Change(v) => *v,
         }
     }
+
+    /// Reconstruct an output from its stored `role` (the [`AsRef<str>`](AsRef) discriminant) and its
+    /// value, so a persistence backend can round-trip it through typed columns rather than a blob.
+    pub fn from_role(role: &str, value: Zatoshis) -> Result<Self, ParsePrepOutputError> {
+        Ok(match role {
+            "funding" => PrepOutput::Funding(value),
+            "intermediate" => PrepOutput::Intermediate(value),
+            "change" => PrepOutput::Change(value),
+            _ => return Err(ParsePrepOutputError),
+        })
+    }
+}
+
+impl AsRef<str> for PrepOutput {
+    /// The stable lowercase wire name of this output's role, as a store persists it (paired with
+    /// [`value`](Self::value)); parsed back with [`from_role`](Self::from_role).
+    fn as_ref(&self) -> &str {
+        match self {
+            PrepOutput::Funding(_) => "funding",
+            PrepOutput::Intermediate(_) => "intermediate",
+            PrepOutput::Change(_) => "change",
+        }
+    }
+}
+
+/// The error returned when a string does not name a [`PrepOutput`] role (its
+/// [`from_role`](PrepOutput::from_role) constructor).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParsePrepOutputError;
+
+impl fmt::Display for ParsePrepOutputError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unrecognized preparation output role")
+    }
 }
 
 /// One note-preparation transaction: a same-pool send-to-self, padded at build time to

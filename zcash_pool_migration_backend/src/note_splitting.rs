@@ -211,7 +211,8 @@ impl NoteSplitPlan {
     }
 
     /// Reassemble a plan from its stored fields, exactly as they were persisted. This is the inverse
-    /// of the accessors below: a store (for example `zcash_pool_migration_sqlite`) reads the columns
+    /// of the accessors below: a store (for example `zcash_client_sqlite`'s `pool_migration`
+    /// module) reads the columns
     /// back and reconstructs the plan verbatim, so `total_migratable` is taken as stored
     /// rather than recomputed (the caller is responsible for having persisted a consistent set, which
     /// for a plan produced by `Self::from_notes` means `total_migratable` equals the sum of

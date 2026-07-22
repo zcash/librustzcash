@@ -363,13 +363,13 @@ Type safety is paramount. This is a security-critical codebase.
 - **`from_parts` constructors**: Preferred over public struct fields.
 - **`testing` submodules**: Exposed via `test-dependencies` feature for cross-crate
   test utilities (proptest strategies, mock implementations).
-- **Instance-parameterized store crates**: a persistence crate keeps its generic
-  machinery crate-internal (DDL builders parameterized by table names, the
+- **Instance-parameterized store modules**: a persistence module keeps its generic
+  machinery private (DDL builders parameterized by table names, the
   connection wrapper) and exposes ONE public submodule per concrete
   instantiation that binds the table names, so nothing generic leaks and the
-  table names reflect the instance (e.g. `zcash_pool_migration_sqlite::orchard_ironwood`
-  over `orchard_ironwood_migrations`). A second instance is a sibling submodule,
-  not a fork. The blob (de)serialization is not defined here: it is the canonical
+  table names reflect the instance (e.g. `zcash_client_sqlite`'s
+  `pool_migration::orchard_ironwood` over `orchard_ironwood_migrations`). A
+  second instance is a sibling submodule, not a fork. The blob (de)serialization is not defined here: it is the canonical
   codec on the types (see the serialization convention above), which the store
   calls.
 

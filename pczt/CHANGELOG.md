@@ -16,6 +16,10 @@ workspace.
 - `pczt::roles::redactor::orchard::OrchardRedactor::compact_resolvable_fields`,
   behind the `orchard` feature, which compacts the Orchard-protocol (Orchard and
   Ironwood) action fields that `pczt::orchard::Bundle::resolve_fields` can restore.
+- `pczt::orchard::AnchorConsistencyError` and `pczt::sapling::AnchorConsistencyError`,
+  behind the `prover` feature combined with the `orchard` / `sapling` feature
+  respectively: the witness-to-anchor consistency errors the `Prover` role
+  reports via its `InconsistentWitness` error variants.
 
 ### Changed
 - Serializing an Orchard-protocol bundle built with its anchor deferred to

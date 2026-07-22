@@ -88,10 +88,11 @@ pub trait MigrationBackend {
 }
 
 /// Read access to a persisted pool migration: the store side of the migration interface, mirroring
-/// `zcash_client_backend`'s `WalletRead`. A store implements this over its own tables (the
-/// `zcash_pool_migration_sqlite` crate does so as a migration registered into `zcash_client_sqlite`'s
-/// `WalletDb`). The committed migration is a set of pre-signed PCZTs plus their schedule and lifecycle
-/// state, so a wallet resumes a migration entirely from the store after being closed or restarted.
+/// `zcash_client_backend`'s `WalletRead`. A store implements this over its own tables
+/// (`zcash_client_sqlite`'s `pool_migration` module does so over tables registered into its
+/// `WalletDb` schema). The committed migration is a set of pre-signed PCZTs plus their schedule and
+/// lifecycle state, so a wallet resumes a migration entirely from the store after being closed or
+/// restarted.
 pub trait PoolMigrationRead {
     /// The store's own error type.
     type Error;
@@ -157,6 +158,71 @@ pub enum MigrationTxKind {
     Preparation { layer: usize, index: usize },
     /// A phase-2 pool-crossing transfer of the `crossing`-th funding note.
     Transfer { crossing: usize },
+}
+
+impl AsRef<str> for MigrationTxKind {
+    /// The stable lowercase wire name of this kind, as a store persists it (the queryable
+    /// discriminant); the per-variant indices are stored alongside and reattached by
+    /// [`from_stored`](Self::from_stored).
+    fn as_ref(&self) -> &str {
+        match self {
+            MigrationTxKind::Preparation { .. } => "preparation",
+            MigrationTxKind::Transfer { .. } => "transfer",
+        }
+    }
+}
+
+impl MigrationTxKind {
+    /// The `(layer, index)` of a [`Preparation`](Self::Preparation) kind (its stored indices), or
+    /// `None` for a [`Transfer`](Self::Transfer).
+    pub fn preparation_indices(&self) -> Option<(usize, usize)> {
+        match self {
+            MigrationTxKind::Preparation { layer, index } => Some((*layer, *index)),
+            MigrationTxKind::Transfer { .. } => None,
+        }
+    }
+
+    /// The `crossing` of a [`Transfer`](Self::Transfer) kind (its stored index), or `None` for a
+    /// [`Preparation`](Self::Preparation).
+    pub fn transfer_crossing(&self) -> Option<usize> {
+        match self {
+            MigrationTxKind::Transfer { crossing } => Some(*crossing),
+            MigrationTxKind::Preparation { .. } => None,
+        }
+    }
+
+    /// Reconstruct a kind from the stored discriminant (the [`AsRef<str>`](AsRef) value) and the
+    /// per-variant index columns (each `None` for the variant that does not carry it). Errors on an
+    /// unrecognized discriminant, or a discriminant whose index columns are absent.
+    pub fn from_stored(
+        kind: &str,
+        layer: Option<usize>,
+        index: Option<usize>,
+        crossing: Option<usize>,
+    ) -> Result<Self, ParseMigrationTxKindError> {
+        Ok(match kind {
+            "preparation" => MigrationTxKind::Preparation {
+                layer: layer.ok_or(ParseMigrationTxKindError)?,
+                index: index.ok_or(ParseMigrationTxKindError)?,
+            },
+            "transfer" => MigrationTxKind::Transfer {
+                crossing: crossing.ok_or(ParseMigrationTxKindError)?,
+            },
+            _ => return Err(ParseMigrationTxKindError),
+        })
+    }
+}
+
+/// The error returned when a stored `(kind, layer, index, crossing)` tuple does not reconstruct a
+/// [`MigrationTxKind`] (its [`from_stored`](MigrationTxKind::from_stored) constructor): an
+/// unrecognized discriminant, or a variant missing its index columns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseMigrationTxKindError;
+
+impl fmt::Display for ParseMigrationTxKindError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unrecognized or incomplete migration transaction kind")
+    }
 }
 
 /// Where a migration transaction is in its lifecycle.
@@ -306,6 +372,76 @@ impl TryFrom<&str> for MigrationStatus {
     }
 }
 
+impl AsRef<str> for MigrationTxState {
+    /// The stable lowercase wire name of the lifecycle state, as a store persists it (the queryable
+    /// discriminant); the `Broadcast` txid and `Mined` height are stored alongside and reattached by
+    /// [`from_stored`](Self::from_stored).
+    fn as_ref(&self) -> &str {
+        match self {
+            MigrationTxState::AwaitingSignature => "awaiting_signature",
+            MigrationTxState::Signed => "signed",
+            MigrationTxState::Proved => "proved",
+            MigrationTxState::Broadcast { .. } => "broadcast",
+            MigrationTxState::Mined { .. } => "mined",
+        }
+    }
+}
+
+/// The error returned when a stored `(state, txid, mined_height)` triple does not reconstruct a
+/// [`MigrationTxState`] (its [`from_stored`](MigrationTxState::from_stored) constructor): an
+/// unrecognized discriminant, or a `broadcast`/`mined` row missing its txid/height payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseMigrationTxStateError;
+
+impl fmt::Display for ParseMigrationTxStateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unrecognized or incomplete migration transaction state")
+    }
+}
+
+impl MigrationTxState {
+    /// The transaction id of a [`Broadcast`](Self::Broadcast) state (its stored payload), or `None`
+    /// for any other state.
+    pub fn broadcast_txid(&self) -> Option<[u8; 32]> {
+        match self {
+            MigrationTxState::Broadcast { txid } => Some(*txid.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// The block height of a [`Mined`](Self::Mined) state (its stored payload), or `None` for any
+    /// other state.
+    pub fn mined_height(&self) -> Option<BlockHeight> {
+        match self {
+            MigrationTxState::Mined { height } => Some(*height),
+            _ => None,
+        }
+    }
+
+    /// Reconstruct a state from a store: the lowercase discriminant produced by
+    /// [`AsRef<str>`](AsRef), plus the `broadcast` txid and `mined` height columns (each `None` for a
+    /// state that does not carry it). Errors on an unrecognized discriminant, or a `broadcast`/`mined`
+    /// discriminant whose payload column is absent.
+    pub fn from_stored(
+        state: &str,
+        txid: Option<[u8; 32]>,
+        mined_height: Option<BlockHeight>,
+    ) -> Result<Self, ParseMigrationTxStateError> {
+        Ok(match state {
+            "awaiting_signature" => MigrationTxState::AwaitingSignature,
+            "signed" => MigrationTxState::Signed,
+            "proved" => MigrationTxState::Proved,
+            "broadcast" => MigrationTxState::Broadcast {
+                txid: TxId::from_bytes(txid.ok_or(ParseMigrationTxStateError)?),
+            },
+            "mined" => MigrationTxState::Mined {
+                height: mined_height.ok_or(ParseMigrationTxStateError)?,
+            },
+            _ => return Err(ParseMigrationTxStateError),
+        })
+    }
+}
+
 /// The persisted state of a migration: the note split (for the preview and residual accounting) and
 /// every transaction, each as its pre-signed PCZT and metadata. A wallet resumes a migration entirely
 /// from this state after being closed or restarted; this is what a [`MigrationBackend`] stores.
@@ -317,11 +453,6 @@ pub struct MigrationState {
     /// The note-split decomposition (the denominations and residual).
     #[getset(get = "pub")]
     pub(crate) note_split: NoteSplitPlan,
-    /// The reconciled self-funding note values (in zatoshi), one per crossing: a `Transfer { crossing }`
-    /// transaction spends `funding_notes[crossing]` and crosses `funding_notes[crossing]` minus the fee
-    /// buffer into the destination pool.
-    #[getset(get = "pub")]
-    pub(crate) funding_notes: Vec<Zatoshis>,
     /// The preparation plan (its layers and direct-funding notes), retained for auditability and
     /// for the rebuild-on-expiry slice. A `Preparation { layer, index }` transaction's spends
     /// resolve against `preparation.layers()[layer][index]`.
@@ -338,17 +469,23 @@ impl MigrationState {
     pub fn from_parts(
         status: MigrationStatus,
         note_split: NoteSplitPlan,
-        funding_notes: Vec<Zatoshis>,
         preparation: PreparationPlan,
         transactions: Vec<MigrationTransaction>,
     ) -> Self {
         Self {
             status,
             note_split,
-            funding_notes,
             preparation,
             transactions,
         }
+    }
+
+    /// The self-funding note values (in zatoshi), one per crossing: a `Transfer { crossing }`
+    /// transaction spends `funding_notes()[crossing]` and crosses that value minus the fee buffer
+    /// into the destination pool. Derived from the note split (each crossing value plus the fee
+    /// buffer), so a store persists only the note split.
+    pub fn funding_notes(&self) -> Vec<Zatoshis> {
+        self.note_split.migration_outputs()
     }
 }
 
@@ -358,24 +495,23 @@ impl MigrationState {
 #[derive(Clone, Debug)]
 pub struct MigrationPlan {
     note_split: NoteSplitPlan,
-    funding_notes: Vec<Zatoshis>,
     preparation: PreparationPlan,
     prep_schedule: Vec<Vec<BlockHeight>>,
     schedule: Vec<Schedule>,
 }
 
 impl MigrationPlan {
-    /// The note-split decomposition (the denominations and self-funding note values it produced,
-    /// before reconciling against the preparation fees; see [`funding_notes`](Self::funding_notes)).
+    /// The note-split decomposition (the denominations and residual). The split already reflects
+    /// reconciliation against the preparation fees: when the fees did not fit the balance, the
+    /// smallest denominations were dropped (left in the source pool) during the decomposition.
     pub fn note_split(&self) -> &NoteSplitPlan {
         &self.note_split
     }
 
-    /// The funding-note values this migration will actually mint, one per phase-2 crossing. These are
-    /// the note split's outputs after reconciliation: when the preparation transactions' fees do not
-    /// fit the balance, the smallest denominations are dropped (left in the source pool) until they do.
-    pub fn funding_notes(&self) -> &[Zatoshis] {
-        &self.funding_notes
+    /// The funding-note values this migration will mint, one per phase-2 crossing. Derived from the
+    /// note split (each crossing value plus the fee buffer).
+    pub fn funding_notes(&self) -> Vec<Zatoshis> {
+        self.note_split.migration_outputs()
     }
 
     /// The preparation transactions (in dependency layers) that mint the funding notes.
@@ -599,7 +735,6 @@ where
 
     Ok(MigrationPlan {
         note_split,
-        funding_notes,
         preparation,
         prep_schedule,
         schedule,
@@ -1307,7 +1442,6 @@ where
         let state = MigrationState {
             status: MigrationStatus::Committed,
             note_split: plan.note_split().clone(),
-            funding_notes: plan.funding_notes().to_vec(),
             preparation: plan.preparation().clone(),
             transactions: self.transactions,
         };
@@ -1466,7 +1600,6 @@ mod tests {
             plan.preparation().funding_notes().len(),
             plan.funding_notes().len()
         );
-        assert!(plan.funding_notes().len() <= plan.note_split().migration_outputs().len());
     }
 
     /// SHUFFLE (ZIP 318): the crossings are non-increasing, so an unshuffled schedule would
@@ -1533,7 +1666,6 @@ mod tests {
         let state = MigrationState {
             status: MigrationStatus::Committed,
             note_split,
-            funding_notes: Vec::new(),
             preparation: crate::preparation::PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions: vec![tx],
         };
@@ -1868,7 +2000,6 @@ mod commit_tests {
         let schedule = crate::scheduling::schedule(schedule_base, funding.len(), &mut rng);
         let plan = MigrationPlan {
             note_split,
-            funding_notes: funding_zats,
             preparation,
             prep_schedule,
             schedule,

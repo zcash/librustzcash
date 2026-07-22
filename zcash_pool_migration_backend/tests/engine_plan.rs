@@ -113,7 +113,7 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
     // sub-multiset of it), so no denomination or value is invented. Removing the kept notes from a
     // copy of the proposed outputs leaves exactly the dropped notes.
     let mut dropped = proposed.clone();
-    for &k in kept {
+    for &k in &kept {
         let pos = dropped
             .iter()
             .position(|&v| v == k)
@@ -140,7 +140,7 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
         .spendable_orchard_note_values()
         .expect("the mock source notes are available");
     assert!(
-        plan_preparation(&source, kept, prep_tx_fee).is_ok(),
+        plan_preparation(&source, &kept, prep_tx_fee).is_ok(),
         "the reconciled funding set must be preparable from the source notes"
     );
 }
@@ -173,7 +173,6 @@ fn stores_loads_and_updates_a_migration() {
     let state = MigrationState::from_parts(
         MigrationStatus::Committed,
         note_split,
-        Vec::new(),
         PreparationPlan::from_parts(Vec::new(), Vec::new()),
         vec![tx],
     );
