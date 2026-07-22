@@ -39,9 +39,10 @@
 //!
 //! Transfers (across all wallets) that prove against the same boundary anchor form a COHORT: to an
 //! observer they are indistinguishable in their anchor, which is the anonymity set the anchor draw
-//! builds. In this pure module a cohort is just "transfers that chose the same boundary height";
-//! [`group_by_boundary`] groups a single wallet's own transfers that way, and [`K_MAX`] bounds how
-//! many of the wallet's OWN parts may land on one boundary (a SHOULD, still an open ZIP issue).
+//! builds. In this pure module a cohort is just "transfers that chose the same boundary height".
+//! How many of a wallet's OWN parts land on one boundary is whatever the independent geometric
+//! draws produce: ZIP 318 deliberately places no cap on per-wallet multiplicity, since truncating
+//! the outcome of random draws with an arbitrary bound would only distort the distribution.
 //!
 //! # Out of scope (enforced elsewhere, not here)
 //!
@@ -109,16 +110,6 @@ pub const EXPIRY_MODULUS: u32 = 34_560;
 /// modulus period it is scheduled, keeps between one and two [`EXPIRY_MODULUS`] periods of validity.
 /// See [`expiry_height`].
 pub const EXPIRY_WINDOW: u32 = 2 * EXPIRY_MODULUS;
-
-/// Provisional cap on how many of a single wallet's OWN transfers may share one boundary anchor.
-/// When a fresh anchor draw would place more than `K_MAX` of the wallet's parts on the same
-/// boundary, the age is redrawn (see [`draw_anchor_boundary_bounded`]).
-///
-/// This is a SHOULD, not a MUST, and an OPEN ISSUE in ZIP 318 (not yet ratified): capping a
-/// wallet's own multiplicity on a boundary trades a little anonymity-set sharing for less
-/// self-linkage of one wallet's transfers. The value 2 is provisional and may change when the ZIP
-/// settles.
-pub const K_MAX: usize = 2;
 
 /// The scheduled broadcast and expiry heights of one migration transfer. Produced by
 /// [`schedule`]; ties a part's [`broadcast_height`](Self::broadcast_height) (from the cumulative
@@ -455,120 +446,6 @@ pub fn earliest_broadcast_height(
         .saturating_add(BOUNDARY_MODULUS)
         .max(boundary_at_or_after(u32::from(funding_creation_height)));
     BlockHeight::from_u32(lowest.saturating_add(BOUNDARY_MODULUS))
-}
-
-/// Like [`draw_anchor_boundary`], but additionally enforces the provisional per-wallet multiplicity
-/// cap [`K_MAX`] (ZIP 318 SHOULD / OPEN ISSUE): `chosen_counts` maps each boundary height already
-/// chosen by THIS wallet to how many of its parts landed there. A fresh draw whose boundary already
-/// holds [`K_MAX`] of the wallet's parts is discarded and the age redrawn.
-///
-/// Returns `None` if the candidate set is empty, or if the candidate set cannot satisfy the cap
-/// (every reachable boundary is already saturated) within a bounded number of attempts, so the
-/// caller can fall back (for example by not bounding this part). Because this is only a SHOULD, a
-/// caller may prefer plain [`draw_anchor_boundary`].
-pub fn draw_anchor_boundary_bounded<R: RngCore>(
-    nu63_activation: BlockHeight,
-    funding_creation_height: BlockHeight,
-    chain_tip_height: BlockHeight,
-    chosen_counts: &BoundaryCounts,
-    rng: &mut R,
-) -> Option<BlockHeight> {
-    // Cheap fast path / feasibility check: is any candidate boundary still below the cap?
-    let (lowest, highest) = candidate_boundary_bounds(
-        u32::from(nu63_activation),
-        u32::from(funding_creation_height),
-        most_recent_boundary_u32(u32::from(chain_tip_height)),
-    )?;
-    let mut any_room = false;
-    let mut b = lowest;
-    while b <= highest {
-        if chosen_counts.count(BlockHeight::from_u32(b)) < K_MAX {
-            any_room = true;
-            break;
-        }
-        // Step to the next boundary; stop if we would pass `highest` or overflow.
-        match b.checked_add(BOUNDARY_MODULUS) {
-            Some(next) => b = next,
-            None => break,
-        }
-    }
-    if !any_room {
-        return None;
-    }
-
-    for _ in 0..K_MAX_DRAW_ATTEMPTS {
-        let candidate = draw_anchor_boundary(
-            nu63_activation,
-            funding_creation_height,
-            chain_tip_height,
-            rng,
-        )?;
-        if chosen_counts.count(candidate) < K_MAX {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-/// Maximum number of anchor redraws [`draw_anchor_boundary_bounded`] makes while trying to satisfy
-/// the [`K_MAX`] cap before giving up and returning `None`. A generous bound so that, whenever the
-/// candidate set has room, a valid boundary is found with overwhelming probability, while still
-/// guaranteeing termination.
-const K_MAX_DRAW_ATTEMPTS: usize = 64;
-
-/// A running tally of how many of a single wallet's OWN transfers have chosen each boundary height,
-/// used to enforce the [`K_MAX`] cap in [`draw_anchor_boundary_bounded`] and to describe COHORTS
-/// (transfers sharing a boundary anchor). Backed by a simple association list, since one wallet
-/// touches only a handful of boundaries per run.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BoundaryCounts {
-    entries: Vec<(BlockHeight, usize)>,
-}
-
-impl BoundaryCounts {
-    /// An empty tally.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The number of the wallet's transfers recorded at `boundary` (0 if none).
-    pub fn count(&self, boundary: BlockHeight) -> usize {
-        self.entries
-            .iter()
-            .find_map(|(b, c)| (*b == boundary).then_some(*c))
-            .unwrap_or(0)
-    }
-
-    /// Record one more of the wallet's transfers at `boundary`, returning the new count there.
-    pub fn record(&mut self, boundary: BlockHeight) -> usize {
-        for (b, c) in self.entries.iter_mut() {
-            if *b == boundary {
-                *c += 1;
-                return *c;
-            }
-        }
-        self.entries.push((boundary, 1));
-        1
-    }
-
-    /// The distinct boundaries recorded, each with its count, sorted ascending by boundary height.
-    /// Each `(boundary, count)` pair is one of the wallet's cohorts (its parts sharing that anchor).
-    pub fn cohorts(&self) -> Vec<(BlockHeight, usize)> {
-        let mut out = self.entries.clone();
-        out.sort_unstable_by_key(|(b, _)| *b);
-        out
-    }
-}
-
-/// Group a wallet's own chosen boundary heights into a [`BoundaryCounts`] tally: transfers that
-/// chose the same boundary height share a COHORT (a common anchor). A convenience over repeated
-/// [`BoundaryCounts::record`] for when the boundaries are already known.
-pub fn group_by_boundary(boundaries: &[BlockHeight]) -> BoundaryCounts {
-    let mut counts = BoundaryCounts::new();
-    for &b in boundaries {
-        counts.record(b);
-    }
-    counts
 }
 
 #[cfg(test)]
@@ -1146,70 +1023,6 @@ mod tests {
         check_anchor_golden(act, funding, tip + BOUNDARY_MODULUS - 1, 42, &exp_seed42);
     }
 
-    /// Golden vectors for [`draw_anchor_boundary_bounded`]: a sequence of draws over the same
-    /// candidate set (`288..=2736`), each accepted draw recorded into the running
-    /// [`BoundaryCounts`], pinned to the exact chosen boundaries. The invariant checked is the
-    /// `K_MAX` cap: no boundary ends up holding more than [`K_MAX`] of the wallet's parts.
-    #[test]
-    fn draw_anchor_boundary_bounded_golden() {
-        fn check(seed: u64, expected: &[Option<u32>]) {
-            let (act, funding, tip) = (
-                BOUNDARY_MODULUS,
-                2 * BOUNDARY_MODULUS,
-                20 * BOUNDARY_MODULUS,
-            );
-            let mut r = rng(seed);
-            let mut counts = BoundaryCounts::new();
-            let mut got: Vec<Option<u32>> = Vec::new();
-            for _ in 0..expected.len() {
-                match draw_anchor_boundary_bounded(bh(act), bh(funding), bh(tip), &counts, &mut r) {
-                    Some(b) => {
-                        counts.record(b);
-                        got.push(Some(u32::from(b)));
-                    }
-                    None => got.push(None),
-                }
-            }
-            assert_eq!(got, expected, "draw_anchor_boundary_bounded(seed={seed})");
-            for (_, c) in counts.cohorts() {
-                assert!(c <= K_MAX, "cohort count {c} exceeds K_MAX {K_MAX}");
-            }
-        }
-        let exp_seed1 = [
-            Some(2736),
-            Some(2736),
-            Some(2592),
-            Some(2304),
-            Some(2592),
-            Some(2304),
-            Some(2016),
-            Some(2448),
-        ];
-        let exp_seed42 = [
-            Some(2736),
-            Some(2304),
-            Some(2448),
-            Some(2592),
-            Some(2160),
-            Some(2592),
-            Some(2448),
-            Some(1296),
-        ];
-        let exp_seed7 = [
-            Some(2736),
-            Some(2592),
-            Some(2736),
-            Some(2304),
-            Some(2592),
-            Some(2304),
-            Some(2448),
-            Some(2448),
-        ];
-        check(1, &exp_seed1);
-        check(42, &exp_seed42);
-        check(7, &exp_seed7);
-    }
-
     #[test]
     fn anchor_tiny_range_single_candidate() {
         // Exactly one candidate: the boundary below the tip's, and it satisfies all bounds.
@@ -1223,112 +1036,6 @@ mod tests {
                 draw_anchor_boundary(bh(act), bh(funding), bh(tip), &mut r),
                 Some(bh(2 * BOUNDARY_MODULUS))
             );
-        }
-    }
-
-    // --- K_MAX bounded draw / cohorts ---------------------------------------------------------
-
-    proptest! {
-        /// The bounded draw never lets one wallet exceed K_MAX parts on a boundary, when it returns
-        /// a value (SHOULD / open issue).
-        #[test]
-        fn bounded_draw_respects_k_max((act, tip, funding) in arb_anchor_inputs(),
-                                       seed in any::<u64>()) {
-            let mut r = rng(seed);
-            let mut counts = BoundaryCounts::new();
-            // Draw several parts; each accepted draw is recorded.
-            for _ in 0..8 {
-                if let Some(b) = draw_anchor_boundary_bounded(bh(act), bh(funding), bh(tip),
-                                                              &counts, &mut r) {
-                    prop_assert!(counts.count(b) < K_MAX, "would exceed K_MAX at {b}");
-                    counts.record(b);
-                }
-            }
-            for (_, c) in counts.cohorts() {
-                prop_assert!(c <= K_MAX);
-            }
-        }
-    }
-
-    #[test]
-    fn bounded_draw_exhausts_to_none() {
-        // Single candidate, filled to K_MAX: the bounded draw must report infeasible (None).
-        let mut r = rng(5);
-        let act = BOUNDARY_MODULUS;
-        let tip = 3 * BOUNDARY_MODULUS;
-        let funding = 2 * BOUNDARY_MODULUS;
-        let only = 2 * BOUNDARY_MODULUS;
-        let mut counts = BoundaryCounts::new();
-        for _ in 0..K_MAX {
-            counts.record(bh(only));
-        }
-        assert_eq!(
-            draw_anchor_boundary_bounded(bh(act), bh(funding), bh(tip), &counts, &mut r),
-            None
-        );
-    }
-
-    #[test]
-    fn group_by_boundary_counts_cohorts() {
-        let counts = group_by_boundary(&[bh(144), bh(288), bh(144), bh(144), bh(288)]);
-        assert_eq!(counts.count(bh(144)), 3);
-        assert_eq!(counts.count(bh(288)), 2);
-        assert_eq!(counts.count(bh(432)), 0);
-        assert_eq!(counts.cohorts(), alloc::vec![(bh(144), 3), (bh(288), 2)]);
-    }
-
-    /// Golden for the [`BoundaryCounts`] primitive operations (`new`, `record`, `count`, `cohorts`)
-    /// exercised directly rather than through [`group_by_boundary`]: a fresh tally is empty,
-    /// [`BoundaryCounts::record`] returns the incremented running count at that boundary, and
-    /// [`BoundaryCounts::cohorts`] lists distinct boundaries sorted ascending regardless of
-    /// insertion order.
-    #[test]
-    fn boundary_counts_golden() {
-        let mut c = BoundaryCounts::new();
-        assert_eq!(c, BoundaryCounts::default(), "new() must equal default()");
-        assert_eq!(c.count(bh(144)), 0, "empty tally counts zero");
-        assert!(c.cohorts().is_empty(), "empty tally has no cohorts");
-        // record returns the new running count at the boundary; insert out of order (288 before 144).
-        // Each expected running count is bound so the incrementing sequence is readable.
-        let exp_record_288_first = 1;
-        let exp_record_144_first = 1;
-        let exp_record_288_second = 2;
-        let exp_record_288_third = 3;
-        assert_eq!(c.record(bh(288)), exp_record_288_first);
-        assert_eq!(c.record(bh(144)), exp_record_144_first);
-        assert_eq!(c.record(bh(288)), exp_record_288_second);
-        assert_eq!(c.record(bh(288)), exp_record_288_third);
-        assert_eq!(c.count(bh(288)), 3);
-        assert_eq!(c.count(bh(144)), 1);
-        assert_eq!(c.count(bh(432)), 0, "unrecorded boundary counts zero");
-        // cohorts sorted ascending by boundary height, not insertion order.
-        let exp_cohorts = alloc::vec![(bh(144), 1), (bh(288), 3)];
-        assert_eq!(c.cohorts(), exp_cohorts);
-    }
-
-    proptest! {
-        /// [`group_by_boundary`] / [`BoundaryCounts`] tallies faithfully: the cohort counts sum to the
-        /// input length, each boundary's count equals its number of occurrences, an absent boundary
-        /// counts zero, and cohorts are strictly ascending by boundary height (distinct + sorted).
-        #[test]
-        fn group_by_boundary_tallies(boundaries in prop::collection::vec(0u32..2000, 0..64)) {
-            let heights: Vec<BlockHeight> = boundaries.iter().copied().map(bh).collect();
-            let counts = group_by_boundary(&heights);
-            // Sum of cohort counts equals the number of recorded boundaries.
-            let total: usize = counts.cohorts().iter().map(|(_, c)| *c).sum();
-            prop_assert_eq!(total, boundaries.len());
-            // Every recorded boundary is counted with its exact multiplicity.
-            for &b in &boundaries {
-                let occ = boundaries.iter().filter(|&&x| x == b).count();
-                prop_assert_eq!(counts.count(bh(b)), occ);
-            }
-            // A boundary outside the drawn range is never present.
-            prop_assert_eq!(counts.count(bh(9999)), 0);
-            // cohorts() is strictly ascending by boundary height (distinct keys, sorted).
-            let cohorts = counts.cohorts();
-            for w in cohorts.windows(2) {
-                prop_assert!(w[0].0 < w[1].0, "cohorts not strictly ascending");
-            }
         }
     }
 
