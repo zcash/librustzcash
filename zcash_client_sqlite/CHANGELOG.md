@@ -47,11 +47,41 @@ workspace.
   included), or if the document exposes an address at a higher child index under
   the same account and key scope, since transparent addresses are handed out in
   index order.
+- `WalletWrite::rewind_to_chain_state` no longer reports `CorruptedData` for a
+  shielded pool whose note commitment tree checkpoints do not cover the rewind
+  target, provided the truncation leaves that pool's tree in a consistent
+  state. On an upgraded wallet, the `orchard_shardtree` or `ironwood_shardtree`
+  migration creates the pool's tree tables empty and requeues a rescan; until
+  that rescan catches up, the pool's checkpoints may be absent entirely, may
+  all lag the rewind target (a backfill in progress), or may all lie above it
+  (a rescan that has so far only reached tip-priority blocks near the chain
+  tip). All of these states are now tolerated: an empty or lagging tree is left
+  untouched, while a tree whose checkpoints all postdate the target is reset to
+  only the roots of subtrees completed at or below the target (preserving
+  subtree roots downloaded during fast sync, which are required to construct
+  witnesses spanning those subtrees), with the rescan re-creating the rest — in
+  either case without destroying any note witness that the rescan would not
+  re-create. This previously caused
+  account creation and import (which rewind via this method) to fail
+  deterministically on an upgraded, already-scanned wallet until its NU6.3
+  rescan had caught up. A rewind that cannot be executed because it would
+  destroy witness data that the rescan would not re-create is refused as
+  `RequestedRewindInvalid` (it reflects valid wallet state, not corruption); a
+  pool whose checkpoints lie both above and below the truncation height
+  without one at it is still reported as corruption.
 
 ### Changed
 - The `zip-233` feature flag now also enables `zcash_client_backend/zip-233`,
   keeping the two crates' feature-gated `zcash_primitives` call signatures in
   agreement when this crate is built with ZIP 233 support.
+- `WalletWrite::truncate_to_height` now accepts a truncation height that a
+  pool's note commitment tree checkpoints do not cover whenever the truncation
+  leaves that pool's tree in a consistent state — the same per-pool tolerances
+  applied by `rewind_to_chain_state` (see under "Fixed" above). Callers that
+  relied on `RequestedRewindInvalid` being returned for such heights should
+  note that the truncation now succeeds, resetting any tree whose scanned
+  contents lie entirely above the truncation height to only the roots of
+  subtrees completed at or below it.
 
 ### Fixed
 - Value in immature transparent coinbase outputs is now reported as pending

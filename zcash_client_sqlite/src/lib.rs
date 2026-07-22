@@ -172,12 +172,11 @@ pub(crate) const PRUNING_DEPTH: u32 = 100;
 /// The number of blocks to verify ahead when the chain tip is updated.
 pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
+// The Orchard and Ironwood tables exist in the schema (and so may be named in queries)
+// regardless of whether the `orchard` feature is enabled; they are only written to when it
+// is.
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
-
-#[cfg(feature = "orchard")]
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
-
-#[cfg(feature = "orchard")]
 pub(crate) const IRONWOOD_TABLES_PREFIX: &str = "ironwood";
 
 #[cfg(not(feature = "orchard"))]
