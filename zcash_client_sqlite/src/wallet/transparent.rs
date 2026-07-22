@@ -1270,10 +1270,14 @@ pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
 /// - `outpoint`: The identifier for the output to be retrieved.
 /// - `target_height`: The target height of a transaction under construction that will spend the
 ///   returned output. If this is `None`, no spendability checks are performed.
+/// - `include_locked`: When `false`, an output whose `lock_expiry_height` has not passed as of
+///   `target_height` is treated as unspendable and excluded. Like the other spendability checks,
+///   the lock check is skipped entirely when `target_height` is `None`.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
     target_height: Option<TargetHeight>,
+    include_locked: bool,
 ) -> Result<Option<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
@@ -1299,11 +1303,13 @@ pub(crate) fn get_wallet_transparent_output(
                  ({}) -- the transaction is unexpired
                  AND u.id NOT IN ({}) -- and the output is unspent
                  AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
+                 AND ({}) -- the output is not locked
              )
          )",
         tx_unexpired_condition("t"),
         spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
+        output_unlocked_condition("u"),
     ))?;
 
     let result: Result<Option<WalletTransparentOutput<_>>, SqliteClientError> = stmt_select_utxo
@@ -1313,6 +1319,7 @@ pub(crate) fn get_wallet_transparent_output(
                 ":output_index": outpoint.n(),
                 ":target_height": target_height.map(u32::from),
                 ":allow_unspendable": target_height.is_none(),
+                ":include_locked": include_locked,
             ],
             |row| to_unspent_transparent_output(conn, row),
         )?
