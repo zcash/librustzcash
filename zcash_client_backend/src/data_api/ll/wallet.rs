@@ -1606,7 +1606,7 @@ fn should_track_nullifiers(
 
 /// The interval, in blocks, at which checkpoints are retained as durable "anchors" once anchor
 /// retention is active. At 75-second blocks this is roughly every 6 hours (4 per day).
-const ANCHOR_RETENTION_INTERVAL: u32 = 288;
+pub(crate) const ANCHOR_RETENTION_INTERVAL: u32 = 288;
 
 /// Returns whether the checkpoint at `height` should be retained as a durable anchor.
 ///
@@ -1698,12 +1698,15 @@ where
     retain_anchor_checkpoint(tree, anchor_retention_height, frontier_height)?;
 
     for (subtree, checkpoints) in subtrees {
-        // Capture the checkpoint heights before the checkpoint map is consumed by `insert_tree`.
-        let checkpoint_heights = checkpoints.keys().copied().collect::<Vec<_>>();
-        tree.insert_tree(subtree, checkpoints)?;
-        for height in checkpoint_heights {
-            retain_anchor_checkpoint(tree, anchor_retention_height, height)?;
+        // Register anchor retention for this batch's checkpoint heights *before* `insert_tree`,
+        // which prunes down to `max_checkpoints` during insertion. A batch larger than the
+        // checkpoint budget would otherwise prune an anchor before it could be retained, so
+        // retention must be recorded first; `ShardTree::ensure_retained` accepts a checkpoint
+        // height whose checkpoint does not yet exist.
+        for height in checkpoints.keys() {
+            retain_anchor_checkpoint(tree, anchor_retention_height, *height)?;
         }
+        tree.insert_tree(subtree, checkpoints)?;
     }
 
     // Ensure we have a tree checkpoint for each checkpointed block height.
