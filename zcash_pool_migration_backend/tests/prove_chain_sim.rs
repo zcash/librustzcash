@@ -51,9 +51,6 @@ use zcash_pool_migration_backend::wallet::{WalletMigration, WalletMigrationProve
 /// Every network upgrade (through NU6.3, which activates the Ironwood pool) is active from this
 /// height, so a migration built at or above it is post-NU6.3 and its transfers cross into Ironwood.
 const ACTIVATION: u32 = 100_000;
-/// The account is funded with this many ZEC in a single Orchard note; large enough that the
-/// note-split planner produces at least one preparation transaction and one pool-crossing transfer.
-const FUNDING_ZEC: u64 = 78;
 /// Empty blocks scanned after a note is received so its commitment-tree shard completes and an
 /// anchor at that height is available.
 const SHARD_COMPLETION_BLOCKS: usize = 5;
@@ -103,8 +100,41 @@ impl PoolMigrationWrite for MigrationTestStore {
     }
 }
 
+/// One end-to-end proving scenario. Kept as data, with its expected observable amounts, so more
+/// balances and note shapes can be added to [`SCENARIOS`] without duplicating the proving flow.
+struct Scenario {
+    /// A label for assertion messages.
+    label: &'static str,
+    /// The single spendable Orchard note the account is funded with.
+    funding: Zatoshis,
+    /// The number of preparation transactions the migration is expected to produce.
+    expected_preparations: usize,
+    /// The number of pool-crossing transfers (one per prepared funding note).
+    expected_transfers: usize,
+    /// The total value expected to cross into Ironwood: the sum of the crossing denominations.
+    expected_migrated: Zatoshis,
+}
+
+/// The proving scenarios exercised end to end. A single balance for now; the harness is
+/// scenario-driven so more (different balances, multi-note sources) can be added here.
+const SCENARIOS: &[Scenario] = &[Scenario {
+    label: "78 ZEC in a single note",
+    funding: Zatoshis::const_from_u64(78 * COIN),
+    expected_preparations: 1,
+    expected_transfers: 10,
+    // 77.99 ZEC: the canonical {1, 2, 5} * 10^k decomposition of 78 ZEC less the reserved transfer
+    // buffers and preparation fee, leaving 0.0077 ZEC of source-pool change.
+    expected_migrated: Zatoshis::const_from_u64(7_799 * (COIN / 100)),
+}];
+
 #[test]
 fn migration_proves_end_to_end_against_a_funded_wallet() {
+    for scenario in SCENARIOS {
+        run_scenario(scenario);
+    }
+}
+
+fn run_scenario(scenario: &Scenario) {
     let network = nu63_network();
 
     let mut st = TestBuilder::new()
@@ -119,34 +149,59 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
     let usk = account.usk().clone();
     let fvk = OrchardPoolTester::test_account_fvk(&st);
 
-    // Fund the account with a single spendable Orchard note, then let its shard complete so an
-    // anchor is available at the tip.
-    let funding = Zatoshis::const_from_u64(FUNDING_ZEC * COIN);
-    let (fund_height, _, _) = st.generate_next_block(&fvk, AddressType::DefaultExternal, funding);
+    // Fund the account with the scenario's single spendable Orchard note, then let its shard
+    // complete so an anchor is available at the tip.
+    let (fund_height, _, _) =
+        st.generate_next_block(&fvk, AddressType::DefaultExternal, scenario.funding);
     st.scan_cached_blocks(fund_height, 1);
-    assert_eq!(st.get_total_balance(account_id), funding);
+    assert_eq!(
+        st.get_total_balance(account_id),
+        scenario.funding,
+        "{}: funded balance",
+        scenario.label
+    );
     for _ in 0..SHARD_COMPLETION_BLOCKS {
         let (h, _) = st.generate_empty_block();
         st.scan_cached_blocks(h, 1);
     }
 
     // Commit a migration over the wallet adapter: the plan, the preparation transactions, and the
-    // transfers all come from the real wallet's spendable notes.
+    // transfers all come from the real wallet's spendable notes. Capture the planned amounts so the
+    // real chain state can be held to them below.
     let tip = st
         .wallet()
         .chain_height()
         .expect("reads the chain height")
         .expect("the wallet has a chain tip");
     let mut rng = ChaCha8Rng::seed_from_u64(0);
-    let (mut state, _funding_notes) = {
+    let (mut state, funding_notes, migrated, change) = {
         let adapter =
             WalletMigration::new(st.wallet(), account_id, usk, MigrationTestStore::default());
         let plan =
             engine::plan_migration(&network, &adapter, &mut rng).expect("plans the migration");
+        let funding_notes = plan.funding_notes();
+        let migrated = plan.note_split().total_migratable();
+        let change = plan.note_split().change().map(u64::from).unwrap_or(0);
         let mut adapter = adapter;
-        engine::commit_preparation_with_funding(&network, tip, &mut adapter, &plan, &mut rng)
-            .expect("commits the migration")
+        let (state, _) =
+            engine::commit_preparation_with_funding(&network, tip, &mut adapter, &plan, &mut rng)
+                .expect("commits the migration");
+        (state, funding_notes, migrated, change)
     };
+
+    // The observable amounts match what this balance is expected to migrate: one funding note (and
+    // one transfer) per crossing denomination, and the whole value carried into Ironwood.
+    assert_eq!(
+        funding_notes.len(),
+        scenario.expected_transfers,
+        "{}: prepared funding notes",
+        scenario.label
+    );
+    assert_eq!(
+        migrated, scenario.expected_migrated,
+        "{}: total migrated value",
+        scenario.label
+    );
 
     // Every transaction is Signed with anchors and witnesses deferred.
     for tx in state.transactions() {
@@ -161,9 +216,11 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
         .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { .. }))
         .map(|t| t.id())
         .collect();
-    assert!(
-        !prep_ids.is_empty(),
-        "the migration has preparation transactions"
+    assert_eq!(
+        prep_ids.len(),
+        scenario.expected_preparations,
+        "{}: preparation transactions",
+        scenario.label
     );
 
     for prep_id in prep_ids {
@@ -204,6 +261,17 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
         st.scan_cached_blocks(prep_height, 1);
     }
 
+    // With every preparation mined and scanned, the original note has been spent and replaced by the
+    // prepared funding notes plus the source-pool change, so the wallet's balance is exactly the
+    // funding minus the reserved preparation fees.
+    let funding_notes_total: u64 = funding_notes.iter().map(|&v| u64::from(v)).sum();
+    assert_eq!(
+        st.get_total_balance(account_id),
+        Zatoshis::from_u64(funding_notes_total + change).expect("a valid balance"),
+        "{}: balance after preparations",
+        scenario.label
+    );
+
     // Prove each transfer once the chain has reached its drawn anchor boundary (so that checkpoint
     // exists and holds the funding note), staying within the pruning window.
     let mut transfers: Vec<(MigrationTxId, BlockHeight)> = state
@@ -219,7 +287,12 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
         })
         .collect();
     transfers.sort_by_key(|(_, boundary)| *boundary);
-    assert!(!transfers.is_empty(), "the migration has transfers");
+    assert_eq!(
+        transfers.len(),
+        scenario.expected_transfers,
+        "{}: transfers",
+        scenario.label
+    );
 
     for (transfer_id, boundary) in transfers {
         // Advance (scanning empty blocks) until the tip is strictly past the transfer's boundary, so
