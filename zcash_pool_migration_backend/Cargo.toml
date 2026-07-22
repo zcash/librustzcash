@@ -56,10 +56,6 @@ rand_chacha.workspace = true
 rusqlite.workspace = true
 shardtree.workspace = true
 tempfile.workspace = true
-# The wallet-backed real-proving E2E (`tests/prove_chain_sim.rs`) drives a real in-memory
-# `WalletDb` through the `zcash_client_backend` testing framework: fund an account, commit a
-# migration, then prove + mine + scan the preparation and prove the transfer against the wallet's
-# own Orchard commitment tree. `zcash_proofs` supplies the halo2 proving parameters.
 zcash_client_backend = { workspace = true, features = ["orchard", "test-dependencies"] }
 zcash_client_sqlite = { workspace = true, features = ["orchard", "test-dependencies"] }
 zcash_proofs.workspace = true
