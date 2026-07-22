@@ -103,6 +103,40 @@ impl TestCache for BlockCache {
     }
 }
 
+/// The highest checkpoint at or below `from` whose Orchard commitment-tree root is available, or
+/// `None` if there is none at or below `from`. Right after scanning, the tip checkpoint is not yet
+/// rooted, so a spend anchors to the newest settled checkpoint below it (every note mined at or
+/// before that height is still witnessable there).
+#[cfg(feature = "orchard")]
+pub fn highest_rooted_orchard_checkpoint<W>(
+    db: &mut W,
+    from: zcash_protocol::consensus::BlockHeight,
+) -> Option<zcash_protocol::consensus::BlockHeight>
+where
+    W: zcash_client_backend::data_api::WalletCommitmentTrees,
+{
+    use shardtree::error::ShardTreeError;
+    use zcash_client_backend::data_api::WalletCommitmentTrees;
+    use zcash_protocol::consensus::BlockHeight;
+
+    let mut height = u32::from(from);
+    loop {
+        let bh = BlockHeight::from_u32(height);
+        let rooted = db
+            .with_orchard_tree_mut::<_, _, ShardTreeError<<W as WalletCommitmentTrees>::Error>>(
+                |tree| Ok(tree.root_at_checkpoint_id(&bh)?.is_some()),
+            )
+            .expect("queries the Orchard tree");
+        if rooted {
+            return Some(bh);
+        }
+        if height == 0 {
+            return None;
+        }
+        height -= 1;
+    }
+}
+
 #[cfg(feature = "unstable")]
 pub(crate) struct FsBlockCache {
     fsblockdb_root: TempDir,
