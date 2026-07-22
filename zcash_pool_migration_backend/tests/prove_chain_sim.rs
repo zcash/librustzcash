@@ -49,10 +49,14 @@ use zcash_pool_migration_backend::engine::{
     PoolMigrationWrite,
 };
 use zcash_pool_migration_backend::wallet::{WalletMigration, WalletMigrationProver};
+use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
 /// Every network upgrade (through NU6.3, which activates the Ironwood pool) is active from this
 /// height, so a migration built at or above it is post-NU6.3 and its transfers cross into Ironwood.
 const ACTIVATION: u32 = 100_000;
+/// The single quantum the minimal end-to-end migration moves: the 0.01 ZEC minimum denomination
+/// (the smallest `{1, 2, 5} * 10^k` value the note-split planner emits).
+const SINGLE_QUANTUM_ZATOSHI: u64 = COIN / 100;
 /// Empty blocks scanned after a note is received so its commitment-tree shard completes and an
 /// anchor at that height is available.
 const SHARD_COMPLETION_BLOCKS: usize = 5;
@@ -544,4 +548,186 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
     for scenario in scenarios() {
         scenario.prove_end_to_end();
     }
+}
+
+/// The minimal migration proven end to end: a wallet funded with exactly one quantum plus its fees.
+///
+/// This is the prover-backed companion to the planner-only
+/// `full_migration_of_one_quantum_is_one_layer_one_transaction` (in `tests/engine_plan.rs`): where
+/// that test asserts the PLAN shape, this one funds a real wallet with exactly that balance and
+/// proves the resulting single preparation and single transfer end to end against the wallet's own
+/// Orchard commitment tree. A quantum is a canonical `{1, 2, 5} * 10^k` denomination; its fees are
+/// the ZIP-317 transfer buffer that funds the crossing note plus one padded preparation-transaction
+/// fee, so the whole balance migrates as one crossing note with no source-pool change.
+#[test]
+fn single_quantum_migration_proves_end_to_end() {
+    let network = nu63_network();
+
+    // The canonical ZIP-317 fees use a fixed fee rule, so they are network- and height-independent:
+    // discover them from a cheap probe migration of a lone 0.02 ZEC note, which funds exactly one
+    // 0.01 ZEC minimum-denomination note in a single padded preparation transaction (its reserved
+    // prep fee is then one transaction fee). The wallet is funded with one quantum plus these fees.
+    let mut probe_rng = ChaCha8Rng::seed_from_u64(0);
+    let probe = MockBackend::new(vec![2 * SINGLE_QUANTUM_ZATOSHI], 2_000_000);
+    let probe_plan = engine::plan_migration(&regtest_network(true), &probe, &mut probe_rng)
+        .expect("the probe migration plans");
+    assert_eq!(probe_plan.preparation().transaction_count(), 1);
+    let buffer = u64::from(probe_plan.note_split().note_fee_buffer());
+    let prep_tx_fee = u64::from(probe_plan.note_split().prep_fees());
+    let funding = Zatoshis::from_u64(SINGLE_QUANTUM_ZATOSHI + buffer + prep_tx_fee)
+        .expect("the funding amount is a valid value");
+
+    let mut st = TestBuilder::new()
+        .with_network(network)
+        .with_data_store_factory(TestDbFactory::default())
+        .with_block_cache(BlockCache::new())
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account = st.test_account().cloned().expect("the test account exists");
+    let account_id = account.id();
+    let usk = account.usk().clone();
+    let fvk = OrchardPoolTester::test_account_fvk(&st);
+
+    // Fund the account with a single spendable Orchard note of exactly one quantum plus its fees,
+    // then let its shard complete so an anchor is available at the tip.
+    let (fund_height, _, _) = st.generate_next_block(&fvk, AddressType::DefaultExternal, funding);
+    st.scan_cached_blocks(fund_height, 1);
+    assert_eq!(st.get_total_balance(account_id), funding);
+    for _ in 0..SHARD_COMPLETION_BLOCKS {
+        let (h, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h, 1);
+    }
+
+    let tip = st
+        .wallet()
+        .chain_height()
+        .expect("reads the chain height")
+        .expect("the wallet has a chain tip");
+    let mut rng = ChaCha8Rng::seed_from_u64(0);
+    let mut state = {
+        let adapter =
+            WalletMigration::new(st.wallet(), account_id, usk, MigrationTestStore::default());
+        let plan =
+            engine::plan_migration(&network, &adapter, &mut rng).expect("plans the migration");
+
+        // The whole balance migrates as one quantum-sized crossing note, minted by a single
+        // preparation transaction in a single layer, with no source-pool change.
+        assert_eq!(
+            plan.note_split()
+                .crossing_values()
+                .iter()
+                .map(|&v| u64::from(v))
+                .collect::<Vec<u64>>(),
+            vec![SINGLE_QUANTUM_ZATOSHI],
+        );
+        assert_eq!(plan.note_split().change(), None);
+        assert_eq!(plan.preparation().layer_count(), 1);
+        assert_eq!(plan.preparation().transaction_count(), 1);
+
+        let mut adapter = adapter;
+        let (state, _funding_notes) =
+            engine::commit_preparation_with_funding(&network, tip, &mut adapter, &plan, &mut rng)
+                .expect("commits the migration");
+        state
+    };
+
+    // Exactly one preparation transaction and one transfer, each Signed with anchor and witnesses
+    // deferred.
+    let prep_ids: Vec<MigrationTxId> = state
+        .transactions()
+        .iter()
+        .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { .. }))
+        .map(|t| t.id())
+        .collect();
+    let transfer_ids: Vec<MigrationTxId> = state
+        .transactions()
+        .iter()
+        .filter(|t| matches!(t.kind(), MigrationTxKind::Transfer { .. }))
+        .map(|t| t.id())
+        .collect();
+    assert_eq!(prep_ids.len(), 1, "one preparation transaction");
+    assert_eq!(transfer_ids.len(), 1, "one transfer");
+    for tx in state.transactions() {
+        assert!(matches!(tx.state(), MigrationTxState::Signed));
+    }
+    let prep_id = prep_ids[0];
+    let transfer_id = transfer_ids[0];
+
+    // Prove the single preparation against the current tip, extract it (Orchard-only), mine it, and
+    // scan it, so its minted funding note becomes a spendable received note in the wallet.
+    let anchor = highest_rooted_orchard_checkpoint(st.wallet_mut(), tip)
+        .expect("a rooted Orchard checkpoint exists");
+    {
+        let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
+        engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
+            .expect("proves the preparation transaction");
+    }
+    let proven_prep = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == prep_id)
+        .expect("the preparation transaction is present");
+    assert!(matches!(proven_prep.state(), MigrationTxState::Proved));
+    let prep_tx = TransactionExtractor::new(
+        pczt::Pczt::parse(proven_prep.pczt()).expect("parses the proven preparation PCZT"),
+    )
+    .extract()
+    .expect("extracts and verifies the preparation transaction");
+    assert!(
+        prep_tx.orchard_bundle().is_some(),
+        "the preparation has an Orchard bundle"
+    );
+    assert!(
+        prep_tx.ironwood_bundle().is_none(),
+        "the preparation has no Ironwood bundle"
+    );
+    let (prep_height, _) = st.generate_next_block_from_tx(1, &prep_tx);
+    st.scan_cached_blocks(prep_height, 1);
+
+    // Advance (scanning empty blocks) until the tip is strictly past the transfer's drawn boundary,
+    // so its checkpoint is settled and rooted, then prove the single transfer and assert BOTH its
+    // Orchard and Ironwood bundles verify.
+    let boundary = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == transfer_id)
+        .and_then(|t| t.anchor_boundary())
+        .expect("the transfer carries a drawn boundary");
+    loop {
+        let tip = st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+        if tip > boundary {
+            break;
+        }
+        let (h, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h, 1);
+    }
+    {
+        let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
+        engine::prove_transfer(&mut prover, &mut state, transfer_id)
+            .expect("proves the transfer against its drawn boundary");
+    }
+    let proven_transfer = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == transfer_id)
+        .expect("the transfer is present");
+    assert!(matches!(proven_transfer.state(), MigrationTxState::Proved));
+    let transfer_tx = TransactionExtractor::new(
+        pczt::Pczt::parse(proven_transfer.pczt()).expect("parses the proven transfer PCZT"),
+    )
+    .extract()
+    .expect("extracts and verifies the transfer's Orchard and Ironwood proofs");
+    assert!(
+        transfer_tx.orchard_bundle().is_some(),
+        "the transfer has an Orchard bundle"
+    );
+    assert!(
+        transfer_tx.ironwood_bundle().is_some(),
+        "the transfer has an Ironwood bundle"
+    );
 }
