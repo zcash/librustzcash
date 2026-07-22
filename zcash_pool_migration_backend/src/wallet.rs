@@ -363,7 +363,7 @@ type ProverError<W> =
 /// account's full viewing key, and matches. This serves both a transfer (one funding-note spend
 /// plus an Ironwood output) and a preparation transaction (one or more spends, no Ironwood). The
 /// anchor checkpoint the witnesses are taken against must still exist in the tree at proving time
-/// (migration anchor-checkpoint retention, issue #2700).
+/// (the wallet backend must retain that checkpoint until the migration's transfers are proven).
 pub struct WalletMigrationProver<'a, W>
 where
     W: InputSource,

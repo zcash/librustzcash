@@ -185,6 +185,12 @@ since Mermaid layout is hard to reason about in plain text.
   canonical leaf strategies into strategies for its own types; it does not
   re-derive the leaves.
 
+- **No issue or PR numbers in code comments.** A comment must stand on its own,
+  explaining the code in words. Do not annotate it with an issue/PR reference
+  (`issue #2700`, `see #1234`): when the patch already solves the problem the
+  reference is stale noise, and when it tracks future work that belongs in the
+  issue tracker, not the source. Name the concern instead of linking to it.
+
 ## Build & Test Commands
 
 For the most part we follow standard Rust `cargo` practices.
