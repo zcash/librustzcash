@@ -1769,7 +1769,7 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
 /// [`std::sync::OnceLock`] for thread-safe lazy initialization. Proving requires
 /// `std` in practice, so this covers the paths that actually create proofs.
 #[cfg(all(feature = "circuits", feature = "std"))]
-fn cached_orchard_proving_key(
+pub fn cached_orchard_proving_key(
     circuit_version: orchard::circuit::OrchardCircuitVersion,
 ) -> &'static orchard::circuit::ProvingKey {
     use orchard::circuit::{OrchardCircuitVersion, ProvingKey};
