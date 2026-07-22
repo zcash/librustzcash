@@ -3617,6 +3617,16 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
 
+    // Remember the funding note's reference; it is spent at the end of this test, where the
+    // lock-a-spent-note behavior is pinned.
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), 1);
+    let funding_note_ref = OutputRef::new(
+        *notes[0].txid(),
+        PoolType::Shielded(notes[0].note().pool()),
+        u32::from(notes[0].output_index()),
+    );
+
     // Create a proposal with lock_for_blocks: Some(100) using propose_transfer
     let input_selector = GreedyInputSelector::new();
     let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
@@ -3673,6 +3683,40 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
         locked.is_empty(),
         "all notes should be unlocked after create_proposed_transactions"
     );
+
+    // Pin two lock-target edge behaviors:
+    //
+    // Locking an output the wallet does not know fails with `LockFailure` (the "not found"
+    // and "already locked" cases are deliberately indistinguishable to the caller).
+    let unknown = OutputRef::new(
+        TxId::from_bytes([0xEE; 32]),
+        PoolType::Shielded(T::SHIELDED_PROTOCOL),
+        0,
+    );
+    assert_matches!(
+        st.wallet_mut()
+            .lock_outputs([unknown].into_iter(), BlockHeight::from(u32::MAX)),
+        Err(LockError::LockFailure(r)) if r == unknown
+    );
+
+    // Locking an already-spent note currently SUCCEEDS: `lock_outputs` checks only for an
+    // existing active lock, not for spend status. This is harmless in the proposal flow
+    // (spent notes never enter selection, and the lock has no balance effect because balance
+    // computation only considers unspent notes), but it is pinned here so that any future
+    // tightening of the contract is a visible, deliberate change.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([funding_note_ref].into_iter(), BlockHeight::from(u32::MAX))
+            .unwrap(),
+        1
+    );
+    // The stale lock is visible in the raw lock listing but has no balance effect.
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![funding_note_ref]
+    );
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+    assert!(st.wallet_mut().unlock_output(&funding_note_ref).unwrap());
 }
 
 /// Verifies that a proposal created with `lock_for_blocks: Some(_)` round-trips through its
