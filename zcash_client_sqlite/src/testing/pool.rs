@@ -997,7 +997,7 @@ mod concurrency_tests {
             },
             wallet::TargetHeight,
         },
-        wallet::OutputRef,
+        wallet::{LockOwner, OutputRef},
     };
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
@@ -1077,18 +1077,20 @@ mod concurrency_tests {
             .is_some()
         );
 
-        // The second handle locks first...
+        // The second handle locks first, under its own owner...
+        let owner_a = LockOwner::new([0xA1; 32]);
+        let owner_b = LockOwner::new([0xB2; 32]);
         assert_eq!(
-            db2.lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+            db2.lock_outputs(&[output_ref], owner_b, BlockHeight::from(u32::MAX))
                 .unwrap(),
             1
         );
 
-        // ... so the first handle's lock fails, naming the contested output: the race is
-        // resolved at the storage layer, across connections.
+        // ... so the first handle's lock (under a different owner) fails, naming the
+        // contested output: the race is resolved at the storage layer, across connections.
         assert_matches!(
             st.wallet_mut()
-                .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX)),
+                .lock_outputs(&[output_ref], owner_a, BlockHeight::from(u32::MAX)),
             Err(LockError::LockFailure(r)) if r == output_ref
         );
 
@@ -1110,9 +1112,25 @@ mod concurrency_tests {
             vec![output_ref]
         );
 
-        // Locks carry no owner, so the losing handle can release the winner's lock; the
-        // release is visible to the winning handle.
-        assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+        // Locks are owner-scoped, so the losing handle CANNOT release the winner's lock:
+        // its unlock is a no-op and the note stays locked.
+        assert!(!st.wallet_mut().unlock_output(&output_ref, owner_a).unwrap());
+        assert!(
+            st.wallet()
+                .get_spendable_note(
+                    &txid,
+                    ShieldedPool::Sapling,
+                    output_index,
+                    target_height,
+                    false
+                )
+                .unwrap()
+                .is_none()
+        );
+
+        // The winning handle releases its own lock; the release is visible to the losing
+        // handle, whose retry then succeeds.
+        assert!(db2.unlock_output(&output_ref, owner_b).unwrap());
         assert!(
             db2.get_spendable_note(
                 &txid,
@@ -1124,11 +1142,9 @@ mod concurrency_tests {
             .unwrap()
             .is_some()
         );
-
-        // With the note unlocked, the losing handle's retry succeeds.
         assert_eq!(
             st.wallet_mut()
-                .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+                .lock_outputs(&[output_ref], owner_a, BlockHeight::from(u32::MAX))
                 .unwrap(),
             1
         );

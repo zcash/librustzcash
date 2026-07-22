@@ -1,5 +1,7 @@
-//! This migration adds `lock_expiry_height` columns to received note tables to support
-//! height-based note locking during proposal creation.
+//! This migration adds the note-locking columns to the received note/output tables. The
+//! `lock_expiry_height` column supports height-based note locking during proposal creation, and
+//! the `lock_owner` column records the flow that acquired a lock, so that unlocking is scoped to
+//! the owner and re-locking by the same owner is idempotent.
 use std::collections::HashSet;
 
 use schemerz_rusqlite::RusqliteMigration;
@@ -30,7 +32,7 @@ impl schemerz::Migration<Uuid> for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Adds lock_expiry_height columns to received note tables for height-based note locking."
+        "Adds lock_expiry_height and lock_owner columns to received note tables for note locking."
     }
 }
 
@@ -42,7 +44,11 @@ impl RusqliteMigration for Migration {
             "ALTER TABLE sapling_received_notes ADD COLUMN lock_expiry_height INTEGER;
              ALTER TABLE orchard_received_notes ADD COLUMN lock_expiry_height INTEGER;
              ALTER TABLE ironwood_received_notes ADD COLUMN lock_expiry_height INTEGER;
-             ALTER TABLE transparent_received_outputs ADD COLUMN lock_expiry_height INTEGER;",
+             ALTER TABLE transparent_received_outputs ADD COLUMN lock_expiry_height INTEGER;
+             ALTER TABLE sapling_received_notes ADD COLUMN lock_owner BLOB;
+             ALTER TABLE orchard_received_notes ADD COLUMN lock_owner BLOB;
+             ALTER TABLE ironwood_received_notes ADD COLUMN lock_owner BLOB;
+             ALTER TABLE transparent_received_outputs ADD COLUMN lock_owner BLOB;",
         )?;
 
         Ok(())

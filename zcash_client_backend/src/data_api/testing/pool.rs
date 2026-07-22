@@ -44,8 +44,8 @@ use crate::{
             single_output_change_strategy,
         },
         wallet::{
-            ConfirmationsPolicy, TargetHeight, TransferErrT, decrypt_and_store_transaction,
-            input_selection::GreedyInputSelector,
+            ConfirmationsPolicy, LockRequest, TargetHeight, TransferErrT,
+            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
         },
     },
     decrypt_transaction,
@@ -54,7 +54,7 @@ use crate::{
         standard::{self, SingleOutputChangeStrategy},
     },
     scanning::ScanError,
-    wallet::{Note, NoteId, OutputRef, OvkPolicy, ReceivedNote},
+    wallet::{LockOwner, Note, NoteId, OutputRef, OvkPolicy, ReceivedNote},
 };
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
@@ -3400,9 +3400,10 @@ pub fn explicit_note_locking<T: ShieldedPoolTester>(
     );
 
     // Lock the note with a far-future expiry so it's active during the test
+    let owner = LockOwner::new([1; 32]);
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+            .lock_outputs(&[output_ref], owner, BlockHeight::from(u32::MAX))
             .unwrap(),
         1
     );
@@ -3433,7 +3434,7 @@ pub fn explicit_note_locking<T: ShieldedPoolTester>(
     );
 
     // Unlock the note
-    assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+    assert!(st.wallet_mut().unlock_output(&output_ref, owner).unwrap());
 
     // Balance should be restored: spendable equals the full value, locked is zero
     assert_eq!(st.get_total_balance(account_id), value);
@@ -3501,9 +3502,10 @@ pub fn note_locking_height_boundary<T: ShieldedPoolTester>(
     );
 
     // Lock with expiry exactly at the target height: the output must be treated as locked.
+    let owner = LockOwner::new([1; 32]);
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), target_height)
+            .lock_outputs(&[output_ref], owner, target_height)
             .unwrap(),
         1
     );
@@ -3517,12 +3519,12 @@ pub fn note_locking_height_boundary<T: ShieldedPoolTester>(
         vec![output_ref]
     );
 
-    // Re-lock with expiry one block below the target height. Because the existing lock is not
-    // yet expired as of the chain tip, we must first unlock it explicitly.
-    assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+    // Re-lock with expiry one block below the target height. The existing lock is not yet
+    // expired as of the chain tip, but the same owner may re-acquire (and here, shorten) its
+    // own lock directly, with no explicit unlock.
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), target_height - 1)
+            .lock_outputs(&[output_ref], owner, target_height - 1)
             .unwrap(),
         1
     );
@@ -3569,9 +3571,10 @@ pub fn clear_locked_outputs<T: ShieldedPoolTester>(
     );
 
     // Lock the note with a far-future expiry.
+    let owner = LockOwner::new([1; 32]);
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+            .lock_outputs(&[output_ref], owner, BlockHeight::from(u32::MAX))
             .unwrap(),
         1
     );
@@ -3582,7 +3585,7 @@ pub fn clear_locked_outputs<T: ShieldedPoolTester>(
     );
 
     // Clearing all locks for the account unlocks the output even though its expiry height is far
-    // in the future.
+    // in the future (and regardless of its owner).
     assert_eq!(st.wallet_mut().clear_locked_outputs(account_id).unwrap(), 1);
     assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
     assert_eq!(
@@ -3638,6 +3641,7 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
     .unwrap();
 
     let network = *st.network();
+    let owner = LockOwner::new([1; 32]);
     let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
@@ -3647,7 +3651,7 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
         request,
         ConfirmationsPolicy::MIN,
         &crate::data_api::wallet::input_selection::SpendPolicy::default(),
-        Some(100), // lock_for_blocks
+        Some(LockRequest::new(owner, 100)),
         None,
     )
     .unwrap();
@@ -3695,7 +3699,7 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
     );
     assert_matches!(
         st.wallet_mut()
-            .lock_outputs([unknown].into_iter(), BlockHeight::from(u32::MAX)),
+            .lock_outputs(&[unknown], owner, BlockHeight::from(u32::MAX)),
         Err(LockError::LockFailure(r)) if r == unknown
     );
 
@@ -3706,7 +3710,7 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
     // tightening of the contract is a visible, deliberate change.
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([funding_note_ref].into_iter(), BlockHeight::from(u32::MAX))
+            .lock_outputs(&[funding_note_ref], owner, BlockHeight::from(u32::MAX))
             .unwrap(),
         1
     );
@@ -3716,7 +3720,11 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
         vec![funding_note_ref]
     );
     assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
-    assert!(st.wallet_mut().unlock_output(&funding_note_ref).unwrap());
+    assert!(
+        st.wallet_mut()
+            .unlock_output(&funding_note_ref, owner)
+            .unwrap()
+    );
 }
 
 /// Verifies that a proposal created with `lock_for_blocks: Some(_)` round-trips through its
@@ -3753,6 +3761,7 @@ pub fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>(
     .unwrap();
 
     let network = *st.network();
+    let owner = LockOwner::new([1; 32]);
     let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
@@ -3762,7 +3771,7 @@ pub fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>(
         request,
         ConfirmationsPolicy::MIN,
         &crate::data_api::wallet::input_selection::SpendPolicy::default(),
-        Some(100), // lock_for_blocks
+        Some(LockRequest::new(owner, 100)),
         None,
     )
     .unwrap();
@@ -3815,10 +3824,11 @@ pub fn lock_expiry_restores_spendability<T: ShieldedPoolTester>(
     );
 
     // Lock the note until three blocks past the current tip.
+    let owner = LockOwner::new([1; 32]);
     let expiry = tip + 3;
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), expiry)
+            .lock_outputs(&[output_ref], owner, expiry)
             .unwrap(),
         1
     );
@@ -3868,12 +3878,14 @@ pub fn lock_expiry_restores_spendability<T: ShieldedPoolTester>(
     )
     .expect("an expired lock must not block proposal creation");
 
-    // The expired lock is replaceable: a fresh lock_outputs call succeeds without an explicit
-    // unlock, overwriting the stale expiry value.
+    // The expired lock is replaceable, even by a DIFFERENT owner: a fresh lock_outputs call
+    // succeeds without an explicit unlock, overwriting the stale expiry value and taking over
+    // ownership of the lock.
+    let other_owner = LockOwner::new([2; 32]);
     let new_tip = st.latest_cached_block().unwrap().height();
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([output_ref].into_iter(), new_tip + 5)
+            .lock_outputs(&[output_ref], other_owner, new_tip + 5)
             .unwrap(),
         1
     );
@@ -3919,26 +3931,41 @@ pub fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>(
     let r1 = output_ref(value1);
     let r2 = output_ref(value2);
 
+    let owner_a = LockOwner::new([0xA1; 32]);
+    let owner_b = LockOwner::new([0xB2; 32]);
+
     // The first lock on a note succeeds.
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([r1].into_iter(), far_expiry)
+            .lock_outputs(&[r1], owner_a, far_expiry)
             .unwrap(),
         1
     );
 
-    // A second lock on the same note fails while the first lock is active, even from the same
-    // caller: an active lock cannot be re-acquired, extended, or shortened without an explicit
-    // unlock first.
+    // Re-locking under the SAME owner succeeds while the lock is active: acquisition is
+    // idempotent for the holding flow (this is the crash-retry path), and may extend or
+    // shorten the expiry.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(&[r1], owner_a, far_expiry)
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![r1]
+    );
+
+    // A lock by a DIFFERENT owner fails while the first lock is active.
     assert_matches!(
-        st.wallet_mut().lock_outputs([r1].into_iter(), far_expiry),
+        st.wallet_mut().lock_outputs(&[r1], owner_b, far_expiry),
         Err(LockError::LockFailure(r)) if r == r1
     );
 
-    // A batch containing a conflicting output fails all-or-nothing: r2 precedes the conflicting
-    // r1 in the batch, but the failure must leave r2 unlocked.
+    // A batch containing a foreign-locked output fails all-or-nothing: r2 precedes the
+    // conflicting r1 in the batch, but the failure must leave r2 unlocked.
     assert_matches!(
-        st.wallet_mut().lock_outputs([r2, r1].into_iter(), far_expiry),
+        st.wallet_mut().lock_outputs(&[r2, r1], owner_b, far_expiry),
         Err(LockError::LockFailure(r)) if r == r1
     );
     assert_eq!(
@@ -3952,35 +3979,47 @@ pub fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>(
         value2
     );
 
-    // A batch containing the same output twice fails on the duplicate: the first occurrence
-    // takes a live lock, which the second occurrence then conflicts with. Atomicity applies
-    // here too: the failed batch leaves r2 unlocked.
-    assert_matches!(
-        st.wallet_mut().lock_outputs([r2, r2].into_iter(), far_expiry),
-        Err(LockError::LockFailure(r)) if r == r2
-    );
+    // A batch containing the same output twice under one owner succeeds: the second occurrence
+    // re-acquires the lock taken by the first (both row updates are counted).
     assert_eq!(
-        st.wallet().get_locked_outputs(account_id).unwrap(),
-        vec![r1]
+        st.wallet_mut()
+            .lock_outputs(&[r2, r2], owner_b, far_expiry)
+            .unwrap(),
+        2
     );
+    {
+        let mut locked = st.wallet().get_locked_outputs(account_id).unwrap();
+        locked.sort();
+        let mut expected = vec![r1, r2];
+        expected.sort();
+        assert_eq!(locked, expected);
+    }
 
-    // Unlocking an existing output that holds no lock reports `true` (the output was found;
-    // its lock state is NULL afterwards either way); unlocking an unknown output reports
-    // `false`.
-    assert!(st.wallet_mut().unlock_output(&r2).unwrap());
+    // Unlocking is owner-scoped: owner A cannot release owner B's lock on r2, and unlocking
+    // an unknown output reports `false`.
+    assert!(!st.wallet_mut().unlock_output(&r2, owner_a).unwrap());
+    assert_eq!(
+        st.get_locked_balance(account_id),
+        (value1 + value2).unwrap()
+    );
     let unknown = OutputRef::new(
         TxId::from_bytes([0xEE; 32]),
         PoolType::Shielded(T::SHIELDED_PROTOCOL),
         0,
     );
-    assert!(!st.wallet_mut().unlock_output(&unknown).unwrap());
+    assert!(!st.wallet_mut().unlock_output(&unknown, owner_a).unwrap());
 
-    // After unlocking r1, both notes are spendable again and a fresh lock succeeds.
-    assert!(st.wallet_mut().unlock_output(&r1).unwrap());
+    // Each owner releases its own lock; unlocking an output that holds no lock reports
+    // `false`.
+    assert!(st.wallet_mut().unlock_output(&r2, owner_b).unwrap());
+    assert!(!st.wallet_mut().unlock_output(&r2, owner_b).unwrap());
+    assert!(st.wallet_mut().unlock_output(&r1, owner_a).unwrap());
     assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+
+    // With everything released, a single owner can lock both notes in one batch.
     assert_eq!(
         st.wallet_mut()
-            .lock_outputs([r1, r2].into_iter(), far_expiry)
+            .lock_outputs(&[r1, r2], owner_a, far_expiry)
             .unwrap(),
         2
     );
@@ -3991,8 +4030,8 @@ pub fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>(
 }
 
 /// Verifies that [`unlock_proposal_inputs`] releases the locks taken by a proposal created with
-/// `lock_for_blocks: Some(_)`, restoring spendability for a subsequent proposal (the
-/// abandoned-proposal recovery path).
+/// a [`LockRequest`], restoring spendability for a subsequent proposal (the abandoned-proposal
+/// recovery path), and that the release is scoped to the owner that took the locks.
 ///
 /// [`unlock_proposal_inputs`]: crate::data_api::wallet::unlock_proposal_inputs
 pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
@@ -4021,6 +4060,7 @@ pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
     .unwrap();
 
     let network = *st.network();
+    let owner = LockOwner::new([1; 32]);
     let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
         st.wallet_mut(),
         &network,
@@ -4030,7 +4070,7 @@ pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
         request,
         ConfirmationsPolicy::MIN,
         &crate::data_api::wallet::input_selection::SpendPolicy::default(),
-        Some(100), // lock_for_blocks
+        Some(LockRequest::new(owner, 100)),
         None,
     )
     .unwrap();
@@ -4051,8 +4091,16 @@ pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
         Err(data_api::error::Error::InsufficientFunds { .. })
     );
 
-    // Abandon the proposal: releasing its inputs restores spendable balance...
-    crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal).unwrap();
+    // Attempting to release the locks under the WRONG owner is a no-op: the locks are scoped
+    // to the owner that took them.
+    let other_owner = LockOwner::new([2; 32]);
+    crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal, other_owner)
+        .unwrap();
+    assert_eq!(st.get_locked_balance(account_id), value);
+
+    // Abandon the proposal: releasing its inputs under the correct owner restores spendable
+    // balance...
+    crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal, owner).unwrap();
     assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
     assert_eq!(
         st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
@@ -4079,44 +4127,57 @@ pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
     .expect("released inputs must be selectable by a new proposal");
 
     // Releasing an already-released proposal is a no-op.
-    crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal).unwrap();
+    crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal, owner).unwrap();
     assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
 }
 
 /// An operation in the note-locking model test; see [`check_note_locking_model`].
 #[derive(Clone, Debug)]
 pub enum LockOp {
-    /// Attempt to lock the notes at the given indices (duplicates permitted, and meaningful:
-    /// a duplicated index conflicts with the lock taken by its own first occurrence unless
-    /// that lock is already expired) with expiry height `chain_tip + expiry_delta`.
+    /// Attempt to lock the notes at the given indices on behalf of the given owner
+    /// (duplicates permitted: a duplicated index re-acquires the lock taken by its own first
+    /// occurrence, which succeeds because it is held by the same owner) with expiry height
+    /// `chain_tip + expiry_delta`.
     ///
     /// An `expiry_delta` of zero produces a lock that is expired from the moment it is taken:
     /// balance and selection evaluate locks against `target_height = chain_tip + 1`.
     Lock {
         notes: Vec<usize>,
+        owner: usize,
         expiry_delta: u32,
     },
-    /// Unlock the note at the given index, whether or not it is locked.
-    Unlock { note: usize },
-    /// Clear every lock for the account, regardless of expiry.
+    /// Unlock the note at the given index on behalf of the given owner; only a lock held by
+    /// that owner is released.
+    Unlock { note: usize, owner: usize },
+    /// Clear every lock for the account, regardless of expiry or owner.
     ClearLocked,
     /// Mine the given number of empty blocks, advancing the chain tip (and thereby expiring
     /// any lock whose expiry height the tip reaches).
     MineBlocks { count: usize },
 }
 
+/// The owner-index pool used by [`arb_lock_ops`] and [`check_note_locking_model`].
+const MODEL_OWNERS: [LockOwner; 2] = [LockOwner::new([0xA1; 32]), LockOwner::new([0xB2; 32])];
+
 /// A `proptest` strategy over sequences of [`LockOp`] for a wallet holding `n_notes` notes.
 ///
 /// Expiry deltas and mining counts are drawn from small ranges so that sequences routinely
 /// cross lock-expiry boundaries.
 pub fn arb_lock_ops(n_notes: usize, max_ops: usize) -> impl Strategy<Value = Vec<LockOp>> {
+    let n_owners = MODEL_OWNERS.len();
     let op = prop_oneof![
         3 => (
             proptest::collection::vec(0..n_notes, 1..=n_notes + 1),
+            0..n_owners,
             0u32..=4,
         )
-            .prop_map(|(notes, expiry_delta)| LockOp::Lock { notes, expiry_delta }),
-        2 => (0..n_notes).prop_map(|note| LockOp::Unlock { note }),
+            .prop_map(|(notes, owner, expiry_delta)| LockOp::Lock {
+                notes,
+                owner,
+                expiry_delta
+            }),
+        2 => (0..n_notes, 0..n_owners)
+            .prop_map(|(note, owner)| LockOp::Unlock { note, owner }),
         1 => Just(LockOp::ClearLocked),
         2 => (1usize..=3).prop_map(|count| LockOp::MineBlocks { count }),
     ];
@@ -4126,11 +4187,12 @@ pub fn arb_lock_ops(n_notes: usize, max_ops: usize) -> impl Strategy<Value = Vec
 /// Model-based test of the note-locking storage operations.
 ///
 /// Funds a wallet with three notes, then applies the given operation sequence both to the real
-/// data store and to a trivial in-memory model (per-note `Option<lock_expiry_height>` plus the
-/// chain tip). After every operation, the store must agree with the model on:
+/// data store and to a trivial in-memory model (per-note `Option<(lock_expiry_height, owner)>`
+/// plus the chain tip). After every operation, the store must agree with the model on:
 ///
 /// - the outcome of the operation itself, including the all-or-nothing failure of a `Lock`
-///   batch containing a conflict (an active, unexpired lock on any requested note);
+///   batch containing a conflict (an active, unexpired lock held by a different owner on any
+///   requested note), same-owner re-lock idempotency, and owner-scoped unlocking;
 /// - the set reported by `get_locked_outputs` (a note is locked while
 ///   `lock_expiry_height >= chain_tip + 1`);
 /// - the account balance decomposition: locked value is exactly the sum of model-locked note
@@ -4174,34 +4236,39 @@ pub fn check_note_locking_model<T: ShieldedPoolTester>(
         })
         .collect();
 
-    // The model: per-note lock expiry height, and the chain tip.
-    let mut model: Vec<Option<u32>> = vec![None; refs.len()];
+    // The model: per-note lock expiry height and owner index, and the chain tip.
+    let mut model: Vec<Option<(u32, usize)>> = vec![None; refs.len()];
     let mut tip = u32::from(st.latest_cached_block().unwrap().height());
 
     for op in ops {
         match op {
             LockOp::Lock {
                 notes,
+                owner,
                 expiry_delta,
             } => {
                 let expiry = tip + expiry_delta;
                 // Predict the outcome by simulating the store's sequential update: each
-                // requested note may be locked when it holds no lock or its lock has expired
-                // as of the chain tip; the first conflict fails the whole batch.
+                // requested note may be locked when it holds no lock, when its lock has
+                // expired as of the chain tip, or when its lock is held by the requesting
+                // owner; the first conflict (an active foreign lock) fails the whole batch.
                 let mut scratch = model.clone();
                 let mut conflict = None;
                 for &i in notes {
-                    if scratch[i].is_none_or(|h| h <= tip) {
-                        scratch[i] = Some(expiry);
+                    if scratch[i].is_none_or(|(h, o)| h <= tip || o == *owner) {
+                        scratch[i] = Some((expiry, *owner));
                     } else {
                         conflict = Some(i);
                         break;
                     }
                 }
 
-                let result = st
-                    .wallet_mut()
-                    .lock_outputs(notes.iter().map(|&i| refs[i]), BlockHeight::from(expiry));
+                let batch: Vec<OutputRef> = notes.iter().map(|&i| refs[i]).collect();
+                let result = st.wallet_mut().lock_outputs(
+                    &batch,
+                    MODEL_OWNERS[*owner],
+                    BlockHeight::from(expiry),
+                );
                 match conflict {
                     None => {
                         assert_matches!(result, Ok(n) if n == notes.len());
@@ -4214,14 +4281,23 @@ pub fn check_note_locking_model<T: ShieldedPoolTester>(
                     }
                 }
             }
-            LockOp::Unlock { note } => {
-                // The note exists, so unlock reports `true` regardless of prior lock state.
-                assert!(st.wallet_mut().unlock_output(&refs[*note]).unwrap());
-                model[*note] = None;
+            LockOp::Unlock { note, owner } => {
+                // Unlocking releases only a lock held by the requesting owner (expired or
+                // not), and reports whether one was released.
+                let expected = model[*note].is_some_and(|(_, o)| o == *owner);
+                assert_eq!(
+                    st.wallet_mut()
+                        .unlock_output(&refs[*note], MODEL_OWNERS[*owner])
+                        .unwrap(),
+                    expected
+                );
+                if expected {
+                    model[*note] = None;
+                }
             }
             LockOp::ClearLocked => {
-                // Clearing removes every lock record, expired or not, and reports how many
-                // rows it touched.
+                // Clearing removes every lock record, expired or not and regardless of
+                // owner, and reports how many rows it touched.
                 let expected = model.iter().filter(|h| h.is_some()).count();
                 assert_eq!(
                     st.wallet_mut().clear_locked_outputs(account_id).unwrap(),
@@ -4241,14 +4317,14 @@ pub fn check_note_locking_model<T: ShieldedPoolTester>(
         let locked_value = model
             .iter()
             .zip(values.iter())
-            .filter(|(h, _)| h.is_some_and(|h| h >= target))
+            .filter(|(h, _)| h.is_some_and(|(h, _)| h >= target))
             .try_fold(Zatoshis::ZERO, |acc, (_, v)| acc + *v)
             .unwrap();
 
         let mut expected_locked: Vec<OutputRef> = model
             .iter()
             .zip(refs.iter())
-            .filter(|(h, _)| h.is_some_and(|h| h >= target))
+            .filter(|(h, _)| h.is_some_and(|(h, _)| h >= target))
             .map(|(_, r)| *r)
             .collect();
         expected_locked.sort();

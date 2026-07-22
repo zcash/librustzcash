@@ -101,7 +101,10 @@ use crate::{
     },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
-    wallet::{Note, NoteId, OutputRef, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
+    wallet::{
+        LockOwner, Note, NoteId, OutputRef, ReceivedNote, Recipient, WalletTransparentOutput,
+        WalletTx,
+    },
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -3638,17 +3641,24 @@ pub trait WalletWrite: WalletRead {
     /// [`ConfirmationsPolicy::trusted`] confirmations even if the output is not wallet-internal.
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error>;
 
-    /// Locks the specified outputs, preventing it from being selected for spending at any height
-    /// less than or equal to the given height.
+    /// Locks the specified outputs on behalf of `owner`, preventing them from being selected
+    /// for spending at any height less than or equal to the given height.
     ///
-    /// Returns the number of outputs locked by the operation on success, or a [`LockError`] on
+    /// Returns the number of row updates performed on success (equal to the number of provided
+    /// references; a duplicated reference is counted per occurrence), or a [`LockError`] on
     /// failure, wrapping either an error from the underlying storage backend or the first output
     /// that could not be locked.
     ///
+    /// A lock may be acquired when the output holds no lock, when its existing lock has expired
+    /// as of the chain tip, or when its existing lock is held by the *same* `owner`; in the
+    /// latter case the lock's expiry height is updated. Same-owner re-locking makes the
+    /// operation idempotent, so a caller that crashes between locking and persisting its
+    /// proposal can safely retry the flow under the same [`LockOwner`]. Acquisition fails only
+    /// when an unexpired lock is held by a different owner.
+    ///
     /// Implementations of this method must either succeed completely, successfully locking each
-    /// provided output on success, or fail completely leaving all lock state unmodified if any of
-    /// the outputs were already locked. Existing locks that have expired as of the chain tip
-    /// should be replaced with new locks.
+    /// provided output on success, or fail completely leaving all lock state unmodified if any
+    /// of the outputs is actively locked by a different owner.
     ///
     /// This is the mechanism by which overlapping proposals for the same account are prevented
     /// from selecting the same inputs. Because note selection and locking cannot be performed as a
@@ -3660,26 +3670,21 @@ pub trait WalletWrite: WalletRead {
     /// [`ProposalError::InputsLocked`](crate::proposal::ProposalError::InputsLocked). The
     /// losing caller has not partially locked anything and should treat the failure as "the
     /// account is busy" and retry.
-    ///
-    /// The provided output references must be distinct: because a live lock cannot be
-    /// re-acquired, a duplicated reference fails on its second occurrence as if a concurrent
-    /// caller held the lock. (Inputs of a valid [`Proposal`] are always distinct; proposal
-    /// construction rejects duplicates as
-    /// [`ProposalError::ChainDoubleSpend`](crate::proposal::ProposalError::ChainDoubleSpend).)
-    ///
-    /// [`Proposal`]: crate::proposal::Proposal
     fn lock_outputs(
         &mut self,
-        outputs: impl Iterator<Item = OutputRef>,
+        outputs: &[OutputRef],
+        owner: LockOwner,
         lock_expiry_height: BlockHeight,
     ) -> Result<usize, LockError<Self::Error>>;
 
-    /// Unlocks the specified output, making it once again available for spending and balance
-    /// computations.
+    /// Unlocks the specified output if it is locked by the given `owner`, making it once again
+    /// available for spending and balance computations.
     ///
-    /// Returns `true` if the output was found and unlocked, `false` if no matching
-    /// output exists.
-    fn unlock_output(&mut self, output: &OutputRef) -> Result<bool, Self::Error>;
+    /// Returns `true` if a lock held by `owner` (whether or not it had already expired) was
+    /// removed from the output, and `false` otherwise: in particular, a lock held by a
+    /// different owner is left in place, so one flow cannot accidentally release another's
+    /// locks.
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error>;
 
     /// Unlocks every currently-locked output belonging to the specified account, regardless of
     /// lock expiry height.
@@ -3692,10 +3697,10 @@ pub trait WalletWrite: WalletRead {
     ///
     /// # Warning
     ///
-    /// This releases every lock for the account, including locks held by proposals that are
-    /// still legitimately in flight; those proposals' inputs immediately become selectable by
-    /// new proposals, re-creating the conflict that locking exists to prevent. Only call this
-    /// when no in-flight proposal or PCZT for the account remains.
+    /// This releases every lock for the account regardless of its owner, including locks held
+    /// by proposals that are still legitimately in flight; those proposals' inputs immediately
+    /// become selectable by new proposals, re-creating the conflict that locking exists to
+    /// prevent. Only call this when no in-flight proposal or PCZT for the account remains.
     ///
     /// Returns the number of outputs that were unlocked.
     fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error>;

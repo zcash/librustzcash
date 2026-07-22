@@ -29,7 +29,7 @@ use zcash_client_backend::{
         wallet::{ConfirmationsPolicy, TargetHeight},
         *,
     },
-    wallet::{Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
+    wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{
     address::UnifiedAddress,

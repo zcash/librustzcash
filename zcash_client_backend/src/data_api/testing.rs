@@ -75,7 +75,9 @@ use crate::{
     proto::compact_formats::{
         self, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
-    wallet::{Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput},
+    wallet::{
+        LockOwner, Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput,
+    },
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -1306,6 +1308,7 @@ where
             to_address,
             memo,
             limit,
+            None,
         )
     }
 
@@ -3382,13 +3385,18 @@ impl WalletWrite for MockWalletDb {
 
     fn lock_outputs(
         &mut self,
-        _outputs: impl Iterator<Item = OutputRef>,
+        _outputs: &[OutputRef],
+        _owner: LockOwner,
         _lock_expiry_height: BlockHeight,
     ) -> Result<usize, LockError<Self::Error>> {
         Ok(0)
     }
 
-    fn unlock_output(&mut self, _output: &OutputRef) -> Result<bool, Self::Error> {
+    fn unlock_output(
+        &mut self,
+        _output: &OutputRef,
+        _owner: LockOwner,
+    ) -> Result<bool, Self::Error> {
         Ok(false)
     }
 

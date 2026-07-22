@@ -109,6 +109,47 @@ impl From<NoteId> for OutputRef {
     }
 }
 
+/// An opaque token identifying the holder of an output lock.
+///
+/// A caller that locks outputs (directly via [`WalletWrite::lock_outputs`], or through a
+/// proposal-creation function's lock request) supplies an owner token and must retain it: the
+/// token is what authorizes releasing the locks ([`WalletWrite::unlock_output`],
+/// [`unlock_proposal_inputs`]) and what makes re-locking idempotent (an owner may re-acquire or
+/// extend its own active lock, for example when retrying a flow after a crash, while a different
+/// owner's lock attempt fails until the lock expires).
+///
+/// The token is not a cryptographic secret: everything that can reach the wallet database can
+/// read it. It exists to prevent *accidental* cross-flow interference between concurrent
+/// in-process operations, not to protect against an adversary with database access.
+///
+/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
+/// [`WalletWrite::unlock_output`]: crate::data_api::WalletWrite::unlock_output
+/// [`unlock_proposal_inputs`]: crate::data_api::wallet::unlock_proposal_inputs
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LockOwner([u8; 32]);
+
+impl LockOwner {
+    /// Constructs a `LockOwner` from the given bytes.
+    ///
+    /// Callers that persist their own operation state may derive a stable token from it; all
+    /// others should prefer [`LockOwner::random`].
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Generates a fresh random `LockOwner`.
+    pub fn random<R: rand_core::RngCore>(rng: &mut R) -> Self {
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        Self(bytes)
+    }
+
+    /// Returns the byte representation of this token.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
 /// A type that represents the recipient of a transaction output.
 ///
 /// Variants vary along two independent axes:
