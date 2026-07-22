@@ -715,7 +715,7 @@ where
     match wallet_db.lock_outputs(proposal_input_refs(proposal), lock_expiry_height) {
         Ok(_) => Ok(()),
         Err(LockError::LockFailure(out_ref)) => {
-            Err(Error::Proposal(ProposalError::ChainDoubleSpend(out_ref)))
+            Err(Error::Proposal(ProposalError::InputsLocked(out_ref)))
         }
         Err(LockError::Storage(e)) => Err(Error::DataSource(e)),
     }
@@ -727,6 +727,14 @@ where
 /// This is useful when a proposal is rejected or abandoned after its inputs were locked, so that
 /// the outputs become available for selection and balance computation once again. Outputs that are
 /// not currently locked are left unchanged.
+///
+/// # Warning
+///
+/// Locks do not record which proposal acquired them, so this function must only be called for
+/// proposals that were created with `lock_for_blocks: Some(_)`. Calling it for an unlocked
+/// proposal that happens to share inputs with a concurrently-created locked proposal (possible
+/// when the two proposals selected inputs before either lock was taken) would release the other
+/// proposal's locks while it is still in flight.
 pub fn unlock_proposal_inputs<DbT, FeeRuleT, NoteRef>(
     wallet_db: &mut DbT,
     proposal: &Proposal<FeeRuleT, NoteRef>,
@@ -758,12 +766,17 @@ where
 /// Locking is how overlapping proposals for the same account are kept from selecting the same
 /// inputs. If a concurrent caller has already locked one of the inputs this proposal selected
 /// (a check-then-lock race resolved at the storage layer), locking fails and the error surfaces
-/// as [`ProposalError::ChainDoubleSpend`] identifying the conflicting output; the losing caller
+/// as [`ProposalError::InputsLocked`] identifying the conflicting output; the losing caller
 /// should treat this as "the account is busy" and retry. A caller that abandons a proposal whose
 /// inputs it locked should release them with [`unlock_proposal_inputs`]; locks are otherwise
 /// cleared automatically when the inputs are recorded as spent by
 /// [`WalletWrite::store_transactions_to_be_sent`], when their expiry height is reached, or via
 /// [`WalletWrite::clear_locked_outputs`].
+///
+/// Note that expiry re-opens the race the lock exists to prevent: if building and proving the
+/// transaction takes longer than `n` blocks, the lock expires and a concurrent proposal may
+/// select and spend the same inputs. Choose `n` conservatively with respect to the worst-case
+/// time between proposal creation and transaction storage.
 ///
 /// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
 /// [`WalletWrite::store_transactions_to_be_sent`]: crate::data_api::WalletWrite::store_transactions_to_be_sent
