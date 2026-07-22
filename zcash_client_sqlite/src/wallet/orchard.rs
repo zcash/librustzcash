@@ -839,6 +839,21 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn lock_expiry_restores_spendability() {
+        testing::pool::lock_expiry_restores_spendability::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn lock_conflict_and_batch_atomicity() {
+        testing::pool::lock_conflict_and_batch_atomicity::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn unlock_proposal_inputs_releases_locks() {
+        testing::pool::unlock_proposal_inputs_releases_locks::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
         testing::pool::ovk_policy_prevents_recovery_from_chain::<OrchardPoolTester>()
     }

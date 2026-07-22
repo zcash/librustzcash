@@ -37,7 +37,7 @@ use crate::{
         MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
         WalletSummary, WalletTest, WalletWrite,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
-        error::Error,
+        error::{Error, LockError},
         testing::{
             AddressType, CacheInsertionResult, FakeCompactOutput, InitialChainState, TestBuilder,
             single_output_change_strategy,
@@ -73,10 +73,10 @@ use {
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
     zcash_primitives::transaction::fees::zip317,
-    zcash_protocol::{TxId, value::ZatBalance},
+    zcash_protocol::value::ZatBalance,
 };
 
-use zcash_protocol::PoolType;
+use zcash_protocol::{PoolType, TxId};
 
 #[cfg(feature = "pczt")]
 use {
@@ -3738,6 +3738,304 @@ pub fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>(
         .try_into_standard_proposal(&network, st.wallet())
         .expect("a proposal with locked inputs must decode from its serialized form");
     assert_eq!(decoded, proposal);
+}
+
+/// Exercises the passed-expiry semantics of note locking under chain advance.
+///
+/// A lock names an expiry height `h`; balance and selection evaluate it against
+/// `target_height = chain_tip + 1`, so the note stays locked while `chain_tip < h` and becomes
+/// spendable again, with no unlock call, as soon as the chain tip reaches `h`. The stale
+/// `lock_expiry_height` value remains in the row, and a subsequent `lock_outputs` replaces it
+/// (the expired-lock branch of the lock-acquisition guard).
+pub fn lock_expiry_restores_spendability<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(50000);
+    let (_, _, _) = st.add_a_single_note_checking_balance(value);
+
+    let account_id = st.test_account().unwrap().id();
+    let tip = st.latest_cached_block().unwrap().height();
+
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), 1);
+    let note = &notes[0];
+    let output_ref = OutputRef::new(
+        *note.txid(),
+        PoolType::Shielded(note.note().pool()),
+        u32::from(note.output_index()),
+    );
+
+    // Lock the note until three blocks past the current tip.
+    let expiry = tip + 3;
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), expiry)
+            .unwrap(),
+        1
+    );
+    assert_eq!(st.get_locked_balance(account_id), value);
+
+    // Advance the chain to two blocks below the expiry... still locked: the balance target
+    // height is now `expiry` itself, and a lock covers its expiry height inclusively.
+    st.add_empty_blocks(2);
+    assert_eq!(st.get_locked_balance(account_id), value);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        Zatoshis::ZERO
+    );
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![output_ref]
+    );
+
+    // One more block reaches the expiry height: the lock has now been passed, and the note is
+    // spendable again without any unlock call. The stale lock_expiry_height column value is
+    // simply ignored by selection and balance.
+    st.add_empty_blocks(1);
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    // A spend proposal succeeds now that the lock has expired.
+    let extsk2 = T::sk(&[0xf5; 32]);
+    let to = T::sk_default_address(&extsk2);
+    st.propose_standard_transfer::<Infallible>(
+        account_id,
+        StandardFeeRule::Zip317,
+        ConfirmationsPolicy::MIN,
+        &to,
+        Zatoshis::const_from_u64(15000),
+        None,
+        None,
+        T::SHIELDED_PROTOCOL,
+    )
+    .expect("an expired lock must not block proposal creation");
+
+    // The expired lock is replaceable: a fresh lock_outputs call succeeds without an explicit
+    // unlock, overwriting the stale expiry value.
+    let new_tip = st.latest_cached_block().unwrap().height();
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), new_tip + 5)
+            .unwrap(),
+        1
+    );
+    assert_eq!(st.get_locked_balance(account_id), value);
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![output_ref]
+    );
+}
+
+/// Exercises lock-conflict detection and the all-or-nothing batch contract of
+/// [`WalletWrite::lock_outputs`], along with the `unlock_output` return-value semantics.
+///
+/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
+pub fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    // Fund the wallet with two notes of distinct values in a single block, so that each note
+    // can be identified by its value below.
+    let value1 = Zatoshis::const_from_u64(60000);
+    let value2 = Zatoshis::const_from_u64(40000);
+    st.add_notes_checking_balance([[value1, value2]]);
+
+    let account_id = st.test_account().unwrap().id();
+    let far_expiry = BlockHeight::from(u32::MAX);
+
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), 2);
+    let output_ref = |value: Zatoshis| {
+        let note = notes
+            .iter()
+            .find(|n| n.note().value() == value)
+            .expect("a note with the requested value exists");
+        OutputRef::new(
+            *note.txid(),
+            PoolType::Shielded(note.note().pool()),
+            u32::from(note.output_index()),
+        )
+    };
+    let r1 = output_ref(value1);
+    let r2 = output_ref(value2);
+
+    // The first lock on a note succeeds.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([r1].into_iter(), far_expiry)
+            .unwrap(),
+        1
+    );
+
+    // A second lock on the same note fails while the first lock is active, even from the same
+    // caller: an active lock cannot be re-acquired, extended, or shortened without an explicit
+    // unlock first.
+    assert_matches!(
+        st.wallet_mut().lock_outputs([r1].into_iter(), far_expiry),
+        Err(LockError::LockFailure(r)) if r == r1
+    );
+
+    // A batch containing a conflicting output fails all-or-nothing: r2 precedes the conflicting
+    // r1 in the batch, but the failure must leave r2 unlocked.
+    assert_matches!(
+        st.wallet_mut().lock_outputs([r2, r1].into_iter(), far_expiry),
+        Err(LockError::LockFailure(r)) if r == r1
+    );
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![r1],
+        "a failed batch lock must not leave any of its outputs locked"
+    );
+    assert_eq!(st.get_locked_balance(account_id), value1);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value2
+    );
+
+    // A batch containing the same output twice fails on the duplicate: the first occurrence
+    // takes a live lock, which the second occurrence then conflicts with. Atomicity applies
+    // here too: the failed batch leaves r2 unlocked.
+    assert_matches!(
+        st.wallet_mut().lock_outputs([r2, r2].into_iter(), far_expiry),
+        Err(LockError::LockFailure(r)) if r == r2
+    );
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![r1]
+    );
+
+    // Unlocking an existing output that holds no lock reports `true` (the output was found;
+    // its lock state is NULL afterwards either way); unlocking an unknown output reports
+    // `false`.
+    assert!(st.wallet_mut().unlock_output(&r2).unwrap());
+    let unknown = OutputRef::new(
+        TxId::from_bytes([0xEE; 32]),
+        PoolType::Shielded(T::SHIELDED_PROTOCOL),
+        0,
+    );
+    assert!(!st.wallet_mut().unlock_output(&unknown).unwrap());
+
+    // After unlocking r1, both notes are spendable again and a fresh lock succeeds.
+    assert!(st.wallet_mut().unlock_output(&r1).unwrap());
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([r1, r2].into_iter(), far_expiry)
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        st.get_locked_balance(account_id),
+        (value1 + value2).unwrap()
+    );
+}
+
+/// Verifies that [`unlock_proposal_inputs`] releases the locks taken by a proposal created with
+/// `lock_for_blocks: Some(_)`, restoring spendability for a subsequent proposal (the
+/// abandoned-proposal recovery path).
+///
+/// [`unlock_proposal_inputs`]: crate::data_api::wallet::unlock_proposal_inputs
+pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // Add funds to the wallet in a single note
+    let value = Zatoshis::const_from_u64(50000);
+    let (_, _, _) = st.add_a_single_note_checking_balance(value);
+
+    let account_id = st.test_account().unwrap().id();
+    let extsk2 = T::sk(&[0xf5; 32]);
+    let to = T::sk_default_address(&extsk2);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
+
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(15000),
+    )])
+    .unwrap();
+
+    let network = *st.network();
+    let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
+        st.wallet_mut(),
+        &network,
+        account_id,
+        &input_selector,
+        &change_strategy,
+        request,
+        ConfirmationsPolicy::MIN,
+        &crate::data_api::wallet::input_selection::SpendPolicy::default(),
+        Some(100), // lock_for_blocks
+        None,
+    )
+    .unwrap();
+
+    // The proposal's input is locked; a competing proposal cannot be created.
+    assert_eq!(st.get_locked_balance(account_id), value);
+    assert_matches!(
+        st.propose_standard_transfer::<Infallible>(
+            account_id,
+            fee_rule,
+            ConfirmationsPolicy::MIN,
+            &to,
+            Zatoshis::const_from_u64(2000),
+            None,
+            None,
+            T::SHIELDED_PROTOCOL,
+        ),
+        Err(data_api::error::Error::InsufficientFunds { .. })
+    );
+
+    // Abandon the proposal: releasing its inputs restores spendable balance...
+    crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal).unwrap();
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+    assert_eq!(
+        st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+        value
+    );
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    // ... and a subsequent proposal can select the released inputs.
+    st.propose_standard_transfer::<Infallible>(
+        account_id,
+        fee_rule,
+        ConfirmationsPolicy::MIN,
+        &to,
+        Zatoshis::const_from_u64(2000),
+        None,
+        None,
+        T::SHIELDED_PROTOCOL,
+    )
+    .expect("released inputs must be selectable by a new proposal");
+
+    // Releasing an already-released proposal is a no-op.
+    crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal).unwrap();
+    assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
 }
 
 pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
