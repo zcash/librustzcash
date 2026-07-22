@@ -288,12 +288,16 @@ pub enum WalletProveError<TE, NE> {
     MalformedNullifier([u8; 32]),
     /// Enumerating the account's spendable Orchard notes (to locate each spend by nullifier) failed.
     Notes(NE),
-    /// The Orchard commitment tree has no root at the anchor checkpoint (the checkpoint was never
-    /// created, or was pruned before proving; see issue #2700).
+    /// A commitment tree (the Orchard source tree, or the Ironwood destination tree for a transfer)
+    /// has no root at the anchor checkpoint (the checkpoint was never created, or was pruned before
+    /// proving; see issue #2700).
     AnchorNotFound(BlockHeight),
     /// A spent note has no witness at the anchor checkpoint (the checkpoint was pruned, or the
     /// note's position is not marked in the tree).
     WitnessNotFound(BlockHeight),
+    /// The wallet backend tracks no Ironwood commitment tree, so a transfer's Ironwood destination
+    /// anchor cannot be resolved (the backend does not support the Ironwood pool).
+    IronwoodTreeUnavailable,
     /// A commitment-tree query failed.
     Tree(ShardTreeError<TE>),
     /// Installing the Orchard source or Ironwood destination anchor through the PCZT `Updater` role
@@ -336,7 +340,7 @@ impl<TE: fmt::Debug, NE: fmt::Debug> fmt::Display for WalletProveError<TE, NE> {
             }
             WalletProveError::AnchorNotFound(h) => write!(
                 f,
-                "the Orchard tree has no root at the anchor checkpoint {}",
+                "a commitment tree has no root at the anchor checkpoint {}",
                 u32::from(*h)
             ),
             WalletProveError::WitnessNotFound(h) => write!(
@@ -344,6 +348,9 @@ impl<TE: fmt::Debug, NE: fmt::Debug> fmt::Display for WalletProveError<TE, NE> {
                 "a spent note has no witness at the anchor checkpoint {}",
                 u32::from(*h)
             ),
+            WalletProveError::IronwoodTreeUnavailable => {
+                f.write_str("the wallet backend tracks no Ironwood commitment tree")
+            }
             WalletProveError::Tree(e) => write!(f, "commitment-tree query failed: {e:?}"),
             WalletProveError::Anchor(e) => write!(f, "installing an anchor failed: {e:?}"),
             WalletProveError::Witness(e) => write!(f, "installing a spend witness failed: {e:?}"),
@@ -487,17 +494,37 @@ where
                 Ok((root, witnesses))
             })?;
 
+        // A transfer's Ironwood destination bundle must anchor at the SAME height as its Orchard
+        // source bundle: all anchors in a transaction are computed for one height. Resolve the
+        // Ironwood tree root at `anchor_height` (its output-only action's padding spend is a value-0
+        // dummy whose Merkle path the circuit does not enforce, so no Ironwood witness is installed,
+        // but the anchor must still be a real historical Ironwood root the consensus rules accept:
+        // the empty-tree root is only valid while no Ironwood notes have been committed).
+        let ironwood_anchor: Option<Anchor> = if has_ironwood {
+            Some(
+                self.wallet
+                    .with_ironwood_tree_mut::<_, Anchor, ProverError<W>>(|tree| {
+                        Ok(tree
+                            .root_at_checkpoint_id(&anchor_height)?
+                            .ok_or(WalletProveError::AnchorNotFound(anchor_height))?
+                            .into())
+                    })?
+                    .ok_or(WalletProveError::IronwoodTreeUnavailable)?,
+            )
+        } else {
+            None
+        };
+
         // Install the deferred data through the Updater role: the Orchard source anchor and every
-        // spend's witness, plus (for a transfer) the Ironwood destination anchor (the output side
-        // anchors to the empty tree; it has no spend to witness).
+        // spend's witness, plus (for a transfer) the Ironwood destination anchor.
         let mut updater = Updater::new(pczt)
             .set_orchard_anchor(anchor)
             .map_err(WalletProveError::Anchor)?
             .set_orchard_spend_witnesses(witnesses)
             .map_err(WalletProveError::Witness)?;
-        if has_ironwood {
+        if let Some(ironwood_anchor) = ironwood_anchor {
             updater = updater
-                .set_ironwood_anchor(Anchor::empty_tree())
+                .set_ironwood_anchor(ironwood_anchor)
                 .map_err(WalletProveError::Anchor)?;
         }
         let updated = updater.finish();
