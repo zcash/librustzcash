@@ -274,8 +274,11 @@ pub struct MigrationTransaction {
     /// dependencies to mine and a boundary to pass rather than a fixed height).
     #[getset(get_copy = "pub")]
     pub(crate) scheduled_height: BlockHeight,
-    /// The height after which the transaction is invalid and must be rebuilt
-    /// (rebuild-on-expiry is grown by a later slice, alongside reconciliation-on-launch).
+    /// The height after which the transaction can no longer be mined (ZIP 203) and its part must
+    /// be carried by an entirely new, freshly signed transaction: a transfer via
+    /// [`rebuild_expired_transfer`] / [`rebuild_expired_transfer_unsigned`] (detection via
+    /// [`MigrationState::expired_transactions`]); an expired preparation awaits its own
+    /// remediation slice.
     #[getset(get_copy = "pub")]
     pub(crate) expiry_height: BlockHeight,
     /// The boundary height whose tree state the transaction proves against. For a transfer this is
@@ -455,8 +458,9 @@ pub struct MigrationState {
     #[getset(get = "pub")]
     pub(crate) note_split: NoteSplitPlan,
     /// The preparation plan (its layers and direct-funding notes), retained for auditability and
-    /// for the rebuild-on-expiry slice. A `Preparation { layer, index }` transaction's spends
-    /// resolve against `preparation.layers()[layer][index]`.
+    /// for rebuilding expired PREPARATION transactions (a follow-on slice). A
+    /// `Preparation { layer, index }` transaction's spends resolve against
+    /// `preparation.layers()[layer][index]`.
     #[getset(get = "pub")]
     pub(crate) preparation: PreparationPlan,
     /// Every migration transaction, in dependency order.
@@ -1339,6 +1343,345 @@ where
 
     state.set_transaction_proved(id, bytes);
     Ok(())
+}
+
+/// Why rebuilding an expired migration transfer failed.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+pub enum RebuildError<E> {
+    /// No transaction with the given id belongs to the migration.
+    UnknownTransaction(MigrationTxId),
+    /// The transaction is a preparation transaction, not a transfer. Only a transfer — a leaf of
+    /// the dependency graph — is rebuilt this way (with a fresh boundary anchor and canonical
+    /// expiry). An expired preparation has no single-transaction rebuild: its dependents'
+    /// pre-signatures commit to the notes it would have minted, so its remediation (re-signing the
+    /// affected subtree) is a follow-on slice.
+    NotATransfer(MigrationTxId),
+    /// The transaction has not expired at the current chain tip, so there is nothing to rebuild: it is
+    /// still valid, or it has already mined. Guards against reissuing a live transaction as a second,
+    /// double-spending copy.
+    NotExpired(MigrationTxId),
+    /// The stored migration state is internally inconsistent: the note split carries no crossing or
+    /// funding value for this transfer's crossing index, or the transfer's stored PCZT is
+    /// malformed.
+    InconsistentPlan(alloc::string::String),
+    /// The transfer's funding note — the EXACT note its expired PCZT spends, matched by nullifier
+    /// among the wallet's spendable notes — is no longer available. It should still be unspent
+    /// (the expired transfer never mined); if it is gone (spent outside the migration), the
+    /// remaining balance must be re-planned instead of this part rebuilt. A different spendable
+    /// note of coincidentally equal value is deliberately not substituted: denominations repeat,
+    /// so it may be a sibling transfer's funding note, and spending it would make the rebuilt
+    /// transfer a double-spend of that still-valid sibling.
+    FundingNoteUnavailable(Zatoshis),
+    /// NU6.3 is not active on this network, so there is no destination pool and no boundary grid to
+    /// draw an anchor from.
+    Nu63NotActive,
+    /// No candidate anchor boundary exists for the rebuilt schedule (the same stale condition
+    /// [`CommitError::StalePlan`] models at commit time): the migration must be re-planned.
+    NoCandidateAnchor,
+    /// Building the fresh transfer PCZT failed.
+    Build(crate::build::BuildError),
+    /// Serializing the rebuilt PCZT failed.
+    Serialize(pczt::EncodingError),
+    /// A wallet backend or signing operation failed.
+    Backend(E),
+}
+
+#[cfg(feature = "orchard")]
+impl<E: fmt::Display> fmt::Display for RebuildError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RebuildError::UnknownTransaction(id) => {
+                write!(f, "no migration transaction with id {}", u32::from(*id))
+            }
+            RebuildError::NotATransfer(id) => write!(
+                f,
+                "transaction {} is a preparation transaction, not a transfer",
+                u32::from(*id)
+            ),
+            RebuildError::NotExpired(id) => write!(
+                f,
+                "transaction {} has not expired; there is nothing to rebuild",
+                u32::from(*id)
+            ),
+            RebuildError::InconsistentPlan(m) => {
+                write!(f, "the migration plan is internally inconsistent: {m}")
+            }
+            RebuildError::FundingNoteUnavailable(v) => write!(
+                f,
+                "the transfer's funding note (funding value {}) is no longer spendable; the \
+                 remaining balance must be re-planned",
+                u64::from(*v)
+            ),
+            RebuildError::Nu63NotActive => f.write_str("NU6.3 is not active on this network"),
+            RebuildError::NoCandidateAnchor => f.write_str(
+                "no candidate anchor boundary exists for the rebuilt schedule; the migration must \
+                 be re-planned",
+            ),
+            RebuildError::Build(e) => write!(f, "rebuilding the transfer failed: {e}"),
+            RebuildError::Serialize(e) => {
+                write!(f, "serializing the rebuilt transfer failed: {e:?}")
+            }
+            RebuildError::Backend(e) => write!(f, "wallet backend error: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
+
+/// Rebuild an EXPIRED migration transfer as an entirely NEW pre-signed transaction, signed anew
+/// IN-PROCESS with the wallet's spend authority and stored back in the transfer's slot as
+/// [`Signed`](MigrationTxState::Signed), with a fresh boundary anchor and canonical expiry and an
+/// unchanged denomination.
+///
+/// A transfer can only be included in a block at or below its expiry height (ZIP 203); once the
+/// chain passes it, the pre-signed transaction is dead and
+/// [`next_step`](MigrationState::next_step) surfaces it as
+/// [`AdvanceStep::Rebuild`](crate::state::AdvanceStep::Rebuild). NOTHING of the expired artifact is
+/// reusable — the signature hash covers the expiry height, so its signatures cannot authorize any
+/// rescheduled copy. This is ZIP 318's expired-transaction handling: "a new transaction with a
+/// fresh anchor and expiry is constructed for the affected part, with its denomination unchanged".
+/// This function performs that reconstruction: it reschedules the part from the current tip with a
+/// fresh memoryless delay, derives the new canonical expiry, draws a fresh boundary anchor, builds
+/// a new transfer PCZT against the same funding note and crossing value, signs it anew, and
+/// replaces the stored PCZT. Anchors and witnesses stay DEFERRED (ZIP 374): the fresh anchor is
+/// installed at proving time, exactly as for an originally committed transfer.
+///
+/// Signing anew is what distinguishes this step from proving and broadcasting: it needs the
+/// account's SPEND AUTHORITY, not just the viewing key and the network. This entry point signs
+/// in-process via [`MigrationCrypto::sign`], for a wallet that holds the spend authority; a
+/// migration signed by an EXTERNAL (hardware or offline) signer uses
+/// [`rebuild_expired_transfer_unsigned`] instead, which leaves the rebuilt transfer awaiting the
+/// device's signature.
+///
+/// The funding note is recovered by IDENTITY, not by value: the expired PCZT's one real spend
+/// reveals the note's nullifier, which is matched among the wallet's spendable Orchard notes. The
+/// note is still unspent (the expired transfer never mined), so the rebuilt transfer re-spends
+/// exactly it — never a different spendable note of coincidentally equal value, which (since
+/// denominations repeat) could be a sibling transfer's funding note and would make the rebuild a
+/// double-spend of that sibling. If the exact note is gone (spent outside the migration), this
+/// returns [`RebuildError::FundingNoteUnavailable`] and the remaining balance should be re-planned
+/// rather than this part rebuilt.
+///
+/// The caller persists the updated state afterwards (`replace_migration`), exactly as after proving.
+#[cfg(feature = "orchard")]
+pub fn rebuild_expired_transfer<P, B, R>(
+    params: &P,
+    backend: &B,
+    state: &mut MigrationState,
+    id: MigrationTxId,
+    rng: &mut R,
+) -> Result<(), RebuildError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters,
+    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+    R: RngCore + rand_core::CryptoRng,
+{
+    rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::InProcess).map(|_| ())
+}
+
+/// Rebuild an EXPIRED migration transfer for an EXTERNAL signer: construct the same entirely new
+/// transaction as [`rebuild_expired_transfer`], but leave it UNSIGNED in the
+/// [`AwaitingSignature`](MigrationTxState::AwaitingSignature) state and return it as an
+/// [`UnsignedMigrationTx`] to route to the signing device (split device-sized sessions with
+/// [`batch_unsigned_by_action_budget`]), mirroring [`build_preparation_unsigned`].
+///
+/// An expired transaction must be signed ANEW — its signature hash covers the expiry height — and
+/// for an externally signed migration the spend authority is on the device, not in-process: the
+/// rebuild therefore requires a new signing session, unlike proving and broadcasting.
+/// [`MigrationCrypto::sign`] is never called. After the device signs, call
+/// [`MigrationState::apply_signature`] with the returned PCZT (matched by
+/// [`UnsignedMigrationTx::id`]) to move the transfer to [`Signed`](MigrationTxState::Signed), and
+/// persist with `replace_migration`.
+#[cfg(feature = "orchard")]
+pub fn rebuild_expired_transfer_unsigned<P, B, R>(
+    params: &P,
+    backend: &B,
+    state: &mut MigrationState,
+    id: MigrationTxId,
+    rng: &mut R,
+) -> Result<UnsignedMigrationTx, RebuildError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters,
+    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+    R: RngCore + rand_core::CryptoRng,
+{
+    rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::External)
+        .map(|unsigned| unsigned.expect("the external signing path always returns the unsigned tx"))
+}
+
+/// Shared body of [`rebuild_expired_transfer`] (with [`Signing::InProcess`]) and
+/// [`rebuild_expired_transfer_unsigned`] (with [`Signing::External`]). Returns the
+/// [`UnsignedMigrationTx`] for the external path, `None` for the in-process path.
+#[cfg(feature = "orchard")]
+fn rebuild_expired_transfer_inner<P, B, R>(
+    params: &P,
+    backend: &B,
+    state: &mut MigrationState,
+    id: MigrationTxId,
+    rng: &mut R,
+    signing: Signing,
+) -> Result<Option<UnsignedMigrationTx>, RebuildError<<B as MigrationBackend>::Error>>
+where
+    P: zcash_protocol::consensus::Parameters,
+    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
+    R: RngCore + rand_core::CryptoRng,
+{
+    // The height of the next block this transfer could be mined into, against which expiry is judged.
+    let target_height = backend.chain_tip_height().map_err(RebuildError::Backend)? + 1;
+
+    // Read everything the rebuild needs from the persisted state before the mutable borrow below.
+    let tx = state
+        .transactions
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or(RebuildError::UnknownTransaction(id))?;
+    let crossing = match tx.kind {
+        MigrationTxKind::Transfer { crossing } => crossing,
+        MigrationTxKind::Preparation { .. } => return Err(RebuildError::NotATransfer(id)),
+    };
+    // Only an expired, not-yet-mined transfer is rebuilt (the same condition the state machine reports
+    // as expired): a still-valid or already-mined transfer is a typed error, not a silently reissued
+    // double spend.
+    let expiry = u32::from(tx.expiry_height);
+    let expired = !matches!(tx.state, MigrationTxState::Mined { .. })
+        && expiry != 0
+        && expiry < u32::from(target_height);
+    if !expired {
+        return Err(RebuildError::NotExpired(id));
+    }
+    let nu63_activation = params
+        .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
+        .ok_or(RebuildError::Nu63NotActive)?;
+    // The candidate anchor set starts at or after the funding note's creation height: the height its
+    // producing preparation mined, or the NU6.3 activation for a wallet note used directly (no
+    // producer).
+    let funding_creation = tx
+        .depends_on
+        .iter()
+        .filter_map(|dep| state.transactions.iter().find(|t| t.id == *dep))
+        .filter_map(|producer| match producer.state {
+            MigrationTxState::Mined { height } => Some(height),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(nu63_activation);
+
+    let crossing_value = *state
+        .note_split
+        .crossing_values()
+        .get(crossing)
+        .ok_or_else(|| {
+            RebuildError::InconsistentPlan(format!("no crossing value for transfer {crossing}"))
+        })?;
+    let funding_value = *state
+        .note_split
+        .migration_outputs()
+        .get(crossing)
+        .ok_or_else(|| {
+            RebuildError::InconsistentPlan(format!("no funding value for transfer {crossing}"))
+        })?;
+
+    // Recover the funding note's IDENTITY from the expired PCZT itself: its one real spend (the
+    // action with no witness; ZIP 374 deferral leaves the padding dummy its arbitrary witness)
+    // reveals the nullifier of the exact note this part is funded by. Denominations repeat across
+    // a migration, so matching the wallet's spendable notes by value alone could grab a sibling
+    // transfer's funding note and turn the rebuilt transfer into a double-spend of that
+    // still-valid sibling.
+    let stored_pczt = pczt::Pczt::parse(&tx.pczt).map_err(|e| {
+        RebuildError::InconsistentPlan(format!("the stored transfer PCZT does not parse: {e:?}"))
+    })?;
+    let mut real_spend_nullifiers = stored_pczt
+        .orchard()
+        .actions()
+        .iter()
+        .filter(|a| a.spend().witness().is_none())
+        .map(|a| *a.spend().nullifier());
+    let funding_nullifier = match (real_spend_nullifiers.next(), real_spend_nullifiers.next()) {
+        (Some(nf), None) => nf,
+        _ => {
+            return Err(RebuildError::InconsistentPlan(
+                "the stored transfer PCZT does not have exactly one real (unwitnessed) spend"
+                    .into(),
+            ));
+        }
+    };
+
+    // The exact note must still be among the wallet's spendable notes; if it is gone (spent
+    // outside the migration), the remaining balance must be re-planned rather than this part
+    // rebuilt, so a different note of coincidentally equal value is deliberately NOT substituted.
+    let fvk = backend.orchard_fvk().map_err(RebuildError::Backend)?;
+    let spendable_values = backend
+        .spendable_orchard_note_values()
+        .map_err(RebuildError::Backend)?;
+    let mut note = None;
+    for (index, value) in spendable_values.iter().enumerate() {
+        if *value != funding_value {
+            continue;
+        }
+        let candidate = backend
+            .resolve_wallet_note(index)
+            .map_err(RebuildError::Backend)?;
+        if candidate.nullifier(&fvk).to_bytes() == funding_nullifier {
+            note = Some(candidate);
+            break;
+        }
+    }
+    let note = note.ok_or(RebuildError::FundingNoteUnavailable(funding_value))?;
+
+    // Reschedule the part with a fresh memoryless delay from the current tip, and derive its new
+    // canonical expiry and a fresh boundary anchor for that schedule.
+    let scheduled_height = target_height + scheduling::draw_delay(&mut *rng);
+    let expiry_height = scheduling::expiry_height(scheduled_height);
+    let anchor_boundary =
+        scheduling::draw_anchor_boundary(nu63_activation, funding_creation, scheduled_height, rng)
+            .ok_or(RebuildError::NoCandidateAnchor)?;
+
+    // Build the entirely new transfer against the same funding note and crossing value; anchors
+    // and witnesses stay deferred (installed at proving time, ZIP 374). The expired artifact
+    // contributes nothing: the new expiry is covered by the signature hash, so the transaction is
+    // signed anew below (in-process) or by the external signer.
+    let pczt = crate::build::build_transfer_pczt(
+        params,
+        u32::from(target_height),
+        u32::from(expiry_height),
+        &fvk,
+        note,
+        crossing_value,
+        &mut *rng,
+    )
+    .map_err(RebuildError::Build)?;
+    let (bytes, new_state, unsigned) = match signing {
+        Signing::InProcess => {
+            let signed = backend.sign(pczt).map_err(RebuildError::Backend)?;
+            let bytes = signed.serialize().map_err(RebuildError::Serialize)?;
+            (bytes, MigrationTxState::Signed, None)
+        }
+        Signing::External => {
+            let bytes = pczt.serialize().map_err(RebuildError::Serialize)?;
+            let unsigned = UnsignedMigrationTx {
+                id,
+                pczt: bytes.clone(),
+                actions: crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
+                    + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER,
+            };
+            (bytes, MigrationTxState::AwaitingSignature, Some(unsigned))
+        }
+    };
+
+    // Replace the expired transaction's PCZT and reschedule it on the fresh schedule.
+    let tx = state
+        .transactions
+        .iter_mut()
+        .find(|t| t.id == id)
+        .expect("the transaction was found above");
+    tx.pczt = bytes;
+    tx.scheduled_height = scheduled_height;
+    tx.expiry_height = expiry_height;
+    tx.anchor_boundary = Some(anchor_boundary);
+    tx.state = new_state;
+    Ok(unsigned)
 }
 
 /// How a freshly built migration PCZT is finished by the commit functions: signed in-process with the
@@ -2402,7 +2745,9 @@ mod commit_tests {
     use crate::build::test_util::{
         TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
     };
-    use crate::note_splitting::NoteSplitPlan;
+    use crate::note_splitting::{
+        DESTINATION_ACTIONS_PER_TRANSFER, NoteSplitPlan, SOURCE_ACTIONS_PER_TRANSFER,
+    };
     use crate::preparation::{PREP_TX_ACTIONS, plan_preparation};
 
     /// The canonical fees on the regtest network at the build height, computed exactly as
@@ -2425,6 +2770,7 @@ mod commit_tests {
         fvk: FullViewingKey,
         ask: SpendAuthorizingKey,
         stored: Option<MigrationState>,
+        tip: BlockHeight,
     }
 
     impl CommitMock {
@@ -2442,6 +2788,7 @@ mod commit_tests {
                 fvk,
                 ask: SpendAuthorizingKey::from(&sk),
                 stored: None,
+                tip: BlockHeight::from_u32(2_000_000),
             }
         }
     }
@@ -2458,7 +2805,7 @@ mod commit_tests {
         }
 
         fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
-            Ok(BlockHeight::from_u32(2_000_000))
+            Ok(self.tip)
         }
     }
 
@@ -2644,6 +2991,349 @@ mod commit_tests {
         assert!(backend.get_migration().unwrap().is_some());
     }
 
+    /// An expired transfer is rebuilt in place: rescheduled forward with a fresh boundary anchor and
+    /// canonical expiry and re-signed against the same funding note, its denomination unchanged, and
+    /// moved back to `Signed` ready to prove and broadcast on the new schedule (ZIP 318 error
+    /// handling). A wallet holding exactly one funding note funds the transfer DIRECTLY (no
+    /// preparation), so the note stays spendable for the rebuild to re-resolve by value.
+    #[test]
+    fn rebuild_expired_transfer_reschedules_and_resigns_in_place() {
+        let seed = 99u64;
+        let params = regtest_network(true);
+        let buffer = u64::from(commit_test_fees().1);
+        let funding_note = COIN + buffer; // one 1-ZEC crossing plus its fee buffer
+        let mut backend = CommitMock::new(seed, &[funding_note]);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        // Direct funding: exactly one transfer, no preparation transactions.
+        assert_eq!(
+            plan.preparation()
+                .layers()
+                .iter()
+                .map(|l| l.len())
+                .sum::<usize>(),
+            0,
+            "the wallet note funds the transfer directly"
+        );
+        assert_eq!(plan.funding_notes().len(), 1);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration");
+        assert_eq!(state.transactions.len(), 1);
+        let id = state.transactions[0].id;
+        let old = state.transactions[0].clone();
+        assert_eq!(old.state, MigrationTxState::Signed);
+        assert!(
+            old.depends_on.is_empty(),
+            "a directly funded transfer has no producer"
+        );
+
+        // Advance the chain tip past the transfer's expiry, so it can no longer be mined.
+        backend.tip = old.expiry_height + 1;
+        let target = backend.chain_tip_height().unwrap() + 1;
+        assert!(
+            state.expired_transactions(target).contains(&id),
+            "the transfer has expired at the new tip"
+        );
+
+        // Rebuild it.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng)
+            .expect("rebuilds the expired transfer");
+
+        let new = &state.transactions[0];
+        // Same denomination and kind, back to Signed, with a fresh schedule, expiry, anchor, and PCZT.
+        assert_eq!(
+            new.kind, old.kind,
+            "the denomination (crossing) is unchanged"
+        );
+        assert_eq!(new.state, MigrationTxState::Signed);
+        assert!(
+            new.scheduled_height > old.scheduled_height,
+            "rescheduled forward from the new tip"
+        );
+        assert!(
+            new.expiry_height > old.expiry_height,
+            "a fresh, later canonical expiry"
+        );
+        assert_ne!(new.pczt, old.pczt, "a freshly built and re-signed PCZT");
+        // The fresh anchor boundary is on the grid and within the rebuilt schedule's candidate set.
+        let boundary = u32::from(
+            new.anchor_boundary
+                .expect("the rebuilt transfer carries a boundary"),
+        );
+        assert_eq!(boundary % crate::scheduling::BOUNDARY_MODULUS, 0);
+        assert!(
+            boundary
+                < u32::from(crate::scheduling::most_recent_boundary(
+                    new.scheduled_height
+                ))
+        );
+
+        // The rebuilt PCZT is a valid pre-signed transfer with deferred anchors and the new expiry.
+        let parsed = pczt::Pczt::parse(&new.pczt).expect("the rebuilt PCZT parses");
+        assert!(parsed.orchard().anchor().is_none());
+        assert!(parsed.ironwood().anchor().is_none());
+        assert_eq!(
+            *parsed.global().expiry_height(),
+            u32::from(new.expiry_height)
+        );
+
+        // It is no longer expired at the tip it was rebuilt against.
+        assert!(!state.expired_transactions(target).contains(&id));
+    }
+
+    /// The nullifier of the one real spend (the action with no witness; ZIP 374 deferral leaves
+    /// the padding dummy its arbitrary witness) of a stored transfer PCZT.
+    fn real_spend_nullifier(pczt_bytes: &[u8]) -> [u8; 32] {
+        let parsed = pczt::Pczt::parse(pczt_bytes).expect("the stored PCZT parses");
+        let real: Vec<[u8; 32]> = parsed
+            .orchard()
+            .actions()
+            .iter()
+            .filter(|a| a.spend().witness().is_none())
+            .map(|a| *a.spend().nullifier())
+            .collect();
+        assert_eq!(real.len(), 1, "a transfer has exactly one real spend");
+        real[0]
+    }
+
+    /// Rebuilding re-funds the transfer with EXACTLY the note its expired PCZT spends (matched by
+    /// nullifier), not whichever spendable note happens to share its value: migration
+    /// denominations repeat, and re-funding from a sibling transfer's identical-value note would
+    /// make the rebuilt transfer a double-spend of that still-valid sibling.
+    #[test]
+    fn rebuild_resolves_the_exact_funding_note_not_an_equal_value_sibling() {
+        let seed = 103u64;
+        let params = regtest_network(true);
+        let buffer = u64::from(commit_test_fees().1);
+        let funding_note = COIN + buffer;
+        // TWO identical-denomination funding notes: two transfers of the same funding value.
+        let mut backend = CommitMock::new(seed, &[funding_note, funding_note]);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration");
+        // Direct funding: two transfers, no preparation transactions.
+        assert_eq!(state.transactions.len(), 2);
+        let victim = state
+            .transactions
+            .iter()
+            .find(|t| matches!(t.kind, MigrationTxKind::Transfer { crossing: 1 }))
+            .expect("the second crossing's transfer exists")
+            .clone();
+
+        // Expire every transfer.
+        let latest_expiry = state
+            .transactions
+            .iter()
+            .map(|t| t.expiry_height)
+            .max()
+            .expect("transactions exist");
+        backend.tip = latest_expiry + 1;
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        rebuild_expired_transfer(&params, &backend, &mut state, victim.id, &mut rng)
+            .expect("rebuilds the expired transfer");
+
+        let rebuilt = state
+            .transactions
+            .iter()
+            .find(|t| t.id == victim.id)
+            .expect("the rebuilt transfer is still stored");
+        assert_eq!(
+            real_spend_nullifier(&rebuilt.pczt),
+            real_spend_nullifier(&victim.pczt),
+            "the rebuilt transfer spends the same funding note its expired PCZT spent"
+        );
+    }
+
+    /// When the exact funding note is gone (spent outside the migration), rebuilding fails with
+    /// `FundingNoteUnavailable` even if the wallet holds a DIFFERENT spendable note of equal
+    /// value: re-funding a part from an arbitrary note is re-planning, not a rebuild.
+    #[test]
+    fn rebuild_rejects_a_replaced_funding_note_of_equal_value() {
+        let seed = 105u64;
+        let params = regtest_network(true);
+        let buffer = u64::from(commit_test_fees().1);
+        let funding_note = COIN + buffer;
+        let mut backend = CommitMock::new(seed, &[funding_note]);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration");
+        let tx = state.transactions[0].clone();
+
+        // Replace the funding note with a different note of the SAME value, as if the original
+        // was spent outside the migration and equal-value change arrived in its place.
+        let replacement = single_note_witness(&backend.fvk, funding_note, seed + 777).0;
+        backend.wallet_notes[0] = replacement;
+        backend.tip = tx.expiry_height + 1;
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, tx.id, &mut rng),
+            Err(RebuildError::FundingNoteUnavailable(v))
+                if v == Zatoshis::from_u64(funding_note).expect("test value is valid")
+        ));
+    }
+
+    /// For an EXTERNALLY signed migration (a hardware or offline signer), an expired transfer is
+    /// rebuilt UNSIGNED, mirroring [`build_preparation_unsigned`]: it moves to
+    /// `AwaitingSignature` holding the fresh unsigned PCZT, the same bytes come back as an
+    /// [`UnsignedMigrationTx`] to route to the device (batchable by action budget), and
+    /// [`MigrationState::apply_signature`] completes it to `Signed`. In-process signing never
+    /// runs: the spend authority stays on the device.
+    #[test]
+    fn rebuild_expired_transfer_unsigned_awaits_the_external_signature() {
+        let seed = 107u64;
+        let params = regtest_network(true);
+        let buffer = u64::from(commit_test_fees().1);
+        let funding_note = COIN + buffer;
+        let mut backend = CommitMock::new(seed, &[funding_note]);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let (mut state, unsigned) = build_preparation_unsigned(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("builds the migration unsigned");
+        // Sign out of band and apply, exactly as the external-signing caller does.
+        for u in unsigned {
+            let (id, bytes) = u.into_parts();
+            let signed = sign_pczt(
+                pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses"),
+                &backend.ask,
+            )
+            .expect("the external signer signs");
+            assert!(state.apply_signature(id, signed.serialize().expect("serializes")));
+        }
+        let old = state.transactions[0].clone();
+        assert_eq!(old.state, MigrationTxState::Signed);
+
+        // Expire the transfer, then rebuild it UNSIGNED.
+        backend.tip = old.expiry_height + 1;
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        let unsigned_rebuild =
+            rebuild_expired_transfer_unsigned(&params, &backend, &mut state, old.id, &mut rng)
+                .expect("rebuilds the expired transfer unsigned");
+
+        // The transfer awaits the external signature, holding the fresh UNSIGNED bytes that were
+        // also returned for routing to the signer.
+        let rebuilt = state.transactions[0].clone();
+        assert_eq!(rebuilt.state, MigrationTxState::AwaitingSignature);
+        assert_eq!(unsigned_rebuild.id(), old.id);
+        assert_eq!(*unsigned_rebuild.pczt(), rebuilt.pczt);
+        assert_eq!(
+            unsigned_rebuild.actions(),
+            SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER
+        );
+        let parsed = pczt::Pczt::parse(&rebuilt.pczt).expect("the rebuilt PCZT parses");
+        assert_eq!(
+            *parsed.global().expiry_height(),
+            u32::from(rebuilt.expiry_height)
+        );
+        assert!(
+            rebuilt.expiry_height > old.expiry_height,
+            "a fresh, later canonical expiry"
+        );
+        // The builder signs its fabricated dummy spends with their throwaway keys; the account's
+        // one REAL spend (the unwitnessed one, ZIP 374) is what must await the external signer.
+        assert!(
+            parsed
+                .orchard()
+                .actions()
+                .iter()
+                .filter(|a| a.spend().witness().is_none())
+                .all(|a| a.spend().spend_auth_sig().is_none()),
+            "the account's spend authorization was not attached in-process"
+        );
+        assert_eq!(
+            real_spend_nullifier(&rebuilt.pczt),
+            real_spend_nullifier(&old.pczt),
+            "the same funding note funds the rebuilt transfer"
+        );
+
+        // The externally produced signature completes it back to Signed.
+        let signed = sign_pczt(parsed, &backend.ask).expect("the external signer signs");
+        assert!(state.apply_signature(old.id, signed.serialize().expect("serializes")));
+        assert_eq!(state.transactions[0].state, MigrationTxState::Signed);
+    }
+
+    /// Rebuilding rejects a transaction that has not expired, a preparation transaction, and an
+    /// unknown id, so a caller cannot reissue a still-valid transfer as a double-spending copy.
+    #[test]
+    fn rebuild_expired_transfer_rejects_ineligible_transactions() {
+        let seed = 101u64;
+        let params = regtest_network(true);
+        let buffer = u64::from(commit_test_fees().1);
+        let mut backend = CommitMock::new(seed, &[COIN + buffer]);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration");
+        let id = state.transactions[0].id;
+
+        // Not expired yet (the tip is far below the expiry): rejected.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            Err(RebuildError::NotExpired(rejected)) if rejected == id
+        ));
+        // An unknown id: rejected.
+        let unknown = MigrationTxId::new(9999);
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, unknown, &mut rng),
+            Err(RebuildError::UnknownTransaction(rejected)) if rejected == unknown
+        ));
+
+        // A preparation transaction, even an expired one: rejected. Only a transfer (a leaf of the
+        // dependency graph) is rebuilt this way; an expired preparation invalidates its dependents'
+        // pre-signatures and needs its own remediation.
+        state.transactions[0].kind = MigrationTxKind::Preparation { layer: 0, index: 0 };
+        backend.tip = state.transactions[0].expiry_height + 1;
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            Err(RebuildError::NotATransfer(rejected)) if rejected == id
+        ));
+    }
+
     /// A lone whale fanning out into more funding notes than one transaction holds needs a
     /// MULTI-LAYER preparation — and it still signs in the SAME single pass: the later layer's
     /// feeder spends and the transfers' funding notes are recovered from the earlier layers'
@@ -2733,6 +3423,7 @@ mod commit_tests {
             fvk,
             ask: SpendAuthorizingKey::from(&sk),
             stored: None,
+            tip: BlockHeight::from_u32(2_000_000),
         };
         let params = regtest_network(true);
         let prep_count = plan.preparation().transaction_count();
