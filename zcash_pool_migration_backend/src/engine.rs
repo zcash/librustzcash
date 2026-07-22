@@ -1300,7 +1300,7 @@ where
 /// locate each transfer's spend in the wallet's Orchard commitment tree at proving time; a
 /// production consumer recovers them from its own scanned note store, so this entry point exists
 /// for tests (and downstream test harnesses) that drive real proving without a scanning wallet.
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(all(feature = "orchard", any(test, feature = "test-dependencies")))]
 pub fn commit_preparation_with_funding<P, B, R>(
     params: &P,
     target_height: BlockHeight,
