@@ -408,7 +408,7 @@ where
     <W as InputSource>::AccountId: Copy,
 {
     /// Prove one migration transaction's Orchard bundle (and its Ironwood bundle, when it has one)
-    /// against `anchor`: install the source anchor and every deferred spend's witness through the
+    /// against `anchor_height`: install the source anchor and every deferred spend's witness through the
     /// PCZT `Updater` role, then run the provers. Shared by
     /// [`prove_transfer`](MigrationProver::prove_transfer) (a transfer: one Orchard spend plus an
     /// Ironwood output) and [`prove_preparation`](MigrationProver::prove_preparation) (a preparation:
@@ -416,7 +416,7 @@ where
     fn prove_orchard(
         &mut self,
         pczt: ::pczt::Pczt,
-        anchor: BlockHeight,
+        anchor_height: BlockHeight,
     ) -> Result<::pczt::Pczt, ProverError<W>> {
         // Every Orchard action whose witness is still deferred is a real spend to witness; the padded
         // dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
@@ -439,7 +439,7 @@ where
 
         // Locate each spend in the wallet's note store: map every unspent Orchard note's nullifier
         // (recomputed under the account FVK) to its commitment-tree position, then look up each spend.
-        let target = TargetHeight::from(u32::from(anchor) + 1);
+        let target = TargetHeight::from(u32::from(anchor_height) + 1);
         let received = self
             .wallet
             .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[])
@@ -473,14 +473,14 @@ where
             self.wallet
                 .with_orchard_tree_mut::<_, _, ProverError<W>>(|tree| {
                     let root: Anchor = tree
-                        .root_at_checkpoint_id(&anchor)?
-                        .ok_or(WalletProveError::AnchorNotFound(anchor))?
+                        .root_at_checkpoint_id(&anchor_height)?
+                        .ok_or(WalletProveError::AnchorNotFound(anchor_height))?
                         .into();
                     let mut witnesses = Vec::with_capacity(spend_positions.len());
                     for (index, position) in &spend_positions {
                         let path: MerklePath = tree
-                            .witness_at_checkpoint_id_caching(*position, &anchor)?
-                            .ok_or(WalletProveError::WitnessNotFound(anchor))?
+                            .witness_at_checkpoint_id_caching(*position, &anchor_height)?
+                            .ok_or(WalletProveError::WitnessNotFound(anchor_height))?
                             .into();
                         witnesses.push((*index, path));
                     }
