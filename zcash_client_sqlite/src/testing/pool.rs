@@ -976,3 +976,154 @@ pub(crate) fn proposal_records_and_serializes_proposed_version() {
         BlockCache::new(),
     );
 }
+
+#[cfg(test)]
+mod concurrency_tests {
+    use assert_matches::assert_matches;
+
+    use zcash_client_backend::{
+        data_api::{
+            Account as _, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite as _,
+            error::LockError,
+            testing::{
+                AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+            },
+            wallet::TargetHeight,
+        },
+        wallet::OutputRef,
+    };
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+
+    use crate::{
+        WalletDb,
+        testing::{
+            BlockCache,
+            db::{TestDbFactory, test_clock, test_rng},
+        },
+    };
+
+    /// Two independent `WalletDb` connections to the same wallet database resolve a lock race
+    /// at the storage layer: both handles observe the same spendable note (the shared
+    /// select-before-lock state of the TOCTOU window), only the first `lock_outputs` succeeds,
+    /// the loser's failure names the contested note, and lock state changes are immediately
+    /// visible across handles. Also pins the ownerless-lock property across connections: the
+    /// losing handle is able to release the winner's lock.
+    #[test]
+    fn concurrent_handles_resolve_lock_conflict() {
+        let mut st = TestBuilder::new()
+            .with_block_cache(BlockCache::new())
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        // Fund the wallet with a single note.
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let value = Zatoshis::const_from_u64(60000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        let account_id = st.test_account().unwrap().id();
+        let notes = st.wallet().get_notes(ShieldedPool::Sapling).unwrap();
+        assert_eq!(notes.len(), 1);
+        let note = &notes[0];
+        let txid = *note.txid();
+        let output_index = u32::from(note.output_index());
+        let output_ref = OutputRef::new(txid, PoolType::SAPLING, output_index);
+
+        let tip = st.wallet().chain_height().unwrap().unwrap();
+        let target_height = TargetHeight::from(tip + 1);
+
+        // Open a second, independent connection to the same wallet database file.
+        let network = *st.network();
+        let mut db2 = WalletDb::for_path(
+            st.wallet().data_file_path(),
+            network,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+
+        // Both handles observe the note as spendable: this is the shared state from which two
+        // concurrent proposal flows would each select the same input.
+        assert!(
+            st.wallet()
+                .get_spendable_note(
+                    &txid,
+                    ShieldedPool::Sapling,
+                    output_index,
+                    target_height,
+                    false
+                )
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            db2.get_spendable_note(
+                &txid,
+                ShieldedPool::Sapling,
+                output_index,
+                target_height,
+                false
+            )
+            .unwrap()
+            .is_some()
+        );
+
+        // The second handle locks first...
+        assert_eq!(
+            db2.lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+                .unwrap(),
+            1
+        );
+
+        // ... so the first handle's lock fails, naming the contested output: the race is
+        // resolved at the storage layer, across connections.
+        assert_matches!(
+            st.wallet_mut()
+                .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX)),
+            Err(LockError::LockFailure(r)) if r == output_ref
+        );
+
+        // The winner's lock is immediately visible to the losing handle.
+        assert!(
+            st.wallet()
+                .get_spendable_note(
+                    &txid,
+                    ShieldedPool::Sapling,
+                    output_index,
+                    target_height,
+                    false
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            st.wallet().get_locked_outputs(account_id).unwrap(),
+            vec![output_ref]
+        );
+
+        // Locks carry no owner, so the losing handle can release the winner's lock; the
+        // release is visible to the winning handle.
+        assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+        assert!(
+            db2.get_spendable_note(
+                &txid,
+                ShieldedPool::Sapling,
+                output_index,
+                target_height,
+                false
+            )
+            .unwrap()
+            .is_some()
+        );
+
+        // With the note unlocked, the losing handle's retry succeeds.
+        assert_eq!(
+            st.wallet_mut()
+                .lock_outputs([output_ref].into_iter(), BlockHeight::from(u32::MAX))
+                .unwrap(),
+            1
+        );
+    }
+}

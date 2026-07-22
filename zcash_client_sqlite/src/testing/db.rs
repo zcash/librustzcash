@@ -111,6 +111,12 @@ impl TestDb {
         self.data_file
     }
 
+    /// Returns the path of the backing database file, so that tests can open additional
+    /// independent connections to the same wallet database.
+    pub(crate) fn data_file_path(&self) -> &std::path::Path {
+        self.data_file.path()
+    }
+
     /// Dump the schema and contents of the given database table, in
     /// sqlite3 ".dump" format. The name of the table must be a static
     /// string. This assumes that `sqlite3` is on your path and that it
