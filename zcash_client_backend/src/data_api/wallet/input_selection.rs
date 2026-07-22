@@ -746,6 +746,10 @@ impl<DbT> GreedyInputSelector<DbT> {
             ),
         };
         *amount_at_transparent_gather = amount_at_gather;
+        // Input selection must never draw on locked outputs: a locked output belongs to
+        // another in-flight proposal, and spending it would recreate the conflict that
+        // locking exists to prevent.
+        let include_locked = false;
         Ok(wallet_db
             .select_spendable_transparent_outputs(
                 account,
@@ -756,7 +760,7 @@ impl<DbT> GreedyInputSelector<DbT> {
                 target_value,
                 shielding_max_inputs(self.shielding_block_space_percent),
                 &StandardFeeRule::Zip317,
-                false,
+                include_locked,
             )
             .map_err(InputSelectorError::DataSource)?
             .into_iter()
@@ -1322,6 +1326,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         && required > amount_at_transparent_gather
                     {
                         let address_allow_list = transparent.address_allow_list();
+                        // Input selection must never draw on locked outputs: a locked output belongs to
+                        // another in-flight proposal, and spending it would recreate the conflict that
+                        // locking exists to prevent.
+                        let include_locked = false;
                         transparent_inputs = wallet_db
                             .select_spendable_transparent_outputs(
                                 account,
@@ -1332,7 +1340,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                 TargetValue::AtLeast(required),
                                 shielding_max_inputs(self.shielding_block_space_percent),
                                 &StandardFeeRule::Zip317,
-                                false,
+                                include_locked,
                             )
                             .map_err(InputSelectorError::DataSource)?
                             .into_iter()
@@ -1356,6 +1364,10 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // by one policy: pool crossing is minimized, and a payment to an Orchard
             // receiver draws on the pool its output is constructed in (the Ironwood
             // pool once NU6.3 is active).
+            // Input selection must never draw on locked outputs: a locked output belongs to
+            // another in-flight proposal, and spending it would recreate the conflict that
+            // locking exists to prevent.
+            let include_locked = false;
             shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
@@ -1364,7 +1376,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     target_height,
                     confirmations_policy,
                     &exclude,
-                    false,
+                    include_locked,
                 )
                 .map_err(InputSelectorError::DataSource)?;
 
@@ -1488,6 +1500,10 @@ where
     InputSourceT: InputSource,
     FeeRuleT: FeeRule + Clone,
 {
+    // Input selection must never draw on locked outputs: a locked output belongs to
+    // another in-flight proposal, and spending it would recreate the conflict that
+    // locking exists to prevent.
+    let include_locked = false;
     let spendable_notes = wallet_db
         .select_spendable_notes(
             source_account,
@@ -1496,7 +1512,7 @@ where
             target_height,
             confirmations_policy,
             &[],
-            false,
+            include_locked,
         )
         .map_err(InputSelectorError::DataSource)?;
 
@@ -2176,13 +2192,17 @@ where
     // one query per address (including for the many addresses that have no spendable outputs),
     // which is prohibitively expensive for wallets that hold large numbers of transparent
     // addresses.
+    // Input selection must never draw on locked outputs: a locked output belongs to
+    // another in-flight proposal, and spending it would recreate the conflict that
+    // locking exists to prevent.
+    let include_locked = false;
     let mut utxos = wallet_db
         .get_spendable_transparent_outputs_for_addresses(
             source_addrs,
             target_height,
             confirmations_policy,
             output_filter,
-            false,
+            include_locked,
         )
         .map_err(InputSelectorError::DataSource)?;
 
