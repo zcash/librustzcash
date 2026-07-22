@@ -30,6 +30,7 @@ zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
 zcash_encoding.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
+zcash_pool_migration_backend.workspace = true
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zcash_script.workspace = true
@@ -115,6 +116,9 @@ zcash_primitives = { workspace = true, features = ["test-dependencies", "non-sta
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+# The backend's shared conformance suite and proptest strategies, so the pool-migration store is
+# exercised by the ONE per-store framework instead of hand-rolled fixtures.
+zcash_pool_migration_backend = { workspace = true, features = ["test-dependencies"] }
 zip321 = { workspace = true }
 
 [features]

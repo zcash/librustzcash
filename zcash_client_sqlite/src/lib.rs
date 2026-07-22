@@ -155,6 +155,7 @@ use {
 
 pub mod chain;
 pub mod error;
+pub mod pool_migration;
 pub mod util;
 pub mod wallet;
 #[cfg(feature = "zewif")]

@@ -234,7 +234,6 @@ fn set_transaction_state(stored: &mut MigrationState, id: MigrationTxId, state: 
     *stored = MigrationState::from_parts(
         stored.status(),
         stored.note_split().clone(),
-        stored.funding_notes().clone(),
         stored.preparation().clone(),
         transactions,
     );
