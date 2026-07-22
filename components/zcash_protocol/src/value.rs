@@ -547,6 +547,15 @@ pub mod testing {
 
     use super::{MAX_BALANCE, MAX_MONEY, ZatBalance, Zatoshis};
 
+    /// A raw zatoshi amount as [`Zatoshis`], for terse test fixtures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `amount` exceeds [`MAX_MONEY`](super::MAX_MONEY).
+    pub fn zats(amount: u64) -> Zatoshis {
+        Zatoshis::const_from_u64(amount)
+    }
+
     prop_compose! {
         pub fn arb_zat_balance()(amt in -MAX_BALANCE..MAX_BALANCE) -> ZatBalance {
             ZatBalance::from_i64(amt).unwrap()
