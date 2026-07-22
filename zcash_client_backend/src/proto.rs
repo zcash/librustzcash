@@ -805,6 +805,14 @@ impl proposal::Proposal {
                 };
 
                 let target_height = TargetHeight::from(self.min_target_height);
+
+                // A proposal created with `lock_for_blocks` locks its own inputs, so
+                // input retrieval during decoding must not filter locked outputs;
+                // otherwise a locked proposal would fail to round-trip through its
+                // serialized form. Double-spend protection is enforced when the
+                // proposal's transactions are created, not here.
+                let include_locked = true;
+
                 // Steps are checked against the Orchard turnstile when Ironwood is
                 // active at the height for which the proposal was constructed.
                 #[cfg(feature = "orchard")]
@@ -875,7 +883,7 @@ impl proposal::Proposal {
                                                     .get_unspent_transparent_output(
                                                         &outpoint,
                                                         target_height,
-                                                        false,
+                                                        include_locked,
                                                     )
                                                     .map_err(ProposalDecodingError::InputRetrieval)?
                                                     .ok_or({
@@ -896,7 +904,7 @@ impl proposal::Proposal {
                                                 protocol,
                                                 out.index,
                                                 target_height,
-                                                false,
+                                                include_locked,
                                             )
                                             .map_err(ProposalDecodingError::InputRetrieval)
                                             .and_then(|opt| {

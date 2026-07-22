@@ -834,6 +834,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn locked_proposal_proto_roundtrip() {
+        testing::pool::locked_proposal_proto_roundtrip::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
         testing::pool::ovk_policy_prevents_recovery_from_chain::<OrchardPoolTester>()
     }
