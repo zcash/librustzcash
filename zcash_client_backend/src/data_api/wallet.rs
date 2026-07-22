@@ -669,7 +669,12 @@ impl ConfirmationsPolicy {
     }
 }
 
-/// Returns the set of [`OutputRef`]s for all inputs selected by the given proposal.
+/// Returns the [`OutputRef`] identifying each output that the given proposal consumes as an
+/// input.
+///
+/// Each note or UTXO selected for spending is an *input* to the proposal's transaction, but is at
+/// the same time an *output* of the earlier transaction that created it; an [`OutputRef`] names it
+/// by that creating transaction's id, which is the stable identity the lock tables are keyed on.
 fn proposal_input_refs<FeeRuleT, NoteRef>(
     proposal: &Proposal<FeeRuleT, NoteRef>,
 ) -> impl Iterator<Item = OutputRef> {
