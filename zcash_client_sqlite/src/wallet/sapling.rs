@@ -617,6 +617,19 @@ pub(crate) mod tests {
         testing::pool::unlock_proposal_inputs_releases_locks::<SaplingPoolTester>()
     }
 
+    proptest::proptest! {
+        // Each case builds a fresh wallet and replays an operation sequence, so keep the
+        // case count moderate; the sequences themselves explore the expiry boundaries.
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(12))]
+
+        #[test]
+        fn note_locking_model(
+            ops in zcash_client_backend::data_api::testing::pool::arb_lock_ops(3, 10)
+        ) {
+            testing::pool::check_note_locking_model::<SaplingPoolTester>(&ops)
+        }
+    }
+
     #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
         testing::pool::ovk_policy_prevents_recovery_from_chain::<SaplingPoolTester>()

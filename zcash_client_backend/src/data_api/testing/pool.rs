@@ -8,6 +8,7 @@ use std::{
 
 use assert_matches::assert_matches;
 use incrementalmerkletree::{Level, Position, frontier::Frontier};
+use proptest::prelude::{Just, Strategy, prop_oneof};
 use rand::{Rng, RngCore};
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
@@ -4036,6 +4037,200 @@ pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
     // Releasing an already-released proposal is a no-op.
     crate::data_api::wallet::unlock_proposal_inputs(st.wallet_mut(), &proposal).unwrap();
     assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
+}
+
+/// An operation in the note-locking model test; see [`check_note_locking_model`].
+#[derive(Clone, Debug)]
+pub enum LockOp {
+    /// Attempt to lock the notes at the given indices (duplicates permitted, and meaningful:
+    /// a duplicated index conflicts with the lock taken by its own first occurrence unless
+    /// that lock is already expired) with expiry height `chain_tip + expiry_delta`.
+    ///
+    /// An `expiry_delta` of zero produces a lock that is expired from the moment it is taken:
+    /// balance and selection evaluate locks against `target_height = chain_tip + 1`.
+    Lock {
+        notes: Vec<usize>,
+        expiry_delta: u32,
+    },
+    /// Unlock the note at the given index, whether or not it is locked.
+    Unlock { note: usize },
+    /// Clear every lock for the account, regardless of expiry.
+    ClearLocked,
+    /// Mine the given number of empty blocks, advancing the chain tip (and thereby expiring
+    /// any lock whose expiry height the tip reaches).
+    MineBlocks { count: usize },
+}
+
+/// A `proptest` strategy over sequences of [`LockOp`] for a wallet holding `n_notes` notes.
+///
+/// Expiry deltas and mining counts are drawn from small ranges so that sequences routinely
+/// cross lock-expiry boundaries.
+pub fn arb_lock_ops(n_notes: usize, max_ops: usize) -> impl Strategy<Value = Vec<LockOp>> {
+    let op = prop_oneof![
+        3 => (
+            proptest::collection::vec(0..n_notes, 1..=n_notes + 1),
+            0u32..=4,
+        )
+            .prop_map(|(notes, expiry_delta)| LockOp::Lock { notes, expiry_delta }),
+        2 => (0..n_notes).prop_map(|note| LockOp::Unlock { note }),
+        1 => Just(LockOp::ClearLocked),
+        2 => (1usize..=3).prop_map(|count| LockOp::MineBlocks { count }),
+    ];
+    proptest::collection::vec(op, 1..=max_ops)
+}
+
+/// Model-based test of the note-locking storage operations.
+///
+/// Funds a wallet with three notes, then applies the given operation sequence both to the real
+/// data store and to a trivial in-memory model (per-note `Option<lock_expiry_height>` plus the
+/// chain tip). After every operation, the store must agree with the model on:
+///
+/// - the outcome of the operation itself, including the all-or-nothing failure of a `Lock`
+///   batch containing a conflict (an active, unexpired lock on any requested note);
+/// - the set reported by `get_locked_outputs` (a note is locked while
+///   `lock_expiry_height >= chain_tip + 1`);
+/// - the account balance decomposition: locked value is exactly the sum of model-locked note
+///   values, spendable value is the remainder, and the total is unaffected by lock state.
+pub fn check_note_locking_model<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+    ops: &[LockOp],
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    // Fund the wallet with three notes of distinct values in a single block, so that notes can
+    // be matched to model indices by value.
+    let values = [
+        Zatoshis::const_from_u64(60000),
+        Zatoshis::const_from_u64(70000),
+        Zatoshis::const_from_u64(80000),
+    ];
+    st.add_notes_checking_balance([values]);
+    let total = values
+        .iter()
+        .try_fold(Zatoshis::ZERO, |acc, v| acc + *v)
+        .unwrap();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), values.len());
+    let refs: Vec<OutputRef> = values
+        .iter()
+        .map(|value| {
+            let note = notes
+                .iter()
+                .find(|n| n.note().value() == *value)
+                .expect("a note with the requested value exists");
+            OutputRef::new(
+                *note.txid(),
+                PoolType::Shielded(note.note().pool()),
+                u32::from(note.output_index()),
+            )
+        })
+        .collect();
+
+    // The model: per-note lock expiry height, and the chain tip.
+    let mut model: Vec<Option<u32>> = vec![None; refs.len()];
+    let mut tip = u32::from(st.latest_cached_block().unwrap().height());
+
+    for op in ops {
+        match op {
+            LockOp::Lock {
+                notes,
+                expiry_delta,
+            } => {
+                let expiry = tip + expiry_delta;
+                // Predict the outcome by simulating the store's sequential update: each
+                // requested note may be locked when it holds no lock or its lock has expired
+                // as of the chain tip; the first conflict fails the whole batch.
+                let mut scratch = model.clone();
+                let mut conflict = None;
+                for &i in notes {
+                    if scratch[i].is_none_or(|h| h <= tip) {
+                        scratch[i] = Some(expiry);
+                    } else {
+                        conflict = Some(i);
+                        break;
+                    }
+                }
+
+                let result = st
+                    .wallet_mut()
+                    .lock_outputs(notes.iter().map(|&i| refs[i]), BlockHeight::from(expiry));
+                match conflict {
+                    None => {
+                        assert_matches!(result, Ok(n) if n == notes.len());
+                        model = scratch;
+                    }
+                    Some(i) => {
+                        // The batch fails naming the conflicting note, and (checked by the
+                        // post-operation invariants below) locks nothing.
+                        assert_matches!(result, Err(LockError::LockFailure(r)) if r == refs[i]);
+                    }
+                }
+            }
+            LockOp::Unlock { note } => {
+                // The note exists, so unlock reports `true` regardless of prior lock state.
+                assert!(st.wallet_mut().unlock_output(&refs[*note]).unwrap());
+                model[*note] = None;
+            }
+            LockOp::ClearLocked => {
+                // Clearing removes every lock record, expired or not, and reports how many
+                // rows it touched.
+                let expected = model.iter().filter(|h| h.is_some()).count();
+                assert_eq!(
+                    st.wallet_mut().clear_locked_outputs(account_id).unwrap(),
+                    expected
+                );
+                model.iter_mut().for_each(|h| *h = None);
+            }
+            LockOp::MineBlocks { count } => {
+                st.add_empty_blocks(*count);
+                tip += *count as u32;
+            }
+        }
+
+        // Invariants, checked after every operation. Balance and selection evaluate lock
+        // state against the next block to be mined.
+        let target = tip + 1;
+        let locked_value = model
+            .iter()
+            .zip(values.iter())
+            .filter(|(h, _)| h.is_some_and(|h| h >= target))
+            .try_fold(Zatoshis::ZERO, |acc, (_, v)| acc + *v)
+            .unwrap();
+
+        let mut expected_locked: Vec<OutputRef> = model
+            .iter()
+            .zip(refs.iter())
+            .filter(|(h, _)| h.is_some_and(|h| h >= target))
+            .map(|(_, r)| *r)
+            .collect();
+        expected_locked.sort();
+        let mut actual_locked = st.wallet().get_locked_outputs(account_id).unwrap();
+        actual_locked.sort();
+        assert_eq!(
+            actual_locked, expected_locked,
+            "locked-output set diverged from the model after {op:?}"
+        );
+
+        assert_eq!(
+            st.get_locked_balance(account_id),
+            locked_value,
+            "locked balance diverged from the model after {op:?}"
+        );
+        assert_eq!(
+            st.get_spendable_balance(account_id, ConfirmationsPolicy::MIN),
+            (total - locked_value).unwrap(),
+            "spendable balance diverged from the model after {op:?}"
+        );
+        assert_eq!(
+            st.get_total_balance(account_id),
+            total,
+            "lock state must never change the total balance (after {op:?})"
+        );
+    }
 }
 
 pub fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester, Dsf>(
