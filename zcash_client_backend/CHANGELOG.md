@@ -58,7 +58,11 @@ workspace.
   `OutputRef` instead of `(PoolType, TxId, u32)`.
 - `zcash_client_backend::data_api::Balance` has been modified to now make it
   possible to represent locked value; this is value that is committed to be
-  spent by an in-flight proposal or PCZT.
+  spent by an in-flight proposal or PCZT. Locked value is a component of the
+  account's total funds: `Balance::total` and `AccountBalance::total` now
+  include locked value in their result (locked funds move out of the spendable
+  total but remain part of the total), so callers that displayed a total by
+  reading `spendable_value` alone should add `locked_value`.
 - The following `InputSource` trait methods now take an additional
   `include_locked: bool` parameter that controls whether locked notes
   are included in results:
