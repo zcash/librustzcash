@@ -1175,3 +1175,99 @@ impl TransparentAddressSource {
         }
     }
 }
+
+/// Property tests for [`OutputRef`], whose identity (txid, pool, output index) is the key the
+/// note-locking tables and the proposal double-spend check operate on.
+#[cfg(test)]
+mod output_ref_tests {
+    use proptest::prelude::*;
+    use zcash_protocol::{PoolType, ShieldedPool, TxId};
+
+    use super::{NoteId, OutputRef};
+
+    fn arb_shielded_pool() -> impl Strategy<Value = ShieldedPool> {
+        prop_oneof![
+            Just(ShieldedPool::Sapling),
+            Just(ShieldedPool::Orchard),
+            Just(ShieldedPool::Ironwood),
+        ]
+    }
+
+    fn arb_pool_type() -> impl Strategy<Value = PoolType> {
+        prop_oneof![
+            Just(PoolType::Transparent),
+            arb_shielded_pool().prop_map(PoolType::Shielded),
+        ]
+    }
+
+    fn arb_output_ref() -> impl Strategy<Value = OutputRef> {
+        (any::<[u8; 32]>(), arb_pool_type(), any::<u32>())
+            .prop_map(|(txid, pool, idx)| OutputRef::new(TxId::from_bytes(txid), pool, idx))
+    }
+
+    proptest! {
+        /// Converting a `NoteId` preserves every component: the note's pool maps into the
+        /// shielded arm of `PoolType`, and the `u16` output index widens losslessly.
+        #[test]
+        fn from_note_id_preserves_fields(
+            txid in any::<[u8; 32]>(),
+            pool in arb_shielded_pool(),
+            idx in any::<u16>(),
+        ) {
+            let txid = TxId::from_bytes(txid);
+            let output_ref = OutputRef::from(NoteId::new(txid, pool, idx));
+            prop_assert_eq!(output_ref.txid(), &txid);
+            prop_assert_eq!(output_ref.pool(), PoolType::Shielded(pool));
+            prop_assert_eq!(output_ref.output_index(), u32::from(idx));
+        }
+
+        /// Identity is exactly the (txid, pool, output index) triple: a reference equals
+        /// itself, differs from any single-field mutation of itself, and `Ord` agrees with
+        /// `Eq` (the `BTreeSet` double-spend check in proposal construction and the lock
+        /// tables both rely on this).
+        #[test]
+        fn identity_is_the_full_triple(a in arb_output_ref()) {
+            prop_assert_eq!(a, a);
+            prop_assert_eq!(a.cmp(&a), std::cmp::Ordering::Equal);
+
+            // A different output index is a different output.
+            let other_index = OutputRef::new(
+                *a.txid(),
+                a.pool(),
+                a.output_index().wrapping_add(1),
+            );
+            prop_assert_ne!(a, other_index);
+            prop_assert_ne!(a.cmp(&other_index), std::cmp::Ordering::Equal);
+
+            // A different pool is a different output, even at the same (txid, index): the
+            // same transaction may have outputs at the same index in several pools.
+            let other_pool = OutputRef::new(
+                *a.txid(),
+                match a.pool() {
+                    PoolType::Transparent => PoolType::SAPLING,
+                    PoolType::Shielded(_) => PoolType::Transparent,
+                },
+                a.output_index(),
+            );
+            prop_assert_ne!(a, other_pool);
+            prop_assert_ne!(a.cmp(&other_pool), std::cmp::Ordering::Equal);
+
+            // A different transaction is a different output.
+            let mut txid = <[u8; 32]>::from(*a.txid());
+            txid[0] = txid[0].wrapping_add(1);
+            let other_txid = OutputRef::new(TxId::from_bytes(txid), a.pool(), a.output_index());
+            prop_assert_ne!(a, other_txid);
+            prop_assert_ne!(a.cmp(&other_txid), std::cmp::Ordering::Equal);
+        }
+
+        /// Two independently drawn references are equal exactly when all three components
+        /// match.
+        #[test]
+        fn equality_is_component_wise(a in arb_output_ref(), b in arb_output_ref()) {
+            let components_equal = a.txid() == b.txid()
+                && a.pool() == b.pool()
+                && a.output_index() == b.output_index();
+            prop_assert_eq!(a == b, components_equal);
+        }
+    }
+}
