@@ -41,6 +41,7 @@ use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_primitives::block::BlockHash;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
+use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, Zatoshis};
 
 use zcash_pool_migration_backend::engine::{
@@ -101,13 +102,14 @@ impl PoolMigrationWrite for MigrationTestStore {
     }
 }
 
-/// An end-to-end migration proving scenario, built fluently: [`Scenario::funded`] sets the source
-/// note, the `expect_*` setters declare the observable outcomes, and [`Scenario::prove_end_to_end`]
-/// funds a real wallet, runs the whole migration, and asserts those outcomes phase by phase. Each new
-/// balance or note shape is a new builder in the test below.
+/// An end-to-end migration proving scenario, built fluently: [`Scenario::funded`] /
+/// [`Scenario::funded_notes`] set the source note shape, the `expect_*` setters declare the
+/// observable outcomes, and [`Scenario::prove_end_to_end`] funds a real wallet, runs the whole
+/// migration, and asserts those outcomes phase by phase. Each new balance or note shape is a new
+/// builder in the test below.
 struct Scenario {
     label: &'static str,
-    funding: Zatoshis,
+    funding: Vec<Zatoshis>,
     expected_preparations: usize,
     expected_transfers: usize,
     expected_migrated: Zatoshis,
@@ -116,6 +118,12 @@ struct Scenario {
 impl Scenario {
     /// Starts a scenario whose account is funded with a single Orchard note worth `funding`.
     fn funded(label: &'static str, funding: Zatoshis) -> Self {
+        Self::funded_notes(label, vec![funding])
+    }
+
+    /// Starts a scenario whose account is funded with several source Orchard notes (the "exchange" /
+    /// dusty shapes whose consolidation drives multi-layer preparation).
+    fn funded_notes(label: &'static str, funding: Vec<Zatoshis>) -> Self {
         Self {
             label,
             funding,
@@ -172,8 +180,8 @@ struct Committed {
 }
 
 impl Run {
-    /// Phase 1 (setup): builds an NU6.3 wallet, funds the account with the scenario's single Orchard
-    /// note, and completes the note's shard so an anchor is available at the tip.
+    /// Phase 1 (setup): builds an NU6.3 wallet, funds the account with the scenario's source Orchard
+    /// notes (one per block), and completes their shards so an anchor is available at the tip.
     fn setup(scenario: &Scenario) -> Self {
         let network = nu63_network();
 
@@ -189,12 +197,19 @@ impl Run {
         let usk = account.usk().clone();
         let fvk = OrchardPoolTester::test_account_fvk(&st);
 
-        let (fund_height, _, _) =
-            st.generate_next_block(&fvk, AddressType::DefaultExternal, scenario.funding);
-        st.scan_cached_blocks(fund_height, 1);
+        for &note in &scenario.funding {
+            let (h, _, _) = st.generate_next_block(&fvk, AddressType::DefaultExternal, note);
+            st.scan_cached_blocks(h, 1);
+        }
+        let funded_total: Zatoshis = scenario
+            .funding
+            .iter()
+            .copied()
+            .sum::<Option<Zatoshis>>()
+            .expect("the funded total is a valid amount");
         assert_eq!(
             st.get_total_balance(account_id),
-            scenario.funding,
+            funded_total,
             "{}: funded balance",
             scenario.label
         );
@@ -448,17 +463,85 @@ impl Run {
     }
 }
 
+/// Every proving scenario, spanning the migration personas exercised across the codebase (the Python
+/// integration-test suite and the note-split golden vectors): single small / medium / large
+/// balances, the minimum-denomination and buffer-pruned edges, and the many-note "exchange" / dust /
+/// whale shapes whose consolidation drives multi-layer preparation.
+fn scenarios() -> Vec<Scenario> {
+    // 0.02 ZEC dust notes.
+    let dust = zats(COIN / 50);
+    let dust_heavy: Vec<Zatoshis> = std::iter::once(zats(COIN))
+        .chain(std::iter::repeat(dust).take(12))
+        .collect();
+    // The migrated total is the balance less the reserved transfer buffers and preparation fees, so
+    // it is a multiple of the 0.01-ZEC minimum denomination; expressed here in hundredths of a ZEC.
+    let hundredths = COIN / 100;
+    vec![
+        // Single-note balances.
+        Scenario::funded("small holder, 2 ZEC", zats(2 * COIN))
+            .expect_preparations(1)
+            .expect_transfers(7)
+            .expect_migrated(zats(199 * hundredths)),
+        Scenario::funded("retail, 15 ZEC", zats(15 * COIN))
+            .expect_preparations(1)
+            .expect_transfers(9)
+            .expect_migrated(zats(1_499 * hundredths)),
+        Scenario::funded("denominations, 60 ZEC", zats(60 * COIN))
+            .expect_preparations(1)
+            .expect_transfers(10)
+            .expect_migrated(zats(5_999 * hundredths)),
+        Scenario::funded("78 ZEC in a single note", zats(78 * COIN))
+            .expect_preparations(1)
+            .expect_transfers(10)
+            .expect_migrated(zats(7_799 * hundredths)),
+        Scenario::funded(
+            "Gwen, 0.0152 ZEC (a single minimum-denomination note)",
+            zats(1_520_000),
+        )
+        .expect_preparations(1)
+        .expect_transfers(1)
+        .expect_migrated(zats(hundredths)),
+        Scenario::funded(
+            "Priya, 7.1101 ZEC (the buffer prunes the trailing crossing)",
+            zats(711_010_000),
+        )
+        .expect_preparations(1)
+        .expect_transfers(3)
+        .expect_migrated(zats(710 * hundredths)),
+        // Many-note shapes, consolidated across preparation layers.
+        Scenario::funded_notes("exchange, ten 5 ZEC notes", vec![zats(5 * COIN); 10])
+            .expect_preparations(2)
+            .expect_transfers(3)
+            .expect_migrated(zats(4_500 * hundredths)),
+        Scenario::funded_notes("monotonic, ten 12 ZEC notes", vec![zats(12 * COIN); 10])
+            .expect_preparations(5)
+            .expect_transfers(11)
+            .expect_migrated(zats(11_999 * hundredths)),
+        Scenario::funded_notes("dust-heavy, 1 ZEC and twelve 0.02 ZEC notes", dust_heavy)
+            .expect_preparations(4)
+            .expect_transfers(4)
+            .expect_migrated(zats(123 * hundredths)),
+        Scenario::funded_notes(
+            "whale plus dust, 40 ZEC and a six-note dust tail",
+            vec![
+                zats(40 * COIN),
+                zats(COIN / 50),
+                zats(COIN / 50),
+                zats(COIN / 20),
+                zats(COIN / 20),
+                zats(COIN / 10),
+                zats(COIN / 10),
+            ],
+        )
+        .expect_preparations(4)
+        .expect_transfers(6)
+        .expect_migrated(zats(4_033 * hundredths)),
+    ]
+}
+
 #[test]
 fn migration_proves_end_to_end_against_a_funded_wallet() {
-    // 78 ZEC decomposes into ten canonical crossings and migrates 77.99 ZEC (the balance less the
-    // reserved transfer buffers and preparation fee, leaving 0.0077 ZEC of source-pool change) via a
-    // single preparation transaction.
-    Scenario::funded(
-        "78 ZEC in a single note",
-        Zatoshis::const_from_u64(78 * COIN),
-    )
-    .expect_preparations(1)
-    .expect_transfers(10)
-    .expect_migrated(Zatoshis::const_from_u64(7_799 * (COIN / 100)))
-    .prove_end_to_end();
+    for scenario in scenarios() {
+        scenario.prove_end_to_end();
+    }
 }
