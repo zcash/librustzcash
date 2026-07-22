@@ -95,9 +95,6 @@ rand_core.workspace = true
 rand_distr.workspace = true
 rand.workspace = true
 
-# Enabled by the `test-dependencies` feature, which exposes the in-crate test harness
-# (`testing::db::TestDbFactory`, `testing::BlockCache`) to external test code. They stay in
-# `[dev-dependencies]` too so the crate's own tests build without enabling the feature.
 ambassador = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 tempfile = { version = "3.5.0", optional = true }
