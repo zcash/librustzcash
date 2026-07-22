@@ -1605,8 +1605,8 @@ fn should_track_nullifiers(
 }
 
 /// The interval, in blocks, at which checkpoints are retained as durable "anchors" once anchor
-/// retention is active. At 75-second blocks this is roughly every 6 hours (4 per day).
-pub(crate) const ANCHOR_RETENTION_INTERVAL: u32 = 288;
+/// retention is active. At 75-second blocks this is roughly every 3 hours (8 per day).
+pub(crate) const ANCHOR_RETENTION_INTERVAL: u32 = 144;
 
 /// Returns whether the checkpoint at `height` should be retained as a durable anchor.
 ///
