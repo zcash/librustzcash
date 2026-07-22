@@ -1818,6 +1818,14 @@ pub(crate) fn add_transparent_account_balances(
             balance.with_unshielded_coinbase_balance_mut(|bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
+                } else if lock_expiry_height
+                    .iter()
+                    .any(|h| *h >= u32::from(target_height))
+                {
+                    // A locked coinbase output (selected by an in-flight shielding
+                    // proposal) is excluded from the spendable balance, exactly like a
+                    // locked non-coinbase output.
+                    bal.add_locked_value(value)
                 } else if is_mature {
                     bal.add_spendable_value(value)
                 } else {
