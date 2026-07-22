@@ -4218,6 +4218,168 @@ pub trait WalletCommitmentTrees {
     }
 }
 
+/// Property tests for the [`Balance`] bucket arithmetic.
+///
+/// These pin the accounting semantics the locked-value bucket joined: every bucket except
+/// `uneconomic_value` participates in [`Balance::total`] and in the shared overflow guard,
+/// while `uneconomic_value` is guarded only against its own overflow and never contributes
+/// to the total.
+#[cfg(test)]
+mod balance_tests {
+    use proptest::prelude::*;
+    use zcash_protocol::value::{BalanceError, MAX_MONEY, Zatoshis};
+
+    use super::Balance;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Bucket {
+        Spendable = 0,
+        Locked = 1,
+        PendingChange = 2,
+        PendingSpendable = 3,
+        Uneconomic = 4,
+    }
+    use Bucket::*;
+
+    const ALL_BUCKETS: [Bucket; 5] = [
+        Spendable,
+        Locked,
+        PendingChange,
+        PendingSpendable,
+        Uneconomic,
+    ];
+    /// The buckets that participate in `Balance::total` and its overflow guard.
+    const TOTAL_BUCKETS: [Bucket; 4] = [Spendable, Locked, PendingChange, PendingSpendable];
+
+    fn apply(balance: &mut Balance, bucket: Bucket, value: Zatoshis) -> Result<(), BalanceError> {
+        match bucket {
+            Spendable => balance.add_spendable_value(value),
+            Locked => balance.add_locked_value(value),
+            PendingChange => balance.add_pending_change_value(value),
+            PendingSpendable => balance.add_pending_spendable_value(value),
+            Uneconomic => balance.add_uneconomic_value(value),
+        }
+    }
+
+    fn get(balance: &Balance, bucket: Bucket) -> Zatoshis {
+        match bucket {
+            Spendable => balance.spendable_value(),
+            Locked => balance.locked_value(),
+            PendingChange => balance.change_pending_confirmation(),
+            PendingSpendable => balance.value_pending_spendability(),
+            Uneconomic => balance.uneconomic_value(),
+        }
+    }
+
+    fn arb_bucket() -> impl Strategy<Value = Bucket> {
+        prop_oneof![
+            Just(Spendable),
+            Just(Locked),
+            Just(PendingChange),
+            Just(PendingSpendable),
+            Just(Uneconomic),
+        ]
+    }
+
+    /// A bucket and a value to add to it. Values are mostly small (so most sequences stay
+    /// within `MAX_MONEY`) with occasional near-cap draws to exercise the overflow guards.
+    fn arb_add() -> impl Strategy<Value = (Bucket, u64)> {
+        (
+            arb_bucket(),
+            prop_oneof![
+                3 => 0u64..=1_000_000,
+                1 => 0u64..=MAX_MONEY,
+            ],
+        )
+    }
+
+    proptest! {
+        /// Bucket adds succeed exactly while their overflow guard permits, mutate only the
+        /// requested bucket, and leave the balance untouched on failure. `total()` is always
+        /// the sum of the four participating buckets. (In particular this establishes that
+        /// the `unwrap` inside each guarded add is unreachable.)
+        #[test]
+        fn add_total_consistency(adds in proptest::collection::vec(arb_add(), 0..12)) {
+            let mut balance = Balance::ZERO;
+            // The model: per-bucket totals, indexed by bucket discriminant.
+            let mut model = [0u64; 5];
+
+            for (bucket, v) in adds {
+                let value = Zatoshis::from_u64(v).unwrap();
+                let before = balance;
+                let result = apply(&mut balance, bucket, value);
+
+                let total: u64 = TOTAL_BUCKETS.iter().map(|b| model[*b as usize]).sum();
+                let expect_ok = match bucket {
+                    Uneconomic => model[Uneconomic as usize] + v <= MAX_MONEY,
+                    _ => total + v <= MAX_MONEY,
+                };
+                if expect_ok {
+                    prop_assert!(result.is_ok());
+                    model[bucket as usize] += v;
+                } else {
+                    prop_assert!(result.is_err());
+                    prop_assert_eq!(
+                        balance, before,
+                        "a failed add must leave the balance unchanged"
+                    );
+                }
+
+                let total: u64 = TOTAL_BUCKETS.iter().map(|b| model[*b as usize]).sum();
+                prop_assert_eq!(balance.total(), Zatoshis::from_u64(total).unwrap());
+                for b in ALL_BUCKETS {
+                    prop_assert_eq!(
+                        get(&balance, b),
+                        Zatoshis::from_u64(model[b as usize]).unwrap()
+                    );
+                }
+            }
+        }
+
+        /// `Balance + Balance` is componentwise addition: it succeeds exactly when the
+        /// combined total and the combined uneconomic value each remain within `MAX_MONEY`,
+        /// and on success every bucket of the sum is the sum of the corresponding buckets.
+        #[test]
+        fn balance_addition_is_componentwise(
+            a in proptest::collection::vec(arb_add(), 0..6),
+            b in proptest::collection::vec(arb_add(), 0..6),
+        ) {
+            let build = |adds: &[(Bucket, u64)]| {
+                let mut balance = Balance::ZERO;
+                for (bucket, v) in adds {
+                    let _ = apply(&mut balance, *bucket, Zatoshis::from_u64(*v).unwrap());
+                }
+                balance
+            };
+            let ba = build(&a);
+            let bb = build(&b);
+
+            let combined_total = u64::from(ba.total()) + u64::from(bb.total());
+            let combined_uneconomic =
+                u64::from(ba.uneconomic_value()) + u64::from(bb.uneconomic_value());
+            match ba + bb {
+                Ok(sum) => {
+                    prop_assert!(combined_total <= MAX_MONEY);
+                    prop_assert!(combined_uneconomic <= MAX_MONEY);
+                    for bucket in ALL_BUCKETS {
+                        prop_assert_eq!(
+                            u64::from(get(&sum, bucket)),
+                            u64::from(get(&ba, bucket)) + u64::from(get(&bb, bucket))
+                        );
+                    }
+                    prop_assert_eq!(u64::from(sum.total()), combined_total);
+                }
+                Err(_) => {
+                    prop_assert!(
+                        combined_total > MAX_MONEY || combined_uneconomic > MAX_MONEY,
+                        "balance addition failed although no component overflows"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
