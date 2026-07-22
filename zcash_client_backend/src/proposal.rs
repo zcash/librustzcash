@@ -52,6 +52,15 @@ pub enum ProposalError {
     StepDoubleSpend(StepOutput),
     /// An attempted double-spend of an output belonging to the wallet was detected.
     ChainDoubleSpend(OutputRef),
+    /// An input selected by the proposal could not be locked, because a concurrent
+    /// proposal or PCZT already holds a lock on it.
+    ///
+    /// This is a transient condition, not a defect in the proposal itself: the wrapped
+    /// output was spendable when it was selected, but another in-flight proposal locked
+    /// it first. Callers should treat this as "the account is busy" and retry proposal
+    /// creation; the retry will select around the locked output (or fail with an
+    /// insufficient-funds error if no other outputs are available).
+    InputsLocked(OutputRef),
     /// There was a mismatch between the payments in the proposal's transaction request
     /// and the payment pool selection values.
     PaymentPoolsMismatch,
@@ -144,6 +153,13 @@ impl Display for ProposalError {
             ProposalError::ChainDoubleSpend(output_ref) => write!(
                 f,
                 "The proposal attempts to spend the same output twice: {}, {}, {}",
+                output_ref.pool(),
+                output_ref.txid(),
+                output_ref.output_index()
+            ),
+            ProposalError::InputsLocked(output_ref) => write!(
+                f,
+                "A selected input is locked by a concurrent proposal (retry later): {}, {}, {}",
                 output_ref.pool(),
                 output_ref.txid(),
                 output_ref.output_index()
