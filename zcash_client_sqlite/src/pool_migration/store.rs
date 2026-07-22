@@ -69,6 +69,10 @@ pub(crate) struct Tables {
 // ---------------------------------------------------------------------------
 
 fn create_migrations_sql(t: &Tables) -> String {
+    // `account_uuid` is not a foreign key into the wallet's `accounts` table: this store is
+    // deliberately standalone and pool-agnostic (it is exercised over a connection that need not
+    // hold an `accounts` table at all). The wallet's account-deletion path removes an account's
+    // migration explicitly instead; see `orchard_ironwood::delete_account_migration`.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             id INTEGER PRIMARY KEY,

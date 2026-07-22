@@ -756,6 +756,11 @@ pub(crate) fn delete_account(
         ],
     )?;
 
+    // Remove any in-progress pool migration for this account. Its table keys by account UUID with
+    // no foreign key into `accounts`, so it is not removed by the account-deletion cascade below and
+    // must be deleted explicitly (its own child rows cascade from it).
+    crate::pool_migration::orchard_ironwood::delete_account_migration(conn, account_uuid)?;
+
     // At this point, the only information remaining about the account is its entry in the
     // accounts table and its addresses; delete them.
     conn.execute(

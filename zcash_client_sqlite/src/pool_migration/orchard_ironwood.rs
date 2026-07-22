@@ -41,6 +41,24 @@ pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
 
+/// Delete `account`'s in-progress Orchard -> Ironwood migration, if any.
+///
+/// The `orchard_ironwood_migrations` table keys by account UUID but has no foreign key into
+/// `accounts` (the store is deliberately standalone), so an account's migration is not removed by
+/// the account-deletion cascade. The wallet's `delete_account` path calls this to remove it
+/// explicitly; the migration's child rows cascade from the parent via their own `ON DELETE CASCADE`
+/// foreign keys (the wallet enforces foreign keys at runtime).
+pub(crate) fn delete_account_migration(
+    conn: &Connection,
+    account: AccountUuid,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        &format!("DELETE FROM {} WHERE account_uuid = ?", TABLES.migrations),
+        rusqlite::params![account.expose_uuid()],
+    )?;
+    Ok(())
+}
+
 /// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`]
 /// over a `rusqlite::Connection`, scoped to one account's migration. Construct it with a connection
 /// borrow (`&Connection` for read-only access, `&mut Connection` to also write) over the same
@@ -153,6 +171,175 @@ mod tests {
             .replace_migration(&state)
             .expect_err("an empty layer cannot be persisted");
         assert!(matches!(err, Error::Unrepresentable(_)));
+    }
+
+    /// `delete_account_migration` removes an account's in-progress migration (the cleanup the
+    /// wallet's account-deletion path performs, since the store has no foreign key into `accounts`
+    /// to cascade it). The migration's child rows cascade from the parent via their own foreign
+    /// keys, so the whole subtree is gone; a different account's migration is untouched.
+    #[test]
+    fn delete_account_migration_removes_only_that_account() {
+        use super::delete_account_migration;
+        use zcash_pool_migration_backend::engine::{MigrationState, MigrationStatus};
+        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_protocol::value::Zatoshis;
+
+        let mut conn = fresh_conn();
+        // The store's tables carry `ON DELETE CASCADE` foreign keys from each child to its parent
+        // migration row; enable enforcement so deleting the parent is observed to reach the
+        // children, exactly as the wallet database does after its migrations complete.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable foreign keys");
+
+        // A minimal but non-trivial migration (one crossing value) so the delete is observed to
+        // reach a child table, not only the parent row.
+        let note_split = NoteSplitPlan::from_stored_parts(
+            vec![Zatoshis::const_from_u64(1)],
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::const_from_u64(1),
+            Zatoshis::const_from_u64(1),
+        )
+        .expect("a one-crossing stored plan reconstructs");
+        let state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            note_split,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            Vec::new(),
+        );
+
+        let account_a = AccountUuid::from_uuid(Uuid::new_v4());
+        let account_b = AccountUuid::from_uuid(Uuid::new_v4());
+        PoolMigrations::for_account(&mut conn, account_a)
+            .replace_migration(&state)
+            .expect("write A's migration");
+        PoolMigrations::for_account(&mut conn, account_b)
+            .replace_migration(&state)
+            .expect("write B's migration");
+
+        let count = |conn: &Connection, table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("count")
+        };
+        assert_eq!(count(&conn, "orchard_ironwood_migrations"), 2);
+        assert_eq!(
+            count(&conn, "orchard_ironwood_migration_crossing_values"),
+            2
+        );
+
+        delete_account_migration(&conn, account_a).expect("delete A's migration");
+
+        // Only A's parent row and its child rows are gone; B's migration remains intact.
+        assert_eq!(
+            count(&conn, "orchard_ironwood_migrations"),
+            1,
+            "only account A's migration row must be deleted"
+        );
+        assert_eq!(
+            count(&conn, "orchard_ironwood_migration_crossing_values"),
+            1,
+            "account A's child rows must cascade away, and only those"
+        );
+        assert_eq!(
+            PoolMigrations::for_account(&conn, account_b)
+                .get_migration()
+                .expect("read B"),
+            Some(state),
+            "account B's migration must be untouched",
+        );
+    }
+
+    /// Security: deleting an account's migration removes ONLY migration data. `account_uuid` is a
+    /// bare column, not a foreign key into `accounts`, and no other table references the migration
+    /// tables, so `delete_account_migration` can never cascade outward to delete the account itself
+    /// or disturb any unrelated table. This guards against a future foreign key (or an errant
+    /// cascade) turning a migration cleanup into account or wallet-data loss.
+    #[test]
+    fn delete_account_migration_does_not_touch_unrelated_data() {
+        use super::delete_account_migration;
+        use zcash_pool_migration_backend::engine::{MigrationState, MigrationStatus};
+        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_protocol::value::Zatoshis;
+
+        let mut conn = fresh_conn();
+        // Stand up the wallet-side tables the migration cleanup must NOT disturb: the `accounts`
+        // table the migration's account belongs to, and an unrelated table, each seeded with a row.
+        conn.execute_batch(
+            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, uuid BLOB NOT NULL, name TEXT);
+             CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid);
+             CREATE TABLE unrelated (id INTEGER PRIMARY KEY, note TEXT NOT NULL);",
+        )
+        .expect("create sibling tables");
+        // Enforce foreign keys, so that any (unintended) cascade would actually fire and be caught.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable foreign keys");
+
+        let account = AccountUuid::from_uuid(Uuid::new_v4());
+        conn.execute(
+            "INSERT INTO accounts (uuid, name) VALUES (?, 'keeper')",
+            rusqlite::params![account.expose_uuid()],
+        )
+        .expect("insert account");
+        conn.execute("INSERT INTO unrelated (note) VALUES ('keep me')", [])
+            .expect("insert unrelated row");
+
+        let note_split = NoteSplitPlan::from_stored_parts(
+            vec![Zatoshis::const_from_u64(1)],
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::const_from_u64(1),
+            Zatoshis::const_from_u64(1),
+        )
+        .expect("a one-crossing stored plan reconstructs");
+        let state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            note_split,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            Vec::new(),
+        );
+        PoolMigrations::for_account(&mut conn, account)
+            .replace_migration(&state)
+            .expect("write the account's migration");
+
+        delete_account_migration(&conn, account).expect("delete the account's migration");
+
+        let count = |conn: &Connection, table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("count")
+        };
+        // The migration and its children are gone...
+        assert_eq!(count(&conn, "orchard_ironwood_migrations"), 0);
+        assert_eq!(
+            count(&conn, "orchard_ironwood_migration_crossing_values"),
+            0
+        );
+        // ...but the account row survives, unchanged, and so does every unrelated table.
+        assert_eq!(
+            count(&conn, "accounts"),
+            1,
+            "deleting a migration must NOT delete the account"
+        );
+        let name: String = conn
+            .query_row(
+                "SELECT name FROM accounts WHERE uuid = ?",
+                rusqlite::params![account.expose_uuid()],
+                |row| row.get(0),
+            )
+            .expect("the account row must still be readable");
+        assert_eq!(name, "keeper", "the account row must be unchanged");
+        assert_eq!(
+            count(&conn, "unrelated"),
+            1,
+            "deleting a migration must NOT affect unrelated tables"
+        );
     }
 
     proptest! {
