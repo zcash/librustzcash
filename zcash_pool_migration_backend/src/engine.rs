@@ -642,7 +642,7 @@ pub fn plan_migration<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore,
+    R: RngCore + rand_core::CryptoRng,
 {
     let notes = backend
         .spendable_orchard_note_values()
@@ -913,7 +913,7 @@ pub fn estimate_migration_runs<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
-    R: RngCore,
+    R: RngCore + rand_core::CryptoRng,
 {
     let height = backend
         .chain_tip_height()

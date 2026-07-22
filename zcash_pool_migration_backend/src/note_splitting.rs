@@ -119,7 +119,7 @@
 
 use alloc::vec::Vec;
 
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
 
 use zcash_protocol::value::{BalanceError, COIN, Zatoshis};
 
@@ -310,8 +310,9 @@ pub trait DenominationStrategy {
     /// mint that multiset at all. The engine backs it with the preparation planner, so the
     /// decomposition reserves the TRUE preparation cost (consolidation, fan-out layers, and all) as
     /// it grows, instead of a fixed guess repaired after the fact. `rng` is used by randomized
-    /// strategies and ignored by deterministic ones.
-    fn plan<R: RngCore>(
+    /// strategies and ignored by deterministic ones; it is bound as [`CryptoRng`] because a
+    /// randomized strategy's draws decide the on-chain crossing values, which are privacy-relevant.
+    fn plan<R: RngCore + CryptoRng>(
         &self,
         total_input: Zatoshis,
         prep_tx_fee: Zatoshis,
@@ -329,7 +330,7 @@ pub(crate) fn zat(value: u64) -> Zatoshis {
 
 /// Convenience wrapper: plan with the recommended [`CanonicalOneTwoFive`] strategy (ZIP 318 canonical
 /// quantization), sized by the caller-computed canonical fees (see [`DenominationStrategy::plan`]).
-pub fn plan_note_split<R: RngCore>(
+pub fn plan_note_split<R: RngCore + CryptoRng>(
     total_input: Zatoshis,
     transfer_fee_buffer: Zatoshis,
     prep_tx_fee: Zatoshis,

@@ -3,8 +3,10 @@
 //!
 //! This module is pool-agnostic and pure arithmetic plus RNG draws (no cryptography, no note tree,
 //! no I/O); it works only in block heights and part indices. All randomness comes from a caller-
-//! supplied `rng` (a CSPRNG in production; the tests pass a seeded `rand_chacha::ChaCha8Rng`).
-//! Every function is deterministic given its `rng`.
+//! supplied `rng`, which the public functions bound as [`CryptoRng`]: the draws decide the
+//! privacy-relevant observables (broadcast order, delays, anchors), so a predictable generator
+//! would let an observer reconstruct them (the tests pass a seeded `rand_chacha::ChaCha8Rng`,
+//! which is a `CryptoRng`). Every function is deterministic given its `rng`.
 //!
 //! # The problem
 //!
@@ -62,7 +64,7 @@
 
 use alloc::vec::Vec;
 
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
 use zcash_protocol::consensus::BlockHeight;
 
 /// Mean of the exponential inter-arrival delay between successive transfers, in blocks. Also the
@@ -192,14 +194,14 @@ fn draw_delay_with<R: RngCore>(mean: u32, cap: u32, rng: &mut R) -> u32 {
 /// Draw one TRANSFER inter-arrival delay in blocks from the truncated exponential distribution:
 /// mean [`MEAN_DELAY`], discard-and-redraw above [`MAX_DELAY`] (ZIP 318 "Transfer scheduling"
 /// MUST). The return is always in `[0, MAX_DELAY]`.
-pub fn draw_delay<R: RngCore>(rng: &mut R) -> u32 {
+pub fn draw_delay<R: RngCore + CryptoRng>(rng: &mut R) -> u32 {
     draw_delay_with(MEAN_DELAY, MAX_DELAY, rng)
 }
 
 /// Draw one PREPARATION inter-arrival delay in blocks: mean [`PREP_MEAN_DELAY`],
 /// discard-and-redraw above [`PREP_MAX_DELAY`]. See [`PREP_MEAN_DELAY`] for why preparations are
 /// spaced tighter than transfers. The return is always in `[0, PREP_MAX_DELAY]`.
-pub fn draw_prep_delay<R: RngCore>(rng: &mut R) -> u32 {
+pub fn draw_prep_delay<R: RngCore + CryptoRng>(rng: &mut R) -> u32 {
     draw_delay_with(PREP_MEAN_DELAY, PREP_MAX_DELAY, rng)
 }
 
@@ -208,7 +210,7 @@ pub fn draw_prep_delay<R: RngCore>(rng: &mut R) -> u32 {
 /// quantized parts so the broadcast ORDER of denominations is independent of the balance.
 ///
 /// Returns the identity for `n == 0` or `n == 1`.
-pub fn shuffle_indices<R: RngCore>(n: usize, rng: &mut R) -> Vec<usize> {
+pub fn shuffle_indices<R: RngCore + CryptoRng>(n: usize, rng: &mut R) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..n).collect();
     shuffle_in_place(&mut indices, rng);
     indices
@@ -217,7 +219,7 @@ pub fn shuffle_indices<R: RngCore>(n: usize, rng: &mut R) -> Vec<usize> {
 /// In-place uniform Fisher-Yates shuffle of `slice` using `rng` (ZIP 318 SHUFFLE MUST). Iterates
 /// from the top, swapping each element with a uniformly chosen one at or below it, so every
 /// permutation is equally likely. Leaves the multiset of elements unchanged.
-pub fn shuffle_in_place<T, R: RngCore>(slice: &mut [T], rng: &mut R) {
+pub fn shuffle_in_place<T, R: RngCore + CryptoRng>(slice: &mut [T], rng: &mut R) {
     let len = slice.len();
     if len < 2 {
         return;
@@ -276,7 +278,7 @@ fn cumulative_broadcast_heights<R: RngCore>(
 /// height by an independently drawn [`draw_delay`] for each of the `n_parts` transfers (ZIP 318
 /// CUMULATIVE MUST). The returned vector has length `n_parts`, is non-decreasing, and every entry is
 /// `>= commit_height`. Heights saturate at `u32::MAX` rather than overflowing.
-pub fn schedule_broadcast_heights<R: RngCore>(
+pub fn schedule_broadcast_heights<R: RngCore + CryptoRng>(
     commit_height: BlockHeight,
     n_parts: usize,
     rng: &mut R,
@@ -290,7 +292,7 @@ pub fn schedule_broadcast_heights<R: RngCore>(
 /// is `>= start`; heights saturate at `u32::MAX`. The caller (the engine) bases each later layer's
 /// `start` past the previous layer's last scheduled height plus a mining margin, so layers stay
 /// serialized while the transactions within and across layers remain temporally decoupled.
-pub fn schedule_prep_broadcast_heights<R: RngCore>(
+pub fn schedule_prep_broadcast_heights<R: RngCore + CryptoRng>(
     start: BlockHeight,
     n_txs: usize,
     rng: &mut R,
@@ -315,7 +317,7 @@ pub fn expiry_height(current_height: BlockHeight) -> BlockHeight {
 /// Assemble a [`Schedule`] for each part: draw the cumulative broadcast heights from `commit_height`
 /// (see [`schedule_broadcast_heights`]) and pair each with its canonical [`expiry_height`]. Returns
 /// one [`Schedule`] per part, in the (already shuffled) part order the caller passes.
-pub fn schedule<R: RngCore>(
+pub fn schedule<R: RngCore + CryptoRng>(
     commit_height: BlockHeight,
     n_parts: usize,
     rng: &mut R,
@@ -366,7 +368,7 @@ fn draw_anchor_age<R: RngCore>(rng: &mut R) -> u32 {
 /// is `most_recent_boundary(chain_tip_height) - a * BOUNDARY_MODULUS`; a draw exceeding
 /// [`ANCHOR_AGE_CAP`] or landing outside the candidate set is discarded and redrawn. Because age is
 /// always `>= 1`, the chosen boundary is always strictly below the most recent boundary.
-pub fn draw_anchor_boundary<R: RngCore>(
+pub fn draw_anchor_boundary<R: RngCore + CryptoRng>(
     nu63_activation: BlockHeight,
     funding_creation_height: BlockHeight,
     chain_tip_height: BlockHeight,
