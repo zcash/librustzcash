@@ -1,3 +1,6 @@
+//! An in-memory [`WalletDb`]-backed data store and [`DataStoreFactory`] for the
+//! `zcash_client_backend` testing framework.
+
 use ambassador::Delegate;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
@@ -66,6 +69,8 @@ pub(crate) fn test_rng() -> ChaChaRng {
     ChaChaRng::from_seed([0u8; 32])
 }
 
+/// A [`WalletDb`] wrapped as a testing-framework data store: it delegates the wallet traits to the
+/// inner database and owns the temporary file backing it.
 #[allow(clippy::duplicated_attributes, reason = "False positive")]
 #[derive(Delegate)]
 #[delegate(InputSource, target = "wallet_db")]
@@ -73,7 +78,7 @@ pub(crate) fn test_rng() -> ChaChaRng {
 #[delegate(WalletTest, target = "wallet_db")]
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
-pub(crate) struct TestDb {
+pub struct TestDb {
     wallet_db: WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng>,
     data_file: NamedTempFile,
 }
@@ -89,20 +94,24 @@ impl TestDb {
         }
     }
 
-    pub(crate) fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
+    /// The wrapped wallet database.
+    pub fn db(&self) -> &WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &self.wallet_db
     }
 
-    pub(crate) fn db_mut(
-        &mut self,
-    ) -> &mut WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
+    /// The wrapped wallet database, mutably.
+    pub fn db_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork, FixedClock, ChaChaRng> {
         &mut self.wallet_db
     }
 
+    // Used only by this crate's own `#[cfg(test)]` tests, not by the harness exposed under
+    // `test-dependencies`, so it is dead in a non-test `test-dependencies` build.
+    #[allow(dead_code)]
     pub(crate) fn conn(&self) -> &Connection {
         &self.wallet_db.conn
     }
 
+    #[allow(dead_code)]
     pub(crate) fn conn_mut(&mut self) -> &mut Connection {
         &mut self.wallet_db.conn
     }
@@ -174,8 +183,10 @@ unsafe fn run_sqlite3<S: AsRef<OsStr>>(db_path: S, command: &str) {
     eprintln!("------");
 }
 
+/// A [`DataStoreFactory`] that builds fresh in-memory [`TestDb`] wallets, optionally migrated only
+/// to a given set of migrations rather than all of them.
 #[derive(Default)]
-pub(crate) struct TestDbFactory {
+pub struct TestDbFactory {
     target_migrations: Option<Vec<Uuid>>,
 }
 

@@ -156,7 +156,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     let mut state = state;
     let target = BlockHeight::from_u32(2_100_000);
     match state.next_step(target) {
-        AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
         }
         other => panic!("expected a broadcast step, got {other:?}"),
@@ -171,7 +171,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .map(|t| t.id())
         .collect();
     match state.next_step(target) {
-        AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {
             assert!(
                 layer1_ids.contains(&id),
                 "layer 1 broadcasts once layer 0 mines"
@@ -183,7 +183,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
     }
     match state.next_step(target) {
-        AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {
             let tx = state
                 .transactions()
                 .iter()

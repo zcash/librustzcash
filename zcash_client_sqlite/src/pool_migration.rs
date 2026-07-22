@@ -39,10 +39,13 @@
 //!
 //! # Model
 //!
-//! There is at most one migration in progress per pool, stored as a single row in the pool's
-//! migrations table keyed by the singleton id, with its transactions, note split, and preparation
-//! plan in the pool's child tables. The pool's `PoolMigrations` type is the store: construct it
-//! over a `rusqlite::Connection` (the same one [`WalletDb`](crate::WalletDb) uses).
+//! There is at most one migration in progress per pool per account, stored as a row in the pool's
+//! migrations table keyed by an `account_id` foreign key into `accounts` (with `ON DELETE CASCADE`,
+//! so an account's migration is removed with the account), with its transactions, note split, and
+//! preparation plan in the pool's child tables (addressed through that row's synthetic primary
+//! key). The pool's `PoolMigrations` type is the store: construct it over a `rusqlite::Connection`
+//! (the same one [`WalletDb`](crate::WalletDb) uses) and the [`AccountUuid`](crate::AccountUuid)
+//! whose migration it tracks, which it resolves to that account's row up front.
 //!
 //! [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
 //! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite

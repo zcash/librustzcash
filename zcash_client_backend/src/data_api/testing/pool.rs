@@ -4358,6 +4358,194 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     );
 }
 
+/// A wallet-level test for note-commitment-tree *anchor retention*: once NU6.3 (Ironwood) is
+/// active, checkpoints on the anchor-retention interval are retained as durable anchors, exempt
+/// from the ordinary `PRUNING_DEPTH`-checkpoint pruning budget, so that their roots and the
+/// witnesses anchored to them remain computable even after they age far behind the chain tip.
+///
+/// The retention interval and pruning depth are read from `crate::data_api::ll::wallet`, so this
+/// test tracks whatever values the implementation defines rather than assuming a particular one.
+///
+/// The test:
+/// - Activates NU6.3 from the Sapling activation height, so anchor retention is live and its
+///   floor equals the account birthday.
+/// - Receives a single note early, capturing its note-commitment-tree position.
+/// - Scans forward in a single batch until an interval-aligned anchor has aged *more than
+///   `PRUNING_DEPTH` checkpoints* behind the chain tip — so it would have been pruned to enforce
+///   the checkpoint budget had it not been retained.
+/// - Proves survival behaviorally: a witness for the received note *as of that buried anchor* is
+///   still constructible (it would be `None` if the anchor checkpoint had been pruned).
+/// - Confirms the anchors did not consume the pruning budget: the ordinary checkpoint immediately
+///   above the buried anchor *was* pruned, exactly the interval-aligned anchors at/above the floor
+///   are retained, and the full `PRUNING_DEPTH` window of checkpoints at the chain tip survives.
+pub fn anchor_checkpoints_retained_across_deep_scan<
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) {
+    use std::collections::BTreeSet;
+
+    use shardtree::{ShardTree, store::ShardStore};
+
+    use crate::data_api::ll::wallet::{ANCHOR_RETENTION_INTERVAL, PRUNING_DEPTH};
+
+    // Reads, from any pool's note commitment tree, the set of surviving checkpoint heights, the
+    // set of retained-anchor heights, and whether a witness for `note_position` as of
+    // `anchor_height` is still constructible.
+    #[allow(clippy::type_complexity)]
+    fn tree_anchor_state<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+        tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+        note_position: Position,
+        anchor_height: BlockHeight,
+    ) -> Result<(bool, BTreeSet<BlockHeight>, BTreeSet<BlockHeight>), ShardTreeError<S::Error>>
+    where
+        S: ShardStore<CheckpointId = BlockHeight>,
+        S::H: incrementalmerkletree::Hashable + Clone + PartialEq,
+    {
+        let witness_computable = tree
+            .witness_at_checkpoint_id(note_position, &anchor_height)?
+            .is_some();
+        let retained = tree
+            .store()
+            .retained_checkpoints()
+            .map_err(ShardTreeError::Storage)?;
+        let checkpoint_count = tree
+            .store()
+            .checkpoint_count()
+            .map_err(ShardTreeError::Storage)?;
+        let mut survivors = BTreeSet::new();
+        tree.store()
+            .for_each_checkpoint(checkpoint_count, |cid, _| {
+                survivors.insert(*cid);
+                Ok(())
+            })
+            .map_err(ShardTreeError::Storage)?;
+        Ok((witness_computable, survivors, retained))
+    }
+
+    // A network on which NU6.3 (Ironwood) is active from the Sapling activation height, so anchor
+    // retention is live with its floor at the account birthday.
+    let activation = BlockHeight::from_u32(100_000);
+    let ironwood_active_network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<T>();
+
+    // Receive a single note; its position is captured after it is deeply confirmed, below.
+    let (received_height, _, _) =
+        st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+    let received = u32::from(received_height);
+    let floor = u32::from(activation);
+
+    // The first interval-aligned anchor height at or above the retention floor and strictly above
+    // the received note, so the note's position precedes the anchor's checkpoint.
+    let mut anchor = floor.div_ceil(ANCHOR_RETENTION_INTERVAL) * ANCHOR_RETENTION_INTERVAL;
+    while anchor <= received {
+        anchor += ANCHOR_RETENTION_INTERVAL;
+    }
+
+    // Scan forward in a single batch so the anchor ages more than `PRUNING_DEPTH` checkpoints
+    // behind the tip: without retention it would be pruned to enforce the checkpoint budget.
+    let tip = anchor + PRUNING_DEPTH + 10;
+
+    // Fillers pay a non-wallet key, so each block still adds a commitment (and thus a checkpoint)
+    // without changing the received note's position or the wallet's spendable set.
+    let not_our_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let filler_count = tip - received;
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+    }
+    st.scan_cached_blocks(received_height + 1, filler_count as usize);
+
+    // Capture the received note's commitment-tree position now that it is deeply confirmed.
+    let account_id = st.get_account().id();
+    let spendable = T::select_spendable_notes(
+        &st,
+        account_id,
+        TargetValue::AtLeast(Zatoshis::const_from_u64(1)),
+        TargetHeight::from(BlockHeight::from(tip + 1)),
+        ConfirmationsPolicy::MIN,
+        &[],
+    )
+    .unwrap();
+    let note_position = spendable
+        .first()
+        .expect("the received note is spendable")
+        .note_commitment_tree_position();
+
+    let anchor_height = BlockHeight::from(anchor);
+    let (witness_computable, survivors, retained) = match T::SHIELDED_PROTOCOL {
+        ShieldedPool::Sapling => st
+            .wallet_mut()
+            .with_sapling_tree_mut(|tree| tree_anchor_state(tree, note_position, anchor_height))
+            .unwrap(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => st
+            .wallet_mut()
+            .with_orchard_tree_mut(|tree| tree_anchor_state(tree, note_position, anchor_height))
+            .unwrap(),
+        other => {
+            unreachable!("anchor retention test covers only Sapling and Orchard, got {other:?}")
+        }
+    };
+
+    // The witness for the received note, anchored at the buried anchor, must still be computable —
+    // impossible if that checkpoint had been pruned.
+    assert!(
+        witness_computable,
+        "a witness for the received note as of the retained anchor at height {anchor} \
+         must still be constructible",
+    );
+
+    // Exactly the interval-aligned checkpoints at or above the retention floor are retained.
+    let expected_anchors: BTreeSet<BlockHeight> = (floor..=tip)
+        .filter(|h| h % ANCHOR_RETENTION_INTERVAL == 0)
+        .map(BlockHeight::from)
+        .collect();
+    assert_eq!(
+        retained, expected_anchors,
+        "only the interval-aligned anchors at/above the NU6.3 floor should be retained",
+    );
+
+    // The buried anchor survives, but the ordinary checkpoint immediately above it was pruned — so
+    // its survival is due to retention, not to pruning having failed to run.
+    assert!(
+        survivors.contains(&anchor_height),
+        "the buried anchor checkpoint must survive",
+    );
+    assert!(
+        !survivors.contains(&BlockHeight::from(anchor + 1)),
+        "the ordinary checkpoint just above the buried anchor must have been pruned",
+    );
+
+    // The anchors did not consume the pruning budget: the full `PRUNING_DEPTH` window of
+    // checkpoints at the chain tip is still retained.
+    for h in (tip - PRUNING_DEPTH + 1)..=tip {
+        assert!(
+            survivors.contains(&BlockHeight::from(h)),
+            "checkpoint at tip-window height {h} must be retained",
+        );
+    }
+}
+
 #[cfg(feature = "orchard")]
 pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,

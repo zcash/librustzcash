@@ -33,6 +33,11 @@ workspace.
   `orchard_pool_bundle_type`, selecting the transactional bundle type
   independently for each Orchard protocol value pool. Set both fields to the
   same value to keep the previous behavior.
+- `zcash_primitives::transaction::builder::Builder::build` no longer
+  reconstructs the Orchard proving key on every call. When the `std` feature is
+  enabled the key is now built lazily and cached process-wide (keyed by circuit
+  version), so building many transactions in a process reuses a single key
+  instead of rebuilding this expensive object each time.
 
 ## [0.29.0] - 2026-07-09
 

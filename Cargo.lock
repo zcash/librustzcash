@@ -7448,13 +7448,18 @@ dependencies = [
  "orchard",
  "pczt",
  "proptest",
+ "prost",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
+ "rusqlite",
  "shardtree",
+ "tempfile",
  "zcash_client_backend",
+ "zcash_client_sqlite",
  "zcash_keys",
  "zcash_pool_migration_memory",
  "zcash_primitives",
+ "zcash_proofs",
  "zcash_protocol",
 ]
 

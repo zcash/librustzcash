@@ -8,11 +8,13 @@
 
 use std::borrow::{Borrow, BorrowMut};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use zcash_pool_migration_backend::engine::{
     MigrationState, MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
+
+use crate::{AccountRef, AccountUuid};
 
 use super::store::{self, Store, Tables};
 
@@ -29,27 +31,48 @@ static TABLES: Tables = Tables {
     transactions: "orchard_ironwood_migration_transactions",
     transaction_deps: "orchard_ironwood_migration_transaction_deps",
     tx_due_index: "idx_orchard_ironwood_migration_tx_due",
+    account_index: "idx_orchard_ironwood_migrations_account",
 };
 
-/// Create the Orchard -> Ironwood pool-migration tables (and the due-transaction index) on `conn`.
-/// This is the body the `orchard_ironwood_migration_tables` schema migration's `up()` calls; it is
-/// idempotent (`IF NOT EXISTS`).
+/// Create the Orchard -> Ironwood pool-migration tables (and the due-transaction and account
+/// indexes) on `conn`. This is the body the `orchard_ironwood_migration_tables` schema migration's
+/// `up()` calls; it is idempotent (`IF NOT EXISTS`).
 pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
 
 /// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`]
-/// over a `rusqlite::Connection`. Construct it with a connection borrow (`&Connection` for read-only
-/// access, `&mut Connection` to also write) over the same connection a
-/// [`WalletDb`](crate::WalletDb) uses, so the pool-migration tables share the wallet database.
+/// over a `rusqlite::Connection`, scoped to one account's migration. Construct it with a connection
+/// borrow (`&Connection` for read-only access, `&mut Connection` to also write) over the same
+/// connection a [`WalletDb`](crate::WalletDb) uses, so the pool-migration tables share the wallet
+/// database.
+///
+/// An account's migration is owned by its row in the wallet's `accounts` table through the
+/// `account_id` foreign key, so deleting the account removes its migration automatically (via
+/// `ON DELETE CASCADE`); no explicit cleanup is required.
 pub struct PoolMigrations<C>(Store<C>);
 
-impl<C> PoolMigrations<C> {
-    /// Wrap a connection borrow as the store.
-    pub fn new(conn: C) -> Self {
-        Self(Store::new(conn, &TABLES))
+impl<C: Borrow<Connection>> PoolMigrations<C> {
+    /// Wrap a connection borrow as the store, scoped to `account`'s migration.
+    ///
+    /// The account is resolved to its `accounts` row up front, so the store keys its migration by
+    /// that row (the foreign key the schema uses) rather than by the external UUID. Returns
+    /// [`Error::AccountUnknown`] if no account with this UUID exists in the wallet.
+    pub fn for_account(conn: C, account: AccountUuid) -> Result<Self, Error> {
+        let account_id = conn
+            .borrow()
+            .query_row(
+                "SELECT id FROM accounts WHERE uuid = ?",
+                rusqlite::params![account.expose_uuid()],
+                |row| row.get(0).map(AccountRef),
+            )
+            .optional()?
+            .ok_or(Error::AccountUnknown)?;
+        Ok(Self(Store::new(conn, &TABLES, account_id)))
     }
+}
 
+impl<C> PoolMigrations<C> {
     /// Recover the wrapped connection borrow.
     pub fn into_inner(self) -> C {
         self.0.into_inner()
@@ -84,9 +107,10 @@ mod tests {
 
     use proptest::prelude::*;
     use rusqlite::Connection;
+    use uuid::Uuid;
 
     use zcash_pool_migration_backend::engine::{
-        MigrationTxId, MigrationTxState, PoolMigrationWrite,
+        MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
     use zcash_pool_migration_backend::testing::{
         arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
@@ -94,14 +118,47 @@ mod tests {
         first_transaction_id,
     };
 
+    use crate::AccountUuid;
+
     use super::Error;
 
-    /// A fresh, empty store over a new in-memory database with the migration tables created. Each
-    /// proptest case and test gets its own, so writes never bleed between cases.
-    fn fresh_store() -> PoolMigrations<Connection> {
+    /// A fresh in-memory database with a minimal `accounts` table (the `account_id` foreign-key
+    /// target) and the migration tables created, but not yet wrapped as a store for any particular
+    /// account. Used by tests that put more than one account's [`PoolMigrations`] over the same
+    /// connection.
+    fn fresh_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
+        // A minimal stand-in for the wallet's `accounts` table: the migration tables' `account_id`
+        // foreign key references `accounts(id)`, and `for_account` resolves an `AccountUuid` to its
+        // row through `accounts(uuid)`.
+        conn.execute_batch(
+            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, uuid BLOB NOT NULL);
+             CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid);",
+        )
+        .expect("create accounts table");
         init_migration_tables(&conn).expect("create tables");
-        PoolMigrations::new(conn)
+        conn
+    }
+
+    /// Insert a fresh random account into `conn`'s `accounts` table and return its UUID, so a store
+    /// can be scoped to it.
+    fn insert_account(conn: &Connection) -> AccountUuid {
+        let account = AccountUuid::from_uuid(Uuid::new_v4());
+        conn.execute(
+            "INSERT INTO accounts (uuid) VALUES (?)",
+            rusqlite::params![account.expose_uuid()],
+        )
+        .expect("insert account");
+        account
+    }
+
+    /// A fresh, empty store over a new in-memory database with the migration tables created, scoped
+    /// to a fresh account. Each proptest case and test gets its own database and account, so writes
+    /// never bleed between cases.
+    fn fresh_store() -> PoolMigrations<Connection> {
+        let conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(conn, account).expect("account exists")
     }
 
     #[test]
@@ -138,6 +195,94 @@ mod tests {
             .replace_migration(&state)
             .expect_err("an empty layer cannot be persisted");
         assert!(matches!(err, Error::Unrepresentable(_)));
+    }
+
+    /// Deleting an account cascades to its in-progress migration: the `account_id` foreign key
+    /// carries `ON DELETE CASCADE`, so removing the account's row removes its migration, whose child
+    /// rows cascade from it in turn. A different account's migration is untouched. This is the
+    /// cleanup the wallet's account-deletion path now relies on entirely (no explicit delete).
+    #[test]
+    fn deleting_an_account_cascades_to_its_migration() {
+        use zcash_pool_migration_backend::engine::{MigrationState, MigrationStatus};
+        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_protocol::value::Zatoshis;
+
+        let mut conn = fresh_conn();
+        // Enforce foreign keys so the account -> migration -> child cascade actually fires, exactly
+        // as the wallet database does at runtime.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable foreign keys");
+
+        let account_a = insert_account(&conn);
+        let account_b = insert_account(&conn);
+
+        // A minimal but non-trivial migration (one crossing value) so the cascade is observed to
+        // reach a child table, not only the parent row.
+        let note_split = NoteSplitPlan::from_stored_parts(
+            vec![Zatoshis::const_from_u64(1)],
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::const_from_u64(1),
+            Zatoshis::const_from_u64(1),
+        )
+        .expect("a one-crossing stored plan reconstructs");
+        let state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            note_split,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            Vec::new(),
+        );
+
+        PoolMigrations::for_account(&mut conn, account_a)
+            .expect("account A exists")
+            .replace_migration(&state)
+            .expect("write A's migration");
+        PoolMigrations::for_account(&mut conn, account_b)
+            .expect("account B exists")
+            .replace_migration(&state)
+            .expect("write B's migration");
+
+        let count = |conn: &Connection, table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .expect("count")
+        };
+        assert_eq!(count(&conn, "orchard_ironwood_migrations"), 2);
+        assert_eq!(
+            count(&conn, "orchard_ironwood_migration_crossing_values"),
+            2
+        );
+
+        // Delete account A directly, as the wallet's `delete_account` does; the cascade removes its
+        // migration and children with it, and nothing else.
+        conn.execute(
+            "DELETE FROM accounts WHERE uuid = ?",
+            rusqlite::params![account_a.expose_uuid()],
+        )
+        .expect("delete account A");
+
+        // Only A's migration row and its child rows are gone; B's migration remains intact.
+        assert_eq!(
+            count(&conn, "orchard_ironwood_migrations"),
+            1,
+            "only account A's migration row must cascade away"
+        );
+        assert_eq!(
+            count(&conn, "orchard_ironwood_migration_crossing_values"),
+            1,
+            "account A's child rows must cascade away, and only those"
+        );
+        assert_eq!(
+            PoolMigrations::for_account(&conn, account_b)
+                .expect("account B exists")
+                .get_migration()
+                .expect("read B"),
+            Some(state),
+            "account B's migration must be untouched",
+        );
     }
 
     proptest! {
@@ -181,6 +326,132 @@ mod tests {
                 .update_transaction(MigrationTxId::new(u32::MAX), MigrationTxState::Proved)
                 .expect_err("no such transaction");
             prop_assert!(matches!(err, Error::Corrupt(_)));
+        }
+
+        /// Two accounts sharing one connection are isolated: writing account A's migration
+        /// creates no row visible to account B (which reads back `None`, exactly as an untouched
+        /// store would), while account A itself round-trips normally.
+        #[test]
+        fn accounts_are_isolated(state in arb_migration_state()) {
+            let mut conn = fresh_conn();
+            let account_a = insert_account(&conn);
+            let account_b = insert_account(&conn);
+
+            PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
+                .replace_migration(&state)
+                .expect("write for A");
+
+            prop_assert_eq!(
+                PoolMigrations::for_account(&conn, account_b)
+                    .expect("account B exists")
+                    .get_migration()
+                    .expect("read for B"),
+                None
+            );
+            prop_assert_eq!(
+                PoolMigrations::for_account(&conn, account_a)
+                    .expect("account A exists")
+                    .get_migration()
+                    .expect("read for A"),
+                Some(state)
+            );
+        }
+
+        /// Replacing account A's migration touches only A's row and children: account B's
+        /// previously written migration, on the same connection, is unaffected.
+        #[test]
+        fn replace_migration_is_scoped_to_its_account(
+            state_a_1 in arb_migration_state(),
+            state_a_2 in arb_migration_state(),
+            state_b in arb_migration_state(),
+        ) {
+            let mut conn = fresh_conn();
+            let account_a = insert_account(&conn);
+            let account_b = insert_account(&conn);
+
+            PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
+                .replace_migration(&state_a_1)
+                .expect("write A first");
+            PoolMigrations::for_account(&mut conn, account_b)
+                .expect("account B exists")
+                .replace_migration(&state_b)
+                .expect("write B");
+            PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
+                .replace_migration(&state_a_2)
+                .expect("write A second");
+
+            prop_assert_eq!(
+                PoolMigrations::for_account(&conn, account_a)
+                    .expect("account A exists")
+                    .get_migration()
+                    .expect("read A"),
+                Some(state_a_2)
+            );
+            prop_assert_eq!(
+                PoolMigrations::for_account(&conn, account_b)
+                    .expect("account B exists")
+                    .get_migration()
+                    .expect("read B"),
+                Some(state_b)
+            );
+        }
+
+        /// A second `replace_migration` for the same account still replaces: the per-account
+        /// singleton semantics hold (enforced by the unique index over `account_id`), because
+        /// the account's existing row is deleted before the new one is inserted.
+        #[test]
+        fn replace_migration_replaces_same_account(
+            first in arb_migration_state(),
+            second in arb_migration_state(),
+        ) {
+            let conn = fresh_conn();
+            let account = insert_account(&conn);
+            let mut store = PoolMigrations::for_account(conn, account).expect("account exists");
+            store.replace_migration(&first).expect("write first");
+            store.replace_migration(&second).expect("write second");
+            prop_assert_eq!(store.get_migration().expect("read"), Some(second));
+        }
+
+        /// `update_transaction` is scoped to its account: advancing a transaction's state for
+        /// account A does not affect account B's migration on the same connection, even when both
+        /// accounts started from the same migration state (and so share the updated `tx_id`).
+        #[test]
+        fn update_transaction_is_scoped_to_its_account(
+            state in arb_migration_state(),
+            new in arb_migration_tx_state(),
+        ) {
+            prop_assume!(!state.transactions().is_empty());
+            let id = first_transaction_id(&state).expect("non-empty by the assumption above");
+
+            let mut conn = fresh_conn();
+            let account_a = insert_account(&conn);
+            let account_b = insert_account(&conn);
+
+            PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
+                .replace_migration(&state)
+                .expect("write A");
+            PoolMigrations::for_account(&mut conn, account_b)
+                .expect("account B exists")
+                .replace_migration(&state)
+                .expect("write B");
+
+            PoolMigrations::for_account(&mut conn, account_a)
+                .expect("account A exists")
+                .update_transaction(id, new)
+                .expect("update A");
+
+            prop_assert_eq!(
+                PoolMigrations::for_account(&conn, account_b)
+                    .expect("account B exists")
+                    .get_migration()
+                    .expect("read B"),
+                Some(state),
+                "account B's migration must be unaffected by account A's update_transaction",
+            );
         }
     }
 }

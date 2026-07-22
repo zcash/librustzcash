@@ -757,7 +757,9 @@ pub(crate) fn delete_account(
     )?;
 
     // At this point, the only information remaining about the account is its entry in the
-    // accounts table and its addresses; delete them.
+    // accounts table and its addresses; delete them. Any in-progress pool migration for this
+    // account is removed by the `ON DELETE CASCADE` on `orchard_ironwood_migrations.account_id`
+    // (its own child rows cascade from it in turn).
     conn.execute(
         "DELETE FROM accounts WHERE uuid = :account_uuid",
         named_params![

@@ -95,6 +95,10 @@ rand_core.workspace = true
 rand_distr.workspace = true
 rand.workspace = true
 
+ambassador = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
+tempfile = { version = "3.5.0", optional = true }
+
 [dev-dependencies]
 ambassador.workspace = true
 assert_matches.workspace = true
@@ -134,6 +138,9 @@ orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
+    "dep:ambassador",
+    "dep:rand_chacha",
+    "dep:tempfile",
     "incrementalmerkletree/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_client_backend/test-dependencies",

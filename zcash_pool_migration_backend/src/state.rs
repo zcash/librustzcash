@@ -23,7 +23,8 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
-    MigrationState, MigrationStatus, MigrationTxId, MigrationTxKind, MigrationTxState,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
+    MigrationTxState,
 };
 
 /// The next thing to do to advance a committed migration, decided purely from its state. The consumer
@@ -32,13 +33,25 @@ use crate::engine::{
 /// [`MigrationState::next_step`] again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvanceStep {
-    /// Prove and broadcast this pre-signed transaction: its dependencies are mined and it is due.
-    Broadcast {
-        /// The transaction to prove and broadcast.
+    /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses and
+    /// store the proven PCZT), WITHOUT broadcasting: its dependencies are mined and, for a transfer,
+    /// its drawn anchor boundary has settled (the boundary block is below the tip, so its checkpoint
+    /// exists and is still within the wallet's checkpoint-pruning window). Broadcast is a separate
+    /// later step once the privacy broadcast schedule is due. Proving is time-critical: the boundary
+    /// checkpoint is pruned once the tip advances past it by the wallet's pruning depth, so a transfer
+    /// must be proved while its boundary is fresh, not deferred to its (later) broadcast height.
+    Prove {
+        /// The transaction to prove.
         id: MigrationTxId,
     },
-    /// Nothing to do now: waiting for one or more transactions to mine, or for a scheduled height to
-    /// arrive.
+    /// Broadcast this already-proven transaction: it is `Proved`, its dependencies are mined, and its
+    /// scheduled broadcast height has arrived.
+    Broadcast {
+        /// The transaction to broadcast.
+        id: MigrationTxId,
+    },
+    /// Nothing to do now: waiting for one or more transactions to mine, for an anchor boundary to
+    /// settle, or for a scheduled height to arrive.
     Waiting,
     /// Every transaction is mined; the migration is complete.
     Complete,
@@ -47,9 +60,13 @@ pub enum AdvanceStep {
 /// The action a wallet takes next on a ready migration transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NextAction {
-    /// Prove and broadcast this pre-signed transaction now that its dependencies are mined and it is
-    /// due.
-    ProveAndBroadcast,
+    /// Prove this pre-signed transaction now (install its deferred anchor and witnesses and store the
+    /// proven PCZT): its dependencies are mined and, for a transfer, its anchor boundary has settled
+    /// within the wallet's checkpoint-pruning window. It is not broadcast yet.
+    Prove,
+    /// Broadcast this already-proven transaction now: it is `Proved` and its scheduled broadcast
+    /// height has arrived.
+    Broadcast,
 }
 
 /// Why a migration transaction is not yet actionable.
@@ -63,6 +80,10 @@ pub enum Blocker {
     /// Built and due only at a later height (the privacy broadcast schedule): waiting for the chain tip
     /// to reach its scheduled height.
     Schedule,
+    /// A transfer whose drawn anchor boundary has not yet settled: waiting for the chain tip to move
+    /// strictly past the boundary block, so the boundary checkpoint exists and the transfer can be
+    /// proved against it (while it is still within the wallet's checkpoint-pruning window).
+    AnchorBoundary,
     /// Built but awaiting an EXTERNAL signature: its unsigned PCZT was exported to a hardware or offline
     /// signer, and this transaction cannot advance until
     /// [`MigrationState::apply_signature`](MigrationState::apply_signature) stores the signed PCZT
@@ -121,13 +142,51 @@ impl MigrationState {
         })
     }
 
-    /// The id of the next transaction ready to prove and broadcast: pre-signed (`Signed`) or already
-    /// `Proved`, its dependencies mined, and scheduled at or before `target_height` (`chain_tip + 1`).
+    /// Whether transaction `t` is ready to PROVE at `target_height` (`chain_tip + 1`): its
+    /// dependencies are mined and its Orchard anchor is resolvable from the wallet's commitment tree
+    /// right now.
+    ///
+    /// A TRANSFER anchors to a drawn boundary ([`anchor_boundary`](MigrationTransaction::anchor_boundary)),
+    /// which must have SETTLED: the boundary block must be strictly below the chain tip so its
+    /// checkpoint exists in the tree. Proving is due as soon as that holds, decoupled from the (later)
+    /// broadcast schedule, because the boundary checkpoint is pruned once the tip advances past it by
+    /// the wallet's pruning depth; a transfer must therefore be proved while its boundary is still
+    /// fresh, not deferred to its broadcast height. A PREPARATION carries no drawn boundary and
+    /// anchors to a fresh checkpoint at the tip when proved, so it is prove-ready once its
+    /// dependencies are mined and its scheduled height has arrived.
+    fn prove_ready(&self, t: &MigrationTransaction, target_height: BlockHeight) -> bool {
+        if !self.deps_mined(&t.depends_on) {
+            return false;
+        }
+        match t.anchor_boundary {
+            // A transfer: the boundary must be strictly below the tip. `target_height` is `tip + 1`,
+            // so `boundary < tip` is `boundary + 1 < target_height`.
+            Some(boundary) => u32::from(boundary) + 1 < u32::from(target_height),
+            // A preparation: prove-ready once its schedule is due.
+            None => t.scheduled_height <= target_height,
+        }
+    }
+
+    /// The id of the next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor
+    /// is resolvable now (see [`Self::prove_ready`]). Proving is decoupled from broadcasting so a
+    /// transfer is proved while its anchor boundary checkpoint is still within the wallet's pruning
+    /// window, then broadcast later at its scheduled height.
+    pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTxId> {
+        self.transactions
+            .iter()
+            .find(|t| {
+                matches!(t.state, MigrationTxState::Signed) && self.prove_ready(t, target_height)
+            })
+            .map(|t| t.id)
+    }
+
+    /// The id of the next transaction ready to BROADCAST: already `Proved`, its dependencies mined,
+    /// and scheduled at or before `target_height` (`chain_tip + 1`).
     pub fn next_broadcastable(&self, target_height: BlockHeight) -> Option<MigrationTxId> {
         self.transactions
             .iter()
             .find(|t| {
-                matches!(t.state, MigrationTxState::Signed | MigrationTxState::Proved)
+                matches!(t.state, MigrationTxState::Proved)
                     && t.scheduled_height <= target_height
                     && self.deps_mined(&t.depends_on)
             })
@@ -228,6 +287,12 @@ impl MigrationState {
         if self.is_terminal() {
             return AdvanceStep::Complete;
         }
+        // Prove before broadcasting: a transfer's anchor boundary checkpoint is only briefly within
+        // the wallet's pruning window, so proving is time-critical, whereas broadcasting a proven
+        // transaction can wait for its (later) schedule.
+        if let Some(id) = self.next_provable(target_height) {
+            return AdvanceStep::Prove { id };
+        }
         if let Some(id) = self.next_broadcastable(target_height) {
             return AdvanceStep::Broadcast { id };
         }
@@ -262,11 +327,31 @@ impl MigrationState {
                     // automatic driver takes no action (the external-signing caller drives it via
                     // `apply_signature`), so it is neither ready nor blocked on the chain.
                     MigrationTxState::AwaitingSignature => (false, None, Some(Blocker::Signature)),
-                    MigrationTxState::Signed | MigrationTxState::Proved => {
+                    // Pre-signed and awaiting proof: ready to PROVE once its anchor is resolvable (a
+                    // transfer's boundary has settled, or a preparation is due). Not yet proved, so
+                    // not yet broadcast.
+                    MigrationTxState::Signed => {
+                        if !deps_ok {
+                            (false, None, Some(Blocker::Dependencies))
+                        } else if self.prove_ready(t, target_height) {
+                            (true, Some(NextAction::Prove), None)
+                        } else {
+                            // Deps mined but not prove-ready: a transfer waiting for its anchor
+                            // boundary to settle, or a preparation not yet due on its schedule.
+                            let blocker = match t.anchor_boundary {
+                                Some(_) => Blocker::AnchorBoundary,
+                                None => Blocker::Schedule,
+                            };
+                            (false, None, Some(blocker))
+                        }
+                    }
+                    // Proved and awaiting broadcast: ready to BROADCAST once its scheduled height has
+                    // arrived, otherwise waiting on the broadcast schedule.
+                    MigrationTxState::Proved => {
                         if !deps_ok {
                             (false, None, Some(Blocker::Dependencies))
                         } else if t.scheduled_height <= target_height {
-                            (true, Some(NextAction::ProveAndBroadcast), None)
+                            (true, Some(NextAction::Broadcast), None)
                         } else {
                             (false, None, Some(Blocker::Schedule))
                         }
@@ -406,10 +491,11 @@ mod tests {
 
     #[test]
     fn next_broadcastable_respects_state_deps_and_schedule() {
-        let mut signed = tx(1, transfer(0), MigrationTxState::Signed);
-        signed.depends_on = vec![MigrationTxId(0)];
-        signed.scheduled_height = BlockHeight::from_u32(5);
-        let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), signed]);
+        // Only a PROVED transaction is broadcastable (proving is a separate earlier step).
+        let mut proved = tx(1, transfer(0), MigrationTxState::Proved);
+        proved.depends_on = vec![MigrationTxId(0)];
+        proved.scheduled_height = BlockHeight::from_u32(5);
+        let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), proved]);
 
         // Not due yet (target below scheduled height).
         assert_eq!(s.next_broadcastable(BlockHeight::from_u32(4)), None);
@@ -419,14 +505,12 @@ mod tests {
             Some(MigrationTxId(1))
         );
 
-        // A Proved transaction is also broadcastable.
-        s.transactions[1].state = MigrationTxState::Proved;
-        assert_eq!(
-            s.next_broadcastable(BlockHeight::from_u32(5)),
-            Some(MigrationTxId(1))
-        );
+        // A Signed (not yet proved) transaction is NOT broadcastable: it must be proved first.
+        s.transactions[1].state = MigrationTxState::Signed;
+        assert_eq!(s.next_broadcastable(BlockHeight::from_u32(5)), None);
 
-        // Dependency not mined: not broadcastable.
+        // Dependency not mined: not broadcastable even when Proved.
+        s.transactions[1].state = MigrationTxState::Proved;
         s.transactions[0].state = MigrationTxState::Broadcast {
             txid: TxId::from_bytes([0; 32]),
         };
@@ -435,16 +519,24 @@ mod tests {
 
     #[test]
     fn next_step_walks_the_lifecycle() {
-        // Every transaction is pre-signed at commit; the state machine only orders the
-        // broadcasts: layer 0, then layer 1 once layer 0 mines, then the transfer once the
-        // whole preparation mines.
+        // Every transaction is pre-signed at commit; the state machine orders proving then
+        // broadcasting, respecting the anchor-bucket dependency order: prove-then-broadcast layer 0,
+        // then layer 1 once layer 0 mines, then the transfer once the whole preparation mines. Each
+        // transaction is PROVED (`Signed -> Proved`) before it is broadcast.
         let mut l1 = tx(1, prep(1, 0), MigrationTxState::Signed);
         l1.depends_on = vec![MigrationTxId(0)];
         let mut xfer = tx(2, transfer(0), MigrationTxState::Signed);
         xfer.depends_on = vec![MigrationTxId(1)];
         let mut s = state_with(vec![tx(0, prep(0, 0), MigrationTxState::Signed), l1, xfer]);
 
-        // 1) Layer 0 is signed and due -> broadcast it.
+        // 1) Layer 0 is signed and due -> prove it first, then broadcast it once proved.
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(100)),
+            AdvanceStep::Prove {
+                id: MigrationTxId(0)
+            }
+        );
+        s.transactions[0].state = MigrationTxState::Proved;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
@@ -461,8 +553,15 @@ mod tests {
             AdvanceStep::Waiting
         );
 
-        // 3) Layer 0 mined -> layer 1 becomes broadcastable.
+        // 3) Layer 0 mined -> layer 1 becomes provable, then broadcastable.
         s.transactions[0].state = mined(10);
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(100)),
+            AdvanceStep::Prove {
+                id: MigrationTxId(1)
+            }
+        );
+        s.transactions[1].state = MigrationTxState::Proved;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
@@ -470,8 +569,15 @@ mod tests {
             }
         );
 
-        // 4) Layer 1 mined -> the transfer becomes broadcastable.
+        // 4) Layer 1 mined -> the transfer becomes provable, then broadcastable.
         s.transactions[1].state = mined(11);
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(100)),
+            AdvanceStep::Prove {
+                id: MigrationTxId(2)
+            }
+        );
+        s.transactions[2].state = MigrationTxState::Proved;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
@@ -494,9 +600,11 @@ mod tests {
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
         // The transfer is signed with deps mined but not due yet -> nothing else to do, waiting.
         assert_eq!(s.next_step(BlockHeight::from_u32(20)), AdvanceStep::Waiting);
+        // Once due, the first step on a still-`Signed` transaction is to PROVE it (broadcasting is a
+        // separate later step, once proved).
         assert_eq!(
             s.next_step(BlockHeight::from_u32(50)),
-            AdvanceStep::Broadcast {
+            AdvanceStep::Prove {
                 id: MigrationTxId(1)
             }
         );
@@ -577,9 +685,9 @@ mod tests {
         assert_eq!(views[0].blocked_on, None);
         assert_eq!(views[0].mined_height, Some(BlockHeight::from_u32(10)));
 
-        // tx 1: signed with its dependency (tx 0) mined and due -> ready to broadcast.
+        // tx 1: signed with its dependency (tx 0) mined and due -> ready to prove.
         assert!(views[1].ready);
-        assert_eq!(views[1].action, Some(NextAction::ProveAndBroadcast));
+        assert_eq!(views[1].action, Some(NextAction::Prove));
         assert_eq!(views[1].blocked_on, None);
 
         // tx 2: signed but its dependency (tx 1) is not mined -> blocked on dependencies.
@@ -598,6 +706,48 @@ mod tests {
         assert_eq!(blocked[1].blocked_on, Some(Blocker::Schedule));
         let ready = s.transaction_statuses(BlockHeight::from_u32(30));
         assert!(ready[1].ready);
-        assert_eq!(ready[1].action, Some(NextAction::ProveAndBroadcast));
+        assert_eq!(ready[1].action, Some(NextAction::Prove));
+    }
+
+    #[test]
+    fn transfer_prove_ready_waits_for_its_anchor_boundary() {
+        // A transfer anchors to a drawn boundary; it is not provable until the boundary block is
+        // strictly below the tip (its checkpoint has settled), decoupled from the broadcast schedule.
+        let mut xfer = tx(1, transfer(0), MigrationTxState::Signed);
+        xfer.depends_on = vec![MigrationTxId(0)];
+        xfer.anchor_boundary = Some(BlockHeight::from_u32(40));
+        xfer.scheduled_height = BlockHeight::from_u32(60);
+        let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
+
+        // `target_height` is `tip + 1`. At tip 40 (target 41) the boundary is not yet strictly below
+        // the tip -> not provable, blocked on the anchor boundary.
+        assert_eq!(s.next_step(BlockHeight::from_u32(41)), AdvanceStep::Waiting);
+        let v = s.transaction_statuses(BlockHeight::from_u32(41));
+        assert!(!v[1].ready);
+        assert_eq!(v[1].blocked_on, Some(Blocker::AnchorBoundary));
+
+        // At tip 41 (target 42) boundary 40 is strictly below the tip -> provable now, even though
+        // the broadcast schedule (60) has not arrived.
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(42)),
+            AdvanceStep::Prove {
+                id: MigrationTxId(1)
+            }
+        );
+
+        // Once proved, it is NOT broadcast until its scheduled height arrives.
+        s.transactions[1].state = MigrationTxState::Proved;
+        assert_eq!(s.next_step(BlockHeight::from_u32(42)), AdvanceStep::Waiting);
+        let v = s.transaction_statuses(BlockHeight::from_u32(42));
+        assert!(!v[1].ready);
+        assert_eq!(v[1].blocked_on, Some(Blocker::Schedule));
+
+        // At the scheduled height it becomes broadcastable.
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(60)),
+            AdvanceStep::Broadcast {
+                id: MigrationTxId(1)
+            }
+        );
     }
 }
