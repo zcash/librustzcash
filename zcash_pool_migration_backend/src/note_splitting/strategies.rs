@@ -9,7 +9,7 @@
 
 use alloc::vec::Vec;
 
-use rand_core::RngCore;
+use rand_core::{CryptoRng, RngCore};
 
 use zcash_protocol::value::COIN;
 
@@ -73,7 +73,7 @@ impl CanonicalOneTwoFive {
 }
 
 impl DenominationStrategy for CanonicalOneTwoFive {
-    fn plan<R: RngCore>(
+    fn plan<R: RngCore + CryptoRng>(
         &self,
         total_input: Zatoshis,
         prep_tx_fee: Zatoshis,
