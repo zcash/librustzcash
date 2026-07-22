@@ -39,6 +39,10 @@ workspace.
   during concurrent proposal creation.
 
 ### Fixed
+- The `InputSource::get_unspent_transparent_output` implementation now honors
+  its `include_locked` parameter; previously the parameter was ignored and
+  locked transparent outputs were returned regardless, diverging from the
+  trait contract and from the shielded `get_spendable_note` behavior.
 - The `zewif` importer no longer marks transparent addresses that have no
   recorded exposure height (`zewif::Address::exposed_at_height() == None`, e.g.
   zcashd keypool reserves) as exposed unconditionally. Previously every such
