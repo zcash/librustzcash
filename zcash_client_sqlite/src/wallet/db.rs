@@ -594,11 +594,14 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 // install into `wallet.db`. Every structured value is stored in typed columns and child tables; the
 // only `BLOB` is the pre-signed transaction (`pczt`), which is already-versioned, unstructured bytes.
 
-/// The single active migration's status and the scalar fields of its note-split plan. The crossing
-/// values are an ordered list in `orchard_ironwood_migration_crossing_values`.
+/// One row per account's active migration: its status and the scalar fields of its note-split
+/// plan. The crossing values are an ordered list in `orchard_ironwood_migration_crossing_values`.
+/// `account_uuid` is enforced unique by `INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`, so an account
+/// has at most one migration in progress.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
 CREATE TABLE orchard_ironwood_migrations (
     id INTEGER PRIMARY KEY,
+    account_uuid BLOB NOT NULL,
     status TEXT NOT NULL,
     note_split_fee_buffer INTEGER NOT NULL,
     note_split_change INTEGER,
@@ -689,6 +692,11 @@ CREATE TABLE orchard_ironwood_migration_transaction_deps (
 pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATION_TX_DUE: &str = "
 CREATE INDEX idx_orchard_ironwood_migration_tx_due ON orchard_ironwood_migration_transactions (
     state, scheduled_height
+)";
+/// Enforces at most one migration per account.
+pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT: &str = "
+CREATE UNIQUE INDEX idx_orchard_ironwood_migrations_account ON orchard_ironwood_migrations (
+    account_uuid
 )";
 
 /// Stores the transparent outputs received by the wallet.

@@ -23,6 +23,7 @@
 use std::borrow::{Borrow, BorrowMut};
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
+use uuid::Uuid;
 
 use zcash_pool_migration_backend::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
@@ -41,7 +42,7 @@ use super::error::Error;
 /// supplies a `'static` value of this for its own pool; the generic store interpolates these into
 /// every DDL and query, so one implementation serves every pool.
 pub(crate) struct Tables {
-    /// The migration-state table (one singleton row; holds the note-split scalars).
+    /// The migration-state table (one row per account; holds the note-split scalars).
     pub migrations: &'static str,
     /// The note-split crossing values (an ordered list).
     pub crossing_values: &'static str,
@@ -58,11 +59,10 @@ pub(crate) struct Tables {
     pub transaction_deps: &'static str,
     /// The index over `(state, scheduled_height)` on the transactions table.
     pub tx_due_index: &'static str,
+    /// The unique index over `account_uuid` on the migrations table, enforcing at most one
+    /// migration per account.
+    pub account_index: &'static str,
 }
-
-/// The primary-key value of the single active migration. There is at most one migration in progress,
-/// so it is stored as one row; a future multi-account model would replace this with an account key.
-pub(crate) const SINGLETON_ID: i64 = 0;
 
 // ---------------------------------------------------------------------------
 // DDL
@@ -72,6 +72,7 @@ fn create_migrations_sql(t: &Tables) -> String {
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             id INTEGER PRIMARY KEY,
+            account_uuid BLOB NOT NULL,
             status TEXT NOT NULL,
             note_split_fee_buffer INTEGER NOT NULL,
             note_split_change INTEGER,
@@ -186,12 +187,19 @@ fn create_tx_due_index_sql(t: &Tables) -> String {
     )
 }
 
-/// Create the pool-migration tables (and the due-transaction index) named by `t` on `conn`. This is
-/// the body the pool's schema migration's `up()` calls; it is idempotent (`IF NOT EXISTS`). Tables
-/// are created in dependency order so each foreign-key target exists first.
+fn create_account_index_sql(t: &Tables) -> String {
+    format!(
+        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} (account_uuid)",
+        t.account_index, t.migrations
+    )
+}
+
+/// Create the pool-migration tables (and the due-transaction and account indexes) named by `t` on
+/// `conn`. This is the body the pool's schema migration's `up()` calls; it is idempotent (`IF NOT
+/// EXISTS`). Tables are created in dependency order so each foreign-key target exists first.
 pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(
-        "{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};",
+        "{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};",
         create_migrations_sql(t),
         create_crossing_values_sql(t),
         create_prep_inputs_sql(t),
@@ -200,6 +208,7 @@ pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
         create_transactions_sql(t),
         create_transaction_deps_sql(t),
         create_tx_due_index_sql(t),
+        create_account_index_sql(t),
     ))
 }
 
@@ -208,21 +217,26 @@ pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
 // ---------------------------------------------------------------------------
 
 /// The generic pool-migration store: it carries the [`PoolMigrationRead`] / [`PoolMigrationWrite`]
-/// logic over a `rusqlite::Connection`, parameterized by the [`Tables`] names for a given pool.
-/// Construct it with a connection borrow (`&Connection` for read-only access, `&mut Connection` to
-/// also write) plus the pool's table names; a concrete facade wraps it so the generic type never
-/// appears in the public API.
+/// logic over a `rusqlite::Connection`, parameterized by the [`Tables`] names for a given pool and
+/// scoped to a single account's migration. Construct it with a connection borrow (`&Connection` for
+/// read-only access, `&mut Connection` to also write) plus the pool's table names and the account;
+/// a concrete facade wraps it so the generic type never appears in the public API.
 ///
 /// [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
 /// [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
 pub(crate) struct Store<C> {
     conn: C,
     tables: &'static Tables,
+    account: Uuid,
 }
 
 impl<C> Store<C> {
-    pub(crate) fn new(conn: C, tables: &'static Tables) -> Self {
-        Self { conn, tables }
+    pub(crate) fn new(conn: C, tables: &'static Tables, account: Uuid) -> Self {
+        Self {
+            conn,
+            tables,
+            account,
+        }
     }
 
     pub(crate) fn into_inner(self) -> C {
@@ -232,15 +246,16 @@ impl<C> Store<C> {
 
 impl<C: Borrow<Connection>> Store<C> {
     pub(crate) fn get_migration(&self) -> Result<Option<MigrationState>, Error> {
-        read_migration(self.conn.borrow(), self.tables)
+        read_migration(self.conn.borrow(), self.tables, &self.account)
     }
 }
 
 impl<C: BorrowMut<Connection>> Store<C> {
     pub(crate) fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Error> {
         let tables = self.tables;
+        let account = self.account;
         let tx = self.conn.borrow_mut().transaction()?;
-        replace_migration(&tx, tables, state)?;
+        replace_migration(&tx, tables, &account, state)?;
         tx.commit()?;
         Ok(())
     }
@@ -250,18 +265,23 @@ impl<C: BorrowMut<Connection>> Store<C> {
         id: MigrationTxId,
         state: MigrationTxState,
     ) -> Result<(), Error> {
-        let updated = self.conn.borrow_mut().execute(
+        let tables = self.tables;
+        let account = self.account;
+        let conn = self.conn.borrow_mut();
+        let migration_id = resolve_migration_id(conn, tables, &account)?
+            .ok_or(Error::Corrupt("update_transaction: no such transaction"))?;
+        let updated = conn.execute(
             &format!(
                 "UPDATE {}
                     SET state = :state, txid = :txid, mined_height = :mined_height
                   WHERE migration_id = :migration_id AND tx_id = :tx_id",
-                self.tables.transactions
+                tables.transactions
             ),
             named_params! {
                 ":state": state.as_ref(),
                 ":txid": state.broadcast_txid().map(hex::encode),
                 ":mined_height": state.mined_height().map(u32::from),
-                ":migration_id": SINGLETON_ID,
+                ":migration_id": migration_id,
                 ":tx_id": u32::from(id),
             },
         )?;
@@ -276,34 +296,58 @@ impl<C: BorrowMut<Connection>> Store<C> {
 // Read
 // ---------------------------------------------------------------------------
 
-fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState>, Error> {
+/// Resolve the primary key of `account`'s row in `t.migrations`, if one exists. Every child table
+/// is addressed by this key rather than by `account_uuid` directly, so a write operation resolves
+/// it once and reuses it for every subsequent query.
+fn resolve_migration_id(
+    conn: &Connection,
+    t: &Tables,
+    account: &Uuid,
+) -> Result<Option<i64>, Error> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT id FROM {} WHERE account_uuid = ?", t.migrations),
+            params![account.as_bytes().as_slice()],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn read_migration(
+    conn: &Connection,
+    t: &Tables,
+    account: &Uuid,
+) -> Result<Option<MigrationState>, Error> {
     let row = conn
         .query_row(
             &format!(
-                "SELECT status, note_split_fee_buffer, note_split_change, note_split_prep_fees,
+                "SELECT id, status, note_split_fee_buffer, note_split_change, note_split_prep_fees,
                         note_split_total_input, note_split_total_migratable
-                   FROM {} WHERE id = ?",
+                   FROM {} WHERE account_uuid = ?",
                 t.migrations
             ),
-            params![SINGLETON_ID],
+            params![account.as_bytes().as_slice()],
             |row| {
                 Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, u64>(1)?,
-                    row.get::<_, Option<u64>>(2)?,
-                    row.get::<_, u64>(3)?,
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, Option<u64>>(3)?,
                     row.get::<_, u64>(4)?,
                     row.get::<_, u64>(5)?,
+                    row.get::<_, u64>(6)?,
                 ))
             },
         )
         .optional()?;
 
-    let Some((status, fee_buffer, change, prep_fees, total_input, total_migratable)) = row else {
+    let Some((migration_id, status, fee_buffer, change, prep_fees, total_input, total_migratable)) =
+        row
+    else {
         return Ok(None);
     };
 
-    let crossing_values = read_zatoshi_list(conn, t.crossing_values)?;
+    let crossing_values = read_zatoshi_list(conn, t.crossing_values, migration_id)?;
     let note_split = NoteSplitPlan::from_stored_parts(
         crossing_values,
         Zatoshis::from_u64(fee_buffer)?,
@@ -314,8 +358,8 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
     )
     .map_err(|_| Error::Corrupt("note_split"))?;
 
-    let preparation = read_preparation(conn, t)?;
-    let transactions = read_transactions(conn, t)?;
+    let preparation = read_preparation(conn, t, migration_id)?;
+    let transactions = read_transactions(conn, t, migration_id)?;
 
     let status =
         MigrationStatus::try_from(status.as_str()).map_err(|_| Error::Corrupt("status"))?;
@@ -328,11 +372,15 @@ fn read_migration(conn: &Connection, t: &Tables) -> Result<Option<MigrationState
 }
 
 /// Read an ordered list of zatoshi amounts (`ordinal`, `value`) from a child table.
-fn read_zatoshi_list(conn: &Connection, table: &str) -> Result<Vec<Zatoshis>, Error> {
+fn read_zatoshi_list(
+    conn: &Connection,
+    table: &str,
+    migration_id: i64,
+) -> Result<Vec<Zatoshis>, Error> {
     let mut stmt = conn.prepare(&format!(
         "SELECT value FROM {table} WHERE migration_id = ? ORDER BY ordinal"
     ))?;
-    let rows = stmt.query_map(params![SINGLETON_ID], |row| row.get::<_, u64>(0))?;
+    let rows = stmt.query_map(params![migration_id], |row| row.get::<_, u64>(0))?;
     let mut out = Vec::new();
     for v in rows {
         out.push(Zatoshis::from_u64(v?)?);
@@ -340,7 +388,11 @@ fn read_zatoshi_list(conn: &Connection, table: &str) -> Result<Vec<Zatoshis>, Er
     Ok(out)
 }
 
-fn read_preparation(conn: &Connection, t: &Tables) -> Result<PreparationPlan, Error> {
+fn read_preparation(
+    conn: &Connection,
+    t: &Tables,
+    migration_id: i64,
+) -> Result<PreparationPlan, Error> {
     // The layers/transactions grid, reconstructed from the input and output rows: every transaction
     // has at least one such row (the write side rejects a state where one does not), so the distinct
     // `(layer, tx_index)` coordinates enumerate the full grid in order.
@@ -352,7 +404,7 @@ fn read_preparation(conn: &Connection, t: &Tables) -> Result<PreparationPlan, Er
              ORDER BY layer, tx_index",
             t.prep_inputs, t.prep_outputs
         ))?;
-        let rows = stmt.query_map(named_params! { ":id": SINGLETON_ID }, |row| {
+        let rows = stmt.query_map(named_params! { ":id": migration_id }, |row| {
             Ok((
                 row.get::<_, u64>(0)? as usize,
                 row.get::<_, u64>(1)? as usize,
@@ -371,8 +423,8 @@ fn read_preparation(conn: &Connection, t: &Tables) -> Result<PreparationPlan, Er
                 "preparation grid: non-contiguous coordinates",
             ));
         }
-        let inputs = read_prep_inputs(conn, t, layer, tx_index)?;
-        let outputs = read_prep_outputs(conn, t, layer, tx_index)?;
+        let inputs = read_prep_inputs(conn, t, migration_id, layer, tx_index)?;
+        let outputs = read_prep_outputs(conn, t, migration_id, layer, tx_index)?;
         layers[layer].push(PrepTransaction::from_parts(inputs, outputs));
     }
 
@@ -381,7 +433,7 @@ fn read_preparation(conn: &Connection, t: &Tables) -> Result<PreparationPlan, Er
             "SELECT wallet_index, value FROM {} WHERE migration_id = ? ORDER BY ordinal",
             t.prep_direct_funding
         ))?;
-        let rows = stmt.query_map(params![SINGLETON_ID], |row| {
+        let rows = stmt.query_map(params![migration_id], |row| {
             Ok((row.get::<_, u64>(0)? as usize, row.get::<_, u64>(1)?))
         })?;
         let mut out = Vec::new();
@@ -398,6 +450,7 @@ fn read_preparation(conn: &Connection, t: &Tables) -> Result<PreparationPlan, Er
 fn read_prep_inputs(
     conn: &Connection,
     t: &Tables,
+    migration_id: i64,
     layer: usize,
     tx_index: usize,
 ) -> Result<Vec<PrepInput>, Error> {
@@ -409,7 +462,7 @@ fn read_prep_inputs(
         t.prep_inputs
     ))?;
     let rows = stmt.query_map(
-        params![SINGLETON_ID, layer as u64, tx_index as u64],
+        params![migration_id, layer as u64, tx_index as u64],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -448,6 +501,7 @@ fn read_prep_inputs(
 fn read_prep_outputs(
     conn: &Connection,
     t: &Tables,
+    migration_id: i64,
     layer: usize,
     tx_index: usize,
 ) -> Result<Vec<PrepOutput>, Error> {
@@ -458,7 +512,7 @@ fn read_prep_outputs(
         t.prep_outputs
     ))?;
     let rows = stmt.query_map(
-        params![SINGLETON_ID, layer as u64, tx_index as u64],
+        params![migration_id, layer as u64, tx_index as u64],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)),
     )?;
     let mut out = Vec::new();
@@ -472,7 +526,11 @@ fn read_prep_outputs(
     Ok(out)
 }
 
-fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTransaction>, Error> {
+fn read_transactions(
+    conn: &Connection,
+    t: &Tables,
+    migration_id: i64,
+) -> Result<Vec<MigrationTransaction>, Error> {
     let rows: Vec<TxRow> = {
         let mut stmt = conn.prepare(&format!(
             "SELECT tx_id, kind, kind_layer, kind_index, kind_crossing, pczt,
@@ -482,7 +540,7 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
               ORDER BY tx_id",
             t.transactions
         ))?;
-        let mapped = stmt.query_map(params![SINGLETON_ID], |row| {
+        let mapped = stmt.query_map(params![migration_id], |row| {
             Ok(TxRow {
                 tx_id: row.get(0)?,
                 kind: row.get(1)?,
@@ -526,7 +584,7 @@ fn read_transactions(conn: &Connection, t: &Tables) -> Result<Vec<MigrationTrans
             r.mined_height.map(BlockHeight::from_u32),
         )
         .map_err(|_| Error::Corrupt("state"))?;
-        let depends_on = read_deps(conn, t, r.tx_id)?;
+        let depends_on = read_deps(conn, t, migration_id, r.tx_id)?;
 
         out.push(MigrationTransaction::from_parts(
             id,
@@ -558,14 +616,19 @@ struct TxRow {
     mined_height: Option<u32>,
 }
 
-fn read_deps(conn: &Connection, t: &Tables, tx_id: u32) -> Result<Vec<MigrationTxId>, Error> {
+fn read_deps(
+    conn: &Connection,
+    t: &Tables,
+    migration_id: i64,
+    tx_id: u32,
+) -> Result<Vec<MigrationTxId>, Error> {
     let mut stmt = conn.prepare(&format!(
         "SELECT depends_on_tx_id FROM {}
           WHERE migration_id = ? AND tx_id = ?
           ORDER BY ordinal",
         t.transaction_deps
     ))?;
-    let rows = stmt.query_map(params![SINGLETON_ID, tx_id], |row| row.get::<_, u32>(0))?;
+    let rows = stmt.query_map(params![migration_id, tx_id], |row| row.get::<_, u32>(0))?;
     let mut out = Vec::new();
     for r in rows {
         out.push(MigrationTxId::new(r?));
@@ -577,12 +640,13 @@ fn read_deps(conn: &Connection, t: &Tables, tx_id: u32) -> Result<Vec<MigrationT
 // Write
 // ---------------------------------------------------------------------------
 
-/// Replace the single active migration in the tables named by `t` with `state` (deletes any existing
-/// migration and its children first). Runs inside the caller's transaction so the replacement is
-/// atomic.
+/// Replace `account`'s migration in the tables named by `t` with `state` (deletes that account's
+/// existing migration and its children first, if any). Runs inside the caller's transaction so the
+/// replacement is atomic.
 fn replace_migration(
     tx: &rusqlite::Transaction,
     t: &Tables,
+    account: &Uuid,
     state: &MigrationState,
 ) -> Result<(), Error> {
     // The layers/transactions grid is stored only through the input and output rows, so a layer
@@ -602,36 +666,38 @@ fn replace_migration(
         }
     }
 
-    // Replace semantics: the store holds at most one migration. Delete children first (in case
-    // foreign-key cascades are not enabled), then the singleton row.
-    for table in [
-        t.transaction_deps,
-        t.transactions,
-        t.prep_inputs,
-        t.prep_outputs,
-        t.prep_direct_funding,
-        t.crossing_values,
-    ] {
+    // Replace semantics: the store holds at most one migration per account. Delete the account's
+    // existing children first (in case foreign-key cascades are not enabled), then its parent row.
+    if let Some(migration_id) = resolve_migration_id(tx, t, account)? {
+        for table in [
+            t.transaction_deps,
+            t.transactions,
+            t.prep_inputs,
+            t.prep_outputs,
+            t.prep_direct_funding,
+            t.crossing_values,
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE migration_id = ?"),
+                params![migration_id],
+            )?;
+        }
         tx.execute(
-            &format!("DELETE FROM {table} WHERE migration_id = ?"),
-            params![SINGLETON_ID],
+            &format!("DELETE FROM {} WHERE id = ?", t.migrations),
+            params![migration_id],
         )?;
     }
-    tx.execute(
-        &format!("DELETE FROM {} WHERE id = ?", t.migrations),
-        params![SINGLETON_ID],
-    )?;
 
     let ns = state.note_split();
     tx.execute(
         &format!(
-            "INSERT INTO {} (id, status, note_split_fee_buffer, note_split_change,
+            "INSERT INTO {} (account_uuid, status, note_split_fee_buffer, note_split_change,
                              note_split_prep_fees, note_split_total_input, note_split_total_migratable)
-             VALUES (:id, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable)",
+             VALUES (:account_uuid, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable)",
             t.migrations
         ),
         named_params! {
-            ":id": SINGLETON_ID,
+            ":account_uuid": account.as_bytes().as_slice(),
             ":status": state.status().as_ref(),
             ":fee_buffer": ns.note_fee_buffer().into_u64(),
             ":change": ns.change().map(Zatoshis::into_u64),
@@ -640,8 +706,9 @@ fn replace_migration(
             ":total_migratable": ns.total_migratable().into_u64(),
         },
     )?;
+    let migration_id = tx.last_insert_rowid();
 
-    insert_zatoshi_list(tx, t.crossing_values, ns.crossing_values())?;
+    insert_zatoshi_list(tx, t.crossing_values, migration_id, ns.crossing_values())?;
 
     let prep = state.preparation();
     for (layer, transactions) in prep.layers().iter().enumerate() {
@@ -674,7 +741,7 @@ fn replace_migration(
                         t.prep_inputs
                     ),
                     named_params! {
-                        ":migration_id": SINGLETON_ID,
+                        ":migration_id": migration_id,
                         ":layer": layer as u64,
                         ":tx_index": tx_index as u64,
                         ":ordinal": ordinal as u64,
@@ -695,7 +762,7 @@ fn replace_migration(
                         t.prep_outputs
                     ),
                     named_params! {
-                        ":migration_id": SINGLETON_ID,
+                        ":migration_id": migration_id,
                         ":layer": layer as u64,
                         ":tx_index": tx_index as u64,
                         ":ordinal": ordinal as u64,
@@ -714,7 +781,7 @@ fn replace_migration(
                 t.prep_direct_funding
             ),
             named_params! {
-                ":migration_id": SINGLETON_ID,
+                ":migration_id": migration_id,
                 ":ordinal": ordinal as u64,
                 ":wallet_index": *wallet_index as u64,
                 ":value": (*value).into_u64(),
@@ -740,7 +807,7 @@ fn replace_migration(
                 t.transactions
             ),
             named_params! {
-                ":migration_id": SINGLETON_ID,
+                ":migration_id": migration_id,
                 ":tx_id": u32::from(mtx.id()),
                 ":kind": kind.as_ref(),
                 ":kind_layer": kind_layer,
@@ -763,7 +830,7 @@ fn replace_migration(
                     t.transaction_deps
                 ),
                 named_params! {
-                    ":migration_id": SINGLETON_ID,
+                    ":migration_id": migration_id,
                     ":tx_id": u32::from(mtx.id()),
                     ":ordinal": ordinal as u64,
                     ":depends_on_tx_id": u32::from(*dep),
@@ -778,6 +845,7 @@ fn replace_migration(
 fn insert_zatoshi_list(
     tx: &rusqlite::Transaction,
     table: &str,
+    migration_id: i64,
     values: &[Zatoshis],
 ) -> Result<(), Error> {
     for (ordinal, value) in values.iter().enumerate() {
@@ -787,7 +855,7 @@ fn insert_zatoshi_list(
                  VALUES (:migration_id, :ordinal, :value)"
             ),
             named_params! {
-                ":migration_id": SINGLETON_ID,
+                ":migration_id": migration_id,
                 ":ordinal": ordinal as u64,
                 ":value": (*value).into_u64(),
             },
