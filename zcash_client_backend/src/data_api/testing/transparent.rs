@@ -17,6 +17,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData, TxVersion, fees::zip317},
 };
 use zcash_protocol::{
+    PoolType, TxId,
     consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS},
     local_consensus::LocalNetwork,
     value::Zatoshis,
@@ -34,6 +35,7 @@ use crate::{
     data_api::{
         Account as _, AccountBalance, Balance, CoinbaseFilter, InputSource as _, MaxSpendMode,
         TargetValue, WalletRead as _, WalletTest as _, WalletWrite,
+        error::LockError,
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
@@ -41,7 +43,7 @@ use crate::{
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
-    wallet::WalletTransparentOutput,
+    wallet::{OutputRef, WalletTransparentOutput},
 };
 
 /// Checks whether the transparent balance of the given test `account` is as `expected`
@@ -220,6 +222,179 @@ where
         ),
         Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
+}
+
+/// Exercises note locking for transparent outputs.
+///
+/// A locked UTXO is excluded from single-output retrieval and from spendable-output listing
+/// unless `include_locked` is set, is reported as locked (not spendable) value in the
+/// per-address balances, conflicts with a second lock, and returns to spendability when the
+/// chain tip passes the lock expiry height, with no unlock call.
+pub fn transparent_note_locking<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let birthday = st.test_account().unwrap().birthday().height();
+    let account_id = st.test_account().unwrap().id();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account_id, UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    let height = birthday + 12345;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // Create a fake transparent output mined at `height`.
+    let value = Zatoshis::const_from_u64(100000);
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint.clone(),
+        txout,
+        Some(height),
+        Some(account_id),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    let target_height = TargetHeight::from(height + 1);
+    let output_ref = OutputRef::new(
+        TxId::from_bytes(*outpoint.hash()),
+        PoolType::TRANSPARENT,
+        outpoint.n(),
+    );
+
+    // The output is retrievable and spendable before locking.
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, target_height, false),
+        Ok(Some(_))
+    );
+
+    // Lock the UTXO until ten blocks past the tip.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), height + 10)
+            .unwrap(),
+        1
+    );
+
+    // A second lock conflicts while the first is active.
+    assert_matches!(
+        st.wallet_mut().lock_outputs([output_ref].into_iter(), height + 20),
+        Err(LockError::LockFailure(r)) if r == output_ref
+    );
+
+    // The locked output is excluded from single-output retrieval unless `include_locked`.
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, target_height, false),
+        Ok(None)
+    );
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, target_height, true),
+        Ok(Some(_))
+    );
+
+    // ... and from the spendable-outputs listing unless `include_locked`.
+    assert_matches!(
+        st.wallet()
+            .get_spendable_transparent_outputs(
+                taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                false,
+            )
+            .as_deref(),
+        Ok(&[])
+    );
+    assert_matches!(
+        st.wallet()
+            .get_spendable_transparent_outputs(
+                taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                true,
+            )
+            .as_deref(),
+        Ok([_])
+    );
+
+    // The per-address balances report the value as locked, not spendable; the total is
+    // unaffected by lock state.
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    let (_, bal) = balances
+        .get(taddr)
+        .expect("the address has a balance entry");
+    assert_eq!(bal.locked_value(), value);
+    assert_eq!(bal.spendable_value(), Zatoshis::ZERO);
+    assert_eq!(bal.total(), value);
+
+    // The locked-outputs listing includes the transparent lock.
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![output_ref]
+    );
+
+    // Advancing the chain tip to the expiry height restores spendability with no unlock call.
+    st.wallet_mut().update_chain_tip(height + 10).unwrap();
+    let expired_target = TargetHeight::from(height + 11);
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, expired_target, false),
+        Ok(Some(_))
+    );
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .unwrap();
+    let (_, bal) = balances
+        .get(taddr)
+        .expect("the address has a balance entry");
+    assert_eq!(bal.spendable_value(), value);
+    assert_eq!(bal.locked_value(), Zatoshis::ZERO);
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    // The expired lock is replaceable without an explicit unlock, and unlocking then reports
+    // the output as found.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs([output_ref].into_iter(), height + 30)
+            .unwrap(),
+        1
+    );
+    assert!(st.wallet_mut().unlock_output(&output_ref).unwrap());
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .unwrap();
+    let (_, bal) = balances
+        .get(taddr)
+        .expect("the address has a balance entry");
+    assert_eq!(bal.spendable_value(), value);
 }
 
 pub fn transparent_balance_across_shielding<DSF>(dsf: DSF, cache: impl TestCache)
