@@ -332,6 +332,115 @@ mod tests {
         assert_eq!(p.change(), Some(zat(below)));
     }
 
+    /// The largest reserved preparation fee the single-quantum tests sample. Kept below the smallest
+    /// gap between adjacent denominations (`RESIDUAL_MIGRATION_MIN`, the 0.01 -> 0.02 ZEC step) so
+    /// that `quantum + fee` never rounds up to the next `{1, 2, 5} * 10^k` denomination: the plan
+    /// must then pick exactly the quantum. Realistic ZIP-317 preparation fees are far smaller (a
+    /// handful of marginal fees).
+    const MAX_SINGLE_QUANTUM_PREP_FEE_ZATOSHI: u64 = COIN / 200; // 0.005 ZEC, half the minimum denom
+
+    /// Every `{1, 2, 5} * 10^k` denomination (a "quantum") within the valid range
+    /// `[RESIDUAL_MIGRATION_MIN, MIGRATION_MAX_DENOMINATION_ZEC]`, in zatoshi. These are exactly the
+    /// crossing values the strategy can emit, so a balance of one of them plus its fees is the
+    /// smallest input that migrates that denomination as a single note.
+    fn all_quanta() -> Vec<u64> {
+        let min = u64::from(RESIDUAL_MIGRATION_MIN);
+        let cap = MIGRATION_MAX_DENOMINATION_ZEC * COIN;
+        let mut quanta = Vec::new();
+        let mut pow = 1u64;
+        while pow <= cap {
+            for m in [1u64, 2, 5] {
+                let q = m * pow;
+                if (min..=cap).contains(&q) {
+                    quanta.push(q);
+                }
+            }
+            match pow.checked_mul(10) {
+                Some(p) => pow = p,
+                None => break,
+            }
+        }
+        quanta
+    }
+
+    /// A single `{1, 2, 5} * 10^k` denomination drawn from [`all_quanta`].
+    fn arb_quantum() -> impl Strategy<Value = u64> {
+        prop::sample::select(all_quanta())
+    }
+
+    /// A balance of exactly one `quantum` plus its fees (the ZIP-317 transfer buffer that funds the
+    /// crossing note, and one reserved preparation-transaction fee) is the smallest input that
+    /// migrates that denomination: the plan is a single crossing note of exactly `quantum`, reserves
+    /// exactly one preparation fee, and leaves no change.
+    fn assert_one_quantum_plus_fees(quantum: u64, prep_fee: u64) {
+        let buffer = zip317_buffer();
+        let balance = quantum + buffer + prep_fee;
+        let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+        let p = s.plan(zat(balance), zat(prep_fee), &prep_tx_count_stub, &mut rng);
+
+        assert_eq!(
+            crossings_u64(&p),
+            vec![quantum],
+            "quantum {quantum}, prep fee {prep_fee}",
+        );
+        assert_eq!(
+            p.migration_outputs()
+                .iter()
+                .map(|&v| u64::from(v))
+                .collect::<Vec<u64>>(),
+            vec![quantum + buffer],
+            "quantum {quantum}, prep fee {prep_fee}",
+        );
+        assert_eq!(
+            u64::from(p.total_migratable()),
+            quantum,
+            "quantum {quantum}, prep fee {prep_fee}",
+        );
+        // One prepared note is one padded preparation transaction, so exactly one fee is reserved.
+        assert_eq!(
+            u64::from(p.prep_fees()),
+            prep_fee,
+            "quantum {quantum}, prep fee {prep_fee}",
+        );
+        assert_eq!(p.change(), None, "quantum {quantum}, prep fee {prep_fee}");
+    }
+
+    /// A balance of exactly one quantum plus fees migrates that quantum as a single note, across a
+    /// few example denominations spanning the `{1, 2, 5} * 10^k` series from the 0.01 ZEC minimum to
+    /// the 10,000 ZEC cap.
+    #[test]
+    fn single_quantum_plus_fees_migrates_exactly_one_note() {
+        // A realistic reserved preparation fee: the ZIP-317 marginal fee for a few actions.
+        let prep_fee = 3 * MARGINAL_FEE.into_u64();
+        let examples = [
+            u64::from(RESIDUAL_MIGRATION_MIN), // 0.01 ZEC, the minimum denomination
+            COIN / 50,                         // 0.02 ZEC
+            COIN / 20,                         // 0.05 ZEC
+            COIN / 10,                         // 0.1 ZEC
+            COIN,                              // 1 ZEC
+            2 * COIN,                          // 2 ZEC
+            5 * COIN,                          // 5 ZEC
+            100 * COIN,                        // 100 ZEC
+            MIGRATION_MAX_DENOMINATION_ZEC * COIN, // 10,000 ZEC, the cap
+        ];
+        for quantum in examples {
+            assert_one_quantum_plus_fees(quantum, prep_fee);
+        }
+    }
+
+    proptest! {
+        /// For any valid `{1, 2, 5} * 10^k` quantum and any realistic reserved preparation fee, a
+        /// balance of exactly that quantum plus its fees migrates it as a single note with no change.
+        #[test]
+        fn single_quantum_plus_fees_is_one_note(
+            quantum in arb_quantum(),
+            prep_fee in 0u64..=MAX_SINGLE_QUANTUM_PREP_FEE_ZATOSHI,
+        ) {
+            assert_one_quantum_plus_fees(quantum, prep_fee);
+        }
+    }
+
     /// The ZIP 318 worked examples: canonical `{1, 2, 5} * 10^k` quantization.
     #[test]
     fn matches_the_zip_worked_examples() {
