@@ -1171,7 +1171,7 @@ mod lock_predicate_tests {
     /// The balance-side model: an output is counted as locked value while its lock expiry
     /// height has not been passed as of the target height.
     fn model_locked(lock_expiry_height: Option<u32>, target_height: u32) -> bool {
-        lock_expiry_height.map_or(false, |h| h >= target_height)
+        lock_expiry_height.is_some_and(|h| h >= target_height)
     }
 
     /// A height strategy biased toward the boundary around the given height, where the
@@ -1228,7 +1228,7 @@ mod lock_predicate_tests {
         ) {
             let expected = match lock {
                 None => true,
-                Some(h) => tip.map_or(false, |tip| h <= tip),
+                Some(h) => tip.is_some_and(|tip| h <= tip),
             };
             prop_assert_eq!(sql_lockable(lock, tip), expected);
         }
