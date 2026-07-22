@@ -471,7 +471,7 @@ fn scenarios() -> Vec<Scenario> {
     // 0.02 ZEC dust notes.
     let dust = zats(COIN / 50);
     let dust_heavy: Vec<Zatoshis> = std::iter::once(zats(COIN))
-        .chain(std::iter::repeat(dust).take(12))
+        .chain(std::iter::repeat_n(dust, 12))
         .collect();
     // The migrated total is the balance less the reserved transfer buffers and preparation fees, so
     // it is a multiple of the 0.01-ZEC minimum denomination; expressed here in hundredths of a ZEC.
