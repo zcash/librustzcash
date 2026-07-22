@@ -159,6 +159,26 @@ pub(crate) fn output_unlocked_condition(tbl: &str) -> String {
     )
 }
 
+/// Generates the SQL condition under which an output's lock may be (re)acquired.
+///
+/// A lock may be taken when no lock exists (`lock_expiry_height IS NULL`) or when the existing
+/// lock has expired as of the chain tip (`lock_expiry_height <= :chain_tip`). Because balance and
+/// selection evaluate lock state against `target_height = chain_tip + 1`, "expired as of the
+/// chain tip" (`h <= chain_tip`) is exactly "not locked for selection" (`h < target_height`):
+/// a lock can never be stolen while the output is still excluded from selection.
+///
+/// When the chain tip is unknown, `:chain_tip` binds to SQL NULL and the comparison evaluates to
+/// NULL (falsy), so only outputs with no existing lock can be locked; an existing lock cannot be
+/// judged expired without a height to compare against.
+///
+/// # Usage requirements
+/// - This condition uses the bare `lock_expiry_height` column name, so it must be used in a
+///   single-table statement (such as the `UPDATE`s in `lock_outputs`).
+/// - The parent must provide `:chain_tip` as a named argument (possibly NULL).
+pub(crate) fn output_lockable_condition() -> &'static str {
+    "lock_expiry_height IS NULL OR lock_expiry_height <= :chain_tip"
+}
+
 fn unscanned_tip_exists(
     conn: &Connection,
     anchor_height: BlockHeight,
@@ -1076,5 +1096,156 @@ mod tests {
         .unwrap();
 
         assert_eq!(unspent_note_meta.len(), 1);
+    }
+}
+
+/// Property tests for the lock-state SQL predicates.
+///
+/// These pin the semantics of `lock_expiry_height` against executable models, evaluating the
+/// actual SQL fragments in SQLite (including their NULL behavior) rather than a Rust
+/// re-implementation of them:
+///
+/// - An output is LOCKED for balance purposes while `lock_expiry_height >= target_height`.
+/// - An output is SELECTABLE when it has no lock or `lock_expiry_height < target_height`;
+///   once the lock expiry height is passed, an expired lock is indistinguishable from no
+///   lock for selection and balance, even though the stale column value remains until it is
+///   replaced or cleared.
+/// - A lock may be (re)acquired only when no lock exists or the existing lock has expired as
+///   of the chain tip (`lock_expiry_height <= chain_tip`); with an unknown chain tip only
+///   unlocked outputs may be locked.
+/// - No lock stealing: whenever a lock is replaceable, the output is already selectable at
+///   the next target height, so replacing an expired lock never removes protection from a
+///   still-protected output.
+#[cfg(test)]
+mod lock_predicate_tests {
+    use proptest::prelude::*;
+    use rusqlite::{Connection, named_params};
+
+    use super::{output_lockable_condition, output_unlocked_condition};
+
+    fn lock_state_db(lock_expiry_height: Option<u32>) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (lock_expiry_height INTEGER)")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO t (lock_expiry_height) VALUES (:h)",
+            named_params![":h": lock_expiry_height],
+        )
+        .unwrap();
+        conn
+    }
+
+    /// Evaluates `output_unlocked_condition` in SQLite. A NULL result is falsy, as it would
+    /// be in the enclosing `WHERE` clauses.
+    fn sql_unlocked(
+        lock_expiry_height: Option<u32>,
+        target_height: u32,
+        include_locked: bool,
+    ) -> bool {
+        let conn = lock_state_db(lock_expiry_height);
+        conn.query_row(
+            &format!("SELECT ({}) FROM t", output_unlocked_condition("t")),
+            named_params![
+                ":target_height": target_height,
+                ":include_locked": include_locked,
+            ],
+            |row| row.get::<_, Option<bool>>(0),
+        )
+        .unwrap()
+        .unwrap_or(false)
+    }
+
+    /// Evaluates `output_lockable_condition` in SQLite. A NULL result is falsy, as it would
+    /// be in the `UPDATE ... WHERE` clause of `lock_outputs`.
+    fn sql_lockable(lock_expiry_height: Option<u32>, chain_tip: Option<u32>) -> bool {
+        let conn = lock_state_db(lock_expiry_height);
+        conn.query_row(
+            &format!("SELECT ({}) FROM t", output_lockable_condition()),
+            named_params![":chain_tip": chain_tip],
+            |row| row.get::<_, Option<bool>>(0),
+        )
+        .unwrap()
+        .unwrap_or(false)
+    }
+
+    /// The balance-side model: an output is counted as locked value while its lock expiry
+    /// height has not been passed as of the target height.
+    fn model_locked(lock_expiry_height: Option<u32>, target_height: u32) -> bool {
+        lock_expiry_height.map_or(false, |h| h >= target_height)
+    }
+
+    /// A height strategy biased toward the boundary around the given height, where the
+    /// interesting semantics (expiry exactly at the target, one below, one above) live.
+    fn arb_height_near(height: u32) -> impl Strategy<Value = u32> {
+        prop_oneof![
+            3 => height.saturating_sub(3)..=height.saturating_add(3),
+            1 => any::<u32>(),
+        ]
+    }
+
+    fn arb_lock_expiry(target_height: u32) -> impl Strategy<Value = Option<u32>> {
+        prop_oneof![
+            1 => Just(None),
+            4 => arb_height_near(target_height).prop_map(Some),
+        ]
+    }
+
+    proptest! {
+        /// `include_locked: true` disables lock filtering entirely.
+        #[test]
+        fn include_locked_ignores_lock_state(
+            target in any::<u32>(),
+            lock in prop::option::of(any::<u32>()),
+        ) {
+            prop_assert!(sql_unlocked(lock, target, true));
+        }
+
+        /// The selection predicate is the exact complement of the locked-balance predicate:
+        /// an output is never both selectable and counted as locked value, and never
+        /// neither. In particular, once the target height passes the lock expiry height the
+        /// output is selectable again with no unlock call, while the stale column value is
+        /// ignored.
+        #[test]
+        fn selection_is_complement_of_locked_balance(
+            (target, lock) in any::<u32>().prop_flat_map(|t| (Just(t), arb_lock_expiry(t))),
+        ) {
+            let selectable = sql_unlocked(lock, target, false);
+            let locked = model_locked(lock, target);
+            prop_assert!(
+                selectable ^ locked,
+                "selectable = {selectable}, locked = {locked} for lock {lock:?}, target {target}"
+            );
+        }
+
+        /// The lock-acquisition predicate matches its model: a lock slot is free when no
+        /// lock exists or the existing lock has expired as of the chain tip; when the chain
+        /// tip is unknown an existing lock can never be judged expired.
+        #[test]
+        fn lockable_matches_model(
+            (tip, lock) in prop::option::of(any::<u32>()).prop_flat_map(|tip| {
+                (Just(tip), arb_lock_expiry(tip.unwrap_or(u32::MAX / 2)))
+            }),
+        ) {
+            let expected = match lock {
+                None => true,
+                Some(h) => tip.map_or(false, |tip| h <= tip),
+            };
+            prop_assert_eq!(sql_lockable(lock, tip), expected);
+        }
+
+        /// No lock stealing: whenever an existing lock may be replaced (as of chain tip
+        /// `tip`), the output is already selectable at the corresponding target height
+        /// `tip + 1`. Acquiring a lock therefore never displaces a lock that still protects
+        /// its output.
+        #[test]
+        fn lockable_implies_selectable(
+            (tip, lock) in (0..u32::MAX).prop_flat_map(|tip| {
+                (Just(tip), arb_lock_expiry(tip))
+            }),
+        ) {
+            if sql_lockable(lock, Some(tip)) {
+                prop_assert!(sql_unlocked(lock, tip + 1, false));
+            }
+        }
     }
 }

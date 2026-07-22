@@ -5425,69 +5425,24 @@ pub(crate) fn lock_outputs(
 
     let mut rows_updated = 0;
     for output in outputs {
-        let updated = match output.pool() {
-            PoolType::Shielded(ShieldedPool::Sapling) => conn.execute(
-                "UPDATE sapling_received_notes SET lock_expiry_height = :expiry_height
-                WHERE output_index = :idx
-                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
-                AND (
-                    lock_expiry_height IS NULL
-                    OR lock_expiry_height <= :chain_tip
-                )",
+        let (table, index_col) = received_outputs_table(output.pool());
+        let updated = conn
+            .execute(
+                &format!(
+                    "UPDATE {table} SET lock_expiry_height = :expiry_height
+                    WHERE {index_col} = :idx
+                    AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
+                    AND ({})",
+                    common::output_lockable_condition(),
+                ),
                 named_params![
                     ":expiry_height": u32::from(lock_expiry_height),
                     ":idx": output.output_index(),
                     ":txid": output.txid().as_ref(),
                     ":chain_tip": chain_tip
                 ],
-            ),
-            PoolType::Shielded(ShieldedPool::Orchard) => conn.execute(
-                "UPDATE orchard_received_notes SET lock_expiry_height = :expiry_height
-                WHERE action_index = :idx
-                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
-                AND (
-                    lock_expiry_height IS NULL
-                    OR lock_expiry_height <= :chain_tip
-                )",
-                named_params![
-                    ":expiry_height": u32::from(lock_expiry_height),
-                    ":idx": output.output_index(),
-                    ":txid": output.txid().as_ref(),
-                    ":chain_tip": chain_tip
-                ],
-            ),
-            PoolType::Shielded(ShieldedPool::Ironwood) => conn.execute(
-                "UPDATE ironwood_received_notes SET lock_expiry_height = :expiry_height
-                WHERE action_index = :idx
-                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
-                AND (
-                    lock_expiry_height IS NULL
-                    OR lock_expiry_height <= :chain_tip
-                )",
-                named_params![
-                    ":expiry_height": u32::from(lock_expiry_height),
-                    ":idx": output.output_index(),
-                    ":txid": output.txid().as_ref(),
-                    ":chain_tip": chain_tip
-                ],
-            ),
-            PoolType::Transparent => conn.execute(
-                "UPDATE transparent_received_outputs SET lock_expiry_height = :expiry_height
-                WHERE output_index = :idx
-                AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
-                AND (
-                    lock_expiry_height IS NULL
-                    OR lock_expiry_height <= :chain_tip
-                )",
-                named_params![
-                    ":expiry_height": u32::from(lock_expiry_height),
-                    ":idx": output.output_index(),
-                    ":txid": output.txid().as_ref(),
-                    ":chain_tip": chain_tip
-                ],
-            ),
-        }
-        .map_err(LockError::Storage)?;
+            )
+            .map_err(LockError::Storage)?;
 
         if updated == 0 {
             return Err(LockError::LockFailure(output));
@@ -5499,48 +5454,32 @@ pub(crate) fn lock_outputs(
     Ok(rows_updated)
 }
 
+/// Returns the received notes/outputs table and its output-index column for the given pool.
+fn received_outputs_table(pool: PoolType) -> (&'static str, &'static str) {
+    match pool {
+        PoolType::Shielded(ShieldedPool::Sapling) => ("sapling_received_notes", "output_index"),
+        PoolType::Shielded(ShieldedPool::Orchard) => ("orchard_received_notes", "action_index"),
+        PoolType::Shielded(ShieldedPool::Ironwood) => ("ironwood_received_notes", "action_index"),
+        PoolType::Transparent => ("transparent_received_outputs", "output_index"),
+    }
+}
+
 pub(crate) fn unlock_output(
     conn: &rusqlite::Transaction,
     output: &OutputRef,
 ) -> Result<bool, SqliteClientError> {
-    let rows_updated = match output.pool() {
-        PoolType::Shielded(ShieldedPool::Sapling) => conn.execute(
-            "UPDATE sapling_received_notes SET lock_expiry_height = NULL
-             WHERE output_index = :idx
-               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
-            named_params![
-                ":idx": output.output_index(),
-                ":txid": output.txid().as_ref(),
-            ],
-        )?,
-        PoolType::Shielded(ShieldedPool::Orchard) => conn.execute(
-            "UPDATE orchard_received_notes SET lock_expiry_height = NULL
-             WHERE action_index = :idx
-               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
-            named_params![
-                ":idx": output.output_index(),
-                ":txid": output.txid().as_ref(),
-            ],
-        )?,
-        PoolType::Shielded(ShieldedPool::Ironwood) => conn.execute(
-            "UPDATE ironwood_received_notes SET lock_expiry_height = NULL
-             WHERE action_index = :idx
-               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
-            named_params![
-                ":idx": output.output_index(),
-                ":txid": output.txid().as_ref(),
-            ],
-        )?,
-        PoolType::Transparent => conn.execute(
-            "UPDATE transparent_received_outputs SET lock_expiry_height = NULL
-             WHERE output_index = :idx
-               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)",
-            named_params![
-                ":idx": output.output_index(),
-                ":txid": output.txid().as_ref(),
-            ],
-        )?,
-    };
+    let (table, index_col) = received_outputs_table(output.pool());
+    let rows_updated = conn.execute(
+        &format!(
+            "UPDATE {table} SET lock_expiry_height = NULL
+             WHERE {index_col} = :idx
+               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)"
+        ),
+        named_params![
+            ":idx": output.output_index(),
+            ":txid": output.txid().as_ref(),
+        ],
+    )?;
     Ok(rows_updated > 0)
 }
 
