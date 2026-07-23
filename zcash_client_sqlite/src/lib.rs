@@ -856,13 +856,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         &self,
         outpoint: &OutPoint,
         target_height: TargetHeight,
-        lock_filter: LockFilter<'_>,
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
             Some(target_height),
-            lock_filter,
         )
     }
 
@@ -1479,13 +1477,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         Option<WalletTransparentOutput<<Self as InputSource>::AccountId>>,
         <Self as InputSource>::Error,
     > {
-        // The test accessor inspects wallet contents irrespective of lock state.
-        let lock_filter = LockFilter::Unfiltered;
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
             target_height,
-            lock_filter,
         )
     }
 
@@ -2388,14 +2383,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         outpoint: &OutPoint,
         target_height: Option<TargetHeight>,
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
-        // The low-level accessor exposes wallet contents irrespective of lock
-        // state; locks only constrain input selection for new proposals.
-        let lock_filter = LockFilter::Unfiltered;
         wallet::transparent::get_wallet_transparent_output(
             self.conn.borrow(),
             outpoint,
             target_height,
-            lock_filter,
         )
     }
 

@@ -1272,20 +1272,17 @@ pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
 }
 /// Get information about a transparent output controlled by the wallet.
 ///
+/// This is a direct lookup by `outpoint`, not a selection query, so it does not filter on lock
+/// state: a locked output that is otherwise unspent and unexpired is still returned.
+///
 /// # Parameters
 /// - `outpoint`: The identifier for the output to be retrieved.
 /// - `target_height`: The target height of a transaction under construction that will spend the
 ///   returned output. If this is `None`, no spendability checks are performed.
-/// - `lock_filter`: Locked outputs are selected according to this filter (see [`LockFilter`]; a
-///   [`LockFilter::Policy`] carrying the default `Exclude` treats an output whose
-///   `lock_expiry_height` has not passed as of `target_height` as unspendable and excludes it).
-///   Like the other spendability checks, the lock check is skipped entirely when `target_height`
-///   is `None`.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
     target_height: Option<TargetHeight>,
-    lock_filter: LockFilter<'_>,
 ) -> Result<Option<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
@@ -1311,27 +1308,23 @@ pub(crate) fn get_wallet_transparent_output(
                  ({}) -- the transaction is unexpired
                  AND u.id NOT IN ({}) -- and the output is unspent
                  AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-                 AND ({}) -- the output is eligible under the lock filter
              )
          )",
         tx_unexpired_condition("t"),
         spent_utxos_clause(),
         excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
-        output_eligible_condition(lock_filter, "u"),
     ))?;
 
     let txid_bytes = outpoint.hash();
     let output_index = outpoint.n();
     let target_height_arg = target_height.map(u32::from);
     let allow_unspendable = target_height.is_none();
-    let overridable_owners = overridable_owners_rarray(lock_filter);
-    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+    let sql_params: Vec<(&str, &dyn ToSql)> = vec![
         (":txid", &txid_bytes),
         (":output_index", &output_index),
         (":target_height", &target_height_arg),
         (":allow_unspendable", &allow_unspendable),
     ];
-    push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
 
     let result: Result<Option<WalletTransparentOutput<_>>, SqliteClientError> = stmt_select_utxo
         .query_and_then(&sql_params[..], |row| {

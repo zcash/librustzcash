@@ -167,11 +167,8 @@ where
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(
-            utxo.outpoint(),
-            target_height,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
-        ),
+        st.wallet()
+            .get_unspent_transparent_output(utxo.outpoint(), target_height),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
@@ -208,11 +205,8 @@ where
 
     // We can still look up the specific output, and it has the expected height.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(
-            utxo2.outpoint(),
-            target_height,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
-        ),
+        st.wallet()
+            .get_unspent_transparent_output(utxo2.outpoint(), target_height),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
     );
@@ -237,10 +231,11 @@ where
 
 /// Exercises note locking for transparent outputs.
 ///
-/// A locked UTXO is excluded from single-output retrieval and from spendable-output listing
-/// unless the query passes `LockFilter::Unfiltered`, is reported as locked (not spendable) value
-/// in the per-address balances, conflicts with a second lock, and returns to spendability when
-/// the chain tip passes the lock expiry height, with no unlock call.
+/// A locked UTXO is still returned by a by-outpoint lookup (which is not a selection query and
+/// so does not filter by lock state), but is excluded from spendable-output listing unless the
+/// query passes `LockFilter::Unfiltered`, is reported as locked (not spendable) value in the
+/// per-address balances, conflicts with a second lock, and returns to spendability when the
+/// chain tip passes the lock expiry height, with no unlock call.
 pub fn transparent_note_locking<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
@@ -289,11 +284,8 @@ where
 
     // The output is retrievable and spendable before locking.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(
-            &outpoint,
-            target_height,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
-        ),
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, target_height),
         Ok(Some(_))
     );
 
@@ -313,21 +305,12 @@ where
         Err(LockError::LockFailure(r)) if r == output_ref
     );
 
-    // The locked output is excluded from single-output retrieval unless the query is unfiltered.
+    // A by-outpoint lookup of a known output is not a selection query, so it does not filter by
+    // lock state: the output is still returned even though it is locked. Lock exclusion is
+    // verified via `get_spendable_transparent_outputs`, below.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(
-            &outpoint,
-            target_height,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
-        ),
-        Ok(None)
-    );
-    assert_matches!(
-        st.wallet().get_unspent_transparent_output(
-            &outpoint,
-            target_height,
-            LockFilter::Unfiltered
-        ),
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, target_height),
         Ok(Some(_))
     );
 
@@ -379,14 +362,6 @@ where
     // Advancing the chain tip to the expiry height restores spendability with no unlock call.
     st.wallet_mut().update_chain_tip(height + 10).unwrap();
     let expired_target = TargetHeight::from(height + 11);
-    assert_matches!(
-        st.wallet().get_unspent_transparent_output(
-            &outpoint,
-            expired_target,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
-        ),
-        Ok(Some(_))
-    );
     let balances = st
         .wallet()
         .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)

@@ -1763,14 +1763,11 @@ pub trait InputSource {
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or would not be
     /// spendable in a transaction mined in the block at the target height.
-    /// Locked outputs are selected according to `lock_filter` (see [`LockFilter`]; a
-    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none).
     #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
         _outpoint: &OutPoint,
         _target_height: TargetHeight,
-        _lock_filter: LockFilter<'_>,
     ) -> Result<Option<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_output must be overridden for wallets to use the `transparent-inputs` feature"

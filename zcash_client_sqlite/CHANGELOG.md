@@ -50,10 +50,6 @@ workspace.
   locked value into `Balance::locked_value`: previously a mature coinbase UTXO
   locked by an in-flight shielding proposal was still reported as spendable,
   even though note selection (correctly) refused to select it.
-- The `InputSource::get_unspent_transparent_output` implementation now honors
-  its `lock_filter` parameter; previously the lock state was ignored and
-  locked transparent outputs were returned regardless, diverging from the
-  trait contract and from the shielded `get_spendable_note` behavior.
 - The `zewif` importer no longer marks transparent addresses that have no
   recorded exposure height (`zewif::Address::exposed_at_height() == None`, e.g.
   zcashd keypool reserves) as exposed unconditionally. Previously every such

@@ -109,7 +109,6 @@ workspace.
   - `select_spendable_notes`
   - `select_unspent_notes`
   - `get_account_metadata`
-  - `get_unspent_transparent_output` (under `transparent-inputs`)
   - `get_spendable_transparent_outputs` (under `transparent-inputs`)
   - `get_spendable_transparent_outputs_for_addresses` (under `transparent-inputs`)
   - `select_spendable_transparent_outputs` (under `transparent-inputs`)
