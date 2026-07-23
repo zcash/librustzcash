@@ -76,6 +76,7 @@ pub(crate) fn test_rng() -> ChaChaRng {
 #[delegate(InputSource, target = "wallet_db")]
 #[delegate(WalletRead, target = "wallet_db")]
 #[delegate(WalletTest, target = "wallet_db")]
+#[delegate(OutputLockStore, target = "wallet_db")]
 #[delegate(WalletWrite, target = "wallet_db")]
 #[delegate(WalletCommitmentTrees, target = "wallet_db")]
 pub struct TestDb {

@@ -2,9 +2,10 @@
 //!
 //! This module is the single home for the wallet's advisory output-locking
 //! vocabulary: the identity of a lock holder ([`LockOwner`]), the error surface
-//! of lock acquisition ([`LockError`]), the request through which
-//! proposal-creation functions acquire locks ([`LockRequest`] and
-//! [`unlock_proposal_inputs`]), and the policy types through which input
+//! of lock acquisition ([`LockError`]), the storage contract through which
+//! wallet backends persist lock state ([`OutputLockStore`]), the request
+//! through which proposal-creation functions acquire locks ([`LockRequest`]
+//! and [`unlock_proposal_inputs`]), and the policy types through which input
 //! selection interacts with lock state ([`LockedInputPolicy`] and
 //! [`LockFilter`]).
 //!
@@ -24,7 +25,7 @@
 //!   its lock has expired (`lock_expiry_height < target_height`), or when its
 //!   `lock_owner` is one of the owners the policy admits. An output locked by
 //!   any other owner is never selected.
-//! * **Acquisition**: a lock may be acquired ([`WalletWrite::lock_outputs`])
+//! * **Acquisition**: a lock may be acquired ([`OutputLockStore::lock_outputs`])
 //!   when the output is unlocked, when its existing lock has expired as of the
 //!   chain tip, or when the existing lock is held by the *same* owner (an
 //!   idempotent re-acquire/extend, so a flow that crashed after locking may
@@ -37,8 +38,8 @@
 //!   override *spends through* a lock during selection; it never releases the
 //!   lock.
 //! * **Release**: there are exactly four release paths: owner-scoped unlock
-//!   ([`WalletWrite::unlock_output`], [`unlock_proposal_inputs`]),
-//!   owner-agnostic clearing ([`WalletWrite::clear_locked_outputs`]),
+//!   ([`OutputLockStore::unlock_output`], [`unlock_proposal_inputs`]),
+//!   owner-agnostic clearing ([`OutputLockStore::clear_locked_outputs`]),
 //!   unlock-on-store (implementations of
 //!   [`WalletWrite::store_transactions_to_be_sent`] unlock outputs recorded as
 //!   spent, the spend records having taken over double-selection protection),
@@ -60,7 +61,7 @@
 //!   ([`propose_transfer`], [`propose_standard_transfer_to_address`],
 //!   [`propose_send_max_transfer`], [`propose_shielding`], and
 //!   [`propose_shielding_coinbase`]) accept an optional [`LockRequest`] and
-//!   lock every selected input via [`WalletWrite::lock_outputs`].
+//!   lock every selected input via [`OutputLockStore::lock_outputs`].
 //! * **Selection**: the seven `zcash_client_sqlite` leaf queries that select
 //!   spendable outputs (`get_spendable_note`, `select_unspent_notes`,
 //!   `select_spendable_notes_matching_value`, and `unspent_notes_meta` in
@@ -82,9 +83,9 @@
 //!   migration's in-flight locks so callers can construct owner-scoped
 //!   policies; Zallet consumes the locking API for its transaction flows.
 //!
-//! [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
-//! [`WalletWrite::unlock_output`]: crate::data_api::WalletWrite::unlock_output
-//! [`WalletWrite::clear_locked_outputs`]: crate::data_api::WalletWrite::clear_locked_outputs
+//! [`OutputLockStore::lock_outputs`]: crate::data_api::OutputLockStore::lock_outputs
+//! [`OutputLockStore::unlock_output`]: crate::data_api::OutputLockStore::unlock_output
+//! [`OutputLockStore::clear_locked_outputs`]: crate::data_api::OutputLockStore::clear_locked_outputs
 //! [`WalletWrite::store_transactions_to_be_sent`]: crate::data_api::WalletWrite::store_transactions_to_be_sent
 //! [`propose_transfer`]: crate::data_api::wallet::propose_transfer
 //! [`propose_standard_transfer_to_address`]: crate::data_api::wallet::propose_standard_transfer_to_address
@@ -94,22 +95,26 @@
 
 use std::collections::BTreeSet;
 use std::error;
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
+use std::hash::Hash;
+
+#[cfg(feature = "test-dependencies")]
+use ambassador::delegatable_trait;
 
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{PoolType, consensus::BlockHeight};
 
 use crate::{
-    data_api::{WalletWrite, error::Error, wallet::input_selection::NonEmptyBTreeSet},
+    data_api::{WalletRead, WalletWrite, error::Error, wallet::input_selection::NonEmptyBTreeSet},
     proposal::{Proposal, ProposalError},
     wallet::OutputRef,
 };
 
 /// An opaque token identifying the holder of an output lock.
 ///
-/// A caller that locks outputs (directly via [`WalletWrite::lock_outputs`], or through a
+/// A caller that locks outputs (directly via [`OutputLockStore::lock_outputs`], or through a
 /// proposal-creation function's lock request) supplies an owner token and must retain it: the
-/// token is what authorizes releasing the locks ([`WalletWrite::unlock_output`],
+/// token is what authorizes releasing the locks ([`OutputLockStore::unlock_output`],
 /// [`unlock_proposal_inputs`]) and what makes re-locking idempotent (an owner may re-acquire or
 /// extend its own active lock, for example when retrying a flow after a crash, while a different
 /// owner's lock attempt fails until the lock expires).
@@ -118,8 +123,8 @@ use crate::{
 /// read it. It exists to prevent *accidental* cross-flow interference between concurrent
 /// in-process operations, not to protect against an adversary with database access.
 ///
-/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
-/// [`WalletWrite::unlock_output`]: crate::data_api::WalletWrite::unlock_output
+/// [`OutputLockStore::lock_outputs`]: crate::data_api::OutputLockStore::lock_outputs
+/// [`OutputLockStore::unlock_output`]: crate::data_api::OutputLockStore::unlock_output
 /// [`unlock_proposal_inputs`]: crate::data_api::wallet::unlock_proposal_inputs
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LockOwner([u8; 32]);
@@ -194,6 +199,102 @@ impl<S: error::Error + 'static> error::Error for LockError<S> {
             LockError::LockFailure(_) => None,
         }
     }
+}
+
+/// The subset of wallet-storage operations that manage output locks.
+///
+/// [`WalletWrite`] requires this trait with its [`Self::AccountId`] and [`Self::Error`] types
+/// tied to the corresponding [`WalletRead`] types, so every writable wallet backend is an
+/// `OutputLockStore`. The separate trait exists so that lock storage can be implemented,
+/// delegated, and reasoned about independently of the full wallet-mutation surface.
+///
+/// [`WalletRead`]: crate::data_api::WalletRead
+#[cfg_attr(feature = "test-dependencies", delegatable_trait)]
+pub trait OutputLockStore {
+    /// The type of errors produced by the lock store.
+    type Error: Debug;
+
+    /// The type of the account identifier.
+    type AccountId: Copy + Debug + Eq + Hash;
+
+    /// Locks the specified outputs on behalf of `owner` so that, by default, they are not
+    /// selected for spending at any height less than or equal to the given height.
+    ///
+    /// Locks are advisory. Input selection excludes locked outputs by default, but a caller may
+    /// deliberately draw on them by supplying an owner-scoped
+    /// [`LockedInputPolicy`](crate::data_api::wallet::input_selection::LockedInputPolicy) (via
+    /// [`SpendPolicy::with_locked_input_policy`](crate::data_api::wallet::input_selection::SpendPolicy::with_locked_input_policy)),
+    /// scoped to the lock owners it names; doing so spends through the lock during selection but
+    /// never releases it. A locked output can be released only via [`Self::unlock_output`] (by its
+    /// owner) or [`Self::clear_locked_outputs`].
+    ///
+    /// Returns the number of row updates performed on success (equal to the number of provided
+    /// references; a duplicated reference is counted per occurrence), or a [`LockError`] on
+    /// failure, wrapping either an error from the underlying storage backend or the first output
+    /// that could not be locked.
+    ///
+    /// A lock may be acquired when the output holds no lock, when its existing lock has expired
+    /// as of the chain tip, or when its existing lock is held by the *same* `owner`; in the
+    /// latter case the lock's expiry height is updated. Same-owner re-locking makes the
+    /// operation idempotent, so a caller that crashes between locking and persisting its
+    /// proposal can safely retry the flow under the same [`LockOwner`]. Acquisition fails only
+    /// when an unexpired lock is held by a different owner.
+    ///
+    /// Implementations of this method must either succeed completely, successfully locking each
+    /// provided output on success, or fail completely leaving all lock state unmodified if any
+    /// of the outputs is actively locked by a different owner.
+    ///
+    /// This is the mechanism by which overlapping proposals for the same account avoid selecting
+    /// the same inputs by default. Because note selection and locking cannot be performed as a
+    /// single atomic step above the storage layer, two callers may independently select an
+    /// overlapping set of outputs before either locks them (a time-of-check/time-of-use race); the
+    /// conflict is resolved here, at the storage layer, where the second caller's `lock_outputs`
+    /// fails with [`LockError::LockFailure`] naming the already-locked output. Callers that lock
+    /// via a proposal-creation function surface this as
+    /// [`ProposalError::InputsLocked`](crate::proposal::ProposalError::InputsLocked). The
+    /// losing caller has not partially locked anything and should treat the failure as "the
+    /// account is busy" and retry.
+    fn lock_outputs(
+        &mut self,
+        outputs: &[OutputRef],
+        owner: LockOwner,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>>;
+
+    /// Unlocks the specified output if it is locked by the given `owner`, making it once again
+    /// available for spending and balance computations.
+    ///
+    /// Returns `true` if a lock held by `owner` (whether or not it had already expired) was
+    /// removed from the output, and `false` otherwise: in particular, a lock held by a
+    /// different owner is left in place, so one flow cannot accidentally release another's
+    /// locks.
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error>;
+
+    /// Unlocks every currently-locked output belonging to the specified account, regardless of
+    /// lock expiry height.
+    ///
+    /// This is intended as a recovery mechanism for callers that have lost track of their
+    /// in-flight proposals or PCZTs (for example, because the application was terminated by the
+    /// operating system before the corresponding transactions could be built). By clearing all
+    /// locks for the account, the caller declares that it has no pending proposals holding those
+    /// outputs.
+    ///
+    /// # Warning
+    ///
+    /// This releases every lock for the account regardless of its owner, including locks held
+    /// by proposals that are still legitimately in flight; those proposals' inputs immediately
+    /// become selectable by new proposals, re-creating the conflict that locking exists to
+    /// prevent. Only call this when no in-flight proposal or PCZT for the account remains.
+    ///
+    /// Returns the number of outputs that were unlocked.
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error>;
+
+    /// Returns the set of currently locked outputs for the given account.
+    ///
+    /// Locked outputs are excluded from note selection, and are tallied separately in balance
+    /// computations.
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_locked_outputs(&self, account: Self::AccountId) -> Result<Vec<OutputRef>, Self::Error>;
 }
 
 /// Returns the [`OutputRef`] identifying each output that the given proposal consumes as an
@@ -277,7 +378,7 @@ pub(crate) fn lock_proposal_inputs<DbT, FeeRuleT, NoteRef, TE, SE, FE, CE>(
     proposal: &Proposal<FeeRuleT, NoteRef>,
     owner: LockOwner,
     lock_expiry_height: BlockHeight,
-) -> Result<(), Error<DbT::Error, TE, SE, FE, CE, NoteRef>>
+) -> Result<(), Error<<DbT as WalletRead>::Error, TE, SE, FE, CE, NoteRef>>
 where
     DbT: WalletWrite,
 {
@@ -301,7 +402,7 @@ pub fn unlock_proposal_inputs<DbT, FeeRuleT, NoteRef>(
     wallet_db: &mut DbT,
     proposal: &Proposal<FeeRuleT, NoteRef>,
     owner: LockOwner,
-) -> Result<(), DbT::Error>
+) -> Result<(), <DbT as WalletRead>::Error>
 where
     DbT: WalletWrite,
 {
