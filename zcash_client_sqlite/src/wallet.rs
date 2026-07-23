@@ -98,7 +98,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         wallet::{ConfirmationsPolicy, TargetHeight},
     },
-    wallet::{LockOwner, Note, NoteId, OutputRef, Recipient, WalletTx},
+    wallet::{Note, NoteId, Recipient, WalletTx},
 };
 use zcash_keys::{
     address::{Address, Receiver, UnifiedAddress},
@@ -128,7 +128,7 @@ use self::{
 use crate::{
     AccountRef, AccountUuid, AddressRef, PRUNING_DEPTH, SqlTransaction, TransferType, TxRef,
     WalletCommitmentTrees, WalletDb,
-    error::{LockError, SqliteClientError},
+    error::SqliteClientError,
     util::Clock,
     wallet::{
         commitment_tree::{SqliteShardStore, get_max_checkpointed_height},
@@ -160,6 +160,7 @@ pub(crate) mod common;
 mod db;
 pub(crate) mod encoding;
 pub mod init;
+pub(crate) mod locking;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
 pub(crate) mod sapling;
@@ -3522,7 +3523,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
 
     // Unlock any notes that were locked for this transaction, since the spend records
     // now prevent them from being selected by subsequent proposals.
-    unlock_spent_notes(conn, tx_ref)?;
+    locking::unlock_spent_notes(conn, tx_ref)?;
 
     for output in sent_tx.outputs() {
         insert_sent_output(conn, params, tx_ref, *sent_tx.funding_account(), output)?;
@@ -5613,210 +5614,6 @@ pub(crate) fn get_block_range(
         },
     )
     .map_err(SqliteClientError::from)
-}
-
-#[cfg(any(test, feature = "test-dependencies"))]
-pub(crate) fn get_locked_outputs(
-    conn: &rusqlite::Connection,
-    account: AccountUuid,
-) -> Result<Vec<OutputRef>, SqliteClientError> {
-    let chain_tip = chain_tip_height(conn)?
-        .map(u32::from)
-        .ok_or(SqliteClientError::ChainHeightUnknown)?;
-
-    let mut result = Vec::new();
-
-    // `lock_expiry_height > chain_tip` is `lock_expiry_height >= chain_tip + 1`, i.e. the
-    // locked-balance condition evaluated at the standard target height.
-    for pool in [
-        PoolType::SAPLING,
-        PoolType::ORCHARD,
-        PoolType::IRONWOOD,
-        PoolType::TRANSPARENT,
-    ] {
-        let (table, index_col) = received_outputs_table(pool);
-        let mut stmt = conn.prepare_cached(&format!(
-            "SELECT t.txid, rn.{index_col}
-             FROM {table} rn
-             JOIN transactions t ON t.id_tx = rn.transaction_id
-             JOIN accounts a ON a.id = rn.account_id
-             WHERE rn.lock_expiry_height > :chain_tip
-             AND a.uuid = :account_uuid"
-        ))?;
-        let rows = stmt.query_map(
-            named_params![
-                ":account_uuid": account.0,
-                ":chain_tip": chain_tip
-            ],
-            |row| {
-                let txid: [u8; 32] = row.get(0)?;
-                let output_index: u32 = row.get(1)?;
-                Ok(OutputRef::new(TxId::from_bytes(txid), pool, output_index))
-            },
-        )?;
-        for row in rows {
-            result.push(row?);
-        }
-    }
-
-    Ok(result)
-}
-
-pub(crate) fn lock_outputs(
-    conn: &rusqlite::Transaction,
-    outputs: &[OutputRef],
-    owner: LockOwner,
-    lock_expiry_height: BlockHeight,
-) -> Result<usize, LockError> {
-    // When the chain tip is unknown, `:chain_tip` binds to SQL NULL and the
-    // `lock_expiry_height <= :chain_tip` clause evaluates to NULL (falsy). In that case only
-    // outputs that are not already locked (`lock_expiry_height IS NULL`) or whose lock is
-    // already held by the requesting owner can be locked; an existing lock cannot be treated
-    // as expired because we have no height against which to judge expiry. This is the
-    // conservative choice: locking generally requires a synced wallet.
-    let chain_tip = chain_tip_height(conn)?.map(u32::from);
-
-    let mut rows_updated = 0;
-    for output in outputs {
-        let (table, index_col) = received_outputs_table(output.pool());
-        let updated = conn
-            .execute(
-                &format!(
-                    "UPDATE {table} SET
-                        lock_expiry_height = :expiry_height,
-                        lock_owner = :owner
-                    WHERE {index_col} = :idx
-                    AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
-                    AND ({})",
-                    common::output_lockable_condition(),
-                ),
-                named_params![
-                    ":expiry_height": u32::from(lock_expiry_height),
-                    ":owner": owner.as_bytes(),
-                    ":idx": output.output_index(),
-                    ":txid": output.txid().as_ref(),
-                    ":chain_tip": chain_tip
-                ],
-            )
-            .map_err(LockError::Storage)?;
-
-        if updated == 0 {
-            return Err(LockError::LockFailure(*output));
-        } else {
-            rows_updated += updated;
-        }
-    }
-
-    Ok(rows_updated)
-}
-
-/// Returns the received notes/outputs table and its output-index column for the given pool.
-fn received_outputs_table(pool: PoolType) -> (&'static str, &'static str) {
-    match pool {
-        PoolType::Shielded(ShieldedPool::Sapling) => ("sapling_received_notes", "output_index"),
-        PoolType::Shielded(ShieldedPool::Orchard) => ("orchard_received_notes", "action_index"),
-        PoolType::Shielded(ShieldedPool::Ironwood) => ("ironwood_received_notes", "action_index"),
-        PoolType::Transparent => ("transparent_received_outputs", "output_index"),
-    }
-}
-
-pub(crate) fn unlock_output(
-    conn: &rusqlite::Transaction,
-    output: &OutputRef,
-    owner: LockOwner,
-) -> Result<bool, SqliteClientError> {
-    let (table, index_col) = received_outputs_table(output.pool());
-    // Unlocking is scoped to the owner: a lock held by a different owner is left in place, so
-    // one flow cannot accidentally release another's locks. An expired lock held by the owner
-    // is still cleared (and reported as such), tidying the stale row.
-    let rows_updated = conn.execute(
-        &format!(
-            "UPDATE {table} SET lock_expiry_height = NULL, lock_owner = NULL
-             WHERE {index_col} = :idx
-               AND transaction_id = (SELECT id_tx FROM transactions WHERE txid = :txid)
-               AND lock_owner = :owner"
-        ),
-        named_params![
-            ":idx": output.output_index(),
-            ":txid": output.txid().as_ref(),
-            ":owner": owner.as_bytes(),
-        ],
-    )?;
-    Ok(rows_updated > 0)
-}
-
-/// Unlocks every currently-locked output belonging to the given account, across all pools,
-/// regardless of lock expiry height. Returns the total number of outputs unlocked.
-///
-/// This is the storage-layer implementation of [`WalletWrite::clear_locked_outputs`], and is
-/// intended as a recovery mechanism for callers that have lost track of their in-flight proposals.
-///
-/// [`WalletWrite::clear_locked_outputs`]: zcash_client_backend::data_api::WalletWrite::clear_locked_outputs
-pub(crate) fn clear_locked_outputs(
-    conn: &rusqlite::Transaction,
-    account: AccountUuid,
-) -> Result<usize, SqliteClientError> {
-    let mut rows_updated = 0;
-    for table in [
-        "sapling_received_notes",
-        "orchard_received_notes",
-        "ironwood_received_notes",
-        "transparent_received_outputs",
-    ] {
-        rows_updated += conn.execute(
-            &format!(
-                "UPDATE {table} SET lock_expiry_height = NULL, lock_owner = NULL
-                 WHERE lock_expiry_height IS NOT NULL
-                   AND account_id = (SELECT id FROM accounts WHERE uuid = :account_uuid)"
-            ),
-            named_params![":account_uuid": account.0],
-        )?;
-    }
-
-    Ok(rows_updated)
-}
-
-/// Unlocks all notes that have been recorded as spent by the given transaction.
-/// This is called after marking notes as spent in `store_transaction_to_be_sent`,
-/// since the spend records now prevent them from being selected by subsequent proposals.
-fn unlock_spent_notes(conn: &rusqlite::Connection, tx_ref: TxRef) -> Result<(), SqliteClientError> {
-    conn.execute(
-        "UPDATE sapling_received_notes SET lock_expiry_height = NULL, lock_owner = NULL
-         WHERE id IN (
-             SELECT sapling_received_note_id FROM sapling_received_note_spends
-             WHERE transaction_id = :tx_ref
-         )",
-        named_params![":tx_ref": tx_ref.0],
-    )?;
-
-    conn.execute(
-        "UPDATE orchard_received_notes SET lock_expiry_height = NULL, lock_owner = NULL
-         WHERE id IN (
-             SELECT orchard_received_note_id FROM orchard_received_note_spends
-             WHERE transaction_id = :tx_ref
-         )",
-        named_params![":tx_ref": tx_ref.0],
-    )?;
-
-    conn.execute(
-        "UPDATE ironwood_received_notes SET lock_expiry_height = NULL, lock_owner = NULL
-         WHERE id IN (
-             SELECT ironwood_received_note_id FROM ironwood_received_note_spends
-             WHERE transaction_id = :tx_ref
-         )",
-        named_params![":tx_ref": tx_ref.0],
-    )?;
-
-    conn.execute(
-        "UPDATE transparent_received_outputs SET lock_expiry_height = NULL, lock_owner = NULL
-         WHERE id IN (
-             SELECT transparent_received_output_id FROM transparent_received_output_spends
-             WHERE transaction_id = :tx_ref
-         )",
-        named_params![":tx_ref": tx_ref.0],
-    )?;
-
-    Ok(())
 }
 
 pub(crate) fn get_received_outputs(

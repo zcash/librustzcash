@@ -23,7 +23,12 @@ use crate::{
     AccountUuid, ReceivedNoteId, SAPLING_TABLES_PREFIX,
     error::SqliteClientError,
     wallet::{
-        get_anchor_height, pool_code,
+        get_anchor_height,
+        locking::{
+            locked_tier_order_key, output_eligible_condition, overridable_owners_rarray,
+            push_lock_params,
+        },
+        pool_code,
         scanning::{parse_priority_code, priority_code},
     },
 };
@@ -137,154 +142,6 @@ pub(crate) fn spent_notes_clause(table_prefix: &str) -> String {
         "#,
         tx_unexpired_condition("stx")
     )
-}
-
-/// Generates the SQL condition under which an output is eligible for selection, given the
-/// active [`LockFilter`].
-///
-/// An output is *locked for selection* when its `lock_expiry_height` is set and greater than or
-/// equal to the target height; equivalently, it becomes selectable again once the target height
-/// has advanced strictly beyond its `lock_expiry_height`. This matches the
-/// [`WalletWrite::lock_outputs`] contract, which prevents selection "at any height less than or
-/// equal to" the lock expiry height, and is the exact complement of the locked-balance condition
-/// (`lock_expiry_height >= target_height`) used in balance computation.
-///
-/// - [`LockFilter::Unfiltered`] admits every output: the fragment is the constant `1`, so neither
-///   `:target_height` nor `:overridable_owners` is referenced on account of the lock filter and
-///   neither must be bound for its sake.
-/// - [`LockFilter::Policy`] admits an output when it carries no lock, when its lock has expired as
-///   of `:target_height`, or when its `lock_owner` is one of the policy's overridable owners. For
-///   [`LockedInputPolicy::Exclude`] the overridable-owner set is empty, so the `IN rarray(...)`
-///   term is always false and only unlocked outputs are eligible; for the preference variants the
-///   set carries the owners whose locks may be drawn upon. An output locked by any other owner is
-///   never eligible.
-///
-/// # Usage requirements
-/// - `tbl` must be set to the SQL alias for the received notes/outputs table.
-/// - Under a [`LockFilter::Policy`] the parent must provide `:target_height` and must bind
-///   `:overridable_owners` to the rarray produced by [`overridable_owners_rarray`]. Under
-///   [`LockFilter::Unfiltered`] neither is referenced by this fragment, and (rusqlite rejecting an
-///   unused named parameter) `:overridable_owners` must not be bound for its sake.
-///
-/// [`WalletWrite::lock_outputs`]: zcash_client_backend::data_api::WalletWrite::lock_outputs
-/// [`LockedInputPolicy::Exclude`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::Exclude
-pub(crate) fn output_eligible_condition(lock_filter: LockFilter<'_>, tbl: &str) -> String {
-    match lock_filter {
-        LockFilter::Unfiltered => "1".to_string(),
-        LockFilter::Policy(_) => format!(
-            "{tbl}.lock_expiry_height IS NULL \
-             OR {tbl}.lock_expiry_height < :target_height \
-             OR {tbl}.lock_owner IN rarray(:overridable_owners)"
-        ),
-    }
-}
-
-/// Builds the `:overridable_owners` rarray for the given [`LockFilter`]: the byte strings of the
-/// lock owners whose locked outputs the filter's policy admits.
-///
-/// The set is empty under [`LockFilter::Unfiltered`] (which does not reference the parameter) and
-/// under [`LockedInputPolicy::Exclude`] (which admits no locked owner). The returned `Rc` must be
-/// kept alive and bound by reference for the duration of the query, following the same pattern as
-/// the `:exclude` rarray.
-///
-/// [`LockedInputPolicy::Exclude`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::Exclude
-pub(crate) fn overridable_owners_rarray(lock_filter: LockFilter<'_>) -> Rc<Vec<Value>> {
-    let owners = match lock_filter {
-        LockFilter::Unfiltered => Vec::new(),
-        LockFilter::Policy(policy) => policy
-            .overridable_owners()
-            .iter()
-            .map(|owner| Value::from(owner.as_bytes().to_vec()))
-            .collect(),
-    };
-    Rc::new(owners)
-}
-
-/// Appends the lock-filter-dependent named parameters that [`output_eligible_condition`]
-/// references to a selection query's parameter list.
-///
-/// This is the single source of truth pairing the eligibility SQL with its bindings: it binds
-/// `:overridable_owners` (to the `overridable_owners` rarray from [`overridable_owners_rarray`],
-/// which must outlive the query) exactly when the fragment references it, i.e. under a
-/// [`LockFilter::Policy`]. Because rusqlite rejects a provided-but-unreferenced named parameter,
-/// keeping this in lockstep with [`output_eligible_condition`] in one place — rather than repeating
-/// the `matches!` and the `:overridable_owners` literal at each call site — prevents the SQL and
-/// its bindings from silently drifting apart.
-///
-/// `:target_height` is deliberately NOT handled here: every query that uses the eligibility
-/// fragment also references `:target_height` independently of the lock filter (via
-/// `spent_notes_clause` / `tx_unexpired_condition` and the like), so it is always present in the
-/// SQL and is bound unconditionally by the caller.
-pub(crate) fn push_lock_params<'a>(
-    params: &mut Vec<(&'a str, &'a dyn ToSql)>,
-    lock_filter: LockFilter<'_>,
-    overridable_owners: &'a Rc<Vec<Value>>,
-) {
-    if matches!(lock_filter, LockFilter::Policy(_)) {
-        params.push((":overridable_owners", overridable_owners as &dyn ToSql));
-    }
-}
-
-/// Returns the tier-preference sort key `(<lock tier>) ASC|DESC` for a [`LockFilter`] that prefers
-/// one lock tier over the other, or `None` when no tier preference applies
-/// ([`LockedInputPolicy::Exclude`] and [`LockFilter::Unfiltered`], which draw on a single admitted
-/// tier or apply no lock filtering).
-///
-/// The tier expression evaluates to `1` for an output that is locked for selection as of
-/// `:target_height` and `0` otherwise. [`LockedInputPolicy::PreferUnlocked`] sorts it ascending
-/// (unlocked first) and [`LockedInputPolicy::PreferLocked`] descending (owned-locked first).
-/// Because a [`LockFilter::Policy`] `WHERE` clause (see [`output_eligible_condition`]) has already
-/// excluded foreign-owner locks, the `1` tier contains only owned-locked outputs.
-///
-/// This key is a *preference* over an eligible set: callers must combine it with the existing
-/// within-tier ordering (age or value) as a secondary key so that ordering is preserved within
-/// each tier.
-///
-/// # Usage requirements
-/// - `tbl` must be set to the SQL alias for the received notes/outputs table.
-/// - When this returns `Some(_)`, the parent must provide `:target_height`.
-///
-/// [`LockedInputPolicy::Exclude`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::Exclude
-/// [`LockedInputPolicy::PreferUnlocked`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::PreferUnlocked
-/// [`LockedInputPolicy::PreferLocked`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::PreferLocked
-pub(crate) fn locked_tier_order_key(lock_filter: LockFilter<'_>, tbl: &str) -> Option<String> {
-    match lock_filter {
-        LockFilter::Policy(policy) if policy.admits_locked() => {
-            let direction = if policy.prefers_locked() {
-                "DESC"
-            } else {
-                "ASC"
-            };
-            Some(format!(
-                "(CASE WHEN {tbl}.lock_expiry_height IS NOT NULL \
-                  AND {tbl}.lock_expiry_height >= :target_height THEN 1 ELSE 0 END) {direction}"
-            ))
-        }
-        _ => None,
-    }
-}
-
-/// Generates the SQL condition under which an output's lock may be (re)acquired.
-///
-/// A lock may be taken when no lock exists (`lock_expiry_height IS NULL`), when the existing
-/// lock has expired as of the chain tip (`lock_expiry_height <= :chain_tip`), or when the
-/// existing lock is held by the requesting owner (`lock_owner = :owner`), which makes
-/// re-locking by the same owner idempotent. Because balance and selection evaluate lock state
-/// against `target_height = chain_tip + 1`, "expired as of the chain tip" (`h <= chain_tip`)
-/// is exactly "not locked for selection" (`h < target_height`): a lock can never be stolen by
-/// a DIFFERENT owner while the output is still excluded from selection.
-///
-/// When the chain tip is unknown, `:chain_tip` binds to SQL NULL and the expiry comparison
-/// evaluates to NULL (falsy), so only outputs with no existing lock, or whose lock the
-/// requesting owner already holds, can be locked; a foreign lock cannot be judged expired
-/// without a height to compare against.
-///
-/// # Usage requirements
-/// - This condition uses the bare `lock_expiry_height` and `lock_owner` column names, so it
-///   must be used in a single-table statement (such as the `UPDATE`s in `lock_outputs`).
-/// - The parent must provide `:chain_tip` (possibly NULL) and `:owner` as named arguments.
-pub(crate) fn output_lockable_condition() -> &'static str {
-    "lock_expiry_height IS NULL OR lock_expiry_height <= :chain_tip OR lock_owner = :owner"
 }
 
 fn unscanned_tip_exists(
@@ -1287,7 +1144,7 @@ mod lock_predicate_tests {
         wallet::LockOwner,
     };
 
-    use super::{
+    use crate::wallet::locking::{
         locked_tier_order_key, output_eligible_condition, output_lockable_condition,
         overridable_owners_rarray, push_lock_params,
     };

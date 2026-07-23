@@ -72,16 +72,15 @@ use crate::{
     error::SqliteClientError,
     util::Clock,
     wallet::{
-        common::{
-            output_eligible_condition, overridable_owners_rarray, push_lock_params,
-            tx_unexpired_condition,
-        },
-        get_account, mempool_height,
+        common::tx_unexpired_condition,
+        get_account,
+        locking::{output_eligible_condition, overridable_owners_rarray, push_lock_params},
+        mempool_height,
     },
 };
 // Used only by the value-target transparent selection, which is gated on transparent inputs.
 #[cfg(feature = "transparent-inputs")]
-use crate::wallet::common::locked_tier_order_key;
+use crate::wallet::locking::locked_tier_order_key;
 
 pub(crate) mod ephemeral;
 

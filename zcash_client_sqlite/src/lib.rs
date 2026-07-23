@@ -1351,7 +1351,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         account: <Self as WalletRead>::AccountId,
     ) -> Result<Vec<OutputRef>, <Self as WalletRead>::Error> {
-        wallet::get_locked_outputs(self.conn.borrow(), account)
+        wallet::locking::get_locked_outputs(self.conn.borrow(), account)
     }
 
     fn get_tx_history(
@@ -1694,16 +1694,16 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         lock_expiry_height: BlockHeight,
     ) -> Result<usize, LockError<Self::Error>> {
         Ok(self.transactionally(|wdb| {
-            wallet::lock_outputs(wdb.conn.0, outputs, owner, lock_expiry_height)
+            wallet::locking::lock_outputs(wdb.conn.0, outputs, owner, lock_expiry_height)
         })?)
     }
 
     fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
-        self.transactionally(|wdb| wallet::unlock_output(wdb.conn.0, output, owner))
+        self.transactionally(|wdb| wallet::locking::unlock_output(wdb.conn.0, output, owner))
     }
 
     fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
-        self.transactionally(|wdb| wallet::clear_locked_outputs(wdb.conn.0, account))
+        self.transactionally(|wdb| wallet::locking::clear_locked_outputs(wdb.conn.0, account))
     }
 
     fn store_transactions_to_be_sent(
@@ -2108,7 +2108,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         // mid-batch `LockFailure`, locks taken for earlier outputs in the batch
         // remain pending in the transaction. `WalletDb::transactionally` (used by
         // the non-transactional impl above) provides that rollback.
-        Ok(wallet::lock_outputs(
+        Ok(wallet::locking::lock_outputs(
             self.conn.0,
             outputs,
             owner,
@@ -2117,11 +2117,11 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     }
 
     fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
-        wallet::unlock_output(self.conn.0, output, owner)
+        wallet::locking::unlock_output(self.conn.0, output, owner)
     }
 
     fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
-        wallet::clear_locked_outputs(self.conn.0, account)
+        wallet::locking::clear_locked_outputs(self.conn.0, account)
     }
 
     fn store_transactions_to_be_sent(
