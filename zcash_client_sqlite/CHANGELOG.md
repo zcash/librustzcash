@@ -33,6 +33,12 @@ workspace.
   `PoolMigrations::for_account`, scoped to the account whose migration it
   tracks; the underlying `orchard_ironwood_migrations` table enforces at most
   one migration per account.
+- `zcash_client_sqlite::pool_migration::PoolMigrations::migration_lock_owners`
+  returns the set of `LockOwner`s under which an account's in-progress pool
+  migration has reserved notes. A proposal can pass this set to a
+  `LockedInputPolicy` override (`SpendPolicy::with_locked_input_policy`) so it
+  may draw on the migration's own locked notes without disturbing any other
+  flow's locks.
 - A database migration adds `lock_expiry_height` and `lock_owner` columns to the
   `sapling_received_notes`, `orchard_received_notes`, `ironwood_received_notes`,
   and `transparent_received_outputs` tables to support explicit note locking
