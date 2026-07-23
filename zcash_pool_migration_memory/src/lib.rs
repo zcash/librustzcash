@@ -225,6 +225,7 @@ fn set_transaction_state(stored: &mut MigrationState, id: MigrationTxId, state: 
                     t.expiry_height(),
                     t.anchor_boundary(),
                     state,
+                    t.lock_owner(),
                 )
             } else {
                 t.clone()

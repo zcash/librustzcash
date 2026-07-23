@@ -237,6 +237,7 @@ fn stores_loads_and_updates_a_migration() {
         BlockHeight::from_u32(2_069_220),
         None,
         MigrationTxState::Signed,
+        None,
     );
     let state = MigrationState::from_parts(
         MigrationStatus::Committed,
