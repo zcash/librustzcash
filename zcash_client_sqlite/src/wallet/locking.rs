@@ -18,7 +18,7 @@ use std::rc::Rc;
 use rusqlite::{ToSql, named_params, types::Value};
 
 use zcash_client_backend::{
-    data_api::wallet::input_selection::LockFilter,
+    data_api::wallet::{TargetHeight, input_selection::LockFilter},
     wallet::{LockOwner, OutputRef},
 };
 use zcash_primitives::transaction::TxId;
@@ -233,6 +233,17 @@ pub(crate) fn unlock_spent_notes(
     Ok(())
 }
 
+/// Returns whether an output bearing the given `lock_expiry_height` is locked as of
+/// `target_height`.
+///
+/// An output is locked while `lock_expiry_height >= target_height`; selection eligibility is
+/// the exact complement of this predicate (see [`output_eligible_condition`]). Balance
+/// computations use this single definition to tally locked value separately from spendable
+/// value.
+pub(crate) fn is_locked_at(lock_expiry_height: Option<u32>, target_height: TargetHeight) -> bool {
+    lock_expiry_height.is_some_and(|h| h >= u32::from(target_height))
+}
+
 /// Generates the SQL condition under which an output is eligible for selection, given the
 /// active [`LockFilter`].
 ///
@@ -379,4 +390,22 @@ pub(crate) fn locked_tier_order_key(lock_filter: LockFilter<'_>, tbl: &str) -> O
 /// - The parent must provide `:chain_tip` (possibly NULL) and `:owner` as named arguments.
 pub(crate) fn output_lockable_condition() -> &'static str {
     "lock_expiry_height IS NULL OR lock_expiry_height <= :chain_tip OR lock_owner = :owner"
+}
+
+#[cfg(test)]
+mod tests {
+    use zcash_client_backend::data_api::wallet::TargetHeight;
+
+    use super::is_locked_at;
+
+    /// The boundary of the locked predicate: a lock expiring exactly at the target height is
+    /// still locked (`h == t`), a lock expiring just below it has expired (`h == t - 1`), and
+    /// an absent lock is never locked.
+    #[test]
+    fn is_locked_at_boundary() {
+        let target = TargetHeight::from(100);
+        assert!(is_locked_at(Some(100), target));
+        assert!(!is_locked_at(Some(99), target));
+        assert!(!is_locked_at(None, target));
+    }
 }

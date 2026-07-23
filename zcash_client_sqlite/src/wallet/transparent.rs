@@ -74,7 +74,9 @@ use crate::{
     wallet::{
         common::tx_unexpired_condition,
         get_account,
-        locking::{output_eligible_condition, overridable_owners_rarray, push_lock_params},
+        locking::{
+            is_locked_at, output_eligible_condition, overridable_owners_rarray, push_lock_params,
+        },
         mempool_height,
     },
 };
@@ -1727,10 +1729,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
         if value <= zip317::MARGINAL_FEE {
             entry.1.add_uneconomic_value(value)?;
-        } else if lock_expiry_height
-            .iter()
-            .any(|h| *h >= u32::from(target_height))
-        {
+        } else if is_locked_at(lock_expiry_height, target_height) {
             entry.1.add_locked_value(value)?;
         } else {
             entry.1.add_spendable_value(value)?;
@@ -1853,10 +1852,7 @@ pub(crate) fn add_transparent_account_balances(
             balance.with_unshielded_coinbase_balance_mut(|bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
-                } else if lock_expiry_height
-                    .iter()
-                    .any(|h| *h >= u32::from(target_height))
-                {
+                } else if is_locked_at(lock_expiry_height, target_height) {
                     // A locked coinbase output (selected by an in-flight shielding
                     // proposal) is excluded from the spendable balance, exactly like a
                     // locked non-coinbase output.
@@ -1873,10 +1869,7 @@ pub(crate) fn add_transparent_account_balances(
             balance.with_unshielded_regular_balance_mut(|bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
-                } else if lock_expiry_height
-                    .iter()
-                    .any(|h| *h >= u32::from(target_height))
-                {
+                } else if is_locked_at(lock_expiry_height, target_height) {
                     bal.add_locked_value(value)
                 } else {
                     bal.add_spendable_value(value)
@@ -1933,10 +1926,7 @@ pub(crate) fn add_transparent_account_balances(
             let add_pending = |bal: &mut Balance| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
-                } else if lock_expiry_height
-                    .iter()
-                    .any(|h| *h >= u32::from(target_height))
-                {
+                } else if is_locked_at(lock_expiry_height, target_height) {
                     bal.add_locked_value(value)
                 } else {
                     bal.add_pending_spendable_value(value)
