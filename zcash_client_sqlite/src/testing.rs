@@ -130,24 +130,26 @@ where
     W: zcash_client_backend::data_api::WalletCommitmentTrees,
 {
     use shardtree::error::ShardTreeError;
+    use shardtree::store::ShardStore;
     use zcash_client_backend::data_api::WalletCommitmentTrees;
 
-    let mut height = u32::from(from);
-    loop {
-        let bh = BlockHeight::from_u32(height);
-        let rooted = db
-            .with_orchard_tree_mut::<_, _, ShardTreeError<<W as WalletCommitmentTrees>::Error>>(
-                |tree| Ok(tree.root_at_checkpoint_id(&bh)?.is_some()),
-            )
-            .expect("queries the Orchard tree");
-        if rooted {
-            return Some(bh);
-        }
-        if height == 0 {
-            return None;
-        }
-        height -= 1;
-    }
+    db.with_orchard_tree_mut::<_, _, ShardTreeError<<W as WalletCommitmentTrees>::Error>>(|tree| {
+        // Take the highest checkpoint id at or below `from` directly from the checkpoint set,
+        // rather than probing the tree at every height down from `from`.
+        let store = tree.store();
+        let count = store.checkpoint_count().map_err(ShardTreeError::Storage)?;
+        let mut highest: Option<BlockHeight> = None;
+        store
+            .for_each_checkpoint(count, |id, _| {
+                if *id <= from {
+                    highest = Some(highest.map_or(*id, |h| h.max(*id)));
+                }
+                Ok(())
+            })
+            .map_err(ShardTreeError::Storage)?;
+        Ok(highest)
+    })
+    .expect("queries the Orchard tree")
 }
 
 #[cfg(all(test, feature = "unstable"))]

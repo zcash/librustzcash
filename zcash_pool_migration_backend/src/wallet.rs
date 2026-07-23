@@ -23,6 +23,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt;
+use core::num::NonZeroU32;
 
 use ::orchard::Anchor;
 use ::orchard::circuit::OrchardCircuitVersion;
@@ -262,9 +263,10 @@ where
 
 /// Why proving a migration transaction through the wallet-backed prover failed. `TE` is the
 /// wallet's commitment-tree error type ([`WalletCommitmentTrees::Error`]); `NE` is its note-source
-/// error type ([`InputSource::Error`]).
+/// error type ([`InputSource::Error`]); `RE` is its chain-state error type
+/// ([`WalletRead::Error`]).
 #[derive(Debug)]
-pub enum WalletProveError<TE, NE> {
+pub enum WalletProveError<TE, NE, RE> {
     /// The PCZT has no real Orchard spend whose witness is still deferred. A migration transfer
     /// spends one funding note and a preparation transaction one or more, so the Orchard bundle
     /// carries at least one action with an absent witness (the fabricated dummy spends keep their
@@ -277,6 +279,11 @@ pub enum WalletProveError<TE, NE> {
     /// A deferred-witness Orchard spend's nullifier bytes are not a valid Orchard nullifier, so the
     /// PCZT is not a well-formed migration transaction awaiting proof.
     MalformedNullifier([u8; 32]),
+    /// Looking up the note-selection target height (the chain tip) through the wallet failed.
+    TargetHeight(RE),
+    /// The wallet knows of no block data, so the note-selection target height (the chain tip) is
+    /// unavailable.
+    ChainTipUnknown,
     /// Enumerating the account's spendable Orchard notes (to locate each spend by nullifier) failed.
     Notes(NE),
     /// A commitment tree (the Orchard source tree, or the Ironwood destination tree for a transfer)
@@ -302,13 +309,13 @@ pub enum WalletProveError<TE, NE> {
     Prove(alloc::string::String),
 }
 
-impl<TE, NE> From<ShardTreeError<TE>> for WalletProveError<TE, NE> {
+impl<TE, NE, RE> From<ShardTreeError<TE>> for WalletProveError<TE, NE, RE> {
     fn from(e: ShardTreeError<TE>) -> Self {
         WalletProveError::Tree(e)
     }
 }
 
-impl<TE: fmt::Debug, NE: fmt::Debug> fmt::Display for WalletProveError<TE, NE> {
+impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> fmt::Display for WalletProveError<TE, NE, RE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WalletProveError::NoRealSpend => {
@@ -325,6 +332,15 @@ impl<TE: fmt::Debug, NE: fmt::Debug> fmt::Display for WalletProveError<TE, NE> {
                     f,
                     "a spend's nullifier bytes are not a valid nullifier: {bytes:?}"
                 )
+            }
+            WalletProveError::TargetHeight(e) => {
+                write!(
+                    f,
+                    "looking up the note-selection target height failed: {e:?}"
+                )
+            }
+            WalletProveError::ChainTipUnknown => {
+                f.write_str("the wallet knows of no block data, so the chain tip is unavailable")
             }
             WalletProveError::Notes(e) => {
                 write!(f, "enumerating spendable Orchard notes failed: {e:?}")
@@ -350,12 +366,18 @@ impl<TE: fmt::Debug, NE: fmt::Debug> fmt::Display for WalletProveError<TE, NE> {
     }
 }
 
-impl<TE: fmt::Debug, NE: fmt::Debug> core::error::Error for WalletProveError<TE, NE> {}
+impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> core::error::Error
+    for WalletProveError<TE, NE, RE>
+{
+}
 
 /// The wallet-backed prover's error for a wallet `W`: a [`WalletProveError`] over the wallet's
-/// commitment-tree and note-source error types.
-type ProverError<W> =
-    WalletProveError<<W as WalletCommitmentTrees>::Error, <W as InputSource>::Error>;
+/// commitment-tree, note-source, and chain-state error types.
+type ProverError<W> = WalletProveError<
+    <W as WalletCommitmentTrees>::Error,
+    <W as InputSource>::Error,
+    <W as WalletRead>::Error,
+>;
 
 /// A wallet-backed prover for migration transactions: the mutable counterpart to [`WalletMigration`].
 ///
@@ -402,7 +424,7 @@ where
 
 impl<'a, W> WalletMigrationProver<'a, W>
 where
-    W: WalletCommitmentTrees + InputSource,
+    W: WalletCommitmentTrees + InputSource + WalletRead,
     <W as InputSource>::AccountId: Copy,
 {
     /// Prove one migration transaction's Orchard bundle (and its Ironwood bundle, when it has one)
@@ -411,6 +433,11 @@ where
     /// [`prove_transfer`](MigrationProver::prove_transfer) (a transfer: one Orchard spend plus an
     /// Ironwood output) and [`prove_preparation`](MigrationProver::prove_preparation) (a preparation:
     /// one or more Orchard spends, no Ironwood).
+    ///
+    /// The anchor and witnesses are resolved at `anchor_height`, but the spent notes are located at
+    /// the wallet's standard note-selection target height (the chain tip, from
+    /// [`WalletRead::get_target_and_anchor_heights`]), so a note already spent by a mined migration
+    /// transaction is excluded from the candidate set.
     fn prove_orchard(
         &mut self,
         pczt: ::pczt::Pczt,
@@ -437,7 +464,15 @@ where
 
         // Locate each spend in the wallet's note store: map every unspent Orchard note's nullifier
         // (recomputed under the account FVK) to its commitment-tree position, then look up each spend.
-        let target = TargetHeight::from(u32::from(anchor_height) + 1);
+        // Select notes at the wallet's standard note-selection target height (the chain tip), not the
+        // witness anchor, so a note already spent by a mined migration transaction is excluded from
+        // consideration. Only the target is needed here; `min_confirmations` bounds only the (unused)
+        // anchor height, so the minimum is passed to avoid a spurious absence near genesis.
+        let (target, _anchor) = self
+            .wallet
+            .get_target_and_anchor_heights(NonZeroU32::MIN)
+            .map_err(WalletProveError::TargetHeight)?
+            .ok_or(WalletProveError::ChainTipUnknown)?;
         let received = self
             .wallet
             .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[])
@@ -539,7 +574,7 @@ where
 
 impl<'a, W> MigrationProver for WalletMigrationProver<'a, W>
 where
-    W: WalletCommitmentTrees + InputSource,
+    W: WalletCommitmentTrees + InputSource + WalletRead,
     <W as InputSource>::AccountId: Copy,
 {
     type Error = ProverError<W>;
