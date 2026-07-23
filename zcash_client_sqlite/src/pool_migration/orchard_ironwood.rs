@@ -166,6 +166,84 @@ mod tests {
         assert_empty_is_none(&fresh_store());
     }
 
+    /// A transaction's `lock_owner` round-trips exactly through the store's `BLOB` column: a
+    /// `Some` token comes back byte-for-byte and a `None` comes back as `None`, not a zeroed or
+    /// otherwise substituted token. This pins the two cases the column must distinguish; the
+    /// general `put_then_get_round_trips` property (whose generator also produces `lock_owner`)
+    /// covers the type more broadly.
+    #[test]
+    fn lock_owner_round_trips() {
+        use zcash_pool_migration_backend::engine::{
+            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
+        };
+        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_protocol::consensus::BlockHeight;
+        use zcash_protocol::value::Zatoshis;
+
+        let note_split = NoteSplitPlan::from_stored_parts(
+            Vec::new(),
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+        )
+        .expect("an empty stored plan reconstructs");
+
+        let owner_bytes = [7u8; 32];
+        let locked = MigrationTransaction::from_parts(
+            MigrationTxId::new(0),
+            MigrationTxKind::Preparation { layer: 0, index: 0 },
+            vec![1, 2, 3],
+            Vec::new(),
+            BlockHeight::from_u32(100),
+            BlockHeight::from_u32(200),
+            None,
+            MigrationTxState::Signed,
+            Some(owner_bytes),
+        );
+        let unlocked = MigrationTransaction::from_parts(
+            MigrationTxId::new(1),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![4, 5, 6],
+            Vec::new(),
+            BlockHeight::from_u32(100),
+            BlockHeight::from_u32(200),
+            None,
+            MigrationTxState::Signed,
+            None,
+        );
+        let state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            note_split,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![locked, unlocked],
+        );
+
+        let mut store = fresh_store();
+        store.replace_migration(&state).expect("write succeeds");
+        let loaded = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+
+        assert_eq!(
+            loaded, state,
+            "the whole migration, including lock_owner, must round-trip unchanged"
+        );
+        assert_eq!(
+            loaded.transactions()[0].lock_owner(),
+            Some(owner_bytes),
+            "a `Some` lock_owner must survive exactly"
+        );
+        assert_eq!(
+            loaded.transactions()[1].lock_owner(),
+            None,
+            "a `None` lock_owner must round-trip as `None`"
+        );
+    }
+
     /// A state with an empty preparation layer is rejected on write rather than silently
     /// renumbered: the layers/transactions grid is stored only through the input and output rows,
     /// so an empty layer would leave no trace (and the engine never produces one).

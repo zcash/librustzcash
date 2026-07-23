@@ -162,6 +162,13 @@ pub fn arb_migration_status() -> impl Strategy<Value = MigrationStatus> {
     ]
 }
 
+/// An arbitrary lock-owner token: `None` (no lock held) or the raw bytes of a
+/// `zcash_client_backend::wallet::LockOwner` (opaque here — this crate does not depend on
+/// `zcash_client_backend`).
+pub fn arb_lock_owner() -> impl Strategy<Value = Option<[u8; 32]>> {
+    prop::option::of(any::<[u8; 32]>())
+}
+
 /// An arbitrary [`MigrationTransaction`], built through [`MigrationTransaction::from_parts`]. Its id
 /// is arbitrary here; [`arb_migration_state`] re-keys the transactions it holds so their ids stay
 /// unique within a migration.
@@ -175,6 +182,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         arb_block_height(),
         prop::option::of(arb_block_height()),
         arb_migration_tx_state(),
+        arb_lock_owner(),
     )
         .prop_map(
             |(
@@ -186,6 +194,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 expiry_height,
                 anchor_boundary,
                 state,
+                lock_owner,
             )| {
                 MigrationTransaction::from_parts(
                     id,
@@ -196,6 +205,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     expiry_height,
                     anchor_boundary,
                     state,
+                    lock_owner,
                 )
             },
         )
@@ -228,6 +238,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                         tx.expiry_height(),
                         tx.anchor_boundary(),
                         tx.state(),
+                        tx.lock_owner(),
                     )
                 })
                 .collect();
