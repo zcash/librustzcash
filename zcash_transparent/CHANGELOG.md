@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_transparent::pczt::ParseError` has a new `InvalidPartialSignature`
+  variant. The `ParseError` enum is now marked `#[non_exhaustive]`.
+
+### Fixed
+- `zcash_transparent::pczt` spend finalization no longer panics on a
+  `partial_signatures` entry larger than the maximum script push-value size.
+  Such entries are now rejected at parse time.
+
 ## [0.9.0] - 2026-07-09
 
 ### Changed
