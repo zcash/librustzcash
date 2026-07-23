@@ -12,7 +12,7 @@
 use orchard::keys::SpendAuthorizingKey;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
-use zcash_protocol::consensus::BlockHeight;
+use zcash_protocol::consensus::{BlockHeight, TargetHeight};
 use zcash_protocol::value::COIN;
 
 use zcash_pool_migration_backend::build::sign_pczt;
@@ -162,6 +162,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .iter()
         .map(|t| t.scheduled_height())
         .max()
+        .map(TargetHeight::from)
         .expect("the committed migration has transactions");
     match state.next_step(target) {
         AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {

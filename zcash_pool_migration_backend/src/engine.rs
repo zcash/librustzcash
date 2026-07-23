@@ -51,6 +51,8 @@ use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
+#[cfg(all(test, feature = "orchard"))]
+use zcash_protocol::consensus::TargetHeight;
 use zcash_protocol::value::{BalanceError, Zatoshis};
 
 use zcash_primitives::transaction::fees::FeeRule as _;
@@ -3058,7 +3060,7 @@ mod commit_tests {
 
         // Advance the chain tip past the transfer's expiry, so it can no longer be mined.
         backend.tip = old.expiry_height + 1;
-        let target = backend.chain_tip_height().unwrap() + 1;
+        let target = TargetHeight::from(backend.chain_tip_height().unwrap() + 1);
         assert!(
             state.expired_transactions(target).contains(&id),
             "the transfer has expired at the new tip"
@@ -3495,6 +3497,7 @@ mod commit_tests {
             .iter()
             .map(|t| t.scheduled_height)
             .max()
+            .map(TargetHeight::from)
             .expect("the committed migration has transactions");
         match state.next_step(target) {
             crate::state::AdvanceStep::Prove { id }
@@ -3675,6 +3678,7 @@ mod commit_tests {
             .iter()
             .map(|t| t.scheduled_height)
             .max()
+            .map(TargetHeight::from)
             .expect("the committed migration has transactions");
         let mut height = 2_000_000u32;
         for layer in 0..layer_count {
