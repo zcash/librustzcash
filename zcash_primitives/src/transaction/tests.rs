@@ -1126,6 +1126,7 @@ fn zip_0244() {
 fn tachyon_v7_test_vectors() {
     use self::data::tachyon_vectors::*;
     use ff::FromUniformBytes;
+    use pasta_curves::group::GroupEncoding;
     use pasta_curves::group::prime::PrimeCurveAffine;
     use pasta_curves::{EpAffine, Fp};
 
@@ -1135,12 +1136,6 @@ fn tachyon_v7_test_vectors() {
         0xba, 0x64, 0x54, 0xc4, 0xa1, 0xd4, 0x27, 0x30, 0xb5, 0x3c, 0xbf, 0x30, 0xd0, 0x5d, 0x3f,
         0x95, 0xaa, 0x54, 0x1c, 0x98, 0xeb, 0xa0, 0x20, 0x5a, 0x75, 0xbb, 0x79, 0x83, 0x44, 0x3b,
         0x37, 0x31,
-    ];
-    // Expected rk bytes for rk_from_seed([0x43; 64]).
-    const EXPECTED_RK_43: [u8; 32] = [
-        0x33, 0x6a, 0x1f, 0x7e, 0xd0, 0x90, 0x31, 0x93, 0xf3, 0x9f, 0xa5, 0x30, 0x6f, 0x3f, 0xd8,
-        0x8d, 0x8a, 0x0a, 0x89, 0x07, 0xa1, 0xde, 0xfd, 0xe5, 0x47, 0xf1, 0x17, 0xe7, 0x07, 0x5d,
-        0x9e, 0x01,
     ];
 
     // Helper: deserialize, check version, roundtrip
@@ -1155,6 +1150,14 @@ fn tachyon_v7_test_vectors() {
         tx
     };
 
+    // The new tachyon API no longer exposes `From<_> for [u8; N]` on the
+    // action/binding signatures, so serialize via the public `write` method.
+    let action_sig_bytes = |sig: &zcash_tachyon::action::Signature| -> Vec<u8> {
+        let mut bytes = Vec::new();
+        sig.write(&mut bytes).unwrap();
+        bytes
+    };
+
     // EMPTY_V7_TX: no tachyon bundle
     {
         let tx = read_and_roundtrip(&EMPTY_V7_TX);
@@ -1167,17 +1170,19 @@ fn tachyon_v7_test_vectors() {
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stripped = match bundle {
             zcash_tachyon::TachyonBundle::Adjunct(s) => s,
-            zcash_tachyon::TachyonBundle::Stamped(_) => panic!("expected Adjunct variant"),
+            _ => panic!("expected Adjunct variant"),
         };
         assert_eq!(stripped.actions.len(), 1);
-        assert_eq!(stripped.value_balance, 0);
+        assert_eq!(i64::from(stripped.value_balance), 0);
 
         let action = &stripped.actions[0];
         let cv_point: EpAffine = action.cv.into();
         assert_eq!(cv_point, EpAffine::generator());
-        assert_eq!(<[u8; 32]>::from(action.rk), EXPECTED_RK_42);
-        assert_eq!(<[u8; 64]>::from(action.sig), [0x01u8; 64]);
-        assert_eq!(<[u8; 64]>::from(stripped.binding_sig), [0x02u8; 64]);
+        assert_eq!(EpAffine::from(action.rk).to_bytes(), EXPECTED_RK_42);
+        assert_eq!(action_sig_bytes(&action.sig), [0x01u8; 64]);
+        let mut binding_sig_bytes = Vec::new();
+        stripped.binding_sig.write(&mut binding_sig_bytes).unwrap();
+        assert_eq!(binding_sig_bytes, [0x02u8; 64]);
         // Adjunct's covering aggregate wtxid set to [0xEE; 64] in zebra fixture.
         assert_eq!(<[u8; 64]>::from(stripped.stamp), [0xEEu8; 64]);
     }
@@ -1187,18 +1192,20 @@ fn tachyon_v7_test_vectors() {
         let tx = read_and_roundtrip(&V7_TX_TACHYON_STAMPED);
         let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
         let stamped = match bundle {
-            zcash_tachyon::TachyonBundle::Stamped(s) => s,
-            zcash_tachyon::TachyonBundle::Adjunct(_) => panic!("expected Stamped variant"),
+            zcash_tachyon::TachyonBundle::Proven(s) => s,
+            _ => panic!("expected Proven variant"),
         };
         assert_eq!(stamped.actions.len(), 1);
-        assert_eq!(stamped.value_balance, 100);
+        assert_eq!(i64::from(stamped.value_balance), 100);
 
         let action = &stamped.actions[0];
         let cv_point: EpAffine = action.cv.into();
         assert_eq!(cv_point, EpAffine::generator());
-        assert_eq!(<[u8; 32]>::from(action.rk), EXPECTED_RK_42);
-        assert_eq!(<[u8; 64]>::from(action.sig), [0x01u8; 64]);
-        assert_eq!(<[u8; 64]>::from(stamped.binding_sig), [0x02u8; 64]);
+        assert_eq!(EpAffine::from(action.rk).to_bytes(), EXPECTED_RK_42);
+        assert_eq!(action_sig_bytes(&action.sig), [0x01u8; 64]);
+        let mut binding_sig_bytes = Vec::new();
+        stamped.binding_sig.write(&mut binding_sig_bytes).unwrap();
+        assert_eq!(binding_sig_bytes, [0x02u8; 64]);
 
         assert_eq!(stamped.stamp.tachygrams.len(), 1);
         let tg_fp: Fp = stamped.stamp.tachygrams[0].into();
@@ -1208,42 +1215,85 @@ fn tachyon_v7_test_vectors() {
         let expected_anchor = zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap();
         assert_eq!(stamped.stamp.anchor, expected_anchor);
     }
+}
 
-    // V7_TX_TACHYON_MULTI_ACTION: 2 actions, stamp with 3 tachygrams, value_balance = 300
-    {
-        let tx = read_and_roundtrip(&V7_TX_TACHYON_MULTI_ACTION);
-        let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
-        let stamped = match bundle {
-            zcash_tachyon::TachyonBundle::Stamped(s) => s,
-            zcash_tachyon::TachyonBundle::Adjunct(_) => panic!("expected Stamped variant"),
-        };
-        assert_eq!(stamped.actions.len(), 2);
-        assert_eq!(stamped.value_balance, 300);
+// V7_TX_TACHYON_MULTI_ACTION: 2 actions, stamp with 3 tachygrams, value_balance = 300.
+//
+// Tachyon requires a bundle's actions and a
+// stamp's tachygrams to be in canonical (sorted) order on the wire (see
+// `Bundle::read_body` and `ProofStamp::read`). The fixture is generated with both
+// sorted, so the specific action/tachygram order is determined by that sort rather
+// than by construction order; the assertions below are therefore order-independent.
+#[cfg(zcash_unstable = "nu7")]
+#[test]
+fn tachyon_v7_multi_action() {
+    use self::data::tachyon_vectors::*;
+    use ff::FromUniformBytes;
+    use pasta_curves::group::GroupEncoding;
+    use pasta_curves::group::prime::PrimeCurveAffine;
+    use pasta_curves::{EpAffine, Fp};
 
-        let action1 = &stamped.actions[0];
-        let cv1: EpAffine = action1.cv.into();
-        assert_eq!(cv1, EpAffine::generator());
-        assert_eq!(<[u8; 32]>::from(action1.rk), EXPECTED_RK_42);
-        assert_eq!(<[u8; 64]>::from(action1.sig), [0x01u8; 64]);
+    // rk bytes for rk_from_seed([0x42; 64]) / ([0x43; 64]), paired with the action
+    // signature each carries in the fixture.
+    const EXPECTED_RK_42: [u8; 32] = [
+        0xba, 0x64, 0x54, 0xc4, 0xa1, 0xd4, 0x27, 0x30, 0xb5, 0x3c, 0xbf, 0x30, 0xd0, 0x5d, 0x3f,
+        0x95, 0xaa, 0x54, 0x1c, 0x98, 0xeb, 0xa0, 0x20, 0x5a, 0x75, 0xbb, 0x79, 0x83, 0x44, 0x3b,
+        0x37, 0x31,
+    ];
+    const EXPECTED_RK_43: [u8; 32] = [
+        0x33, 0x6a, 0x1f, 0x7e, 0xd0, 0x90, 0x31, 0x93, 0xf3, 0x9f, 0xa5, 0x30, 0x6f, 0x3f, 0xd8,
+        0x8d, 0x8a, 0x0a, 0x89, 0x07, 0xa1, 0xde, 0xfd, 0xe5, 0x47, 0xf1, 0x17, 0xe7, 0x07, 0x5d,
+        0x9e, 0x01,
+    ];
 
-        let action2 = &stamped.actions[1];
-        let cv2: EpAffine = action2.cv.into();
-        assert_eq!(cv2, EpAffine::generator());
-        assert_eq!(<[u8; 32]>::from(action2.rk), EXPECTED_RK_43);
-        assert_eq!(<[u8; 64]>::from(action2.sig), [0x03u8; 64]);
+    let action_sig_bytes = |sig: &zcash_tachyon::action::Signature| -> Vec<u8> {
+        let mut bytes = Vec::new();
+        sig.write(&mut bytes).unwrap();
+        bytes
+    };
 
-        assert_eq!(<[u8; 64]>::from(stamped.binding_sig), [0x02u8; 64]);
+    let tx = Transaction::read(&V7_TX_TACHYON_MULTI_ACTION[..], BranchId::Nu7).unwrap();
+    assert_eq!(tx.version, TxVersion::V7);
 
-        assert_eq!(stamped.stamp.tachygrams.len(), 3);
-        let tg1: Fp = stamped.stamp.tachygrams[0].into();
-        let tg2: Fp = stamped.stamp.tachygrams[1].into();
-        let tg3: Fp = stamped.stamp.tachygrams[2].into();
-        assert_eq!(tg1, Fp::from_uniform_bytes(&[0xAAu8; 64]));
-        assert_eq!(tg2, Fp::from_uniform_bytes(&[0xCCu8; 64]));
-        assert_eq!(tg3, Fp::from_uniform_bytes(&[0xDDu8; 64]));
-        let expected_anchor = zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap();
-        assert_eq!(stamped.stamp.anchor, expected_anchor);
+    let mut encoded = Vec::with_capacity(V7_TX_TACHYON_MULTI_ACTION.len());
+    tx.write(&mut encoded).unwrap();
+    assert_eq!(&V7_TX_TACHYON_MULTI_ACTION[..], &encoded[..]);
+
+    let bundle = tx.tachyon_bundle().expect("expected tachyon bundle");
+    let stamped = match bundle {
+        zcash_tachyon::TachyonBundle::Proven(s) => s,
+        _ => panic!("expected Proven variant"),
+    };
+    assert_eq!(stamped.actions.len(), 2);
+    assert_eq!(i64::from(stamped.value_balance), 300);
+
+    // Every action shares the generator as its value commitment; each action is
+    // identified by its (rk, sig) pair. Assert both expected pairs are present
+    // regardless of canonical ordering.
+    let action_pairs: Vec<([u8; 32], Vec<u8>)> = stamped
+        .actions
+        .iter()
+        .map(|action| {
+            let cv: EpAffine = action.cv.into();
+            assert_eq!(cv, EpAffine::generator());
+            (EpAffine::from(action.rk).to_bytes(), action_sig_bytes(&action.sig))
+        })
+        .collect();
+    assert!(action_pairs.contains(&(EXPECTED_RK_42, [0x01u8; 64].to_vec())));
+    assert!(action_pairs.contains(&(EXPECTED_RK_43, [0x03u8; 64].to_vec())));
+
+    let mut binding_sig_bytes = Vec::new();
+    stamped.binding_sig.write(&mut binding_sig_bytes).unwrap();
+    assert_eq!(binding_sig_bytes, [0x02u8; 64]);
+
+    assert_eq!(stamped.stamp.tachygrams.len(), 3);
+    let tachygrams: Vec<Fp> = stamped.stamp.tachygrams.iter().map(|&tg| tg.into()).collect();
+    for seed in [[0xAAu8; 64], [0xCCu8; 64], [0xDDu8; 64]] {
+        assert!(tachygrams.contains(&Fp::from_uniform_bytes(&seed)));
     }
+
+    let expected_anchor = zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap();
+    assert_eq!(stamped.stamp.anchor, expected_anchor);
 }
 
 #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]

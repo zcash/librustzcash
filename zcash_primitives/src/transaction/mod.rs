@@ -540,8 +540,9 @@ impl<A: Authorization> TransactionData<A> {
                         || Ok(ZatBalance::zero()),
                         |b| {
                             let value_balance = match b {
-                                zcash_tachyon::TachyonBundle::Stamped(s) => s.value_balance,
-                                zcash_tachyon::TachyonBundle::Adjunct(s) => s.value_balance,
+                                zcash_tachyon::TachyonBundle::NoBundle => 0i64,
+                                zcash_tachyon::TachyonBundle::Proven(s) => i64::from(s.value_balance),
+                                zcash_tachyon::TachyonBundle::Adjunct(s) => i64::from(s.value_balance),
                             };
                             ZatBalance::try_from(value_balance).map_err(|_| BalanceError::Overflow)
                         },

@@ -1203,7 +1203,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1b84d32b18d9a256d81e4fec2e4cfd0ab6dde5e5ff49be1713ae0adbd0060c2"
 dependencies = [
  "heck",
- "indexmap 2.12.0",
+ "indexmap 1.9.3",
  "itertools 0.13.0",
  "proc-macro-crate",
  "proc-macro2",
@@ -1221,7 +1221,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd5f2b7218a51c827a11d22d1439b598121fac94bf9b99452e4afffe512d78c9"
 dependencies = [
  "heck",
- "indexmap 2.12.0",
+ "indexmap 1.9.3",
  "itertools 0.14.0",
  "proc-macro-crate",
  "proc-macro2",
@@ -3672,7 +3672,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 [[package]]
 name = "ragu"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "blake2b_simd",
  "ragu_arithmetic",
@@ -3686,7 +3686,7 @@ dependencies = [
 [[package]]
 name = "ragu_arithmetic"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "ff",
  "group",
@@ -3699,7 +3699,7 @@ dependencies = [
 [[package]]
 name = "ragu_circuits"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "blake2b_simd",
  "maybe-rayon 0.1.1 (git+https://github.com/tachyon-zcash/maybe-rayon.git?rev=5c37ee0dd448e8c1edc4529d0b8897ecaff5aad1)",
@@ -3711,7 +3711,7 @@ dependencies = [
 [[package]]
 name = "ragu_core"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "ragu_arithmetic",
  "ragu_macros",
@@ -3721,7 +3721,7 @@ dependencies = [
 [[package]]
 name = "ragu_macros"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "num-bigint",
  "num-traits",
@@ -3734,7 +3734,7 @@ dependencies = [
 [[package]]
 name = "ragu_pasta"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "lazy_static",
  "ragu_arithmetic",
@@ -3743,7 +3743,7 @@ dependencies = [
 [[package]]
 name = "ragu_pcd"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "maybe-rayon 0.1.1 (git+https://github.com/tachyon-zcash/maybe-rayon.git?rev=5c37ee0dd448e8c1edc4529d0b8897ecaff5aad1)",
  "ragu_arithmetic",
@@ -3755,7 +3755,7 @@ dependencies = [
 [[package]]
 name = "ragu_primitives"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/ragu?rev=88be1399b541f0e9bef709f3dd2a655a6529dca0#88be1399b541f0e9bef709f3dd2a655a6529dca0"
+source = "git+https://github.com/s1nus/ragu?branch=cnode-working#eda373435d851107533762a990124993ce6cb89c"
 dependencies = [
  "ragu_arithmetic",
  "ragu_core",
@@ -7581,7 +7581,7 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/S1nus/tachyon?rev=af003b1aa55e0c19943141611ebb4afd79b76523#af003b1aa55e0c19943141611ebb4afd79b76523"
+source = "git+https://github.com/S1nus/tachyon?branch=cnode-working#002088549531801da26981d7ca9a44b3f364d5c8"
 dependencies = [
  "blake2b_simd",
  "corez",
