@@ -719,6 +719,15 @@ pub struct GreedyInputSelector<DbT> {
     /// transfers when the active [`TransparentSpendPolicy`] requires it.
     #[cfg(feature = "transparent-inputs")]
     shielding_block_space_percent: u32,
+    /// The policy governing whether the transparent UTXOs gathered by
+    /// [`ShieldingSelector::propose_shielding`] and
+    /// [`ShieldingSelector::propose_shielding_coinbase`] may be drawn from locked outputs.
+    /// Defaults to [`LockedInputPolicy::Exclude`]. Unlike [`SpendPolicy::locked_input_policy`],
+    /// which a caller supplies per call to [`InputSelector::propose_transaction`], shielding has
+    /// no per-call policy argument, so this is configured once on the selector instance via
+    /// [`Self::with_locked_input_policy`].
+    #[cfg(feature = "transparent-inputs")]
+    locked_input_policy: LockedInputPolicy,
     _ds_type: PhantomData<DbT>,
 }
 
@@ -736,6 +745,8 @@ impl<DbT> GreedyInputSelector<DbT> {
         GreedyInputSelector {
             #[cfg(feature = "transparent-inputs")]
             shielding_block_space_percent: DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT,
+            #[cfg(feature = "transparent-inputs")]
+            locked_input_policy: LockedInputPolicy::Exclude,
             _ds_type: PhantomData,
         }
     }
@@ -757,6 +768,18 @@ impl<DbT> GreedyInputSelector<DbT> {
         self
     }
 
+    /// Sets the policy governing whether shielding (via
+    /// [`ShieldingSelector::propose_shielding`] and
+    /// [`ShieldingSelector::propose_shielding_coinbase`]) may draw on transparent UTXOs locked
+    /// by one of the given policy's owners (default: [`LockedInputPolicy::Exclude`], which never
+    /// selects a locked output). This overrides a lock only for the purpose of *selecting through*
+    /// it during shielding; it does not release the lock.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn with_locked_input_policy(mut self, policy: LockedInputPolicy) -> Self {
+        self.locked_input_policy = policy;
+        self
+    }
+
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
@@ -773,6 +796,7 @@ impl<DbT> GreedyInputSelector<DbT> {
         coinbase: CoinbaseFilter,
         transaction_request: &TransactionRequest,
         amount_at_transparent_gather: &mut Zatoshis,
+        locked_input_policy: &LockedInputPolicy,
     ) -> Result<
         Vec<WalletTransparentOutput<()>>,
         InputSelectorError<
@@ -813,9 +837,11 @@ impl<DbT> GreedyInputSelector<DbT> {
             ),
         };
         *amount_at_transparent_gather = amount_at_gather;
-        // Input selection must never draw on locked outputs: a locked output belongs to
-        // another in-flight proposal, and spending it would recreate the conflict that
-        // locking exists to prevent.
+        // Input selection honors the caller's `SpendPolicy::locked_input_policy`: by default
+        // (`Exclude`) a locked output is never drawn upon, since it belongs to another in-flight
+        // proposal and spending it would recreate the conflict that locking exists to prevent; the
+        // `PreferUnlocked`/`PreferLocked` overrides let a caller draw through a lock it recognizes
+        // (e.g. its own pool-migration PCZTs).
         Ok(wallet_db
             .select_spendable_transparent_outputs(
                 account,
@@ -826,7 +852,7 @@ impl<DbT> GreedyInputSelector<DbT> {
                 target_value,
                 shielding_max_inputs(self.shielding_block_space_percent),
                 &StandardFeeRule::Zip317,
-                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                LockFilter::Policy(locked_input_policy),
             )
             .map_err(InputSelectorError::DataSource)?
             .into_iter()
@@ -1031,6 +1057,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     transparent.coinbase().into(),
                     &transaction_request,
                     &mut amount_at_transparent_gather,
+                    spend_policy.locked_input_policy(),
                 )?
             }
         };
@@ -1392,9 +1419,8 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         && required > amount_at_transparent_gather
                     {
                         let address_allow_list = transparent.address_allow_list();
-                        // Input selection must never draw on locked outputs: a locked output belongs to
-                        // another in-flight proposal, and spending it would recreate the conflict that
-                        // locking exists to prevent.
+                        // Honor the caller's `SpendPolicy::locked_input_policy`, as at the
+                        // initial gather above.
                         transparent_inputs = wallet_db
                             .select_spendable_transparent_outputs(
                                 account,
@@ -1405,7 +1431,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                                 TargetValue::AtLeast(required),
                                 shielding_max_inputs(self.shielding_block_space_percent),
                                 &StandardFeeRule::Zip317,
-                                LockFilter::Policy(&LockedInputPolicy::Exclude),
+                                LockFilter::Policy(spend_policy.locked_input_policy()),
                             )
                             .map_err(InputSelectorError::DataSource)?
                             .into_iter()
@@ -1429,9 +1455,11 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // by one policy: pool crossing is minimized, and a payment to an Orchard
             // receiver draws on the pool its output is constructed in (the Ironwood
             // pool once NU6.3 is active).
-            // Input selection must never draw on locked outputs: a locked output belongs to
-            // another in-flight proposal, and spending it would recreate the conflict that
-            // locking exists to prevent.
+            // Input selection honors the caller's `SpendPolicy::locked_input_policy`: by default
+            // (`Exclude`) a locked output is never drawn upon, since it belongs to another
+            // in-flight proposal and spending it would recreate the conflict that locking exists
+            // to prevent; the `PreferUnlocked`/`PreferLocked` overrides let a caller draw through
+            // a lock it recognizes (e.g. its own pool-migration PCZTs).
             shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
@@ -1440,7 +1468,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     target_height,
                     confirmations_policy,
                     &exclude,
-                    LockFilter::Policy(&LockedInputPolicy::Exclude),
+                    LockFilter::Policy(spend_policy.locked_input_policy()),
                 )
                 .map_err(InputSelectorError::DataSource)?;
 
@@ -1550,6 +1578,7 @@ pub(crate) fn propose_send_max<ParamsT, InputSourceT, FeeRuleT>(
     confirmations_policy: ConfirmationsPolicy,
     recipient: ZcashAddress,
     memo: Option<MemoBytes>,
+    locked_input_policy: &LockedInputPolicy,
 ) -> Result<
     Proposal<FeeRuleT, InputSourceT::NoteRef>,
     InputSelectorError<
@@ -1564,9 +1593,11 @@ where
     InputSourceT: InputSource,
     FeeRuleT: FeeRule + Clone,
 {
-    // Input selection must never draw on locked outputs: a locked output belongs to
-    // another in-flight proposal, and spending it would recreate the conflict that
-    // locking exists to prevent.
+    // Input selection honors the caller's `locked_input_policy`: by default (`Exclude`) a
+    // locked output is never drawn upon, since it belongs to another in-flight proposal and
+    // spending it would recreate the conflict that locking exists to prevent; the
+    // `PreferUnlocked`/`PreferLocked` overrides let a caller draw through a lock it recognizes
+    // (e.g. its own pool-migration PCZTs).
     let spendable_notes = wallet_db
         .select_spendable_notes(
             source_account,
@@ -1575,7 +1606,7 @@ where
             target_height,
             confirmations_policy,
             &[],
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
+            LockFilter::Policy(locked_input_policy),
         )
         .map_err(InputSelectorError::DataSource)?;
 
@@ -2013,6 +2044,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             confirmations_policy,
             output_filter,
             shielding_max_inputs(self.shielding_block_space_percent),
+            &self.locked_input_policy,
         )?;
 
         let wallet_meta = change_strategy
@@ -2092,6 +2124,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             limit
                 .unwrap_or(usize::MAX)
                 .min(shielding_max_inputs(self.shielding_block_space_percent)),
+            &self.locked_input_policy,
         )?;
 
         let destination_pool = resolve_shielded_destination::<DbT, FeeRuleT::Error, ParamsT>(
@@ -2237,6 +2270,7 @@ fn gather_shielding_inputs<DbT, ChangeErrT>(
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
     max_inputs: usize,
+    locked_input_policy: &LockedInputPolicy,
 ) -> Result<
     Vec<WalletTransparentOutput<()>>,
     InputSelectorError<
@@ -2255,16 +2289,17 @@ where
     // one query per address (including for the many addresses that have no spendable outputs),
     // which is prohibitively expensive for wallets that hold large numbers of transparent
     // addresses.
-    // Input selection must never draw on locked outputs: a locked output belongs to
-    // another in-flight proposal, and spending it would recreate the conflict that
-    // locking exists to prevent.
+    // Input selection honors the selector's configured `locked_input_policy` (see
+    // `GreedyInputSelector::with_locked_input_policy`): by default (`Exclude`) a locked output is
+    // never drawn upon, since it belongs to another in-flight proposal and spending it would
+    // recreate the conflict that locking exists to prevent.
     let mut utxos = wallet_db
         .get_spendable_transparent_outputs_for_addresses(
             source_addrs,
             target_height,
             confirmations_policy,
             output_filter,
-            LockFilter::Policy(&LockedInputPolicy::Exclude),
+            LockFilter::Policy(locked_input_policy),
         )
         .map_err(InputSelectorError::DataSource)?;
 

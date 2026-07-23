@@ -981,6 +981,11 @@ where
 /// behalf of the request's owner until `target_height + request.for_blocks()` to prevent
 /// concurrent proposals from selecting them; when `None`, no locking is performed. See
 /// [`propose_transfer`] for the full semantics and concurrency behavior.
+///
+/// `locked_input_policy` controls whether a locked note may be drawn upon to reach the
+/// requested amount, exactly as [`input_selection::SpendPolicy::locked_input_policy`] does for
+/// [`propose_transfer`]; pass `&LockedInputPolicy::Exclude` (its default) to never select a
+/// locked note.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
@@ -993,6 +998,7 @@ pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
     memo: Option<MemoBytes>,
     mode: MaxSpendMode,
     confirmations_policy: ConfirmationsPolicy,
+    locked_input_policy: &input_selection::LockedInputPolicy,
     lock_inputs: Option<LockRequest>,
 ) -> Result<
     Proposal<FeeRuleT, <DbT as InputSource>::NoteRef>,
@@ -1025,6 +1031,7 @@ where
         confirmations_policy,
         recipient,
         memo,
+        locked_input_policy,
     )?;
 
     if let Some(request) = lock_inputs {

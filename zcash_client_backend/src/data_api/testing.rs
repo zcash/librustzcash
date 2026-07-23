@@ -57,7 +57,9 @@ use super::{
     scanning::ScanRange,
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
-        input_selection::{GreedyInputSelector, InputSelector, LockFilter, SpendPolicy},
+        input_selection::{
+            GreedyInputSelector, InputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+        },
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
 };
@@ -1181,6 +1183,7 @@ where
             memo,
             mode,
             confirmations_policy,
+            &LockedInputPolicy::Exclude,
             None,
         )
     }
