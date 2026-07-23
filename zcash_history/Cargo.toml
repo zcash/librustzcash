@@ -16,13 +16,14 @@ proptest.workspace = true
 [dependencies]
 primitive-types = { version = "0.12", default-features = false }
 blake2b_simd.workspace = true
-corez = { workspace = true, features = ["std"] }
+corez.workspace = true
 zcash_encoding.workspace = true
 proptest = { workspace = true, optional = true }
 
 [features]
+default = ["std"]
+std = ["corez/std", "zcash_encoding/std"]
 test-dependencies = ["dep:proptest"]
-std = ["corez/std"]
 
 [lib]
 bench = false

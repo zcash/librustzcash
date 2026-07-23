@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_history` is now compatible with `no_std`, via a new default-enabled
+  `std` feature. Build with `default-features = false` to target `no_std`
+  platforms; an allocator is required.
+
 ### Fixed
 - Invalid history node height ranges are now rejected during deserialization,
   and leaf ranges starting at block height zero no longer underflow.

@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 use crate::{Entry, EntryKind, EntryLink, Error, Version};
 
@@ -14,7 +15,7 @@ use crate::{Entry, EntryKind, EntryLink, Error, Version};
 /// how to pick right nodes from the array representation of MMR Tree), perform several operations
 /// (append-s/delete-s) and then drop it.
 pub struct Tree<V: Version> {
-    stored: HashMap<u32, Entry<V>>,
+    stored: BTreeMap<u32, Entry<V>>,
 
     // This can grow indefinitely if `Tree` is misused as a self-contained data structure
     generated: Vec<Entry<V>>,

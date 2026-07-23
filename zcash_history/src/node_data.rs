@@ -1,4 +1,7 @@
+use alloc::vec::Vec;
+
 use primitive_types::U256;
+use zcash_encoding::CompactSize;
 
 use crate::Version;
 
@@ -94,9 +97,9 @@ impl NodeData {
         self.subtree_total_work.to_little_endian(&mut work_buf[..]);
         w.write_all(&work_buf)?;
 
-        zcash_encoding::CompactSize::write(&mut *w, self.start_height as usize)?;
-        zcash_encoding::CompactSize::write(&mut *w, self.end_height as usize)?;
-        zcash_encoding::CompactSize::write(&mut *w, self.sapling_tx as usize)?;
+        CompactSize::write_unbounded(&mut *w, self.start_height)?;
+        CompactSize::write_unbounded(&mut *w, self.end_height)?;
+        CompactSize::write_unbounded(&mut *w, self.sapling_tx)?;
         Ok(())
     }
 
@@ -104,10 +107,13 @@ impl NodeData {
     ///
     /// # Errors
     ///
-    /// Returns [`corez::io::ErrorKind::InvalidData`] if the encoded height range
-    /// is descending or contains more blocks than can be represented by a
-    /// `u64`.
-    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
+    /// uses a non-canonical encoding, or if the encoded height range is
+    /// descending or contains more blocks than can be represented by a `u64`.
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
         let mut data = NodeData {
             consensus_branch_id,
             ..Default::default()
@@ -129,8 +135,8 @@ impl NodeData {
         r.read_exact(&mut work_buf)?;
         data.subtree_total_work = U256::from_little_endian(&work_buf);
 
-        data.start_height = zcash_encoding::CompactSize::read(&mut *r)?;
-        data.end_height = zcash_encoding::CompactSize::read(&mut *r)?;
+        data.start_height = CompactSize::read_unbounded(&mut *r)?;
+        data.end_height = CompactSize::read_unbounded(&mut *r)?;
         if data
             .end_height
             .checked_sub(data.start_height)
@@ -142,7 +148,7 @@ impl NodeData {
                 "history node height range does not contain a representable number of blocks",
             ));
         }
-        data.sapling_tx = zcash_encoding::CompactSize::read(&mut *r)?;
+        data.sapling_tx = CompactSize::read_unbounded(&mut *r)?;
 
         Ok(data)
     }
@@ -156,9 +162,9 @@ impl NodeData {
     ///
     /// # Errors
     ///
-    /// Returns [`corez::io::ErrorKind::InvalidData`] if the encoded height range
-    /// is descending or contains more blocks than can be represented by a
-    /// `u64`.
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
+    /// uses a non-canonical encoding, or if the encoded height range is
+    /// descending or contains more blocks than can be represented by a `u64`.
     pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
         crate::V1::from_bytes(consensus_branch_id, buf)
     }
@@ -198,19 +204,22 @@ impl V2 {
         self.v1.write(w)?;
         w.write_all(&self.start_orchard_root)?;
         w.write_all(&self.end_orchard_root)?;
-        zcash_encoding::CompactSize::write(&mut *w, self.orchard_tx as usize)?;
+        CompactSize::write_unbounded(&mut *w, self.orchard_tx)?;
         Ok(())
     }
 
     /// Read from the byte representation.
-    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
         let mut data = V2 {
             v1: NodeData::read(consensus_branch_id, r)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_orchard_root)?;
         r.read_exact(&mut data.end_orchard_root)?;
-        data.orchard_tx = zcash_encoding::CompactSize::read(&mut *r)?;
+        data.orchard_tx = CompactSize::read_unbounded(&mut *r)?;
 
         Ok(data)
     }
@@ -257,19 +266,22 @@ impl V3 {
         self.v2.write(w)?;
         w.write_all(&self.start_ironwood_root)?;
         w.write_all(&self.end_ironwood_root)?;
-        zcash_encoding::CompactSize::write(&mut *w, self.ironwood_tx as usize)?;
+        CompactSize::write_unbounded(&mut *w, self.ironwood_tx)?;
         Ok(())
     }
 
     /// Read from the byte representation.
-    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
         let mut data = V3 {
             v2: V2::read(consensus_branch_id, r)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_ironwood_root)?;
         r.read_exact(&mut data.end_ironwood_root)?;
-        data.ironwood_tx = zcash_encoding::CompactSize::read(&mut *r)?;
+        data.ironwood_tx = CompactSize::read_unbounded(&mut *r)?;
 
         Ok(data)
     }
@@ -293,9 +305,9 @@ pub mod testing {
             start_sapling_root in uniform32(any::<u8>()),
             end_sapling_root in uniform32(any::<u8>()),
             subtree_total_work in uniform32(any::<u8>()),
-            start_height in 0u64..=zcash_encoding::MAX_COMPACT_SIZE as u64,
-            end_height in 0u64..=zcash_encoding::MAX_COMPACT_SIZE as u64,
-            sapling_tx in 0u64..=zcash_encoding::MAX_COMPACT_SIZE as u64,
+            start_height in any::<u64>(),
+            end_height in any::<u64>(),
+            sapling_tx in any::<u64>(),
         ) -> NodeData {
             NodeData {
                 consensus_branch_id: 0,
@@ -317,6 +329,8 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::testing::arb_node_data;
     use proptest::prelude::*;
 
@@ -375,9 +389,9 @@ mod tests {
             start_sapling_root: [2; 32],
             end_sapling_root: [3; 32],
             subtree_total_work: U256::MAX,
-            start_height: zcash_encoding::MAX_COMPACT_SIZE as u64,
-            end_height: zcash_encoding::MAX_COMPACT_SIZE as u64,
-            sapling_tx: zcash_encoding::MAX_COMPACT_SIZE as u64,
+            start_height: u64::MAX,
+            end_height: u64::MAX,
+            sapling_tx: u64::MAX,
         }
     }
 
@@ -386,7 +400,7 @@ mod tests {
             v1: max_node_data(),
             start_orchard_root: [4; 32],
             end_orchard_root: [5; 32],
-            orchard_tx: zcash_encoding::MAX_COMPACT_SIZE as u64,
+            orchard_tx: u64::MAX,
         }
     }
 
@@ -395,7 +409,7 @@ mod tests {
             v2: max_node_data_v2(),
             start_ironwood_root: [6; 32],
             end_ironwood_root: [7; 32],
-            ironwood_tx: zcash_encoding::MAX_COMPACT_SIZE as u64,
+            ironwood_tx: u64::MAX,
         }
     }
 
@@ -463,7 +477,12 @@ mod tests {
         let mut encoded = vec![];
         entry.write(&mut encoded).unwrap();
 
-        assert_eq!(Entry::<HistoryV1>::from_bytes(0, encoded).unwrap().leaf_count(), 1);
+        assert_eq!(
+            Entry::<HistoryV1>::from_bytes(0, encoded)
+                .unwrap()
+                .leaf_count(),
+            1
+        );
     }
 
     #[test]
@@ -473,15 +492,8 @@ mod tests {
         // node spanning heights 0..=1, leaf_count() must not underflow.
         let left = Entry::<HistoryV1>::new_leaf(node_data(0, 0));
         let right = Entry::<HistoryV1>::new_leaf(node_data(1, 1));
-        let combined = HistoryV1::combine(
-            left.data(),
-            right.data(),
-        );
-        let entry = Entry::<HistoryV1>::new(
-            combined,
-            EntryLink::Stored(0),
-            EntryLink::Stored(1),
-        );
+        let combined = HistoryV1::combine(left.data(), right.data());
+        let entry = Entry::<HistoryV1>::new(combined, EntryLink::Stored(0), EntryLink::Stored(1));
         let mut encoded = vec![];
         entry.write(&mut encoded).unwrap();
 
@@ -493,8 +505,11 @@ mod tests {
     #[test]
     fn invalid_height_ranges_are_rejected() {
         for (start_height, end_height) in [
+            // Descending ranges.
             (200, 5),
-            (zcash_encoding::MAX_COMPACT_SIZE as u64, 5),
+            (u64::MAX, 5),
+            // Ascending, but the leaf count overflows a `u64`.
+            (0, u64::MAX),
         ] {
             let node_data = NodeData {
                 start_height,
@@ -532,17 +547,18 @@ mod tests {
 
     #[test]
     fn max_serialized_sizes_cover_all_versions() {
-        assert_eq!(HistoryV1::to_bytes(&max_node_data()).len(), 159);
-        assert_eq!(HistoryV2::to_bytes(&max_node_data_v2()).len(), 228);
+        // ZIP 221 specifies that history nodes are at most 171 bytes before NU5
+        // and 244 bytes after NU5; those bounds require the compact-encoded
+        // fields to span the full `u64` range (a 9-byte compact encoding each).
+        assert_eq!(HistoryV1::to_bytes(&max_node_data()).len(), 171);
+        assert_eq!(HistoryV2::to_bytes(&max_node_data_v2()).len(), 244);
         let max_v3_bytes = HistoryV3::to_bytes(&max_node_data_v3());
-        assert_eq!(max_v3_bytes.len(), 297);
-        assert!(max_v3_bytes.len() <= MAX_NODE_DATA_SIZE);
+        assert_eq!(max_v3_bytes.len(), MAX_NODE_DATA_SIZE);
         assert_eq!(
             HistoryV3::from_bytes(u32::MAX, &max_v3_bytes).unwrap(),
             max_node_data_v3()
         );
         assert_eq!(MAX_NODE_DATA_SIZE, 317);
-        assert!(max_v3_bytes.len() <= MAX_NODE_DATA_SIZE);
 
         let entry = Entry::<HistoryV3>::new(
             max_node_data_v3(),
@@ -551,7 +567,7 @@ mod tests {
         );
         let mut encoded = vec![];
         entry.write(&mut encoded).unwrap();
-        assert!(encoded.len() <= MAX_ENTRY_SIZE);
+        assert_eq!(encoded.len(), MAX_ENTRY_SIZE);
     }
 
     #[test]

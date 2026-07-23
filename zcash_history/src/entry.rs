@@ -73,7 +73,10 @@ impl<V: Version> Entry<V> {
     }
 
     /// Read from byte representation.
-    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
         let kind = {
             let mut byte = [0u8; 1];
             r.read_exact(&mut byte)?;
@@ -124,8 +127,8 @@ impl<V: Version> Entry<V> {
     }
 }
 
-impl<V: Version> std::fmt::Display for Entry<V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<V: Version> core::fmt::Display for Entry<V> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.kind {
             EntryKind::Node(l, r) => write!(f, "node({l}, {r}, ..)"),
             EntryKind::Leaf => write!(f, "leaf(..)"),
