@@ -30,7 +30,7 @@ use crate::{
     data_api::{
         InputSource,
         chain::ChainState,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     fees::{ChangeValue, StandardFeeRule, TransactionBalance},
     proposal::{
@@ -811,7 +811,7 @@ impl proposal::Proposal {
                 // otherwise a locked proposal would fail to round-trip through its
                 // serialized form. Double-spend protection is enforced when the
                 // proposal's transactions are created, not here.
-                let include_locked = true;
+                let lock_filter = LockFilter::Unfiltered;
 
                 // Steps are checked against the Orchard turnstile when Ironwood is
                 // active at the height for which the proposal was constructed.
@@ -883,7 +883,7 @@ impl proposal::Proposal {
                                                     .get_unspent_transparent_output(
                                                         &outpoint,
                                                         target_height,
-                                                        include_locked,
+                                                        lock_filter,
                                                     )
                                                     .map_err(ProposalDecodingError::InputRetrieval)?
                                                     .ok_or({
@@ -904,7 +904,7 @@ impl proposal::Proposal {
                                                 protocol,
                                                 out.index,
                                                 target_height,
-                                                include_locked,
+                                                lock_filter,
                                             )
                                             .map_err(ProposalDecodingError::InputRetrieval)
                                             .and_then(|opt| {

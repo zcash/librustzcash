@@ -21,7 +21,10 @@ use crate::{
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{
+            ConfirmationsPolicy, TargetHeight,
+            input_selection::{LockFilter, LockedInputPolicy},
+        },
     },
     wallet::{Note, ReceivedNote},
 };
@@ -122,7 +125,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 target_height,
                 confirmations_policy,
                 exclude,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .map(|n| n.take_sapling())
     }
@@ -139,7 +142,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 &[ShieldedPool::Sapling],
                 target_height,
                 exclude,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .map(|n| n.take_sapling())
     }

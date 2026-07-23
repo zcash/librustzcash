@@ -11,7 +11,7 @@ use zcash_client_backend::{
     data_api::{
         Account, NullifierQuery, TargetValue,
         ll::ReceivedSaplingOutput,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     wallet::ReceivedNote,
 };
@@ -139,7 +139,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
     target_height: TargetHeight,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -149,7 +149,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         ShieldedPool::Sapling,
         target_height,
         to_received_note,
-        include_locked,
+        lock_filter,
     )
 }
 
@@ -167,7 +167,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -179,7 +179,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Sapling,
         to_received_note,
-        include_locked,
+        lock_filter,
     )
 }
 

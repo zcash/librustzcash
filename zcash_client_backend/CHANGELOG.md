@@ -83,8 +83,10 @@ workspace.
   total but remain part of the total), so callers that displayed a total by
   reading `spendable_value` alone should add `locked_value`.
 - The following `InputSource` trait methods now take an additional
-  `include_locked: bool` parameter that controls whether locked notes
-  are included in results:
+  `lock_filter: LockFilter<'_>` parameter that controls how locked outputs are
+  selected: `LockFilter::Policy(&policy)` applies an owner-scoped
+  `LockedInputPolicy` (whose default, `LockedInputPolicy::Exclude`, selects no
+  locked outputs), while `LockFilter::Unfiltered` ignores lock state entirely:
   - `get_spendable_note`
   - `select_spendable_notes`
   - `select_unspent_notes`
@@ -135,7 +137,7 @@ workspace.
 
 ### Fixed
 - Proposal decoding (`proto::proposal::Proposal::try_into_standard_proposal`)
-  now retrieves inputs with `include_locked: true`. A proposal created with
+  now retrieves inputs with `LockFilter::Unfiltered`. A proposal created with
   `lock_for_blocks: Some(_)` locks its own inputs, so the previous behavior
   made such a proposal fail to decode from its serialized form with
   `ProposalDecodingError::InputNotFound` for every locked shielded input,

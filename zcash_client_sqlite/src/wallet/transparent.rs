@@ -24,7 +24,7 @@ use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
         TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     fees::StandardFeeRule,
     wallet::{
@@ -1270,14 +1270,16 @@ pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
 /// - `outpoint`: The identifier for the output to be retrieved.
 /// - `target_height`: The target height of a transaction under construction that will spend the
 ///   returned output. If this is `None`, no spendability checks are performed.
-/// - `include_locked`: When `false`, an output whose `lock_expiry_height` has not passed as of
-///   `target_height` is treated as unspendable and excluded. Like the other spendability checks,
-///   the lock check is skipped entirely when `target_height` is `None`.
+/// - `lock_filter`: Locked outputs are selected according to this filter (see [`LockFilter`]; a
+///   [`LockFilter::Policy`] carrying the default `Exclude` treats an output whose
+///   `lock_expiry_height` has not passed as of `target_height` as unspendable and excludes it).
+///   Like the other spendability checks, the lock check is skipped entirely when `target_height`
+///   is `None`.
 pub(crate) fn get_wallet_transparent_output(
     conn: &rusqlite::Connection,
     outpoint: &OutPoint,
     target_height: Option<TargetHeight>,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // This could return as unspent outputs that are actually not spendable, if they are the
     // outputs of deshielding transactions where the spend anchors have been invalidated by a
@@ -1319,7 +1321,7 @@ pub(crate) fn get_wallet_transparent_output(
                 ":output_index": outpoint.n(),
                 ":target_height": target_height.map(u32::from),
                 ":allow_unspendable": target_height.is_none(),
-                ":include_locked": include_locked,
+                ":include_locked": lock_filter.admits_locked(),
             ],
             |row| to_unspent_transparent_output(conn, row),
         )?
@@ -1402,7 +1404,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // Defer to the batched query with a singleton address set, so that there is a single query
     // body to maintain. `transparent_received_outputs.address` is always equal to the
@@ -1417,7 +1419,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         target_height,
         confirmations_policy,
         output_filter,
-        include_locked,
+        lock_filter,
     )
 }
 
@@ -1441,7 +1443,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     if addresses.is_empty() {
         return Ok(vec![]);
@@ -1474,7 +1476,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
         ":coinbase_filter": coinbase_filter,
-        ":include_locked": include_locked,
+        ":include_locked": lock_filter.admits_locked(),
     ])?;
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
@@ -1533,7 +1535,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     target_value: TargetValue,
     max_inputs: usize,
     fee_rule: &StandardFeeRule,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // The post-fee bound for `TargetValue::AtLeast`. `TargetValue::AllFunds` has no bound; we
     // return every eligible output in that case.
@@ -1578,7 +1580,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
         ":min_confirmations": min_confirmations,
         ":min_value": u64::from(zip317::MARGINAL_FEE),
         ":coinbase_filter": coinbase_filter,
-        ":include_locked": include_locked,
+        ":include_locked": lock_filter.admits_locked(),
         ":has_address_allow_list": address_allow_list.is_some(),
         ":addresses": &addresses_ptr,
     ])?;

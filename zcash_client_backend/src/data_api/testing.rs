@@ -57,7 +57,7 @@ use super::{
     scanning::ScanRange,
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
-        input_selection::{GreedyInputSelector, InputSelector, SpendPolicy},
+        input_selection::{GreedyInputSelector, InputSelector, LockFilter, SpendPolicy},
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
 };
@@ -3028,7 +3028,7 @@ impl InputSource for MockWalletDb {
         _protocol: ShieldedPool,
         _index: u32,
         _target_height: TargetHeight,
-        _include_locked: bool,
+        _lock_filter: LockFilter<'_>,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         Ok(None)
     }
@@ -3041,7 +3041,7 @@ impl InputSource for MockWalletDb {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
-        _include_locked: bool,
+        _lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::empty())
     }
@@ -3052,7 +3052,7 @@ impl InputSource for MockWalletDb {
         _sources: &[ShieldedPool],
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
-        _include_locked: bool,
+        _lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Err(())
     }
@@ -3063,7 +3063,7 @@ impl InputSource for MockWalletDb {
         _selector: &NoteFilter,
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
-        _include_locked: bool,
+        _lock_filter: LockFilter<'_>,
     ) -> Result<AccountMeta, Self::Error> {
         Err(())
     }

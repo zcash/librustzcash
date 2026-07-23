@@ -39,7 +39,10 @@ use crate::{
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, SpendPolicy, TransparentSpendPolicy},
+            input_selection::{
+                GreedyInputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+                TransparentSpendPolicy,
+            },
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
@@ -90,7 +93,7 @@ fn check_balance<DSF>(
                 target_height,
                 confirmations_policy,
                 CoinbaseFilter::AllTransparentOutputs,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap()
             .into_iter()
@@ -158,13 +161,17 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height, false),
+        st.wallet().get_unspent_transparent_output(
+            utxo.outpoint(),
+            target_height,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        ),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
@@ -193,7 +200,7 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
-                false
+                LockFilter::Policy(&LockedInputPolicy::Exclude)
             )
             .as_deref(),
         Ok(&[])
@@ -201,7 +208,11 @@ where
 
     // We can still look up the specific output, and it has the expected height.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height, false),
+        st.wallet().get_unspent_transparent_output(
+            utxo2.outpoint(),
+            target_height,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        ),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
     );
@@ -209,7 +220,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, false)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, LockFilter::Policy(&LockedInputPolicy::Exclude))
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -227,9 +238,9 @@ where
 /// Exercises note locking for transparent outputs.
 ///
 /// A locked UTXO is excluded from single-output retrieval and from spendable-output listing
-/// unless `include_locked` is set, is reported as locked (not spendable) value in the
-/// per-address balances, conflicts with a second lock, and returns to spendability when the
-/// chain tip passes the lock expiry height, with no unlock call.
+/// unless the query passes `LockFilter::Unfiltered`, is reported as locked (not spendable) value
+/// in the per-address balances, conflicts with a second lock, and returns to spendability when
+/// the chain tip passes the lock expiry height, with no unlock call.
 pub fn transparent_note_locking<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
@@ -278,8 +289,11 @@ where
 
     // The output is retrievable and spendable before locking.
     assert_matches!(
-        st.wallet()
-            .get_unspent_transparent_output(&outpoint, target_height, false),
+        st.wallet().get_unspent_transparent_output(
+            &outpoint,
+            target_height,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        ),
         Ok(Some(_))
     );
 
@@ -299,19 +313,25 @@ where
         Err(LockError::LockFailure(r)) if r == output_ref
     );
 
-    // The locked output is excluded from single-output retrieval unless `include_locked`.
+    // The locked output is excluded from single-output retrieval unless the query is unfiltered.
     assert_matches!(
-        st.wallet()
-            .get_unspent_transparent_output(&outpoint, target_height, false),
+        st.wallet().get_unspent_transparent_output(
+            &outpoint,
+            target_height,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        ),
         Ok(None)
     );
     assert_matches!(
-        st.wallet()
-            .get_unspent_transparent_output(&outpoint, target_height, true),
+        st.wallet().get_unspent_transparent_output(
+            &outpoint,
+            target_height,
+            LockFilter::Unfiltered
+        ),
         Ok(Some(_))
     );
 
-    // ... and from the spendable-outputs listing unless `include_locked`.
+    // ... and from the spendable-outputs listing unless the query is unfiltered.
     assert_matches!(
         st.wallet()
             .get_spendable_transparent_outputs(
@@ -319,7 +339,7 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .as_deref(),
         Ok(&[])
@@ -331,7 +351,7 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
-                true,
+                LockFilter::Unfiltered,
             )
             .as_deref(),
         Ok([_])
@@ -360,8 +380,11 @@ where
     st.wallet_mut().update_chain_tip(height + 10).unwrap();
     let expired_target = TargetHeight::from(height + 11);
     assert_matches!(
-        st.wallet()
-            .get_unspent_transparent_output(&outpoint, expired_target, false),
+        st.wallet().get_unspent_transparent_output(
+            &outpoint,
+            expired_target,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        ),
         Ok(Some(_))
     );
     let balances = st
@@ -711,7 +734,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(all.len(), 3);
@@ -730,7 +753,7 @@ where
                     target_height,
                     ConfirmationsPolicy::MIN,
                     CoinbaseFilter::AllTransparentOutputs,
-                    false,
+                    LockFilter::Policy(&LockedInputPolicy::Exclude),
                 )
                 .unwrap(),
         );
@@ -748,7 +771,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(subset.len(), 1);
@@ -762,7 +785,7 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap()
             .is_empty()
@@ -1587,7 +1610,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1934,7 +1957,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -2544,7 +2567,7 @@ where
             TargetValue::AtLeast(payment_amount),
             usize::MAX,
             &StandardFeeRule::Zip317,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .expect("initial gather should succeed");
     let initial_gather_value: Zatoshis = initial_gather
@@ -2858,7 +2881,7 @@ where
             TargetValue::AtLeast(target),
             usize::MAX,
             &StandardFeeRule::Zip317,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .expect("value-bounded gather should succeed");
 
@@ -2907,7 +2930,7 @@ where
             TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
             usize::MAX,
             &StandardFeeRule::Zip317,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .expect("AllFunds gather should succeed");
     assert_eq!(all.len(), n_dust);

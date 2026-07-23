@@ -45,7 +45,8 @@ use crate::{
         },
         wallet::{
             ConfirmationsPolicy, LockRequest, TargetHeight, TransferErrT,
-            decrypt_and_store_transaction, input_selection::GreedyInputSelector,
+            decrypt_and_store_transaction,
+            input_selection::{GreedyInputSelector, LockFilter},
         },
     },
     decrypt_transaction,
@@ -7679,7 +7680,13 @@ pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
     let test_meta = |st: &TestState<TC, Dsf::DataStore, LocalNetwork>, query, expected_count| {
         let metadata = st
             .wallet()
-            .get_account_metadata(account.id(), &query, target_height, &[], true)
+            .get_account_metadata(
+                account.id(),
+                &query,
+                target_height,
+                &[],
+                LockFilter::Unfiltered,
+            )
             .unwrap();
 
         assert_eq!(metadata.note_count(T::SHIELDED_PROTOCOL), expected_count);
@@ -8184,6 +8191,8 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
+    use crate::data_api::wallet::input_selection::LockedInputPolicy;
+
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Get the default transparent address
@@ -8220,7 +8229,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
                 TargetHeight::from(h + i),
                 ConfirmationsPolicy::default(),
                 CoinbaseFilter::AllTransparentOutputs,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap();
         let confirmations = latest_block_height - h;
@@ -8244,7 +8253,7 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::AllTransparentOutputs,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert!(
@@ -8280,6 +8289,7 @@ where
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
+    use crate::data_api::wallet::input_selection::LockedInputPolicy;
     use std::collections::BTreeSet;
 
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
@@ -8334,7 +8344,7 @@ where
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::AllTransparentOutputs,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(
@@ -8360,7 +8370,7 @@ where
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::CoinbaseOnly,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(
@@ -8381,7 +8391,7 @@ where
             target_height,
             ConfirmationsPolicy::default(),
             CoinbaseFilter::NonCoinbaseOnly,
-            false,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(
