@@ -135,6 +135,7 @@ pub mod chain;
 pub mod defaults;
 pub mod error;
 pub mod ll;
+pub mod locking;
 pub mod scanning;
 pub mod wallet;
 
