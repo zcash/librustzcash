@@ -603,17 +603,6 @@ pub enum LockFilter<'a> {
     Unfiltered,
 }
 
-impl LockFilter<'_> {
-    /// Whether any locked output is admitted under this filter (the boolean the current
-    /// selection SQL still keys on; owner-scoping is a later task).
-    pub fn admits_locked(&self) -> bool {
-        match self {
-            LockFilter::Unfiltered => true,
-            LockFilter::Policy(p) => p.admits_locked(),
-        }
-    }
-}
-
 /// The caller's choice of which coinbase transparent outputs a transparent spend may draw upon.
 ///
 /// Consensus requires coinbase funds to be spent to a single shielded output with no change and
