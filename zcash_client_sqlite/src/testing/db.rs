@@ -120,8 +120,7 @@ impl TestDb {
         self.data_file
     }
 
-    /// Returns the path of the backing database file, so that tests can open additional
-    /// independent connections to the same wallet database.
+    #[allow(dead_code)]
     pub(crate) fn data_file_path(&self) -> &std::path::Path {
         self.data_file.path()
     }
