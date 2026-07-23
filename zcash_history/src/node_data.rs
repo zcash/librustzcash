@@ -81,7 +81,7 @@ impl NodeData {
         }
     }
 
-    fn write_compact<W: std::io::Write>(w: &mut W, compact: u64) -> std::io::Result<()> {
+    fn write_compact<W: corez::io::Write>(w: &mut W, compact: u64) -> corez::io::Result<()> {
         match compact {
             0..=0xfc => w.write_all(&[compact as u8])?,
             0xfd..=0xffff => {
@@ -100,7 +100,7 @@ impl NodeData {
         Ok(())
     }
 
-    fn read_compact<R: std::io::Read>(reader: &mut R) -> std::io::Result<u64> {
+    fn read_compact<R: corez::io::Read>(reader: &mut R) -> corez::io::Result<u64> {
         let result = match reader.read_u8()? {
             i @ 0..=0xfc => i.into(),
             0xfd => reader.read_u16::<LittleEndian>()?.into(),
@@ -112,7 +112,7 @@ impl NodeData {
     }
 
     /// Write to the byte representation.
-    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         w.write_all(&self.subtree_commitment)?;
         w.write_u32::<LittleEndian>(self.start_time)?;
         w.write_u32::<LittleEndian>(self.end_time)?;
@@ -135,10 +135,10 @@ impl NodeData {
     ///
     /// # Errors
     ///
-    /// Returns [`std::io::ErrorKind::InvalidData`] if the encoded height range
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if the encoded height range
     /// is descending or contains more blocks than can be represented by a
     /// `u64`.
-    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
         let mut data = NodeData {
             consensus_branch_id,
             ..Default::default()
@@ -163,8 +163,8 @@ impl NodeData {
             .and_then(|height_diff| height_diff.checked_add(1))
             .is_none()
         {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(corez::io::Error::new(
+                corez::io::ErrorKind::InvalidData,
                 "history node height range does not contain a representable number of blocks",
             ));
         }
@@ -182,10 +182,10 @@ impl NodeData {
     ///
     /// # Errors
     ///
-    /// Returns [`std::io::ErrorKind::InvalidData`] if the encoded height range
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if the encoded height range
     /// is descending or contains more blocks than can be represented by a
     /// `u64`.
-    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
+    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
         crate::V1::from_bytes(consensus_branch_id, buf)
     }
 
@@ -220,7 +220,7 @@ impl V2 {
     }
 
     /// Write to the byte representation.
-    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         self.v1.write(w)?;
         w.write_all(&self.start_orchard_root)?;
         w.write_all(&self.end_orchard_root)?;
@@ -229,7 +229,7 @@ impl V2 {
     }
 
     /// Read from the byte representation.
-    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
         let mut data = V2 {
             v1: NodeData::read(consensus_branch_id, r)?,
             ..Default::default()
@@ -279,7 +279,7 @@ impl V3 {
     }
 
     /// Write to the byte representation.
-    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         self.v2.write(w)?;
         w.write_all(&self.start_ironwood_root)?;
         w.write_all(&self.end_ironwood_root)?;
@@ -288,7 +288,7 @@ impl V3 {
     }
 
     /// Read from the byte representation.
-    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
         let mut data = V3 {
             v2: V2::read(consensus_branch_id, r)?,
             ..Default::default()
@@ -472,7 +472,7 @@ mod tests {
             } else {
                 prop_assert_eq!(
                     decoded.unwrap_err().kind(),
-                    std::io::ErrorKind::InvalidData
+                    corez::io::ErrorKind::InvalidData
                 );
             }
         }
@@ -532,7 +532,7 @@ mod tests {
                 Err(error) => error,
             };
 
-            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            assert_eq!(error.kind(), corez::io::ErrorKind::InvalidData);
         }
     }
 

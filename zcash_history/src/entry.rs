@@ -75,7 +75,7 @@ impl<V: Version> Entry<V> {
     }
 
     /// Read from byte representation.
-    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
         let kind = {
             match r.read_u8()? {
                 0 => {
@@ -84,7 +84,7 @@ impl<V: Version> Entry<V> {
                     EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right))
                 }
                 1 => EntryKind::Leaf,
-                _ => return Err(std::io::Error::from(std::io::ErrorKind::InvalidData)),
+                _ => return Err(corez::io::Error::from(corez::io::ErrorKind::InvalidData)),
             }
         };
 
@@ -94,7 +94,7 @@ impl<V: Version> Entry<V> {
     }
 
     /// Write to byte representation.
-    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         match self.kind {
             EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right)) => {
                 w.write_u8(0)?;
@@ -105,7 +105,7 @@ impl<V: Version> Entry<V> {
                 w.write_u8(1)?;
             }
             _ => {
-                return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+                return Err(corez::io::Error::from(corez::io::ErrorKind::InvalidData));
             }
         }
 
@@ -115,8 +115,8 @@ impl<V: Version> Entry<V> {
     }
 
     /// Convert from byte representation.
-    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
-        let mut cursor = std::io::Cursor::new(buf);
+    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
+        let mut cursor = corez::io::Cursor::new(buf);
         Self::read(consensus_branch_id, &mut cursor)
     }
 }

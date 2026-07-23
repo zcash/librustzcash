@@ -17,10 +17,12 @@ proptest.workspace = true
 primitive-types = { version = "0.12", default-features = false }
 byteorder.workspace = true
 blake2b_simd.workspace = true
+corez = { workspace = true, features = ["std"] }
 proptest = { workspace = true, optional = true }
 
 [features]
 test-dependencies = ["dep:proptest"]
+std = ["corez/std"]
 
 [lib]
 bench = false

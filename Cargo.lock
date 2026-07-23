@@ -7259,6 +7259,7 @@ dependencies = [
  "assert_matches",
  "blake2b_simd",
  "byteorder",
+ "corez",
  "primitive-types",
  "proptest",
 ]
