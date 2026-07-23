@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- Invalid history node height ranges are now rejected during deserialization,
+  and leaf ranges starting at block height zero no longer underflow.
+
 ## [0.5.0] - 2026-07-09
 
 ### Changed

@@ -40,8 +40,17 @@ impl<V: Version> Entry<V> {
     }
 
     /// Number of leaves under this node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this entry was constructed with a descending height range or
+    /// a range containing more leaves than can be represented by a `u64`.
+    /// Entries produced by [`Self::read`] are validated against these cases.
     pub fn leaf_count(&self) -> u64 {
-        V::end_height(&self.data) - (V::start_height(&self.data) - 1)
+        V::end_height(&self.data)
+            .checked_sub(V::start_height(&self.data))
+            .and_then(|height_diff| height_diff.checked_add(1))
+            .expect("entry height range must contain a representable number of leaves")
     }
 
     /// Is this node a leaf.

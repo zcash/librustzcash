@@ -132,6 +132,12 @@ impl NodeData {
     }
 
     /// Read from the byte representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::ErrorKind::InvalidData`] if the encoded height range
+    /// is descending or contains more blocks than can be represented by a
+    /// `u64`.
     pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
         let mut data = NodeData {
             consensus_branch_id,
@@ -151,6 +157,17 @@ impl NodeData {
 
         data.start_height = Self::read_compact(r)?;
         data.end_height = Self::read_compact(r)?;
+        if data
+            .end_height
+            .checked_sub(data.start_height)
+            .and_then(|height_diff| height_diff.checked_add(1))
+            .is_none()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "history node height range does not contain a representable number of blocks",
+            ));
+        }
         data.sapling_tx = Self::read_compact(r)?;
 
         Ok(data)
@@ -162,6 +179,12 @@ impl NodeData {
     }
 
     /// Convert from byte representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`std::io::ErrorKind::InvalidData`] if the encoded height range
+    /// is descending or contains more blocks than can be represented by a
+    /// `u64`.
     pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
         crate::V1::from_bytes(consensus_branch_id, buf)
     }
@@ -438,7 +461,78 @@ mod tests {
     proptest! {
         #[test]
         fn serialization_round_trip(node_data in arb_node_data()) {
-            assert_eq!(NodeData::from_bytes(0, node_data.to_bytes()).unwrap(), node_data);
+            let decoded = NodeData::from_bytes(0, node_data.to_bytes());
+            let leaf_count = node_data
+                .end_height
+                .checked_sub(node_data.start_height)
+                .and_then(|height_diff| height_diff.checked_add(1));
+
+            if leaf_count.is_some() {
+                prop_assert_eq!(decoded.unwrap(), node_data);
+            } else {
+                prop_assert_eq!(
+                    decoded.unwrap_err().kind(),
+                    std::io::ErrorKind::InvalidData
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn genesis_height_round_trip() {
+        let node_data = NodeData {
+            start_height: 0,
+            end_height: 0,
+            ..Default::default()
+        };
+        let entry = Entry::<HistoryV1>::new_leaf(node_data);
+        let mut encoded = vec![];
+        entry.write(&mut encoded).unwrap();
+
+        assert_eq!(Entry::<HistoryV1>::from_bytes(0, encoded).unwrap().leaf_count(), 1);
+    }
+
+    #[test]
+    fn zero_start_height_combined_node_round_trip() {
+        // Regtest scenario: Heartwood activates at height 0, so the genesis
+        // leaf has start_height == 0. When two leaves are combined into a
+        // node spanning heights 0..=1, leaf_count() must not underflow.
+        let left = Entry::<HistoryV1>::new_leaf(node_data(0, 0));
+        let right = Entry::<HistoryV1>::new_leaf(node_data(1, 1));
+        let combined = HistoryV1::combine(
+            left.data(),
+            right.data(),
+        );
+        let entry = Entry::<HistoryV1>::new(
+            combined,
+            EntryLink::Stored(0),
+            EntryLink::Stored(1),
+        );
+        let mut encoded = vec![];
+        entry.write(&mut encoded).unwrap();
+
+        let decoded = Entry::<HistoryV1>::from_bytes(0, encoded).unwrap();
+        assert_eq!(decoded.leaf_count(), 2);
+        assert!(decoded.complete());
+    }
+
+    #[test]
+    fn invalid_height_ranges_are_rejected() {
+        for (start_height, end_height) in [(200, 5), (0, u64::MAX)] {
+            let node_data = NodeData {
+                start_height,
+                end_height,
+                ..Default::default()
+            };
+            let entry = Entry::<HistoryV1>::new_leaf(node_data);
+            let mut encoded = vec![];
+            entry.write(&mut encoded).unwrap();
+            let error = match Entry::<HistoryV1>::from_bytes(0, encoded) {
+                Ok(_) => panic!("invalid height range was accepted"),
+                Err(error) => error,
+            };
+
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         }
     }
 
