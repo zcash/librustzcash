@@ -7258,7 +7258,6 @@ version = "0.5.0"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
- "byteorder",
  "corez",
  "primitive-types",
  "proptest",

@@ -1,4 +1,3 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use primitive_types::U256;
 
 use crate::Version;
@@ -84,10 +83,10 @@ impl NodeData {
     /// Write to the byte representation.
     pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         w.write_all(&self.subtree_commitment)?;
-        w.write_u32::<LittleEndian>(self.start_time)?;
-        w.write_u32::<LittleEndian>(self.end_time)?;
-        w.write_u32::<LittleEndian>(self.start_target)?;
-        w.write_u32::<LittleEndian>(self.end_target)?;
+        w.write_all(&self.start_time.to_le_bytes())?;
+        w.write_all(&self.end_time.to_le_bytes())?;
+        w.write_all(&self.start_target.to_le_bytes())?;
+        w.write_all(&self.end_target.to_le_bytes())?;
         w.write_all(&self.start_sapling_root)?;
         w.write_all(&self.end_sapling_root)?;
 
@@ -114,10 +113,15 @@ impl NodeData {
             ..Default::default()
         };
         r.read_exact(&mut data.subtree_commitment)?;
-        data.start_time = r.read_u32::<LittleEndian>()?;
-        data.end_time = r.read_u32::<LittleEndian>()?;
-        data.start_target = r.read_u32::<LittleEndian>()?;
-        data.end_target = r.read_u32::<LittleEndian>()?;
+        let mut buf = [0u8; 4];
+        r.read_exact(&mut buf)?;
+        data.start_time = u32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        data.end_time = u32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        data.start_target = u32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        data.end_target = u32::from_le_bytes(buf);
         r.read_exact(&mut data.start_sapling_root)?;
         r.read_exact(&mut data.end_sapling_root)?;
 

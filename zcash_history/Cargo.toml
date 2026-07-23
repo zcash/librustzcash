@@ -15,7 +15,6 @@ proptest.workspace = true
 
 [dependencies]
 primitive-types = { version = "0.12", default-features = false }
-byteorder.workspace = true
 blake2b_simd.workspace = true
 corez = { workspace = true, features = ["std"] }
 zcash_encoding.workspace = true

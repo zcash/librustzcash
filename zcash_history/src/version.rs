@@ -2,7 +2,6 @@ use std::fmt;
 use corez::io;
 
 use blake2b_simd::Params as Blake2Params;
-use byteorder::{ByteOrder, LittleEndian};
 
 use crate::{MAX_NODE_DATA_SIZE, NodeData, NodeDataV2, NodeDataV3};
 
@@ -21,7 +20,7 @@ fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
 fn personalization(branch_id: u32) -> [u8; 16] {
     let mut result = [0u8; 16];
     result[..12].copy_from_slice(b"ZcashHistory");
-    LittleEndian::write_u32(&mut result[12..], branch_id);
+    result[12..16].copy_from_slice(&branch_id.to_le_bytes());
     result
 }
 

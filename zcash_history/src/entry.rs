@@ -1,5 +1,3 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-
 use crate::{EntryKind, EntryLink, Error, MAX_NODE_DATA_SIZE, Version};
 
 /// Max serialized length of entry data.
@@ -77,10 +75,15 @@ impl<V: Version> Entry<V> {
     /// Read from byte representation.
     pub fn read<R: corez::io::Read>(consensus_branch_id: u32, r: &mut R) -> corez::io::Result<Self> {
         let kind = {
-            match r.read_u8()? {
+            let mut byte = [0u8; 1];
+            r.read_exact(&mut byte)?;
+            match byte[0] {
                 0 => {
-                    let left = r.read_u32::<LittleEndian>()?;
-                    let right = r.read_u32::<LittleEndian>()?;
+                    let mut buf = [0u8; 4];
+                    r.read_exact(&mut buf)?;
+                    let left = u32::from_le_bytes(buf);
+                    r.read_exact(&mut buf)?;
+                    let right = u32::from_le_bytes(buf);
                     EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right))
                 }
                 1 => EntryKind::Leaf,
@@ -97,12 +100,12 @@ impl<V: Version> Entry<V> {
     pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         match self.kind {
             EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right)) => {
-                w.write_u8(0)?;
-                w.write_u32::<LittleEndian>(left)?;
-                w.write_u32::<LittleEndian>(right)?;
+                w.write_all(&[0])?;
+                w.write_all(&left.to_le_bytes())?;
+                w.write_all(&right.to_le_bytes())?;
             }
             EntryKind::Leaf => {
-                w.write_u8(1)?;
+                w.write_all(&[1])?;
             }
             _ => {
                 return Err(corez::io::Error::from(corez::io::ErrorKind::InvalidData));
