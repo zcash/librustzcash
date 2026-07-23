@@ -7262,6 +7262,7 @@ dependencies = [
  "corez",
  "primitive-types",
  "proptest",
+ "zcash_encoding",
 ]
 
 [[package]]

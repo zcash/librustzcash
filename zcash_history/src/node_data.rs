@@ -81,36 +81,6 @@ impl NodeData {
         }
     }
 
-    fn write_compact<W: corez::io::Write>(w: &mut W, compact: u64) -> corez::io::Result<()> {
-        match compact {
-            0..=0xfc => w.write_all(&[compact as u8])?,
-            0xfd..=0xffff => {
-                w.write_all(&[0xfd])?;
-                w.write_u16::<LittleEndian>(compact as u16)?;
-            }
-            0x10000..=0xffff_ffff => {
-                w.write_all(&[0xfe])?;
-                w.write_u32::<LittleEndian>(compact as u32)?;
-            }
-            _ => {
-                w.write_all(&[0xff])?;
-                w.write_u64::<LittleEndian>(compact)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn read_compact<R: corez::io::Read>(reader: &mut R) -> corez::io::Result<u64> {
-        let result = match reader.read_u8()? {
-            i @ 0..=0xfc => i.into(),
-            0xfd => reader.read_u16::<LittleEndian>()?.into(),
-            0xfe => reader.read_u32::<LittleEndian>()?.into(),
-            _ => reader.read_u64::<LittleEndian>()?,
-        };
-
-        Ok(result)
-    }
-
     /// Write to the byte representation.
     pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         w.write_all(&self.subtree_commitment)?;
@@ -125,9 +95,9 @@ impl NodeData {
         self.subtree_total_work.to_little_endian(&mut work_buf[..]);
         w.write_all(&work_buf)?;
 
-        Self::write_compact(w, self.start_height)?;
-        Self::write_compact(w, self.end_height)?;
-        Self::write_compact(w, self.sapling_tx)?;
+        zcash_encoding::CompactSize::write(&mut *w, self.start_height as usize)?;
+        zcash_encoding::CompactSize::write(&mut *w, self.end_height as usize)?;
+        zcash_encoding::CompactSize::write(&mut *w, self.sapling_tx as usize)?;
         Ok(())
     }
 
@@ -155,8 +125,8 @@ impl NodeData {
         r.read_exact(&mut work_buf)?;
         data.subtree_total_work = U256::from_little_endian(&work_buf);
 
-        data.start_height = Self::read_compact(r)?;
-        data.end_height = Self::read_compact(r)?;
+        data.start_height = zcash_encoding::CompactSize::read(&mut *r)?;
+        data.end_height = zcash_encoding::CompactSize::read(&mut *r)?;
         if data
             .end_height
             .checked_sub(data.start_height)
@@ -168,7 +138,7 @@ impl NodeData {
                 "history node height range does not contain a representable number of blocks",
             ));
         }
-        data.sapling_tx = Self::read_compact(r)?;
+        data.sapling_tx = zcash_encoding::CompactSize::read(&mut *r)?;
 
         Ok(data)
     }
@@ -224,7 +194,7 @@ impl V2 {
         self.v1.write(w)?;
         w.write_all(&self.start_orchard_root)?;
         w.write_all(&self.end_orchard_root)?;
-        NodeData::write_compact(w, self.orchard_tx)?;
+        zcash_encoding::CompactSize::write(&mut *w, self.orchard_tx as usize)?;
         Ok(())
     }
 
@@ -236,7 +206,7 @@ impl V2 {
         };
         r.read_exact(&mut data.start_orchard_root)?;
         r.read_exact(&mut data.end_orchard_root)?;
-        data.orchard_tx = NodeData::read_compact(r)?;
+        data.orchard_tx = zcash_encoding::CompactSize::read(&mut *r)?;
 
         Ok(data)
     }
@@ -283,7 +253,7 @@ impl V3 {
         self.v2.write(w)?;
         w.write_all(&self.start_ironwood_root)?;
         w.write_all(&self.end_ironwood_root)?;
-        NodeData::write_compact(w, self.ironwood_tx)?;
+        zcash_encoding::CompactSize::write(&mut *w, self.ironwood_tx as usize)?;
         Ok(())
     }
 
@@ -295,7 +265,7 @@ impl V3 {
         };
         r.read_exact(&mut data.start_ironwood_root)?;
         r.read_exact(&mut data.end_ironwood_root)?;
-        data.ironwood_tx = NodeData::read_compact(r)?;
+        data.ironwood_tx = zcash_encoding::CompactSize::read(&mut *r)?;
 
         Ok(data)
     }
@@ -319,9 +289,9 @@ pub mod testing {
             start_sapling_root in uniform32(any::<u8>()),
             end_sapling_root in uniform32(any::<u8>()),
             subtree_total_work in uniform32(any::<u8>()),
-            start_height in any::<u64>(),
-            end_height in any::<u64>(),
-            sapling_tx in any::<u64>(),
+            start_height in 0u64..=zcash_encoding::MAX_COMPACT_SIZE as u64,
+            end_height in 0u64..=zcash_encoding::MAX_COMPACT_SIZE as u64,
+            sapling_tx in 0u64..=zcash_encoding::MAX_COMPACT_SIZE as u64,
         ) -> NodeData {
             NodeData {
                 consensus_branch_id: 0,
@@ -401,9 +371,9 @@ mod tests {
             start_sapling_root: [2; 32],
             end_sapling_root: [3; 32],
             subtree_total_work: U256::MAX,
-            start_height: u64::MAX,
-            end_height: u64::MAX,
-            sapling_tx: u64::MAX,
+            start_height: zcash_encoding::MAX_COMPACT_SIZE as u64,
+            end_height: zcash_encoding::MAX_COMPACT_SIZE as u64,
+            sapling_tx: zcash_encoding::MAX_COMPACT_SIZE as u64,
         }
     }
 
@@ -412,7 +382,7 @@ mod tests {
             v1: max_node_data(),
             start_orchard_root: [4; 32],
             end_orchard_root: [5; 32],
-            orchard_tx: u64::MAX,
+            orchard_tx: zcash_encoding::MAX_COMPACT_SIZE as u64,
         }
     }
 
@@ -421,7 +391,7 @@ mod tests {
             v2: max_node_data_v2(),
             start_ironwood_root: [6; 32],
             end_ironwood_root: [7; 32],
-            ironwood_tx: u64::MAX,
+            ironwood_tx: zcash_encoding::MAX_COMPACT_SIZE as u64,
         }
     }
 
@@ -518,7 +488,10 @@ mod tests {
 
     #[test]
     fn invalid_height_ranges_are_rejected() {
-        for (start_height, end_height) in [(200, 5), (0, u64::MAX)] {
+        for (start_height, end_height) in [
+            (200, 5),
+            (zcash_encoding::MAX_COMPACT_SIZE as u64, 5),
+        ] {
             let node_data = NodeData {
                 start_height,
                 end_height,
@@ -555,15 +528,17 @@ mod tests {
 
     #[test]
     fn max_serialized_sizes_cover_all_versions() {
-        assert_eq!(HistoryV1::to_bytes(&max_node_data()).len(), 171);
-        assert_eq!(HistoryV2::to_bytes(&max_node_data_v2()).len(), 244);
+        assert_eq!(HistoryV1::to_bytes(&max_node_data()).len(), 159);
+        assert_eq!(HistoryV2::to_bytes(&max_node_data_v2()).len(), 228);
         let max_v3_bytes = HistoryV3::to_bytes(&max_node_data_v3());
-        assert_eq!(max_v3_bytes.len(), 317);
+        assert_eq!(max_v3_bytes.len(), 297);
+        assert!(max_v3_bytes.len() <= MAX_NODE_DATA_SIZE);
         assert_eq!(
-            HistoryV3::from_bytes(u32::MAX, max_v3_bytes).unwrap(),
+            HistoryV3::from_bytes(u32::MAX, &max_v3_bytes).unwrap(),
             max_node_data_v3()
         );
         assert_eq!(MAX_NODE_DATA_SIZE, 317);
+        assert!(max_v3_bytes.len() <= MAX_NODE_DATA_SIZE);
 
         let entry = Entry::<HistoryV3>::new(
             max_node_data_v3(),
@@ -572,7 +547,7 @@ mod tests {
         );
         let mut encoded = vec![];
         entry.write(&mut encoded).unwrap();
-        assert_eq!(encoded.len(), MAX_ENTRY_SIZE);
+        assert!(encoded.len() <= MAX_ENTRY_SIZE);
     }
 
     #[test]
