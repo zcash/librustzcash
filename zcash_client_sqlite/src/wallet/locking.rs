@@ -2,16 +2,16 @@
 //!
 //! This module implements the storage side of the locking contracts defined in
 //! [`zcash_client_backend::data_api::locking`]: the lock-mutation statements
-//! backing [`WalletWrite::lock_outputs`], [`WalletWrite::unlock_output`], and
-//! [`WalletWrite::clear_locked_outputs`], the unlock-on-store path, and the SQL
+//! backing [`OutputLockStore::lock_outputs`], [`OutputLockStore::unlock_output`], and
+//! [`OutputLockStore::clear_locked_outputs`], the unlock-on-store path, and the SQL
 //! fragments through which the spendable-output queries apply a
 //! [`LockFilter`]. See the backend module's documentation for the semantic
 //! invariants (the locked/eligible complement, the acquisition rules, and the
 //! release paths) that these implementations realize.
 //!
-//! [`WalletWrite::lock_outputs`]: zcash_client_backend::data_api::WalletWrite::lock_outputs
-//! [`WalletWrite::unlock_output`]: zcash_client_backend::data_api::WalletWrite::unlock_output
-//! [`WalletWrite::clear_locked_outputs`]: zcash_client_backend::data_api::WalletWrite::clear_locked_outputs
+//! [`OutputLockStore::lock_outputs`]: zcash_client_backend::data_api::OutputLockStore::lock_outputs
+//! [`OutputLockStore::unlock_output`]: zcash_client_backend::data_api::OutputLockStore::unlock_output
+//! [`OutputLockStore::clear_locked_outputs`]: zcash_client_backend::data_api::OutputLockStore::clear_locked_outputs
 
 use std::rc::Rc;
 
@@ -159,10 +159,10 @@ pub(crate) fn unlock_output(
 /// Unlocks every currently-locked output belonging to the given account, across all pools,
 /// regardless of lock expiry height. Returns the total number of outputs unlocked.
 ///
-/// This is the storage-layer implementation of [`WalletWrite::clear_locked_outputs`], and is
+/// This is the storage-layer implementation of [`OutputLockStore::clear_locked_outputs`], and is
 /// intended as a recovery mechanism for callers that have lost track of their in-flight proposals.
 ///
-/// [`WalletWrite::clear_locked_outputs`]: zcash_client_backend::data_api::WalletWrite::clear_locked_outputs
+/// [`OutputLockStore::clear_locked_outputs`]: zcash_client_backend::data_api::OutputLockStore::clear_locked_outputs
 pub(crate) fn clear_locked_outputs(
     conn: &rusqlite::Transaction,
     account: AccountUuid,
@@ -250,7 +250,7 @@ pub(crate) fn is_locked_at(lock_expiry_height: Option<u32>, target_height: Targe
 /// An output is *locked for selection* when its `lock_expiry_height` is set and greater than or
 /// equal to the target height; equivalently, it becomes selectable again once the target height
 /// has advanced strictly beyond its `lock_expiry_height`. This matches the
-/// [`WalletWrite::lock_outputs`] contract, which prevents selection "at any height less than or
+/// [`OutputLockStore::lock_outputs`] contract, which prevents selection "at any height less than or
 /// equal to" the lock expiry height, and is the exact complement of the locked-balance condition
 /// (`lock_expiry_height >= target_height`) used in balance computation.
 ///
@@ -271,7 +271,7 @@ pub(crate) fn is_locked_at(lock_expiry_height: Option<u32>, target_height: Targe
 ///   [`LockFilter::Unfiltered`] neither is referenced by this fragment, and (rusqlite rejecting an
 ///   unused named parameter) `:overridable_owners` must not be bound for its sake.
 ///
-/// [`WalletWrite::lock_outputs`]: zcash_client_backend::data_api::WalletWrite::lock_outputs
+/// [`OutputLockStore::lock_outputs`]: zcash_client_backend::data_api::OutputLockStore::lock_outputs
 /// [`LockedInputPolicy::Exclude`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::Exclude
 pub(crate) fn output_eligible_condition(lock_filter: LockFilter<'_>, tbl: &str) -> String {
     match lock_filter {
@@ -915,7 +915,8 @@ mod tests {
 
         use zcash_client_backend::{
             data_api::{
-                Account as _, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite as _,
+                Account as _, InputSource as _, OutputLockStore as _, WalletRead as _,
+                WalletTest as _,
                 error::LockError,
                 testing::{
                     AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
