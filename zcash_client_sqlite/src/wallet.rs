@@ -2718,10 +2718,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
             let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
 
-            let is_locked = row
-                .get::<_, Option<u32>>("lock_expiry_height")?
-                .iter()
-                .any(|h| *h >= u32::from(target_height));
+            let is_locked = locking::is_locked_at(
+                row.get::<_, Option<u32>>("lock_expiry_height")?,
+                target_height,
+            );
 
             // A stabilized note is unconditionally spendable. Its originating transaction has been
             // confirmed well beyond any reasonable confirmation policy, and its witness data
