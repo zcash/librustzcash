@@ -3649,8 +3649,16 @@ pub trait WalletWrite: WalletRead {
     /// [`ConfirmationsPolicy::trusted`] confirmations even if the output is not wallet-internal.
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error>;
 
-    /// Locks the specified outputs on behalf of `owner`, preventing them from being selected
-    /// for spending at any height less than or equal to the given height.
+    /// Locks the specified outputs on behalf of `owner` so that, by default, they are not
+    /// selected for spending at any height less than or equal to the given height.
+    ///
+    /// Locks are advisory. Input selection excludes locked outputs by default, but a caller may
+    /// deliberately draw on them by supplying an owner-scoped
+    /// [`LockedInputPolicy`](crate::data_api::wallet::input_selection::LockedInputPolicy) (via
+    /// [`SpendPolicy::with_locked_input_policy`](crate::data_api::wallet::input_selection::SpendPolicy::with_locked_input_policy)),
+    /// scoped to the lock owners it names; doing so spends through the lock during selection but
+    /// never releases it. A locked output can be released only via [`Self::unlock_output`] (by its
+    /// owner) or [`Self::clear_locked_outputs`].
     ///
     /// Returns the number of row updates performed on success (equal to the number of provided
     /// references; a duplicated reference is counted per occurrence), or a [`LockError`] on
@@ -3668,8 +3676,8 @@ pub trait WalletWrite: WalletRead {
     /// provided output on success, or fail completely leaving all lock state unmodified if any
     /// of the outputs is actively locked by a different owner.
     ///
-    /// This is the mechanism by which overlapping proposals for the same account are prevented
-    /// from selecting the same inputs. Because note selection and locking cannot be performed as a
+    /// This is the mechanism by which overlapping proposals for the same account avoid selecting
+    /// the same inputs by default. Because note selection and locking cannot be performed as a
     /// single atomic step above the storage layer, two callers may independently select an
     /// overlapping set of outputs before either locks them (a time-of-check/time-of-use race); the
     /// conflict is resolved here, at the storage layer, where the second caller's `lock_outputs`
