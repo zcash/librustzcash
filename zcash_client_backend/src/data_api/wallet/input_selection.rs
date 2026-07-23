@@ -2525,25 +2525,6 @@ mod spend_policy_tests {
         assert!(matches!(policy.source(), TransparentSource::AnyAccountAddr));
     }
 
-    // Each variant's accessors agree with the meaning of the variant: `Exclude` admits no
-    // owners at all, while `PreferUnlocked`/`PreferLocked` admit exactly the given owners and
-    // differ only in whether locked outputs are preferred.
-    #[test]
-    fn locked_input_policy_accessors() {
-        let owner = LockOwner::new([7u8; 32]);
-        let set = BTreeSet::from([owner]);
-        let owners = NonEmptyBTreeSet::from_set(set.clone()).unwrap();
-        assert_eq!(LockedInputPolicy::default(), LockedInputPolicy::Exclude);
-        assert!(LockedInputPolicy::Exclude.overridable_owners().is_empty());
-        assert!(!LockedInputPolicy::Exclude.admits_locked());
-        let pu = LockedInputPolicy::PreferUnlocked(owners.clone());
-        assert!(pu.admits_locked() && !pu.prefers_locked());
-        assert_eq!(pu.overridable_owners(), &set);
-        let pl = LockedInputPolicy::PreferLocked(owners.clone());
-        assert!(pl.admits_locked() && pl.prefers_locked());
-        assert_eq!(pl.overridable_owners(), &set);
-    }
-
     // The default `SpendPolicy` excludes locked inputs, and `with_locked_input_policy` overrides
     // that choice.
     #[test]

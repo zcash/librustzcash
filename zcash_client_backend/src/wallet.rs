@@ -1262,15 +1262,6 @@ mod output_ref_tests {
             prop_assert_ne!(a.cmp(&other_txid), std::cmp::Ordering::Equal);
         }
 
-        /// A txid-derived [`super::LockOwner`] preserves the txid bytes, so two owners
-        /// derived from distinct transactions are distinct (a persisted PCZT re-derives
-        /// exactly its own token after a restart).
-        #[test]
-        fn lock_owner_from_txid_preserves_bytes(txid in any::<[u8; 32]>()) {
-            let owner = super::LockOwner::from(TxId::from_bytes(txid));
-            prop_assert_eq!(*owner.as_bytes(), txid);
-        }
-
         /// Two independently drawn references are equal exactly when all three components
         /// match.
         #[test]

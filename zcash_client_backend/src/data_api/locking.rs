@@ -367,3 +367,43 @@ pub enum LockFilter<'a> {
     /// Ignore lock state entirely; every matching output is eligible.
     Unfiltered,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use proptest::prelude::*;
+
+    use super::{LockOwner, LockedInputPolicy};
+    use crate::data_api::wallet::input_selection::NonEmptyBTreeSet;
+
+    // Each variant's accessors agree with the meaning of the variant: `Exclude` admits no
+    // owners at all, while `PreferUnlocked`/`PreferLocked` admit exactly the given owners and
+    // differ only in whether locked outputs are preferred.
+    #[test]
+    fn locked_input_policy_accessors() {
+        let owner = LockOwner::new([7u8; 32]);
+        let set = BTreeSet::from([owner]);
+        let owners = NonEmptyBTreeSet::from_set(set.clone()).unwrap();
+        assert_eq!(LockedInputPolicy::default(), LockedInputPolicy::Exclude);
+        assert!(LockedInputPolicy::Exclude.overridable_owners().is_empty());
+        assert!(!LockedInputPolicy::Exclude.admits_locked());
+        let pu = LockedInputPolicy::PreferUnlocked(owners.clone());
+        assert!(pu.admits_locked() && !pu.prefers_locked());
+        assert_eq!(pu.overridable_owners(), &set);
+        let pl = LockedInputPolicy::PreferLocked(owners.clone());
+        assert!(pl.admits_locked() && pl.prefers_locked());
+        assert_eq!(pl.overridable_owners(), &set);
+    }
+
+    proptest! {
+        /// A txid-derived [`LockOwner`] preserves the txid bytes, so two owners
+        /// derived from distinct transactions are distinct (a persisted PCZT re-derives
+        /// exactly its own token after a restart).
+        #[test]
+        fn lock_owner_from_txid_preserves_bytes(txid in any::<[u8; 32]>()) {
+            let owner = LockOwner::from(super::TxId::from_bytes(txid));
+            prop_assert_eq!(*owner.as_bytes(), txid);
+        }
+    }
+}
