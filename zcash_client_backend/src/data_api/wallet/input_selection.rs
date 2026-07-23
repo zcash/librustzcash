@@ -19,6 +19,7 @@ use zcash_protocol::{
 };
 use zip321::TransactionRequest;
 
+pub use crate::data_api::locking::{LockFilter, LockedInputPolicy};
 use crate::{
     data_api::{
         InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
@@ -26,7 +27,7 @@ use crate::{
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
     proposal::{Proposal, ProposalError, ShieldedInputs},
-    wallet::{LockOwner, WalletTransparentOutput},
+    wallet::WalletTransparentOutput,
 };
 
 use super::ConfirmationsPolicy;
@@ -544,63 +545,6 @@ impl SpendPolicy {
     pub fn locked_input_policy(&self) -> &LockedInputPolicy {
         &self.locked_input_policy
     }
-}
-
-/// Governs whether input selection may draw on locked outputs, and with what preference.
-///
-/// Locks are advisory. The default, [`Self::Exclude`], never selects a locked output. The
-/// overriding variants each carry the set of lock owners whose locks may be drawn upon; a locked
-/// output whose owner is not in that set is never selected, regardless of variant. This keeps an
-/// override scoped to a known reason (e.g. the wallet's own pool-migration PCZTs) and leaves every
-/// other flow's locks intact. Overriding here only *spends through* a lock during selection; it
-/// never releases the lock.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub enum LockedInputPolicy {
-    /// Never select locked outputs.
-    #[default]
-    Exclude,
-    /// Prefer unlocked outputs; draw on outputs locked by one of these owners only as needed to
-    /// reach the target value.
-    PreferUnlocked(NonEmptyBTreeSet<LockOwner>),
-    /// Prefer outputs locked by one of these owners; draw on unlocked outputs only as needed to
-    /// reach the target value.
-    PreferLocked(NonEmptyBTreeSet<LockOwner>),
-}
-
-impl LockedInputPolicy {
-    /// The set of lock owners whose locked outputs this policy admits (empty for `Exclude`).
-    pub fn overridable_owners(&self) -> &BTreeSet<LockOwner> {
-        static EMPTY: BTreeSet<LockOwner> = BTreeSet::new();
-        match self {
-            LockedInputPolicy::Exclude => &EMPTY,
-            LockedInputPolicy::PreferUnlocked(o) | LockedInputPolicy::PreferLocked(o) => o.as_set(),
-        }
-    }
-
-    /// Whether locked (overridable) outputs are preferred ahead of unlocked ones.
-    pub fn prefers_locked(&self) -> bool {
-        matches!(self, LockedInputPolicy::PreferLocked(_))
-    }
-
-    /// Whether any locked outputs may be selected at all.
-    pub fn admits_locked(&self) -> bool {
-        !matches!(self, LockedInputPolicy::Exclude)
-    }
-}
-
-/// How a query filters candidate outputs by lock state.
-///
-/// Input selection for a proposal passes [`Self::Policy`], carrying the caller's owner-scoped
-/// [`LockedInputPolicy`]. Retrieval/decoding paths that must expose wallet contents regardless of
-/// locks (proposal decoding, low-level and test accessors) pass [`Self::Unfiltered`]. Keeping the
-/// two separate means a `SpendPolicy` can only ever request an owner-scoped override, never an
-/// unscoped "ignore all locks".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LockFilter<'a> {
-    /// Apply the given owner-scoped selection policy.
-    Policy(&'a LockedInputPolicy),
-    /// Ignore lock state entirely; every matching output is eligible.
-    Unfiltered,
 }
 
 /// The caller's choice of which coinbase transparent outputs a transparent spend may draw upon.
@@ -2526,6 +2470,7 @@ mod tests {
 #[cfg(test)]
 mod spend_policy_tests {
     use super::*;
+    use crate::wallet::LockOwner;
 
     // The default spend policy preserves the historical `ShieldedOnly` behavior: notes may be
     // selected from every shielded pool present in the build, and no transparent UTXOs are
@@ -2578,25 +2523,6 @@ mod spend_policy_tests {
         let policy = policy.with_coinbase(CoinbasePolicy::OnlyCoinbase);
         assert_eq!(policy.coinbase(), CoinbasePolicy::OnlyCoinbase);
         assert!(matches!(policy.source(), TransparentSource::AnyAccountAddr));
-    }
-
-    // Each variant's accessors agree with the meaning of the variant: `Exclude` admits no
-    // owners at all, while `PreferUnlocked`/`PreferLocked` admit exactly the given owners and
-    // differ only in whether locked outputs are preferred.
-    #[test]
-    fn locked_input_policy_accessors() {
-        let owner = LockOwner::new([7u8; 32]);
-        let set = BTreeSet::from([owner]);
-        let owners = NonEmptyBTreeSet::from_set(set.clone()).unwrap();
-        assert_eq!(LockedInputPolicy::default(), LockedInputPolicy::Exclude);
-        assert!(LockedInputPolicy::Exclude.overridable_owners().is_empty());
-        assert!(!LockedInputPolicy::Exclude.admits_locked());
-        let pu = LockedInputPolicy::PreferUnlocked(owners.clone());
-        assert!(pu.admits_locked() && !pu.prefers_locked());
-        assert_eq!(pu.overridable_owners(), &set);
-        let pl = LockedInputPolicy::PreferLocked(owners.clone());
-        assert!(pl.admits_locked() && pl.prefers_locked());
-        assert_eq!(pl.overridable_owners(), &set);
     }
 
     // The default `SpendPolicy` excludes locked inputs, and `with_locked_input_policy` overrides

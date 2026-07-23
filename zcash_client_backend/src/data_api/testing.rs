@@ -65,7 +65,7 @@ use super::{
 };
 use crate::{
     data_api::{
-        MaxSpendMode, TargetValue,
+        MaxSpendMode, OutputLockStore, TargetValue,
         error::{LockError, RewindError},
         wallet::TargetHeight,
     },
@@ -988,7 +988,8 @@ where
     ErrT: std::fmt::Debug,
     DbT: InputSource<AccountId = AccountIdT, Error = ErrT>
         + WalletTest
-        + WalletWrite<AccountId = AccountIdT, Error = ErrT>
+        + WalletRead<AccountId = AccountIdT, Error = ErrT>
+        + WalletWrite
         + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
@@ -1520,7 +1521,8 @@ where
     ErrT: std::fmt::Debug,
     DbT: InputSource<AccountId = AccountIdT, Error = ErrT>
         + WalletTest
-        + WalletWrite<AccountId = AccountIdT, Error = ErrT>
+        + WalletRead<AccountId = AccountIdT, Error = ErrT>
+        + WalletWrite
         + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
@@ -3285,106 +3287,9 @@ impl WalletRead for MockWalletDb {
     }
 }
 
-impl WalletWrite for MockWalletDb {
-    type UtxoRef = u32;
-
-    fn create_account(
-        &mut self,
-        _account_name: &str,
-        seed: &SecretVec<u8>,
-        _birthday: &AccountBirthday,
-        _key_source: Option<&str>,
-    ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
-        let account = zip32::AccountId::ZERO;
-        UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
-            .map(|k| (u32::from(account), k))
-            .map_err(|_| ())
-    }
-
-    fn import_account_hd(
-        &mut self,
-        _account_name: &str,
-        _seed: &SecretVec<u8>,
-        _account_index: zip32::AccountId,
-        _birthday: &AccountBirthday,
-        _key_source: Option<&str>,
-    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
-        todo!()
-    }
-
-    fn import_account_ufvk(
-        &mut self,
-        _account_name: &str,
-        _unified_key: &UnifiedFullViewingKey,
-        _birthday: &AccountBirthday,
-        _purpose: AccountPurpose,
-        _key_source: Option<&str>,
-    ) -> Result<Self::Account, Self::Error> {
-        todo!()
-    }
-
-    fn delete_account(&mut self, _account: Self::AccountId) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    #[cfg(feature = "transparent-key-import")]
-    fn import_standalone_transparent_pubkey(
-        &mut self,
-        _account: Self::AccountId,
-        _address: secp256k1::PublicKey,
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    #[cfg(feature = "transparent-key-import")]
-    fn import_standalone_transparent_script(
-        &mut self,
-        _account: Self::AccountId,
-        _script: script::Redeem,
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    fn get_next_available_address(
-        &mut self,
-        _account: Self::AccountId,
-        _request: UnifiedAddressRequest,
-    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
-        Ok(None)
-    }
-
-    fn get_address_for_index(
-        &mut self,
-        _account: Self::AccountId,
-        _diversifier_index: DiversifierIndex,
-        _request: UnifiedAddressRequest,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        Ok(None)
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn put_blocks(
-        &mut self,
-        _from_state: &ChainState,
-        _blocks: Vec<ScannedBlock<Self::AccountId>>,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn update_chain_tip(&mut self, _tip_height: BlockHeight) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn store_decrypted_tx(
-        &mut self,
-        _received_tx: DecryptedTransaction<Transaction, Self::AccountId>,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn set_tx_trust(&mut self, _txid: TxId, _trusted: bool) -> Result<(), Self::Error> {
-        Ok(())
-    }
+impl OutputLockStore for MockWalletDb {
+    type Error = ();
+    type AccountId = u32;
 
     fn lock_outputs(
         &mut self,
@@ -3407,55 +3312,177 @@ impl WalletWrite for MockWalletDb {
         Ok(0)
     }
 
+    fn get_locked_outputs(&self, _account: Self::AccountId) -> Result<Vec<OutputRef>, Self::Error> {
+        Ok(Vec::new())
+    }
+}
+
+impl WalletWrite for MockWalletDb {
+    type UtxoRef = u32;
+
+    fn create_account(
+        &mut self,
+        _account_name: &str,
+        seed: &SecretVec<u8>,
+        _birthday: &AccountBirthday,
+        _key_source: Option<&str>,
+    ) -> Result<(<Self as WalletRead>::AccountId, UnifiedSpendingKey), <Self as WalletRead>::Error>
+    {
+        let account = zip32::AccountId::ZERO;
+        UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
+            .map(|k| (u32::from(account), k))
+            .map_err(|_| ())
+    }
+
+    fn import_account_hd(
+        &mut self,
+        _account_name: &str,
+        _seed: &SecretVec<u8>,
+        _account_index: zip32::AccountId,
+        _birthday: &AccountBirthday,
+        _key_source: Option<&str>,
+    ) -> Result<(Self::Account, UnifiedSpendingKey), <Self as WalletRead>::Error> {
+        todo!()
+    }
+
+    fn import_account_ufvk(
+        &mut self,
+        _account_name: &str,
+        _unified_key: &UnifiedFullViewingKey,
+        _birthday: &AccountBirthday,
+        _purpose: AccountPurpose,
+        _key_source: Option<&str>,
+    ) -> Result<Self::Account, <Self as WalletRead>::Error> {
+        todo!()
+    }
+
+    fn delete_account(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_pubkey(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _address: secp256k1::PublicKey,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        todo!()
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_script(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _script: script::Redeem,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        todo!()
+    }
+
+    fn get_next_available_address(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _request: UnifiedAddressRequest,
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, <Self as WalletRead>::Error> {
+        Ok(None)
+    }
+
+    fn get_address_for_index(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _diversifier_index: DiversifierIndex,
+        _request: UnifiedAddressRequest,
+    ) -> Result<Option<UnifiedAddress>, <Self as WalletRead>::Error> {
+        Ok(None)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn put_blocks(
+        &mut self,
+        _from_state: &ChainState,
+        _blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        Ok(())
+    }
+
+    fn update_chain_tip(
+        &mut self,
+        _tip_height: BlockHeight,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        Ok(())
+    }
+
+    fn store_decrypted_tx(
+        &mut self,
+        _received_tx: DecryptedTransaction<Transaction, <Self as WalletRead>::AccountId>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        Ok(())
+    }
+
+    fn set_tx_trust(
+        &mut self,
+        _txid: TxId,
+        _trusted: bool,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        Ok(())
+    }
+
     fn store_transactions_to_be_sent(
         &mut self,
-        _transactions: &[SentTransaction<Self::AccountId>],
-    ) -> Result<(), Self::Error> {
+        _transactions: &[SentTransaction<<Self as WalletRead>::AccountId>],
+    ) -> Result<(), <Self as WalletRead>::Error> {
         Ok(())
     }
 
     fn truncate_to_height(
         &mut self,
         _block_height: BlockHeight,
-    ) -> Result<BlockHeight, Self::Error> {
+    ) -> Result<BlockHeight, <Self as WalletRead>::Error> {
         Err(())
     }
 
-    fn truncate_to_chain_state(&mut self, _chain_state: ChainState) -> Result<(), Self::Error> {
+    fn truncate_to_chain_state(
+        &mut self,
+        _chain_state: ChainState,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         Err(())
     }
 
     fn rewind_to_chain_state(
         &mut self,
         _chain_state: ChainState,
-        _reset_account_birthdays: HashSet<Self::AccountId>,
-    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        _reset_account_birthdays: HashSet<<Self as WalletRead>::AccountId>,
+    ) -> Result<(), RewindError<<Self as WalletRead>::AccountId, <Self as WalletRead>::Error>> {
         Err(RewindError::DataSource(()))
     }
 
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput<Self::AccountId>,
-    ) -> Result<Self::UtxoRef, Self::Error> {
+        _output: &WalletTransparentOutput<<Self as WalletRead>::AccountId>,
+    ) -> Result<Self::UtxoRef, <Self as WalletRead>::Error> {
         Ok(0)
     }
 
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
-        _account_id: Self::AccountId,
+        _account_id: <Self as WalletRead>::AccountId,
         _n: usize,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
         Err(())
     }
 
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_internal_addresses(
         &mut self,
-        _account_id: Self::AccountId,
+        _account_id: <Self as WalletRead>::AccountId,
         _n: usize,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
         Err(())
     }
 
@@ -3463,7 +3490,7 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _txid: TxId,
         _status: TransactionStatus,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         Ok(())
     }
 
@@ -3472,7 +3499,7 @@ impl WalletWrite for MockWalletDb {
         &mut self,
         _request: TransactionsInvolvingAddress,
         _as_of_height: BlockHeight,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         Ok(())
     }
 }

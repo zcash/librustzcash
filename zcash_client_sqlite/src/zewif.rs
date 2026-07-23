@@ -65,7 +65,8 @@ use rand::RngCore;
 use secrecy::{ExposeSecret, SecretVec};
 use zcash_client_backend::data_api::wallet::decrypt_and_store_transaction;
 use zcash_client_backend::data_api::{
-    Account as _, AccountBirthday, AccountPurpose, WalletWrite, Zip32Derivation, chain::ChainState,
+    Account as _, AccountBirthday, AccountPurpose, WalletRead, WalletWrite, Zip32Derivation,
+    chain::ChainState,
 };
 use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
 use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
@@ -1023,7 +1024,7 @@ fn register_transparent_keys<DbT, P, S>(
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
+    DbT: WalletRead<AccountId = AccountUuid, Error = SqliteClientError> + WalletWrite,
     P: consensus::Parameters,
     S: std::error::Error,
 {
@@ -1103,7 +1104,7 @@ fn exposed_receivers<DbT, S>(
     accounts: &std::collections::HashSet<AccountUuid>,
 ) -> Result<std::collections::HashSet<TransparentAddress>, ZewifImportError<S>>
 where
-    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
+    DbT: WalletRead<AccountId = AccountUuid, Error = SqliteClientError> + WalletWrite,
     S: std::error::Error,
 {
     let mut exposed = std::collections::HashSet::new();
@@ -1159,7 +1160,7 @@ fn mark_addresses_exposed<DbT, P, S>(
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
+    DbT: WalletRead<AccountId = AccountUuid, Error = SqliteClientError> + WalletWrite,
     P: consensus::Parameters,
     S: std::error::Error,
 {
@@ -1300,7 +1301,7 @@ fn import_transactions<DbT, P, S>(
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
+    DbT: WalletRead<AccountId = AccountUuid, Error = SqliteClientError> + WalletWrite,
     P: consensus::Parameters,
     S: std::error::Error,
 {
@@ -1399,7 +1400,7 @@ fn import_account<DbT, P, S>(
     report: &mut ZewifImportReport,
 ) -> Result<(), ZewifImportError<S>>
 where
-    DbT: WalletWrite<AccountId = AccountUuid, Error = SqliteClientError>,
+    DbT: WalletRead<AccountId = AccountUuid, Error = SqliteClientError> + WalletWrite,
     P: consensus::Parameters,
     S: std::error::Error,
 {

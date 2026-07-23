@@ -58,9 +58,9 @@ use zcash_client_backend::{
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
         BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock,
-        SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
         ll::{
@@ -1347,13 +1347,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTest
     for WalletDb<C, P, CL, R>
 {
-    fn get_locked_outputs(
-        &self,
-        account: <Self as WalletRead>::AccountId,
-    ) -> Result<Vec<OutputRef>, <Self as WalletRead>::Error> {
-        wallet::get_locked_outputs(self.conn.borrow(), account)
-    }
-
     fn get_tx_history(
         &self,
     ) -> Result<Vec<TransactionSummary<<Self as WalletRead>::AccountId>>, <Self as WalletRead>::Error>
@@ -1560,6 +1553,37 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
 }
 
 impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: RngCore>
+    OutputLockStore for WalletDb<C, P, CL, R>
+{
+    type Error = SqliteClientError;
+    type AccountId = AccountUuid;
+
+    fn lock_outputs(
+        &mut self,
+        outputs: &[OutputRef],
+        owner: LockOwner,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        Ok(self.transactionally(|wdb| {
+            wallet::locking::lock_outputs(wdb.conn.0, outputs, owner, lock_expiry_height)
+        })?)
+    }
+
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
+        self.transactionally(|wdb| wallet::locking::unlock_output(wdb.conn.0, output, owner))
+    }
+
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
+        self.transactionally(|wdb| wallet::locking::clear_locked_outputs(wdb.conn.0, account))
+    }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_locked_outputs(&self, account: Self::AccountId) -> Result<Vec<OutputRef>, Self::Error> {
+        wallet::locking::get_locked_outputs(self.conn.borrow(), account)
+    }
+}
+
+impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: RngCore>
     WalletWrite for WalletDb<C, P, CL, R>
 {
     type UtxoRef = UtxoId;
@@ -1570,7 +1594,8 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
         key_source: Option<&str>,
-    ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
+    ) -> Result<(<Self as WalletRead>::AccountId, UnifiedSpendingKey), <Self as WalletRead>::Error>
+    {
         self.borrow_mut()
             .transactionally(|wdb| wdb.create_account(account_name, seed, birthday, key_source))
     }
@@ -1582,7 +1607,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         account_index: zip32::AccountId,
         birthday: &AccountBirthday,
         key_source: Option<&str>,
-    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+    ) -> Result<(Self::Account, UnifiedSpendingKey), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| {
             wdb.import_account_hd(account_name, seed, account_index, birthday, key_source)
         })
@@ -1595,61 +1620,67 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
         key_source: Option<&str>,
-    ) -> Result<Self::Account, Self::Error> {
+    ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         self.transactionally(|wdb| {
             wdb.import_account_ufvk(account_name, ufvk, birthday, purpose, key_source)
         })
     }
 
-    fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
+    fn delete_account(
+        &mut self,
+        account_uuid: <Self as WalletRead>::AccountId,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.delete_account(account_uuid))
     }
 
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.import_standalone_transparent_pubkey(account, pubkey))
     }
 
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkeys(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.import_standalone_transparent_pubkeys(account, pubkeys))
     }
 
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_script(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         script: zcash_script::script::Redeem,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.import_standalone_transparent_script(account, script))
     }
 
     fn get_next_available_address(
         &mut self,
-        account_uuid: Self::AccountId,
+        account_uuid: <Self as WalletRead>::AccountId,
         request: UnifiedAddressRequest,
-    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.get_next_available_address(account_uuid, request))
     }
 
     fn get_address_for_index(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         diversifier_index: DiversifierIndex,
         request: UnifiedAddressRequest,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+    ) -> Result<Option<UnifiedAddress>, <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.get_address_for_index(account, diversifier_index, request))
     }
 
-    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+    fn update_chain_tip(
+        &mut self,
+        tip_height: BlockHeight,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.update_chain_tip(tip_height))
     }
 
@@ -1658,15 +1689,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     fn put_blocks(
         &mut self,
         from_state: &ChainState,
-        blocks: Vec<ScannedBlock<Self::AccountId>>,
-    ) -> Result<(), Self::Error> {
+        blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.put_blocks(from_state, blocks))
     }
 
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput<Self::AccountId>,
-    ) -> Result<Self::UtxoRef, Self::Error> {
+        _output: &WalletTransparentOutput<<Self as WalletRead>::AccountId>,
+    ) -> Result<Self::UtxoRef, <Self as WalletRead>::Error> {
         #[cfg(feature = "transparent-inputs")]
         return self.transactionally(|wdb| wdb.put_received_transparent_utxo(_output));
 
@@ -1678,54 +1709,45 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: DecryptedTransaction<Transaction, Self::AccountId>,
-    ) -> Result<(), Self::Error> {
+        d_tx: DecryptedTransaction<Transaction, <Self as WalletRead>::AccountId>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.store_decrypted_tx(d_tx))
     }
 
-    fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| wdb.set_tx_trust(txid, trusted))
-    }
-
-    fn lock_outputs(
+    fn set_tx_trust(
         &mut self,
-        outputs: &[OutputRef],
-        owner: LockOwner,
-        lock_expiry_height: BlockHeight,
-    ) -> Result<usize, LockError<Self::Error>> {
-        Ok(self.transactionally(|wdb| {
-            wallet::lock_outputs(wdb.conn.0, outputs, owner, lock_expiry_height)
-        })?)
-    }
-
-    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
-        self.transactionally(|wdb| wallet::unlock_output(wdb.conn.0, output, owner))
-    }
-
-    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
-        self.transactionally(|wdb| wallet::clear_locked_outputs(wdb.conn.0, account))
+        txid: TxId,
+        trusted: bool,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.set_tx_trust(txid, trusted))
     }
 
     fn store_transactions_to_be_sent(
         &mut self,
-        transactions: &[SentTransaction<Self::AccountId>],
-    ) -> Result<(), Self::Error> {
+        transactions: &[SentTransaction<<Self as WalletRead>::AccountId>],
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.store_transactions_to_be_sent(transactions))
     }
 
-    fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+    fn truncate_to_height(
+        &mut self,
+        max_height: BlockHeight,
+    ) -> Result<BlockHeight, <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.truncate_to_height(max_height))
     }
 
-    fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error> {
+    fn truncate_to_chain_state(
+        &mut self,
+        chain_state: ChainState,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.truncate_to_chain_state(chain_state))
     }
 
     fn rewind_to_chain_state(
         &mut self,
         chain_state: ChainState,
-        reset_account_birthdays: HashSet<Self::AccountId>,
-    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        reset_account_birthdays: HashSet<<Self as WalletRead>::AccountId>,
+    ) -> Result<(), RewindError<<Self as WalletRead>::AccountId, <Self as WalletRead>::Error>> {
         let tx = self
             .conn
             .borrow_mut()
@@ -1749,18 +1771,20 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
-        account_id: Self::AccountId,
+        account_id: <Self as WalletRead>::AccountId,
         n: usize,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
         self.transactionally(|wdb| wdb.reserve_next_n_ephemeral_addresses(account_id, n))
     }
 
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_internal_addresses(
         &mut self,
-        account_id: Self::AccountId,
+        account_id: <Self as WalletRead>::AccountId,
         n: usize,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
         self.transactionally(|wdb| wdb.reserve_next_n_internal_addresses(account_id, n))
     }
 
@@ -1768,7 +1792,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         txid: TxId,
         status: data_api::TransactionStatus,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| WalletWrite::set_transaction_status(wdb, txid, status))
     }
 
@@ -1777,7 +1801,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         address: &TransparentAddress,
         offset_seconds: u32,
-    ) -> Result<Option<SystemTime>, Self::Error> {
+    ) -> Result<Option<SystemTime>, <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.schedule_next_check(address, offset_seconds))
     }
 
@@ -1785,7 +1809,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     fn mark_transparent_addresses_exposed(
         &mut self,
         exposures: &[(TransparentAddress, BlockHeight)],
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.mark_transparent_addresses_exposed(exposures))
     }
 
@@ -1794,7 +1818,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         request: TransactionsInvolvingAddress,
         as_of_height: BlockHeight,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.notify_address_checked(request, as_of_height))
     }
 
@@ -1803,13 +1827,53 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         &mut self,
         outpoint: OutPoint,
         as_of_height: BlockHeight,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         self.transactionally(|wdb| wdb.notify_output_verified_unspent(outpoint, as_of_height))
     }
 }
 
 /// This impl block is only usable when you already have an [`SqlTransaction`], meaning
 /// you are inside a [`WalletDb::transactionally`] block with a lock on the database.
+impl<P: consensus::Parameters, CL: Clock, R: RngCore> OutputLockStore
+    for WalletDb<SqlTransaction<'_>, P, CL, R>
+{
+    type Error = SqliteClientError;
+    type AccountId = AccountUuid;
+
+    fn lock_outputs(
+        &mut self,
+        outputs: &[OutputRef],
+        owner: LockOwner,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        // This impl operates within an enclosing database transaction, so the
+        // all-or-nothing contract of `OutputLockStore::lock_outputs` holds only if a
+        // returned error causes the enclosing transaction to be rolled back: on a
+        // mid-batch `LockFailure`, locks taken for earlier outputs in the batch
+        // remain pending in the transaction. `WalletDb::transactionally` (used by
+        // the non-transactional impl above) provides that rollback.
+        Ok(wallet::locking::lock_outputs(
+            self.conn.0,
+            outputs,
+            owner,
+            lock_expiry_height,
+        )?)
+    }
+
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
+        wallet::locking::unlock_output(self.conn.0, output, owner)
+    }
+
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
+        wallet::locking::clear_locked_outputs(self.conn.0, account)
+    }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    fn get_locked_outputs(&self, account: Self::AccountId) -> Result<Vec<OutputRef>, Self::Error> {
+        wallet::locking::get_locked_outputs(self.conn.0, account)
+    }
+}
+
 impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     for WalletDb<SqlTransaction<'_>, P, CL, R>
 {
@@ -1821,7 +1885,8 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         seed: &SecretVec<u8>,
         birthday: &AccountBirthday,
         key_source: Option<&str>,
-    ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
+    ) -> Result<(<Self as WalletRead>::AccountId, UnifiedSpendingKey), <Self as WalletRead>::Error>
+    {
         let seed_fingerprint =
             SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
                 SqliteClientError::BadAccountData(
@@ -1870,7 +1935,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         account_index: zip32::AccountId,
         birthday: &AccountBirthday,
         key_source: Option<&str>,
-    ) -> Result<(Self::Account, UnifiedSpendingKey), Self::Error> {
+    ) -> Result<(Self::Account, UnifiedSpendingKey), <Self as WalletRead>::Error> {
         let seed_fingerprint =
             SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
                 SqliteClientError::BadAccountData(
@@ -1911,7 +1976,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         birthday: &AccountBirthday,
         purpose: AccountPurpose,
         key_source: Option<&str>,
-    ) -> Result<Self::Account, Self::Error> {
+    ) -> Result<Self::Account, <Self as WalletRead>::Error> {
         wallet::add_account(
             self.conn.0,
             &self.params,
@@ -1927,16 +1992,19 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         )
     }
 
-    fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
+    fn delete_account(
+        &mut self,
+        account_uuid: <Self as WalletRead>::AccountId,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::delete_account(self.conn.0, account_uuid)
     }
 
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         pubkey: secp256k1::PublicKey,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::import_standalone_transparent_pubkey(self.conn.0, &self.params, account, pubkey)
             .map(|_inserted| ())
     }
@@ -1944,9 +2012,9 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkeys(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         pubkeys: &[secp256k1::PublicKey],
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::import_standalone_transparent_pubkeys(self.conn.0, &self.params, account, pubkeys)
             .map(|_inserted| ())
     }
@@ -1954,17 +2022,17 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_script(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         script: zcash_script::script::Redeem,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::import_standalone_transparent_script(self.conn.0, &self.params, account, script)
     }
 
     fn get_next_available_address(
         &mut self,
-        account_uuid: Self::AccountId,
+        account_uuid: <Self as WalletRead>::AccountId,
         request: UnifiedAddressRequest,
-    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, Self::Error> {
+    ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, <Self as WalletRead>::Error> {
         wallet::get_next_available_address(
             self.conn.0,
             &self.params,
@@ -1978,10 +2046,10 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn get_address_for_index(
         &mut self,
-        account: Self::AccountId,
+        account: <Self as WalletRead>::AccountId,
         diversifier_index: DiversifierIndex,
         request: UnifiedAddressRequest,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+    ) -> Result<Option<UnifiedAddress>, <Self as WalletRead>::Error> {
         if let Some(account) = self.get_account(account)? {
             use zcash_keys::keys::AddressGenerationError::*;
 
@@ -2010,7 +2078,10 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         }
     }
 
-    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+    fn update_chain_tip(
+        &mut self,
+        tip_height: BlockHeight,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::scanning::update_chain_tip(self.conn.0, &self.params, tip_height)?;
         Ok(())
     }
@@ -2019,8 +2090,8 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     fn put_blocks(
         &mut self,
         from_state: &ChainState,
-        blocks: Vec<ScannedBlock<Self::AccountId>>,
-    ) -> Result<(), Self::Error> {
+        blocks: Vec<ScannedBlock<<Self as WalletRead>::AccountId>>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
         // retention interval are retained as durable anchors. The activation height is `None`
         // (and so anchor retention is inactive) on networks that do not yet have an assigned
@@ -2042,8 +2113,8 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn put_received_transparent_utxo(
         &mut self,
-        _output: &WalletTransparentOutput<Self::AccountId>,
-    ) -> Result<Self::UtxoRef, Self::Error> {
+        _output: &WalletTransparentOutput<<Self as WalletRead>::AccountId>,
+    ) -> Result<Self::UtxoRef, <Self as WalletRead>::Error> {
         #[cfg(feature = "transparent-inputs")]
         return {
             let (account_id, _, key_scope, utxo_id) =
@@ -2078,8 +2149,8 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: DecryptedTransaction<Transaction, Self::AccountId>,
-    ) -> Result<(), Self::Error> {
+        d_tx: DecryptedTransaction<Transaction, <Self as WalletRead>::AccountId>,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         let chain_tip = wallet::chain_tip_height(self.conn.borrow())?
             .ok_or(SqliteClientError::ChainHeightUnknown)?;
         store_decrypted_tx(
@@ -2092,42 +2163,18 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         )
     }
 
-    fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error> {
-        wallet::set_tx_trust(self.conn.0, txid, trusted)
-    }
-
-    fn lock_outputs(
+    fn set_tx_trust(
         &mut self,
-        outputs: &[OutputRef],
-        owner: LockOwner,
-        lock_expiry_height: BlockHeight,
-    ) -> Result<usize, LockError<Self::Error>> {
-        // This impl operates within an enclosing database transaction, so the
-        // all-or-nothing contract of `WalletWrite::lock_outputs` holds only if a
-        // returned error causes the enclosing transaction to be rolled back: on a
-        // mid-batch `LockFailure`, locks taken for earlier outputs in the batch
-        // remain pending in the transaction. `WalletDb::transactionally` (used by
-        // the non-transactional impl above) provides that rollback.
-        Ok(wallet::lock_outputs(
-            self.conn.0,
-            outputs,
-            owner,
-            lock_expiry_height,
-        )?)
-    }
-
-    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
-        wallet::unlock_output(self.conn.0, output, owner)
-    }
-
-    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
-        wallet::clear_locked_outputs(self.conn.0, account)
+        txid: TxId,
+        trusted: bool,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::set_tx_trust(self.conn.0, txid, trusted)
     }
 
     fn store_transactions_to_be_sent(
         &mut self,
-        transactions: &[SentTransaction<Self::AccountId>],
-    ) -> Result<(), Self::Error> {
+        transactions: &[SentTransaction<<Self as WalletRead>::AccountId>],
+    ) -> Result<(), <Self as WalletRead>::Error> {
         for sent_tx in transactions {
             wallet::store_transaction_to_be_sent(
                 self.conn.0,
@@ -2140,7 +2187,10 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         Ok(())
     }
 
-    fn truncate_to_height(&mut self, max_height: BlockHeight) -> Result<BlockHeight, Self::Error> {
+    fn truncate_to_height(
+        &mut self,
+        max_height: BlockHeight,
+    ) -> Result<BlockHeight, <Self as WalletRead>::Error> {
         wallet::truncate_to_height(
             self.conn.0,
             &self.params,
@@ -2150,15 +2200,18 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         )
     }
 
-    fn truncate_to_chain_state(&mut self, chain_state: ChainState) -> Result<(), Self::Error> {
+    fn truncate_to_chain_state(
+        &mut self,
+        chain_state: ChainState,
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::truncate_to_chain_state(self, chain_state)
     }
 
     fn rewind_to_chain_state(
         &mut self,
         chain_state: ChainState,
-        reset_account_birthdays: HashSet<Self::AccountId>,
-    ) -> Result<(), RewindError<Self::AccountId, Self::Error>> {
+        reset_account_birthdays: HashSet<<Self as WalletRead>::AccountId>,
+    ) -> Result<(), RewindError<<Self as WalletRead>::AccountId, <Self as WalletRead>::Error>> {
         wallet::rewind_to_chain_state(
             self.conn.0,
             &self.params,
@@ -2172,9 +2225,10 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_ephemeral_addresses(
         &mut self,
-        account_id: Self::AccountId,
+        account_id: <Self as WalletRead>::AccountId,
         n: usize,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
         let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
         let reserved = wallet::transparent::reserve_next_n_addresses(
             self.conn.0,
@@ -2191,9 +2245,10 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     #[cfg(feature = "transparent-inputs")]
     fn reserve_next_n_internal_addresses(
         &mut self,
-        account_id: Self::AccountId,
+        account_id: <Self as WalletRead>::AccountId,
         n: usize,
-    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, Self::Error> {
+    ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, <Self as WalletRead>::Error>
+    {
         let account_id = wallet::get_account_ref(self.conn.0, account_id)?;
         let reserved = wallet::transparent::reserve_next_n_addresses(
             self.conn.0,
@@ -2211,7 +2266,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         txid: TxId,
         status: data_api::TransactionStatus,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::set_transaction_status(
             self.conn.0,
             &self.params,
@@ -2227,7 +2282,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         address: &TransparentAddress,
         offset_seconds: u32,
-    ) -> Result<Option<SystemTime>, Self::Error> {
+    ) -> Result<Option<SystemTime>, <Self as WalletRead>::Error> {
         wallet::transparent::schedule_next_check(
             self.conn.0,
             &self.params,
@@ -2242,7 +2297,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     fn mark_transparent_addresses_exposed(
         &mut self,
         exposures: &[(TransparentAddress, BlockHeight)],
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::transparent::mark_transparent_addresses_exposed(
             self.conn.0,
             &self.params,
@@ -2255,7 +2310,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         request: TransactionsInvolvingAddress,
         as_of_height: BlockHeight,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         if let Some(requested_end) = request.block_range_end() {
             // block_end_height is end-exclusive
             if as_of_height != requested_end - 1 {
@@ -2279,7 +2334,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         outpoint: OutPoint,
         as_of_height: BlockHeight,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::transparent::update_observed_unspent_height_for_outpoint(
             self.conn.0,
             &outpoint,

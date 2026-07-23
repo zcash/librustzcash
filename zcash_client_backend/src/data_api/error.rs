@@ -15,7 +15,6 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::wallet::OutputRef;
 use crate::{
     data_api::wallet::input_selection::InputSelectorError, fees::ChangeError,
     proposal::ProposalError, wallet::NoteId,
@@ -556,34 +555,4 @@ impl<E: error::Error + 'static> error::Error for FindAccountForAddressError<E> {
     }
 }
 
-/// Errors that occur when attempting to lock an output.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LockError<S> {
-    /// Wrapper for storage errors.
-    Storage(S),
-    /// The wrapped output reference was not found, or the output it refers to was already locked.
-    LockFailure(OutputRef),
-}
-
-impl<S: Display> Display for LockError<S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LockError::Storage(e) => write!(f, "Note locking failed: {e}"),
-            LockError::LockFailure(output) => {
-                write!(
-                    f,
-                    "Lock conflict or missing output for reference {output:?}"
-                )
-            }
-        }
-    }
-}
-
-impl<S: error::Error + 'static> error::Error for LockError<S> {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match self {
-            LockError::Storage(e) => Some(e),
-            LockError::LockFailure(_) => None,
-        }
-    }
-}
+pub use super::locking::LockError;
