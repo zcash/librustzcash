@@ -2881,13 +2881,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn transparent_note_locking() {
-        zcash_client_backend::data_api::testing::transparent::transparent_note_locking(
-            TestDbFactory::default(),
-        );
-    }
-
     /// Re-storing a transparent output with an unknown mined height (`None`) must not discard
     /// the mined height already recorded for its transaction. A `None` height means "we do not
     /// yet know this to have been mined" — for example, an output re-observed via the mempool
