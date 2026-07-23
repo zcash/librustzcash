@@ -33,8 +33,10 @@ impl super::Bundle {
                             } else {
                                 // P2PKH scriptSig
                                 input.script_sig = Some(script::Component(vec![
-                                    pv::push_value(sig_bytes).expect("short enough"),
-                                    pv::push_value(pubkey).expect("short enough"),
+                                    pv::push_value(sig_bytes)
+                                        .ok_or(SpendFinalizerError::InvalidSignature)?,
+                                    pv::push_value(pubkey)
+                                        .ok_or(SpendFinalizerError::InvalidSignature)?,
                                 ]));
                                 Ok(())
                             }
@@ -144,4 +146,88 @@ pub enum SpendFinalizerError {
     UnsupportedScriptPubkey,
     /// The `redeem_script` kind is unsupported.
     UnsupportedRedeemScript,
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::BTreeMap;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use super::SpendFinalizerError;
+    use crate::pczt::{Bundle, Input};
+
+    fn p2pkh_script_pubkey_bytes(pubkey_hash: [u8; 20]) -> Vec<u8> {
+        // OP_DUP OP_HASH160 OP_PUSH_20 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+        let mut bytes = vec![0x76u8, 0xa9, 0x14];
+        bytes.extend_from_slice(&pubkey_hash);
+        bytes.push(0x88);
+        bytes.push(0xac);
+        bytes
+    }
+
+    /// Regression test: the P2PKH branch of `Bundle::finalize_spends` returns
+    /// `Err(InvalidSignature)` on an oversize `partial_signatures` entry,
+    /// because `pv::push_value(sig_bytes)` returns `None` for input larger than
+    /// `LargeValue::MAX_SIZE` (= 520 bytes) and the branch uses
+    /// `.ok_or(InvalidSignature)?` to surface the failure. The companion P2MS
+    /// branch in the same function handles the identical fallibility the same
+    /// way.
+    ///
+    /// Reachable from: serde wire (`pczt/src/transparent.rs`) →
+    /// `Input::parse` (no length check on `partial_signatures` entries) →
+    /// `SpendFinalizer::finalize_spends`.
+    #[test]
+    fn p2pkh_finalize_spends_rejects_oversize_signature() {
+        // Construct an arbitrary 33-byte value to use as the BTreeMap key. It
+        // need not be a valid secp256k1 point — the P2PKH branch only checks
+        // that hash160(pubkey) matches the script_pubkey hash, which we
+        // control on both sides.
+        let mut pubkey = [0u8; 33];
+        pubkey[0] = 0x02;
+        for (i, b) in pubkey.iter_mut().enumerate().skip(1) {
+            *b = i as u8;
+        }
+        let pubkey_hash = crate::util::hash160::hash(&pubkey);
+        let script_pubkey_bytes = p2pkh_script_pubkey_bytes(pubkey_hash);
+
+        // 521-byte signature: just one byte over LargeValue::MAX_SIZE (= 520).
+        // Any value > 520 triggers the InvalidSignature error.
+        let mut partial_signatures: BTreeMap<[u8; 33], Vec<u8>> = BTreeMap::new();
+        partial_signatures.insert(pubkey, vec![0x42u8; 521]);
+
+        let input = Input::parse(
+            [0u8; 32],           // prevout_txid
+            0,                   // prevout_index
+            None,                // sequence
+            None,                // required_time_lock_time
+            None,                // required_height_lock_time
+            None,                // script_sig
+            1_000,               // value
+            script_pubkey_bytes, // script_pubkey
+            None,                // redeem_script
+            partial_signatures,
+            0x01, // sighash_type = SIGHASH_ALL
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
+        .expect("input parse should succeed");
+
+        let mut bundle = Bundle {
+            inputs: vec![input],
+            outputs: vec![],
+        };
+
+        // Should return Err(InvalidSignature) from the P2PKH branch at
+        // `pv::push_value(sig_bytes).ok_or(InvalidSignature)?`.
+        let result = bundle.finalize_spends();
+        assert!(
+            matches!(result, Err(SpendFinalizerError::InvalidSignature)),
+            "expected Err(InvalidSignature), got {result:?}",
+        );
+    }
 }
