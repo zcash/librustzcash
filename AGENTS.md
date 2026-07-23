@@ -510,6 +510,12 @@ New features and non-fix changes should branch from `main`.
   provide **only** the information needed for end users to adapt to API changes, and
   **never** describe implementation details or contracts that are not visible to
   a user of the public API.
+- **Never modify a CHANGELOG entry under an already-published version heading**
+  (a released `## [x.y.z] - DATE` section). Those entries are the historical
+  record of what that release shipped; they must not be altered, even to add a
+  clarification, note a later re-export, or fix a detail. Anything a user needs
+  to adapt to a new change belongs in the `## [Unreleased]` section, never
+  edited into a past release.
 - Commits must be discrete semantic changes — no WIP commits in final PR history.
 - Each commit that alters public API must also update docs and changelog in the same commit.
 - Use `git revise` to maintain clean history within a PR.
