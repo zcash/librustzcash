@@ -4132,6 +4132,140 @@ pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
     assert_eq!(st.get_locked_balance(account_id), Zatoshis::ZERO);
 }
 
+/// Verifies that `SpendPolicy::with_locked_input_policy` actually reaches note selection in
+/// `GreedyInputSelector::propose_transaction`, end to end.
+///
+/// With the default policy (`LockedInputPolicy::Exclude`), a proposal that needs more than the
+/// unlocked balance fails with `InsufficientFunds`, even though a locked note could cover it.
+/// With `LockedInputPolicy::PreferUnlocked` naming the lock's owner, the same proposal succeeds
+/// and its selected inputs include the note that owner locked. A note locked by a DIFFERENT
+/// owner — one the policy does not name — is never selected, under either policy.
+pub fn spend_policy_locked_input_policy_reaches_selection<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    use crate::data_api::wallet::input_selection::{
+        LockedInputPolicy, NonEmptyBTreeSet, SpendPolicy,
+    };
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let fee_rule = StandardFeeRule::Zip317;
+
+    // Fund the account with three notes of distinct values in a single block, so that each can
+    // be identified by its value below: `unlocked_value` is left unlocked, `locked_a_value` is
+    // locked by owner A, and `locked_b_value` is locked by a DIFFERENT owner B.
+    let unlocked_value = Zatoshis::const_from_u64(20_000);
+    let locked_a_value = Zatoshis::const_from_u64(60_000);
+    let locked_b_value = Zatoshis::const_from_u64(70_000);
+    st.add_notes_checking_balance([[unlocked_value, locked_a_value, locked_b_value]]);
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+
+    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+    assert_eq!(notes.len(), 3);
+    let output_ref = |value: Zatoshis| {
+        let note = notes
+            .iter()
+            .find(|n| n.note().value() == value)
+            .expect("a note with the requested value exists");
+        OutputRef::new(
+            *note.txid(),
+            PoolType::Shielded(note.note().pool()),
+            u32::from(note.output_index()),
+        )
+    };
+    let locked_a_ref = output_ref(locked_a_value);
+    let locked_b_ref = output_ref(locked_b_value);
+
+    let owner_a = LockOwner::new([0xA1; 32]);
+    let owner_b = LockOwner::new([0xB2; 32]);
+    let far_expiry = BlockHeight::from(u32::MAX);
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(&[locked_a_ref], owner_a, far_expiry)
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(&[locked_b_ref], owner_b, far_expiry)
+            .unwrap(),
+        1
+    );
+
+    // The unlocked note alone cannot cover this request (plus fee); a locked note is required.
+    let request_amount = Zatoshis::const_from_u64(50_000);
+    let extsk2 = T::sk(&[0xf5; 32]);
+    let to = T::sk_default_address(&extsk2);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        request_amount,
+    )])
+    .unwrap();
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
+
+    // With the default `Exclude` policy, both locked notes are ineligible, and the unlocked
+    // note alone is insufficient: the A-locked note is NOT drawn upon.
+    assert_matches!(
+        st.propose_transfer_with_policy(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request.clone(),
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+        ),
+        Err(data_api::error::Error::InsufficientFunds { .. })
+    );
+
+    // With `PreferUnlocked` naming owner A, the proposal succeeds and draws on the note owner A
+    // locked, but never on the note locked by owner B (who the policy does not name).
+    let policy = SpendPolicy::default().with_locked_input_policy(
+        LockedInputPolicy::PreferUnlocked(NonEmptyBTreeSet::singleton(owner_a)),
+    );
+    let proposal = st
+        .propose_transfer_with_policy(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &policy,
+        )
+        .expect("a note locked by a permitted owner must be selectable to cover the request");
+
+    assert_eq!(proposal.steps().len(), 1);
+    let selected_values: Vec<Zatoshis> = proposal
+        .steps()
+        .head
+        .shielded_inputs()
+        .expect("the proposal must spend shielded notes")
+        .notes()
+        .iter()
+        .map(|rn| rn.note().value())
+        .collect();
+    assert!(
+        selected_values.contains(&locked_a_value),
+        "the note locked by the permitted owner must be selected: {selected_values:?}"
+    );
+    assert!(
+        !selected_values.contains(&locked_b_value),
+        "a note locked by a different owner must never be selected: {selected_values:?}"
+    );
+
+    // The owner-B lock is untouched by this proposal.
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .contains(&locked_b_ref)
+    );
+}
+
 /// An operation in the note-locking model test; see [`check_note_locking_model`].
 #[derive(Clone, Debug)]
 pub enum LockOp {

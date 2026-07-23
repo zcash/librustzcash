@@ -617,6 +617,11 @@ pub(crate) mod tests {
         testing::pool::unlock_proposal_inputs_releases_locks::<SaplingPoolTester>()
     }
 
+    #[test]
+    fn spend_policy_locked_input_policy_reaches_selection() {
+        testing::pool::spend_policy_locked_input_policy_reaches_selection::<SaplingPoolTester>()
+    }
+
     proptest::proptest! {
         // Each case builds a fresh wallet and replays an operation sequence, so keep the
         // case count moderate; the sequences themselves explore the expiry boundaries.

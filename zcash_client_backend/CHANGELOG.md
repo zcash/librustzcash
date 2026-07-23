@@ -48,6 +48,24 @@ workspace.
   condition that callers should respond to by retrying, distinct from
   `ProposalError::ChainDoubleSpend`, which continues to indicate a proposal
   that attempts to spend the same output twice.
+- `zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy`,
+  a `SpendPolicy` field (`SpendPolicy::locked_input_policy` /
+  `with_locked_input_policy`, default `Exclude`) governing whether
+  `GreedyInputSelector::propose_transaction` may draw on locked outputs, and if
+  so, with what preference: `Exclude` never selects one; `PreferUnlocked` and
+  `PreferLocked` each carry the set of `LockOwner`s whose locks may be drawn
+  upon, preferring unlocked or owned-locked outputs respectively, and drawing
+  on the other tier only as needed to reach the target value. An output locked
+  by an owner outside that set is never selected, under either variant. This
+  is how a caller (for example, the wallet's own pool-migration PCZTs) spends
+  through its own advisory lock without weakening the exclusion every other
+  flow relies on.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::with_locked_input_policy`,
+  the shielding-specific counterpart: it configures the `LockedInputPolicy`
+  that `ShieldingSelector::propose_shielding` and
+  `propose_shielding_coinbase` apply when gathering transparent inputs
+  (default `Exclude`). Shielding has no per-call `SpendPolicy` argument, so
+  this is set once on the selector instance rather than passed to each call.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
@@ -125,6 +143,11 @@ workspace.
   `transparent-inputs` feature is not enabled. Balance errors encountered
   during send-max input selection are now wrapped in
   `GreedyInputSelectorError::Balance`.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  takes an additional `locked_input_policy: &LockedInputPolicy` argument,
+  positioned before `lock_inputs`; pass `&LockedInputPolicy::Exclude` (its
+  `Default`) to preserve the previous behavior of never drawing on a locked
+  note.
 - `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
   `orchard::builder::BundleType` and `orchard::bundle::BundleVersion` that the
   transaction builder will be configured with, and returns a `Result`. It
