@@ -248,7 +248,7 @@ pub fn decrypt_and_store_transaction<ParamsT, DbT>(
     data: &mut DbT,
     tx: &Transaction,
     mined_height: Option<BlockHeight>,
-) -> Result<(), DbT::Error>
+) -> Result<(), <DbT as WalletRead>::Error>
 where
     ParamsT: consensus::Parameters,
     DbT: WalletWrite,
@@ -674,7 +674,7 @@ impl ConfirmationsPolicy {
 /// [`create_proposed_transactions`].
 ///
 /// When `lock_inputs` is `Some(request)`, every input selected by the returned proposal is
-/// locked via [`WalletWrite::lock_outputs`] on behalf of the request's [`LockOwner`], with an
+/// locked via [`OutputLockStore::lock_outputs`] on behalf of the request's [`LockOwner`], with an
 /// expiry height of `target_height + request.for_blocks()`, so that the inputs are excluded from
 /// selection by subsequent proposals until that height is reached (or until they are explicitly
 /// released; see below). When it is `None`, no locking is performed.
@@ -694,7 +694,7 @@ impl ConfirmationsPolicy {
 /// whose inputs it locked should release them with [`unlock_proposal_inputs`] under the same
 /// owner; locks are otherwise cleared automatically when the inputs are recorded as spent by
 /// [`WalletWrite::store_transactions_to_be_sent`], when their expiry height is reached, or via
-/// [`WalletWrite::clear_locked_outputs`].
+/// [`OutputLockStore::clear_locked_outputs`].
 ///
 /// Note that expiry re-opens the race the lock exists to prevent: if building and proving the
 /// transaction takes longer than the requested lock window, the lock expires and a concurrent
@@ -702,9 +702,9 @@ impl ConfirmationsPolicy {
 /// to the worst-case time between proposal creation and transaction storage.
 ///
 /// [`LockOwner`]: crate::wallet::LockOwner
-/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
+/// [`OutputLockStore::lock_outputs`]: crate::data_api::OutputLockStore::lock_outputs
 /// [`WalletWrite::store_transactions_to_be_sent`]: crate::data_api::WalletWrite::store_transactions_to_be_sent
-/// [`WalletWrite::clear_locked_outputs`]: crate::data_api::WalletWrite::clear_locked_outputs
+/// [`OutputLockStore::clear_locked_outputs`]: crate::data_api::OutputLockStore::clear_locked_outputs
 /// [zcash/librustzcash#2161]: https://github.com/zcash/librustzcash/issues/2161
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -818,10 +818,8 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 where
     ParamsT: consensus::Parameters + Clone,
     DbT: InputSource,
-    DbT: WalletWrite<
-            Error = <DbT as InputSource>::Error,
-            AccountId = <DbT as InputSource>::AccountId,
-        >,
+    DbT: WalletWrite,
+    DbT: WalletRead<Error = <DbT as InputSource>::Error, AccountId = <DbT as InputSource>::AccountId>,
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![
@@ -1462,7 +1460,10 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
     // Overrides the builder-derived expiry height, when set. Applied immediately after
     // `Builder::new` below, before any inputs are added or signatures/proofs are produced.
     expiry_height: Option<BlockHeight>,
-) -> Result<BuildState<ParamsT, DbT::AccountId>, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
+) -> Result<
+    BuildState<ParamsT, <DbT as WalletRead>::AccountId>,
+    CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>,
+>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
@@ -2587,7 +2588,7 @@ where
     DbT: WalletWrite + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
-    DbT::AccountId: serde::Serialize,
+    <DbT as WalletRead>::AccountId: serde::Serialize,
 {
     let account = wallet_db
         .get_account(account_id)
@@ -2709,7 +2710,7 @@ where
         .update_global_with(|mut updater| {
             updater.set_proprietary(
                 PROPRIETARY_PROPOSAL_INFO.into(),
-                postcard::to_allocvec(&ProposalInfo::<DbT::AccountId> {
+                postcard::to_allocvec(&ProposalInfo::<<DbT as WalletRead>::AccountId> {
                     from_account: account_id,
                     target_height: proposal.min_target_height(),
                 })
@@ -3203,7 +3204,7 @@ pub fn extract_and_store_transaction_from_pczt<DbT, N>(
 ) -> Result<TxId, ExtractErrT<DbT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
-    DbT::AccountId: serde::de::DeserializeOwned,
+    <DbT as WalletRead>::AccountId: serde::de::DeserializeOwned,
 {
     use std::collections::BTreeMap;
     use zcash_note_encryption::{Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput};
@@ -3216,7 +3217,7 @@ where
         .get(PROPRIETARY_PROPOSAL_INFO)
         .ok_or_else(|| PcztError::Invalid("PCZT missing proprietary proposal info field".into()))
         .and_then(|v| {
-            postcard::from_bytes::<ProposalInfo<DbT::AccountId>>(v).map_err(|e| {
+            postcard::from_bytes::<ProposalInfo<<DbT as WalletRead>::AccountId>>(v).map_err(|e| {
                 PcztError::Invalid(format!(
                     "Postcard decoding of proprietary proposal info failed: {e}"
                 ))
@@ -3264,7 +3265,7 @@ where
                 .output()
                 .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
-                .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
+                .map(|v| postcard::from_bytes::<PcztRecipient<<DbT as WalletRead>::AccountId>>(v))
                 .transpose()
                 .map_err(|e: postcard::Error| {
                     PcztError::Invalid(format!(
@@ -3310,7 +3311,7 @@ where
             let pczt_recipient = out
                 .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
-                .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
+                .map(|v| postcard::from_bytes::<PcztRecipient<<DbT as WalletRead>::AccountId>>(v))
                 .transpose()
                 .map_err(|e: postcard::Error| {
                     PcztError::Invalid(format!(
@@ -3341,7 +3342,7 @@ where
             let pczt_recipient = out
                 .proprietary()
                 .get(PROPRIETARY_OUTPUT_INFO)
-                .map(|v| postcard::from_bytes::<PcztRecipient<DbT::AccountId>>(v))
+                .map(|v| postcard::from_bytes::<PcztRecipient<<DbT as WalletRead>::AccountId>>(v))
                 .transpose()
                 .map_err(|e: postcard::Error| {
                     PcztError::Invalid(format!(

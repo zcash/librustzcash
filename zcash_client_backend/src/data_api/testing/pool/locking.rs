@@ -15,7 +15,7 @@ use zip321::Payment;
 
 use crate::{
     data_api::{
-        self, Account as _, InputSource, WalletRead, WalletTest, WalletWrite,
+        self, Account as _, InputSource, OutputLockStore, WalletRead, WalletTest, WalletWrite,
         error::LockError,
         testing::{AddressType, DataStoreFactory, TestCache, single_output_change_strategy},
         wallet::{
@@ -352,10 +352,10 @@ pub fn note_locking_height_boundary<T: ShieldedPoolTester>(
     );
 }
 
-/// Verifies that [`WalletWrite::clear_locked_outputs`] unlocks every locked output for an account
+/// Verifies that [`OutputLockStore::clear_locked_outputs`] unlocks every locked output for an account
 /// regardless of expiry height, as required by the lost-proposal recovery path.
 ///
-/// [`WalletWrite::clear_locked_outputs`]: crate::data_api::WalletWrite::clear_locked_outputs
+/// [`OutputLockStore::clear_locked_outputs`]: crate::data_api::OutputLockStore::clear_locked_outputs
 pub fn clear_locked_outputs<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
@@ -706,9 +706,9 @@ pub fn lock_expiry_restores_spendability<T: ShieldedPoolTester>(
 }
 
 /// Exercises lock-conflict detection and the all-or-nothing batch contract of
-/// [`WalletWrite::lock_outputs`], along with the `unlock_output` return-value semantics.
+/// [`OutputLockStore::lock_outputs`], along with the `unlock_output` return-value semantics.
 ///
-/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
+/// [`OutputLockStore::lock_outputs`]: crate::data_api::OutputLockStore::lock_outputs
 pub fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
