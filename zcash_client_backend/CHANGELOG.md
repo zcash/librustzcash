@@ -67,7 +67,35 @@ workspace.
   (default `Exclude`). Shielding has no per-call `SpendPolicy` argument, so
   this is set once on the selector instance rather than passed to each call.
 
+- `zcash_client_backend::data_api::locking`, a new module that is the single
+  home for the note-locking vocabulary: `LockOwner`, `LockError`,
+  `LockRequest`, `unlock_proposal_inputs`, `LockedInputPolicy`, and
+  `LockFilter` now live here, together with the module-level documentation of
+  the locking semantics. All previous paths (`wallet::LockOwner`,
+  `data_api::error::LockError`, `data_api::wallet::{LockRequest,
+  unlock_proposal_inputs}`, and
+  `data_api::wallet::input_selection::{LockedInputPolicy, LockFilter}`) are
+  preserved as re-exports.
+- `zcash_client_backend::data_api::locking::OutputLockStore` (re-exported as
+  `zcash_client_backend::data_api::OutputLockStore`), the extracted storage
+  contract for output locks, with `AccountId` and `Error` associated types.
+
 ### Changed
+- The output-lock storage methods have been extracted from `WalletWrite` into
+  the new `OutputLockStore` trait (a breaking change relative to the locking
+  API introduced earlier in this unreleased cycle):
+  - `WalletWrite` now has
+    `OutputLockStore<AccountId = <Self as WalletRead>::AccountId,
+    Error = <Self as WalletRead>::Error>` as a supertrait and no longer
+    declares `lock_outputs`, `unlock_output`, or `clear_locked_outputs`;
+    implementors must now provide these via an `OutputLockStore` impl.
+  - `WalletTest::get_locked_outputs` has moved to `OutputLockStore` (still
+    gated on the `test-dependencies` feature).
+  - Because `WalletWrite` now inherits same-named associated types from two
+    supertraits, generic code bounded on `WalletWrite` must qualify
+    `AccountId` and `Error` (e.g. `<DbT as WalletRead>::Error`), and bounds of
+    the form `WalletWrite<Error = E, AccountId = A>` should become
+    `WalletRead<Error = E, AccountId = A> + WalletWrite`.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
   takes an `expiry_height: Option<BlockHeight>` parameter, mirroring the
   one already accepted by `create_pczt_from_proposal`. This lets callers
