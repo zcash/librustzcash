@@ -8,7 +8,7 @@ use zcash_client_backend::{
     data_api::{
         MaxSpendMode, NoteFilter, NullifierQuery, PoolMeta, SAPLING_SHARD_HEIGHT, TargetValue,
         scanning::ScanPriority,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     wallet::ReceivedNote,
 };
@@ -271,7 +271,7 @@ pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     protocol: ShieldedPool,
     target_height: TargetHeight,
     to_spendable_note: F,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(
@@ -320,7 +320,7 @@ where
            ":txid": txid.as_ref(),
            ":output_index": index,
            ":target_height": u32::from(target_height),
-           ":include_locked": include_locked,
+           ":include_locked": lock_filter.admits_locked(),
         ],
         |row| to_spendable_note(params, protocol, row),
     );
@@ -377,7 +377,7 @@ pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     exclude: &[ReceivedNoteId],
     protocol: ShieldedPool,
     to_spendable_note: F,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(
@@ -403,7 +403,7 @@ where
             protocol,
             &to_spendable_note,
             NoteRequest::from_max_spend_mode(mode, anchor_height),
-            include_locked,
+            lock_filter,
         ),
         TargetValue::AtLeast(zats) => select_spendable_notes_matching_value(
             conn,
@@ -416,7 +416,7 @@ where
             exclude,
             protocol,
             &to_spendable_note,
-            include_locked,
+            lock_filter,
         ),
     }
 }
@@ -442,7 +442,7 @@ pub(crate) fn select_unspent_notes<P: consensus::Parameters, F, Note>(
     protocol: ShieldedPool,
     to_received_note: F,
     note_request: NoteRequest,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(
@@ -516,7 +516,7 @@ where
             ":target_height": &u32::from(target_height),
             ":exclude": &excluded_ptr,
             ":min_value": u64::from(zip317::MARGINAL_FEE),
-            ":include_locked": include_locked,
+            ":include_locked": lock_filter.admits_locked(),
         ],
         |row| -> Result<_, SqliteClientError> {
             let result_note = to_received_note(params, protocol, row)?;
@@ -608,7 +608,7 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     exclude: &[ReceivedNoteId],
     protocol: ShieldedPool,
     to_spendable_note: F,
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(
@@ -729,7 +729,7 @@ where
             ":scanned_priority": priority_code(&ScanPriority::Scanned),
             ":tip_unscanned": i64::from(tip_unscanned),
             ":min_value": u64::from(zip317::MARGINAL_FEE),
-            ":include_locked": include_locked,
+            ":include_locked": lock_filter.admits_locked(),
         ],
         |row| {
             let tx_trust_status = row.get::<_, bool>("trust_status")?;
@@ -887,7 +887,7 @@ pub(crate) fn unspent_notes_meta(
     account: AccountUuid,
     filter: &NoteFilter,
     exclude: &[ReceivedNoteId],
-    include_locked: bool,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<PoolMeta>, SqliteClientError> {
     let TableConstants { table_prefix, .. } = table_constants::<SqliteClientError>(protocol)?;
 
@@ -931,7 +931,7 @@ pub(crate) fn unspent_notes_meta(
                 ":min_value": u64::from(min_value),
                 ":exclude": &excluded_ptr,
                 ":target_height": u32::from(target_height),
-                ":include_locked": include_locked,
+                ":include_locked": lock_filter.admits_locked(),
             ],
             |row| {
                 Ok((

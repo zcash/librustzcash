@@ -27,7 +27,10 @@ use crate::{
         WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
         testing::{TestState, pool::ShieldedPoolTester},
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{
+            ConfirmationsPolicy, TargetHeight,
+            input_selection::{LockFilter, LockedInputPolicy},
+        },
     },
     wallet::{Note, ReceivedNote},
 };
@@ -138,7 +141,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 target_height,
                 confirmations_policy,
                 exclude,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .map(|n| n.take_orchard())
     }
@@ -155,7 +158,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 &[ShieldedPool::Orchard],
                 target_height,
                 exclude,
-                false,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .map(|n| n.take_orchard())
     }

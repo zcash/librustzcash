@@ -35,13 +35,16 @@ use shardtree::error::ShardTreeError;
 
 use ::pczt::roles::prover::Prover;
 use ::pczt::roles::updater::{AnchorUpdateError, SpendWitnessUpdateError, Updater};
-use zcash_client_backend::data_api::wallet::TargetHeight;
-use zcash_client_backend::data_api::{InputSource, WalletCommitmentTrees, WalletRead};
+use zcash_client_backend::data_api::{
+    InputSource, WalletCommitmentTrees, WalletRead,
+    wallet::{
+        TargetHeight,
+        input_selection::{LockFilter, LockedInputPolicy},
+    },
+};
 use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_primitives::transaction::builder::cached_orchard_proving_key;
-use zcash_protocol::ShieldedPool;
-use zcash_protocol::consensus::BlockHeight;
-use zcash_protocol::value::Zatoshis;
+use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
 
 use crate::build::sign_pczt;
 use crate::engine::{
@@ -161,7 +164,13 @@ where
         let target = self.selection_target()?;
         let received = self
             .wallet
-            .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[], false)
+            .select_unspent_notes(
+                self.account,
+                &[ShieldedPool::Orchard],
+                target,
+                &[],
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+            )
             .map_err(Error::InputSource)?;
         let mut notes: Vec<SpendableNote> = received
             .orchard()
@@ -475,7 +484,13 @@ where
             .ok_or(WalletProveError::ChainTipUnknown)?;
         let received = self
             .wallet
-            .select_unspent_notes(self.account, &[ShieldedPool::Orchard], target, &[])
+            .select_unspent_notes(
+                self.account,
+                &[ShieldedPool::Orchard],
+                target,
+                &[],
+                LockFilter::Unfiltered,
+            )
             .map_err(WalletProveError::Notes)?;
         let positions: BTreeMap<Nullifier, Position> = received
             .orchard()

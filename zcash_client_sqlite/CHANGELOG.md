@@ -45,7 +45,7 @@ workspace.
   locked by an in-flight shielding proposal was still reported as spendable,
   even though note selection (correctly) refused to select it.
 - The `InputSource::get_unspent_transparent_output` implementation now honors
-  its `include_locked` parameter; previously the parameter was ignored and
+  its `lock_filter` parameter; previously the lock state was ignored and
   locked transparent outputs were returned regardless, diverging from the
   trait contract and from the shielded `get_spendable_note` behavior.
 - The `zewif` importer no longer marks transparent addresses that have no

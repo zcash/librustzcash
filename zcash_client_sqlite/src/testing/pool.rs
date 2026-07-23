@@ -995,7 +995,10 @@ mod concurrency_tests {
             testing::{
                 AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
             },
-            wallet::TargetHeight,
+            wallet::{
+                TargetHeight,
+                input_selection::{LockFilter, LockedInputPolicy},
+            },
         },
         wallet::{LockOwner, OutputRef},
     };
@@ -1060,7 +1063,7 @@ mod concurrency_tests {
                     ShieldedPool::Sapling,
                     output_index,
                     target_height,
-                    false
+                    LockFilter::Policy(&LockedInputPolicy::Exclude)
                 )
                 .unwrap()
                 .is_some()
@@ -1071,7 +1074,7 @@ mod concurrency_tests {
                 ShieldedPool::Sapling,
                 output_index,
                 target_height,
-                false
+                LockFilter::Policy(&LockedInputPolicy::Exclude)
             )
             .unwrap()
             .is_some()
@@ -1102,7 +1105,7 @@ mod concurrency_tests {
                     ShieldedPool::Sapling,
                     output_index,
                     target_height,
-                    false
+                    LockFilter::Policy(&LockedInputPolicy::Exclude)
                 )
                 .unwrap()
                 .is_none()
@@ -1122,7 +1125,7 @@ mod concurrency_tests {
                     ShieldedPool::Sapling,
                     output_index,
                     target_height,
-                    false
+                    LockFilter::Policy(&LockedInputPolicy::Exclude)
                 )
                 .unwrap()
                 .is_none()
@@ -1137,7 +1140,7 @@ mod concurrency_tests {
                 ShieldedPool::Sapling,
                 output_index,
                 target_height,
-                false
+                LockFilter::Policy(&LockedInputPolicy::Exclude)
             )
             .unwrap()
             .is_some()

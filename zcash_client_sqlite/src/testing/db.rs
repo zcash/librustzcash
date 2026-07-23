@@ -26,7 +26,7 @@ use zcash_client_backend::{
         error::{LockError, RewindError},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
         *,
     },
     wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
