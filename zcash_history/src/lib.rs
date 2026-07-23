@@ -1,6 +1,5 @@
-//! Chain history library for Zcash
-//!
-//! To be used in zebra and via FFI bindings in zcashd
+//! To be used in Zebra. Originally also consumed by zcashd via FFI bindings,
+//! which reached End-of-Support in July 2026.
 
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -39,7 +38,6 @@ impl std::fmt::Display for Error {
 }
 
 /// Reference to the tree node.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub enum EntryLink {
     /// Reference to the stored (in the array representation) leaf/node.
@@ -58,7 +56,6 @@ impl std::fmt::Display for EntryLink {
 }
 
 /// MMR Node. It is leaf when `left`, `right` are `None` and node when they are not.
-#[repr(C)]
 #[derive(Debug)]
 pub enum EntryKind {
     /// Leaf entry.
