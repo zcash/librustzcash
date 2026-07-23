@@ -439,9 +439,18 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
         .network()
         .activation_height(NetworkUpgrade::Sapling)
         .unwrap();
+    // The first block pays wallet A's own account: with a witnessed note below the capture
+    // height, the pruned checkpoint cannot be recovered from by emptying the tree, forcing
+    // `truncate_to_chain_state` down the `insert_frontier` path this test exercises.
+    let account_fvk_a = T::test_account_fvk(&wallet_a);
     let fvk_a = T::sk_to_fvk(&T::sk(&[1u8; 32]));
     let initial_blocks = 8u32;
-    for _ in 0..initial_blocks {
+    wallet_a.generate_next_block(
+        &account_fvk_a,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(10_000),
+    );
+    for _ in 1..initial_blocks {
         wallet_a.generate_next_block(
             &fvk_a,
             AddressType::DefaultExternal,

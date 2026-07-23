@@ -5187,14 +5187,23 @@ where
         .unwrap();
 
     // Step 2: Generate and scan initial blocks to populate the note commitment tree.
-    // We use an "other" fvk so that notes won't be tracked by the wallet (keeping the
-    // test focused on tree state rather than wallet balances).
+    // The first block pays the wallet's own account, so the wallet holds a witnessed note
+    // below the capture height; without one, a store may satisfy the step-5 truncation by
+    // emptying the pool's tree outright (which is tolerated when no witness data would be
+    // lost). The remaining blocks use an "other" fvk so that their notes won't be tracked
+    // by the wallet (keeping the test focused on tree state rather than wallet balances).
+    let account_fvk = T::test_account_fvk(&st);
     let seed = [1u8; 32];
     let other_sk = T::sk(&seed);
     let other_fvk = T::sk_to_fvk(&other_sk);
 
     let initial_block_count = 8u32;
-    for _ in 0..initial_block_count {
+    st.generate_next_block(
+        &account_fvk,
+        AddressType::DefaultExternal,
+        Zatoshis::const_from_u64(10000),
+    );
+    for _ in 1..initial_block_count {
         st.generate_next_block(
             &other_fvk,
             AddressType::DefaultExternal,
@@ -5236,8 +5245,9 @@ where
         "tip should be beyond pruning depth from capture height"
     );
 
-    // Step 5: Verify that truncate_to_height fails at capture_height because the
-    // checkpoint has been pruned.
+    // Step 5: Verify that truncate_to_height fails at capture_height: the checkpoint there
+    // has been pruned, and the wallet holds a witnessed note below that height, so the
+    // truncation cannot be satisfied by emptying the tree either.
     let truncation_result = st.wallet_mut().truncate_to_height(capture_height);
     assert!(
         truncation_result.is_err(),

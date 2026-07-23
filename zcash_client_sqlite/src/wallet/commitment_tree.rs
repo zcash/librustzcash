@@ -691,6 +691,85 @@ pub(crate) fn min_checkpoint_id_at_or_above(
     .map_err(Error::Query)
 }
 
+/// Resets the note commitment tree with the given table prefix to contain only the roots of
+/// subtrees completed at or below `truncation_height`, discarding all of its other state:
+/// scanned shard contents, the cap, and all checkpoints.
+///
+/// This is the truncation outcome for a tree whose retained checkpoints all lie above the
+/// truncation height: no checkpoint exists at or below that height for
+/// `ShardTree::truncate_to_checkpoint` to target, so the tree's scanned contents postdate the
+/// truncation point and must be discarded; the rescan of heights above that point re-creates
+/// them. The roots of subtrees completed at or below the truncation height remain facts
+/// about the retained portion of the chain, however, so they are preserved (in the form
+/// fast sync would deliver them, via [`put_shard_roots`]); discarding them would leave the
+/// wallet unable to construct witnesses spanning those subtrees until they had been
+/// re-downloaded.
+pub(crate) fn truncate_tree_to_subtree_roots<
+    H: Hashable + HashSer + Clone + Eq,
+    const DEPTH: u8,
+    const SHARD_HEIGHT: u8,
+>(
+    conn: &rusqlite::Transaction<'_>,
+    table_prefix: &'static str,
+    truncation_height: BlockHeight,
+) -> Result<(), ShardTreeError<Error>> {
+    // Collect the roots of subtrees completed at or below the truncation height. Subtree end
+    // heights increase with shard index, so these form a prefix of the shard sequence;
+    // re-insertion via `put_shard_roots` requires contiguity from index zero, so collection
+    // stops at the first shard for which no completed root is recorded.
+    let roots = {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT shard_index, subtree_end_height, root_hash
+                 FROM {table_prefix}_tree_shards
+                 WHERE subtree_end_height IS NOT NULL
+                 AND subtree_end_height <= :truncation_height
+                 AND root_hash IS NOT NULL
+                 ORDER BY shard_index"
+            ))
+            .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
+
+        let rows = stmt
+            .query_map(
+                named_params![":truncation_height": u32::from(truncation_height)],
+                |row| {
+                    Ok((
+                        row.get::<_, u64>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
+            )
+            .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
+
+        let mut roots = vec![];
+        for row in rows {
+            let (shard_index, subtree_end_height, root_hash) =
+                row.map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
+            if shard_index != u64::try_from(roots.len()).expect("vec length fits in u64") {
+                break;
+            }
+            let root = H::read(Cursor::new(root_hash))
+                .map_err(|e| ShardTreeError::Storage(Error::Serialization(e)))?;
+            roots.push(CommitmentTreeRoot::from_parts(
+                BlockHeight::from(subtree_end_height),
+                root,
+            ));
+        }
+        roots
+    };
+
+    conn.execute_batch(&format!(
+        "DELETE FROM {table_prefix}_tree_checkpoint_marks_removed;
+         DELETE FROM {table_prefix}_tree_checkpoints;
+         DELETE FROM {table_prefix}_tree_shards;
+         DELETE FROM {table_prefix}_tree_cap;"
+    ))
+    .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
+
+    put_shard_roots::<H, DEPTH, SHARD_HEIGHT>(conn, table_prefix, 0, &roots)
+}
+
 pub(crate) fn add_checkpoint(
     conn: &rusqlite::Transaction<'_>,
     table_prefix: &'static str,
