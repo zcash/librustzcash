@@ -883,7 +883,6 @@ impl proposal::Proposal {
                                                     .get_unspent_transparent_output(
                                                         &outpoint,
                                                         target_height,
-                                                        lock_filter,
                                                     )
                                                     .map_err(ProposalDecodingError::InputRetrieval)?
                                                     .ok_or({
