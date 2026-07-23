@@ -14,7 +14,13 @@ use zcash_protocol::{
 };
 
 use crate::{
-    data_api::{AccountMeta, InputSource, NoteFilter, wallet::TargetHeight},
+    data_api::{
+        AccountMeta, InputSource, NoteFilter,
+        wallet::{
+            TargetHeight,
+            input_selection::{LockFilter, LockedInputPolicy},
+        },
+    },
     fees::StandardFeeRule,
 };
 
@@ -318,7 +324,16 @@ where
                 .unwrap_or(SplitPolicy::MIN_NOTE_VALUE),
         );
 
-        meta_source.get_account_metadata(account, &note_selector, target_height, exclude)
+        // Account metadata feeds change-splitting decisions, which reason about the
+        // notes that selection can actually draw on; locked notes are excluded from
+        // selection, so they are excluded here as well.
+        meta_source.get_account_metadata(
+            account,
+            &note_selector,
+            target_height,
+            exclude,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
     }
 
     fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(

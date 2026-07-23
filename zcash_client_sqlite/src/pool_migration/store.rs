@@ -4,8 +4,11 @@
 //! (the DDL builders and the [`Store`] type that carries the [`PoolMigrationRead`] /
 //! [`PoolMigrationWrite`] SQL logic), parameterized over the table names in [`Tables`]. The schema is
 //! fully NORMALIZED: every structured value is stored in typed columns and child-table rows, so the
-//! store maps the engine types to and from columns directly. The only `BLOB` column is the pre-signed
-//! transaction (`pczt`), which is genuinely unstructured, already-versioned bytes. All amounts are
+//! store maps the engine types to and from columns directly. The `BLOB` columns are the pre-signed
+//! transaction (`pczt`), which is genuinely unstructured, already-versioned bytes, and each
+//! transaction's `lock_owner`, an opaque fixed-size token read and written directly as
+//! `Option<[u8; 32]>` (no codec: `rusqlite`'s fixed-size-array `FromSql`/`ToSql` impls handle it,
+//! and reject a non-NULL blob that is not exactly 32 bytes). All amounts are
 //! zatoshi `INTEGER` columns; the broadcast `txid` is stored as hex `TEXT`.
 //!
 //! The preparation plan's layers/transactions grid has no tables of its own: each input and output
@@ -21,9 +24,11 @@
 //! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
 
 use std::borrow::{Borrow, BorrowMut};
+use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 
+use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration_backend::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
     MigrationTxState,
@@ -165,6 +170,7 @@ fn create_transactions_sql(t: &Tables) -> String {
             state TEXT NOT NULL,
             txid TEXT,
             mined_height INTEGER,
+            lock_owner BLOB,
             PRIMARY KEY (migration_id, tx_id)
         )",
         t.transactions, t.migrations
@@ -253,6 +259,13 @@ impl<C> Store<C> {
 impl<C: Borrow<Connection>> Store<C> {
     pub(crate) fn get_migration(&self) -> Result<Option<MigrationState>, Error> {
         read_migration(self.conn.borrow(), self.tables, self.account_id)
+    }
+
+    /// Returns the set of [`LockOwner`]s under which this account's in-progress migration has
+    /// locked notes (empty if the account has no migration, or none of its transactions hold a
+    /// lock).
+    pub(crate) fn migration_lock_owners(&self) -> Result<BTreeSet<LockOwner>, Error> {
+        read_lock_owners(self.conn.borrow(), self.tables, self.account_id)
     }
 }
 
@@ -540,7 +553,8 @@ fn read_transactions(
     let rows: Vec<TxRow> = {
         let mut stmt = conn.prepare(&format!(
             "SELECT tx_id, kind, kind_layer, kind_index, kind_crossing, pczt,
-                    scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height
+                    scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
+                    lock_owner
                FROM {}
               WHERE migration_id = ?
               ORDER BY tx_id",
@@ -560,6 +574,7 @@ fn read_transactions(
                 state: row.get(9)?,
                 txid: row.get(10)?,
                 mined_height: row.get(11)?,
+                lock_owner: row.get(12)?,
             })
         })?;
         mapped.collect::<Result<_, _>>()?
@@ -601,7 +616,33 @@ fn read_transactions(
             BlockHeight::from_u32(r.expiry_height),
             r.anchor_boundary.map(BlockHeight::from_u32),
             state,
+            r.lock_owner,
         ));
+    }
+    Ok(out)
+}
+
+/// Returns the distinct [`LockOwner`]s recorded on `account`'s migration transactions (empty if
+/// the account has no migration, or none of its transactions hold a lock). A direct `DISTINCT`
+/// query over the transactions table, scoped by the account's resolved migration id, so this
+/// avoids reconstructing the whole migration (with its preparation plan and every transaction)
+/// just to inspect which locks it holds.
+fn read_lock_owners(
+    conn: &Connection,
+    t: &Tables,
+    account: AccountRef,
+) -> Result<BTreeSet<LockOwner>, Error> {
+    let Some(migration_id) = resolve_migration_id(conn, t, account)? else {
+        return Ok(BTreeSet::new());
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT lock_owner FROM {} WHERE migration_id = ? AND lock_owner IS NOT NULL",
+        t.transactions
+    ))?;
+    let rows = stmt.query_map(params![migration_id], |row| row.get::<_, [u8; 32]>(0))?;
+    let mut out = BTreeSet::new();
+    for r in rows {
+        out.insert(LockOwner::new(r?));
     }
     Ok(out)
 }
@@ -620,6 +661,10 @@ struct TxRow {
     state: String,
     txid: Option<String>,
     mined_height: Option<u32>,
+    /// The stored lock-owner token, read directly as a fixed-size blob: `rusqlite`'s `[u8; 32]`
+    /// `FromSql` impl errors cleanly (`InvalidBlobSize`) if a non-NULL blob is not exactly 32
+    /// bytes, so a corrupt row is rejected rather than silently truncated or panicking.
+    lock_owner: Option<[u8; 32]>,
 }
 
 fn read_deps(
@@ -806,10 +851,10 @@ fn replace_migration(
             &format!(
                 "INSERT INTO {} (migration_id, tx_id, kind, kind_layer, kind_index, kind_crossing,
                                  pczt, scheduled_height, expiry_height, anchor_boundary, state, txid,
-                                 mined_height)
+                                 mined_height, lock_owner)
                  VALUES (:migration_id, :tx_id, :kind, :kind_layer, :kind_index, :kind_crossing,
                          :pczt, :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
-                         :mined_height)",
+                         :mined_height, :lock_owner)",
                 t.transactions
             ),
             named_params! {
@@ -826,6 +871,7 @@ fn replace_migration(
                 ":state": tx_state.as_ref(),
                 ":txid": tx_state.broadcast_txid().map(hex::encode),
                 ":mined_height": tx_state.mined_height().map(u32::from),
+                ":lock_owner": mtx.lock_owner(),
             },
         )?;
         for (ordinal, dep) in mtx.depends_on().iter().enumerate() {

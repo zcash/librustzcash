@@ -57,12 +57,18 @@ use super::{
     scanning::ScanRange,
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
-        input_selection::{GreedyInputSelector, InputSelector, SpendPolicy},
+        input_selection::{
+            GreedyInputSelector, InputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+        },
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
 };
 use crate::{
-    data_api::{MaxSpendMode, TargetValue, error::RewindError, wallet::TargetHeight},
+    data_api::{
+        MaxSpendMode, TargetValue,
+        error::{LockError, RewindError},
+        wallet::TargetHeight,
+    },
     fees::{
         ChangeStrategy, DustOutputPolicy, StandardFeeRule,
         standard::{self, SingleOutputChangeStrategy},
@@ -71,7 +77,9 @@ use crate::{
     proto::compact_formats::{
         self, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
-    wallet::{Note, NoteId, OvkPolicy, ReceivedNote, WalletTransparentOutput},
+    wallet::{
+        LockOwner, Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput,
+    },
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -1061,6 +1069,7 @@ where
             confirmations_policy,
             &SpendPolicy::default(),
             None,
+            None,
         )?;
 
         create_proposed_transactions(
@@ -1103,6 +1112,7 @@ where
             confirmations_policy,
             &SpendPolicy::default(),
             None,
+            None,
         )
     }
 
@@ -1141,6 +1151,7 @@ where
             confirmations_policy,
             spend_policy,
             None,
+            None,
         )
     }
 
@@ -1172,6 +1183,8 @@ where
             memo,
             mode,
             confirmations_policy,
+            &LockedInputPolicy::Exclude,
+            None,
         )
     }
 
@@ -1209,6 +1222,7 @@ where
             memo,
             change_memo,
             fallback_change_pool,
+            None,
             None,
         );
 
@@ -1256,6 +1270,7 @@ where
             to_account,
             confirmations_policy,
             output_filter,
+            None,
         )
     }
 
@@ -1296,6 +1311,7 @@ where
             to_address,
             memo,
             limit,
+            None,
         )
     }
 
@@ -1439,6 +1455,13 @@ where
     /// Returns the total balance in the given account at this point in the test.
     pub fn get_total_balance(&self, account: AccountIdT) -> Zatoshis {
         self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| balance.total())
+    }
+
+    /// Returns the locked balance in the given account at this point in the test.
+    pub fn get_locked_balance(&self, account: AccountIdT) -> Zatoshis {
+        self.with_account_balance(account, ConfirmationsPolicy::MIN, |balance| {
+            balance.locked_value()
+        })
     }
 
     /// Returns the balance in the given account that is spendable with the given number
@@ -3008,6 +3031,7 @@ impl InputSource for MockWalletDb {
         _protocol: ShieldedPool,
         _index: u32,
         _target_height: TargetHeight,
+        _lock_filter: LockFilter<'_>,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         Ok(None)
     }
@@ -3020,6 +3044,7 @@ impl InputSource for MockWalletDb {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::empty())
     }
@@ -3030,6 +3055,7 @@ impl InputSource for MockWalletDb {
         _sources: &[ShieldedPool],
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Err(())
     }
@@ -3040,6 +3066,7 @@ impl InputSource for MockWalletDb {
         _selector: &NoteFilter,
         _target_height: TargetHeight,
         _exclude: &[Self::NoteRef],
+        _lock_filter: LockFilter<'_>,
     ) -> Result<AccountMeta, Self::Error> {
         Err(())
     }
@@ -3357,6 +3384,27 @@ impl WalletWrite for MockWalletDb {
 
     fn set_tx_trust(&mut self, _txid: TxId, _trusted: bool) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn lock_outputs(
+        &mut self,
+        _outputs: &[OutputRef],
+        _owner: LockOwner,
+        _lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        Ok(0)
+    }
+
+    fn unlock_output(
+        &mut self,
+        _output: &OutputRef,
+        _owner: LockOwner,
+    ) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
+
+    fn clear_locked_outputs(&mut self, _account: Self::AccountId) -> Result<usize, Self::Error> {
+        Ok(0)
     }
 
     fn store_transactions_to_be_sent(

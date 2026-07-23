@@ -23,6 +23,49 @@ workspace.
   API of this crate; it exists so code in this crate that constructs
   `zcash_primitives` transactions can pass the feature-gated ZIP 233 arguments
   exactly when the underlying crate expects them.
+- `zcash_client_backend::data_api::Balance::{locked_value, add_locked_value}`
+- `zcash_client_backend::data_api::AccountBalance::locked_value`
+- `zcash_client_backend::data_api::error::LockError`
+- `zcash_client_backend::wallet::OutputRef`
+- `impl From<zcash_client_backend::wallet::NoteId> for zcash_client_backend::wallet::OutputRef`
+- `zcash_client_backend::wallet::LockOwner`, an opaque token identifying the
+  holder of an output lock. Locks record their owner: unlocking is scoped to
+  the owner that took the lock, and re-locking by the same owner is an
+  idempotent acquire/extend (supporting crash-retry of a flow that had already
+  locked its inputs), while an active lock held by a different owner cannot be
+  acquired or released until it expires.
+- `zcash_client_backend::data_api::wallet::LockRequest`, the
+  `(owner, for_blocks)` pair accepted by the proposal-creation functions to
+  lock the proposal's inputs.
+- `impl From<TxId> for zcash_client_backend::wallet::LockOwner`, for flows
+  that hold a durable transaction identity while their locks are alive (such
+  as a persisted PCZT with final effecting data), enabling the owner token to
+  be re-derived after a restart.
+- `zcash_client_backend::data_api::wallet::unlock_proposal_inputs`
+- `zcash_client_backend::proposal::ProposalError::InputsLocked`, returned by the
+  proposal-creation functions when an input selected by the proposal is already
+  locked by a concurrent proposal or PCZT. This is a transient "account busy"
+  condition that callers should respond to by retrying, distinct from
+  `ProposalError::ChainDoubleSpend`, which continues to indicate a proposal
+  that attempts to spend the same output twice.
+- `zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy`,
+  a `SpendPolicy` field (`SpendPolicy::locked_input_policy` /
+  `with_locked_input_policy`, default `Exclude`) governing whether
+  `GreedyInputSelector::propose_transaction` may draw on locked outputs, and if
+  so, with what preference: `Exclude` never selects one; `PreferUnlocked` and
+  `PreferLocked` each carry the set of `LockOwner`s whose locks may be drawn
+  upon, preferring unlocked or owned-locked outputs respectively, and drawing
+  on the other tier only as needed to reach the target value. An output locked
+  by an owner outside that set is never selected, under either variant. This
+  is how a caller (for example, the wallet's own pool-migration PCZTs) spends
+  through its own advisory lock without weakening the exclusion every other
+  flow relies on.
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector::with_locked_input_policy`,
+  the shielding-specific counterpart: it configures the `LockedInputPolicy`
+  that `ShieldingSelector::propose_shielding` and
+  `propose_shielding_coinbase` apply when gathering transparent inputs
+  (default `Exclude`). Shielding has no per-call `SpendPolicy` argument, so
+  this is set once on the selector instance rather than passed to each call.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
@@ -48,6 +91,49 @@ workspace.
     reported in the `value_pending_spendability` field of the coinbase bucket
     rather than as spendable value; it becomes spendable only once the output
     reaches coinbase maturity.
+- `zcash_client_backend::proposal::ProposalError::ChainDoubleSpend` now wraps an
+  `OutputRef` instead of `(PoolType, TxId, u32)`.
+- `zcash_client_backend::data_api::Balance` has been modified to now make it
+  possible to represent locked value; this is value that is committed to be
+  spent by an in-flight proposal or PCZT. Locked value is a component of the
+  account's total funds: `Balance::total` and `AccountBalance::total` now
+  include locked value in their result (locked funds move out of the spendable
+  total but remain part of the total), so callers that displayed a total by
+  reading `spendable_value` alone should add `locked_value`.
+- The following `InputSource` trait methods now take an additional
+  `lock_filter: LockFilter<'_>` parameter that controls how locked outputs are
+  selected: `LockFilter::Policy(&policy)` applies an owner-scoped
+  `LockedInputPolicy` (whose default, `LockedInputPolicy::Exclude`, selects no
+  locked outputs), while `LockFilter::Unfiltered` ignores lock state entirely:
+  - `get_spendable_note`
+  - `select_spendable_notes`
+  - `select_unspent_notes`
+  - `get_account_metadata`
+  - `get_spendable_transparent_outputs` (under `transparent-inputs`)
+  - `get_spendable_transparent_outputs_for_addresses` (under `transparent-inputs`)
+  - `select_spendable_transparent_outputs` (under `transparent-inputs`)
+- `WalletWrite::store_transactions_to_be_sent` implementations are now
+  required to unlock any locked outputs that are recorded as spent by
+  the stored transactions.
+- `zcash_client_backend::data_api::WalletWrite` has added methods
+  `lock_outputs`, `unlock_output`, and `clear_locked_outputs`. Locks are keyed
+  by a `LockOwner` token: `lock_outputs` takes the outputs as a slice together
+  with the owner and fails only on an active lock held by a different owner;
+  `unlock_output` releases only a lock held by the given owner;
+  `clear_locked_outputs` releases every lock for an account regardless of
+  owner, as a recovery mechanism.
+- `zcash_client_backend::data_api::WalletTest` has added method
+  `get_locked_outputs`.
+- The following `zcash_client_backend::data_api::wallet::` proposal creation
+  functions now take a `lock_inputs: Option<LockRequest>` parameter and require
+  `WalletWrite` instead of `WalletRead`; `Some(request)` locks the proposal's
+  inputs on behalf of the request's owner until `target_height +
+  request.for_blocks()`:
+  - `propose_transfer`
+  - `propose_standard_transfer_to_address`
+  - `propose_send_max_transfer`
+  - `propose_shielding`
+  - `propose_shielding_coinbase` (under `transparent-inputs`)
 - `zcash_client_backend::data_api::wallet::ProposeSendMaxErrT` now uses
   `GreedyInputSelectorError` (instead of `BalanceError`) as its note-selection
   error type, so that `propose_send_max_transfer` can report
@@ -56,6 +142,11 @@ workspace.
   `transparent-inputs` feature is not enabled. Balance errors encountered
   during send-max input selection are now wrapped in
   `GreedyInputSelectorError::Balance`.
+- `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
+  takes an additional `locked_input_policy: &LockedInputPolicy` argument,
+  positioned before `lock_inputs`; pass `&LockedInputPolicy::Exclude` (its
+  `Default`) to preserve the previous behavior of never drawing on a locked
+  note.
 - `zcash_client_backend::proposal::Step::orchard_action_count` now takes the
   `orchard::builder::BundleType` and `orchard::bundle::BundleVersion` that the
   transaction builder will be configured with, and returns a `Result`. It
@@ -67,6 +158,12 @@ workspace.
   feature.
 
 ### Fixed
+- Proposal decoding (`proto::proposal::Proposal::try_into_standard_proposal`)
+  now retrieves inputs with `LockFilter::Unfiltered`. A proposal created with
+  `lock_for_blocks: Some(_)` locks its own inputs, so the previous behavior
+  made such a proposal fail to decode from its serialized form with
+  `ProposalDecodingError::InputNotFound` for every locked shielded input,
+  breaking persist-and-restore of in-flight locking proposals.
 - `zcash_client_backend::data_api::wallet::propose_send_max_transfer` now
   correctly constructs proposals paying a transparent (non-TEX) recipient — a
   bare transparent address, or a unified address having no shielded receiver.

@@ -290,6 +290,17 @@ pub struct MigrationTransaction {
     /// The transaction's lifecycle state.
     #[getset(get_copy = "pub")]
     pub(crate) state: MigrationTxState,
+    /// The opaque lock-owner token under which this transaction's input notes are locked, or
+    /// `None` if it holds no lock. These are the raw bytes of a wallet's
+    /// `zcash_client_backend::wallet::LockOwner` (its `LockOwner::as_bytes()` /
+    /// `LockOwner::new()` round-trip) — carried here as an opaque `[u8; 32]` rather than the typed
+    /// `LockOwner` because this `orchard`-gated engine module must not depend on
+    /// `zcash_client_backend` (only `wallet`-feature code does); the conversion to/from `LockOwner`
+    /// happens at that boundary, not here. The migration flow does not yet acquire locks, so every
+    /// transaction the engine itself builds carries `None`; a store still round-trips whatever a
+    /// caller sets.
+    #[getset(get_copy = "pub")]
+    pub(crate) lock_owner: Option<[u8; 32]>,
 }
 
 impl MigrationTransaction {
@@ -306,6 +317,7 @@ impl MigrationTransaction {
         expiry_height: BlockHeight,
         anchor_boundary: Option<BlockHeight>,
         state: MigrationTxState,
+        lock_owner: Option<[u8; 32]>,
     ) -> Self {
         Self {
             id,
@@ -316,6 +328,7 @@ impl MigrationTransaction {
             expiry_height,
             anchor_boundary,
             state,
+            lock_owner,
         }
     }
 }
@@ -2171,6 +2184,9 @@ where
                     expiry_height,
                     anchor_boundary: None,
                     state: tx_state,
+                    // The engine does not yet acquire locks; a later slice that draws a
+                    // `LockOwner` for the commit would set this here.
+                    lock_owner: None,
                 });
             }
             self.layer_ids.push(this_layer_ids);
@@ -2321,6 +2337,9 @@ where
                 expiry_height: schedule.expiry_height(),
                 anchor_boundary: Some(anchor_boundary),
                 state: tx_state,
+                // The engine does not yet acquire locks; a later slice that draws a
+                // `LockOwner` for the commit would set this here.
+                lock_owner: None,
             });
             self.transfer_funding.push((id, note));
         }
@@ -2697,6 +2716,7 @@ mod tests {
             expiry_height: BlockHeight::from_u32(2_069_220),
             anchor_boundary: None,
             state: MigrationTxState::Signed,
+            lock_owner: None,
         };
         let state = MigrationState {
             status: MigrationStatus::Committed,

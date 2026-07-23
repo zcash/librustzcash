@@ -11,7 +11,7 @@ use rand::RngCore;
 use rand_distr::Distribution;
 use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
-use rusqlite::{Connection, Row, named_params};
+use rusqlite::{Connection, Row, ToSql, named_params};
 use tracing::{debug, warn};
 
 use transparent::{
@@ -24,7 +24,7 @@ use zcash_client_backend::{
     data_api::{
         Account, AccountBalance, Balance, CoinbaseFilter, OutputStatusFilter, TargetValue,
         TransactionDataRequest, TransactionStatusFilter, TransparentBalances,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     fees::StandardFeeRule,
     wallet::{
@@ -71,8 +71,17 @@ use crate::{
     AccountRef, AccountUuid, AddressRef, TxRef, UtxoId,
     error::SqliteClientError,
     util::Clock,
-    wallet::{common::tx_unexpired_condition, get_account, mempool_height},
+    wallet::{
+        common::{
+            output_eligible_condition, overridable_owners_rarray, push_lock_params,
+            tx_unexpired_condition,
+        },
+        get_account, mempool_height,
+    },
 };
+// Used only by the value-target transparent selection, which is gated on transparent inputs.
+#[cfg(feature = "transparent-inputs")]
+use crate::wallet::common::locked_tier_order_key;
 
 pub(crate) mod ephemeral;
 
@@ -1263,6 +1272,9 @@ pub(crate) fn excluding_immature_coinbase_outputs(tx: &str) -> String {
 }
 /// Get information about a transparent output controlled by the wallet.
 ///
+/// This is a direct lookup by `outpoint`, not a selection query, so it does not filter on lock
+/// state: a locked output that is otherwise unspent and unexpired is still returned.
+///
 /// # Parameters
 /// - `outpoint`: The identifier for the output to be retrieved.
 /// - `target_height`: The target height of a transaction under construction that will spend the
@@ -1300,19 +1312,24 @@ pub(crate) fn get_wallet_transparent_output(
          )",
         tx_unexpired_condition("t"),
         spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
     ))?;
 
+    let txid_bytes = outpoint.hash();
+    let output_index = outpoint.n();
+    let target_height_arg = target_height.map(u32::from);
+    let allow_unspendable = target_height.is_none();
+    let sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":txid", &txid_bytes),
+        (":output_index", &output_index),
+        (":target_height", &target_height_arg),
+        (":allow_unspendable", &allow_unspendable),
+    ];
+
     let result: Result<Option<WalletTransparentOutput<_>>, SqliteClientError> = stmt_select_utxo
-        .query_and_then(
-            named_params![
-                ":txid": outpoint.hash(),
-                ":output_index": outpoint.n(),
-                ":target_height": target_height.map(u32::from),
-                ":allow_unspendable": target_height.is_none(),
-            ],
-            |row| to_unspent_transparent_output(conn, row),
-        )?
+        .query_and_then(&sql_params[..], |row| {
+            to_unspent_transparent_output(conn, row)
+        })?
         .next()
         .transpose();
 
@@ -1322,11 +1339,16 @@ pub(crate) fn get_wallet_transparent_output(
 /// Builds the SQL query body shared by `get_spendable_transparent_outputs[_for_addresses]`
 /// and `select_spendable_transparent_outputs`.
 ///
-/// The query body is parameterized over the address-predicate SQL fragment and the
-/// `ORDER BY` fragment, so callers can match on a single address, a set of addresses, or
-/// an account; and can order by address+index (per-address determinism) or by value
-/// descending (value-bounded selection).
-fn spendable_transparent_outputs_query(address_predicate_sql: &str, order_by_sql: &str) -> String {
+/// The query body is parameterized over the address-predicate SQL fragment, the lock-eligibility
+/// fragment (see [`output_eligible_condition`]), and the `ORDER BY` fragment, so callers can match
+/// on a single address, a set of addresses, or an account; and can order by address+index
+/// (per-address determinism) or by value descending (value-bounded selection), optionally prefixed
+/// with a lock-tier preference key.
+fn spendable_transparent_outputs_query(
+    address_predicate_sql: &str,
+    lock_eligible_sql: &str,
+    order_by_sql: &str,
+) -> String {
     format!(
         "SELECT t.txid, u.output_index, u.script,
                 u.value_zat, addresses.key_scope,
@@ -1351,6 +1373,7 @@ fn spendable_transparent_outputs_query(address_predicate_sql: &str, order_by_sql
          ) -- coinbase filter: 0 = all, 1 = coinbase-only, 2 = non-coinbase-only;
            -- unknown tx_index defaults to 1 (non-coinbase) to avoid false positives,
            -- so such outputs are excluded by CoinbaseOnly and included by NonCoinbaseOnly
+         AND ({lock_eligible_sql}) -- the output is eligible under the lock filter
          ORDER BY {order_by_sql}",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
@@ -1390,6 +1413,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // Defer to the batched query with a singleton address set, so that there is a single query
     // body to maintain. `transparent_received_outputs.address` is always equal to the
@@ -1404,6 +1428,7 @@ pub(crate) fn get_spendable_transparent_outputs<P: consensus::Parameters>(
         target_height,
         confirmations_policy,
         output_filter,
+        lock_filter,
     )
 }
 
@@ -1427,6 +1452,7 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     output_filter: CoinbaseFilter,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     if addresses.is_empty() {
         return Ok(vec![]);
@@ -1434,8 +1460,11 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
 
     let coinbase_filter = coinbase_filter_encoding(output_filter);
 
+    // This returns all matching outputs (no value target), so only the eligibility filter
+    // (Part A) applies; no lock-tier ordering is imposed.
     let mut stmt_utxos = conn.prepare_cached(&spendable_transparent_outputs_query(
         "addresses.cached_transparent_receiver_address IN rarray(:addresses)",
+        &output_eligible_condition(lock_filter, "u"),
         "addresses.cached_transparent_receiver_address, u.output_index",
     ))?;
 
@@ -1453,13 +1482,19 @@ pub(crate) fn get_spendable_transparent_outputs_for_addresses<P: consensus::Para
         .collect();
     let addresses_ptr = Rc::new(address_values);
 
-    let mut rows = stmt_utxos.query(named_params![
-        ":addresses": &addresses_ptr,
-        ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations,
-        ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":coinbase_filter": coinbase_filter,
-    ])?;
+    let target_height_arg = u32::from(target_height);
+    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let overridable_owners = overridable_owners_rarray(lock_filter);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":addresses", &addresses_ptr),
+        (":target_height", &target_height_arg),
+        (":min_confirmations", &min_confirmations),
+        (":min_value", &min_value),
+        (":coinbase_filter", &coinbase_filter),
+    ];
+    push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
+
+    let mut rows = stmt_utxos.query(&sql_params[..])?;
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     while let Some(row) = rows.next()? {
@@ -1517,6 +1552,7 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     target_value: TargetValue,
     max_inputs: usize,
     fee_rule: &StandardFeeRule,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<WalletTransparentOutput<AccountUuid>>, SqliteClientError> {
     // The post-fee bound for `TargetValue::AtLeast`. `TargetValue::AllFunds` has no bound; we
     // return every eligible output in that case.
@@ -1526,6 +1562,15 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     };
 
     let coinbase_filter = coinbase_filter_encoding(output_filter);
+
+    // This gathers outputs greedily in `ORDER BY` order until the value target is met, so a
+    // `LockFilter::Policy` that prefers one lock tier prefixes the value ordering with a lock-tier
+    // key (Part B): the preferred tier is drawn upon first, with value-descending order retained as
+    // a secondary key within each tier. For `Exclude`/`Unfiltered` the ordering is unchanged.
+    let order_by_sql = match locked_tier_order_key(lock_filter, "u") {
+        Some(tier_key) => format!("{tier_key}, u.value_zat DESC, u.output_index"),
+        None => "u.value_zat DESC, u.output_index".to_string(),
+    };
 
     // `:has_address_allow_list` and `:addresses` are always bound (the latter to an empty
     // array when there is no allow list), following the same always-bound-flag idiom as
@@ -1537,7 +1582,8 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
              :has_address_allow_list = 0
              OR addresses.cached_transparent_receiver_address IN rarray(:addresses)
          )",
-        "u.value_zat DESC, u.output_index",
+        &output_eligible_condition(lock_filter, "u"),
+        &order_by_sql,
     ))?;
 
     // We treat all transparent UTXOs as untrusted; however, if zero-conf shielding
@@ -1555,15 +1601,23 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
         .collect();
     let addresses_ptr = Rc::new(address_values);
 
-    let mut rows = stmt_utxos.query(named_params![
-        ":account_uuid": account.0,
-        ":target_height": u32::from(target_height),
-        ":min_confirmations": min_confirmations,
-        ":min_value": u64::from(zip317::MARGINAL_FEE),
-        ":coinbase_filter": coinbase_filter,
-        ":has_address_allow_list": address_allow_list.is_some(),
-        ":addresses": &addresses_ptr,
-    ])?;
+    let account_uuid = account.0;
+    let target_height_arg = u32::from(target_height);
+    let min_value = u64::from(zip317::MARGINAL_FEE);
+    let has_address_allow_list = address_allow_list.is_some();
+    let overridable_owners = overridable_owners_rarray(lock_filter);
+    let mut sql_params: Vec<(&str, &dyn ToSql)> = vec![
+        (":account_uuid", &account_uuid),
+        (":target_height", &target_height_arg),
+        (":min_confirmations", &min_confirmations),
+        (":min_value", &min_value),
+        (":coinbase_filter", &coinbase_filter),
+        (":has_address_allow_list", &has_address_allow_list),
+        (":addresses", &addresses_ptr),
+    ];
+    push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
+
+    let mut rows = stmt_utxos.query(&sql_params[..])?;
 
     let mut utxos = Vec::<WalletTransparentOutput<_>>::new();
     let mut accumulated_value: u64 = 0;
@@ -1642,19 +1696,19 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     let mut result = HashMap::new();
 
     let mut stmt_address_balances = conn.prepare(&format!(
-        "SELECT u.address, u.value_zat, addresses.key_scope
+        "SELECT u.address, u.value_zat, u.lock_expiry_height, addresses.key_scope
          FROM transparent_received_outputs u
          JOIN accounts ON accounts.id = u.account_id
          JOIN transactions t ON t.id_tx = u.transaction_id
          JOIN addresses ON addresses.id = u.address_id
          WHERE accounts.uuid = :account_uuid
          AND u.value_zat > 0
-         AND ({}) -- the transaction is mined or unexpired with minconf 0
+         AND ({}) -- the output is mined with sufficient confirmations, or is unexpired and minconf is 0
          AND u.id NOT IN ({}) -- and the output is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
     ))?;
 
     let mut rows = stmt_address_balances.query(named_params![
@@ -1667,20 +1721,31 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
         let taddr_str: String = row.get("address")?;
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
         let value = Zatoshis::from_nonnegative_i64(row.get("value_zat")?)?;
+        let lock_expiry_height: Option<u32> = row.get("lock_expiry_height")?;
         let key_scope_code: i64 = row.get("key_scope")?;
         let key_origin = KeyScope::decode(key_scope_code)?.as_key_origin();
 
         let entry = result.entry(taddr).or_insert((key_origin, Balance::ZERO));
         if value <= zip317::MARGINAL_FEE {
             entry.1.add_uneconomic_value(value)?;
+        } else if lock_expiry_height
+            .iter()
+            .any(|h| *h >= u32::from(target_height))
+        {
+            entry.1.add_locked_value(value)?;
         } else {
             entry.1.add_spendable_value(value)?;
         }
     }
 
+    // Compute pending spendable balance.
+    //
     // Pending spendable balance for transparent UTXOs is only relevant for min_confirmations > 0;
     // with min_confirmations == 0, zero-conf spends are allowed and therefore the value will
-    // appear in the spendable balance and we don't want to double-count it.
+    // appear in the spendable balance and we don't want to also count it as pending.
+    //
+    // For pending value, we can ignore locking considerations until the balance is no longer
+    // pending, so we don't check locking here.
     if min_confirmations > 0 {
         let mut stmt_address_balances = conn.prepare(&format!(
             "SELECT u.address, u.value_zat, addresses.key_scope
@@ -1750,7 +1815,7 @@ pub(crate) fn add_transparent_account_balances(
     };
 
     let mut stmt_account_spendable_balances = conn.prepare(&format!(
-        "SELECT accounts.uuid, SUM(u.value_zat),
+        "SELECT accounts.uuid, u.lock_expiry_height, SUM(u.value_zat),
             (IFNULL(t.tx_index, 1) == 0) AS is_coinbase,
             (t.mined_height IS NOT NULL
              AND :target_height - t.mined_height >= {COINBASE_MATURITY_BLOCKS}) AS is_mature
@@ -1761,10 +1826,10 @@ pub(crate) fn add_transparent_account_balances(
          WHERE ({}) -- the transaction is mined or unexpired with minconf 0
          AND u.id NOT IN ({}) -- and the received txo is unspent
          AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-         GROUP BY accounts.uuid, is_coinbase, is_mature",
+         GROUP BY accounts.uuid, lock_expiry_height, is_coinbase, is_mature",
         tx_unexpired_condition_minconf_0("t"),
         spent_utxos_clause(),
-        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+        excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
     ))?;
 
     let mut rows = stmt_account_spendable_balances.query(named_params![
@@ -1774,7 +1839,8 @@ pub(crate) fn add_transparent_account_balances(
 
     while let Some(row) = rows.next()? {
         let account = AccountUuid(row.get(0)?);
-        let raw_value = row.get(1)?;
+        let lock_expiry_height: Option<u32> = row.get(1)?;
+        let raw_value = row.get(2)?;
         let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
             SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
         })?;
@@ -1788,6 +1854,14 @@ pub(crate) fn add_transparent_account_balances(
             balance.with_unshielded_coinbase_balance_mut(|bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
+                } else if lock_expiry_height
+                    .iter()
+                    .any(|h| *h >= u32::from(target_height))
+                {
+                    // A locked coinbase output (selected by an in-flight shielding
+                    // proposal) is excluded from the spendable balance, exactly like a
+                    // locked non-coinbase output.
+                    bal.add_locked_value(value)
                 } else if is_mature {
                     bal.add_spendable_value(value)
                 } else {
@@ -1800,6 +1874,11 @@ pub(crate) fn add_transparent_account_balances(
             balance.with_unshielded_regular_balance_mut(|bal| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
+                } else if lock_expiry_height
+                    .iter()
+                    .any(|h| *h >= u32::from(target_height))
+                {
+                    bal.add_locked_value(value)
                 } else {
                     bal.add_spendable_value(value)
                 }
@@ -1813,7 +1892,7 @@ pub(crate) fn add_transparent_account_balances(
     // TODO (#1592): Ability to distinguish between Transparent pending change and pending non-change
     if min_confirmations > 0 {
         let mut stmt_account_unconfirmed_balances = conn.prepare(&format!(
-            "SELECT accounts.uuid, SUM(u.value_zat),
+            "SELECT accounts.uuid, u.lock_expiry_height, SUM(u.value_zat),
                 (IFNULL(t.tx_index, 1) == 0) AS is_coinbase
              FROM transparent_received_outputs u
              JOIN accounts ON accounts.id = u.account_id
@@ -1833,9 +1912,9 @@ pub(crate) fn add_transparent_account_balances(
              )
              AND u.id NOT IN ({}) -- and the received txo is unspent
              AND ({}) -- exclude likely-spent wallet-internal ephemeral outputs
-             GROUP BY accounts.uuid, is_coinbase",
+             GROUP BY accounts.uuid, lock_expiry_height, is_coinbase",
             spent_utxos_clause(),
-            excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts")
+            excluding_wallet_internal_ephemeral_outputs("u", "addresses", "t", "accounts"),
         ))?;
 
         let mut rows = stmt_account_unconfirmed_balances.query(named_params![
@@ -1845,7 +1924,8 @@ pub(crate) fn add_transparent_account_balances(
 
         while let Some(row) = rows.next()? {
             let account = AccountUuid(row.get(0)?);
-            let raw_value = row.get(1)?;
+            let lock_expiry_height: Option<u32> = row.get(1)?;
+            let raw_value = row.get(2)?;
             let value = Zatoshis::from_nonnegative_i64(raw_value).map_err(|_| {
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {raw_value:?}"))
             })?;
@@ -1854,6 +1934,11 @@ pub(crate) fn add_transparent_account_balances(
             let add_pending = |bal: &mut Balance| {
                 if value <= zip317::MARGINAL_FEE {
                     bal.add_uneconomic_value(value)
+                } else if lock_expiry_height
+                    .iter()
+                    .any(|h| *h >= u32::from(target_height))
+                {
+                    bal.add_locked_value(value)
                 } else {
                     bal.add_pending_spendable_value(value)
                 }
@@ -2803,6 +2888,13 @@ mod tests {
     #[test]
     fn put_received_transparent_utxo() {
         zcash_client_backend::data_api::testing::transparent::put_received_transparent_utxo(
+            TestDbFactory::default(),
+        );
+    }
+
+    #[test]
+    fn transparent_note_locking() {
+        zcash_client_backend::data_api::testing::transparent::transparent_note_locking(
             TestDbFactory::default(),
         );
     }

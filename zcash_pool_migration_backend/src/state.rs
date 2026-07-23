@@ -510,6 +510,7 @@ mod tests {
             expiry_height: BlockHeight::from_u32(0),
             anchor_boundary: None,
             state,
+            lock_owner: None,
         }
     }
 

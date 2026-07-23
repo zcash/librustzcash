@@ -21,7 +21,10 @@ use crate::{
         DecryptedTransaction, InputSource, TargetValue, WalletCommitmentTrees, WalletSummary,
         WalletTest,
         chain::{CommitmentTreeRoot, ScanSummary},
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{
+            ConfirmationsPolicy, TargetHeight,
+            input_selection::{LockFilter, LockedInputPolicy},
+        },
     },
     wallet::{Note, ReceivedNote},
 };
@@ -122,6 +125,7 @@ impl ShieldedPoolTester for SaplingPoolTester {
                 target_height,
                 confirmations_policy,
                 exclude,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .map(|n| n.take_sapling())
     }
@@ -133,7 +137,13 @@ impl ShieldedPoolTester for SaplingPoolTester {
         exclude: &[DbT::NoteRef],
     ) -> Result<Vec<ReceivedNote<DbT::NoteRef, Self::Note>>, <DbT as InputSource>::Error> {
         st.wallet()
-            .select_unspent_notes(account, &[ShieldedPool::Sapling], target_height, exclude)
+            .select_unspent_notes(
+                account,
+                &[ShieldedPool::Sapling],
+                target_height,
+                exclude,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+            )
             .map(|n| n.take_sapling())
     }
 

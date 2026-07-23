@@ -96,12 +96,15 @@ use self::{
 };
 use crate::{
     data_api::{
-        error::RewindError,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        error::{LockError, RewindError},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     decrypt::DecryptedOutput,
     proto::service::TreeState,
-    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
+    wallet::{
+        LockOwner, Note, NoteId, OutputRef, ReceivedNote, Recipient, WalletTransparentOutput,
+        WalletTx,
+    },
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -214,6 +217,7 @@ pub enum MaxSpendMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
     spendable_value: Zatoshis,
+    locked_value: Zatoshis,
     change_pending_confirmation: Zatoshis,
     value_pending_spendability: Zatoshis,
     uneconomic_value: Zatoshis,
@@ -223,6 +227,7 @@ impl Balance {
     /// The [`Balance`] value having zero values for all its fields.
     pub const ZERO: Self = Self {
         spendable_value: Zatoshis::ZERO,
+        locked_value: Zatoshis::ZERO,
         change_pending_confirmation: Zatoshis::ZERO,
         value_pending_spendability: Zatoshis::ZERO,
         uneconomic_value: Zatoshis::ZERO,
@@ -230,6 +235,7 @@ impl Balance {
 
     fn check_total_adding(&self, value: Zatoshis) -> Result<Zatoshis, BalanceError> {
         (self.spendable_value
+            + self.locked_value
             + self.change_pending_confirmation
             + self.value_pending_spendability
             + value)
@@ -243,10 +249,25 @@ impl Balance {
         self.spendable_value
     }
 
+    /// Returns the value in the account that is currently "locked".
+    ///
+    /// The outputs that comprise this balance are seen by the wallet as being committed to be
+    /// spent by a transaction proposal or PCZT.
+    pub fn locked_value(&self) -> Zatoshis {
+        self.locked_value
+    }
+
     /// Adds the specified value to the spendable total, checking for overflow.
     pub fn add_spendable_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
         self.check_total_adding(value)?;
         self.spendable_value = (self.spendable_value + value).unwrap();
+        Ok(())
+    }
+
+    /// Adds the specified value to the locked total, checking for overflow.
+    pub fn add_locked_value(&mut self, value: Zatoshis) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.locked_value = (self.locked_value + value).unwrap();
         Ok(())
     }
 
@@ -291,7 +312,10 @@ impl Balance {
 
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> Zatoshis {
-        (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
+        (self.spendable_value
+            + self.locked_value
+            + self.change_pending_confirmation
+            + self.value_pending_spendability)
             .expect("Balance cannot overflow MAX_MONEY")
     }
 }
@@ -303,6 +327,7 @@ impl core::ops::Add<Balance> for Balance {
         let result = Balance {
             spendable_value: (self.spendable_value + rhs.spendable_value)
                 .ok_or(BalanceError::Overflow)?,
+            locked_value: (self.locked_value + rhs.locked_value).ok_or(BalanceError::Overflow)?,
             change_pending_confirmation: (self.change_pending_confirmation
                 + rhs.change_pending_confirmation)
                 .ok_or(BalanceError::Overflow)?,
@@ -497,6 +522,17 @@ impl AccountBalance {
             + self.orchard_balance.spendable_value
             + self.ironwood_balance.spendable_value)
             .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of notes and UTXOs that are locked, having been committed to
+    /// an in-flight transaction proposal or PCZT.
+    pub fn locked_value(&self) -> Zatoshis {
+        (self.sapling_balance.locked_value()
+            + self.orchard_balance.locked_value()
+            + self.ironwood_balance.locked_value()
+            + self.unshielded_regular_balance.locked_value()
+            + self.unshielded_coinbase_balance.locked_value())
+        .expect("Account balance cannot overflow MAX_MONEY")
     }
 
     /// Returns the total value of change and/or shielding transaction outputs that are awaiting
@@ -1660,18 +1696,25 @@ pub trait InputSource {
     /// specified shielded protocol.
     ///
     /// Returns `Ok(None)` if the note is not known to belong to the wallet or if the note
-    /// is not spendable as of the given height.
+    /// is not spendable as of the given height. Locked outputs are selected according to
+    /// `lock_filter` (see [`LockFilter`]; a [`LockFilter::Policy`] carrying the default
+    /// [`LockedInputPolicy::Exclude`] selects none).
+    ///
+    /// [`LockedInputPolicy::Exclude`]: crate::data_api::wallet::input_selection::LockedInputPolicy::Exclude
     fn get_spendable_note(
         &self,
         txid: &TxId,
         protocol: ShieldedPool,
         index: u32,
         target_height: TargetHeight,
+        lock_filter: LockFilter<'_>,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
-    /// be included.
+    /// be included. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
+    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).
+    #[allow(clippy::too_many_arguments)]
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
@@ -1680,16 +1723,19 @@ pub trait InputSource {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns the list of notes belonging to the wallet that are unspent as of the specified
-    /// target height.
+    /// target height. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];
+    /// a [`LockFilter::Policy`] carrying the default `Exclude` selects none).
     fn select_unspent_notes(
         &self,
         account: Self::AccountId,
         sources: &[ShieldedPool],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
 
     /// Returns metadata describing the structure of the wallet for the specified account.
@@ -1698,6 +1744,8 @@ pub trait InputSource {
     /// - notes that are not considered spendable as of the given `target_height`
     /// - unspent notes excluded by the provided selector;
     /// - unspent notes identified in the given `exclude` list.
+    /// - locked notes not admitted by `lock_filter` (see [`LockFilter`]; a [`LockFilter::Policy`]
+    ///   carrying the default `Exclude` admits none).
     ///
     /// Implementations of this method may limit the complexity of supported queries. Such
     /// limitations should be clearly documented for the implementing type.
@@ -1707,6 +1755,7 @@ pub trait InputSource {
         selector: &NoteFilter,
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
     ) -> Result<AccountMeta, Self::Error>;
 
     /// Fetches the transparent output corresponding to the provided `outpoint` if it is considered
@@ -1738,6 +1787,8 @@ pub trait InputSource {
     ///
     /// Any output that is potentially spent by an unmined transaction in the mempool should be
     /// excluded unless the spending transaction will be expired at `target_height`.
+    /// Locked outputs are selected according to `lock_filter` (see [`LockFilter`]; a
+    /// [`LockFilter::Policy`] carrying the default `Exclude` selects none).
     #[cfg(feature = "transparent-inputs")]
     fn get_spendable_transparent_outputs(
         &self,
@@ -1745,6 +1796,7 @@ pub trait InputSource {
         _target_height: TargetHeight,
         _confirmations_policy: ConfirmationsPolicy,
         _output_filter: CoinbaseFilter,
+        _lock_filter: LockFilter<'_>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         unimplemented!(
             "InputSource::get_spendable_transparent_outputs must be overridden for wallets to use the `transparent-inputs` feature"
@@ -1771,6 +1823,7 @@ pub trait InputSource {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
+        lock_filter: LockFilter<'_>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let mut outputs = Vec::new();
         for address in addresses {
@@ -1779,6 +1832,7 @@ pub trait InputSource {
                 target_height,
                 confirmations_policy,
                 output_filter,
+                lock_filter,
             )?);
         }
         Ok(outputs)
@@ -1838,6 +1892,7 @@ pub trait InputSource {
         target_value: TargetValue,
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
+        lock_filter: LockFilter<'_>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         let _ = (
             account,
@@ -1848,6 +1903,7 @@ pub trait InputSource {
             target_value,
             max_inputs,
             fee_rule,
+            lock_filter,
         );
         unimplemented!(
             "InputSource::select_spendable_transparent_outputs must be overridden for \
@@ -2284,6 +2340,15 @@ pub trait WalletRead {
 #[cfg(any(test, feature = "test-dependencies"))]
 #[cfg_attr(feature = "test-dependencies", delegatable_trait)]
 pub trait WalletTest: InputSource + WalletRead {
+    /// Returns the set of currently locked outputs for the given account.
+    ///
+    /// Locked outputs are excluded from note selection, and are tallied separately in balance
+    /// computations.
+    fn get_locked_outputs(
+        &self,
+        account: <Self as WalletRead>::AccountId,
+    ) -> Result<Vec<OutputRef>, <Self as WalletRead>::Error>;
+
     /// Returns a vector of transaction summaries.
     ///
     /// Currently test-only, as production use could return a very large number of results; either
@@ -3581,6 +3646,78 @@ pub trait WalletWrite: WalletRead {
     /// [`ConfirmationsPolicy::trusted`] confirmations even if the output is not wallet-internal.
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error>;
 
+    /// Locks the specified outputs on behalf of `owner` so that, by default, they are not
+    /// selected for spending at any height less than or equal to the given height.
+    ///
+    /// Locks are advisory. Input selection excludes locked outputs by default, but a caller may
+    /// deliberately draw on them by supplying an owner-scoped
+    /// [`LockedInputPolicy`](crate::data_api::wallet::input_selection::LockedInputPolicy) (via
+    /// [`SpendPolicy::with_locked_input_policy`](crate::data_api::wallet::input_selection::SpendPolicy::with_locked_input_policy)),
+    /// scoped to the lock owners it names; doing so spends through the lock during selection but
+    /// never releases it. A locked output can be released only via [`Self::unlock_output`] (by its
+    /// owner) or [`Self::clear_locked_outputs`].
+    ///
+    /// Returns the number of row updates performed on success (equal to the number of provided
+    /// references; a duplicated reference is counted per occurrence), or a [`LockError`] on
+    /// failure, wrapping either an error from the underlying storage backend or the first output
+    /// that could not be locked.
+    ///
+    /// A lock may be acquired when the output holds no lock, when its existing lock has expired
+    /// as of the chain tip, or when its existing lock is held by the *same* `owner`; in the
+    /// latter case the lock's expiry height is updated. Same-owner re-locking makes the
+    /// operation idempotent, so a caller that crashes between locking and persisting its
+    /// proposal can safely retry the flow under the same [`LockOwner`]. Acquisition fails only
+    /// when an unexpired lock is held by a different owner.
+    ///
+    /// Implementations of this method must either succeed completely, successfully locking each
+    /// provided output on success, or fail completely leaving all lock state unmodified if any
+    /// of the outputs is actively locked by a different owner.
+    ///
+    /// This is the mechanism by which overlapping proposals for the same account avoid selecting
+    /// the same inputs by default. Because note selection and locking cannot be performed as a
+    /// single atomic step above the storage layer, two callers may independently select an
+    /// overlapping set of outputs before either locks them (a time-of-check/time-of-use race); the
+    /// conflict is resolved here, at the storage layer, where the second caller's `lock_outputs`
+    /// fails with [`LockError::LockFailure`] naming the already-locked output. Callers that lock
+    /// via a proposal-creation function surface this as
+    /// [`ProposalError::InputsLocked`](crate::proposal::ProposalError::InputsLocked). The
+    /// losing caller has not partially locked anything and should treat the failure as "the
+    /// account is busy" and retry.
+    fn lock_outputs(
+        &mut self,
+        outputs: &[OutputRef],
+        owner: LockOwner,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>>;
+
+    /// Unlocks the specified output if it is locked by the given `owner`, making it once again
+    /// available for spending and balance computations.
+    ///
+    /// Returns `true` if a lock held by `owner` (whether or not it had already expired) was
+    /// removed from the output, and `false` otherwise: in particular, a lock held by a
+    /// different owner is left in place, so one flow cannot accidentally release another's
+    /// locks.
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error>;
+
+    /// Unlocks every currently-locked output belonging to the specified account, regardless of
+    /// lock expiry height.
+    ///
+    /// This is intended as a recovery mechanism for callers that have lost track of their
+    /// in-flight proposals or PCZTs (for example, because the application was terminated by the
+    /// operating system before the corresponding transactions could be built). By clearing all
+    /// locks for the account, the caller declares that it has no pending proposals holding those
+    /// outputs.
+    ///
+    /// # Warning
+    ///
+    /// This releases every lock for the account regardless of its owner, including locks held
+    /// by proposals that are still legitimately in flight; those proposals' inputs immediately
+    /// become selectable by new proposals, re-creating the conflict that locking exists to
+    /// prevent. Only call this when no in-flight proposal or PCZT for the account remains.
+    ///
+    /// Returns the number of outputs that were unlocked.
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error>;
+
     /// Saves information about transactions constructed by the wallet to the persistent
     /// wallet store.
     ///
@@ -3588,6 +3725,11 @@ pub trait WalletWrite: WalletRead {
     ///
     /// Transactions that have been stored by this method should be retransmitted while it
     /// is still possible that they could be mined.
+    ///
+    /// Implementations must unlock any locked outputs that are recorded as spent by the
+    /// stored transactions. Once spend records exist, the outputs are protected from
+    /// double-selection by the spend tracking mechanism, so the explicit locks are no
+    /// longer needed.
     fn store_transactions_to_be_sent(
         &mut self,
         transactions: &[SentTransaction<Self::AccountId>],
@@ -4091,6 +4233,168 @@ pub trait WalletCommitmentTrees {
         })?;
 
         Ok(())
+    }
+}
+
+/// Property tests for the [`Balance`] bucket arithmetic.
+///
+/// These pin the accounting semantics the locked-value bucket joined: every bucket except
+/// `uneconomic_value` participates in [`Balance::total`] and in the shared overflow guard,
+/// while `uneconomic_value` is guarded only against its own overflow and never contributes
+/// to the total.
+#[cfg(test)]
+mod balance_tests {
+    use proptest::prelude::*;
+    use zcash_protocol::value::{BalanceError, MAX_MONEY, Zatoshis};
+
+    use super::Balance;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Bucket {
+        Spendable = 0,
+        Locked = 1,
+        PendingChange = 2,
+        PendingSpendable = 3,
+        Uneconomic = 4,
+    }
+    use Bucket::*;
+
+    const ALL_BUCKETS: [Bucket; 5] = [
+        Spendable,
+        Locked,
+        PendingChange,
+        PendingSpendable,
+        Uneconomic,
+    ];
+    /// The buckets that participate in `Balance::total` and its overflow guard.
+    const TOTAL_BUCKETS: [Bucket; 4] = [Spendable, Locked, PendingChange, PendingSpendable];
+
+    fn apply(balance: &mut Balance, bucket: Bucket, value: Zatoshis) -> Result<(), BalanceError> {
+        match bucket {
+            Spendable => balance.add_spendable_value(value),
+            Locked => balance.add_locked_value(value),
+            PendingChange => balance.add_pending_change_value(value),
+            PendingSpendable => balance.add_pending_spendable_value(value),
+            Uneconomic => balance.add_uneconomic_value(value),
+        }
+    }
+
+    fn get(balance: &Balance, bucket: Bucket) -> Zatoshis {
+        match bucket {
+            Spendable => balance.spendable_value(),
+            Locked => balance.locked_value(),
+            PendingChange => balance.change_pending_confirmation(),
+            PendingSpendable => balance.value_pending_spendability(),
+            Uneconomic => balance.uneconomic_value(),
+        }
+    }
+
+    fn arb_bucket() -> impl Strategy<Value = Bucket> {
+        prop_oneof![
+            Just(Spendable),
+            Just(Locked),
+            Just(PendingChange),
+            Just(PendingSpendable),
+            Just(Uneconomic),
+        ]
+    }
+
+    /// A bucket and a value to add to it. Values are mostly small (so most sequences stay
+    /// within `MAX_MONEY`) with occasional near-cap draws to exercise the overflow guards.
+    fn arb_add() -> impl Strategy<Value = (Bucket, u64)> {
+        (
+            arb_bucket(),
+            prop_oneof![
+                3 => 0u64..=1_000_000,
+                1 => 0u64..=MAX_MONEY,
+            ],
+        )
+    }
+
+    proptest! {
+        /// Bucket adds succeed exactly while their overflow guard permits, mutate only the
+        /// requested bucket, and leave the balance untouched on failure. `total()` is always
+        /// the sum of the four participating buckets. (In particular this establishes that
+        /// the `unwrap` inside each guarded add is unreachable.)
+        #[test]
+        fn add_total_consistency(adds in proptest::collection::vec(arb_add(), 0..12)) {
+            let mut balance = Balance::ZERO;
+            // The model: per-bucket totals, indexed by bucket discriminant.
+            let mut model = [0u64; 5];
+
+            for (bucket, v) in adds {
+                let value = Zatoshis::from_u64(v).unwrap();
+                let before = balance;
+                let result = apply(&mut balance, bucket, value);
+
+                let total: u64 = TOTAL_BUCKETS.iter().map(|b| model[*b as usize]).sum();
+                let expect_ok = match bucket {
+                    Uneconomic => model[Uneconomic as usize] + v <= MAX_MONEY,
+                    _ => total + v <= MAX_MONEY,
+                };
+                if expect_ok {
+                    prop_assert!(result.is_ok());
+                    model[bucket as usize] += v;
+                } else {
+                    prop_assert!(result.is_err());
+                    prop_assert_eq!(
+                        balance, before,
+                        "a failed add must leave the balance unchanged"
+                    );
+                }
+
+                let total: u64 = TOTAL_BUCKETS.iter().map(|b| model[*b as usize]).sum();
+                prop_assert_eq!(balance.total(), Zatoshis::from_u64(total).unwrap());
+                for b in ALL_BUCKETS {
+                    prop_assert_eq!(
+                        get(&balance, b),
+                        Zatoshis::from_u64(model[b as usize]).unwrap()
+                    );
+                }
+            }
+        }
+
+        /// `Balance + Balance` is componentwise addition: it succeeds exactly when the
+        /// combined total and the combined uneconomic value each remain within `MAX_MONEY`,
+        /// and on success every bucket of the sum is the sum of the corresponding buckets.
+        #[test]
+        fn balance_addition_is_componentwise(
+            a in proptest::collection::vec(arb_add(), 0..6),
+            b in proptest::collection::vec(arb_add(), 0..6),
+        ) {
+            let build = |adds: &[(Bucket, u64)]| {
+                let mut balance = Balance::ZERO;
+                for (bucket, v) in adds {
+                    let _ = apply(&mut balance, *bucket, Zatoshis::from_u64(*v).unwrap());
+                }
+                balance
+            };
+            let ba = build(&a);
+            let bb = build(&b);
+
+            let combined_total = u64::from(ba.total()) + u64::from(bb.total());
+            let combined_uneconomic =
+                u64::from(ba.uneconomic_value()) + u64::from(bb.uneconomic_value());
+            match ba + bb {
+                Ok(sum) => {
+                    prop_assert!(combined_total <= MAX_MONEY);
+                    prop_assert!(combined_uneconomic <= MAX_MONEY);
+                    for bucket in ALL_BUCKETS {
+                        prop_assert_eq!(
+                            u64::from(get(&sum, bucket)),
+                            u64::from(get(&ba, bucket)) + u64::from(get(&bb, bucket))
+                        );
+                    }
+                    prop_assert_eq!(u64::from(sum.total()), combined_total);
+                }
+                Err(_) => {
+                    prop_assert!(
+                        combined_total > MAX_MONEY || combined_uneconomic > MAX_MONEY,
+                        "balance addition failed although no component overflows"
+                    );
+                }
+            }
+        }
     }
 }
 

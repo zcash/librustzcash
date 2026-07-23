@@ -11,7 +11,7 @@ use zcash_client_backend::{
     data_api::{
         Account, NullifierQuery, TargetValue,
         ll::ReceivedSaplingOutput,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     wallet::ReceivedNote,
 };
@@ -139,6 +139,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
     target_height: TargetHeight,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -148,6 +149,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         ShieldedPool::Sapling,
         target_height,
         to_received_note,
+        lock_filter,
     )
 }
 
@@ -156,6 +158,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
 /// If the tip shard has unscanned ranges below the anchor height and greater than or equal to
 /// the wallet birthday, none of our notes can be spent because we cannot construct witnesses at
 /// the provided anchor height.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -164,6 +167,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -175,6 +179,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Sapling,
         to_received_note,
+        lock_filter,
     )
 }
 
@@ -570,6 +575,64 @@ pub(crate) mod tests {
     #[test]
     fn spend_fails_on_locked_notes() {
         testing::pool::spend_fails_on_locked_notes::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn explicit_note_locking() {
+        testing::pool::explicit_note_locking::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn note_locking_height_boundary() {
+        testing::pool::note_locking_height_boundary::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn clear_locked_outputs() {
+        testing::pool::clear_locked_outputs::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn proposal_level_note_locking() {
+        testing::pool::proposal_level_note_locking::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn locked_proposal_proto_roundtrip() {
+        testing::pool::locked_proposal_proto_roundtrip::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn lock_expiry_restores_spendability() {
+        testing::pool::lock_expiry_restores_spendability::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn lock_conflict_and_batch_atomicity() {
+        testing::pool::lock_conflict_and_batch_atomicity::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn unlock_proposal_inputs_releases_locks() {
+        testing::pool::unlock_proposal_inputs_releases_locks::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn spend_policy_locked_input_policy_reaches_selection() {
+        testing::pool::spend_policy_locked_input_policy_reaches_selection::<SaplingPoolTester>()
+    }
+
+    proptest::proptest! {
+        // Each case builds a fresh wallet and replays an operation sequence, so keep the
+        // case count moderate; the sequences themselves explore the expiry boundaries.
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(12))]
+
+        #[test]
+        fn note_locking_model(
+            ops in zcash_client_backend::data_api::testing::pool::arb_lock_ops(3, 10)
+        ) {
+            testing::pool::check_note_locking_model::<SaplingPoolTester>(&ops)
+        }
     }
 
     #[test]

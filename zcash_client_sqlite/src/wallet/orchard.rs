@@ -12,7 +12,7 @@ use zcash_client_backend::{
     data_api::{
         Account as _, NullifierQuery, TargetValue,
         ll::ReceivedOrchardOutput,
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     wallet::ReceivedNote,
 };
@@ -150,6 +150,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
     target_height: TargetHeight,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -159,6 +160,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
         ShieldedPool::Orchard,
         target_height,
         to_received_note,
+        lock_filter,
     )
 }
 
@@ -171,6 +173,7 @@ pub(crate) fn get_spendable_ironwood_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
     target_height: TargetHeight,
+    lock_filter: LockFilter<'_>,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
@@ -180,12 +183,14 @@ pub(crate) fn get_spendable_ironwood_note<P: consensus::Parameters>(
         ShieldedPool::Ironwood,
         target_height,
         to_received_note,
+        lock_filter,
     )
 }
 
 /// Selects spendable Ironwood notes to satisfy the given target value. Ironwood notes are
 /// Orchard-shaped, so this reuses the Orchard note reconstruction; only the pool (and thus the
 /// `ironwood_received_notes` table) differs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_ironwood_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -194,6 +199,7 @@ pub(crate) fn select_spendable_ironwood_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -205,9 +211,11 @@ pub(crate) fn select_spendable_ironwood_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Ironwood,
         to_received_note,
+        lock_filter,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -216,6 +224,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     target_height: TargetHeight,
     confirmations_policy: ConfirmationsPolicy,
     exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
@@ -227,6 +236,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
         exclude,
         ShieldedPool::Orchard,
         to_received_note,
+        lock_filter,
     )
 }
 
@@ -801,6 +811,64 @@ pub(crate) mod tests {
     #[test]
     fn spend_fails_on_locked_notes() {
         testing::pool::spend_fails_on_locked_notes::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn explicit_note_locking() {
+        testing::pool::explicit_note_locking::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn note_locking_height_boundary() {
+        testing::pool::note_locking_height_boundary::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn clear_locked_outputs() {
+        testing::pool::clear_locked_outputs::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn proposal_level_note_locking() {
+        testing::pool::proposal_level_note_locking::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn locked_proposal_proto_roundtrip() {
+        testing::pool::locked_proposal_proto_roundtrip::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn lock_expiry_restores_spendability() {
+        testing::pool::lock_expiry_restores_spendability::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn lock_conflict_and_batch_atomicity() {
+        testing::pool::lock_conflict_and_batch_atomicity::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn unlock_proposal_inputs_releases_locks() {
+        testing::pool::unlock_proposal_inputs_releases_locks::<OrchardPoolTester>()
+    }
+
+    #[test]
+    fn spend_policy_locked_input_policy_reaches_selection() {
+        testing::pool::spend_policy_locked_input_policy_reaches_selection::<OrchardPoolTester>()
+    }
+
+    proptest::proptest! {
+        // Each case builds a fresh wallet and replays an operation sequence, so keep the
+        // case count moderate; the sequences themselves explore the expiry boundaries.
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(12))]
+
+        #[test]
+        fn note_locking_model(
+            ops in zcash_client_backend::data_api::testing::pool::arb_lock_ops(3, 10)
+        ) {
+            testing::pool::check_note_locking_model::<OrchardPoolTester>(&ops)
+        }
     }
 
     #[test]
@@ -1965,6 +2033,9 @@ pub(crate) mod tests {
             use zcash_client_backend::data_api::{TargetValue, WalletRead};
 
             use crate::wallet::orchard::select_spendable_ironwood_notes;
+            use zcash_client_backend::data_api::wallet::input_selection::{
+                LockFilter, LockedInputPolicy,
+            };
 
             let mut st = TestBuilder::new()
                 .with_network(ironwood_active_network())
@@ -2010,6 +2081,7 @@ pub(crate) mod tests {
                 target_height,
                 ConfirmationsPolicy::MIN,
                 &[],
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap();
             assert_eq!(notes.len(), 2, "both Ironwood notes are spendable");
@@ -2033,6 +2105,7 @@ pub(crate) mod tests {
                 target_height,
                 ConfirmationsPolicy::MIN,
                 &[excluded],
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap();
             assert!(
@@ -2182,6 +2255,9 @@ pub(crate) mod tests {
 
             use crate::error::SqliteClientError;
             use crate::wallet::orchard::select_spendable_ironwood_notes;
+            use zcash_client_backend::data_api::wallet::input_selection::{
+                LockFilter, LockedInputPolicy,
+            };
 
             let mut st = TestBuilder::new()
                 .with_network(ironwood_active_network())
@@ -2221,6 +2297,7 @@ pub(crate) mod tests {
                 target_height,
                 ConfirmationsPolicy::MIN,
                 &[],
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap()
             .into_iter()

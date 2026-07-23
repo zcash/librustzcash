@@ -17,6 +17,7 @@ use zcash_primitives::{
     transaction::{Transaction, TransactionData, TxVersion, fees::zip317},
 };
 use zcash_protocol::{
+    PoolType, TxId,
     consensus::{BlockHeight, BranchId, COINBASE_MATURITY_BLOCKS},
     local_consensus::LocalNetwork,
     value::Zatoshis,
@@ -34,14 +35,18 @@ use crate::{
     data_api::{
         Account as _, AccountBalance, Balance, CoinbaseFilter, InputSource as _, MaxSpendMode,
         TargetValue, WalletRead as _, WalletTest as _, WalletWrite,
+        error::LockError,
         testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
-            input_selection::{GreedyInputSelector, SpendPolicy, TransparentSpendPolicy},
+            input_selection::{
+                GreedyInputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+                TransparentSpendPolicy,
+            },
         },
     },
     fees::{DustOutputPolicy, StandardFeeRule, standard},
-    wallet::WalletTransparentOutput,
+    wallet::{LockOwner, OutputRef, WalletTransparentOutput},
 };
 
 /// Checks whether the transparent balance of the given test `account` is as `expected`
@@ -87,7 +92,8 @@ fn check_balance<DSF>(
                 taddr,
                 target_height,
                 confirmations_policy,
-                CoinbaseFilter::AllTransparentOutputs
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap()
             .into_iter()
@@ -155,12 +161,14 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         ).as_deref(),
         Ok([ret])
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo.outpoint(), target_height),
+        st.wallet()
+            .get_unspent_transparent_output(utxo.outpoint(), target_height),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_1))
     );
@@ -188,7 +196,8 @@ where
                 taddr,
                 target_height,
                 ConfirmationsPolicy::MIN,
-                CoinbaseFilter::AllTransparentOutputs
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude)
             )
             .as_deref(),
         Ok(&[])
@@ -196,7 +205,8 @@ where
 
     // We can still look up the specific output, and it has the expected height.
     assert_matches!(
-        st.wallet().get_unspent_transparent_output(utxo2.outpoint(), target_height),
+        st.wallet()
+            .get_unspent_transparent_output(utxo2.outpoint(), target_height),
         Ok(Some(ret))
         if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo2.outpoint(), utxo2.txout(), Some(height_2))
     );
@@ -204,7 +214,7 @@ where
     // If we include `height_2` then the output is returned.
     assert_matches!(
         st.wallet()
-            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs)
+            .get_spendable_transparent_outputs(taddr, TargetHeight::from(height_2 + 1), ConfirmationsPolicy::MIN, CoinbaseFilter::AllTransparentOutputs, LockFilter::Policy(&LockedInputPolicy::Exclude))
             .as_deref(),
         Ok([ret]) if (ret.outpoint(), ret.txout(), ret.mined_height()) == (utxo.outpoint(), utxo.txout(), Some(height_2))
     );
@@ -217,6 +227,178 @@ where
         ),
         Ok(h) if h.get(taddr).map(|(_, b)| b.spendable_value()) == Some(value)
     );
+}
+
+/// Exercises note locking for transparent outputs.
+///
+/// A locked UTXO is still returned by a by-outpoint lookup (which is not a selection query and
+/// so does not filter by lock state), but is excluded from spendable-output listing unless the
+/// query passes `LockFilter::Unfiltered`, is reported as locked (not spendable) value in the
+/// per-address balances, conflicts with a second lock, and returns to spendability when the
+/// chain tip passes the lock expiry height, with no unlock call.
+pub fn transparent_note_locking<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let birthday = st.test_account().unwrap().birthday().height();
+    let account_id = st.test_account().unwrap().id();
+    let uaddr = st
+        .wallet()
+        .get_last_generated_address_matching(account_id, UnifiedAddressRequest::AllAvailableKeys)
+        .unwrap()
+        .unwrap();
+    let taddr = uaddr.transparent().unwrap();
+
+    let height = birthday + 12345;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // Create a fake transparent output mined at `height`.
+    let value = Zatoshis::const_from_u64(100000);
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint.clone(),
+        txout,
+        Some(height),
+        Some(account_id),
+        Some(TransparentKeyScope::EXTERNAL),
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    let target_height = TargetHeight::from(height + 1);
+    let output_ref = OutputRef::new(
+        TxId::from_bytes(*outpoint.hash()),
+        PoolType::TRANSPARENT,
+        outpoint.n(),
+    );
+
+    // The output is retrievable and spendable before locking.
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, target_height),
+        Ok(Some(_))
+    );
+
+    // Lock the UTXO until ten blocks past the tip.
+    let owner = LockOwner::new([1; 32]);
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(&[output_ref], owner, height + 10)
+            .unwrap(),
+        1
+    );
+
+    // A lock by a different owner conflicts while the first is active.
+    let other_owner = LockOwner::new([2; 32]);
+    assert_matches!(
+        st.wallet_mut().lock_outputs(&[output_ref], other_owner, height + 20),
+        Err(LockError::LockFailure(r)) if r == output_ref
+    );
+
+    // A by-outpoint lookup of a known output is not a selection query, so it does not filter by
+    // lock state: the output is still returned even though it is locked. Lock exclusion is
+    // verified via `get_spendable_transparent_outputs`, below.
+    assert_matches!(
+        st.wallet()
+            .get_unspent_transparent_output(&outpoint, target_height),
+        Ok(Some(_))
+    );
+
+    // ... and from the spendable-outputs listing unless the query is unfiltered.
+    assert_matches!(
+        st.wallet()
+            .get_spendable_transparent_outputs(
+                taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
+            )
+            .as_deref(),
+        Ok(&[])
+    );
+    assert_matches!(
+        st.wallet()
+            .get_spendable_transparent_outputs(
+                taddr,
+                target_height,
+                ConfirmationsPolicy::MIN,
+                CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Unfiltered,
+            )
+            .as_deref(),
+        Ok([_])
+    );
+
+    // The per-address balances report the value as locked, not spendable; the total is
+    // unaffected by lock state.
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    let (_, bal) = balances
+        .get(taddr)
+        .expect("the address has a balance entry");
+    assert_eq!(bal.locked_value(), value);
+    assert_eq!(bal.spendable_value(), Zatoshis::ZERO);
+    assert_eq!(bal.total(), value);
+
+    // The locked-outputs listing includes the transparent lock.
+    assert_eq!(
+        st.wallet().get_locked_outputs(account_id).unwrap(),
+        vec![output_ref]
+    );
+
+    // Advancing the chain tip to the expiry height restores spendability with no unlock call.
+    st.wallet_mut().update_chain_tip(height + 10).unwrap();
+    let expired_target = TargetHeight::from(height + 11);
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .unwrap();
+    let (_, bal) = balances
+        .get(taddr)
+        .expect("the address has a balance entry");
+    assert_eq!(bal.spendable_value(), value);
+    assert_eq!(bal.locked_value(), Zatoshis::ZERO);
+    assert!(
+        st.wallet()
+            .get_locked_outputs(account_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    // The expired lock is replaceable without an explicit unlock, even by a different owner,
+    // and the new holder can then release it.
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(&[output_ref], other_owner, height + 30)
+            .unwrap(),
+        1
+    );
+    assert!(
+        st.wallet_mut()
+            .unlock_output(&output_ref, other_owner)
+            .unwrap()
+    );
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, expired_target, ConfirmationsPolicy::MIN)
+        .unwrap();
+    let (_, bal) = balances
+        .get(taddr)
+        .expect("the address has a balance entry");
+    assert_eq!(bal.spendable_value(), value);
 }
 
 pub fn transparent_balance_across_shielding<DSF>(dsf: DSF, cache: impl TestCache)
@@ -527,6 +709,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(all.len(), 3);
@@ -545,6 +728,7 @@ where
                     target_height,
                     ConfirmationsPolicy::MIN,
                     CoinbaseFilter::AllTransparentOutputs,
+                    LockFilter::Policy(&LockedInputPolicy::Exclude),
                 )
                 .unwrap(),
         );
@@ -562,6 +746,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(subset.len(), 1);
@@ -575,6 +760,7 @@ where
                 target_height,
                 ConfirmationsPolicy::MIN,
                 CoinbaseFilter::AllTransparentOutputs,
+                LockFilter::Policy(&LockedInputPolicy::Exclude),
             )
             .unwrap()
             .is_empty()
@@ -1399,6 +1585,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -1745,6 +1932,7 @@ where
             target_height,
             ConfirmationsPolicy::MIN,
             CoinbaseFilter::AllTransparentOutputs,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .unwrap();
     assert_eq!(utxos.len(), 1);
@@ -2354,6 +2542,7 @@ where
             TargetValue::AtLeast(payment_amount),
             usize::MAX,
             &StandardFeeRule::Zip317,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .expect("initial gather should succeed");
     let initial_gather_value: Zatoshis = initial_gather
@@ -2667,6 +2856,7 @@ where
             TargetValue::AtLeast(target),
             usize::MAX,
             &StandardFeeRule::Zip317,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .expect("value-bounded gather should succeed");
 
@@ -2715,6 +2905,7 @@ where
             TargetValue::AllFunds(MaxSpendMode::MaxSpendable),
             usize::MAX,
             &StandardFeeRule::Zip317,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
         )
         .expect("AllFunds gather should succeed");
     assert_eq!(all.len(), n_dust);

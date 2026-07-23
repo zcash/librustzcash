@@ -23,13 +23,13 @@ use zcash_client_backend::{
     data_api::{
         TargetValue,
         chain::{ChainState, CommitmentTreeRoot},
-        error::RewindError,
+        error::{LockError, RewindError},
         scanning::ScanRange,
         testing::{DataStoreFactory, Reset, TestState},
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
         *,
     },
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
+    wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput},
 };
 use zcash_keys::{
     address::UnifiedAddress,
@@ -118,6 +118,11 @@ impl TestDb {
 
     pub(crate) fn take_data_file(self) -> NamedTempFile {
         self.data_file
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn data_file_path(&self) -> &std::path::Path {
+        self.data_file.path()
     }
 
     /// Dump the schema and contents of the given database table, in

@@ -65,6 +65,109 @@ impl NoteId {
     }
 }
 
+/// A reference to a transaction output received by the wallet, across all pools.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OutputRef {
+    txid: TxId,
+    pool: PoolType,
+    output_index: u32,
+}
+
+impl OutputRef {
+    /// Constructs a new `OutputRef` from its parts.
+    pub fn new(txid: TxId, pool: PoolType, output_index: u32) -> Self {
+        Self {
+            txid,
+            pool,
+            output_index,
+        }
+    }
+
+    /// Returns the ID of the transaction containing this output.
+    pub fn txid(&self) -> &TxId {
+        &self.txid
+    }
+
+    /// Returns the pool type of this output.
+    pub fn pool(&self) -> PoolType {
+        self.pool
+    }
+
+    /// Returns the index of this output within its transaction.
+    pub fn output_index(&self) -> u32 {
+        self.output_index
+    }
+}
+
+impl From<NoteId> for OutputRef {
+    fn from(note_id: NoteId) -> Self {
+        Self {
+            txid: note_id.txid,
+            pool: PoolType::Shielded(note_id.protocol),
+            output_index: note_id.output_index.into(),
+        }
+    }
+}
+
+/// An opaque token identifying the holder of an output lock.
+///
+/// A caller that locks outputs (directly via [`WalletWrite::lock_outputs`], or through a
+/// proposal-creation function's lock request) supplies an owner token and must retain it: the
+/// token is what authorizes releasing the locks ([`WalletWrite::unlock_output`],
+/// [`unlock_proposal_inputs`]) and what makes re-locking idempotent (an owner may re-acquire or
+/// extend its own active lock, for example when retrying a flow after a crash, while a different
+/// owner's lock attempt fails until the lock expires).
+///
+/// The token is not a cryptographic secret: everything that can reach the wallet database can
+/// read it. It exists to prevent *accidental* cross-flow interference between concurrent
+/// in-process operations, not to protect against an adversary with database access.
+///
+/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
+/// [`WalletWrite::unlock_output`]: crate::data_api::WalletWrite::unlock_output
+/// [`unlock_proposal_inputs`]: crate::data_api::wallet::unlock_proposal_inputs
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LockOwner([u8; 32]);
+
+impl LockOwner {
+    /// Constructs a `LockOwner` from the given bytes.
+    ///
+    /// Callers that persist their own operation state may derive a stable token from it; all
+    /// others should prefer [`LockOwner::random`].
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Generates a fresh random `LockOwner`.
+    pub fn random<R: rand_core::RngCore>(rng: &mut R) -> Self {
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        Self(bytes)
+    }
+
+    /// Returns the byte representation of this token.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// A transaction id may serve as a lock owner.
+///
+/// This is the right owner choice for flows that hold a durable transaction identity while
+/// their locks are alive; most notably a persisted PCZT, whose v5 txid is fixed once its
+/// effecting data is final. Deriving the owner from the txid lets such a flow re-derive its
+/// token after a restart and release (or re-acquire) exactly its own locks.
+///
+/// It is NOT a suitable owner for proposal-time locking in general: at proposal creation no
+/// transaction exists yet, a multi-step proposal builds several transactions, and a
+/// transaction rebuilt after a crash generally has a different txid, which would defeat the
+/// idempotent same-owner re-lock. Flows without a durable transaction identity should use
+/// [`LockOwner::random`] and retain the token.
+impl From<TxId> for LockOwner {
+    fn from(txid: TxId) -> Self {
+        Self(txid.into())
+    }
+}
+
 /// A type that represents the recipient of a transaction output.
 ///
 /// Variants vary along two independent axes:
@@ -1128,6 +1231,111 @@ impl TransparentAddressSource {
             TransparentAddressSource::StandalonePubkey(_) => None,
             #[cfg(feature = "transparent-key-import")]
             TransparentAddressSource::StandaloneScript(redeem_script) => Some(redeem_script),
+        }
+    }
+}
+
+/// Property tests for [`OutputRef`], whose identity (txid, pool, output index) is the key the
+/// note-locking tables and the proposal double-spend check operate on.
+#[cfg(test)]
+mod output_ref_tests {
+    use proptest::prelude::*;
+    use zcash_protocol::{PoolType, ShieldedPool, TxId};
+
+    use super::{NoteId, OutputRef};
+
+    fn arb_shielded_pool() -> impl Strategy<Value = ShieldedPool> {
+        prop_oneof![
+            Just(ShieldedPool::Sapling),
+            Just(ShieldedPool::Orchard),
+            Just(ShieldedPool::Ironwood),
+        ]
+    }
+
+    fn arb_pool_type() -> impl Strategy<Value = PoolType> {
+        prop_oneof![
+            Just(PoolType::Transparent),
+            arb_shielded_pool().prop_map(PoolType::Shielded),
+        ]
+    }
+
+    fn arb_output_ref() -> impl Strategy<Value = OutputRef> {
+        (any::<[u8; 32]>(), arb_pool_type(), any::<u32>())
+            .prop_map(|(txid, pool, idx)| OutputRef::new(TxId::from_bytes(txid), pool, idx))
+    }
+
+    proptest! {
+        /// Converting a `NoteId` preserves every component: the note's pool maps into the
+        /// shielded arm of `PoolType`, and the `u16` output index widens losslessly.
+        #[test]
+        fn from_note_id_preserves_fields(
+            txid in any::<[u8; 32]>(),
+            pool in arb_shielded_pool(),
+            idx in any::<u16>(),
+        ) {
+            let txid = TxId::from_bytes(txid);
+            let output_ref = OutputRef::from(NoteId::new(txid, pool, idx));
+            prop_assert_eq!(output_ref.txid(), &txid);
+            prop_assert_eq!(output_ref.pool(), PoolType::Shielded(pool));
+            prop_assert_eq!(output_ref.output_index(), u32::from(idx));
+        }
+
+        /// Identity is exactly the (txid, pool, output index) triple: a reference equals
+        /// itself, differs from any single-field mutation of itself, and `Ord` agrees with
+        /// `Eq` (the `BTreeSet` double-spend check in proposal construction and the lock
+        /// tables both rely on this).
+        #[test]
+        fn identity_is_the_full_triple(a in arb_output_ref()) {
+            prop_assert_eq!(a, a);
+            prop_assert_eq!(a.cmp(&a), std::cmp::Ordering::Equal);
+
+            // A different output index is a different output.
+            let other_index = OutputRef::new(
+                *a.txid(),
+                a.pool(),
+                a.output_index().wrapping_add(1),
+            );
+            prop_assert_ne!(a, other_index);
+            prop_assert_ne!(a.cmp(&other_index), std::cmp::Ordering::Equal);
+
+            // A different pool is a different output, even at the same (txid, index): the
+            // same transaction may have outputs at the same index in several pools.
+            let other_pool = OutputRef::new(
+                *a.txid(),
+                match a.pool() {
+                    PoolType::Transparent => PoolType::SAPLING,
+                    PoolType::Shielded(_) => PoolType::Transparent,
+                },
+                a.output_index(),
+            );
+            prop_assert_ne!(a, other_pool);
+            prop_assert_ne!(a.cmp(&other_pool), std::cmp::Ordering::Equal);
+
+            // A different transaction is a different output.
+            let mut txid = <[u8; 32]>::from(*a.txid());
+            txid[0] = txid[0].wrapping_add(1);
+            let other_txid = OutputRef::new(TxId::from_bytes(txid), a.pool(), a.output_index());
+            prop_assert_ne!(a, other_txid);
+            prop_assert_ne!(a.cmp(&other_txid), std::cmp::Ordering::Equal);
+        }
+
+        /// A txid-derived [`super::LockOwner`] preserves the txid bytes, so two owners
+        /// derived from distinct transactions are distinct (a persisted PCZT re-derives
+        /// exactly its own token after a restart).
+        #[test]
+        fn lock_owner_from_txid_preserves_bytes(txid in any::<[u8; 32]>()) {
+            let owner = super::LockOwner::from(TxId::from_bytes(txid));
+            prop_assert_eq!(*owner.as_bytes(), txid);
+        }
+
+        /// Two independently drawn references are equal exactly when all three components
+        /// match.
+        #[test]
+        fn equality_is_component_wise(a in arb_output_ref(), b in arb_output_ref()) {
+            let components_equal = a.txid() == b.txid()
+                && a.pool() == b.pool()
+                && a.output_index() == b.output_index();
+            prop_assert_eq!(a == b, components_equal);
         }
     }
 }

@@ -231,6 +231,79 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn explicit_note_locking<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::explicit_note_locking::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn note_locking_height_boundary<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::note_locking_height_boundary::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn clear_locked_outputs<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::clear_locked_outputs::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn proposal_level_note_locking<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::proposal_level_note_locking::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::locked_proposal_proto_roundtrip::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn lock_expiry_restores_spendability<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::lock_expiry_restores_spendability::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::lock_conflict_and_batch_atomicity::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::unlock_proposal_inputs_releases_locks::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn spend_policy_locked_input_policy_reaches_selection<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::spend_policy_locked_input_policy_reaches_selection::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn check_note_locking_model<T: ShieldedPoolTester>(
+    ops: &[zcash_client_backend::data_api::testing::pool::LockOp],
+) {
+    zcash_client_backend::data_api::testing::pool::check_note_locking_model::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        ops,
+    )
+}
+
 pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::ovk_policy_prevents_recovery_from_chain::<T, _>(
         TestDbFactory::default(),
@@ -925,4 +998,174 @@ pub(crate) fn proposal_records_and_serializes_proposed_version() {
         TestDbFactory::default(),
         BlockCache::new(),
     );
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use assert_matches::assert_matches;
+
+    use zcash_client_backend::{
+        data_api::{
+            Account as _, InputSource as _, WalletRead as _, WalletTest as _, WalletWrite as _,
+            error::LockError,
+            testing::{
+                AddressType, TestBuilder, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+            },
+            wallet::{
+                TargetHeight,
+                input_selection::{LockFilter, LockedInputPolicy},
+            },
+        },
+        wallet::{LockOwner, OutputRef},
+    };
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+
+    use crate::{
+        WalletDb,
+        testing::{
+            BlockCache,
+            db::{TestDbFactory, test_clock, test_rng},
+        },
+    };
+
+    /// Two independent `WalletDb` connections to the same wallet database resolve a lock race
+    /// at the storage layer: both handles observe the same spendable note (the shared
+    /// select-before-lock state of the TOCTOU window), only the first `lock_outputs` succeeds,
+    /// the loser's failure names the contested note, and lock state changes are immediately
+    /// visible across handles. Also pins the ownerless-lock property across connections: the
+    /// losing handle is able to release the winner's lock.
+    #[test]
+    fn concurrent_handles_resolve_lock_conflict() {
+        let mut st = TestBuilder::new()
+            .with_block_cache(BlockCache::new())
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        // Fund the wallet with a single note.
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let value = Zatoshis::const_from_u64(60000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        let account_id = st.test_account().unwrap().id();
+        let notes = st.wallet().get_notes(ShieldedPool::Sapling).unwrap();
+        assert_eq!(notes.len(), 1);
+        let note = &notes[0];
+        let txid = *note.txid();
+        let output_index = u32::from(note.output_index());
+        let output_ref = OutputRef::new(txid, PoolType::SAPLING, output_index);
+
+        let tip = st.wallet().chain_height().unwrap().unwrap();
+        let target_height = TargetHeight::from(tip + 1);
+
+        // Open a second, independent connection to the same wallet database file.
+        let network = *st.network();
+        let mut db2 = WalletDb::for_path(
+            st.wallet().data_file_path(),
+            network,
+            test_clock(),
+            test_rng(),
+        )
+        .unwrap();
+
+        // Both handles observe the note as spendable: this is the shared state from which two
+        // concurrent proposal flows would each select the same input.
+        assert!(
+            st.wallet()
+                .get_spendable_note(
+                    &txid,
+                    ShieldedPool::Sapling,
+                    output_index,
+                    target_height,
+                    LockFilter::Policy(&LockedInputPolicy::Exclude)
+                )
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            db2.get_spendable_note(
+                &txid,
+                ShieldedPool::Sapling,
+                output_index,
+                target_height,
+                LockFilter::Policy(&LockedInputPolicy::Exclude)
+            )
+            .unwrap()
+            .is_some()
+        );
+
+        // The second handle locks first, under its own owner...
+        let owner_a = LockOwner::new([0xA1; 32]);
+        let owner_b = LockOwner::new([0xB2; 32]);
+        assert_eq!(
+            db2.lock_outputs(&[output_ref], owner_b, BlockHeight::from(u32::MAX))
+                .unwrap(),
+            1
+        );
+
+        // ... so the first handle's lock (under a different owner) fails, naming the
+        // contested output: the race is resolved at the storage layer, across connections.
+        assert_matches!(
+            st.wallet_mut()
+                .lock_outputs(&[output_ref], owner_a, BlockHeight::from(u32::MAX)),
+            Err(LockError::LockFailure(r)) if r == output_ref
+        );
+
+        // The winner's lock is immediately visible to the losing handle.
+        assert!(
+            st.wallet()
+                .get_spendable_note(
+                    &txid,
+                    ShieldedPool::Sapling,
+                    output_index,
+                    target_height,
+                    LockFilter::Policy(&LockedInputPolicy::Exclude)
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            st.wallet().get_locked_outputs(account_id).unwrap(),
+            vec![output_ref]
+        );
+
+        // Locks are owner-scoped, so the losing handle CANNOT release the winner's lock:
+        // its unlock is a no-op and the note stays locked.
+        assert!(!st.wallet_mut().unlock_output(&output_ref, owner_a).unwrap());
+        assert!(
+            st.wallet()
+                .get_spendable_note(
+                    &txid,
+                    ShieldedPool::Sapling,
+                    output_index,
+                    target_height,
+                    LockFilter::Policy(&LockedInputPolicy::Exclude)
+                )
+                .unwrap()
+                .is_none()
+        );
+
+        // The winning handle releases its own lock; the release is visible to the losing
+        // handle, whose retry then succeeds.
+        assert!(db2.unlock_output(&output_ref, owner_b).unwrap());
+        assert!(
+            db2.get_spendable_note(
+                &txid,
+                ShieldedPool::Sapling,
+                output_index,
+                target_height,
+                LockFilter::Policy(&LockedInputPolicy::Exclude)
+            )
+            .unwrap()
+            .is_some()
+        );
+        assert_eq!(
+            st.wallet_mut()
+                .lock_outputs(&[output_ref], owner_a, BlockHeight::from(u32::MAX))
+                .unwrap(),
+            1
+        );
+    }
 }

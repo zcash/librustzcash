@@ -62,16 +62,16 @@ use zcash_client_backend::{
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
-        error::{FindAccountForAddressError, RewindError},
+        error::{FindAccountForAddressError, LockError, RewindError},
         ll::{
             self, LowLevelWalletRead, LowLevelWalletWrite, ReceivedSaplingOutput,
             wallet::store_decrypted_tx,
         },
         scanning::{ScanPriority, ScanRange},
-        wallet::{ConfirmationsPolicy, TargetHeight},
+        wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
     proto::compact_formats::CompactBlock,
-    wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput, WalletTx},
+    wallet::{LockOwner, Note, NoteId, OutputRef, ReceivedNote, WalletTransparentOutput, WalletTx},
 };
 use zcash_keys::{
     address::UnifiedAddress,
@@ -672,6 +672,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         protocol: ShieldedPool,
         index: u32,
         target_height: TargetHeight,
+        lock_filter: LockFilter<'_>,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         match protocol {
             ShieldedPool::Sapling => wallet::sapling::get_spendable_sapling_note(
@@ -680,6 +681,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 txid,
                 index,
                 target_height,
+                lock_filter,
             )
             .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
             ShieldedPool::Orchard => {
@@ -690,6 +692,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     txid,
                     index,
                     target_height,
+                    lock_filter,
                 )
                 .map(|opt| {
                     opt.map(|n| {
@@ -711,6 +714,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     txid,
                     index,
                     target_height,
+                    lock_filter,
                 )
                 .map(|opt| {
                     opt.map(|n| {
@@ -735,6 +739,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
             if sources.contains(&ShieldedPool::Sapling) {
@@ -746,6 +751,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     confirmations_policy,
                     exclude,
+                    lock_filter,
                 )?
             } else {
                 vec![]
@@ -760,6 +766,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     confirmations_policy,
                     exclude,
+                    lock_filter,
                 )?
             } else {
                 vec![]
@@ -774,6 +781,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     target_height,
                     confirmations_policy,
                     exclude,
+                    lock_filter,
                 )?
             } else {
                 vec![]
@@ -787,6 +795,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         sources: &[ShieldedPool],
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
         Ok(ReceivedNotes::new(
             if sources.contains(&ShieldedPool::Sapling) {
@@ -800,6 +809,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ShieldedPool::Sapling,
                     wallet::sapling::to_received_note,
                     wallet::common::NoteRequest::Unspent,
+                    lock_filter,
                 )?
             } else {
                 vec![]
@@ -816,6 +826,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ShieldedPool::Orchard,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
+                    lock_filter,
                 )?
             } else {
                 vec![]
@@ -832,6 +843,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                     ShieldedPool::Ironwood,
                     wallet::orchard::to_received_note,
                     wallet::common::NoteRequest::Unspent,
+                    lock_filter,
                 )?
             } else {
                 vec![]
@@ -859,6 +871,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
+        lock_filter: LockFilter<'_>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -867,6 +880,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_height,
             confirmations_policy,
             output_filter,
+            lock_filter,
         )
     }
 
@@ -877,6 +891,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
+        lock_filter: LockFilter<'_>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::get_spendable_transparent_outputs_for_addresses(
             self.conn.borrow(),
@@ -885,6 +900,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_height,
             confirmations_policy,
             output_filter,
+            lock_filter,
         )
     }
 
@@ -899,6 +915,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         target_value: TargetValue,
         max_inputs: usize,
         fee_rule: &StandardFeeRule,
+        lock_filter: LockFilter<'_>,
     ) -> Result<Vec<WalletTransparentOutput<Self::AccountId>>, Self::Error> {
         wallet::transparent::select_spendable_transparent_outputs(
             self.conn.borrow(),
@@ -911,6 +928,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             target_value,
             max_inputs,
             fee_rule,
+            lock_filter,
         )
     }
 
@@ -921,6 +939,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         selector: &NoteFilter,
         target_height: TargetHeight,
         exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
     ) -> Result<AccountMeta, Self::Error> {
         let sapling_pool_meta = unspent_notes_meta(
             self.conn.borrow(),
@@ -929,6 +948,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             account_id,
             selector,
             exclude,
+            lock_filter,
         )?;
 
         #[cfg(feature = "orchard")]
@@ -939,6 +959,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             account_id,
             selector,
             exclude,
+            lock_filter,
         )?;
         #[cfg(not(feature = "orchard"))]
         let orchard_pool_meta = None;
@@ -951,6 +972,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
             account_id,
             selector,
             exclude,
+            lock_filter,
         )?;
         #[cfg(not(feature = "orchard"))]
         let ironwood_pool_meta = None;
@@ -1325,6 +1347,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTest
     for WalletDb<C, P, CL, R>
 {
+    fn get_locked_outputs(
+        &self,
+        account: <Self as WalletRead>::AccountId,
+    ) -> Result<Vec<OutputRef>, <Self as WalletRead>::Error> {
+        wallet::get_locked_outputs(self.conn.borrow(), account)
+    }
+
     fn get_tx_history(
         &self,
     ) -> Result<Vec<TransactionSummary<<Self as WalletRead>::AccountId>>, <Self as WalletRead>::Error>
@@ -1482,12 +1511,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
             .query_map([], |row| {
                 let txid: [u8; 32] = row.get("txid")?;
                 let output_index: u32 = row.get(output_index_col)?;
+                // The test accessor inspects wallet contents irrespective of lock state.
+                let lock_filter = LockFilter::Unfiltered;
                 let note = self
                     .get_spendable_note(
                         &TxId::from_bytes(txid),
                         protocol,
                         output_index,
                         target_height,
+                        lock_filter,
                     )
                     .unwrap()
                     .unwrap();
@@ -1653,6 +1685,25 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
 
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wdb.set_tx_trust(txid, trusted))
+    }
+
+    fn lock_outputs(
+        &mut self,
+        outputs: &[OutputRef],
+        owner: LockOwner,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        Ok(self.transactionally(|wdb| {
+            wallet::lock_outputs(wdb.conn.0, outputs, owner, lock_expiry_height)
+        })?)
+    }
+
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
+        self.transactionally(|wdb| wallet::unlock_output(wdb.conn.0, output, owner))
+    }
+
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
+        self.transactionally(|wdb| wallet::clear_locked_outputs(wdb.conn.0, account))
     }
 
     fn store_transactions_to_be_sent(
@@ -2043,6 +2094,34 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
 
     fn set_tx_trust(&mut self, txid: TxId, trusted: bool) -> Result<(), Self::Error> {
         wallet::set_tx_trust(self.conn.0, txid, trusted)
+    }
+
+    fn lock_outputs(
+        &mut self,
+        outputs: &[OutputRef],
+        owner: LockOwner,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<usize, LockError<Self::Error>> {
+        // This impl operates within an enclosing database transaction, so the
+        // all-or-nothing contract of `WalletWrite::lock_outputs` holds only if a
+        // returned error causes the enclosing transaction to be rolled back: on a
+        // mid-batch `LockFailure`, locks taken for earlier outputs in the batch
+        // remain pending in the transaction. `WalletDb::transactionally` (used by
+        // the non-transactional impl above) provides that rollback.
+        Ok(wallet::lock_outputs(
+            self.conn.0,
+            outputs,
+            owner,
+            lock_expiry_height,
+        )?)
+    }
+
+    fn unlock_output(&mut self, output: &OutputRef, owner: LockOwner) -> Result<bool, Self::Error> {
+        wallet::unlock_output(self.conn.0, output, owner)
+    }
+
+    fn clear_locked_outputs(&mut self, account: Self::AccountId) -> Result<usize, Self::Error> {
+        wallet::clear_locked_outputs(self.conn.0, account)
     }
 
     fn store_transactions_to_be_sent(
