@@ -1856,7 +1856,7 @@ where
         rng,
         Signing::InProcess,
     )
-    .map(|(state, _unsigned, _funding)| state)
+    .map(|output| output.state)
 }
 
 /// Commit a planned migration for an EXTERNAL signer: build EVERY transaction exactly as
@@ -1890,7 +1890,7 @@ where
     R: RngCore + rand_core::CryptoRng,
 {
     commit_preparation_inner(params, target_height, backend, plan, rng, Signing::External)
-        .map(|(state, unsigned, _funding)| (state, unsigned))
+        .map(|output| (output.state, output.unsigned))
 }
 
 /// Shared body of [`commit_preparation`] (with [`Signing::InProcess`]) and
@@ -1919,11 +1919,11 @@ where
     committer.build_transfers(plan)?;
     // `into_state` consumes the committer, releasing its `&mut backend` reborrow, so the store
     // write below can borrow `backend` again.
-    let (state, unsigned, transfer_funding) = committer.into_state(plan);
+    let output = committer.into_state(plan);
     backend
-        .replace_migration(&state)
+        .replace_migration(&output.state)
         .map_err(CommitError::Backend)?;
-    Ok((state, unsigned, transfer_funding))
+    Ok(output)
 }
 
 /// Commit a planned migration in-process (as [`commit_preparation`]) and additionally return each
@@ -1955,7 +1955,7 @@ where
         rng,
         Signing::InProcess,
     )
-    .map(|(state, _unsigned, funding)| (state, funding))
+    .map(|output| (output.state, output.transfer_funding))
 }
 
 /// Hosts the shared mutable state that building a whole committed migration threads through its
@@ -2356,7 +2356,11 @@ where
             preparation: plan.preparation().clone(),
             transactions: self.transactions,
         };
-        (state, self.unsigned, self.transfer_funding)
+        CommitOutput {
+            state,
+            unsigned: self.unsigned,
+            transfer_funding: self.transfer_funding,
+        }
     }
 }
 
@@ -2366,11 +2370,14 @@ where
 #[cfg(feature = "orchard")]
 type TransferFunding = Vec<(MigrationTxId, orchard::note::Note)>;
 
-/// What one commit pass produces: the persisted [`MigrationState`], the unsigned PCZTs (empty for
-/// the in-process signing path), and each transfer paired with the funding note it spends. The
-/// public commit entry points drop the parts they do not surface.
+/// What one commit pass produces. The public commit entry points drop the parts they do not
+/// surface.
 #[cfg(feature = "orchard")]
-type CommitOutput = (MigrationState, Vec<UnsignedMigrationTx>, TransferFunding);
+struct CommitOutput {
+    state: MigrationState,
+    unsigned: Vec<UnsignedMigrationTx>,
+    transfer_funding: TransferFunding,
+}
 
 #[cfg(test)]
 mod tests {
