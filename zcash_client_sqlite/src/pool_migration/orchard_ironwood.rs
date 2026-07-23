@@ -7,9 +7,11 @@
 //! migration runs. The generic store type never leaks into this API.
 
 use std::borrow::{Borrow, BorrowMut};
+use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension};
 
+use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration_backend::engine::{
     MigrationState, MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
@@ -76,6 +78,20 @@ impl<C> PoolMigrations<C> {
     /// Recover the wrapped connection borrow.
     pub fn into_inner(self) -> C {
         self.0.into_inner()
+    }
+}
+
+impl<C: Borrow<Connection>> PoolMigrations<C> {
+    /// Returns the set of [`LockOwner`]s under which this account's in-progress pool migration
+    /// has locked notes (empty if there is no migration, or it holds no locks).
+    ///
+    /// This is the set a caller passes to a `LockedInputPolicy::PreferUnlocked` /
+    /// `PreferLocked` override so a proposal may draw on the migration's own locked notes
+    /// without disturbing any other flow's locks. It is not part of [`PoolMigrationRead`]: that
+    /// trait is shared with the pool-agnostic migration engine, which has no notion of
+    /// [`LockOwner`] (a wallet-level concept).
+    pub fn migration_lock_owners(&self) -> Result<BTreeSet<LockOwner>, Error> {
+        self.0.migration_lock_owners()
     }
 }
 
@@ -241,6 +257,79 @@ mod tests {
             loaded.transactions()[1].lock_owner(),
             None,
             "a `None` lock_owner must round-trip as `None`"
+        );
+    }
+
+    /// `migration_lock_owners` returns exactly the distinct, non-`None` lock owners across an
+    /// account's migration transactions: an account with no migration returns the empty set,
+    /// a `None` lock_owner contributes nothing, and repeated owners collapse to one entry.
+    #[test]
+    fn migration_lock_owners_collects_distinct_non_none_owners() {
+        use std::collections::BTreeSet;
+
+        use zcash_client_backend::wallet::LockOwner;
+        use zcash_pool_migration_backend::engine::{
+            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
+        };
+        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_protocol::consensus::BlockHeight;
+        use zcash_protocol::value::Zatoshis;
+
+        let mut store = fresh_store();
+        assert_eq!(
+            store.migration_lock_owners().expect("read succeeds"),
+            BTreeSet::new(),
+            "an account with no migration must report no lock owners"
+        );
+
+        let owner_a_bytes = [0xA1u8; 32];
+        let owner_b_bytes = [0xB2u8; 32];
+
+        let note_split = NoteSplitPlan::from_stored_parts(
+            Vec::new(),
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+        )
+        .expect("an empty stored plan reconstructs");
+
+        let tx = |id: u32, crossing: usize, lock_owner: Option<[u8; 32]>| {
+            MigrationTransaction::from_parts(
+                MigrationTxId::new(id),
+                MigrationTxKind::Transfer { crossing },
+                vec![id as u8],
+                Vec::new(),
+                BlockHeight::from_u32(100),
+                BlockHeight::from_u32(200),
+                None,
+                MigrationTxState::Signed,
+                lock_owner,
+            )
+        };
+
+        let state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            note_split,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![
+                tx(0, 0, Some(owner_a_bytes)),
+                tx(1, 1, Some(owner_b_bytes)),
+                tx(2, 2, None),
+                // A second transaction locked by A, to prove duplicates collapse.
+                tx(3, 3, Some(owner_a_bytes)),
+            ],
+        );
+
+        store.replace_migration(&state).expect("write succeeds");
+
+        let owners = store.migration_lock_owners().expect("read succeeds");
+        assert_eq!(
+            owners,
+            BTreeSet::from([LockOwner::new(owner_a_bytes), LockOwner::new(owner_b_bytes)]),
+            "must contain exactly the distinct non-None lock owners, deduped"
         );
     }
 

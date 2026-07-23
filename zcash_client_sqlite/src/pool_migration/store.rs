@@ -24,9 +24,11 @@
 //! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
 
 use std::borrow::{Borrow, BorrowMut};
+use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 
+use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration_backend::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
     MigrationTxState,
@@ -257,6 +259,13 @@ impl<C> Store<C> {
 impl<C: Borrow<Connection>> Store<C> {
     pub(crate) fn get_migration(&self) -> Result<Option<MigrationState>, Error> {
         read_migration(self.conn.borrow(), self.tables, self.account_id)
+    }
+
+    /// Returns the set of [`LockOwner`]s under which this account's in-progress migration has
+    /// locked notes (empty if the account has no migration, or none of its transactions hold a
+    /// lock).
+    pub(crate) fn migration_lock_owners(&self) -> Result<BTreeSet<LockOwner>, Error> {
+        read_lock_owners(self.conn.borrow(), self.tables, self.account_id)
     }
 }
 
@@ -609,6 +618,31 @@ fn read_transactions(
             state,
             r.lock_owner,
         ));
+    }
+    Ok(out)
+}
+
+/// Returns the distinct [`LockOwner`]s recorded on `account`'s migration transactions (empty if
+/// the account has no migration, or none of its transactions hold a lock). A direct `DISTINCT`
+/// query over the transactions table, scoped by the account's resolved migration id, so this
+/// avoids reconstructing the whole migration (with its preparation plan and every transaction)
+/// just to inspect which locks it holds.
+fn read_lock_owners(
+    conn: &Connection,
+    t: &Tables,
+    account: AccountRef,
+) -> Result<BTreeSet<LockOwner>, Error> {
+    let Some(migration_id) = resolve_migration_id(conn, t, account)? else {
+        return Ok(BTreeSet::new());
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT lock_owner FROM {} WHERE migration_id = ? AND lock_owner IS NOT NULL",
+        t.transactions
+    ))?;
+    let rows = stmt.query_map(params![migration_id], |row| row.get::<_, [u8; 32]>(0))?;
+    let mut out = BTreeSet::new();
+    for r in rows {
+        out.insert(LockOwner::new(r?));
     }
     Ok(out)
 }
