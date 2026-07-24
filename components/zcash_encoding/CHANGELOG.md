@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-24
+
 ### Added
 - `zcash_encoding::CompactSize::{read_unbounded, write_unbounded}`, which use the
   same wire format as `CompactSize::{read, write}` but span the full `u64` range
