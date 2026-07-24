@@ -1,6 +1,6 @@
 [package]
 name = "zcash_pool_migration_memory"
-description = "In-memory, test-only implementations of the zcash_pool_migration_backend engine traits"
+description = "In-memory, test-only implementations of the zcash_pool_migration engine traits"
 version = "0.1.0"
 authors = [
     "Danny Willems <be.danny.willems@gmail.com>",
@@ -16,9 +16,9 @@ categories.workspace = true
 
 [dependencies]
 # The engine traits and types these mocks implement. The crypto mocks and the witness helpers need
-# the backend's Orchard surface (`MigrationCrypto`, `build::sign_pczt`), so enable its `orchard`
-# feature unconditionally: this crate exists only to support the backend's tests.
-zcash_pool_migration_backend = { path = "../zcash_pool_migration_backend", features = [
+# the engine's Orchard surface (`MigrationCrypto`, `build::sign_pczt`), so enable its `orchard`
+# feature unconditionally: this crate exists only to support the engine's tests.
+zcash_pool_migration = { path = "../zcash_pool_migration", features = [
     "orchard",
 ] }
 

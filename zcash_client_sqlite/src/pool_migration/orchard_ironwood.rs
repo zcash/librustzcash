@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use rusqlite::{Connection, OptionalExtension};
 
 use zcash_client_backend::wallet::LockOwner;
-use zcash_pool_migration_backend::engine::{
+use zcash_pool_migration::engine::{
     MigrationState, MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 
@@ -125,10 +125,10 @@ mod tests {
     use rusqlite::Connection;
     use uuid::Uuid;
 
-    use zcash_pool_migration_backend::engine::{
+    use zcash_pool_migration::engine::{
         MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
-    use zcash_pool_migration_backend::testing::{
+    use zcash_pool_migration::testing::{
         arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
         assert_put_get_roundtrip, assert_put_replaces, assert_update_transaction,
         first_transaction_id,
@@ -189,11 +189,11 @@ mod tests {
     /// covers the type more broadly.
     #[test]
     fn lock_owner_round_trips() {
-        use zcash_pool_migration_backend::engine::{
+        use zcash_pool_migration::engine::{
             MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
         };
-        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
-        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_pool_migration::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::consensus::BlockHeight;
         use zcash_protocol::value::Zatoshis;
 
@@ -268,11 +268,11 @@ mod tests {
         use std::collections::BTreeSet;
 
         use zcash_client_backend::wallet::LockOwner;
-        use zcash_pool_migration_backend::engine::{
+        use zcash_pool_migration::engine::{
             MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
         };
-        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
-        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_pool_migration::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::consensus::BlockHeight;
         use zcash_protocol::value::Zatoshis;
 
@@ -338,9 +338,9 @@ mod tests {
     /// so an empty layer would leave no trace (and the engine never produces one).
     #[test]
     fn empty_prep_layer_is_rejected() {
-        use zcash_pool_migration_backend::engine::{MigrationState, MigrationStatus};
-        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
-        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_pool_migration::engine::{MigrationState, MigrationStatus};
+        use zcash_pool_migration::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::value::Zatoshis;
 
         let note_split = NoteSplitPlan::from_stored_parts(
@@ -370,9 +370,9 @@ mod tests {
     /// cleanup the wallet's account-deletion path now relies on entirely (no explicit delete).
     #[test]
     fn deleting_an_account_cascades_to_its_migration() {
-        use zcash_pool_migration_backend::engine::{MigrationState, MigrationStatus};
-        use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
-        use zcash_pool_migration_backend::preparation::PreparationPlan;
+        use zcash_pool_migration::engine::{MigrationState, MigrationStatus};
+        use zcash_pool_migration::note_splitting::NoteSplitPlan;
+        use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::value::Zatoshis;
 
         let mut conn = fresh_conn();

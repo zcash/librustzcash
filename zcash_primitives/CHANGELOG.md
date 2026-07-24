@@ -28,7 +28,7 @@ workspace.
 - `zcash_primitives::transaction::builder::Error::AnchorDeferralUnsupported`
 - `zcash_primitives::transaction::builder::cached_orchard_proving_key`, the
   process-wide, per-circuit-version Orchard proving-key cache, now public so
-  other proving code in the workspace (such as the pool-migration backend) can
+  other proving code in the workspace (such as the pool-migration engine) can
   share it instead of rebuilding the expensive proving key.
 
 ### Changed

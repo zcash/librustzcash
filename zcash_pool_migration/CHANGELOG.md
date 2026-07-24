@@ -7,4 +7,4 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-Initial release of the `zcash_pool_migration_backend` crate.
+Initial release of the `zcash_pool_migration` crate.
