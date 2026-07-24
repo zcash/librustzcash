@@ -18,9 +18,9 @@ use nom::{
 
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_protocol::{
+    PoolType,
     memo::{self, MemoBytes},
-    value::BalanceError,
-    value::Zatoshis,
+    value::{BalanceError, Zatoshis},
 };
 
 /// Errors that may be produced in constructing a [`Payment`].
@@ -273,6 +273,48 @@ impl Payment {
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(crate) fn normalize(&mut self) {
         self.other_params.sort();
+    }
+
+    /// Returns [true] if the payment is expected to be using the Sapling
+    /// transfer protocol. The detection is based on the recipient address type.
+    ///
+    /// For unified addresses, as described in
+    /// [ZIP-316](https://zips.z.cash/zip-0316#encoding-of-unified-addresses),
+    /// we follow the priority list.
+    ///
+    /// ```text
+    /// We say that a Receiver Type is “preferred” over another when it appears
+    /// earlier in this Priority List (as potentially modified by experiments).
+    /// ```
+    pub fn is_sapling_payment(&self) -> bool {
+        !self.is_orchard_payment() && self.recipient_address.is_sapling()
+    }
+
+    /// Returns [true] if the payment is expected to be using the Orchard
+    /// transfer protocol. The detection is based on the recipient address type.
+    pub fn is_orchard_payment(&self) -> bool {
+        self.recipient_address.is_orchard()
+    }
+
+    /// Returns [true] if the payment is expected to be using the Transparent
+    /// transfer protocol. The detection is based on the recipient address type.
+    pub fn is_transparent_payment(&self) -> bool {
+        self.recipient_address.is_transparent_only()
+    }
+
+    /// Returns the pool type the payment is related to.
+    pub fn pool_type(&self) -> PoolType {
+        if self.is_orchard_payment() {
+            PoolType::ORCHARD
+        } else if self.is_sapling_payment() {
+            PoolType::SAPLING
+        } else if self.is_transparent_payment() {
+            PoolType::TRANSPARENT
+        } else {
+            unimplemented!(
+                "Impossible to infer the pool type. Maybe a new transfer protocol has been defined and hasn't been added yet in this method"
+            )
+        }
     }
 }
 
