@@ -555,7 +555,8 @@ impl MigrationPlan {
     /// The preparation broadcast schedule, one height per preparation transaction, in the same
     /// `[layer][index]` shape as [`preparation`](Self::preparation)'s layers: exponential
     /// inter-arrival delays with the tighter preparation spacing (see
-    /// [`scheduling::PREP_MEAN_DELAY`]), each layer based past
+    /// [`SchedulingParams::preparation_delay`](scheduling::SchedulingParams::preparation_delay)),
+    /// each layer based past
     /// the previous layer's last height plus a mining margin, so the transactions are temporally
     /// decoupled from one another while the layers stay serialized.
     pub fn prep_schedule(&self) -> &[Vec<BlockHeight>] {
@@ -730,7 +731,12 @@ where
     let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::with_capacity(preparation.layer_count());
     let mut layer_base = commit_height;
     for layer in preparation.layers() {
-        let heights = scheduling::schedule_prep_broadcast_heights(layer_base, layer.len(), rng);
+        let heights = scheduling::schedule_prep_broadcast_heights(
+            &scheduling::SchedulingParams::ZIP_318,
+            layer_base,
+            layer.len(),
+            rng,
+        );
         layer_base = heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS;
         prep_schedule.push(heights);
     }
@@ -748,6 +754,7 @@ where
         .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
         .ok_or(MigrationError::Nu63NotActive)?;
     let schedule_base = commit_height.max(scheduling::earliest_broadcast_height(
+        scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
         nu63_activation,
         est_last_prep_height,
     ));
@@ -757,7 +764,12 @@ where
     // temporal sequence an observer could read the balance back out of. Drawing a uniform
     // permutation and assigning the i-th drawn slot to the permuted crossing makes the
     // broadcast order of denominations independent of the balance.
-    let slots = scheduling::schedule(schedule_base, funding_notes.len(), rng);
+    let slots = scheduling::schedule(
+        &scheduling::SchedulingParams::ZIP_318,
+        schedule_base,
+        funding_notes.len(),
+        rng,
+    );
     let mut schedule = slots.clone();
     for (slot, &crossing) in scheduling::shuffle_indices(funding_notes.len(), rng)
         .iter()
@@ -1645,11 +1657,19 @@ where
 
     // Reschedule the part with a fresh memoryless delay from the current tip, and derive its new
     // canonical expiry and a fresh boundary anchor for that schedule.
-    let scheduled_height = target_height + scheduling::draw_delay(&mut *rng);
+    let scheduled_height = target_height
+        + scheduling::SchedulingParams::ZIP_318
+            .transfer_delay()
+            .draw(&mut *rng);
     let expiry_height = scheduling::expiry_height(scheduled_height);
-    let anchor_boundary =
-        scheduling::draw_anchor_boundary(nu63_activation, funding_creation, scheduled_height, rng)
-            .ok_or(RebuildError::NoCandidateAnchor)?;
+    let anchor_boundary = scheduling::draw_anchor_boundary(
+        scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+        nu63_activation,
+        funding_creation,
+        scheduled_height,
+        rng,
+    )
+    .ok_or(RebuildError::NoCandidateAnchor)?;
 
     // Build the entirely new transfer against the same funding note and crossing value; anchors
     // and witnesses stay deferred (installed at proving time, ZIP 374). The expired artifact
@@ -2313,6 +2333,7 @@ where
             )
             .map_err(CommitError::Build)?;
             let anchor_boundary = scheduling::draw_anchor_boundary(
+                scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
                 nu63_activation,
                 est_last_prep_height,
                 schedule.broadcast_height(),
@@ -2518,8 +2539,11 @@ mod tests {
             .copied()
             .unwrap_or(BlockHeight::from_u32(2_000_000))
             + EST_PREP_LAYER_MINING_BLOCKS;
-        let earliest =
-            crate::scheduling::earliest_broadcast_height(BlockHeight::from_u32(10), est_last_prep);
+        let earliest = crate::scheduling::earliest_broadcast_height(
+            crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+            BlockHeight::from_u32(10),
+            est_last_prep,
+        );
         assert!(
             plan.schedule()
                 .iter()
@@ -3003,15 +3027,12 @@ mod commit_tests {
                         tx.anchor_boundary
                             .expect("every transfer carries its boundary"),
                     );
-                    assert_eq!(b % crate::scheduling::BOUNDARY_MODULUS, 0);
+                    let interval =
+                        crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval();
+                    assert!(interval.is_boundary(BlockHeight::from_u32(b)));
                     assert!(b > 10, "boundary above the regtest NU6.3 activation");
-                    assert!(
-                        b >= u32::from(est_last_prep).div_ceil(crate::scheduling::BOUNDARY_MODULUS)
-                            * crate::scheduling::BOUNDARY_MODULUS
-                    );
-                    assert!(
-                        b < u32::from(crate::scheduling::most_recent_boundary(tx.scheduled_height))
-                    );
+                    assert!(b >= u32::from(interval.boundary_at_or_above(est_last_prep)));
+                    assert!(b < u32::from(interval.boundary_at_or_below(tx.scheduled_height)));
                 }
             }
         }
@@ -3097,13 +3118,9 @@ mod commit_tests {
             new.anchor_boundary
                 .expect("the rebuilt transfer carries a boundary"),
         );
-        assert_eq!(boundary % crate::scheduling::BOUNDARY_MODULUS, 0);
-        assert!(
-            boundary
-                < u32::from(crate::scheduling::most_recent_boundary(
-                    new.scheduled_height
-                ))
-        );
+        let interval = crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval();
+        assert!(interval.is_boundary(BlockHeight::from_u32(boundary)));
+        assert!(boundary < u32::from(interval.boundary_at_or_below(new.scheduled_height)));
 
         // The rebuilt PCZT is a valid pre-signed transfer with deferred anchors and the new expiry.
         let parsed = pczt::Pczt::parse(&new.pczt).expect("the rebuilt PCZT parses");
@@ -3419,6 +3436,7 @@ mod commit_tests {
         let mut layer_base = BlockHeight::from_u32(2_000_000);
         for layer in preparation.layers() {
             let heights = crate::scheduling::schedule_prep_broadcast_heights(
+                &crate::scheduling::SchedulingParams::ZIP_318,
                 layer_base,
                 layer.len(),
                 &mut rng,
@@ -3435,9 +3453,17 @@ mod commit_tests {
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .expect("NU6.3 is active on the test network")
         };
-        let schedule_base =
-            crate::scheduling::earliest_broadcast_height(nu63_activation, layer_base);
-        let schedule = crate::scheduling::schedule(schedule_base, funding.len(), &mut rng);
+        let schedule_base = crate::scheduling::earliest_broadcast_height(
+            crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+            nu63_activation,
+            layer_base,
+        );
+        let schedule = crate::scheduling::schedule(
+            &crate::scheduling::SchedulingParams::ZIP_318,
+            schedule_base,
+            funding.len(),
+            &mut rng,
+        );
         let plan = MigrationPlan {
             note_split,
             preparation,
