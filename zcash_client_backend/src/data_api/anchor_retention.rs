@@ -18,6 +18,7 @@
 //! [`WalletRead::anchor_retention_interval`]: super::WalletRead::anchor_retention_interval
 
 use core::num::NonZeroU32;
+use std::collections::BTreeSet;
 
 use zcash_protocol::consensus::BlockHeight;
 
@@ -54,6 +55,16 @@ impl AnchorRetentionInterval {
     /// [ZIP 318]: https://zips.z.cash/zip-0318
     #[cfg(any(test, feature = "test-dependencies", feature = "unstable"))]
     pub const fn custom(blocks: NonZeroU32) -> Self {
+        Self(blocks)
+    }
+
+    /// Reconstructs an interval from a block count that was previously persisted, for a store
+    /// reading back its own durable state.
+    ///
+    /// This is the inverse of [`Self::block_count`], and is not a way to CHOOSE an interval: a
+    /// caller deciding what grid to retain on wants [`Self::ZIP_318`] or, deliberately and on a
+    /// test network only, [`Self::custom`].
+    pub const fn from_stored_block_count(blocks: NonZeroU32) -> Self {
         Self(blocks)
     }
 
@@ -94,15 +105,23 @@ impl Default for AnchorRetentionInterval {
     }
 }
 
-/// The anchor-retention policy in force while a range of blocks is being added to the wallet.
+/// The anchor-retention policy in force while a range of blocks is being added to the wallet: the
+/// set of grids whose boundaries are retained, and the height from which retention applies.
 ///
 /// Retention applies only from [`Self::from_height`] upward: below the network upgrade that
 /// introduces the destination pool there are no migration transfers to anchor, so retaining
 /// checkpoints there would consume storage to no purpose.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// The policy holds a SET of intervals rather than one because a wallet may owe retention to more
+/// than one grid at a time. The note commitment trees are wallet-wide while a pool migration is
+/// per-account, so two accounts migrating under different intervals each need their own boundaries
+/// kept; and a migration already committed under one grid must keep being retained even if the
+/// wallet is later configured with a different one, or the boundaries its transfers are anchored to
+/// would be pruned out from under it.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnchorRetention {
     from_height: BlockHeight,
-    interval: AnchorRetentionInterval,
+    intervals: BTreeSet<AnchorRetentionInterval>,
 }
 
 impl AnchorRetention {
@@ -111,8 +130,22 @@ impl AnchorRetention {
     pub fn new(from_height: BlockHeight, interval: AnchorRetentionInterval) -> Self {
         Self {
             from_height,
-            interval,
+            intervals: core::iter::once(interval).collect(),
         }
+    }
+
+    /// Constructs a retention policy that retains the checkpoint at every height that is a boundary
+    /// of ANY of `intervals`, at or above `from_height`. Returns `None` if `intervals` is empty,
+    /// there then being nothing to retain.
+    pub fn union(
+        from_height: BlockHeight,
+        intervals: impl IntoIterator<Item = AnchorRetentionInterval>,
+    ) -> Option<Self> {
+        let intervals: BTreeSet<AnchorRetentionInterval> = intervals.into_iter().collect();
+        (!intervals.is_empty()).then_some(Self {
+            from_height,
+            intervals,
+        })
     }
 
     /// The height at or above which anchor retention applies (the activation height of the network
@@ -121,16 +154,16 @@ impl AnchorRetention {
         self.from_height
     }
 
-    /// The interval defining which heights are retained as durable anchors.
-    pub fn interval(&self) -> AnchorRetentionInterval {
-        self.interval
+    /// The grids whose boundaries are retained as durable anchors.
+    pub fn intervals(&self) -> &BTreeSet<AnchorRetentionInterval> {
+        &self.intervals
     }
 
     /// Returns whether the checkpoint at `height` should be retained as a durable anchor under this
-    /// policy: `height` is at or above [`Self::from_height`] and is a boundary of
-    /// [`Self::interval`].
+    /// policy: `height` is at or above [`Self::from_height`] and is a boundary of at least one of
+    /// [`Self::intervals`].
     pub fn retains(&self, height: BlockHeight) -> bool {
-        height >= self.from_height && self.interval.is_boundary(height)
+        height >= self.from_height && self.intervals.iter().any(|i| i.is_boundary(height))
     }
 }
 
@@ -142,6 +175,17 @@ mod tests {
 
     fn interval(blocks: u32) -> AnchorRetentionInterval {
         AnchorRetentionInterval::custom(NonZeroU32::new(blocks).expect("nonzero"))
+    }
+
+    /// An empty grid set means there is nothing to retain, which the constructor reports as `None`
+    /// rather than as a policy that silently retains nothing.
+    #[test]
+    fn union_of_no_intervals_is_none() {
+        assert!(AnchorRetention::union(BlockHeight::from_u32(0), []).is_none());
+        assert!(
+            AnchorRetention::union(BlockHeight::from_u32(0), [AnchorRetentionInterval::ZIP_318])
+                .is_some()
+        );
     }
 
     #[test]
@@ -217,6 +261,33 @@ mod tests {
             let policy = AnchorRetention::new(BlockHeight::from_u32(floor), i);
             let h = BlockHeight::from_u32(floor.saturating_sub(1_000).saturating_add(offset));
             prop_assert_eq!(policy.retains(h), h >= BlockHeight::from_u32(floor) && i.is_boundary(h));
+        }
+
+        /// A union policy retains a height iff ANY of its grids does, so adding a grid only ever
+        /// widens what survives pruning — a migration committed under one interval keeps its
+        /// boundaries even once the wallet is retaining on another.
+        #[test]
+        fn union_retains_every_constituent_grid(
+            floor in 0u32..100_000,
+            offset in 0u32..5_000,
+            a in 1u32..500,
+            b in 1u32..500,
+        ) {
+            let (ia, ib) = (interval(a), interval(b));
+            let f = BlockHeight::from_u32(floor);
+            let union = AnchorRetention::union(f, [ia, ib]).expect("non-empty");
+            let h = BlockHeight::from_u32(floor.saturating_add(offset));
+
+            prop_assert_eq!(
+                union.retains(h),
+                AnchorRetention::new(f, ia).retains(h) || AnchorRetention::new(f, ib).retains(h)
+            );
+            // Widening never removes anything either grid alone would have kept.
+            for single in [ia, ib] {
+                if AnchorRetention::new(f, single).retains(h) {
+                    prop_assert!(union.retains(h));
+                }
+            }
         }
     }
 }

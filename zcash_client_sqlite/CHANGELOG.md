@@ -52,11 +52,13 @@ workspace.
 - `zcash_client_sqlite::WalletDb::with_anchor_retention_interval` configures the
   interval on which the wallet retains note commitment tree checkpoints as
   durable anchors, for use on test networks where waiting out the ZIP 318
-  144-block interval makes exercising a pool migration impractical. The interval
-  is not persisted, so an application using a non-default value must apply it
-  every time it opens the wallet; a pool migration committed under a different
-  interval is rejected with `ProveError::AnchorIntervalMismatch` rather than
-  being left anchored to checkpoints the wallet no longer retains.
+  144-block interval makes exercising a pool migration impractical. The setting
+  governs what grid the next migration is planned against; the grid an in-flight
+  migration was committed under is recorded with it and keeps being retained
+  regardless, so reopening the wallet without reapplying the setting cannot
+  strand a migration.
+- `zcash_client_sqlite::WalletDb::set_anchor_retention_interval`, the
+  by-reference form of `with_anchor_retention_interval`.
 
 ### Fixed
 - The coinbase branch of the transparent account-balance tally now classifies

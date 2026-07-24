@@ -72,9 +72,13 @@ workspace.
   this is set once on the selector instance rather than passed to each call.
 - `zcash_client_backend::data_api::anchor_retention`, containing
   `AnchorRetentionInterval` (the block-height grid on which note commitment tree
-  checkpoints are retained as durable anchors) and `AnchorRetention` (that grid
-  paired with the height at or above which retention applies). The interval was
-  previously a hard-coded 144 blocks.
+  checkpoints are retained as durable anchors) and `AnchorRetention` (the set of
+  such grids to retain, paired with the height at or above which retention
+  applies). The interval was previously a hard-coded 144 blocks. `AnchorRetention`
+  holds a set rather than a single grid because a wallet may owe retention to more
+  than one at a time: the trees are wallet-wide while a pool migration is
+  per-account, and a migration already committed under one grid must keep being
+  retained even if the wallet is later configured with a different one.
 - `zcash_client_backend::data_api::WalletRead::anchor_retention_interval`, which
   reports the grid a backend retains. It defaults to
   `AnchorRetentionInterval::ZIP_318`, matching the retention a backend performs
@@ -86,12 +90,12 @@ workspace.
 ### Changed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks` and
   `zcash_client_backend::data_api::ll::wallet::update_tree` now take
-  `Option<AnchorRetention>` in place of `anchor_retention_height:
-  Option<BlockHeight>`. Replace `Some(height)` with
-  `Some(AnchorRetention::new(height, interval))`, where `interval` is the
-  wallet's configured `AnchorRetentionInterval` (use
-  `AnchorRetentionInterval::ZIP_318` to preserve the previous behaviour);
-  `None` continues to disable anchor retention.
+  `Option<&AnchorRetention>` in place of `anchor_retention_height:
+  Option<BlockHeight>`. Replace `Some(height)` with a reference to
+  `AnchorRetention::new(height, interval)`, where `interval` is the wallet's
+  configured `AnchorRetentionInterval` (use `AnchorRetentionInterval::ZIP_318` to
+  preserve the previous behaviour), or to `AnchorRetention::union(height, grids)`
+  to retain several; `None` continues to disable anchor retention.
 - `zcash_client_backend::data_api::testing::DataStoreFactory::new_data_store`
   takes an additional `anchor_retention_interval: Option<AnchorRetentionInterval>`
   argument; pass `None` to keep the default grid.

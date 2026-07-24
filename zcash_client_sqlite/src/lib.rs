@@ -478,18 +478,28 @@ impl<C, P, CL, R> WalletDb<C, P, CL, R> {
     /// Sets the interval on which this wallet retains note commitment tree checkpoints as durable
     /// anchors, exempt from ordinary checkpoint pruning.
     ///
-    /// A ZIP 318 pool migration run over this wallet reads the interval back through
+    /// A ZIP 318 pool migration planned over this wallet reads the interval back through
     /// [`WalletRead::anchor_retention_interval`] and draws its transfers' anchors from the same
-    /// grid, so the two cannot disagree. Note that the interval is not persisted: an application
-    /// that configures a non-default interval must apply it every time it opens the wallet, or a
-    /// migration committed under the old grid will be left anchored to checkpoints this wallet no
-    /// longer retains.
+    /// grid, so the two cannot disagree.
+    ///
+    /// This setting is not persisted, but it does not need to be: once a migration is committed,
+    /// the grid it was committed under is recorded with it, and this wallet keeps retaining that
+    /// grid's boundaries for as long as the migration is in flight, whatever it is currently
+    /// configured with. Reopening the wallet without reapplying a non-default interval therefore
+    /// cannot strand an in-flight migration; it only affects what grid the NEXT migration is
+    /// planned against.
     ///
     /// The default is [`AnchorRetentionInterval::ZIP_318`], which every wallet on the production
     /// network must use.
     pub fn with_anchor_retention_interval(mut self, interval: AnchorRetentionInterval) -> Self {
-        self.anchor_retention_interval = interval;
+        self.set_anchor_retention_interval(interval);
         self
+    }
+
+    /// Sets the anchor retention interval on an existing handle; see
+    /// [`Self::with_anchor_retention_interval`], of which this is the by-reference form.
+    pub fn set_anchor_retention_interval(&mut self, interval: AnchorRetentionInterval) {
+        self.anchor_retention_interval = interval;
     }
 }
 
@@ -2070,14 +2080,32 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
-        // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on this wallet's
-        // configured anchor retention interval are retained as durable anchors. The activation
-        // height is `None` (and so anchor retention is inactive) on networks that do not yet have
-        // an assigned NU6.3 activation height.
+        // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
+        // retention grids are retained as durable anchors. The activation height is `None` (and so
+        // anchor retention is inactive) on networks that do not yet have an assigned NU6.3
+        // activation height.
+        //
+        // The grids are this wallet's configured interval TOGETHER WITH the interval every
+        // in-flight migration was committed under. The latter comes from the database, not from
+        // configuration: a migration's transfers are anchored to boundaries of its committed grid
+        // and are provable only while those checkpoints survive, so an application that reopens the
+        // wallet without reapplying a non-default interval must not thereby cause this scan to pass
+        // a boundary that migration still needs. Retaining the union costs at most a few extra
+        // checkpoints and makes that failure unreachable.
         let anchor_retention = self
             .params
             .activation_height(consensus::NetworkUpgrade::Nu6_3)
-            .map(|from_height| AnchorRetention::new(from_height, self.anchor_retention_interval));
+            .map(|from_height| {
+                let committed = pool_migration::orchard_ironwood::active_anchor_bucket_intervals(
+                    self.conn.borrow(),
+                )?;
+                Ok::<_, SqliteClientError>(AnchorRetention::union(
+                    from_height,
+                    core::iter::once(self.anchor_retention_interval).chain(committed),
+                ))
+            })
+            .transpose()?
+            .flatten();
 
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
@@ -2085,7 +2113,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             self.gap_limits,
             from_state,
             blocks,
-            anchor_retention,
+            anchor_retention.as_ref(),
         )
         .map_err(SqliteClientError::from)
     }

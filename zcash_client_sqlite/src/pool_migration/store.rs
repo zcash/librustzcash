@@ -333,6 +333,32 @@ fn resolve_migration_id(
         .optional()?)
 }
 
+/// The distinct anchor bucket intervals, in blocks, of every migration in `t.migrations` that is
+/// not yet complete — the grids the wallet still owes anchor-checkpoint retention to.
+///
+/// This is read from the database rather than from any in-memory configuration on purpose. A
+/// migration's transfers are anchored to boundaries of the grid it was COMMITTED under, and are
+/// provable only while those boundaries' checkpoints survive pruning. Were retention driven by a
+/// setting the application had to reapply on every open, forgetting to do so would let a scan pass
+/// a boundary the migration still needs without retaining it — unrecoverably, since the checkpoint
+/// is gone by the time anything notices.
+///
+/// A `complete` migration has no transfer left to prove, so its grid is dropped.
+pub(crate) fn active_anchor_bucket_intervals(
+    conn: &Connection,
+    t: &Tables,
+) -> Result<BTreeSet<NonZeroU32>, Error> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT anchor_bucket_interval FROM {} WHERE status <> ?",
+        t.migrations
+    ))?;
+    let rows = stmt.query_map(params![MigrationStatus::Complete.as_ref()], |row| {
+        row.get::<_, u32>(0)
+    })?;
+    rows.map(|blocks| NonZeroU32::new(blocks?).ok_or(Error::Corrupt("anchor_bucket_interval")))
+        .collect()
+}
+
 fn read_migration(
     conn: &Connection,
     t: &Tables,

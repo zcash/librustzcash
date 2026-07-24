@@ -628,7 +628,7 @@ pub fn put_blocks<DbT, SE, TE>(
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
-    anchor_retention: Option<AnchorRetention>,
+    anchor_retention: Option<&AnchorRetention>,
 ) -> Result<(), PutBlocksError<SE, TE>>
 where
     DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
@@ -1609,14 +1609,14 @@ fn should_track_nullifiers(
 /// Returns whether the checkpoint at `height` should be retained as a durable anchor: anchor
 /// retention is enabled at all (`anchor_retention` is `Some`) and its policy
 /// [retains](AnchorRetention::retains) `height`.
-fn should_retain_anchor(anchor_retention: Option<AnchorRetention>, height: BlockHeight) -> bool {
+fn should_retain_anchor(anchor_retention: Option<&AnchorRetention>, height: BlockHeight) -> bool {
     anchor_retention.is_some_and(|retention| retention.retains(height))
 }
 
 /// Retains `height` as a durable anchor checkpoint when [`should_retain_anchor`] holds.
 fn retain_anchor_checkpoint<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
-    anchor_retention: Option<AnchorRetention>,
+    anchor_retention: Option<&AnchorRetention>,
     height: BlockHeight,
 ) -> Result<(), ShardTreeError<S::Error>>
 where
@@ -1669,7 +1669,7 @@ pub fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     frontier: &Frontier<S::H, DEPTH>,
     frontier_height: BlockHeight,
     tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
-    anchor_retention: Option<AnchorRetention>,
+    anchor_retention: Option<&AnchorRetention>,
     subtrees: impl Iterator<Item = (LocatedPrunableTree<S::H>, BTreeMap<BlockHeight, Position>)>,
     #[cfg(feature = "orchard")] missing_checkpoints: impl Iterator<Item = (BlockHeight, Checkpoint)>,
 ) -> Result<(), ShardTreeError<S::Error>>
@@ -1832,34 +1832,35 @@ mod tests {
         ] {
             let blocks = interval.block_count().get();
             let floor = BlockHeight::from(4 * blocks);
-            let retention = AnchorRetention::new(floor, interval);
+            let policy = AnchorRetention::new(floor, interval);
+            let retention = Some(&policy);
 
             // With retention disabled, nothing is retained, even on the interval.
             assert!(!should_retain_anchor(None, BlockHeight::from(8 * blocks)));
 
             // On the interval and at or above the floor: retained.
             assert!(should_retain_anchor(
-                Some(retention),
+                retention,
                 BlockHeight::from(4 * blocks)
             ));
             assert!(should_retain_anchor(
-                Some(retention),
+                retention,
                 BlockHeight::from(8 * blocks)
             ));
 
             // On the interval but below the floor: not retained.
             assert!(!should_retain_anchor(
-                Some(retention),
+                retention,
                 BlockHeight::from(3 * blocks)
             ));
 
             // At or above the floor but not on the interval: not retained.
             assert!(!should_retain_anchor(
-                Some(retention),
+                retention,
                 BlockHeight::from(4 * blocks + 1)
             ));
             assert!(!should_retain_anchor(
-                Some(retention),
+                retention,
                 BlockHeight::from(5 * blocks - 1)
             ));
         }

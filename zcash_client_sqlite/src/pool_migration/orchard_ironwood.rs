@@ -16,6 +16,9 @@ use zcash_pool_migration::engine::{
     MigrationState, MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 
+use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
+
+use crate::error::SqliteClientError;
 use crate::{AccountRef, AccountUuid};
 
 use super::store::{self, Store, Tables};
@@ -41,6 +44,30 @@ static TABLES: Tables = Tables {
 /// `up()` calls; it is idempotent (`IF NOT EXISTS`).
 pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
+}
+
+/// The anchor bucket grids, in blocks, of every Orchard -> Ironwood migration in this database
+/// that is not yet complete.
+///
+/// A wallet must keep retaining the boundaries of the grid each in-flight migration was committed
+/// under, whatever it is currently configured to retain, or that migration's transfers become
+/// unprovable. Reading the grids back from the migrations themselves is what makes that
+/// independent of the application remembering to reapply a setting. See
+/// [`store::active_anchor_bucket_intervals`].
+pub(crate) fn active_anchor_bucket_intervals(
+    conn: &Connection,
+) -> Result<BTreeSet<AnchorRetentionInterval>, SqliteClientError> {
+    store::active_anchor_bucket_intervals(conn, &TABLES)
+        .map(|blocks| {
+            blocks
+                .into_iter()
+                .map(AnchorRetentionInterval::from_stored_block_count)
+                .collect()
+        })
+        .map_err(|e| match e {
+            Error::Db(e) => SqliteClientError::DbError(e),
+            other => SqliteClientError::CorruptedData(other.to_string()),
+        })
 }
 
 /// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`]
@@ -114,6 +141,163 @@ impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         self.0.update_transaction(id, state)
+    }
+}
+
+/// Retention follows the grid recorded WITH an in-flight migration, not the wallet's current
+/// configuration, so an application that reopens the wallet without reapplying a non-default
+/// interval cannot cause a scan to prune a boundary that migration still needs.
+///
+/// This is the gap the interval-mismatch check alone leaves: that check compares intervals at
+/// proving time, but the damage is done at scan time, and reapplying the setting afterwards repairs
+/// the comparison without bringing the checkpoint back.
+#[cfg(all(test, feature = "orchard"))]
+mod retention_follows_the_committed_migration {
+    use core::num::NonZeroU32;
+    use std::collections::BTreeSet;
+
+    use shardtree::store::ShardStore;
+    use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
+    use zcash_client_backend::data_api::testing::{
+        TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+    };
+    use zcash_client_backend::data_api::{Account as _, WalletCommitmentTrees, WalletRead};
+    use zcash_pool_migration::engine::{
+        MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite,
+    };
+    use zcash_pool_migration::note_splitting::NoteSplitPlan;
+    use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_pool_migration::scheduling::AnchorBucketInterval;
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::value::Zatoshis;
+
+    use super::PoolMigrations;
+    use crate::testing::{BlockCache, db::TestDbFactory};
+
+    /// A migration carrying no transactions, recorded as committed under `interval`. Only the
+    /// recorded grid matters here; the retention decision does not look at the transfers.
+    fn migration_committed_under(interval: AnchorBucketInterval) -> MigrationState {
+        MigrationState::from_parts(
+            MigrationStatus::Committed,
+            NoteSplitPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            Vec::new(),
+            interval,
+        )
+    }
+
+    #[test]
+    fn misconfigured_reopen_keeps_retaining_the_committed_grid() {
+        let activation = zcash_protocol::consensus::BlockHeight::from_u32(100_000);
+        let network = zcash_protocol::local_consensus::LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        // The wallet is left at the ZIP 318 default: this stands for an application that
+        // configured a short grid when it committed, then reopened without reapplying it.
+        let mut st = TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        assert_eq!(
+            st.wallet().anchor_retention_interval(),
+            AnchorRetentionInterval::ZIP_318,
+            "the wallet is configured with the default grid",
+        );
+
+        // Record a migration committed under a 12-block grid.
+        let committed = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+        let account_id = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        PoolMigrations::for_account(st.wallet_mut().conn_mut(), account_id)
+            .expect("the account exists")
+            .replace_migration(&migration_committed_under(committed))
+            .expect("persists the migration");
+
+        // Scan enough blocks to cross several boundaries of both grids. The account's birthday is
+        // the Sapling activation height, so the first generated block sits just above it.
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        for _ in 0..600 {
+            let (h, _, _) = st.generate_next_block(
+                &fvk,
+                zcash_client_backend::data_api::testing::AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.scan_cached_blocks(h, 1);
+        }
+        let tip = u32::from(
+            st.wallet()
+                .chain_height()
+                .expect("reads the chain height")
+                .expect("the wallet has a chain tip"),
+        );
+        let start = u32::from(activation);
+
+        let retained: BTreeSet<u32> = st
+            .wallet_mut()
+            .with_orchard_tree_mut(|tree| {
+                Ok::<_, crate::error::SqliteClientError>(
+                    tree.store()
+                        .retained_checkpoints()
+                        .expect("reads retained checkpoints"),
+                )
+            })
+            .expect("reads the Orchard tree")
+            .into_iter()
+            .map(u32::from)
+            .collect();
+
+        // Every boundary of the MIGRATION's grid in the scanned range was retained, despite the
+        // wallet being configured with a different one.
+        let expected_committed: BTreeSet<u32> = (start..=tip)
+            .filter(|h| h % 12 == 0 && *h > start)
+            .collect();
+        assert!(
+            expected_committed.is_subset(&retained),
+            "the committed 12-block grid must stay retained; missing {:?}",
+            expected_committed.difference(&retained).collect::<Vec<_>>(),
+        );
+
+        // The configured grid is retained too: the policy is the union, not a replacement.
+        let expected_configured: BTreeSet<u32> = (start..=tip)
+            .filter(|h| h % 144 == 0 && *h > start)
+            .collect();
+        assert!(
+            expected_configured.is_subset(&retained),
+            "the configured grid must also stay retained",
+        );
+
+        // Sanity: with no migration recorded, the 12-block grid would NOT have been retained, so
+        // the assertion above is load-bearing rather than incidentally true.
+        assert!(
+            !expected_committed.is_empty(),
+            "the scan must cross at least one boundary of the committed grid",
+        );
+        assert!(
+            PoolMigrations::for_account(st.wallet_mut().conn_mut(), account_id)
+                .expect("the account exists")
+                .get_migration()
+                .expect("reads the migration")
+                .is_some(),
+            "the migration is still recorded",
+        );
     }
 }
 
