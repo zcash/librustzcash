@@ -1,18 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.pczt]]
-version = "0.8.0"
-audited_as = "0.8.0-rc.1"
-
-[[unpublished.zcash_primitives]]
-version = "0.30.0"
-audited_as = "0.29.0"
-
-[[unpublished.zcash_proofs]]
-version = "0.30.0"
-audited_as = "0.29.0"
-
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -98,8 +86,8 @@ user-login = "str4d"
 user-name = "Jack Grigg"
 
 [[publisher.pczt]]
-version = "0.8.0-rc.1"
-when = "2026-07-12"
+version = "0.8.0"
+when = "2026-07-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -496,15 +484,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_primitives]]
-version = "0.29.0"
-when = "2026-07-09"
+version = "0.30.0"
+when = "2026-07-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_proofs]]
-version = "0.29.0"
-when = "2026-07-09"
+version = "0.30.0"
+when = "2026-07-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
