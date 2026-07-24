@@ -39,7 +39,13 @@ equihash = { version = "0.3", path = "components/equihash", default-features = f
 zcash_address = { version = "0.13.0", path = "components/zcash_address", default-features = false }
 zcash_client_backend = { version = "0.24.0-rc.1", path = "zcash_client_backend" }
 zcash_client_sqlite = { version = "0.22.0-rc.1", path = "zcash_client_sqlite" }
-zcash_encoding = { version = "0.4", path = "components/zcash_encoding", default-features = false }
+# zcash_encoding 0.5.0 is a breaking release (MSRV bump + `CompactSize::write` now
+# rejects values above `MAX_COMPACT_SIZE`). To avoid forcing every dependent to
+# migrate at once, the workspace default stays pinned to the published 0.4; only
+# `zcash_history` (a leaf crate, and the sole consumer of the new API) takes an
+# explicit path dependency on the local 0.5. Migrate the remaining crates one at a
+# time, then flip this back to `path = "components/zcash_encoding"` at "0.5".
+zcash_encoding = { version = "0.4", default-features = false }
 zcash_keys = { version = "0.15.0", path = "zcash_keys", default-features = false  }
 zcash_pool_migration = { version = "0.1.0-alpha.1", path = "zcash_pool_migration" }
 zcash_protocol = { version = "0.10.0", path = "components/zcash_protocol", default-features = false }

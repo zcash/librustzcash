@@ -1,8 +1,8 @@
-use std::fmt;
-use std::io;
+use alloc::vec::Vec;
+use core::fmt;
 
 use blake2b_simd::Params as Blake2Params;
-use byteorder::{ByteOrder, LittleEndian};
+use corez::io;
 
 use crate::{MAX_NODE_DATA_SIZE, NodeData, NodeDataV2, NodeDataV3};
 
@@ -21,7 +21,7 @@ fn blake2b_personal(personalization: &[u8], input: &[u8]) -> [u8; 32] {
 fn personalization(branch_id: u32) -> [u8; 16] {
     let mut result = [0u8; 16];
     result[..12].copy_from_slice(b"ZcashHistory");
-    LittleEndian::write_u32(&mut result[12..], branch_id);
+    result[12..16].copy_from_slice(&branch_id.to_le_bytes());
     result
 }
 
@@ -48,7 +48,7 @@ pub trait Version {
 
         let mut hash_buf = [0u8; MAX_NODE_DATA_SIZE * 2];
         let size = {
-            let mut cursor = ::std::io::Cursor::new(&mut hash_buf[..]);
+            let mut cursor = corez::io::Cursor::new(&mut hash_buf[..]);
             Self::write(left, &mut cursor)
                 .expect("Writing to memory buf with enough length cannot fail; qed");
             Self::write(right, &mut cursor)
@@ -84,7 +84,7 @@ pub trait Version {
     fn to_bytes(data: &Self::NodeData) -> Vec<u8> {
         let mut buf = [0u8; MAX_NODE_DATA_SIZE];
         let pos = {
-            let mut cursor = std::io::Cursor::new(&mut buf[..]);
+            let mut cursor = corez::io::Cursor::new(&mut buf[..]);
             Self::write(data, &mut cursor).expect("Cursor cannot fail");
             cursor.position() as usize
         };
@@ -94,7 +94,7 @@ pub trait Version {
 
     /// Convert from byte representation.
     fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> io::Result<Self::NodeData> {
-        let mut cursor = std::io::Cursor::new(buf);
+        let mut cursor = corez::io::Cursor::new(buf);
         Self::read(consensus_branch_id, &mut cursor)
     }
 
