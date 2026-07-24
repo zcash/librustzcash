@@ -1370,7 +1370,7 @@ where
             ovk_policy,
             proposal,
             expiry_height,
-            ::orchard::builder::BundleType::DEFAULT,
+            ::zcash_primitives::transaction::builder::BundlePadding::DEFAULT,
         )
     }
 

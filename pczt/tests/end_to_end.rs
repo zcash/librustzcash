@@ -31,7 +31,7 @@ use rand_core::{OsRng, SeedableRng};
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
-    builder::{BuildConfig, Builder, PcztResult},
+    builder::{BuildConfig, Builder, BundlePadding, PcztResult},
     fees::zip317,
     sighash::SignableInput,
     sighash_v5::v5_signature_hash,
@@ -156,8 +156,8 @@ fn transparent_to_orchard() {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -348,8 +348,8 @@ fn transparent_p2sh_multisig_to_orchard() {
             sapling_anchor: None,
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -559,8 +559,8 @@ fn sapling_to_orchard() {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -724,8 +724,8 @@ fn orchard_to_orchard() {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -946,8 +946,8 @@ fn orchard_low_level_signer_uses_preverified_signing_parse() {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -1123,8 +1123,8 @@ fn pczt_with_anchor(pool: ShieldedPool) -> Pczt {
             orchard_anchor: matches!(pool, ShieldedPool::Orchard).then(orchard::Anchor::empty_tree),
             ironwood_anchor: matches!(pool, ShieldedPool::Ironwood)
                 .then(orchard::Anchor::empty_tree),
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -1262,8 +1262,8 @@ fn redacted_sapling_anchor_can_be_restored_after_signing() {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -1423,8 +1423,8 @@ fn wallet_can_set_sapling_witness_after_signing() {
             sapling_anchor: Some(anchor),
             orchard_anchor: Some(orchard::Anchor::empty_tree()),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -1622,8 +1622,8 @@ fn redacted_orchard_anchor_can_be_restored_after_signing() {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
             ironwood_anchor: Some(orchard::Anchor::empty_tree()),
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -1774,8 +1774,8 @@ fn wallet_can_set_orchard_witness_after_signing() {
             sapling_anchor: None,
             orchard_anchor: Some(anchor),
             ironwood_anchor: None,
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -1947,8 +1947,8 @@ fn wallet_can_set_ironwood_witness_after_signing() {
             sapling_anchor: None,
             orchard_anchor: None,
             ironwood_anchor: Some(anchor),
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -2121,8 +2121,8 @@ fn ironwood_low_level_signer_uses_preverified_signing_parse() {
             sapling_anchor: None,
             orchard_anchor: None,
             ironwood_anchor: Some(anchor),
-            orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-            ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+            orchard_padding: BundlePadding::DEFAULT,
+            ironwood_padding: BundlePadding::DEFAULT,
         },
     );
     builder
@@ -2405,8 +2405,8 @@ fn builder_can_defer_anchors_until_proving() {
     let mut builder = DeferredPcztBuilder::new::<zip317::FeeRule>(
         nu6_3_test_network(),
         10_000_000.into(),
-        orchard::builder::BundleType::DEFAULT,
-        orchard::builder::BundleType::DEFAULT,
+        BundlePadding::DEFAULT,
+        BundlePadding::DEFAULT,
     )
     .unwrap();
     builder
@@ -2506,8 +2506,8 @@ fn deferred_anchors_require_v6() {
         DeferredPcztBuilder::new::<zip317::FeeRule>(
             pre_nu6_3_test_network(),
             10_000_000.into(),
-            orchard::builder::BundleType::DEFAULT,
-            orchard::builder::BundleType::DEFAULT,
+            BundlePadding::DEFAULT,
+            BundlePadding::DEFAULT,
         ),
         Err(zcash_primitives::transaction::builder::Error::AnchorDeferralUnsupported(_))
     ));

@@ -523,10 +523,11 @@ workspace.
   other internal variant.
 - MSRV is now 1.88
 - `zcash_client_backend::data_api::wallet::create_pczt_from_proposal` now takes an
-  `orchard_pool_bundle_type` argument (behind the `pczt` feature flag) selecting
-  the transactional bundle type for the Orchard and Ironwood bundles; it must
+  `orchard_pool_padding` argument (behind the `pczt` feature flag) selecting
+  the transactional bundle padding for the Orchard and Ironwood bundles; it must
   match the change strategy used to create the proposal. Pass
-  `orchard::builder::BundleType::DEFAULT` for the previous (padded) behavior.
+  `zcash_primitives::transaction::builder::BundlePadding::DEFAULT` for the
+  previous (padded) behavior.
 - The `proposed_version: Option<TxVersion>` parameter of
   `zcash_client_backend::data_api::wallet::propose_transfer`,
   `propose_standard_transfer_to_address`, and
