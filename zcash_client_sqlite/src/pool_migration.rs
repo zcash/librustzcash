@@ -1,6 +1,6 @@
 //! SQLite persistence for value-pool migrations (ZIP 318).
 //!
-//! This module implements [`zcash_pool_migration_backend`]'s [`PoolMigrationRead`] /
+//! This module implements [`zcash_pool_migration`]'s [`PoolMigrationRead`] /
 //! [`PoolMigrationWrite`] store traits over a set of SQLite tables in the wallet database,
 //! mirroring how this crate implements `zcash_client_backend`'s `WalletRead` / `WalletWrite`. A
 //! committed migration is a set of pre-signed PCZTs plus their schedule and lifecycle state, so a
@@ -48,8 +48,8 @@
 //! (the same one [`WalletDb`](crate::WalletDb) uses) and the [`AccountUuid`](crate::AccountUuid)
 //! whose migration it tracks, which it resolves to that account's row up front.
 //!
-//! [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
-//! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
+//! [`PoolMigrationRead`]: zcash_pool_migration::engine::PoolMigrationRead
+//! [`PoolMigrationWrite`]: zcash_pool_migration::engine::PoolMigrationWrite
 
 mod error;
 mod store;

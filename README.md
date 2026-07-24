@@ -31,6 +31,7 @@ graph TB
             zcash_client_backend
             zcash_client_sqlite
             zcash_keys
+            zcash_pool_migration
             zip321
         end
 
@@ -58,10 +59,16 @@ graph TB
 
     zcash_client_sqlite --> zcash_client_backend
 
+    zcash_client_sqlite --> zcash_pool_migration
+
+    zcash_pool_migration --> zcash_client_backend
+
     zcash_client_backend --> pczt
+    %% zcash_pool_migration --> pczt
 
     %% zcash_client_sqlite --> zcash_keys
     zcash_client_backend --> zcash_keys
+    %% zcash_pool_migration --> zcash_keys
 
     zcash_client_backend --> zcash_proofs
 
@@ -69,6 +76,7 @@ graph TB
     pczt --> zcash_primitives
     %% zcash_client_backend --> zcash_primitives
     %% zcash_client_sqlite --> zcash_primitives
+    %% zcash_pool_migration --> zcash_primitives
 
     %% zcash_client_sqlite --> zcash_transparent
     %% zcash_client_backend --> zcash_transparent
@@ -92,6 +100,7 @@ graph TB
     %% pczt --> zcash_protocol
     zcash_address --> zcash_protocol
     %% zip321 --> zcash_protocol
+    %% zcash_pool_migration --> zcash_protocol
 
     %% zcash_client_sqlite --> zcash_encoding
     %% zcash_transparent --> zcash_encoding
@@ -109,6 +118,7 @@ graph TB
     zcash_keys --> orchard
     zcash_primitives --> orchard
     %% zcash_client_sqlite --> orchard
+    %% zcash_pool_migration --> orchard
 
     %% zcash_client_sqlite --> sapling-crypto
     %% zcash_client_backend --> sapling-crypto
@@ -151,6 +161,7 @@ graph TB
     click zcash_client_sqlite "https://docs.rs/zcash_client_sqlite/" _blank
     click zcash_keys "https://docs.rs/zcash_keys/" _blank
     click zcash_note_encryption "https://docs.rs/zcash_note_encryption/" _blank
+    click zcash_pool_migration "https://docs.rs/zcash_pool_migration/" _blank
     click zcash_primitives "https://docs.rs/zcash_primitives/" _blank
     click zcash_proofs "https://docs.rs/zcash_proofs/" _blank
     click zcash_protocol "https://docs.rs/zcash_protocol/" _blank

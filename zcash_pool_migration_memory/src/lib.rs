@@ -1,4 +1,4 @@
-//! In-memory implementations of the [`zcash_pool_migration_backend`] engine traits, **FOR TESTING
+//! In-memory implementations of the [`zcash_pool_migration`] engine traits, **FOR TESTING
 //! ONLY**.
 //!
 //! This crate provides in-memory implementations of the pool-migration engine traits
@@ -16,10 +16,10 @@
 //! It mirrors how [`zcash_client_memory`] relates to `zcash_client_backend`: a shared, test-support
 //! crate so several test suites can reuse the same mock implementations.
 //!
-//! [`MigrationBackend`]: zcash_pool_migration_backend::engine::MigrationBackend
-//! [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
-//! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
-//! [`MigrationCrypto`]: zcash_pool_migration_backend::engine::MigrationCrypto
+//! [`MigrationBackend`]: zcash_pool_migration::engine::MigrationBackend
+//! [`PoolMigrationRead`]: zcash_pool_migration::engine::PoolMigrationRead
+//! [`PoolMigrationWrite`]: zcash_pool_migration::engine::PoolMigrationWrite
+//! [`MigrationCrypto`]: zcash_pool_migration::engine::MigrationCrypto
 //! [`zcash_client_memory`]: https://docs.rs/zcash_client_memory
 
 use incrementalmerkletree::{Hashable, Level};
@@ -34,8 +34,8 @@ use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::Zatoshis;
 
-use zcash_pool_migration_backend::build::sign_pczt;
-use zcash_pool_migration_backend::engine::{
+use zcash_pool_migration::build::sign_pczt;
+use zcash_pool_migration::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTxId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };

@@ -20,8 +20,8 @@
 //!
 //! The column set is the same for every pool; only the table and index names change.
 //!
-//! [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
-//! [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
+//! [`PoolMigrationRead`]: zcash_pool_migration::engine::PoolMigrationRead
+//! [`PoolMigrationWrite`]: zcash_pool_migration::engine::PoolMigrationWrite
 
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::BTreeSet;
@@ -29,14 +29,12 @@ use std::collections::BTreeSet;
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 
 use zcash_client_backend::wallet::LockOwner;
-use zcash_pool_migration_backend::engine::{
+use zcash_pool_migration::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
     MigrationTxState,
 };
-use zcash_pool_migration_backend::note_splitting::NoteSplitPlan;
-use zcash_pool_migration_backend::preparation::{
-    PrepInput, PrepOutput, PrepTransaction, PreparationPlan,
-};
+use zcash_pool_migration::note_splitting::NoteSplitPlan;
+use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 
@@ -234,8 +232,8 @@ pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
 /// read-only access, `&mut Connection` to also write) plus the pool's table names and the account;
 /// a concrete facade wraps it so the generic type never appears in the public API.
 ///
-/// [`PoolMigrationRead`]: zcash_pool_migration_backend::engine::PoolMigrationRead
-/// [`PoolMigrationWrite`]: zcash_pool_migration_backend::engine::PoolMigrationWrite
+/// [`PoolMigrationRead`]: zcash_pool_migration::engine::PoolMigrationRead
+/// [`PoolMigrationWrite`]: zcash_pool_migration::engine::PoolMigrationWrite
 pub(crate) struct Store<C> {
     conn: C,
     tables: &'static Tables,

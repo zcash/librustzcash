@@ -15,14 +15,14 @@ use rand_core::SeedableRng;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::COIN;
 
-use zcash_pool_migration_backend::build::sign_pczt;
-use zcash_pool_migration_backend::engine::{
+use zcash_pool_migration::build::sign_pczt;
+use zcash_pool_migration::engine::{
     MigrationPlan, MigrationStatus, MigrationTxKind, MigrationTxState, PoolMigrationRead,
     PoolMigrationWrite, batch_unsigned_by_action_budget, build_preparation_unsigned,
     commit_preparation, plan_migration,
 };
-use zcash_pool_migration_backend::preparation::PREP_TX_ACTIONS;
-use zcash_pool_migration_backend::state::AdvanceStep;
+use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
+use zcash_pool_migration::state::AdvanceStep;
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};
 
 /// A planned single-note migration and the mock wallet that holds the note.

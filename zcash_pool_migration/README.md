@@ -1,4 +1,4 @@
-# zcash_pool_migration_backend
+# zcash_pool_migration
 
 A backend-agnostic engine for migrating Zcash wallet funds between value pools
 (Zcash's first use is the Orchard to Ironwood migration). The engine plans a note

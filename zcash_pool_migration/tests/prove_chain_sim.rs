@@ -44,11 +44,11 @@ use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, Zatoshis};
 
-use zcash_pool_migration_backend::engine::{
+use zcash_pool_migration::engine::{
     self, MigrationState, MigrationTxId, MigrationTxKind, MigrationTxState, PoolMigrationRead,
     PoolMigrationWrite,
 };
-use zcash_pool_migration_backend::wallet::{WalletMigration, WalletMigrationProver};
+use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
 
 /// Every network upgrade (through NU6.3, which activates the Ironwood pool) is active from this
 /// height, so a migration built at or above it is post-NU6.3 and its transfers cross into Ironwood.
