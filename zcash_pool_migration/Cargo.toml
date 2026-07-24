@@ -1,7 +1,7 @@
 [package]
 name = "zcash_pool_migration"
 description = "Backend-agnostic value-pool migration engine for Zcash wallets"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 authors = [
     "Danny Willems <be.danny.willems@gmail.com>",
     "John Boyd <john@coldnoise.net>",

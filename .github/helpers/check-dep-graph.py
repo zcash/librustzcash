@@ -19,6 +19,7 @@ CRATES_IN_GRAPH = set([
     'zcash_client_sqlite',
     'zcash_history',
     'zcash_keys',
+    'zcash_pool_migration',
     'zcash_primitives',
     'zcash_proofs',
     'zcash_transparent',
