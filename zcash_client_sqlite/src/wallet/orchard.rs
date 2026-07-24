@@ -2248,7 +2248,7 @@ pub(crate) mod tests {
                 wallet::{TargetHeight, decrypt_and_store_transaction},
             };
             use zcash_primitives::transaction::{
-                builder::{BuildConfig, Builder},
+                builder::{BuildConfig, Builder, BundlePadding},
                 fees::zip317,
             };
             use zcash_protocol::memo::MemoBytes;
@@ -2342,8 +2342,8 @@ pub(crate) mod tests {
                     sapling_anchor: None,
                     orchard_anchor: None,
                     ironwood_anchor: Some(anchor),
-                    orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-                    ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+                    orchard_padding: BundlePadding::DEFAULT,
+                    ironwood_padding: BundlePadding::DEFAULT,
                 },
             );
             builder

@@ -301,7 +301,7 @@ mod tests {
         block::BlockHash,
         transaction::{
             Transaction,
-            builder::{BuildConfig, BuildResult, Builder},
+            builder::{BuildConfig, BuildResult, Builder, BundlePadding},
             fees::fixed,
         },
     };
@@ -363,8 +363,8 @@ mod tests {
                 sapling_anchor: Some(sapling::Anchor::empty_tree()),
                 orchard_anchor: None,
                 ironwood_anchor: None,
-                orchard_bundle_type: orchard::builder::BundleType::DEFAULT,
-                ironwood_bundle_type: orchard::builder::BundleType::DEFAULT,
+                orchard_padding: BundlePadding::DEFAULT,
+                ironwood_padding: BundlePadding::DEFAULT,
             },
         );
         let mut transparent_signing_set = TransparentSigningSet::new();

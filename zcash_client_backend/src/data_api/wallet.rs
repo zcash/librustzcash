@@ -70,7 +70,7 @@ use zcash_keys::{
 };
 use zcash_primitives::transaction::{
     Transaction, TxId,
-    builder::{BuildConfig, BuildResult, Builder},
+    builder::{BuildConfig, BuildResult, Builder, BundlePadding},
     components::sapling::zip212_enforcement,
     fees::FeeRule,
 };
@@ -83,7 +83,6 @@ use zcash_protocol::{
 use zip32::Scope;
 use zip321::Payment;
 
-use orchard::builder::BundleType;
 #[cfg(feature = "transparent-inputs")]
 use {
     super::CoinbaseFilter,
@@ -1533,9 +1532,10 @@ fn build_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT, N>
         (TransparentAddress, OutPoint),
     >,
     proposed_version: Option<TxVersion>,
-    // The transactional bundle type for the Orchard and Ironwood bundles; the PCZT path
-    // threads the proposal's configured type here, other callers pass `BundleType::DEFAULT`.
-    orchard_pool_bundle_type: BundleType,
+    // The transactional bundle padding for the Orchard and Ironwood bundles; the PCZT path
+    // threads the proposal's configured padding here, other callers pass
+    // `BundlePadding::DEFAULT`.
+    orchard_pool_padding: BundlePadding,
     // Overrides the builder-derived expiry height, when set. Applied immediately after
     // `Builder::new` below, before any inputs are added or signatures/proofs are produced.
     expiry_height: Option<BlockHeight>,
@@ -1743,8 +1743,8 @@ where
             sapling_anchor,
             orchard_anchor,
             ironwood_anchor,
-            orchard_bundle_type: orchard_pool_bundle_type,
-            ironwood_bundle_type: orchard_pool_bundle_type,
+            orchard_padding: orchard_pool_padding,
+            ironwood_padding: orchard_pool_padding,
         },
     );
     if let Some(expiry_height) = expiry_height {
@@ -2387,7 +2387,7 @@ where
         unused_transparent_outputs,
         proposed_version,
         // The non-PCZT path always builds padded Orchard-pool bundles.
-        BundleType::DEFAULT,
+        BundlePadding::DEFAULT,
         expiry_height,
     )?;
 
@@ -2642,11 +2642,12 @@ where
 /// [`Error::ExpiryHeightBelowTargetHeight`]. An `expiry_height` of zero,
 /// which disables expiry, is exempt from this check.
 ///
-/// `orchard_pool_bundle_type` selects the transactional bundle type for the Orchard
+/// `orchard_pool_padding` selects the transactional bundle padding for the Orchard
 /// and Ironwood bundles, and must match the change strategy used to create
 /// `proposal` (see
 /// `zip317::SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`); pass
-/// [`BundleType::DEFAULT`](orchard::builder::BundleType) otherwise.
+/// [`BundlePadding::DEFAULT`](zcash_primitives::transaction::builder::BundlePadding)
+/// otherwise.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]
@@ -2657,7 +2658,7 @@ pub fn create_pczt_from_proposal<DbT, ParamsT, InputsErrT, FeeRuleT, ChangeErrT,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, N>,
     expiry_height: Option<BlockHeight>,
-    orchard_pool_bundle_type: BundleType,
+    orchard_pool_padding: BundlePadding,
 ) -> Result<pczt::Pczt, CreateErrT<DbT, InputsErrT, FeeRuleT, ChangeErrT, N>>
 where
     DbT: WalletWrite + WalletCommitmentTrees,
@@ -2713,7 +2714,7 @@ where
         #[cfg(feature = "transparent-inputs")]
         unused_transparent_outputs,
         proposed_version,
-        orchard_pool_bundle_type,
+        orchard_pool_padding,
         // This path applies `expiry_height` after the PCZT is built instead (below),
         // since overriding it via the builder would be redundant with that existing mechanism.
         None,

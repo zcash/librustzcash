@@ -55,9 +55,8 @@ use alloc::vec::Vec;
 
 use rand_core::{CryptoRng, RngCore};
 
-use orchard::builder::BundleType;
 use orchard::keys::{FullViewingKey, Scope};
-use zcash_primitives::transaction::builder::DeferredPcztBuilder;
+use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
 use zcash_primitives::transaction::fees::zip317::{
     FeeError as Zip317FeeError, FeeRule as Zip317FeeRule,
 };
@@ -148,11 +147,11 @@ where
     let mut builder = DeferredPcztBuilder::new::<Zip317FeeError>(
         params.clone(),
         BlockHeight::from_u32(target_height),
-        BundleType::Transactional {
+        BundlePadding {
             bundle_required: false,
             pad_to_minimum: Some(PREP_TX_ACTIONS as u8),
         },
-        BundleType::DEFAULT,
+        BundlePadding::DEFAULT,
     )
     .map_err(|e| BuildError::Build(format!("preparation: builder: {e}")))?
     .with_expiry_height(BlockHeight::from_u32(expiry_height));

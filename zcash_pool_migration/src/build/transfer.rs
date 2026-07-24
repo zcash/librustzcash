@@ -23,9 +23,8 @@
 
 use rand_core::{CryptoRng, RngCore};
 
-use orchard::builder::BundleType;
 use orchard::keys::{FullViewingKey, Scope};
-use zcash_primitives::transaction::builder::DeferredPcztBuilder;
+use zcash_primitives::transaction::builder::{BundlePadding, DeferredPcztBuilder};
 use zcash_primitives::transaction::fees::zip317::{
     FeeError as Zip317FeeError, FeeRule as Zip317FeeRule,
 };
@@ -35,11 +34,11 @@ use zcash_protocol::value::Zatoshis;
 
 use super::{BuildError, finalize_pczt};
 
-/// The transfer's destination-pool bundle type: a SINGLE unpadded Ironwood action. The canonical
+/// The transfer's destination-pool bundle padding: a SINGLE unpadded Ironwood action. The canonical
 /// transfer carries exactly one Ironwood output, and since every migration transfer shares this
 /// canonical shape the one-action bundle reveals nothing extra, while saving proving bandwidth on
 /// hardware signers.
-const IRONWOOD_TRANSFER_BUNDLE_TYPE: BundleType = BundleType::Transactional {
+const IRONWOOD_TRANSFER_PADDING: BundlePadding = BundlePadding {
     bundle_required: false,
     pad_to_minimum: Some(1),
 };
@@ -83,8 +82,8 @@ where
     let mut builder = DeferredPcztBuilder::new::<Zip317FeeError>(
         params.clone(),
         BlockHeight::from_u32(target_height),
-        BundleType::DEFAULT,
-        IRONWOOD_TRANSFER_BUNDLE_TYPE,
+        BundlePadding::DEFAULT,
+        IRONWOOD_TRANSFER_PADDING,
     )
     .map_err(|e| BuildError::Build(format!("transfer: builder: {e}")))?
     .with_expiry_height(BlockHeight::from_u32(expiry_height));
