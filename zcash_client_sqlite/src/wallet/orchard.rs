@@ -1234,6 +1234,143 @@ pub(crate) mod tests {
         assert_eq!(note_row("ironwood"), (20_000, 3));
     }
 
+    /// Regression test for the receiver-union merge in `upsert_address` (see its doc comment):
+    /// the transparent gap-limit subsystem may already have inserted the bare internal
+    /// transparent change address at the same `(account, key_scope, diversifier_index)` key
+    /// that a shielded internal note's `ensure_address` resolves to. The stored row must
+    /// upgrade to a unified encoding carrying BOTH receivers — not keep the first writer's
+    /// transparent-only string — the note must link to that same row, and the transparent
+    /// subsystem's cached-receiver bookkeeping must survive untouched.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn internal_address_upsert_merges_with_preexisting_transparent_row() {
+        use orchard::{
+            ValuePool,
+            note::{Note, NoteVersion, RandomSeed, Rho},
+            value::NoteValue,
+        };
+        use rusqlite::named_params;
+        use zcash_client_backend::{
+            DecryptedOutput, TransferType,
+            data_api::{
+                Account as _,
+                testing::{TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester},
+            },
+        };
+        use zcash_keys::address::Address;
+        use zcash_primitives::block::BlockHash;
+        use zcash_protocol::{ShieldedPool, memo::MemoBytes};
+
+        use crate::{
+            TxRef,
+            testing::db::TestDbFactory,
+            wallet::encoding::{KeyScope, ReceiverFlags},
+        };
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        // Diversifier index 0 under the internal scope — the same index the pre-inserted
+        // transparent change address below occupies, forcing the union-merge path.
+        let recipient = fvk.address_at(0u32, zip32::Scope::Internal);
+        let rho = Option::from(Rho::from_bytes(&[0; 32])).unwrap();
+        let rseed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho)).unwrap();
+        let note = Option::from(Note::from_parts(
+            recipient,
+            NoteValue::from_raw(10_000),
+            rho,
+            rseed,
+            NoteVersion::V2,
+        ))
+        .unwrap();
+        let output = DecryptedOutput::new(
+            0,
+            (note, ValuePool::Orchard),
+            ShieldedPool::Orchard,
+            account_uuid,
+            MemoBytes::empty(),
+            TransferType::AccountInternal,
+        );
+
+        let conn = st.wallet_mut().conn_mut();
+        let tx = conn.transaction().unwrap();
+
+        // The account fixture's transparent gap-limit provisioning has already inserted the
+        // bare internal transparent change address at (account, INTERNAL, diversifier index
+        // 0) — exactly the collision this test guards against.
+        let (pre_id, pre_addr, pre_flags, pre_cached): (i64, String, i64, Option<String>) = tx
+            .query_row(
+                "SELECT id, address, receiver_flags, cached_transparent_receiver_address
+                 FROM addresses
+                 WHERE key_scope = :key_scope AND diversifier_index_be = :di_be",
+                named_params![
+                    ":key_scope": KeyScope::INTERNAL.encode(),
+                    ":di_be": [0u8; 11].as_slice(),
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            pre_flags,
+            ReceiverFlags::P2PKH.bits(),
+            "precondition: the gap-limit row must be transparent-only"
+        );
+        assert!(
+            matches!(
+                Address::decode(&network, &pre_addr),
+                Some(Address::Transparent(_))
+            ),
+            "precondition: the gap-limit row must store a bare transparent encoding"
+        );
+
+        let tx_ref = tx
+            .query_row(
+                "INSERT INTO transactions (txid, min_observed_height)
+                 VALUES (:txid, 0)
+                 RETURNING id_tx",
+                named_params![":txid": [0x7fu8; 32].as_slice()],
+                |row| row.get::<_, i64>(0).map(TxRef),
+            )
+            .unwrap();
+
+        super::put_received_note(&tx, &network, ShieldedPool::Orchard, &output, tx_ref, None, None)
+            .unwrap();
+
+        // The note links to the SAME row, whose encoding is now a unified address carrying
+        // both the pre-existing transparent receiver and the note's orchard receiver.
+        let (addr_id, addr_str, flags, cached): (i64, String, i64, Option<String>) = tx
+            .query_row(
+                "SELECT a.id, a.address, a.receiver_flags, a.cached_transparent_receiver_address
+                 FROM orchard_received_notes orn
+                 JOIN addresses a ON a.id = orn.address_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(addr_id, pre_id);
+        assert_eq!(cached, pre_cached);
+        assert_eq!(flags, pre_flags | ReceiverFlags::ORCHARD.bits());
+        match Address::decode(&network, &addr_str) {
+            Some(Address::Unified(ua)) => {
+                assert!(
+                    ua.orchard().is_some(),
+                    "merged address must keep the orchard receiver"
+                );
+                assert!(
+                    ua.transparent().is_some(),
+                    "merged address must keep the transparent receiver"
+                );
+            }
+            _ => panic!("expected a unified encoding after the merge"),
+        }
+    }
+
     /// End-to-end: a wallet that scans a block containing an Ironwood (version 3) note stores it in
     /// `ironwood_received_notes` as note version 3, counts it in the wallet balance, persists the
     /// Ironwood note commitment tree, and records nothing in the Orchard tables.

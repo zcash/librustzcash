@@ -1446,6 +1446,19 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
 ///   inserted for the given account and diversifier index, and the `exposed_at_height` column
 ///   is currently `NULL` (i.e. the address at this diversifier index has not yet been exposed)
 ///   then the value of the `address` column will be replaced with the provided address.
+///
+/// ## Receiver-union semantics
+///
+/// The row keyed by `(account_id, key_scope, diversifier_index_be)` can be written by more
+/// than one subsystem: transparent gap-limit tracking inserts the bare internal transparent
+/// change address, while shielded note ingestion (`ensure_address`) upserts the receiver a
+/// decrypted note paid to. The stored encoding converges to the UNION of every receiver
+/// observed at that index — never dropping one — so a bare-transparent row is upgraded to a
+/// unified encoding when a shielded receiver arrives at the same index, instead of the first
+/// writer winning. Only the address text, receiver flags, and exposure height are updated by
+/// the merge; the transparent bookkeeping columns (`transparent_child_index`,
+/// `cached_transparent_receiver_address`) belong to the transparent subsystem and remain
+/// valid because the union preserves the transparent receiver they cache.
 pub(crate) fn upsert_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1495,6 +1508,105 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
                 ));
             }
             _ => (),
+        }
+    }
+
+    // Receiver-union merge (see the doc comment): if a row already exists at this key and the
+    // incoming address contributes a receiver the stored encoding lacks, rewrite the stored
+    // address as the union of both receiver sets and return the existing row's id.
+    let existing = conn
+        .query_row(
+            "SELECT address, receiver_flags FROM addresses
+             WHERE account_id = :account_id
+             AND diversifier_index_be = :diversifier_index_be
+             AND key_scope = :key_scope",
+            named_params![
+                ":account_id": account_id.0,
+                ":diversifier_index_be": &di_be,
+                ":key_scope": key_scope.encode(),
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+
+    if let Some((existing_addr, existing_flags)) = existing {
+        #[cfg(feature = "orchard")]
+        let mut ex_orchard = None;
+        let mut ex_sapling = None;
+        let mut ex_transparent = None;
+        match Address::decode(params, &existing_addr) {
+            Some(Address::Unified(ua)) => {
+                #[cfg(feature = "orchard")]
+                {
+                    ex_orchard = ua.orchard().cloned();
+                }
+                ex_sapling = ua.sapling().cloned();
+                ex_transparent = ua.transparent().cloned();
+            }
+            Some(Address::Transparent(t)) => ex_transparent = Some(t),
+            Some(Address::Sapling(p)) => ex_sapling = Some(p),
+            _ => (),
+        }
+
+        let adds_receiver = {
+            #[cfg(feature = "orchard")]
+            let adds_orchard = ex_orchard.is_none() && address.orchard().is_some();
+            #[cfg(not(feature = "orchard"))]
+            let adds_orchard = false;
+            adds_orchard
+                || (ex_sapling.is_none() && address.sapling().is_some())
+                || (ex_transparent.is_none() && address.transparent().is_some())
+        };
+
+        if adds_receiver {
+            let merged = {
+                let sapling = ex_sapling.or_else(|| address.sapling().cloned());
+                let transparent = ex_transparent.or_else(|| address.transparent().cloned());
+                #[cfg(feature = "orchard")]
+                {
+                    UnifiedAddress::from_receivers(
+                        ex_orchard.or_else(|| address.orchard().cloned()),
+                        sapling,
+                        transparent,
+                    )
+                }
+                #[cfg(not(feature = "orchard"))]
+                {
+                    UnifiedAddress::from_receivers(sapling, transparent)
+                }
+            };
+
+            // `from_receivers` yields `None` only for a shielded-receiver-less union, in which
+            // case there is nothing better to store than what is already present.
+            if let Some(merged) = merged {
+                let merged_flags = existing_flags | ReceiverFlags::from(&merged).bits();
+                let id = conn
+                    .query_row(
+                        "UPDATE addresses SET
+                            address = :address,
+                            receiver_flags = :receiver_flags,
+                            exposed_at_height = COALESCE(
+                                MIN(exposed_at_height, :exposed_at_height),
+                                exposed_at_height,
+                                :exposed_at_height
+                            )
+                         WHERE account_id = :account_id
+                         AND diversifier_index_be = :diversifier_index_be
+                         AND key_scope = :key_scope
+                         RETURNING id",
+                        named_params![
+                            ":address": merged.encode(params),
+                            ":receiver_flags": merged_flags,
+                            ":account_id": account_id.0,
+                            ":diversifier_index_be": &di_be,
+                            ":key_scope": key_scope.encode(),
+                            ":exposed_at_height": exposed_at_height.map(u32::from),
+                        ],
+                        |row| row.get(0).map(AddressRef),
+                    )
+                    .map_err(SqliteClientError::from)?;
+                return Ok(id);
+            }
         }
     }
 

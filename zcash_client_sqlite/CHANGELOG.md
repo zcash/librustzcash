@@ -46,6 +46,19 @@ workspace.
   lock lasts, and `lock_owner` records the flow that acquired it.
 
 ### Fixed
+- Wallet-internal (change and pool-migration) shielded outputs now get an
+  `addresses` row: address resolution during note storage previously skipped
+  `Scope::Internal` outputs entirely, leaving `to_address` NULL in
+  `v_tx_outputs` for every self-transfer output. Internal-scope Sapling,
+  Orchard, and Ironwood note recipients are now derived via the internal-scope
+  viewing key and recorded under the internal key scope.
+- When an address upsert collides with an existing row at the same
+  `(account, key scope, diversifier index)` whose stored encoding lacks a
+  receiver the incoming address carries — e.g. an internal-scope shielded note
+  arriving at the diversifier index where transparent gap-limit provisioning
+  already stored the bare transparent change address — the stored address is
+  now rewritten as a unified address carrying the union of both receiver sets,
+  instead of retaining the first writer's encoding.
 - The coinbase branch of the transparent account-balance tally now classifies
   locked value into `Balance::locked_value`: previously a mature coinbase UTXO
   locked by an in-flight shielding proposal was still reported as spendable,
