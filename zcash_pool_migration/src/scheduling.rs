@@ -720,6 +720,42 @@ mod tests {
         SchedulingParams::new(interval(blocks), P.transfer_delay(), P.preparation_delay())
     }
 
+    #[cfg(feature = "wallet")]
+    proptest! {
+        /// The wallet's `AnchorRetentionInterval` and this crate's `AnchorBucketInterval` implement
+        /// the same boundary arithmetic in two places. The `From` conversion is the seam between
+        /// them, and this is what keeps the two implementations from drifting: for any height and
+        /// any interval, converting and then asking must give the same answer as asking the
+        /// wallet's type directly.
+        ///
+        /// A drift here is exactly the failure this whole design exists to prevent — a migration
+        /// anchoring to a height the wallet does not consider a boundary, and so does not retain.
+        #[test]
+        fn conversion_preserves_the_boundary_arithmetic(
+            h in 0u32..5_000_000,
+            blocks in 1u32..10_000,
+        ) {
+            use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
+
+            let retention = AnchorRetentionInterval::custom(
+                NonZeroU32::new(blocks).expect("nonzero"),
+            );
+            let bucket = AnchorBucketInterval::from(retention);
+            let height = bh(h);
+
+            prop_assert_eq!(bucket.block_count(), retention.block_count());
+            prop_assert_eq!(bucket.is_boundary(height), retention.is_boundary(height));
+            prop_assert_eq!(
+                bucket.boundary_at_or_below(height),
+                retention.boundary_at_or_below(height)
+            );
+            prop_assert_eq!(
+                bucket.boundary_at_or_above(height),
+                retention.boundary_at_or_above(height)
+            );
+        }
+    }
+
     // --- AnchorBucketInterval boundary helpers ------------------------------------------------
 
     proptest! {

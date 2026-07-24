@@ -556,7 +556,7 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
 fn migration_anchors_to_the_wallets_configured_retention_grid() {
     use core::num::NonZeroU32;
     use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
-    use zcash_pool_migration::engine::{MigrationBackend, MigrationTxKind};
+    use zcash_pool_migration::engine::{MigrationBackend, MigrationTxId, MigrationTxKind};
     use zcash_pool_migration::scheduling::{AnchorBucketInterval, SchedulingParams};
 
     // A short grid, so a migration reaches anchor viability without waiting out 144-block buckets.
@@ -609,11 +609,12 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
         engine::commit_preparation_with_funding(&network, tip, &mut adapter, &plan, &mut rng)
             .expect("commits the migration");
 
-    // Every transfer anchors to a boundary of the WALLET's grid; nothing lands off it.
-    let mut transfers = 0;
+    // Every transfer anchors to a boundary of the WALLET's grid; nothing lands off it, and the
+    // migration records that grid so a later reconfiguration is detectable.
+    assert_eq!(state.anchor_bucket_interval(), interval);
+    let mut transfer_boundaries = Vec::new();
     for tx in state.transactions() {
         if matches!(tx.kind(), MigrationTxKind::Transfer { .. }) {
-            transfers += 1;
             let boundary = tx
                 .anchor_boundary()
                 .expect("every committed transfer carries its boundary");
@@ -622,7 +623,81 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
                 "anchor {boundary:?} is not on the wallet's {}-block retention grid",
                 interval.block_count(),
             );
+            transfer_boundaries.push((tx.id(), boundary));
         }
     }
-    assert!(transfers > 0, "the migration commits at least one transfer");
+    assert!(
+        !transfer_boundaries.is_empty(),
+        "the migration commits at least one transfer"
+    );
+
+    // Now the part that ties the two grids together for real: mine the preparations so the funding
+    // notes exist, then bury each transfer's boundary far enough behind the chain tip that its
+    // checkpoint survives only because the wallet RETAINED it, and prove against it. Without
+    // retention on the wallet's configured grid this fails with `AnchorNotFound`.
+    let mut state = state;
+    let prep_ids: Vec<MigrationTxId> = state
+        .transactions()
+        .iter()
+        .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { .. }))
+        .map(|t| t.id())
+        .collect();
+    for prep_id in prep_ids {
+        let tip = st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+        let anchor = highest_rooted_orchard_checkpoint(st.wallet_mut(), tip)
+            .expect("a rooted Orchard checkpoint exists");
+        {
+            let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
+            engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
+                .expect("proves the preparation transaction");
+        }
+        let proven = state
+            .transactions()
+            .iter()
+            .find(|t| t.id() == prep_id)
+            .expect("the preparation is present");
+        let tx = TransactionExtractor::new(
+            pczt::Pczt::parse(proven.pczt()).expect("parses the proven preparation PCZT"),
+        )
+        .extract()
+        .expect("extracts the preparation transaction");
+        let (prep_height, _) = st.generate_next_block_from_tx(1, &tx);
+        st.scan_cached_blocks(prep_height, 1);
+    }
+
+    // `zcash_client_sqlite` keeps only the most recent 100 checkpoints, so burying the boundary
+    // deeper than that is what makes the proof depend on retention rather than on ordinary
+    // checkpoint survival.
+    const PRUNING_DEPTH: u32 = 100;
+    transfer_boundaries.sort_by_key(|(_, boundary)| *boundary);
+    let deepest = transfer_boundaries
+        .last()
+        .map(|(_, boundary)| *boundary)
+        .expect("there is at least one transfer");
+    loop {
+        let tip = st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+        if u32::from(tip) > u32::from(deepest) + PRUNING_DEPTH + 10 {
+            break;
+        }
+        let (h, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h, 1);
+    }
+
+    for (transfer_id, boundary) in transfer_boundaries {
+        let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
+        engine::prove_transfer(&mut prover, &mut state, transfer_id).unwrap_or_else(|e| {
+            panic!(
+                "proving against the retained boundary {boundary:?} on the wallet's configured \
+                 grid failed: {e}"
+            )
+        });
+    }
 }
