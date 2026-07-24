@@ -40,6 +40,7 @@ graph TB
             equihash
             f4jumble
             zcash_encoding
+            zcash_history
         end
     end
 
@@ -108,6 +109,7 @@ graph TB
     %% zcash_keys --> zcash_encoding
     %% zcash_primitives --> zcash_encoding
     %% zcash_address --> zcash_encoding
+    zcash_history --> zcash_encoding
     zcash_protocol --> zcash_encoding
 
     zcash_primitives --> equihash
@@ -169,6 +171,7 @@ graph TB
     click zcash_transparent "https://docs.rs/zcash_transparent/" _blank
     click zip321 "https://docs.rs/zip321/" _blank
     click zip32 "https://docs.rs/zip32/" _blank
+    click zcash_history "https://docs.rs/zcash_history/" _blank
 ```
 
 <!-- END mermaid-dependency-graph -->

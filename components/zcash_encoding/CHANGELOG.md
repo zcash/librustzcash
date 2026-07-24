@@ -8,12 +8,20 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_encoding::CompactSize::{read_unbounded, write_unbounded}`, which use the
+  same wire format as `CompactSize::{read, write}` but span the full `u64` range
+  instead of enforcing the `MAX_COMPACT_SIZE` consensus limit.
 - `zcash_encoding::testing::check_roundtrip` (behind the new `test-dependencies`
   feature), a helper that asserts a `write`/`read` codec pair are exact inverses
   and that the encoding is stable across a round-trip.
 
 ### Changed
 - MSRV is now 1.88
+- `zcash_encoding::CompactSize::write` now returns an error when the provided
+  value exceeds `MAX_COMPACT_SIZE`, rather than silently writing a value that
+  `CompactSize::read` would reject. This mirrors the bound already enforced by
+  `CompactSize::read`; callers that may legitimately encode larger values should
+  use the new `CompactSize::write_unbounded`.
 
 ## [0.4.0] - 2026-04-23
 

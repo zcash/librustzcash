@@ -1,5 +1,7 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use alloc::vec::Vec;
+
 use primitive_types::U256;
+use zcash_encoding::CompactSize;
 
 use crate::Version;
 
@@ -81,43 +83,13 @@ impl NodeData {
         }
     }
 
-    fn write_compact<W: std::io::Write>(w: &mut W, compact: u64) -> std::io::Result<()> {
-        match compact {
-            0..=0xfc => w.write_all(&[compact as u8])?,
-            0xfd..=0xffff => {
-                w.write_all(&[0xfd])?;
-                w.write_u16::<LittleEndian>(compact as u16)?;
-            }
-            0x10000..=0xffff_ffff => {
-                w.write_all(&[0xfe])?;
-                w.write_u32::<LittleEndian>(compact as u32)?;
-            }
-            _ => {
-                w.write_all(&[0xff])?;
-                w.write_u64::<LittleEndian>(compact)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn read_compact<R: std::io::Read>(reader: &mut R) -> std::io::Result<u64> {
-        let result = match reader.read_u8()? {
-            i @ 0..=0xfc => i.into(),
-            0xfd => reader.read_u16::<LittleEndian>()?.into(),
-            0xfe => reader.read_u32::<LittleEndian>()?.into(),
-            _ => reader.read_u64::<LittleEndian>()?,
-        };
-
-        Ok(result)
-    }
-
     /// Write to the byte representation.
-    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         w.write_all(&self.subtree_commitment)?;
-        w.write_u32::<LittleEndian>(self.start_time)?;
-        w.write_u32::<LittleEndian>(self.end_time)?;
-        w.write_u32::<LittleEndian>(self.start_target)?;
-        w.write_u32::<LittleEndian>(self.end_target)?;
+        w.write_all(&self.start_time.to_le_bytes())?;
+        w.write_all(&self.end_time.to_le_bytes())?;
+        w.write_all(&self.start_target.to_le_bytes())?;
+        w.write_all(&self.end_target.to_le_bytes())?;
         w.write_all(&self.start_sapling_root)?;
         w.write_all(&self.end_sapling_root)?;
 
@@ -125,23 +97,37 @@ impl NodeData {
         self.subtree_total_work.to_little_endian(&mut work_buf[..]);
         w.write_all(&work_buf)?;
 
-        Self::write_compact(w, self.start_height)?;
-        Self::write_compact(w, self.end_height)?;
-        Self::write_compact(w, self.sapling_tx)?;
+        CompactSize::write_unbounded(&mut *w, self.start_height)?;
+        CompactSize::write_unbounded(&mut *w, self.end_height)?;
+        CompactSize::write_unbounded(&mut *w, self.sapling_tx)?;
         Ok(())
     }
 
     /// Read from the byte representation.
-    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
+    /// uses a non-canonical encoding, or if the encoded height range is
+    /// descending or contains more blocks than can be represented by a `u64`.
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
         let mut data = NodeData {
             consensus_branch_id,
             ..Default::default()
         };
         r.read_exact(&mut data.subtree_commitment)?;
-        data.start_time = r.read_u32::<LittleEndian>()?;
-        data.end_time = r.read_u32::<LittleEndian>()?;
-        data.start_target = r.read_u32::<LittleEndian>()?;
-        data.end_target = r.read_u32::<LittleEndian>()?;
+        let mut buf = [0u8; 4];
+        r.read_exact(&mut buf)?;
+        data.start_time = u32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        data.end_time = u32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        data.start_target = u32::from_le_bytes(buf);
+        r.read_exact(&mut buf)?;
+        data.end_target = u32::from_le_bytes(buf);
         r.read_exact(&mut data.start_sapling_root)?;
         r.read_exact(&mut data.end_sapling_root)?;
 
@@ -149,9 +135,20 @@ impl NodeData {
         r.read_exact(&mut work_buf)?;
         data.subtree_total_work = U256::from_little_endian(&work_buf);
 
-        data.start_height = Self::read_compact(r)?;
-        data.end_height = Self::read_compact(r)?;
-        data.sapling_tx = Self::read_compact(r)?;
+        data.start_height = CompactSize::read_unbounded(&mut *r)?;
+        data.end_height = CompactSize::read_unbounded(&mut *r)?;
+        if data
+            .end_height
+            .checked_sub(data.start_height)
+            .and_then(|height_diff| height_diff.checked_add(1))
+            .is_none()
+        {
+            return Err(corez::io::Error::new(
+                corez::io::ErrorKind::InvalidData,
+                "history node height range does not contain a representable number of blocks",
+            ));
+        }
+        data.sapling_tx = CompactSize::read_unbounded(&mut *r)?;
 
         Ok(data)
     }
@@ -162,7 +159,13 @@ impl NodeData {
     }
 
     /// Convert from byte representation.
-    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> std::io::Result<Self> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
+    /// uses a non-canonical encoding, or if the encoded height range is
+    /// descending or contains more blocks than can be represented by a `u64`.
+    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
         crate::V1::from_bytes(consensus_branch_id, buf)
     }
 
@@ -197,23 +200,26 @@ impl V2 {
     }
 
     /// Write to the byte representation.
-    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         self.v1.write(w)?;
         w.write_all(&self.start_orchard_root)?;
         w.write_all(&self.end_orchard_root)?;
-        NodeData::write_compact(w, self.orchard_tx)?;
+        CompactSize::write_unbounded(&mut *w, self.orchard_tx)?;
         Ok(())
     }
 
     /// Read from the byte representation.
-    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
         let mut data = V2 {
             v1: NodeData::read(consensus_branch_id, r)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_orchard_root)?;
         r.read_exact(&mut data.end_orchard_root)?;
-        data.orchard_tx = NodeData::read_compact(r)?;
+        data.orchard_tx = CompactSize::read_unbounded(&mut *r)?;
 
         Ok(data)
     }
@@ -256,23 +262,26 @@ impl V3 {
     }
 
     /// Write to the byte representation.
-    pub fn write<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
         self.v2.write(w)?;
         w.write_all(&self.start_ironwood_root)?;
         w.write_all(&self.end_ironwood_root)?;
-        NodeData::write_compact(w, self.ironwood_tx)?;
+        CompactSize::write_unbounded(&mut *w, self.ironwood_tx)?;
         Ok(())
     }
 
     /// Read from the byte representation.
-    pub fn read<R: std::io::Read>(consensus_branch_id: u32, r: &mut R) -> std::io::Result<Self> {
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
         let mut data = V3 {
             v2: V2::read(consensus_branch_id, r)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_ironwood_root)?;
         r.read_exact(&mut data.end_ironwood_root)?;
-        data.ironwood_tx = NodeData::read_compact(r)?;
+        data.ironwood_tx = CompactSize::read_unbounded(&mut *r)?;
 
         Ok(data)
     }
@@ -320,6 +329,8 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::testing::arb_node_data;
     use proptest::prelude::*;
 
@@ -438,7 +449,82 @@ mod tests {
     proptest! {
         #[test]
         fn serialization_round_trip(node_data in arb_node_data()) {
-            assert_eq!(NodeData::from_bytes(0, node_data.to_bytes()).unwrap(), node_data);
+            let decoded = NodeData::from_bytes(0, node_data.to_bytes());
+            let leaf_count = node_data
+                .end_height
+                .checked_sub(node_data.start_height)
+                .and_then(|height_diff| height_diff.checked_add(1));
+
+            if leaf_count.is_some() {
+                prop_assert_eq!(decoded.unwrap(), node_data);
+            } else {
+                prop_assert_eq!(
+                    decoded.unwrap_err().kind(),
+                    corez::io::ErrorKind::InvalidData
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn genesis_height_round_trip() {
+        let node_data = NodeData {
+            start_height: 0,
+            end_height: 0,
+            ..Default::default()
+        };
+        let entry = Entry::<HistoryV1>::new_leaf(node_data);
+        let mut encoded = vec![];
+        entry.write(&mut encoded).unwrap();
+
+        assert_eq!(
+            Entry::<HistoryV1>::from_bytes(0, encoded)
+                .unwrap()
+                .leaf_count(),
+            1
+        );
+    }
+
+    #[test]
+    fn zero_start_height_combined_node_round_trip() {
+        // Regtest scenario: Heartwood activates at height 0, so the genesis
+        // leaf has start_height == 0. When two leaves are combined into a
+        // node spanning heights 0..=1, leaf_count() must not underflow.
+        let left = Entry::<HistoryV1>::new_leaf(node_data(0, 0));
+        let right = Entry::<HistoryV1>::new_leaf(node_data(1, 1));
+        let combined = HistoryV1::combine(left.data(), right.data());
+        let entry = Entry::<HistoryV1>::new(combined, EntryLink::Stored(0), EntryLink::Stored(1));
+        let mut encoded = vec![];
+        entry.write(&mut encoded).unwrap();
+
+        let decoded = Entry::<HistoryV1>::from_bytes(0, encoded).unwrap();
+        assert_eq!(decoded.leaf_count(), 2);
+        assert!(decoded.complete());
+    }
+
+    #[test]
+    fn invalid_height_ranges_are_rejected() {
+        for (start_height, end_height) in [
+            // Descending ranges.
+            (200, 5),
+            (u64::MAX, 5),
+            // Ascending, but the leaf count overflows a `u64`.
+            (0, u64::MAX),
+        ] {
+            let node_data = NodeData {
+                start_height,
+                end_height,
+                ..Default::default()
+            };
+            let entry = Entry::<HistoryV1>::new_leaf(node_data);
+            let mut encoded = vec![];
+            entry.write(&mut encoded).unwrap();
+            let error = match Entry::<HistoryV1>::from_bytes(0, encoded) {
+                Ok(_) => panic!("invalid height range was accepted"),
+                Err(error) => error,
+            };
+
+            assert_eq!(error.kind(), corez::io::ErrorKind::InvalidData);
         }
     }
 
@@ -461,12 +547,15 @@ mod tests {
 
     #[test]
     fn max_serialized_sizes_cover_all_versions() {
+        // ZIP 221 specifies that history nodes are at most 171 bytes before NU5
+        // and 244 bytes after NU5; those bounds require the compact-encoded
+        // fields to span the full `u64` range (a 9-byte compact encoding each).
         assert_eq!(HistoryV1::to_bytes(&max_node_data()).len(), 171);
         assert_eq!(HistoryV2::to_bytes(&max_node_data_v2()).len(), 244);
         let max_v3_bytes = HistoryV3::to_bytes(&max_node_data_v3());
-        assert_eq!(max_v3_bytes.len(), 317);
+        assert_eq!(max_v3_bytes.len(), MAX_NODE_DATA_SIZE);
         assert_eq!(
-            HistoryV3::from_bytes(u32::MAX, max_v3_bytes).unwrap(),
+            HistoryV3::from_bytes(u32::MAX, &max_v3_bytes).unwrap(),
             max_node_data_v3()
         );
         assert_eq!(MAX_NODE_DATA_SIZE, 317);

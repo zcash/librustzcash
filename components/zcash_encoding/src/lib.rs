@@ -32,13 +32,34 @@ pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
 pub struct CompactSize;
 
 impl CompactSize {
-    /// Reads an integer encoded in compact form.
-    pub fn read<R: Read>(mut reader: R) -> io::Result<u64> {
+    /// Reads an integer encoded in compact form, enforcing the
+    /// [`MAX_COMPACT_SIZE`] consensus limit.
+    ///
+    /// Use [`CompactSize::read_unbounded`] to decode values that are permitted
+    /// to exceed this limit.
+    pub fn read<R: Read>(reader: R) -> io::Result<u64> {
+        match Self::read_unbounded(reader)? {
+            s if s > <u64>::from(MAX_COMPACT_SIZE) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CompactSize too large",
+            )),
+            s => Ok(s),
+        }
+    }
+
+    /// Reads an integer encoded in compact form, over the full range of a `u64`.
+    ///
+    /// Unlike [`CompactSize::read`], this does not enforce the
+    /// [`MAX_COMPACT_SIZE`] consensus limit; it is intended for encodings such
+    /// as ZIP 221 chain history nodes, whose cumulative transaction counters may
+    /// legitimately exceed `MAX_COMPACT_SIZE`. Non-canonical encodings (values
+    /// that could have been encoded in fewer bytes) are still rejected.
+    pub fn read_unbounded<R: Read>(mut reader: R) -> io::Result<u64> {
         let mut flag_bytes = [0; 1];
         reader.read_exact(&mut flag_bytes)?;
         let flag = flag_bytes[0];
 
-        let result = if flag < 253 {
+        if flag < 253 {
             Ok(u64::from(flag))
         } else if flag == 253 {
             let mut bytes = [0; 2];
@@ -70,14 +91,6 @@ impl CompactSize {
                 )),
                 n => Ok(n),
             }
-        }?;
-
-        match result {
-            s if s > <u64>::from(MAX_COMPACT_SIZE) => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "CompactSize too large",
-            )),
-            s => Ok(s),
         }
     }
 
@@ -93,21 +106,40 @@ impl CompactSize {
         })
     }
 
-    /// Writes the provided `usize` value to the provided Writer in compact form.
-    pub fn write<W: Write>(mut writer: W, size: usize) -> io::Result<()> {
-        match size {
-            s if s < 253 => writer.write_all(&[s as u8]),
-            s if s <= 0xFFFF => {
+    /// Writes the provided `usize` value to the provided Writer in compact form,
+    /// enforcing the [`MAX_COMPACT_SIZE`] consensus limit.
+    ///
+    /// Returns an error if `size` exceeds `MAX_COMPACT_SIZE`; use
+    /// [`CompactSize::write_unbounded`] to encode larger values.
+    pub fn write<W: Write>(writer: W, size: usize) -> io::Result<()> {
+        if size as u64 > u64::from(MAX_COMPACT_SIZE) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CompactSize too large",
+            ));
+        }
+        Self::write_unbounded(writer, size as u64)
+    }
+
+    /// Writes the provided `u64` value to the provided Writer in compact form,
+    /// over the full range of a `u64`.
+    ///
+    /// Unlike [`CompactSize::write`], the value is not required to satisfy the
+    /// [`MAX_COMPACT_SIZE`] consensus limit.
+    pub fn write_unbounded<W: Write>(mut writer: W, value: u64) -> io::Result<()> {
+        match value {
+            n if n < 253 => writer.write_all(&[n as u8]),
+            n if n <= 0xFFFF => {
                 writer.write_all(&[253])?;
-                writer.write_all(&(s as u16).to_le_bytes())
+                writer.write_all(&(n as u16).to_le_bytes())
             }
-            s if s <= 0xFFFFFFFF => {
+            n if n <= 0xFFFFFFFF => {
                 writer.write_all(&[254])?;
-                writer.write_all(&(s as u32).to_le_bytes())
+                writer.write_all(&(n as u32).to_le_bytes())
             }
-            s => {
+            n => {
                 writer.write_all(&[255])?;
-                writer.write_all(&(s as u64).to_le_bytes())
+                writer.write_all(&n.to_le_bytes())
             }
         }
     }
@@ -383,15 +415,44 @@ mod tests {
         eval(33554432, &[254, 0, 0, 0, 2]);
 
         {
+            // Values above `MAX_COMPACT_SIZE` are rejected on both write and read.
             let value = 33554433;
             let encoded = &[254, 1, 0, 0, 2][..];
-            let mut data = vec![];
-            CompactSize::write(&mut data, value).unwrap();
-            assert_eq!(&data[..], encoded);
-            let serialized_size = CompactSize::serialized_size(value);
-            assert_eq!(serialized_size, encoded.len());
+            assert!(CompactSize::write(&mut vec![], value).is_err());
             assert!(CompactSize::read(encoded).is_err());
         }
+    }
+
+    #[test]
+    fn compact_size_unbounded() {
+        fn eval(value: u64, expected: &[u8]) {
+            let mut data = vec![];
+            CompactSize::write_unbounded(&mut data, value).unwrap();
+            assert_eq!(&data[..], expected);
+            assert_eq!(CompactSize::read_unbounded(expected).unwrap(), value);
+        }
+
+        // Values within the consensus bound encode exactly as `CompactSize`.
+        eval(0, &[0]);
+        eval(252, &[252]);
+        eval(253, &[253, 253, 0]);
+        eval(65535, &[253, 255, 255]);
+        eval(65536, &[254, 0, 0, 1, 0]);
+        eval(0xffff_ffff, &[254, 255, 255, 255, 255]);
+
+        // Values above `MAX_COMPACT_SIZE` round-trip through the unbounded
+        // codec, but the bounded `CompactSize` rejects them on both read and
+        // write.
+        eval(0x0200_0001, &[254, 1, 0, 0, 2]);
+        eval(0x1_0000_0000, &[255, 0, 0, 0, 0, 1, 0, 0, 0]);
+        eval(u64::MAX, &[255, 255, 255, 255, 255, 255, 255, 255, 255]);
+        assert!(CompactSize::read(&[254, 1, 0, 0, 2][..]).is_err());
+        assert!(CompactSize::write(&mut vec![], 0x0200_0001).is_err());
+
+        // Non-canonical encodings are rejected.
+        assert!(CompactSize::read_unbounded(&[253, 0, 0][..]).is_err());
+        assert!(CompactSize::read_unbounded(&[254, 0, 0, 0, 0][..]).is_err());
+        assert!(CompactSize::read_unbounded(&[255, 0, 0, 0, 0, 0, 0, 0, 0][..]).is_err());
     }
 
     #[allow(clippy::useless_vec)]

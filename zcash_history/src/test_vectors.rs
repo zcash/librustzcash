@@ -12,6 +12,8 @@ mod zip_0221_v1;
 mod zip_0221_v2;
 mod zip_0221_v3;
 
+use alloc::vec::Vec;
+
 use primitive_types::U256;
 
 use crate::{Entry, NodeData, NodeDataV2, NodeDataV3, Tree, V1, V2, V3, Version};
