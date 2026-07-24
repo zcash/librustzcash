@@ -147,6 +147,26 @@ impl Default for AnchorBucketInterval {
     }
 }
 
+/// The grid a `zcash_client_backend` wallet retains its durable anchor checkpoints on is exactly
+/// the grid a migration over that wallet may anchor to, so the two are freely interconvertible.
+/// Converting rather than configuring the migration separately is what keeps them from diverging.
+#[cfg(feature = "wallet")]
+impl From<zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval>
+    for AnchorBucketInterval
+{
+    fn from(
+        interval: zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval,
+    ) -> Self {
+        Self(interval.block_count())
+    }
+}
+
+// The reverse conversion is deliberately absent. The wallet is the authority on the grid — it is
+// the side that retains the checkpoints — so a migration derives its interval from a wallet, never
+// the other way around. Constructing a non-ZIP-318 retention interval goes through
+// `AnchorRetentionInterval::custom`, which `zcash_client_backend` gates behind its `unstable`
+// feature precisely so that choosing a non-standard grid is a deliberate act.
+
 /// A truncated exponential inter-arrival delay distribution, in blocks: draws have mean
 /// [`Self::mean`], and a draw exceeding [`Self::cap`] is discarded and redrawn (truncating the
 /// exponential's heavy tail, so nothing is starved for an unbounded time).

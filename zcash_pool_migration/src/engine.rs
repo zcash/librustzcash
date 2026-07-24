@@ -86,6 +86,21 @@ pub trait MigrationBackend {
 
     /// The current chain-tip height, from which the transfer schedule's delays accumulate.
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error>;
+
+    /// The parameters this backend's migrations are scheduled under: the anchor bucket grid and the
+    /// transfer and preparation inter-arrival delays.
+    ///
+    /// The engine never takes these as its own argument; it asks the backend, because the anchor
+    /// bucket interval is not free to choose. A transfer proves against the note commitment tree
+    /// state at the boundary it anchored to, which requires the wallet to have RETAINED that
+    /// boundary's checkpoint. Sourcing the interval from the same backend that performs the
+    /// retention is what makes the two grids incapable of disagreeing; a backend that returns an
+    /// interval it does not retain on will produce transfers it cannot prove.
+    ///
+    /// A backend on the production network must return [`SchedulingParams::ZIP_318`].
+    ///
+    /// [`SchedulingParams::ZIP_318`]: crate::scheduling::SchedulingParams::ZIP_318
+    fn scheduling_params(&self) -> crate::scheduling::SchedulingParams;
 }
 
 /// Read access to a persisted pool migration: the store side of the migration interface, mirroring
@@ -693,6 +708,9 @@ where
     let commit_height = backend
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
+    // The anchor grid and delay distributions come from the backend, not from this function's
+    // caller: the grid must be the one the backend retains its anchor checkpoints on.
+    let sched_params = backend.scheduling_params();
 
     // The canonical fees, computed once from the canonical transaction shapes and reused throughout.
     let (prep_tx_fee, transfer_fee_buffer) =
@@ -732,7 +750,7 @@ where
     let mut layer_base = commit_height;
     for layer in preparation.layers() {
         let heights = scheduling::schedule_prep_broadcast_heights(
-            &scheduling::SchedulingParams::ZIP_318,
+            &sched_params,
             layer_base,
             layer.len(),
             rng,
@@ -754,7 +772,7 @@ where
         .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
         .ok_or(MigrationError::Nu63NotActive)?;
     let schedule_base = commit_height.max(scheduling::earliest_broadcast_height(
-        scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+        sched_params.anchor_bucket_interval(),
         nu63_activation,
         est_last_prep_height,
     ));
@@ -764,12 +782,7 @@ where
     // temporal sequence an observer could read the balance back out of. Drawing a uniform
     // permutation and assigning the i-th drawn slot to the permuted crossing makes the
     // broadcast order of denominations independent of the balance.
-    let slots = scheduling::schedule(
-        &scheduling::SchedulingParams::ZIP_318,
-        schedule_base,
-        funding_notes.len(),
-        rng,
-    );
+    let slots = scheduling::schedule(&sched_params, schedule_base, funding_notes.len(), rng);
     let mut schedule = slots.clone();
     for (slot, &crossing) in scheduling::shuffle_indices(funding_notes.len(), rng)
         .iter()
@@ -1657,13 +1670,11 @@ where
 
     // Reschedule the part with a fresh memoryless delay from the current tip, and derive its new
     // canonical expiry and a fresh boundary anchor for that schedule.
-    let scheduled_height = target_height
-        + scheduling::SchedulingParams::ZIP_318
-            .transfer_delay()
-            .draw(&mut *rng);
+    let sched_params = backend.scheduling_params();
+    let scheduled_height = target_height + sched_params.transfer_delay().draw(&mut *rng);
     let expiry_height = scheduling::expiry_height(scheduled_height);
     let anchor_boundary = scheduling::draw_anchor_boundary(
-        scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+        sched_params.anchor_bucket_interval(),
         nu63_activation,
         funding_creation,
         scheduled_height,
@@ -2285,6 +2296,9 @@ where
             .params
             .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
             .ok_or(CommitError::Nu63NotActive)?;
+        // The grid to draw from is the backend's, so the boundary each transfer anchors to is one
+        // whose checkpoint that backend retains.
+        let anchor_bucket_interval = self.backend.scheduling_params().anchor_bucket_interval();
         for (crossing, schedule) in plan.schedule().iter().enumerate() {
             let id = self.next_id();
 
@@ -2333,7 +2347,7 @@ where
             )
             .map_err(CommitError::Build)?;
             let anchor_boundary = scheduling::draw_anchor_boundary(
-                scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+                anchor_bucket_interval,
                 nu63_activation,
                 est_last_prep_height,
                 schedule.broadcast_height(),
@@ -2447,6 +2461,7 @@ mod tests {
         notes: Vec<Zatoshis>,
         tip: BlockHeight,
         stored: Option<MigrationState>,
+        sched_params: crate::scheduling::SchedulingParams,
     }
 
     impl MockBackend {
@@ -2458,6 +2473,7 @@ mod tests {
                     .collect(),
                 tip: BlockHeight::from_u32(tip),
                 stored: None,
+                sched_params: crate::scheduling::SchedulingParams::ZIP_318,
             }
         }
     }
@@ -2471,6 +2487,10 @@ mod tests {
 
         fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
             Ok(self.tip)
+        }
+
+        fn scheduling_params(&self) -> crate::scheduling::SchedulingParams {
+            self.sched_params
         }
     }
 
@@ -2822,6 +2842,7 @@ mod commit_tests {
         ask: SpendAuthorizingKey,
         stored: Option<MigrationState>,
         tip: BlockHeight,
+        sched_params: crate::scheduling::SchedulingParams,
     }
 
     impl CommitMock {
@@ -2840,6 +2861,7 @@ mod commit_tests {
                 ask: SpendAuthorizingKey::from(&sk),
                 stored: None,
                 tip: BlockHeight::from_u32(2_000_000),
+                sched_params: crate::scheduling::SchedulingParams::ZIP_318,
             }
         }
     }
@@ -2857,6 +2879,10 @@ mod commit_tests {
 
         fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
             Ok(self.tip)
+        }
+
+        fn scheduling_params(&self) -> crate::scheduling::SchedulingParams {
+            self.sched_params
         }
     }
 
@@ -3477,6 +3503,7 @@ mod commit_tests {
             ask: SpendAuthorizingKey::from(&sk),
             stored: None,
             tip: BlockHeight::from_u32(2_000_000),
+            sched_params: crate::scheduling::SchedulingParams::ZIP_318,
         };
         let params = regtest_network(true);
         let prep_count = plan.preparation().transaction_count();

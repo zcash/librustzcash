@@ -39,6 +39,7 @@ use zcash_pool_migration::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTxId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
+use zcash_pool_migration::scheduling::SchedulingParams;
 
 /// A post-NU6.3 height (past the regtest NU6.3 activation) at which the migration transactions are
 /// built and their fees computed.
@@ -247,6 +248,7 @@ pub struct MockBackend {
     notes: Vec<Zatoshis>,
     tip: BlockHeight,
     stored: Option<MigrationState>,
+    sched_params: SchedulingParams,
 }
 
 impl MockBackend {
@@ -260,7 +262,16 @@ impl MockBackend {
                 .collect(),
             tip: BlockHeight::from_u32(tip),
             stored: None,
+            sched_params: SchedulingParams::ZIP_318,
         }
+    }
+
+    /// Overrides the scheduling parameters this backend reports (the default is
+    /// [`SchedulingParams::ZIP_318`]), for tests that exercise a non-standard anchor bucket grid or
+    /// compressed delays.
+    pub fn with_scheduling_params(mut self, sched_params: SchedulingParams) -> Self {
+        self.sched_params = sched_params;
+        self
     }
 }
 
@@ -273,6 +284,10 @@ impl MigrationBackend for MockBackend {
 
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
         Ok(self.tip)
+    }
+
+    fn scheduling_params(&self) -> SchedulingParams {
+        self.sched_params
     }
 }
 
@@ -317,6 +332,8 @@ pub struct CommitMock {
     pub ask: SpendAuthorizingKey,
     /// The in-memory migration state (`None` until a migration is committed).
     pub stored: Option<MigrationState>,
+    /// The scheduling parameters this backend reports to the engine.
+    sched_params: SchedulingParams,
 }
 
 impl CommitMock {
@@ -334,7 +351,16 @@ impl CommitMock {
             fvk,
             ask: SpendAuthorizingKey::from(&sk),
             stored: None,
+            sched_params: SchedulingParams::ZIP_318,
         }
+    }
+
+    /// Overrides the scheduling parameters this backend reports (the default is
+    /// [`SchedulingParams::ZIP_318`]), for tests that exercise a non-standard anchor bucket grid or
+    /// compressed delays.
+    pub fn with_scheduling_params(mut self, sched_params: SchedulingParams) -> Self {
+        self.sched_params = sched_params;
+        self
     }
 }
 
@@ -351,6 +377,10 @@ impl MigrationBackend for CommitMock {
 
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
         Ok(BlockHeight::from_u32(2_000_000))
+    }
+
+    fn scheduling_params(&self) -> SchedulingParams {
+        self.sched_params
     }
 }
 
