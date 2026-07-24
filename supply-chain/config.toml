@@ -67,6 +67,9 @@ audit-as-crates-io = true
 [policy.zcash_keys]
 audit-as-crates-io = true
 
+[policy.zcash_pool_migration]
+audit-as-crates-io = true
+
 [policy.zcash_primitives]
 audit-as-crates-io = true
 

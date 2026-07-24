@@ -32,6 +32,7 @@ workspace.
   share it instead of rebuilding the expensive proving key.
 
 ### Changed
+- Migrated to `zcash_transparent 0.10.0`.
 - `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries
   separate `orchard_bundle_type` and `ironwood_bundle_type` fields in place of
   `orchard_pool_bundle_type`, selecting the transactional bundle type
