@@ -1024,10 +1024,10 @@ fn source_pool_notes_after_run(
     for layer in preparation.layers() {
         for tx in layer {
             for input in tx.inputs() {
-                if let PrepInput::Wallet { index, .. } = input {
-                    if let Some(flag) = spent.get_mut(*index) {
-                        *flag = true;
-                    }
+                if let PrepInput::Wallet { index, .. } = input
+                    && let Some(flag) = spent.get_mut(*index)
+                {
+                    *flag = true;
                 }
             }
         }
@@ -2472,10 +2472,10 @@ mod tests {
             id: MigrationTxId,
             state: MigrationTxState,
         ) -> Result<(), Self::Error> {
-            if let Some(stored) = &mut self.stored {
-                if let Some(tx) = stored.transactions.iter_mut().find(|t| t.id == id) {
-                    tx.state = state;
-                }
+            if let Some(stored) = &mut self.stored
+                && let Some(tx) = stored.transactions.iter_mut().find(|t| t.id == id)
+            {
+                tx.state = state;
             }
             Ok(())
         }
@@ -2855,10 +2855,10 @@ mod commit_tests {
             id: MigrationTxId,
             state: MigrationTxState,
         ) -> Result<(), Self::Error> {
-            if let Some(stored) = &mut self.stored {
-                if let Some(tx) = stored.transactions.iter_mut().find(|t| t.id == id) {
-                    tx.state = state;
-                }
+            if let Some(stored) = &mut self.stored
+                && let Some(tx) = stored.transactions.iter_mut().find(|t| t.id == id)
+            {
+                tx.state = state;
             }
             Ok(())
         }

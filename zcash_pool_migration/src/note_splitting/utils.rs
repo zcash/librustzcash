@@ -21,10 +21,10 @@ pub(crate) fn largest_one_two_five(hi: u64, floor: u64) -> u64 {
     }
     // Prefer the largest significand multiple of that power that still fits.
     for multiple in ONE_TWO_FIVE_DESCENDING {
-        if let Some(v) = pow.checked_mul(multiple) {
-            if v <= hi {
-                return v;
-            }
+        if let Some(v) = pow.checked_mul(multiple)
+            && v <= hi
+        {
+            return v;
         }
     }
     pow

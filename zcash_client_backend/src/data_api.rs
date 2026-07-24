@@ -92,7 +92,7 @@ use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
-    scanning::ScanRange,
+    scanning::{ScanPriority, ScanRange},
 };
 use crate::{
     data_api::{
@@ -2057,6 +2057,15 @@ pub trait WalletRead {
     /// or `Ok(None)` if the wallet has no initialized accounts.
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
+    /// Returns the height at which the wallet as a whole will have exited recovery mode.
+    ///
+    /// This returns the latest `recover_until` height among accounts maintained by this
+    /// wallet (see [`AccountBirthday::recover_until`]), or `Ok(None)` if no account has a
+    /// recovery horizon set (for example, in a wallet whose accounts were all created at
+    /// the chain tip rather than restored from backup). Heights below the returned value,
+    /// exclusive, are in scope for wallet recovery for at least one account.
+    fn get_wallet_recover_until(&self) -> Result<Option<BlockHeight>, Self::Error>;
+
     /// Returns a [`WalletSummary`] that represents the sync status and the wallet balances as of
     /// the chain tip given the specified confirmation policy for all accounts known to the wallet,
     /// or `Ok(None)` if the wallet has no summary data available.
@@ -3614,6 +3623,40 @@ pub trait WalletWrite: WalletRead {
     /// needs to correctly prioritize scanning operations.
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error>;
 
+    /// Drops the scan work queued below `height`, except where retained by
+    /// `retain_with_priority`. Returns the number of queue entries removed or altered.
+    ///
+    /// If `retain_with_priority` is `None`, no entries below `height` are retained,
+    /// irrespective of their priority. If it is `Some(priority)`, entries with that
+    /// priority and greater are retained (left untouched, even where they straddle
+    /// `height`), as are entries with the bookkeeping priorities
+    /// [`ScanPriority::Scanned`] and [`ScanPriority::Ignored`] — those record which
+    /// regions of the chain the backend has already covered or deliberately skips, and
+    /// removing them would cause the backend to forget coverage state it maintains
+    /// itself (use the `None` form when that full reset is the intent). Entries with
+    /// priorities between the bookkeeping ones and the retained threshold are pruned.
+    ///
+    /// Pruning must not leave a gap in the queue's coverage: implementations are required
+    /// to preserve contiguity across whatever remains below `height`, which in general
+    /// means demoting pruned ranges to [`ScanPriority::Ignored`] rather than deleting them
+    /// outright. Only coverage below the lowest retained entry may be deleted, since that
+    /// merely raises the floor of the queue. A caller may therefore observe that the total
+    /// span of the queue is unchanged and that the pruned region is now `Ignored`.
+    ///
+    /// This is a queue-hygiene operation. The primary use case is discarding historic scan
+    /// ranges that no remaining account justifies: [`WalletWrite::delete_account`] does not
+    /// modify the scan queue, so the deep ranges queued for a since-deleted account's
+    /// birthday would otherwise still be scanned even though no remaining account can have
+    /// notes below its own birthday. In that case, pass the wallet birthday
+    /// ([`WalletRead::get_wallet_birthday`]) as `height` and retain
+    /// [`ScanPriority::OpenAdjacent`] and greater — the priorities that may legitimately
+    /// reach below the wallet birthday in service of note witnesses.
+    fn prune_scan_queue_below(
+        &mut self,
+        height: BlockHeight,
+        retain_with_priority: Option<ScanPriority>,
+    ) -> Result<u64, Self::Error>;
+
     /// Updates the state of the wallet database by persisting the provided block information,
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
@@ -4034,6 +4077,18 @@ pub trait WalletCommitmentTrees {
         roots: &[CommitmentTreeRoot<sapling::Node>],
     ) -> Result<(), ShardTreeError<Self::Error>>;
 
+    /// Returns the stored root hash of the completed Sapling subtree with the given index,
+    /// or `Ok(None)` if no root is recorded for that subtree.
+    ///
+    /// This is the store's record of the subtree root as most recently provided via
+    /// [`WalletCommitmentTrees::put_sapling_subtree_roots`] (i.e. the chain-authoritative
+    /// root obtained from a chain data provider), or as recorded when a locally-completed
+    /// subtree was persisted.
+    fn get_sapling_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<sapling::Node>, ShardTreeError<Self::Error>>;
+
     /// The type of the backing [`ShardStore`] for the Orchard note commitment tree.
     #[cfg(feature = "orchard")]
     type OrchardShardStore<'a>: ShardStore<
@@ -4066,6 +4121,19 @@ pub trait WalletCommitmentTrees {
         start_index: u64,
         roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>>;
+
+    /// Returns the stored root hash of the completed Orchard subtree with the given index,
+    /// or `Ok(None)` if no root is recorded for that subtree.
+    ///
+    /// This is the store's record of the subtree root as most recently provided via
+    /// [`WalletCommitmentTrees::put_orchard_subtree_roots`] (i.e. the chain-authoritative
+    /// root obtained from a chain data provider), or as recorded when a locally-completed
+    /// subtree was persisted.
+    #[cfg(feature = "orchard")]
+    fn get_orchard_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>>;
 
     /// Evaluates the given callback with the Ironwood note commitment tree
     /// maintained by the wallet, if this backend has one.
@@ -4105,6 +4173,17 @@ pub trait WalletCommitmentTrees {
         _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
         Ok(())
+    }
+
+    /// Returns the stored root hash of the completed Ironwood subtree with the given
+    /// index, or `Ok(None)` if no root is recorded for that subtree (in particular, if
+    /// this backend does not track an Ironwood tree — the default implementation).
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_subtree_root(
+        &mut self,
+        _index: u64,
+    ) -> Result<Option<orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>> {
+        Ok(None)
     }
 
     /// Applies a batch of changes — shards, an optional replacement tree cap, and a

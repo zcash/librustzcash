@@ -54,7 +54,7 @@ use super::{
     WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
     chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
-    scanning::ScanRange,
+    scanning::{ScanPriority, ScanRange},
     wallet::{
         ConfirmationsPolicy, SpendingKeys, create_proposed_transactions,
         input_selection::{
@@ -3154,6 +3154,10 @@ impl WalletRead for MockWalletDb {
         Ok(None)
     }
 
+    fn get_wallet_recover_until(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        Ok(None)
+    }
+
     fn get_wallet_summary(
         &self,
         _confirmations_policy: ConfirmationsPolicy,
@@ -3375,6 +3379,14 @@ impl WalletWrite for MockWalletDb {
         Ok(())
     }
 
+    fn prune_scan_queue_below(
+        &mut self,
+        _height: BlockHeight,
+        _retain_with_priority: Option<ScanPriority>,
+    ) -> Result<u64, Self::Error> {
+        Ok(0)
+    }
+
     fn store_decrypted_tx(
         &mut self,
         _received_tx: DecryptedTransaction<Transaction, Self::AccountId>,
@@ -3514,6 +3526,26 @@ impl WalletCommitmentTrees for MockWalletDb {
         Ok(())
     }
 
+    fn get_sapling_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<::sapling::Node>, ShardTreeError<Self::Error>> {
+        use shardtree::store::ShardStore as _;
+        self.with_sapling_tree_mut(|t| {
+            let addr =
+                incrementalmerkletree::Address::from_parts(SAPLING_SHARD_HEIGHT.into(), index);
+            Ok::<_, ShardTreeError<Self::Error>>(
+                t.store()
+                    .get_shard(addr)
+                    .map_err(ShardTreeError::Storage)?
+                    .and_then(|shard| match shard.root() {
+                        tree if tree.is_leaf() => tree.leaf_value().copied(),
+                        tree => tree.annotation().and_then(|ann| ann.as_deref().copied()),
+                    }),
+            )
+        })
+    }
+
     #[cfg(feature = "orchard")]
     type OrchardShardStore<'a> = MemoryShardStore<::orchard::tree::MerkleHashOrchard, BlockHeight>;
 
@@ -3551,5 +3583,26 @@ impl WalletCommitmentTrees for MockWalletDb {
         })?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn get_orchard_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<::orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>> {
+        use shardtree::store::ShardStore as _;
+        self.with_orchard_tree_mut(|t| {
+            let addr =
+                incrementalmerkletree::Address::from_parts(ORCHARD_SHARD_HEIGHT.into(), index);
+            Ok::<_, ShardTreeError<Self::Error>>(
+                t.store()
+                    .get_shard(addr)
+                    .map_err(ShardTreeError::Storage)?
+                    .and_then(|shard| match shard.root() {
+                        tree if tree.is_leaf() => tree.leaf_value().copied(),
+                        tree => tree.annotation().and_then(|ann| ann.as_deref().copied()),
+                    }),
+            )
+        })
     }
 }

@@ -1131,6 +1131,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
         wallet::wallet_birthday(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
+    fn get_wallet_recover_until(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::wallet_recover_until(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
     fn get_wallet_summary(
         &self,
         confirmations_policy: ConfirmationsPolicy,
@@ -1653,6 +1657,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.update_chain_tip(tip_height))
     }
 
+    fn prune_scan_queue_below(
+        &mut self,
+        height: BlockHeight,
+        retain_with_priority: Option<ScanPriority>,
+    ) -> Result<u64, Self::Error> {
+        self.transactionally(|wdb| wdb.prune_scan_queue_below(height, retain_with_priority))
+    }
+
     #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
     #[allow(clippy::type_complexity)]
     fn put_blocks(
@@ -2013,6 +2025,14 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
         wallet::scanning::update_chain_tip(self.conn.0, &self.params, tip_height)?;
         Ok(())
+    }
+
+    fn prune_scan_queue_below(
+        &mut self,
+        height: BlockHeight,
+        retain_with_priority: Option<ScanPriority>,
+    ) -> Result<u64, Self::Error> {
+        wallet::scanning::prune_scan_queue_below(self.conn.0, height, retain_with_priority)
     }
 
     #[allow(clippy::type_complexity)]
@@ -2907,6 +2927,14 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
         Ok(())
     }
 
+    fn get_sapling_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<sapling::Node>, ShardTreeError<Self::Error>> {
+        wallet::commitment_tree::get_subtree_root(self.conn.borrow(), SAPLING_TABLES_PREFIX, index)
+            .map_err(ShardTreeError::Storage)
+    }
+
     #[cfg(feature = "orchard")]
     type OrchardShardStore<'a> = SqliteShardStore<
         &'a rusqlite::Transaction<'a>,
@@ -2959,6 +2987,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
     }
 
     #[cfg(feature = "orchard")]
+    fn get_orchard_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>> {
+        wallet::commitment_tree::get_subtree_root(self.conn.borrow(), ORCHARD_TABLES_PREFIX, index)
+            .map_err(ShardTreeError::Storage)
+    }
+
+    #[cfg(feature = "orchard")]
     fn put_ironwood_subtree_roots(
         &mut self,
         start_index: u64,
@@ -2978,6 +3015,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL, R> Wallet
         tx.commit()
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>> {
+        wallet::commitment_tree::get_subtree_root(self.conn.borrow(), IRONWOOD_TABLES_PREFIX, index)
+            .map_err(ShardTreeError::Storage)
     }
 
     #[cfg(feature = "orchard")]
@@ -3034,6 +3080,14 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
         )
     }
 
+    fn get_sapling_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<sapling::Node>, ShardTreeError<Self::Error>> {
+        wallet::commitment_tree::get_subtree_root(self.conn.0, SAPLING_TABLES_PREFIX, index)
+            .map_err(ShardTreeError::Storage)
+    }
+
     #[cfg(feature = "orchard")]
     type OrchardShardStore<'a> = crate::OrchardShardStore<&'a rusqlite::Transaction<'a>>;
 
@@ -3065,6 +3119,15 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
     }
 
     #[cfg(feature = "orchard")]
+    fn get_orchard_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>> {
+        wallet::commitment_tree::get_subtree_root(self.conn.0, ORCHARD_TABLES_PREFIX, index)
+            .map_err(ShardTreeError::Storage)
+    }
+
+    #[cfg(feature = "orchard")]
     fn put_ironwood_subtree_roots(
         &mut self,
         start_index: u64,
@@ -3076,6 +3139,15 @@ impl<P: consensus::Parameters, CL, R> WalletCommitmentTrees
             start_index,
             roots,
         )
+    }
+
+    #[cfg(feature = "orchard")]
+    fn get_ironwood_subtree_root(
+        &mut self,
+        index: u64,
+    ) -> Result<Option<orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>> {
+        wallet::commitment_tree::get_subtree_root(self.conn.0, IRONWOOD_TABLES_PREFIX, index)
+            .map_err(ShardTreeError::Storage)
     }
 
     #[cfg(feature = "orchard")]
@@ -3566,6 +3638,61 @@ mod tests {
     #[cfg(feature = "unstable")]
     use zcash_keys::keys::sapling;
     use zcash_protocol::local_consensus::LocalNetwork;
+
+    #[test]
+    fn get_wallet_recover_until_is_max_across_accounts() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        // The fixture account has no recovery horizon.
+        assert_eq!(st.wallet().get_wallet_recover_until().unwrap(), None);
+        // The result reflects the maximum recover_until height across accounts.
+        st.wallet_mut()
+            .conn_mut()
+            .execute("UPDATE accounts SET recover_until_height = 123456", [])
+            .unwrap();
+        assert_eq!(
+            st.wallet().get_wallet_recover_until().unwrap(),
+            Some(zcash_protocol::consensus::BlockHeight::from_u32(123456))
+        );
+    }
+
+    #[test]
+    fn get_subtree_root_round_trips_put_subtree_roots() {
+        use incrementalmerkletree::Hashable as _;
+        use zcash_client_backend::data_api::{
+            SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, chain::CommitmentTreeRoot,
+        };
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let root = ::sapling::Node::empty_root(SAPLING_SHARD_HEIGHT.into());
+        st.wallet_mut()
+            .db_mut()
+            .put_sapling_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    zcash_protocol::consensus::BlockHeight::from_u32(500_000),
+                    root,
+                )],
+            )
+            .unwrap();
+        assert_eq!(
+            st.wallet_mut()
+                .db_mut()
+                .get_sapling_subtree_root(0)
+                .unwrap(),
+            Some(root)
+        );
+        assert_eq!(
+            st.wallet_mut()
+                .db_mut()
+                .get_sapling_subtree_root(1)
+                .unwrap(),
+            None
+        );
+    }
 
     /// Builds a test wallet with a single account and an application-owned extension
     /// table (`ext_test_notes`), simulating an external migration having created it.
