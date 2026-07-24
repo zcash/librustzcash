@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-23
+
 ### Added
 - `pczt::Pczt`'s Orchard/Ironwood bundle spends now expose their `witness` field
   via a getter.
