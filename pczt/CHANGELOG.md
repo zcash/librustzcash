@@ -22,7 +22,7 @@ workspace.
   reports via its `InconsistentWitness` error variants.
 
 ### Changed
-- Migrated to `zcash_transparent 0.10.0`.
+- Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`.
 - Serializing an Orchard-protocol bundle built with its anchor deferred to
   proving time (`orchard`'s `Builder::new_with_anchor_deferred`, ZIP 374) now
   emits the bundle's anchor as ABSENT (its real spends' witnesses are already
