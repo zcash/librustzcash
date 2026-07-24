@@ -595,6 +595,12 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
         st.wallet_mut().set_tx_trust(txid, true).unwrap();
     }
 
+    // `confirmations_until_spendable` treats a wallet-internal output as trusted regardless of
+    // any explicit tx-trust marking (it checks `receiving_key_scope == Some(Scope::Internal)`
+    // independently of `tx_trusted`), so the expected confirmations count below must account for
+    // that in addition to `trusted` above.
+    let expect_trusted_confirmations = trusted || input_trust == InputTrust::Internal;
+
     let add_confirmation = |i: u32| {
         let (h, _) = st.generate_empty_block();
         st.scan_cached_blocks(h, 1);
@@ -605,7 +611,7 @@ pub fn zip_315_confirmations_test_steps<T: ShieldedPoolTester>(
         assert_eq!(outputs.len(), 1);
         assert_eq!(
             outputs[0].confirmations_until_spendable(),
-            u32::from(if trusted {
+            u32::from(if expect_trusted_confirmations {
                 confirmations_policy.trusted()
             } else {
                 confirmations_policy.untrusted()

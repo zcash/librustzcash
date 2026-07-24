@@ -1993,6 +1993,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
                         &self.params,
                         account.internal_id(),
                         diversifier_index,
+                        KeyScope::EXTERNAL,
                         &address,
                         Some(chain_tip_height.unwrap_or(account.birthday())),
                         true,

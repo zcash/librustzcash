@@ -16,7 +16,10 @@ use zcash_client_backend::{
     },
     wallet::ReceivedNote,
 };
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
+use zcash_keys::{
+    address::UnifiedAddress,
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey},
+};
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     PoolType, ShieldedPool,
@@ -354,10 +357,10 @@ pub(crate) fn ensure_address<
     output: &T,
     exposure_height: Option<BlockHeight>,
 ) -> Result<Option<AddressRef>, SqliteClientError> {
-    if output.recipient_key_scope() != Some(Scope::Internal) {
-        let account = get_account(conn, params, output.account_id())?
-            .ok_or(SqliteClientError::AccountUnknown)?;
+    let account = get_account(conn, params, output.account_id())?
+        .ok_or(SqliteClientError::AccountUnknown)?;
 
+    if output.recipient_key_scope() != Some(Scope::Internal) {
         let uivk = account.uivk();
         let ivk = uivk
             .orchard()
@@ -376,13 +379,48 @@ pub(crate) fn ensure_address<
             params,
             account.internal_id(),
             diversifier_index,
+            KeyScope::EXTERNAL,
             &ua,
             exposure_height,
             false,
         )
         .map(Some)
     } else {
-        Ok(None)
+        // Wallet-internal outputs (change, and pool-migration crossings such as Ironwood) still
+        // need an address row: without one, `v_tx_outputs` has no `to_address` for the note, and
+        // self-transfers show up with a blank recipient. The external ivk above can't decrypt an
+        // internal-scope receiver's diversifier index — external and internal scopes are derived
+        // from distinct diversifier keys — so derive the internal-scope ivk from the account's
+        // full viewing key instead. An internal-scope output can only have been decrypted if the
+        // account holds a full viewing key, since deriving an internal ivk requires spend
+        // authority that a view-only (incoming-viewing-key-only) account does not have.
+        let ufvk = account.ufvk().expect(
+            "an internal-scope output was decrypted, so the account holds a full viewing key",
+        );
+        let fvk = ufvk.orchard().expect("uivk decrypted this output.");
+        let to = output.note().recipient();
+        let internal_ivk = fvk.to_ivk(Scope::Internal);
+        let diversifier_index = internal_ivk
+            .diversifier_index(&to)
+            .expect("address corresponds to account");
+
+        // Internal addresses are single-receiver (Orchard-only) and are never encoded or shown
+        // to a user, so — unlike the external branch above — there's no need to derive sibling
+        // receivers in other pools at this diversifier index.
+        let ua = UnifiedAddress::from_receivers(Some(to), None, None)
+            .expect("a Unified Address with an Orchard receiver is always constructible");
+
+        upsert_address(
+            conn,
+            params,
+            account.internal_id(),
+            diversifier_index,
+            KeyScope::INTERNAL,
+            &ua,
+            exposure_height,
+            false,
+        )
+        .map(Some)
     }
 }
 
@@ -1091,14 +1129,16 @@ pub(crate) mod tests {
     fn put_received_note_records_to_caller_selected_table() {
         use orchard::{
             ValuePool,
-            keys::{FullViewingKey, SpendingKey},
             note::{Note, NoteVersion, RandomSeed, Rho},
             value::NoteValue,
         };
         use rusqlite::named_params;
         use zcash_client_backend::{
             DecryptedOutput, TransferType,
-            data_api::{Account as _, testing::TestBuilder},
+            data_api::{
+                Account as _,
+                testing::{TestBuilder, pool::ShieldedPoolTester},
+            },
         };
         use zcash_primitives::block::BlockHash;
         use zcash_protocol::{ShieldedPool, memo::MemoBytes};
@@ -1113,10 +1153,14 @@ pub(crate) mod tests {
         let account_uuid = st.test_account().unwrap().id();
         let network = *st.network();
 
-        // The recipient need not correspond to the receiving account here: internally-scoped
-        // outputs skip address derivation, and this test exercises only note storage.
-        let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
-        let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
+        // Each output below is marked `TransferType::AccountInternal`, so `put_received_note`
+        // (via `ensure_address`) derives the recipient's diversifier index under the receiving
+        // account's internal-scope ivk. The recipient must therefore be a genuine internal-scope
+        // address of the account under test — unlike an external-scope recipient, it can't be an
+        // unrelated key, since ensure_address's internal-scope arm now actually derives against
+        // this account's own keys instead of skipping address derivation entirely.
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        let recipient = fvk.address_at(0u32, zip32::Scope::Internal);
         let rho = Option::from(Rho::from_bytes(&[0; 32])).unwrap();
         let rseed = Option::from(RandomSeed::from_bytes([0x1b; 32], &rho)).unwrap();
         let note = |value: u64, version: NoteVersion| {

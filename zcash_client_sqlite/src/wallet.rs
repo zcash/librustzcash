@@ -636,6 +636,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         params,
         account_id,
         d_idx,
+        KeyScope::EXTERNAL,
         &address,
         Some(birthday.height()),
         false,
@@ -1123,6 +1124,7 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         params,
         account.internal_id(),
         diversifier_index,
+        KeyScope::EXTERNAL,
         &addr,
         Some(chain_tip_height),
         true,
@@ -1426,13 +1428,17 @@ pub(crate) fn get_last_generated_address_matching<P: consensus::Parameters>(
     .transpose()
 }
 
-/// Adds the given external address and diversifier index to the addresses table.
+/// Adds the given address and diversifier index to the addresses table, under the given key
+/// scope.
 ///
 /// Returns the primary key identifier for the newly-inserted address.
 ///
 /// ## Parameters
 /// - `account_id`: The account that the address was generated for.
 /// - `diversifier_index`: The diversifier index used to generate the address.
+/// - `key_scope`: The key scope (external, internal, ephemeral, …) that the address was derived
+///   under. Internal-scope rows exist so that wallet-internal (change / pool-migration) outputs
+///   have an address to display, but internal addresses must never be exposed to end users.
 /// - `address`: The unified address itself.
 /// - `exposed_at_height`: The block height at the earliest time that the address may have been
 ///   exposed to a user, assuming a single generator of addresses.
@@ -1445,6 +1451,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
     params: &P,
     account_id: AccountRef,
     diversifier_index: DiversifierIndex,
+    key_scope: KeyScope,
     address: &UnifiedAddress,
     exposed_at_height: Option<BlockHeight>,
     force_update_address: bool,
@@ -1466,7 +1473,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
                 named_params![
                     ":account_id": account_id.0,
                     ":diversifier_index_be": di_be,
-                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                    ":key_scope": key_scope.encode(),
                 ],
                 |row| {
                     let address = row.get::<_, String>("address")?;
@@ -1553,7 +1560,7 @@ pub(crate) fn upsert_address<P: consensus::Parameters>(
             ":account_id": account_id.0,
             // the diversifier index is stored in big-endian order to allow sorting
             ":diversifier_index_be": &di_be,
-            ":key_scope": KeyScope::EXTERNAL.encode(),
+            ":key_scope": key_scope.encode(),
             ":address": &address.encode(params),
             ":transparent_child_index": transparent_child_index,
             ":cached_transparent_receiver_address": &cached_taddr,

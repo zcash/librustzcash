@@ -6,7 +6,10 @@ use group::ff::PrimeField;
 use incrementalmerkletree::Position;
 use rusqlite::{Connection, Row, named_params, types::Value};
 
-use sapling::{self, Diversifier, Nullifier, Rseed};
+use sapling::{
+    self, Diversifier, Nullifier, Rseed,
+    zip32::{DiversifierKey, sapling_derive_internal_fvk},
+};
 use zcash_client_backend::{
     data_api::{
         Account, NullifierQuery, TargetValue,
@@ -15,7 +18,10 @@ use zcash_client_backend::{
     },
     wallet::ReceivedNote,
 };
-use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey};
+use zcash_keys::{
+    address::UnifiedAddress,
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey},
+};
 use zcash_protocol::{
     ShieldedPool, TxId,
     consensus::{self, BlockHeight},
@@ -299,10 +305,10 @@ pub(crate) fn ensure_address<
     output: &T,
     exposure_height: Option<BlockHeight>,
 ) -> Result<Option<AddressRef>, SqliteClientError> {
-    if output.recipient_key_scope() != Some(Scope::Internal) {
-        let account = get_account(conn, params, output.account_id())?
-            .ok_or(SqliteClientError::AccountUnknown)?;
+    let account = get_account(conn, params, output.account_id())?
+        .ok_or(SqliteClientError::AccountUnknown)?;
 
+    if output.recipient_key_scope() != Some(Scope::Internal) {
         let uivk = account.uivk();
         let ivk = uivk
             .sapling()
@@ -322,13 +328,67 @@ pub(crate) fn ensure_address<
             params,
             account.internal_id(),
             diversifier_index,
+            KeyScope::EXTERNAL,
             &ua,
             exposure_height,
             false,
         )
         .map(Some)
     } else {
-        Ok(None)
+        // Wallet-internal outputs (change, and pool-migration crossings) still need an address
+        // row: without one, `v_tx_outputs` has no `to_address` for the note, and self-transfers
+        // show up with a blank recipient. The account's uivk above is external-only, so it can't
+        // decrypt an internal-scope receiver's diversifier index — external and internal scopes
+        // use distinct diversifier keys.
+        //
+        // `DiversifiableFullViewingKey::decrypt_diversifier` auto-detects either scope, but its
+        // internal-scope branch verifies the candidate index by re-deriving with the *external*
+        // ivk (`self.address(j_internal)` instead of `self.derive_internal().address(j_internal)`
+        // — a bug in this sapling-crypto version), so it can never actually match an
+        // internal-scope address. Derive the internal diversifier key ourselves instead, via the
+        // same public `sapling_derive_internal_fvk` helper `derive_internal` wraps. We already
+        // know (from `output.recipient_key_scope()`) that this diversifier was produced by the
+        // internal key, so no re-verification is needed — we already have the exact recipient
+        // address (`to`) itself to store.
+        let ufvk = account.ufvk().expect(
+            "an internal-scope output was decrypted, so the account holds a full viewing key",
+        );
+        let dfvk = ufvk.sapling().expect("uivk decrypted this output.");
+        let to = output.note().recipient();
+
+        let external_dk_bytes: [u8; 32] = dfvk.to_bytes()[96..]
+            .try_into()
+            .expect("the diversifier key occupies the last 32 bytes of the DFVK encoding");
+        let external_dk = DiversifierKey::from_bytes(external_dk_bytes);
+        let (_, internal_dk) = sapling_derive_internal_fvk(dfvk.fvk(), &external_dk);
+        let diversifier_index = internal_dk.diversifier_index(to.diversifier());
+
+        // Internal addresses are single-receiver (Sapling-only) and are never encoded or shown
+        // to a user, so — unlike the external branch above — there's no need to derive sibling
+        // receivers in other pools at this diversifier index.
+        let ua = {
+            #[cfg(feature = "orchard")]
+            {
+                UnifiedAddress::from_receivers(None, Some(to), None)
+            }
+            #[cfg(not(feature = "orchard"))]
+            {
+                UnifiedAddress::from_receivers(Some(to), None)
+            }
+        }
+        .expect("a Unified Address with a Sapling receiver is always constructible");
+
+        upsert_address(
+            conn,
+            params,
+            account.internal_id(),
+            diversifier_index,
+            KeyScope::INTERNAL,
+            &ua,
+            exposure_height,
+            false,
+        )
+        .map(Some)
     }
 }
 
