@@ -46,10 +46,10 @@ zcash_protocol = { version = "0.10.0", path = "components/zcash_protocol", defau
 zip321 = { version = "0.9.0-rc.1", path = "components/zip321" }
 
 zcash_note_encryption = "0.4.1"
-zcash_primitives = { version = "0.29.0", path = "zcash_primitives", default-features = false }
-zcash_proofs = { version = "0.29.0", path = "zcash_proofs", default-features = false }
+zcash_primitives = { version = "0.30.0", path = "zcash_primitives", default-features = false }
+zcash_proofs = { version = "0.30.0", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.8.0-rc.1", path = "pczt" }
+pczt = { version = "0.8.0", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
