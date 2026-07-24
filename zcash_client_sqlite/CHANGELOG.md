@@ -86,7 +86,8 @@ workspace.
   without one at it is still reported as corruption.
 
 ### Changed
-- Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`.
+- Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`,
+  `zcash_proofs 0.30.0`.
 - The `zip-233` feature flag now also enables `zcash_client_backend/zip-233`,
   keeping the two crates' feature-gated `zcash_primitives` call signatures in
   agreement when this crate is built with ZIP 233 support.
