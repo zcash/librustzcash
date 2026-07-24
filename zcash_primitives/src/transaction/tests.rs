@@ -1196,3 +1196,69 @@ fn zip_0233() {
         );
     }
 }
+
+#[cfg(test)]
+mod v4_sapling_value_balance_consistency {
+    use alloc::vec::Vec;
+    use corez::io::Cursor;
+
+    use zcash_protocol::{
+        consensus::BranchId,
+        constants::{V4_TX_VERSION, V4_VERSION_GROUP_ID},
+    };
+
+    use crate::transaction::Transaction;
+
+    fn build_v4_empty_sapling_with_vb(vb: i64) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(64);
+
+        // Overwintered bit | v4 header, version group ID, 0 tx_in, 0 tx_out,
+        // lock_time, nExpiryHeight, valueBalanceSapling, 0 nShieldedSpend,
+        // 0 nShieldedOutput, 0 nJoinSplit. No binding signature follows since
+        // both Sapling vectors are empty.
+        let header: u32 = (1u32 << 31) | V4_TX_VERSION;
+        bytes.extend_from_slice(&header.to_le_bytes());
+        bytes.extend_from_slice(&V4_VERSION_GROUP_ID.to_le_bytes());
+        bytes.push(0x00);
+        bytes.push(0x00);
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&vb.to_le_bytes());
+        bytes.push(0x00);
+        bytes.push(0x00);
+        bytes.push(0x00);
+
+        bytes
+    }
+
+    #[test]
+    fn reject_v4_empty_sapling_bundle_with_nonzero_value_balance() {
+        let vb: i64 = 1_000_000;
+        let bytes = build_v4_empty_sapling_with_vb(vb);
+
+        let result = Transaction::read(Cursor::new(&bytes[..]), BranchId::Nu5);
+
+        assert!(
+            result.is_err(),
+            "v4 deserializer accepted an encoding with n_spends == 0, \
+             n_outputs == 0, value_balance == {vb} (non-zero); \
+             this violates the §7.1.2 consensus rule and diverges from Zebra. \
+             Got: {:?}",
+            result
+                .as_ref()
+                .map(|tx| (tx.sapling_bundle().is_some(), tx.txid())),
+        );
+    }
+
+    #[test]
+    fn accept_v4_empty_sapling_bundle_with_zero_value_balance() {
+        let bytes = build_v4_empty_sapling_with_vb(0);
+        let tx = Transaction::read(Cursor::new(&bytes[..]), BranchId::Nu5)
+            .expect("vb=0 / empty bundle is a valid v4 encoding");
+        assert!(tx.sapling_bundle().is_none());
+
+        let mut reserialized = Vec::new();
+        tx.write(&mut reserialized).unwrap();
+        assert_eq!(reserialized, bytes);
+    }
+}

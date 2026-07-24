@@ -78,6 +78,13 @@ workspace.
   Orchard and Ironwood bundles. Pass `orchard::builder::BundleType::DEFAULT` to keep
   the previous (padded) behavior.
 
+### Fixed
+- `zcash_primitives::transaction::Transaction::read` now rejects v4
+  transactions whose Sapling section contains zero spends and zero outputs
+  but a non-zero `valueBalanceSapling`, matching Zebra and post-v6.12.2
+  zcashd (consensus rule §7.1.2). Previously the value was silently
+  discarded, accepting an encoding that no consensus node will admit.
+
 ## [0.29.0-pre.0] - 2026-06-30
 
 ### Added
@@ -199,6 +206,7 @@ workspace.
   arbitrary data (GHSA-2x4w-pxqw-58v9). Proof-size enforcement is `Strict` for
   transactions parsed under NU6.2 and later consensus branches, and `Unenforced`
   for earlier branches to preserve the ability to parse historical transactions.
+
 ## [0.27.1] - 2026-05-14
 
 ### Fixed
