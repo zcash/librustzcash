@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-23
+
 ### Added
 - `zcash_protocol::consensus::SECONDS_PER_BLOCK`
 - `zcash_protocol::consensus::BLOCKS_PER_HOUR`
