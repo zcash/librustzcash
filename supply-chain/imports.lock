@@ -85,13 +85,6 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
-[[publisher.orchard]]
-version = "0.15.0"
-when = "2026-07-09"
-user-id = 169181
-user-login = "nuttycom"
-user-name = "Kris Nuttycombe"
-
 [[publisher.pczt]]
 version = "0.8.0-rc.1"
 when = "2026-07-12"
@@ -498,8 +491,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_protocol]]
-version = "0.10.0"
-when = "2026-07-09"
+version = "0.10.1"
+when = "2026-07-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
