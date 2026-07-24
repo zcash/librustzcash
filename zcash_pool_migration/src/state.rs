@@ -537,6 +537,7 @@ mod tests {
             .expect("an empty stored plan reconstructs"),
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,
+            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
         }
     }
 

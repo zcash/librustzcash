@@ -605,6 +605,11 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 /// `account_id` is enforced unique by `INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`, so an account
 /// has at most one migration in progress. It is a foreign key into `accounts` with `ON DELETE
 /// CASCADE`, so deleting an account removes its migration (and its child rows cascade in turn).
+///
+/// `anchor_bucket_interval` records the anchor retention grid the migration was committed against,
+/// in blocks. Every transfer's `anchor_boundary` lies on that grid, and it is provable only while
+/// the wallet still retains those checkpoints, so a mismatch against the wallet's current interval
+/// is reported as an error rather than left to surface as a missing checkpoint at proving time.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
 CREATE TABLE orchard_ironwood_migrations (
     id INTEGER PRIMARY KEY,
@@ -614,7 +619,8 @@ CREATE TABLE orchard_ironwood_migrations (
     note_split_change INTEGER,
     note_split_prep_fees INTEGER NOT NULL,
     note_split_total_input INTEGER NOT NULL,
-    note_split_total_migratable INTEGER NOT NULL
+    note_split_total_migratable INTEGER NOT NULL,
+    anchor_bucket_interval INTEGER NOT NULL
 )";
 /// The note-split crossing values (an ordered list of zatoshi amounts). The funding-note values
 /// have no table of their own: each is its crossing value plus the note-split fee buffer.

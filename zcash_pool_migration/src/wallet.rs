@@ -51,7 +51,7 @@ use crate::engine::{
     MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTxId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
-use crate::scheduling::{DelayDistribution, SchedulingParams};
+use crate::scheduling::{AnchorBucketInterval, DelayDistribution, SchedulingParams};
 
 /// A failure of the wallet-backed migration adapter. Parameterized by the error types of the two
 /// wallet traits and the store, which for `zcash_client_sqlite`'s `WalletDb` are all one type but in
@@ -648,6 +648,13 @@ where
         anchor: BlockHeight,
     ) -> Result<::pczt::Pczt, Self::Error> {
         self.prove_orchard(pczt, anchor)
+    }
+
+    /// The grid the wallet this prover reads its commitment trees from currently retains anchor
+    /// checkpoints on, so a transfer committed against a different grid is rejected before its
+    /// (by then pruned) checkpoint is looked up.
+    fn anchor_bucket_interval(&self) -> AnchorBucketInterval {
+        self.wallet.anchor_retention_interval().into()
     }
 }
 

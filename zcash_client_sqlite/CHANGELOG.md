@@ -54,7 +54,9 @@ workspace.
   durable anchors, for use on test networks where waiting out the ZIP 318
   144-block interval makes exercising a pool migration impractical. The interval
   is not persisted, so an application using a non-default value must apply it
-  every time it opens the wallet.
+  every time it opens the wallet; a pool migration committed under a different
+  interval is rejected with `ProveError::AnchorIntervalMismatch` rather than
+  being left anchored to checkpoints the wallet no longer retains.
 
 ### Fixed
 - The coinbase branch of the transparent account-balance tally now classifies

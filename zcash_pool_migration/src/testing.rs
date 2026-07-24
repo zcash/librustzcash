@@ -15,6 +15,7 @@
 //! downstream crate reuses these directly rather than duplicating them.
 
 use core::fmt::Debug;
+use core::num::NonZeroU32;
 
 use proptest::prelude::*;
 
@@ -29,6 +30,7 @@ use crate::engine::{
 };
 use crate::note_splitting::NoteSplitPlan;
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
+use crate::scheduling::AnchorBucketInterval;
 
 /// Convert a bounded `u64` to [`Zatoshis`]; infallible for the ranges the strategies draw from.
 fn zat(value: u64) -> Zatoshis {
@@ -211,39 +213,60 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         )
 }
 
+/// An arbitrary [`AnchorBucketInterval`]: the ZIP 318 grid or an arbitrary non-standard one, so a
+/// store is exercised on both the value it will almost always see and values it must not special-case.
+pub fn arb_anchor_bucket_interval() -> impl Strategy<Value = AnchorBucketInterval> {
+    prop_oneof![
+        1 => Just(AnchorBucketInterval::ZIP_318),
+        1 => (1u32..100_000).prop_map(|blocks| {
+            AnchorBucketInterval::custom(NonZeroU32::new(blocks).expect("nonzero"))
+        }),
+    ]
+}
+
 /// An arbitrary whole [`MigrationState`], built through [`MigrationState::from_parts`]: a status, a
-/// note split (from which the funding-note values derive), a preparation plan, and a small set of
+/// note split (from which the funding-note values derive), a preparation plan, a small set of
 /// transactions re-keyed with sequential [`MigrationTxId`]s (so their row keys are unique, as a
-/// store requires). Generated values are self-consistent enough to persist and read back unchanged.
+/// store requires), and the anchor bucket grid it was committed under. Generated values are
+/// self-consistent enough to persist and read back unchanged.
 pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
     (
         arb_migration_status(),
         arb_note_split_plan(),
         arb_preparation_plan(),
         prop::collection::vec(arb_migration_transaction(), 0..6),
+        arb_anchor_bucket_interval(),
     )
-        .prop_map(|(status, note_split, preparation, txs)| {
-            // Re-key the transactions with sequential ids so their row keys are unique; a store
-            // keys transaction rows by id and returns them in id order.
-            let transactions = txs
-                .into_iter()
-                .enumerate()
-                .map(|(i, tx)| {
-                    MigrationTransaction::from_parts(
-                        MigrationTxId::new(i as u32),
-                        tx.kind(),
-                        tx.pczt().clone(),
-                        tx.depends_on().clone(),
-                        tx.scheduled_height(),
-                        tx.expiry_height(),
-                        tx.anchor_boundary(),
-                        tx.state(),
-                        tx.lock_owner(),
-                    )
-                })
-                .collect();
-            MigrationState::from_parts(status, note_split, preparation, transactions)
-        })
+        .prop_map(
+            |(status, note_split, preparation, txs, anchor_bucket_interval)| {
+                // Re-key the transactions with sequential ids so their row keys are unique; a store
+                // keys transaction rows by id and returns them in id order.
+                let transactions = txs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, tx)| {
+                        MigrationTransaction::from_parts(
+                            MigrationTxId::new(i as u32),
+                            tx.kind(),
+                            tx.pczt().clone(),
+                            tx.depends_on().clone(),
+                            tx.scheduled_height(),
+                            tx.expiry_height(),
+                            tx.anchor_boundary(),
+                            tx.state(),
+                            tx.lock_owner(),
+                        )
+                    })
+                    .collect();
+                MigrationState::from_parts(
+                    status,
+                    note_split,
+                    preparation,
+                    transactions,
+                    anchor_bucket_interval,
+                )
+            },
+        )
 }
 
 // --- conformance suite over the store traits ---

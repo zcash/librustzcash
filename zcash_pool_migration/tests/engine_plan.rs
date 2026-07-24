@@ -22,6 +22,7 @@ use zcash_pool_migration::note_splitting::{NoteSplitPlan, plan_note_split};
 use zcash_pool_migration::preparation::{
     FUNDING_OUTPUTS_PER_TX, PreparationPlan, plan_preparation,
 };
+use zcash_pool_migration::scheduling::AnchorBucketInterval;
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
 /// Wrap a raw zatoshi amount as [`Zatoshis`] for the tests.
@@ -244,6 +245,7 @@ fn stores_loads_and_updates_a_migration() {
         note_split,
         PreparationPlan::from_parts(Vec::new(), Vec::new()),
         vec![tx],
+        AnchorBucketInterval::ZIP_318,
     );
     backend.replace_migration(&state).unwrap();
 

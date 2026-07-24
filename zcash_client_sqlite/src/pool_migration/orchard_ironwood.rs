@@ -128,6 +128,7 @@ mod tests {
     use zcash_pool_migration::engine::{
         MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
+    use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_pool_migration::testing::{
         arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
         assert_put_get_roundtrip, assert_put_replaces, assert_update_transaction,
@@ -235,6 +236,7 @@ mod tests {
             note_split,
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             vec![locked, unlocked],
+            AnchorBucketInterval::ZIP_318,
         );
 
         let mut store = fresh_store();
@@ -321,6 +323,7 @@ mod tests {
                 // A second transaction locked by A, to prove duplicates collapse.
                 tx(3, 3, Some(owner_a_bytes)),
             ],
+            AnchorBucketInterval::ZIP_318,
         );
 
         store.replace_migration(&state).expect("write succeeds");
@@ -357,6 +360,7 @@ mod tests {
             note_split,
             PreparationPlan::from_parts(vec![Vec::new()], Vec::new()),
             Vec::new(),
+            AnchorBucketInterval::ZIP_318,
         );
         let err = fresh_store()
             .replace_migration(&state)
@@ -400,6 +404,7 @@ mod tests {
             note_split,
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             Vec::new(),
+            AnchorBucketInterval::ZIP_318,
         );
 
         PoolMigrations::for_account(&mut conn, account_a)

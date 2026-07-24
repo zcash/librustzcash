@@ -238,6 +238,7 @@ fn set_transaction_state(stored: &mut MigrationState, id: MigrationTxId, state: 
         stored.note_split().clone(),
         stored.preparation().clone(),
         transactions,
+        stored.anchor_bucket_interval(),
     );
 }
 
