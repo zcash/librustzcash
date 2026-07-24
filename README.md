@@ -61,10 +61,11 @@ graph TB
 
     zcash_client_sqlite --> zcash_pool_migration
 
-    zcash_pool_migration --> zcash_client_backend
+    %% The `zcash_client_backend` dependency is gated on the `wallet` feature.
+    zcash_pool_migration -.-> zcash_client_backend
 
     zcash_client_backend --> pczt
-    %% zcash_pool_migration --> pczt
+    zcash_pool_migration --> pczt
 
     %% zcash_client_sqlite --> zcash_keys
     zcash_client_backend --> zcash_keys
@@ -216,12 +217,19 @@ graph TB
   - fee calculation
   - transaction proposals & high-level transaction construction APIs
 * `zcash_client_sqlite`: SQLite-based implementation of `zcash_client_backend` storage APIs
+* `zcash_pool_migration`: Backend-agnostic engine for migrating wallet funds between value pools (first used for the NU6.3 Orchard → Ironwood migration)
+  - note-split planning into self-funding denominations
+  - migration PCZT construction, signing & height-based scheduling
+  - state persistence through a wallet backend
 
 #### Utilities & Common Dependencies
 
 * `f4jumble`: Encoding for Unified addresses
 * `zcash_encoding`: Bitcoin-derived transaction encoding utilities for Zcash
 * `equihash`: Proof-of-work protocol implementation
+* `zcash_history`: Zcash blockchain history tree
+  - the ZIP 221 Merkle Mountain Range over per-block metadata
+  - consumed by node implementations (Zebra, zcashd) for FlyClient proofs
 
 
 ## Security Warnings
