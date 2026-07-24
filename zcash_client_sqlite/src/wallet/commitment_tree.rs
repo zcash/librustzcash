@@ -409,6 +409,30 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
     }
 }
 
+/// Returns the stored root hash of the completed subtree with the given index, as most
+/// recently written by [`put_shard_roots`] or recorded by [`put_shard`], or `Ok(None)` if
+/// no row exists for the subtree or its `root_hash` is unknown.
+pub(crate) fn get_subtree_root<H: HashSer>(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+    index: u64,
+) -> Result<Option<H>, Error> {
+    conn.query_row(
+        &format!(
+            "SELECT root_hash
+             FROM {table_prefix}_tree_shards
+             WHERE shard_index = :shard_index"
+        ),
+        named_params![":shard_index": index],
+        |row| row.get::<_, Option<Vec<u8>>>(0),
+    )
+    .optional()
+    .map_err(Error::Query)?
+    .flatten()
+    .map(|bytes| H::read(Cursor::new(bytes)).map_err(Error::Serialization))
+    .transpose()
+}
+
 pub(crate) fn get_shard<H: HashSer>(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,

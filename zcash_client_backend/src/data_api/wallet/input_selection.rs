@@ -1715,12 +1715,12 @@ where
     // only an Orchard receiver, in a build made without the `orchard` feature). Other
     // recipient kinds always receive an assignment above, except for TEX addresses,
     // whose payment is delivered by the ephemeral second step.
-    if payment_pools.is_empty() {
-        if let Address::Unified(addr) = &recipient_address {
-            return Err(InputSelectorError::Selection(
-                GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
-            ));
-        }
+    if payment_pools.is_empty()
+        && let Address::Unified(addr) = &recipient_address
+    {
+        return Err(InputSelectorError::Selection(
+            GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+        ));
     }
 
     let (tr0_fee, tr1_fee) = match recipient_address {

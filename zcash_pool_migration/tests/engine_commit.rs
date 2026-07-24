@@ -140,14 +140,14 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .collect();
     assert_eq!(layer0_ids.len(), 1, "one root transaction in layer 0");
     for tx in state.transactions() {
-        if let MigrationTxKind::Preparation { layer, .. } = tx.kind() {
-            if layer > 0 {
-                assert_eq!(
-                    tx.depends_on(),
-                    &layer0_ids,
-                    "a later layer broadcasts only after its predecessor mines"
-                );
-            }
+        if let MigrationTxKind::Preparation { layer, .. } = tx.kind()
+            && layer > 0
+        {
+            assert_eq!(
+                tx.depends_on(),
+                &layer0_ids,
+                "a later layer broadcasts only after its predecessor mines"
+            );
         }
     }
 

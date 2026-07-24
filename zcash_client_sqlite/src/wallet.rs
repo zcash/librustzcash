@@ -3078,6 +3078,20 @@ pub(crate) fn wallet_birthday(
     )
 }
 
+/// Returns the maximum `recover_until` height for accounts in the wallet.
+pub(crate) fn wallet_recover_until(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    conn.query_row(
+        "SELECT MAX(recover_until_height) AS wallet_recover_until FROM accounts",
+        [],
+        |row| {
+            row.get::<_, Option<u32>>(0)
+                .map(|opt| opt.map(BlockHeight::from))
+        },
+    )
+}
+
 pub(crate) fn account_birthday(
     conn: &rusqlite::Connection,
     account_uuid: AccountUuid,

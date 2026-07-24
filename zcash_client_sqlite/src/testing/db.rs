@@ -24,7 +24,7 @@ use zcash_client_backend::{
         TargetValue,
         chain::{ChainState, CommitmentTreeRoot},
         error::{LockError, RewindError},
-        scanning::ScanRange,
+        scanning::{ScanPriority, ScanRange},
         testing::{DataStoreFactory, Reset, TestState},
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
         *,

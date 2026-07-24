@@ -58,6 +58,20 @@ pub(crate) fn parse_priority_code(code: i64) -> Option<ScanPriority> {
     }
 }
 
+/// Decodes a `scan_queue` row selected as `(block_range_start, block_range_end, priority)`.
+fn scan_range_from_row<E: WalletError>(row: &rusqlite::Row<'_>) -> Result<ScanRange, E> {
+    let start = row.get::<_, u32>(0).map_err(E::db_error)?;
+    let end = row.get::<_, u32>(1).map_err(E::db_error)?;
+    let code = row.get::<_, i64>(2).map_err(E::db_error)?;
+    let priority = parse_priority_code(code)
+        .ok_or_else(|| E::corrupt(format!("scan priority not recognized: {code}")))?;
+
+    Ok(ScanRange::from_parts(
+        BlockHeight::from(start)..BlockHeight::from(end),
+        priority,
+    ))
+}
+
 pub(crate) fn suggest_scan_ranges(
     conn: &rusqlite::Connection,
     min_priority: ScanPriority,
@@ -69,24 +83,12 @@ pub(crate) fn suggest_scan_ranges(
          ORDER BY priority DESC, block_range_end DESC",
     )?;
 
-    let mut rows =
-        stmt_scan_ranges.query(named_params![":min_priority": priority_code(&min_priority)])?;
-
-    let mut result = vec![];
-    while let Some(row) = rows.next()? {
-        let range = Range {
-            start: row.get::<_, u32>(0).map(BlockHeight::from)?,
-            end: row.get::<_, u32>(1).map(BlockHeight::from)?,
-        };
-        let code = row.get::<_, i64>(2)?;
-        let priority = parse_priority_code(code).ok_or_else(|| {
-            SqliteClientError::CorruptedData(format!("scan priority not recognized: {code}"))
-        })?;
-
-        result.push(ScanRange::from_parts(range, priority));
-    }
-
-    Ok(result)
+    stmt_scan_ranges
+        .query_and_then(
+            named_params![":min_priority": priority_code(&min_priority)],
+            scan_range_from_row::<SqliteClientError>,
+        )?
+        .collect()
 }
 
 pub(crate) fn insert_queue_entries<'a>(
@@ -173,18 +175,7 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
         let mut to_create: Option<SpanningTree> = None;
         let mut to_delete_ends: Vec<Value> = vec![];
         while let Some(row) = rows.next().map_err(E::db_error)? {
-            let entry = ScanRange::from_parts(
-                Range {
-                    start: BlockHeight::from(row.get::<_, u32>(0).map_err(E::db_error)?),
-                    end: BlockHeight::from(row.get::<_, u32>(1).map_err(E::db_error)?),
-                },
-                {
-                    let code = row.get::<_, i64>(2).map_err(E::db_error)?;
-                    parse_priority_code(code).ok_or_else(|| {
-                        E::corrupt(format!("scan priority not recognized: {code}"))
-                    })?
-                },
-            );
+            let entry = scan_range_from_row::<E>(row)?;
             to_delete_ends.push(Value::from(u32::from(entry.block_range().end)));
             to_create = if let Some(cur) = to_create {
                 Some(cur.insert(entry, force_rescans))
@@ -219,6 +210,117 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
     }
 
     Ok(())
+}
+
+/// Drops the scan work queued below `height`, leaving the queue's coverage contiguous.
+///
+/// This is the inverse of [`replace_queue_entries`], and cannot be expressed in terms of
+/// it: the spanning tree's dominance rule exists to stop a merge from *lowering* the
+/// priority of a queued range, which is precisely what pruning must do.
+///
+/// With `Some(priority)`, entries at or above that priority are retained whole (even where
+/// they straddle `height`), as are the `Scanned`/`Ignored` bookkeeping entries — those
+/// record which regions the store has already covered or deliberately skips. With `None`,
+/// nothing below `height` is retained, irrespective of priority.
+///
+/// Pruned coverage is only ever *relabelled*, never removed, wherever a retained entry
+/// still sits below it: such regions are rewritten as [`ScanPriority::Ignored`] and
+/// coalesced with their neighbours. Deleting them instead would leave a hole that
+/// [`replace_queue_entries`] refills as [`ScanPriority::Historic`] the next time a
+/// spanning-tree merge covers it, resurrecting the very work being pruned. Only coverage
+/// beneath the lowest retained entry is deleted outright, since raising the queue's floor
+/// cannot open an interior gap.
+///
+/// Returns the number of queue entries that were removed or altered.
+pub(crate) fn prune_scan_queue_below(
+    conn: &rusqlite::Transaction<'_>,
+    height: BlockHeight,
+    retain_with_priority: Option<ScanPriority>,
+) -> Result<u64, SqliteClientError> {
+    let is_retained = |priority: ScanPriority| {
+        retain_with_priority
+            .is_some_and(|retain| priority <= ScanPriority::Scanned || priority >= retain)
+    };
+
+    // Every entry this operation can touch starts below `height`; the queue's non-overlap
+    // invariant leaves the remainder unaffected. Reading them up front keeps the no-op
+    // case read-only, so callers probing at every wallet open never contend for the write
+    // lock.
+    let existing = {
+        let mut stmt = conn.prepare_cached(
+            "SELECT block_range_start, block_range_end, priority FROM scan_queue
+             WHERE block_range_start < :height
+             ORDER BY block_range_start",
+        )?;
+
+        stmt.query_and_then(
+            named_params![":height": u32::from(height)],
+            scan_range_from_row::<SqliteClientError>,
+        )?
+        .collect::<Result<Vec<_>, _>>()?
+    };
+
+    // The lowest retained entry is the floor of the region that must remain covered.
+    let fill_from = existing
+        .iter()
+        .find(|entry| is_retained(entry.priority()))
+        .map(|entry| entry.block_range().start);
+
+    let replacement = existing
+        .iter()
+        .flat_map(|entry| {
+            let range = entry.block_range();
+            if is_retained(entry.priority()) {
+                vec![entry.clone()]
+            } else {
+                // Only the part below `height` is pruned; any remainder keeps its priority.
+                let pruned = ScanRange::from_parts(
+                    range.start..min(range.end, height),
+                    ScanPriority::Ignored,
+                );
+                let kept = (range.end > height)
+                    .then(|| ScanRange::from_parts(height..range.end, entry.priority()));
+
+                match fill_from {
+                    Some(floor) if pruned.block_range().end > floor => {
+                        Some(pruned).into_iter().chain(kept).collect()
+                    }
+                    _ => kept.into_iter().collect(),
+                }
+            }
+        })
+        .fold(Vec::<ScanRange>::new(), |mut acc, entry| {
+            match acc.last() {
+                Some(prev)
+                    if prev.priority() == entry.priority()
+                        && prev.block_range().end == entry.block_range().start =>
+                {
+                    let merged = ScanRange::from_parts(
+                        prev.block_range().start..entry.block_range().end,
+                        prev.priority(),
+                    );
+                    acc.pop();
+                    acc.push(merged);
+                }
+                _ => acc.push(entry),
+            }
+            acc
+        });
+
+    if replacement == existing {
+        return Ok(0);
+    }
+
+    conn.execute(
+        "DELETE FROM scan_queue WHERE block_range_start < :height",
+        named_params![":height": u32::from(height)],
+    )?;
+    insert_queue_entries(conn, replacement.iter())?;
+
+    Ok(existing
+        .iter()
+        .filter(|entry| !replacement.contains(entry))
+        .count() as u64)
 }
 
 fn extend_range(
@@ -690,7 +792,9 @@ pub(crate) mod tests {
             BlockCache,
             db::{TestDb, TestDbFactory},
         },
-        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        wallet::scanning::{
+            insert_queue_entries, priority_code, replace_queue_entries, suggest_scan_ranges,
+        },
     };
 
     /// `extend_range` for the Ironwood pool must query the `ironwood_tree_shards` table (rather
@@ -2183,5 +2287,246 @@ pub(crate) mod tests {
             "the ChainTip range must cover the Ironwood shard tip {low:?}, but started at \
              {chain_tip_start:?}",
         );
+    }
+
+    fn queue_contents(st: &TestState<(), TestDb, LocalNetwork>) -> Vec<(u32, u32, i64)> {
+        let mut stmt = st
+            .wallet()
+            .conn()
+            .prepare(
+                "SELECT block_range_start, block_range_end, priority FROM scan_queue
+                 ORDER BY block_range_start",
+            )
+            .unwrap();
+
+        stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, u32>(0)?,
+                r.get::<_, u32>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    /// Asserts that the scan queue's coverage is contiguous. `replace_queue_entries` fills
+    /// any gap between adjacent entries with a `Historic` range, so a hole punched in the
+    /// queue silently re-queues that region for scanning at the next spanning-tree merge.
+    fn assert_queue_contiguous(st: &TestState<(), TestDb, LocalNetwork>) {
+        let entries = queue_contents(st);
+        for pair in entries.windows(2) {
+            assert_eq!(
+                pair[0].1, pair[1].0,
+                "gap in scan queue between {:?} and {:?}",
+                pair[0], pair[1]
+            );
+        }
+    }
+
+    #[test]
+    fn prune_scan_queue_below_retains_at_and_above_priority() {
+        use zcash_client_backend::data_api::WalletWrite as _;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(419_200..450_000, ScanPriority::Ignored), // bookkeeping: kept
+                scan_range(450_000..460_000, ScanPriority::FoundNote), // retained priority: kept
+                scan_range(460_000..500_000, ScanPriority::Scanned), // bookkeeping: kept
+                scan_range(500_000..700_000, ScanPriority::Historic), // straddler: split
+                scan_range(700_000..710_000, ScanPriority::ChainTip), // above height: untouched
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        let changed = st
+            .wallet_mut()
+            .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+            .unwrap();
+        assert_eq!(
+            changed, 1,
+            "only the straddling `Historic` entry is altered"
+        );
+
+        // The `Historic` entry's coverage below the floor is demoted rather than deleted:
+        // the `FoundNote` witness range still sits below it, so deleting would leave a gap.
+        assert_eq!(
+            queue_contents(&st),
+            vec![
+                (419_200, 450_000, priority_code(&ScanPriority::Ignored)),
+                (450_000, 460_000, priority_code(&ScanPriority::FoundNote)),
+                (460_000, 500_000, priority_code(&ScanPriority::Scanned)),
+                (500_000, 663_150, priority_code(&ScanPriority::Ignored)),
+                (663_150, 700_000, priority_code(&ScanPriority::Historic)),
+                (700_000, 710_000, priority_code(&ScanPriority::ChainTip)),
+            ]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// The motivating case: after the account that justified the deep `Historic` range is
+    /// deleted, pruning to the remaining wallet birthday leaves exactly the state that
+    /// account creation would have produced had the deleted account never existed — a
+    /// single `Ignored` range below the birthday.
+    #[test]
+    fn prune_scan_queue_below_coalesces_with_the_ignored_floor() {
+        use zcash_client_backend::data_api::WalletWrite as _;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(419_200..500_000, ScanPriority::Ignored),
+                scan_range(500_000..700_000, ScanPriority::Historic),
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            queue_contents(&st),
+            vec![
+                (419_200, 663_150, priority_code(&ScanPriority::Ignored)),
+                (663_150, 700_000, priority_code(&ScanPriority::Historic)),
+            ]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// Where nothing below the pruned region is retained, the queue's floor simply rises;
+    /// raising the floor cannot open an interior gap, so no `Ignored` filler is recorded.
+    #[test]
+    fn prune_scan_queue_below_raises_the_floor_when_nothing_is_retained() {
+        use zcash_client_backend::data_api::WalletWrite as _;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(500_000..600_000, ScanPriority::Historic),
+                scan_range(600_000..700_000, ScanPriority::Historic),
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            queue_contents(&st),
+            vec![(663_150, 700_000, priority_code(&ScanPriority::Historic))]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// `retain_with_priority: None` retains nothing below the height, irrespective of
+    /// priority — even a `Verify` entry is pruned, and the bookkeeping entries that would
+    /// otherwise anchor the queue's floor go with it.
+    #[test]
+    fn prune_scan_queue_below_none_retains_nothing() {
+        use zcash_client_backend::data_api::WalletWrite as _;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [
+                scan_range(419_200..450_000, ScanPriority::Ignored), // deleted despite bookkeeping
+                scan_range(450_000..460_000, ScanPriority::Verify),  // deleted despite priority
+                scan_range(460_000..600_000, ScanPriority::Historic), // deleted
+                scan_range(600_000..700_000, ScanPriority::FoundNote), // straddler: trimmed
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut().prune_scan_queue_below(floor, None).unwrap(),
+            4
+        );
+        assert_eq!(
+            queue_contents(&st),
+            vec![(663_150, 700_000, priority_code(&ScanPriority::FoundNote))]
+        );
+        assert_queue_contiguous(&st);
+    }
+
+    /// Pruning is a no-op when nothing below the height is prunable, and leaves the queue
+    /// untouched rather than rewriting it.
+    #[test]
+    fn prune_scan_queue_below_is_a_no_op_when_all_entries_are_retained() {
+        use zcash_client_backend::data_api::WalletWrite as _;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let entries = [
+            scan_range(419_200..450_000, ScanPriority::Ignored),
+            scan_range(450_000..460_000, ScanPriority::Scanned),
+            scan_range(460_000..700_000, ScanPriority::FoundNote),
+        ];
+        insert_queue_entries(st.wallet().conn(), entries.iter()).unwrap();
+        let before = queue_contents(&st);
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(
+                    BlockHeight::from_u32(663_150),
+                    Some(ScanPriority::OpenAdjacent)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(queue_contents(&st), before);
+    }
+
+    /// `block_range_end` is exclusive: an entry ending exactly at `height` covers only
+    /// heights strictly below it, so it is deleted whole rather than trimmed to an empty
+    /// range (which the schema's `start < end` constraint would reject).
+    #[test]
+    fn prune_scan_queue_below_treats_end_at_height_as_fully_below() {
+        use zcash_client_backend::data_api::WalletWrite as _;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+        let floor = BlockHeight::from_u32(663_150);
+        insert_queue_entries(
+            st.wallet().conn(),
+            [scan_range(600_000..663_150, ScanPriority::Historic)].iter(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            st.wallet_mut()
+                .prune_scan_queue_below(floor, Some(ScanPriority::OpenAdjacent))
+                .unwrap(),
+            1
+        );
+        let remaining: i64 = st
+            .wallet()
+            .conn()
+            .query_row("SELECT COUNT(*) FROM scan_queue", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }

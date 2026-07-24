@@ -390,21 +390,20 @@ pub fn plan_preparation(
         .filter(|(i, _)| !used[*i])
         .map(|(i, &v)| (i, v))
         .max_by_key(|&(_, v)| v)
+        && big >= subtree_cost(&remaining, fee_per_tx).1
     {
-        if big >= subtree_cost(&remaining, fee_per_tx).1 {
-            build_split(
-                PrepInput::Wallet {
-                    index: idx,
-                    value: zat(big),
-                },
-                big,
-                &remaining,
-                fee_per_tx,
-                0,
-                &mut layers,
-            );
-            remaining.clear();
-        }
+        build_split(
+            PrepInput::Wallet {
+                index: idx,
+                value: zat(big),
+            },
+            big,
+            &remaining,
+            fee_per_tx,
+            0,
+            &mut layers,
+        );
+        remaining.clear();
     }
 
     // The notes available to spend in the current layer (layer 0: the wallet's own notes not already
@@ -540,10 +539,10 @@ pub fn plan_preparation(
     for (li, layer) in layers.iter_mut().enumerate() {
         for (ti, tx) in layer.iter_mut().enumerate() {
             for (oi, out) in tx.outputs.iter_mut().enumerate() {
-                if let PrepOutput::Intermediate(v) = *out {
-                    if !spent.contains(&(li, ti, oi)) {
-                        *out = PrepOutput::Change(v);
-                    }
+                if let PrepOutput::Intermediate(v) = *out
+                    && !spent.contains(&(li, ti, oi))
+                {
+                    *out = PrepOutput::Change(v);
                 }
             }
         }
@@ -634,15 +633,15 @@ fn unconsumed_feeders(layers: &[Vec<PrepTransaction>]) -> Vec<PrepInput> {
     for (li, layer) in layers.iter().enumerate() {
         for (ti, tx) in layer.iter().enumerate() {
             for (oi, output) in tx.outputs.iter().enumerate() {
-                if let PrepOutput::Intermediate(v) = output {
-                    if !spent.contains(&(li, ti, oi)) {
-                        out.push(PrepInput::Prior {
-                            layer: li,
-                            transaction: ti,
-                            output: oi,
-                            value: *v,
-                        });
-                    }
+                if let PrepOutput::Intermediate(v) = output
+                    && !spent.contains(&(li, ti, oi))
+                {
+                    out.push(PrepInput::Prior {
+                        layer: li,
+                        transaction: ti,
+                        output: oi,
+                        value: *v,
+                    });
                 }
             }
         }

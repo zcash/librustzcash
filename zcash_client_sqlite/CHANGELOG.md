@@ -11,6 +11,11 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `WalletDb` now implements the new `zcash_client_backend` storage-trait
+  methods `WalletRead::get_wallet_recover_until`,
+  `WalletWrite::prune_scan_queue_below`, and
+  `WalletCommitmentTrees::{get_sapling_subtree_root, get_orchard_subtree_root,
+  get_ironwood_subtree_root}`.
 - `WalletDb::get_unspent_ironwood_notes_at_historical_height` returns all Ironwood
   notes that existed and were unspent at a given height.
 - `WalletDb::transactionally_with_extension` performs wallet operations and writes to
