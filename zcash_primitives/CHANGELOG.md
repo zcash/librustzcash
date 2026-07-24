@@ -37,6 +37,7 @@ workspace.
   express a coinbase bundle.
 
 ### Changed
+- Migrated to `zcash_transparent 0.10.0`.
 - `zcash_primitives::transaction::builder::BuildConfig::Standard` now carries
   separate `orchard_padding` and `ironwood_padding` fields (of the new
   `BundlePadding` type) in place of `orchard_pool_bundle_type`, selecting the

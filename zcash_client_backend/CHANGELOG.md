@@ -68,6 +68,7 @@ workspace.
   this is set once on the selector instance rather than passed to each call.
 
 ### Changed
+- Migrated to `zcash_transparent 0.10.0`.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
   takes an `expiry_height: Option<BlockHeight>` parameter, mirroring the
   one already accepted by `create_pczt_from_proposal`. This lets callers
