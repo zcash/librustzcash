@@ -972,19 +972,53 @@ where
     )
 }
 
-/// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
-/// of transactions that would spend all available funds from the given `spend_pool`s that can then
-/// be authorized and made ready for submission to the network with [`create_proposed_transactions`].
+/// Proposes spending the maximum available value from the given shielded pools, sending it
+/// to a single recipient.
 ///
-/// When `lock_inputs` is `Some(request)`, the inputs selected by the proposal are locked on
-/// behalf of the request's owner until `target_height + request.for_blocks()` to prevent
-/// concurrent proposals from selecting them; when `None`, no locking is performed. See
-/// [`propose_transfer`] for the full semantics and concurrency behavior.
+/// Returns the proposal, which may then be executed using [`create_proposed_transactions`].
+/// Depending upon the recipient address, more than one transaction may be constructed in the
+/// execution of the returned proposal.
 ///
-/// `locked_input_policy` controls whether a locked note may be drawn upon to reach the
-/// requested amount, exactly as [`input_selection::SpendPolicy::locked_input_policy`] does for
-/// [`propose_transfer`]; pass `&LockedInputPolicy::Exclude` (its default) to never select a
-/// locked note.
+/// Unlike [`propose_transfer`], the caller does not choose an amount. The value sent is
+/// whatever remains once the fee for the selected inputs is covered, and that fee is not
+/// knowable in advance because it depends on which inputs the selector picks. This is the
+/// reason to prefer this function over computing "balance minus fee" in the caller: only
+/// input selection knows the fee, so only it can leave nothing behind.
+///
+/// The wallet must have been scanned far enough to establish target and anchor heights;
+/// otherwise [`InputSelectorError::SyncRequired`] is returned.
+///
+/// Parameters:
+/// * `wallet_db`: A read/write reference to the wallet database.
+/// * `params`: Consensus parameters.
+/// * `spend_from_account`: The unified account that controls the funds that will be spent
+///   in the resulting transaction. This procedure will return an error if the account ID
+///   does not correspond to an account known to the wallet.
+/// * `spend_pools`: The shielded pools that may be drawn upon. Funds in any pool outside
+///   this set are left untouched, so this is what makes the function usable for moving a
+///   single pool rather than emptying the account. Transparent funds are never selected.
+/// * `fee_rule`: The fee rule to use in creating the transaction.
+/// * `recipient`: The address to which the spendable value will be paid.
+/// * `memo`: A memo to be included in the output to the recipient. Supplying a memo for a
+///   recipient that cannot receive one returns [`zip321::PaymentError::TransparentMemo`].
+/// * `mode`: How to treat funds in `spend_pools` that are not currently spendable, for
+///   example because a note lacks confirmations or its witness is not yet available.
+///   [`MaxSpendMode::MaxSpendable`] skips such notes and proposes a transaction spending
+///   the rest; [`MaxSpendMode::Everything`] returns an error instead, so that a caller who
+///   needs the pools genuinely emptied cannot be handed a partial result that looks like a
+///   complete one.
+/// * `confirmations_policy`: The minimum number of confirmations that a previously
+///   received note must have in the blockchain in order to be considered for being
+///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
+///   not supported.
+/// * `locked_input_policy`: Whether a locked note may be drawn upon to reach the requested
+///   amount, exactly as [`input_selection::SpendPolicy::locked_input_policy`] does for
+///   [`propose_transfer`]; pass `&LockedInputPolicy::Exclude` (its default) to never select
+///   a locked note.
+/// * `lock_inputs`: When `Some(request)`, the inputs selected by the proposal are locked on
+///   behalf of the request's owner until `target_height + request.for_blocks()` to prevent
+///   concurrent proposals from selecting them; when `None`, no locking is performed. See
+///   [`propose_transfer`] for the full semantics and concurrency behavior.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_send_max_transfer<DbT, ParamsT, FeeRuleT, CommitmentTreeErrT>(
