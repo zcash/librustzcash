@@ -1,6 +1,6 @@
 [package]
 name = "pczt"
-version = "0.8.0-rc.1"
+version = "0.8.0"
 authors = ["Jack Grigg <jack@electriccoin.co>"]
 edition.workspace = true
 rust-version.workspace = true

@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-07-23
+
 ### Added
 - `zcash_primitives::transaction::components::orchard::ACTION_SIZE`, the size in
   bytes of an Orchard action description as encoded in a transaction. It excludes
