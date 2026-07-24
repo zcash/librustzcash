@@ -70,8 +70,33 @@ workspace.
   `propose_shielding_coinbase` apply when gathering transparent inputs
   (default `Exclude`). Shielding has no per-call `SpendPolicy` argument, so
   this is set once on the selector instance rather than passed to each call.
+- `zcash_client_backend::data_api::anchor_retention`, containing
+  `AnchorRetentionInterval` (the block-height grid on which note commitment tree
+  checkpoints are retained as durable anchors) and `AnchorRetention` (that grid
+  paired with the height at or above which retention applies). The interval was
+  previously a hard-coded 144 blocks.
+- `zcash_client_backend::data_api::WalletRead::anchor_retention_interval`, which
+  reports the grid a backend retains. It defaults to
+  `AnchorRetentionInterval::ZIP_318`, matching the retention a backend performs
+  if it does not configure the interval; a backend that makes retention
+  configurable MUST override it, because a ZIP 318 pool migration reads the grid
+  back through this method to decide which heights its transfers may anchor to.
+- `zcash_client_backend::data_api::testing::TestBuilder::with_anchor_retention_interval`
 
 ### Changed
+- `zcash_client_backend::data_api::ll::wallet::put_blocks` and
+  `zcash_client_backend::data_api::ll::wallet::update_tree` now take
+  `Option<AnchorRetention>` in place of `anchor_retention_height:
+  Option<BlockHeight>`. Replace `Some(height)` with
+  `Some(AnchorRetention::new(height, interval))`, where `interval` is the
+  wallet's configured `AnchorRetentionInterval` (use
+  `AnchorRetentionInterval::ZIP_318` to preserve the previous behaviour);
+  `None` continues to disable anchor retention.
+- `zcash_client_backend::data_api::testing::DataStoreFactory::new_data_store`
+  takes an additional `anchor_retention_interval: Option<AnchorRetentionInterval>`
+  argument; pass `None` to keep the default grid.
+- `zcash_client_backend::data_api::testing::pool::anchor_checkpoints_retained_across_deep_scan`
+  takes the `AnchorRetentionInterval` to exercise as an additional argument.
 - Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`,
   `zcash_proofs 0.30.0`, `pczt 0.8.0`.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now

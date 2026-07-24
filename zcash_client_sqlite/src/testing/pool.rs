@@ -2,13 +2,18 @@
 //!
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
+use core::num::NonZeroU32;
+
 use crate::{
     SAPLING_TABLES_PREFIX,
     testing::{BlockCache, db::TestDbFactory},
 };
-use zcash_client_backend::data_api::testing::{
-    pool::{InputTrust, ShieldedPoolTester},
-    sapling::SaplingPoolTester,
+use zcash_client_backend::data_api::{
+    anchor_retention::AnchorRetentionInterval,
+    testing::{
+        pool::{InputTrust, ShieldedPoolTester},
+        sapling::SaplingPoolTester,
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -380,11 +385,19 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     )
 }
 
+/// Runs the deep-scan retention check at the ZIP 318 interval and at a short configured one, so
+/// that the wallet is shown to retain exactly the grid it was configured with rather than a
+/// hard-coded 144-block one.
 pub(crate) fn anchor_checkpoints_retained_across_deep_scan<T: ShieldedPoolTester>() {
-    zcash_client_backend::data_api::testing::pool::anchor_checkpoints_retained_across_deep_scan::<
-        T,
-        _,
-    >(TestDbFactory::default(), BlockCache::new())
+    for interval in [
+        AnchorRetentionInterval::ZIP_318,
+        AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero")),
+    ] {
+        zcash_client_backend::data_api::testing::pool::anchor_checkpoints_retained_across_deep_scan::<
+            T,
+            _,
+        >(TestDbFactory::default(), BlockCache::new(), interval)
+    }
 }
 
 #[cfg(feature = "orchard")]

@@ -37,6 +37,7 @@ use crate::{
         self, Account as _, AccountBirthday, BoundedU8, DecryptedTransaction, InputSource,
         MaxSpendMode, NoteFilter, Ratio, TargetValue, WalletCommitmentTrees, WalletRead,
         WalletSummary, WalletTest, WalletWrite,
+        anchor_retention::AnchorRetentionInterval,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::{Error, LockError},
         testing::{
@@ -5484,8 +5485,11 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
 /// from the ordinary `PRUNING_DEPTH`-checkpoint pruning budget, so that their roots and the
 /// witnesses anchored to them remain computable even after they age far behind the chain tip.
 ///
-/// The retention interval and pruning depth are read from `crate::data_api::ll::wallet`, so this
-/// test tracks whatever values the implementation defines rather than assuming a particular one.
+/// The interval is supplied by the caller (the pruning depth is read from
+/// `crate::data_api::ll::wallet`, so this test tracks whatever value the implementation defines).
+/// Passing a short interval keeps the test cheap: the scan must reach a boundary more than
+/// `PRUNING_DEPTH` checkpoints behind the tip, which at the ZIP 318 interval means generating
+/// several hundred blocks.
 ///
 /// The test:
 /// - Activates NU6.3 from the Sapling activation height, so anchor retention is live and its
@@ -5505,12 +5509,15 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
 >(
     ds_factory: Dsf,
     cache: impl TestCache,
+    interval: AnchorRetentionInterval,
 ) {
     use std::collections::BTreeSet;
 
     use shardtree::{ShardTree, store::ShardStore};
 
-    use crate::data_api::ll::wallet::{ANCHOR_RETENTION_INTERVAL, PRUNING_DEPTH};
+    use crate::data_api::ll::wallet::PRUNING_DEPTH;
+
+    let interval_blocks = interval.block_count().get();
 
     // Reads, from any pool's note commitment tree, the set of surviving checkpoint heights, the
     // set of retained-anchor heights, and whether a witness for `note_position` as of
@@ -5562,6 +5569,7 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
             .with_network(ironwood_active_network)
             .with_data_store_factory(ds_factory)
             .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
             .with_account_from_sapling_activation(BlockHash([0; 32])),
     )
     .build::<T>();
@@ -5574,9 +5582,9 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
 
     // The first interval-aligned anchor height at or above the retention floor and strictly above
     // the received note, so the note's position precedes the anchor's checkpoint.
-    let mut anchor = floor.div_ceil(ANCHOR_RETENTION_INTERVAL) * ANCHOR_RETENTION_INTERVAL;
+    let mut anchor = u32::from(interval.boundary_at_or_above(BlockHeight::from(floor)));
     while anchor <= received {
-        anchor += ANCHOR_RETENTION_INTERVAL;
+        anchor += interval_blocks;
     }
 
     // Scan forward in a single batch so the anchor ages more than `PRUNING_DEPTH` checkpoints
@@ -5638,8 +5646,8 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
 
     // Exactly the interval-aligned checkpoints at or above the retention floor are retained.
     let expected_anchors: BTreeSet<BlockHeight> = (floor..=tip)
-        .filter(|h| h % ANCHOR_RETENTION_INTERVAL == 0)
         .map(BlockHeight::from)
+        .filter(|h| interval.is_boundary(*h))
         .collect();
     assert_eq!(
         retained, expected_anchors,

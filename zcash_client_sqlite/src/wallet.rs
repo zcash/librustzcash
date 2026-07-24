@@ -92,6 +92,7 @@ use zcash_client_backend::{
         AddressSource, BlockMetadata, Progress, Ratio, ReceivedTransactionOutput,
         SAPLING_SHARD_HEIGHT, SentTransaction, SentTransactionOutput, TransactionDataRequest,
         TransactionStatus, WalletSummary, Zip32Derivation,
+        anchor_retention::AnchorRetentionInterval,
         chain::ChainState,
         defaults::address_receiver_matches_ua,
         error::{FindAccountForAddressError, RewindError},
@@ -4164,6 +4165,9 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
             params: params.clone(),
             clock: (),
             rng: (),
+            // Truncation removes checkpoints; it never establishes them, so no anchor retention
+            // decision is made through this handle and the interval is immaterial.
+            anchor_retention_interval: AnchorRetentionInterval::default(),
             #[cfg(feature = "transparent-inputs")]
             gap_limits: *gap_limits,
         };

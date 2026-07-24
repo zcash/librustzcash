@@ -61,6 +61,7 @@ use zcash_client_backend::{
         ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock,
         SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
         ll::{
@@ -282,6 +283,7 @@ pub struct WalletDb<C, P, CL, R> {
     params: P,
     clock: CL,
     rng: R,
+    anchor_retention_interval: AnchorRetentionInterval,
     #[cfg(feature = "transparent-inputs")]
     gap_limits: GapLimits,
 }
@@ -464,10 +466,30 @@ impl<P, CL, R> WalletDb<rusqlite::Connection, P, CL, R> {
                 params,
                 clock,
                 rng,
+                anchor_retention_interval: AnchorRetentionInterval::default(),
                 #[cfg(feature = "transparent-inputs")]
                 gap_limits: GapLimits::default(),
             })
         })
+    }
+}
+
+impl<C, P, CL, R> WalletDb<C, P, CL, R> {
+    /// Sets the interval on which this wallet retains note commitment tree checkpoints as durable
+    /// anchors, exempt from ordinary checkpoint pruning.
+    ///
+    /// A ZIP 318 pool migration run over this wallet reads the interval back through
+    /// [`WalletRead::anchor_retention_interval`] and draws its transfers' anchors from the same
+    /// grid, so the two cannot disagree. Note that the interval is not persisted: an application
+    /// that configures a non-default interval must apply it every time it opens the wallet, or a
+    /// migration committed under the old grid will be left anchored to checkpoints this wallet no
+    /// longer retains.
+    ///
+    /// The default is [`AnchorRetentionInterval::ZIP_318`], which every wallet on the production
+    /// network must use.
+    pub fn with_anchor_retention_interval(mut self, interval: AnchorRetentionInterval) -> Self {
+        self.anchor_retention_interval = interval;
+        self
     }
 }
 
@@ -501,6 +523,7 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
             params,
             clock,
             rng,
+            anchor_retention_interval: AnchorRetentionInterval::default(),
             #[cfg(feature = "transparent-inputs")]
             gap_limits: GapLimits::default(),
         }
@@ -528,6 +551,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
             params: &self.params,
             clock: &self.clock,
             rng: &mut self.rng,
+            anchor_retention_interval: self.anchor_retention_interval,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         };
@@ -585,6 +609,7 @@ impl<C: BorrowMut<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
             params: &self.params,
             clock: &self.clock,
             rng: &mut self.rng,
+            anchor_retention_interval: self.anchor_retention_interval,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         };
@@ -1151,6 +1176,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::chain_tip_height(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn anchor_retention_interval(&self) -> AnchorRetentionInterval {
+        self.anchor_retention_interval
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
@@ -2041,13 +2070,14 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
-        // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on the anchor
-        // retention interval are retained as durable anchors. The activation height is `None`
-        // (and so anchor retention is inactive) on networks that do not yet have an assigned
-        // NU6.3 activation height.
-        let anchor_retention_height = self
+        // Once the NU6.3 (Ironwood) activation height is reached, checkpoints on this wallet's
+        // configured anchor retention interval are retained as durable anchors. The activation
+        // height is `None` (and so anchor retention is inactive) on networks that do not yet have
+        // an assigned NU6.3 activation height.
+        let anchor_retention = self
             .params
-            .activation_height(consensus::NetworkUpgrade::Nu6_3);
+            .activation_height(consensus::NetworkUpgrade::Nu6_3)
+            .map(|from_height| AnchorRetention::new(from_height, self.anchor_retention_interval));
 
         ll::wallet::put_blocks::<_, SqliteClientError, commitment_tree::Error>(
             self,
@@ -2055,7 +2085,7 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             self.gap_limits,
             from_state,
             blocks,
-            anchor_retention_height,
+            anchor_retention,
         )
         .map_err(SqliteClientError::from)
     }

@@ -131,6 +131,7 @@ use ambassador::delegatable_trait;
 #[cfg(any(test, feature = "test-dependencies"))]
 use zcash_protocol::consensus::NetworkUpgrade;
 
+pub mod anchor_retention;
 pub mod chain;
 pub mod defaults;
 pub mod error;
@@ -2079,6 +2080,25 @@ pub trait WalletRead {
     ///
     /// This will return `Ok(None)` if the height of the current consensus chain tip is unknown.
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
+
+    /// Returns the interval on which this wallet retains note commitment tree checkpoints as
+    /// durable anchors.
+    ///
+    /// A ZIP 318 pool migration anchors each of its pool-crossing transfers to a boundary of this
+    /// interval, and proves the transfer long after that boundary has passed; the proof can only be
+    /// constructed if the wallet kept the boundary's checkpoint. Reading the grid back off the
+    /// wallet that maintains it — rather than configuring the migration separately — is what
+    /// guarantees the two agree.
+    ///
+    /// The default implementation returns [`AnchorRetentionInterval::ZIP_318`], which matches the
+    /// retention a backend performs if it does not configure the interval. A backend that DOES make
+    /// retention configurable must override this to report the interval it actually retains, or
+    /// migrations over it will draw anchors it has pruned.
+    ///
+    /// [`AnchorRetentionInterval::ZIP_318`]: anchor_retention::AnchorRetentionInterval::ZIP_318
+    fn anchor_retention_interval(&self) -> anchor_retention::AnchorRetentionInterval {
+        anchor_retention::AnchorRetentionInterval::ZIP_318
+    }
 
     /// Returns the block hash for the block at the given height, if the
     /// associated block data is available. Returns `Ok(None)` if the hash
