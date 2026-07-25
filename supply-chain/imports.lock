@@ -1,13 +1,9 @@
 
 # cargo-vet imports lock
 
-[[unpublished.zcash_encoding]]
-version = "0.5.0"
-audited_as = "0.4.0"
-
-[[unpublished.zcash_history]]
-version = "0.6.0"
-audited_as = "0.5.0"
+[[unpublished.zcash_keys]]
+version = "0.16.0"
+audited_as = "0.15.0"
 
 [[publisher.bumpalo]]
 version = "3.16.0"
@@ -470,9 +466,16 @@ user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
-[[publisher.zcash_history]]
+[[publisher.zcash_encoding]]
 version = "0.5.0"
-when = "2026-07-09"
+when = "2026-07-24"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zcash_history]]
+version = "0.6.0"
+when = "2026-07-24"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
