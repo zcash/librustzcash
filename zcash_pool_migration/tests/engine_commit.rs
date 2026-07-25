@@ -22,6 +22,7 @@ use zcash_pool_migration::engine::{
     commit_preparation, plan_migration,
 };
 use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
+use zcash_pool_migration::signing_rounds::SigningRoundBudget;
 use zcash_pool_migration::state::AdvanceStep;
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};
 
@@ -234,14 +235,17 @@ fn external_signing_batches_by_action_budget() {
     // one preparation plus one transfer splits the list without ever exceeding the budget (every
     // batch is non-empty and within budget).
     const ACTIONS_PER_TRANSFER: usize = 3;
-    let budget = PREP_TX_ACTIONS + ACTIONS_PER_TRANSFER;
+    let budget_actions = PREP_TX_ACTIONS + ACTIONS_PER_TRANSFER;
+    let budget = SigningRoundBudget::new(
+        core::num::NonZeroU32::new(budget_actions as u32).expect("nonzero budget"),
+    );
     let total = unsigned.len();
     let sessions = batch_unsigned_by_action_budget(unsigned, budget);
-    assert!(sessions.len() > 1, "several sessions: {}", sessions.len());
+    assert!(sessions.len() > 1, "several rounds: {}", sessions.len());
     assert_eq!(sessions.iter().map(|s| s.len()).sum::<usize>(), total);
     for session in &sessions {
         assert!(!session.is_empty());
-        assert!(session.iter().map(|tx| tx.actions()).sum::<usize>() <= budget);
+        assert!(session.iter().map(|tx| tx.actions()).sum::<usize>() <= budget_actions);
     }
 
     // Sign every session out of band and apply the signatures back; the whole migration is then

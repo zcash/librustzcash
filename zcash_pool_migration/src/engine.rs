@@ -43,7 +43,7 @@
 
 use alloc::vec::Vec;
 use core::fmt;
-use core::num::NonZeroUsize;
+use core::num::{NonZeroU32, NonZeroUsize};
 
 use corez::io;
 
@@ -59,6 +59,10 @@ use zcash_primitives::transaction::fees::{transparent, zip317};
 use crate::note_splitting::{NoteSplitPlan, plan_note_split};
 use crate::preparation::{PrepError, PrepInput, PreparationPlan, plan_preparation};
 use crate::scheduling::{self, Schedule};
+use crate::signing_rounds::{
+    MinRounds, PlannedSigningRound, PlannedTx, SigningRoundBudget, SigningRoundStrategy,
+    min_budget_for_rounds, min_signing_rounds,
+};
 
 /// The estimated number of blocks for a preparation layer's LAST scheduled transaction to mine and
 /// become spendable: mining latency plus the wallet's witness-sync and next-broadcast turnaround, a
@@ -597,6 +601,115 @@ impl MigrationPlan {
     pub fn schedule(&self) -> &[Schedule] {
         &self.schedule
     }
+
+    /// Every transaction this plan will build, enumerated BEFORE building in the exact order the
+    /// commit assigns [`MigrationTxId`]s (each preparation layer in order, then each transfer by
+    /// crossing), so a [`PlannedTx`]'s id equals the id the built transaction will carry. Each
+    /// carries its [`action_weight`](crate::signing_rounds::action_weight). This is a pure function
+    /// of the plan, recomputed on demand, so planning stays unchanged.
+    pub fn planned_transactions(&self) -> Vec<PlannedTx> {
+        let mut txs = Vec::with_capacity(self.total_transactions());
+        let mut next = 0u32;
+        for (layer, layer_txs) in self.preparation.layers().iter().enumerate() {
+            for index in 0..layer_txs.len() {
+                txs.push(PlannedTx::new(
+                    MigrationTxId::new(next),
+                    MigrationTxKind::Preparation { layer, index },
+                ));
+                next += 1;
+            }
+        }
+        for crossing in 0..self.transfer_tx_count() {
+            txs.push(PlannedTx::new(
+                MigrationTxId::new(next),
+                MigrationTxKind::Transfer { crossing },
+            ));
+            next += 1;
+        }
+        txs
+    }
+
+    /// The total number of transactions this plan builds and signs: its preparation transactions
+    /// plus one pool-crossing transfer per funding note.
+    pub fn total_transactions(&self) -> usize {
+        self.preparation_tx_count() + self.transfer_tx_count()
+    }
+
+    /// The number of preparation transactions across all layers.
+    pub fn preparation_tx_count(&self) -> usize {
+        self.preparation.transaction_count()
+    }
+
+    /// The number of pool-crossing transfers (one per funding note).
+    pub fn transfer_tx_count(&self) -> usize {
+        self.note_split.migration_outputs().len()
+    }
+
+    /// The number of sequential preparation layers (the phase's wall-clock depth).
+    pub fn preparation_layer_count(&self) -> usize {
+        self.preparation.layer_count()
+    }
+
+    /// The total Orchard-family actions across every transaction this plan builds.
+    pub fn total_actions(&self) -> u32 {
+        let prep = (self.preparation_tx_count() as u64)
+            .saturating_mul(u64::from(crate::signing_rounds::PREPARATION_ACTIONS));
+        let xfer = (self.transfer_tx_count() as u64)
+            .saturating_mul(u64::from(crate::signing_rounds::TRANSFER_ACTIONS));
+        u32::try_from(prep.saturating_add(xfer)).unwrap_or(u32::MAX)
+    }
+
+    /// The total value that migrates to the destination pool (the sum of the crossing values).
+    pub fn value_migrated(&self) -> Zatoshis {
+        self.note_split.total_migratable()
+    }
+
+    /// The source-pool value left untouched by this plan (change plus dust below a self-funding
+    /// note); zero when the balance decomposed exactly.
+    pub fn residual(&self) -> Zatoshis {
+        self.note_split.change().unwrap_or(Zatoshis::ZERO)
+    }
+
+    /// Group this plan's transactions into signing ROUNDS for a signer bounded by `budget` total
+    /// Orchard actions per interaction, using the optimal [`MinRounds`] packing (fewest signer
+    /// interactions). The `budget` is the caller's per-round capacity (for example
+    /// [`SigningRoundBudget::KEYSTONE`]); it is a QUERY parameter, so a plan can be evaluated for any
+    /// signer without re-planning. See [`signing_rounds_with`](Self::signing_rounds_with) to choose
+    /// a different [`SigningRoundStrategy`].
+    pub fn signing_rounds(&self, budget: SigningRoundBudget) -> Vec<PlannedSigningRound> {
+        self.signing_rounds_with(&MinRounds, budget)
+    }
+
+    /// Like [`signing_rounds`](Self::signing_rounds) but with an explicit packing `strategy` (the
+    /// named solution of the round-packing problem).
+    pub fn signing_rounds_with<S: SigningRoundStrategy>(
+        &self,
+        strategy: &S,
+        budget: SigningRoundBudget,
+    ) -> Vec<PlannedSigningRound> {
+        strategy.pack(&self.planned_transactions(), budget)
+    }
+
+    /// The number of signing rounds this plan needs for a signer bounded by `budget` (the optimal
+    /// [`MinRounds`] count), without materializing the packing.
+    pub fn signing_round_count(&self, budget: SigningRoundBudget) -> usize {
+        min_signing_rounds(
+            self.preparation_tx_count(),
+            self.transfer_tx_count(),
+            budget,
+        )
+    }
+
+    /// The smallest per-round budget that signs this whole plan in ONE round: the plan's total
+    /// actions (never below [`SigningRoundBudget::minimum_feasible`]). For the signer-selection UX
+    /// ("a signer supporting at least this many actions per round signs this in one interaction").
+    pub fn min_budget_for_single_round(&self) -> NonZeroU32 {
+        min_budget_for_rounds(
+            self.preparation_tx_count(),
+            self.transfer_tx_count(),
+            NonZeroUsize::MIN,
+        )
+    }
 }
 
 /// Why a migration could not be planned.
@@ -850,15 +963,17 @@ impl RunEstimate {
         self.prep_transactions + self.crossings
     }
 
-    /// The number of signing sessions this run needs when an external signer (for example a Keystone
-    /// hardware wallet) can sign at most `max_per_session` transactions in one interaction:
-    /// `ceil(transactions / max_per_session)`. All of a run's transactions are built and signed
-    /// together (anchors and witnesses are deferred to proving time, [ZIP 374]), so they pool into
-    /// sessions bounded only by the signer's capacity.
+    /// The number of signing ROUNDS this run needs when an external signer is bounded by `budget`
+    /// total Orchard ACTIONS per interaction (for example a Keystone,
+    /// [`SigningRoundBudget::KEYSTONE`]). This is the per-round-total-action model, NOT a
+    /// per-transaction cap: a round holds any mix of preparation (16-action) and transfer (3-action)
+    /// transactions summing to at most the budget. Computed as the optimal (minimum) packing, since
+    /// all of a run's transactions are built and signed together (anchors and witnesses deferred to
+    /// proving, [ZIP 374]) and are free to be grouped in any order.
     ///
     /// [ZIP 374]: https://zips.z.cash/zip-0374
-    pub fn signing_sessions(&self, max_per_session: NonZeroUsize) -> usize {
-        self.transactions().div_ceil(max_per_session.get())
+    pub fn signing_rounds(&self, budget: SigningRoundBudget) -> usize {
+        min_signing_rounds(self.prep_transactions, self.crossings, budget)
     }
 }
 
@@ -871,11 +986,10 @@ impl RunEstimate {
 /// compare them: the note-split crossings it migrates and the note-preparation layers and
 /// transactions it costs.
 ///
-/// A capacity-limited external signer adds a third dimension: given how many transactions such a
-/// signer can sign in one interaction, [`total_signing_sessions`](Self::total_signing_sessions) gives
-/// the number of signing interactions the whole migration requires. That limit is a query parameter,
-/// not part of the estimate, so an SDK can evaluate it for any signer capacity without re-running the
-/// planners.
+/// A capacity-limited external signer adds a third dimension: given the signer's per-interaction
+/// action budget, [`total_signing_rounds`](Self::total_signing_rounds) gives the number of signing
+/// interactions the whole migration requires. That budget is a query parameter, not part of the
+/// estimate, so an SDK can evaluate it for any signer capacity without re-running the planners.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MigrationRunEstimate {
     runs: Vec<RunEstimate>,
@@ -936,19 +1050,16 @@ impl MigrationRunEstimate {
         self.runs.iter().map(RunEstimate::transactions).sum()
     }
 
-    /// The total number of signing sessions the whole migration needs when an external signer can sign
-    /// at most `max_per_session` transactions in one interaction — the number of times the user must
+    /// The total number of signing ROUNDS the whole migration needs when an external signer is
+    /// bounded by `budget` total Orchard actions per interaction — the number of times the user must
     /// interact with a capacity-limited hardware signer (for example a Keystone, whose limit the SDK
     /// passes in here).
     ///
-    /// This is the SUM of each run's [`signing_sessions`](RunEstimate::signing_sessions), NOT
-    /// `ceil(total_transactions / max_per_session)`, because signing sessions cannot span runs: a later
-    /// run's transactions spend notes an earlier run must mine first, so each run is signed on its own.
-    pub fn total_signing_sessions(&self, max_per_session: NonZeroUsize) -> usize {
-        self.runs
-            .iter()
-            .map(|run| run.signing_sessions(max_per_session))
-            .sum()
+    /// This is the SUM of each run's [`signing_rounds`](RunEstimate::signing_rounds), NOT the packing
+    /// of `total_transactions` at once, because rounds cannot span runs: a later run's transactions
+    /// spend notes an earlier run must mine first, so each run is signed on its own.
+    pub fn total_signing_rounds(&self, budget: SigningRoundBudget) -> usize {
+        self.runs.iter().map(|run| run.signing_rounds(budget)).sum()
     }
 }
 
@@ -964,9 +1075,9 @@ impl MigrationRunEstimate {
 /// that run spends and the residuals it leaves form the next run's structure.
 ///
 /// The note-split run count itself does NOT depend on an external signer's capacity. When a
-/// capacity-limited hardware signer (for example a Keystone) can sign only so many transactions in one
-/// interaction, pass that user-configured limit to
-/// [`MigrationRunEstimate::total_signing_sessions`] to get the number of signing interactions the
+/// capacity-limited hardware signer (for example a Keystone) is bounded by a per-interaction action
+/// budget, pass that user-configured [`SigningRoundBudget`] to
+/// [`MigrationRunEstimate::total_signing_rounds`] to get the number of signing interactions the
 /// migration requires (each run is signed on its own; see that method). Because this iterates the
 /// note-split and preparation planners once per run, its cost is roughly one [`plan_migration`] per
 /// run.
@@ -1858,36 +1969,81 @@ impl UnsignedMigrationTx {
     }
 }
 
-/// Split unsigned migration transactions into SIGNING SESSIONS: consecutive batches, preserving
-/// the given order (the commit functions emit topological order), each holding at most
-/// `action_budget` total [`actions`](UnsignedMigrationTx::actions) — except that a batch always
-/// holds at least one transaction, so a single transaction larger than the budget still gets a
-/// session of its own.
+/// Split unsigned migration transactions into SIGNING ROUNDS: consecutive batches, preserving the
+/// given order (the commit functions emit topological order), each holding at most `budget` total
+/// [`actions`](UnsignedMigrationTx::actions) — except that a batch always holds at least one
+/// transaction, so a single transaction larger than the budget still gets a round of its own. This
+/// is the order-preserving [`NextFit`](crate::signing_rounds::NextFit) packing; for the fewest
+/// signer interactions, use [`MigrationPlan::group_unsigned`], which packs optimally with the plan's
+/// transaction kinds.
 ///
 /// Every transaction is fully built and independent at signing time (anchors and witnesses are
-/// deferred to proving; nothing waits on the chain), so a session boundary reflects only the
-/// signer's per-interaction capacity — a hardware device's action budget — and each session's
-/// results are applied back with [`MigrationState::apply_signature`] in any order.
+/// deferred to proving; nothing waits on the chain), so a round boundary reflects only the signer's
+/// per-interaction capacity — a hardware device's action budget — and each round's results are
+/// applied back with [`MigrationState::apply_signature`] in any order.
 #[cfg(feature = "orchard")]
 pub fn batch_unsigned_by_action_budget(
     unsigned: Vec<UnsignedMigrationTx>,
-    action_budget: usize,
+    budget: SigningRoundBudget,
 ) -> Vec<Vec<UnsignedMigrationTx>> {
-    let mut sessions: Vec<Vec<UnsignedMigrationTx>> = Vec::new();
+    let cap = budget.max_actions() as usize;
+    let mut rounds: Vec<Vec<UnsignedMigrationTx>> = Vec::new();
     let mut current: Vec<UnsignedMigrationTx> = Vec::new();
     let mut current_actions = 0usize;
     for tx in unsigned {
-        if !current.is_empty() && current_actions.saturating_add(tx.actions) > action_budget {
-            sessions.push(core::mem::take(&mut current));
+        if !current.is_empty() && current_actions.saturating_add(tx.actions) > cap {
+            rounds.push(core::mem::take(&mut current));
             current_actions = 0;
         }
         current_actions = current_actions.saturating_add(tx.actions);
         current.push(tx);
     }
     if !current.is_empty() {
-        sessions.push(current);
+        rounds.push(current);
     }
-    sessions
+    rounds
+}
+
+#[cfg(feature = "orchard")]
+impl MigrationPlan {
+    /// Group this plan's built UNSIGNED transactions into signing rounds bounded by `budget`, using
+    /// the optimal [`MinRounds`] packing (fewest signer interactions). The `unsigned` come from
+    /// [`build_preparation_unsigned`] in commit order; each is matched back to its round by
+    /// [`UnsignedMigrationTx::id`], so the rounds reflect the SAME grouping the plan's
+    /// [`signing_rounds`](Self::signing_rounds) preview showed the user. Prefer this to
+    /// [`batch_unsigned_by_action_budget`] (which packs order-preserving, not optimally) when driving
+    /// a real signer.
+    pub fn group_unsigned(
+        &self,
+        unsigned: Vec<UnsignedMigrationTx>,
+        budget: SigningRoundBudget,
+    ) -> Vec<Vec<UnsignedMigrationTx>> {
+        use alloc::collections::BTreeMap;
+
+        let rounds = self.signing_rounds(budget);
+        let mut round_of: BTreeMap<u32, usize> = BTreeMap::new();
+        for (i, round) in rounds.iter().enumerate() {
+            for tx in round.transactions() {
+                round_of.insert(u32::from(tx.id()), i);
+            }
+        }
+        let mut buckets: Vec<Vec<UnsignedMigrationTx>> =
+            (0..rounds.len()).map(|_| Vec::new()).collect();
+        // Any unsigned transaction the plan did not enumerate (never expected) becomes its own
+        // trailing round rather than being dropped.
+        let mut leftover: Vec<UnsignedMigrationTx> = Vec::new();
+        for tx in unsigned {
+            match round_of.get(&u32::from(tx.id())) {
+                Some(&i) => buckets[i].push(tx),
+                None => leftover.push(tx),
+            }
+        }
+        if !leftover.is_empty() {
+            buckets.push(leftover);
+        }
+        buckets.retain(|b| !b.is_empty());
+        buckets
+    }
 }
 
 /// Serialize a freshly built PCZT for storage. For [`Signing::InProcess`], sign it with the backend and
@@ -2791,12 +2947,15 @@ mod tests {
         );
     }
 
-    /// The number of signing sessions follows a capacity-limited signer's per-interaction transaction
-    /// limit (a Keystone-style hard limit): one session per transaction at capacity one, one session
-    /// per run when the capacity exceeds every run, and monotonically more sessions as the limit
-    /// tightens. Sessions are summed per run (they cannot span runs).
+    /// The number of signing ROUNDS follows a capacity-limited signer's per-interaction ACTION budget
+    /// (a Keystone-style hard limit, not a per-transaction cap): one round per run when the budget
+    /// exceeds a whole run, monotonically more rounds as the budget tightens, and each run's rounds
+    /// match the optimal packer. Rounds are summed per run (they cannot span runs).
     #[test]
-    fn signing_sessions_follow_the_signer_capacity() {
+    fn signing_rounds_follow_the_signer_budget() {
+        use crate::signing_rounds::{SigningRoundBudget, min_signing_rounds};
+        use core::num::NonZeroU32;
+
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         // A whale, so there are several runs, each with several transactions.
         let whale = MockBackend::new(vec![1_200_000 * COIN], 2_000_000);
@@ -2808,28 +2967,28 @@ mod tests {
             est.total_prep_transactions() + est.total_crossings()
         );
 
-        let one = NonZeroUsize::new(1).unwrap();
-        let big = NonZeroUsize::new(10_000).unwrap();
-        let mid = NonZeroUsize::new(8).unwrap();
+        let huge = SigningRoundBudget::new(NonZeroU32::new(1_000_000).unwrap());
+        let keystone = SigningRoundBudget::KEYSTONE;
+        let tiny = SigningRoundBudget::new(SigningRoundBudget::minimum_feasible());
 
-        // Capacity of one transaction per session: one session per transaction.
-        assert_eq!(est.total_signing_sessions(one), est.total_transactions());
-        // Capacity larger than any single run's transaction count: one session per run.
-        assert_eq!(est.total_signing_sessions(big), est.run_count());
-        // A tighter limit never needs fewer sessions than a looser one.
-        assert!(est.total_signing_sessions(mid) >= est.total_signing_sessions(big));
-        assert!(est.total_signing_sessions(one) >= est.total_signing_sessions(mid));
+        // A budget larger than any run's total actions: one round per run.
+        assert_eq!(est.total_signing_rounds(huge), est.run_count());
+        // A tighter budget never needs fewer rounds than a looser one.
+        assert!(est.total_signing_rounds(keystone) >= est.total_signing_rounds(huge));
+        assert!(est.total_signing_rounds(tiny) >= est.total_signing_rounds(keystone));
 
-        // Per-run consistency: a run's sessions are the ceiling of its transaction count, and the
-        // total is the per-run sum (sessions do not span runs).
-        let summed: usize = est.runs().iter().map(|r| r.signing_sessions(mid)).sum();
-        assert_eq!(est.total_signing_sessions(mid), summed);
+        // Per-run consistency: the total is the per-run sum, and each run matches the packer.
+        let summed: usize = est.runs().iter().map(|r| r.signing_rounds(keystone)).sum();
+        assert_eq!(est.total_signing_rounds(keystone), summed);
         for run in est.runs() {
             assert_eq!(
                 run.transactions(),
                 run.prep_transactions() + run.crossings()
             );
-            assert_eq!(run.signing_sessions(mid), run.transactions().div_ceil(8));
+            assert_eq!(
+                run.signing_rounds(keystone),
+                min_signing_rounds(run.prep_transactions(), run.crossings(), keystone)
+            );
         }
     }
 
@@ -3899,19 +4058,22 @@ mod commit_tests {
             assert_eq!(tx.state, MigrationTxState::AwaitingSignature);
         }
 
-        // Sessions are consecutive prefixes bounded by the action budget; a preparation is
+        // Rounds are consecutive prefixes bounded by the action budget; a preparation is
         // PREP_TX_ACTIONS actions, so a budget of one preparation plus one transfer splits the
-        // list without ever exceeding the budget (every batch is non-empty and within budget).
-        let budget = PREP_TX_ACTIONS
+        // list without ever exceeding the budget (every round is non-empty and within budget).
+        let budget_actions = PREP_TX_ACTIONS
             + crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
             + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER;
+        let budget = crate::signing_rounds::SigningRoundBudget::new(
+            core::num::NonZeroU32::new(budget_actions as u32).unwrap(),
+        );
         let total = unsigned.len();
         let sessions = batch_unsigned_by_action_budget(unsigned, budget);
-        assert!(sessions.len() > 1, "several sessions: {}", sessions.len());
+        assert!(sessions.len() > 1, "several rounds: {}", sessions.len());
         assert_eq!(sessions.iter().map(|s| s.len()).sum::<usize>(), total);
         for session in &sessions {
             assert!(!session.is_empty());
-            assert!(session.iter().map(|tx| tx.actions()).sum::<usize>() <= budget);
+            assert!(session.iter().map(|tx| tx.actions()).sum::<usize>() <= budget_actions);
         }
 
         // Sign every session out of band and apply the signatures back; the whole migration is
@@ -3931,6 +4093,81 @@ mod commit_tests {
         backend.replace_migration(&state).unwrap();
         for tx in &state.transactions {
             assert_eq!(tx.state, MigrationTxState::Signed);
+        }
+    }
+
+    /// The plan exposes its transactions and signing rounds as a QUERY (no re-planning): the
+    /// enumerated `PlannedTx` ids match the ids the build assigns, `signing_rounds(budget)` is a
+    /// valid partition within the budget, and `group_unsigned` buckets the built PCZTs into that
+    /// same grouping.
+    #[test]
+    fn plan_exposes_signing_rounds_and_groups_unsigned() {
+        let seed = 23u64;
+        let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
+        let params = regtest_network(true);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let (_state, unsigned) = build_preparation_unsigned(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("builds the migration unsigned");
+
+        // The planned enumeration matches the built transactions one-for-one, in id order.
+        let planned = plan.planned_transactions();
+        assert_eq!(planned.len(), plan.total_transactions());
+        assert_eq!(planned.len(), unsigned.len());
+        let planned_ids: Vec<u32> = planned.iter().map(|t| u32::from(t.id())).collect();
+        let mut built_ids: Vec<u32> = unsigned.iter().map(|u| u32::from(u.id())).collect();
+        built_ids.sort_unstable();
+        assert_eq!(planned_ids, (0..planned.len() as u32).collect::<Vec<_>>());
+        assert_eq!(built_ids, planned_ids);
+
+        // A tight budget (one preparation + one transfer) forces several rounds.
+        let budget = SigningRoundBudget::new(
+            NonZeroU32::new(
+                crate::preparation::PREP_TX_ACTIONS as u32
+                    + crate::signing_rounds::TRANSFER_ACTIONS,
+            )
+            .unwrap(),
+        );
+        let rounds = plan.signing_rounds(budget);
+        assert_eq!(rounds.len(), plan.signing_round_count(budget));
+
+        // The rounds are a valid partition of every planned transaction, within the budget.
+        let mut round_ids: Vec<u32> = rounds
+            .iter()
+            .flat_map(|r| r.transactions().iter().map(|t| u32::from(t.id())))
+            .collect();
+        round_ids.sort_unstable();
+        assert_eq!(round_ids, planned_ids);
+        for r in &rounds {
+            assert!(!r.is_empty());
+            if r.len() > 1 {
+                assert!(r.total_actions() <= budget.max_actions());
+            }
+        }
+
+        // group_unsigned buckets the built PCZTs into the SAME rounds (same ids per round).
+        let grouped = plan.group_unsigned(unsigned, budget);
+        assert_eq!(grouped.len(), rounds.len());
+        for (bucket, round) in grouped.iter().zip(rounds.iter()) {
+            let bucket_ids: Vec<u32> = bucket.iter().map(|u| u32::from(u.id())).collect();
+            let round_ids: Vec<u32> = round
+                .transactions()
+                .iter()
+                .map(|t| u32::from(t.id()))
+                .collect();
+            assert_eq!(
+                bucket_ids, round_ids,
+                "each unsigned round matches the planned round"
+            );
+            assert!(
+                bucket.iter().map(|u| u.actions()).sum::<usize>() <= budget.max_actions() as usize
+            );
         }
     }
 

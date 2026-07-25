@@ -31,6 +31,11 @@ use crate::engine::{
 use crate::note_splitting::NoteSplitPlan;
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::scheduling::AnchorBucketInterval;
+use crate::signing_rounds::{
+    PlannedTx, SigningRoundBudget, SigningRoundStrategy, min_signing_rounds,
+};
+
+use alloc::vec::Vec;
 
 /// Convert a bounded `u64` to [`Zatoshis`]; infallible for the ranges the strategies draw from.
 fn zat(value: u64) -> Zatoshis {
@@ -361,4 +366,142 @@ pub fn assert_update_transaction<S: PoolMigrationWrite>(
 /// for driving [`assert_update_transaction`] from a generated [`MigrationState`].
 pub fn first_transaction_id(state: &MigrationState) -> Option<MigrationTxId> {
     state.transactions().first().map(|t| t.id())
+}
+
+// --- signing-round packing: reusable strategies + conformance suite ---
+//
+// A reusable suite so every `SigningRoundStrategy` (the crate's `MinRounds` / `NextFit`, and any a
+// downstream crate adds) is exercised the same way: generate transaction sets and budgets, then
+// assert the packing invariants hold for the strategy under test.
+
+/// An arbitrary [`SigningRoundBudget`], covering the named [`SigningRoundBudget::KEYSTONE`] and
+/// [`SigningRoundBudget::DEFAULT`] values plus a spread from the minimum feasible budget upward.
+pub fn arb_signing_round_budget() -> impl Strategy<Value = SigningRoundBudget> {
+    let floor = SigningRoundBudget::minimum_feasible().get();
+    prop_oneof![
+        Just(SigningRoundBudget::KEYSTONE),
+        Just(SigningRoundBudget::DEFAULT),
+        (floor..=1024u32)
+            .prop_map(|n| SigningRoundBudget::new(NonZeroU32::new(n).expect("nonzero"))),
+    ]
+}
+
+/// An arbitrary `(n_prep, n_transfer)` transaction-count pair for a single migration run, in the
+/// realistic range a run produces (bounded by the per-run note cap).
+pub fn arb_signing_round_counts() -> impl Strategy<Value = (usize, usize)> {
+    (0usize..20, 0usize..60)
+}
+
+/// An arbitrary set of [`PlannedTx`] for one run: `n_prep` preparation transactions followed by
+/// `n_transfer` transfers, in the canonical commit order with sequential ids (the same order a
+/// [`MigrationPlan`](crate::engine::MigrationPlan) enumerates).
+pub fn arb_planned_txs() -> impl Strategy<Value = Vec<PlannedTx>> {
+    arb_signing_round_counts().prop_map(|(n_prep, n_transfer)| planned_txs(n_prep, n_transfer))
+}
+
+/// Build the canonical planned-transaction list for `n_prep` preparation and `n_transfer` transfer
+/// transactions (preparation first, then transfers), with sequential ids.
+pub fn planned_txs(n_prep: usize, n_transfer: usize) -> Vec<PlannedTx> {
+    let mut txs = Vec::with_capacity(n_prep + n_transfer);
+    let mut id = 0u32;
+    for index in 0..n_prep {
+        txs.push(PlannedTx::new(
+            MigrationTxId::new(id),
+            MigrationTxKind::Preparation { layer: 0, index },
+        ));
+        id += 1;
+    }
+    for crossing in 0..n_transfer {
+        txs.push(PlannedTx::new(
+            MigrationTxId::new(id),
+            MigrationTxKind::Transfer { crossing },
+        ));
+        id += 1;
+    }
+    txs
+}
+
+/// Assert the packing INVARIANTS every [`SigningRoundStrategy`] must satisfy on `txs` under
+/// `budget`: every input transaction appears in exactly one round, no round is empty, no multi-tx
+/// round exceeds the budget, each round's `total_actions` is accurate, and `pack().len()` equals the
+/// strategy's own `round_count` for the same counts. Reusable across strategies and downstream
+/// implementations.
+pub fn assert_valid_packing<S: SigningRoundStrategy>(
+    strategy: &S,
+    txs: &[PlannedTx],
+    budget: SigningRoundBudget,
+) {
+    let name = strategy.name();
+    let rounds = strategy.pack(txs, budget);
+
+    let mut got: Vec<u32> = rounds
+        .iter()
+        .flat_map(|r| r.transactions().iter().map(|t| u32::from(t.id())))
+        .collect();
+    got.sort_unstable();
+    let mut want: Vec<u32> = txs.iter().map(|t| u32::from(t.id())).collect();
+    want.sort_unstable();
+    assert_eq!(
+        got, want,
+        "[{name}] packing must cover every tx exactly once"
+    );
+
+    for r in &rounds {
+        assert!(!r.is_empty(), "[{name}] must not produce empty rounds");
+        if r.len() > 1 {
+            assert!(
+                r.total_actions() <= budget.max_actions(),
+                "[{name}] a multi-tx round must stay within the budget"
+            );
+        }
+        let summed: u32 = r.transactions().iter().map(|t| t.actions()).sum();
+        assert_eq!(
+            summed,
+            r.total_actions(),
+            "[{name}] round total_actions must be accurate"
+        );
+    }
+
+    let n_prep = txs.iter().filter(|t| t.is_preparation()).count();
+    let n_transfer = txs.iter().filter(|t| t.is_transfer()).count();
+    assert_eq!(
+        rounds.len(),
+        strategy.round_count(n_prep, n_transfer, budget),
+        "[{name}] pack length must match round_count"
+    );
+}
+
+/// Assert `strategy` achieves the OPTIMAL (minimum) number of rounds for the given counts, i.e. it
+/// matches [`min_signing_rounds`]. Use for strategies that claim optimality (for example
+/// `MinRounds`); an approximate strategy such as `NextFit` is not expected to pass this.
+pub fn assert_optimal_round_count<S: SigningRoundStrategy>(
+    strategy: &S,
+    n_prep: usize,
+    n_transfer: usize,
+    budget: SigningRoundBudget,
+) {
+    assert_eq!(
+        strategy.round_count(n_prep, n_transfer, budget),
+        min_signing_rounds(n_prep, n_transfer, budget),
+        "[{}] must achieve the optimal round count",
+        strategy.name()
+    );
+}
+
+/// Assert `candidate` never needs more rounds than `baseline` for the given counts (for example
+/// `MinRounds` is never worse than `NextFit`).
+pub fn assert_no_worse_than<A: SigningRoundStrategy, B: SigningRoundStrategy>(
+    candidate: &A,
+    baseline: &B,
+    n_prep: usize,
+    n_transfer: usize,
+    budget: SigningRoundBudget,
+) {
+    assert!(
+        candidate.round_count(n_prep, n_transfer, budget)
+            <= baseline.round_count(n_prep, n_transfer, budget),
+        "[{}] must never need more rounds than [{}]",
+        candidate.name(),
+        baseline.name()
+    );
 }
