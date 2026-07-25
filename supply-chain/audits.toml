@@ -933,6 +933,12 @@ criteria = "safe-to-deploy"
 delta = "0.5.6 -> 0.5.7"
 notes = "The new uses of unsafe to access getsockopt/setsockopt look reasonable."
 
+[[audits.spin]]
+who = "Kris Nuttycombe <kris@nutty.land>"
+criteria = "safe-to-deploy"
+delta = "0.9.8 -> 0.9.9"
+notes = "Fix for https://rustsec.org/advisories/RUSTSEC-2023-0031.html"
+
 [[audits.strum]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"

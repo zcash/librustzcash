@@ -1,22 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.zcash_client_backend]]
-version = "0.24.0-rc.2"
-audited_as = "0.24.0-rc.1"
-
-[[unpublished.zcash_client_sqlite]]
-version = "0.22.0-rc.2"
-audited_as = "0.22.0-rc.1"
-
-[[unpublished.zcash_keys]]
-version = "0.16.0"
-audited_as = "0.15.0"
-
-[[unpublished.zcash_pool_migration]]
-version = "0.1.0-rc.1"
-audited_as = "0.1.0-alpha.1"
-
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
@@ -458,15 +442,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_backend]]
-version = "0.24.0-rc.1"
-when = "2026-07-12"
+version = "0.24.0-rc.2"
+when = "2026-07-25"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_client_sqlite]]
-version = "0.22.0-rc.1"
-when = "2026-07-12"
+version = "0.22.0-rc.2"
+when = "2026-07-25"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
@@ -493,15 +477,15 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_keys]]
-version = "0.15.0"
-when = "2026-07-09"
+version = "0.16.0"
+when = "2026-07-25"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_pool_migration]]
-version = "0.1.0-alpha.1"
-when = "2026-07-24"
+version = "0.1.0-rc.1"
+when = "2026-07-25"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
