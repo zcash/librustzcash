@@ -25,6 +25,7 @@
 
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 
@@ -35,6 +36,7 @@ use zcash_pool_migration::engine::{
 };
 use zcash_pool_migration::note_splitting::NoteSplitPlan;
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
+use zcash_pool_migration::scheduling::AnchorBucketInterval;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 
@@ -87,7 +89,8 @@ fn create_migrations_sql(t: &Tables) -> String {
             note_split_change INTEGER,
             note_split_prep_fees INTEGER NOT NULL,
             note_split_total_input INTEGER NOT NULL,
-            note_split_total_migratable INTEGER NOT NULL
+            note_split_total_migratable INTEGER NOT NULL,
+            anchor_bucket_interval INTEGER NOT NULL
         )",
         t.migrations
     )
@@ -330,6 +333,32 @@ fn resolve_migration_id(
         .optional()?)
 }
 
+/// The distinct anchor bucket intervals, in blocks, of every migration in `t.migrations` that is
+/// not yet complete — the grids the wallet still owes anchor-checkpoint retention to.
+///
+/// This is read from the database rather than from any in-memory configuration on purpose. A
+/// migration's transfers are anchored to boundaries of the grid it was COMMITTED under, and are
+/// provable only while those boundaries' checkpoints survive pruning. Were retention driven by a
+/// setting the application had to reapply on every open, forgetting to do so would let a scan pass
+/// a boundary the migration still needs without retaining it — unrecoverably, since the checkpoint
+/// is gone by the time anything notices.
+///
+/// A `complete` migration has no transfer left to prove, so its grid is dropped.
+pub(crate) fn active_anchor_bucket_intervals(
+    conn: &Connection,
+    t: &Tables,
+) -> Result<BTreeSet<NonZeroU32>, Error> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT anchor_bucket_interval FROM {} WHERE status <> ?",
+        t.migrations
+    ))?;
+    let rows = stmt.query_map(params![MigrationStatus::Complete.as_ref()], |row| {
+        row.get::<_, u32>(0)
+    })?;
+    rows.map(|blocks| NonZeroU32::new(blocks?).ok_or(Error::Corrupt("anchor_bucket_interval")))
+        .collect()
+}
+
 fn read_migration(
     conn: &Connection,
     t: &Tables,
@@ -339,7 +368,7 @@ fn read_migration(
         .query_row(
             &format!(
                 "SELECT id, status, note_split_fee_buffer, note_split_change, note_split_prep_fees,
-                        note_split_total_input, note_split_total_migratable
+                        note_split_total_input, note_split_total_migratable, anchor_bucket_interval
                    FROM {} WHERE account_id = ?",
                 t.migrations
             ),
@@ -353,16 +382,28 @@ fn read_migration(
                     row.get::<_, u64>(4)?,
                     row.get::<_, u64>(5)?,
                     row.get::<_, u64>(6)?,
+                    row.get::<_, u32>(7)?,
                 ))
             },
         )
         .optional()?;
 
-    let Some((migration_id, status, fee_buffer, change, prep_fees, total_input, total_migratable)) =
-        row
+    let Some((
+        migration_id,
+        status,
+        fee_buffer,
+        change,
+        prep_fees,
+        total_input,
+        total_migratable,
+        anchor_bucket_interval,
+    )) = row
     else {
         return Ok(None);
     };
+    let anchor_bucket_interval = NonZeroU32::new(anchor_bucket_interval)
+        .map(AnchorBucketInterval::custom)
+        .ok_or(Error::Corrupt("anchor_bucket_interval"))?;
 
     let crossing_values = read_zatoshi_list(conn, t.crossing_values, migration_id)?;
     let note_split = NoteSplitPlan::from_stored_parts(
@@ -385,6 +426,7 @@ fn read_migration(
         note_split,
         preparation,
         transactions,
+        anchor_bucket_interval,
     )))
 }
 
@@ -741,8 +783,10 @@ fn replace_migration(
     tx.execute(
         &format!(
             "INSERT INTO {} (account_id, status, note_split_fee_buffer, note_split_change,
-                             note_split_prep_fees, note_split_total_input, note_split_total_migratable)
-             VALUES (:account_id, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable)",
+                             note_split_prep_fees, note_split_total_input, note_split_total_migratable,
+                             anchor_bucket_interval)
+             VALUES (:account_id, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable,
+                     :anchor_bucket_interval)",
             t.migrations
         ),
         named_params! {
@@ -753,6 +797,7 @@ fn replace_migration(
             ":prep_fees": ns.prep_fees().into_u64(),
             ":total_input": ns.total_input().into_u64(),
             ":total_migratable": ns.total_migratable().into_u64(),
+            ":anchor_bucket_interval": state.anchor_bucket_interval().block_count().get(),
         },
     )?;
     let migration_id = tx.last_insert_rowid();

@@ -86,6 +86,21 @@ pub trait MigrationBackend {
 
     /// The current chain-tip height, from which the transfer schedule's delays accumulate.
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error>;
+
+    /// The parameters this backend's migrations are scheduled under: the anchor bucket grid and the
+    /// transfer and preparation inter-arrival delays.
+    ///
+    /// The engine never takes these as its own argument; it asks the backend, because the anchor
+    /// bucket interval is not free to choose. A transfer proves against the note commitment tree
+    /// state at the boundary it anchored to, which requires the wallet to have RETAINED that
+    /// boundary's checkpoint. Sourcing the interval from the same backend that performs the
+    /// retention is what makes the two grids incapable of disagreeing; a backend that returns an
+    /// interval it does not retain on will produce transfers it cannot prove.
+    ///
+    /// A backend on the production network must return [`SchedulingParams::ZIP_318`].
+    ///
+    /// [`SchedulingParams::ZIP_318`]: crate::scheduling::SchedulingParams::ZIP_318
+    fn scheduling_params(&self) -> crate::scheduling::SchedulingParams;
 }
 
 /// Read access to a persisted pool migration: the store side of the migration interface, mirroring
@@ -479,6 +494,16 @@ pub struct MigrationState {
     /// Every migration transaction, in dependency order.
     #[getset(get = "pub")]
     pub(crate) transactions: Vec<MigrationTransaction>,
+    /// The anchor bucket grid this migration was COMMITTED under, recorded so a later change to the
+    /// wallet's anchor retention interval is caught as a typed error rather than surfacing as an
+    /// unexplained missing checkpoint.
+    ///
+    /// Every transfer's [`anchor_boundary`](MigrationTransaction::anchor_boundary) lies on this
+    /// grid. If the wallet is subsequently reconfigured, it stops retaining these boundaries'
+    /// checkpoints and they are pruned, at which point the committed transfers become unprovable —
+    /// so [`prove_transfer`] and the rebuild path reject the mismatch up front.
+    #[getset(get_copy = "pub")]
+    pub(crate) anchor_bucket_interval: crate::scheduling::AnchorBucketInterval,
 }
 
 impl MigrationState {
@@ -489,12 +514,14 @@ impl MigrationState {
         note_split: NoteSplitPlan,
         preparation: PreparationPlan,
         transactions: Vec<MigrationTransaction>,
+        anchor_bucket_interval: crate::scheduling::AnchorBucketInterval,
     ) -> Self {
         Self {
             status,
             note_split,
             preparation,
             transactions,
+            anchor_bucket_interval,
         }
     }
 
@@ -555,7 +582,8 @@ impl MigrationPlan {
     /// The preparation broadcast schedule, one height per preparation transaction, in the same
     /// `[layer][index]` shape as [`preparation`](Self::preparation)'s layers: exponential
     /// inter-arrival delays with the tighter preparation spacing (see
-    /// [`scheduling::PREP_MEAN_DELAY`]), each layer based past
+    /// [`SchedulingParams::preparation_delay`](scheduling::SchedulingParams::preparation_delay)),
+    /// each layer based past
     /// the previous layer's last height plus a mining margin, so the transactions are temporally
     /// decoupled from one another while the layers stay serialized.
     pub fn prep_schedule(&self) -> &[Vec<BlockHeight>] {
@@ -692,6 +720,9 @@ where
     let commit_height = backend
         .chain_tip_height()
         .map_err(MigrationError::Backend)?;
+    // The anchor grid and delay distributions come from the backend, not from this function's
+    // caller: the grid must be the one the backend retains its anchor checkpoints on.
+    let sched_params = backend.scheduling_params();
 
     // The canonical fees, computed once from the canonical transaction shapes and reused throughout.
     let (prep_tx_fee, transfer_fee_buffer) =
@@ -730,7 +761,12 @@ where
     let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::with_capacity(preparation.layer_count());
     let mut layer_base = commit_height;
     for layer in preparation.layers() {
-        let heights = scheduling::schedule_prep_broadcast_heights(layer_base, layer.len(), rng);
+        let heights = scheduling::schedule_prep_broadcast_heights(
+            &sched_params,
+            layer_base,
+            layer.len(),
+            rng,
+        );
         layer_base = heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS;
         prep_schedule.push(heights);
     }
@@ -748,6 +784,7 @@ where
         .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
         .ok_or(MigrationError::Nu63NotActive)?;
     let schedule_base = commit_height.max(scheduling::earliest_broadcast_height(
+        sched_params.anchor_bucket_interval(),
         nu63_activation,
         est_last_prep_height,
     ));
@@ -757,7 +794,7 @@ where
     // temporal sequence an observer could read the balance back out of. Drawing a uniform
     // permutation and assigning the i-th drawn slot to the permuted crossing makes the
     // broadcast order of denominations independent of the balance.
-    let slots = scheduling::schedule(schedule_base, funding_notes.len(), rng);
+    let slots = scheduling::schedule(&sched_params, schedule_base, funding_notes.len(), rng);
     let mut schedule = slots.clone();
     for (slot, &crossing) in scheduling::shuffle_indices(funding_notes.len(), rng)
         .iter()
@@ -1129,6 +1166,15 @@ pub trait MigrationProver {
         pczt: pczt::Pczt,
         anchor: BlockHeight,
     ) -> Result<pczt::Pczt, Self::Error>;
+
+    /// The anchor bucket grid the wallet backing this prover currently retains its durable anchor
+    /// checkpoints on.
+    ///
+    /// [`prove_transfer`] compares this against the grid the migration was committed under and
+    /// refuses to prove a transfer whose boundary is no longer retained, so a reconfiguration
+    /// mid-migration surfaces as [`ProveError::AnchorIntervalMismatch`] rather than as a bare
+    /// missing checkpoint at witness-resolution time.
+    fn anchor_bucket_interval(&self) -> crate::scheduling::AnchorBucketInterval;
 }
 
 /// Why committing a migration's preparation failed.
@@ -1214,6 +1260,16 @@ pub enum ProveError<E> {
     /// A transfer carries no anchor boundary. Every transfer draws one at scheduling time, so this
     /// indicates a corrupt stored state rather than a normal condition.
     NoAnchorBoundary(MigrationTxId),
+    /// The wallet's anchor retention grid has changed since this migration was committed, so the
+    /// boundaries its transfers anchored to are no longer retained and their checkpoints will have
+    /// been pruned. The migration cannot be proved and must be re-planned under the current grid
+    /// (or the wallet reconfigured back to the committed one).
+    AnchorIntervalMismatch {
+        /// The grid the migration was committed under.
+        committed: crate::scheduling::AnchorBucketInterval,
+        /// The grid the wallet retains on now.
+        configured: crate::scheduling::AnchorBucketInterval,
+    },
     /// The stored PCZT could not be parsed.
     Parse(pczt::ParseError),
     /// The proven PCZT could not be serialized.
@@ -1250,6 +1306,17 @@ impl<E: fmt::Display> fmt::Display for ProveError<E> {
                 f,
                 "transfer {} has no drawn anchor boundary; the stored state is inconsistent",
                 u32::from(*id)
+            ),
+            ProveError::AnchorIntervalMismatch {
+                committed,
+                configured,
+            } => write!(
+                f,
+                "the migration was committed against a {}-block anchor bucket grid, but the wallet \
+                 now retains anchors on a {}-block grid; its transfers' anchors are no longer \
+                 retained",
+                committed.block_count(),
+                configured.block_count()
             ),
             ProveError::Parse(e) => write!(f, "parsing the stored PCZT failed: {e:?}"),
             ProveError::Serialize(e) => write!(f, "serializing the proven PCZT failed: {e:?}"),
@@ -1299,6 +1366,17 @@ where
     let anchor_boundary = tx
         .anchor_boundary()
         .ok_or(ProveError::NoAnchorBoundary(id))?;
+
+    // The stored boundary is only provable while the wallet still retains its checkpoint, which it
+    // does only if it is still retaining on the grid the migration was committed under.
+    let committed = state.anchor_bucket_interval();
+    let configured = prover.anchor_bucket_interval();
+    if committed != configured {
+        return Err(ProveError::AnchorIntervalMismatch {
+            committed,
+            configured,
+        });
+    }
 
     let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
     let proven = prover
@@ -1392,6 +1470,16 @@ pub enum RebuildError<E> {
     /// No candidate anchor boundary exists for the rebuilt schedule (the same stale condition
     /// [`CommitError::StalePlan`] models at commit time): the migration must be re-planned.
     NoCandidateAnchor,
+    /// The backend's anchor bucket grid has changed since this migration was committed. Rebuilding
+    /// would draw the replacement transfer's anchor from the NEW grid while its siblings remain on
+    /// the old one, leaving the migration anchored to two grids of which the wallet retains only
+    /// one. The migration must be re-planned instead.
+    AnchorIntervalMismatch {
+        /// The grid the migration was committed under.
+        committed: crate::scheduling::AnchorBucketInterval,
+        /// The grid the backend schedules against now.
+        configured: crate::scheduling::AnchorBucketInterval,
+    },
     /// Building the fresh transfer PCZT failed.
     Build(crate::build::BuildError),
     /// Serializing the rebuilt PCZT failed.
@@ -1430,6 +1518,16 @@ impl<E: fmt::Display> fmt::Display for RebuildError<E> {
             RebuildError::NoCandidateAnchor => f.write_str(
                 "no candidate anchor boundary exists for the rebuilt schedule; the migration must \
                  be re-planned",
+            ),
+            RebuildError::AnchorIntervalMismatch {
+                committed,
+                configured,
+            } => write!(
+                f,
+                "the migration was committed against a {}-block anchor bucket grid, but the backend \
+                 now schedules against a {}-block grid; the migration must be re-planned",
+                committed.block_count(),
+                configured.block_count()
             ),
             RebuildError::Build(e) => write!(f, "rebuilding the transfer failed: {e}"),
             RebuildError::Serialize(e) => {
@@ -1541,6 +1639,20 @@ where
     B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
     R: RngCore + rand_core::CryptoRng,
 {
+    // A rebuilt transfer draws a fresh anchor. If the backend's grid has moved since the commit,
+    // that anchor would sit on a different grid from its siblings', leaving the migration anchored
+    // to two grids of which the wallet retains only one — so the whole migration must be re-planned.
+    // This invalidates every transfer, not just this one, so it is checked before any condition
+    // specific to `id`.
+    let sched_params = backend.scheduling_params();
+    let committed_interval = state.anchor_bucket_interval();
+    if committed_interval != sched_params.anchor_bucket_interval() {
+        return Err(RebuildError::AnchorIntervalMismatch {
+            committed: committed_interval,
+            configured: sched_params.anchor_bucket_interval(),
+        });
+    }
+
     // The height of the next block this transfer could be mined into, against which expiry is judged.
     let target_height = backend.chain_tip_height().map_err(RebuildError::Backend)? + 1;
 
@@ -1645,11 +1757,16 @@ where
 
     // Reschedule the part with a fresh memoryless delay from the current tip, and derive its new
     // canonical expiry and a fresh boundary anchor for that schedule.
-    let scheduled_height = target_height + scheduling::draw_delay(&mut *rng);
+    let scheduled_height = target_height + sched_params.transfer_delay().draw(&mut *rng);
     let expiry_height = scheduling::expiry_height(scheduled_height);
-    let anchor_boundary =
-        scheduling::draw_anchor_boundary(nu63_activation, funding_creation, scheduled_height, rng)
-            .ok_or(RebuildError::NoCandidateAnchor)?;
+    let anchor_boundary = scheduling::draw_anchor_boundary(
+        sched_params.anchor_bucket_interval(),
+        nu63_activation,
+        funding_creation,
+        scheduled_height,
+        rng,
+    )
+    .ok_or(RebuildError::NoCandidateAnchor)?;
 
     // Build the entirely new transfer against the same funding note and crossing value; anchors
     // and witnesses stay deferred (installed at proving time, ZIP 374). The expired artifact
@@ -2265,6 +2382,9 @@ where
             .params
             .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
             .ok_or(CommitError::Nu63NotActive)?;
+        // The grid to draw from is the backend's, so the boundary each transfer anchors to is one
+        // whose checkpoint that backend retains.
+        let anchor_bucket_interval = self.backend.scheduling_params().anchor_bucket_interval();
         for (crossing, schedule) in plan.schedule().iter().enumerate() {
             let id = self.next_id();
 
@@ -2313,6 +2433,7 @@ where
             )
             .map_err(CommitError::Build)?;
             let anchor_boundary = scheduling::draw_anchor_boundary(
+                anchor_bucket_interval,
                 nu63_activation,
                 est_last_prep_height,
                 schedule.broadcast_height(),
@@ -2355,6 +2476,9 @@ where
             note_split: plan.note_split().clone(),
             preparation: plan.preparation().clone(),
             transactions: self.transactions,
+            // Stamp the grid the transfers were anchored to, so a later reconfiguration of the
+            // backend is detectable rather than silently invalidating them.
+            anchor_bucket_interval: self.backend.scheduling_params().anchor_bucket_interval(),
         };
         CommitOutput {
             state,
@@ -2426,6 +2550,7 @@ mod tests {
         notes: Vec<Zatoshis>,
         tip: BlockHeight,
         stored: Option<MigrationState>,
+        sched_params: crate::scheduling::SchedulingParams,
     }
 
     impl MockBackend {
@@ -2437,6 +2562,7 @@ mod tests {
                     .collect(),
                 tip: BlockHeight::from_u32(tip),
                 stored: None,
+                sched_params: crate::scheduling::SchedulingParams::ZIP_318,
             }
         }
     }
@@ -2450,6 +2576,10 @@ mod tests {
 
         fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
             Ok(self.tip)
+        }
+
+        fn scheduling_params(&self) -> crate::scheduling::SchedulingParams {
+            self.sched_params
         }
     }
 
@@ -2518,8 +2648,11 @@ mod tests {
             .copied()
             .unwrap_or(BlockHeight::from_u32(2_000_000))
             + EST_PREP_LAYER_MINING_BLOCKS;
-        let earliest =
-            crate::scheduling::earliest_broadcast_height(BlockHeight::from_u32(10), est_last_prep);
+        let earliest = crate::scheduling::earliest_broadcast_height(
+            crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+            BlockHeight::from_u32(10),
+            est_last_prep,
+        );
         assert!(
             plan.schedule()
                 .iter()
@@ -2730,6 +2863,7 @@ mod tests {
             note_split,
             preparation: crate::preparation::PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions: vec![tx],
+            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
         };
         backend.replace_migration(&state).unwrap();
 
@@ -2798,6 +2932,7 @@ mod commit_tests {
         ask: SpendAuthorizingKey,
         stored: Option<MigrationState>,
         tip: BlockHeight,
+        sched_params: crate::scheduling::SchedulingParams,
     }
 
     impl CommitMock {
@@ -2816,6 +2951,7 @@ mod commit_tests {
                 ask: SpendAuthorizingKey::from(&sk),
                 stored: None,
                 tip: BlockHeight::from_u32(2_000_000),
+                sched_params: crate::scheduling::SchedulingParams::ZIP_318,
             }
         }
     }
@@ -2833,6 +2969,10 @@ mod commit_tests {
 
         fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
             Ok(self.tip)
+        }
+
+        fn scheduling_params(&self) -> crate::scheduling::SchedulingParams {
+            self.sched_params
         }
     }
 
@@ -2896,6 +3036,10 @@ mod commit_tests {
             // passing the persisted `anchor_boundary`, and the Signed -> Proved transition) is what
             // the tests exercise.
             Ok(pczt)
+        }
+
+        fn anchor_bucket_interval(&self) -> crate::scheduling::AnchorBucketInterval {
+            self.sched_params.anchor_bucket_interval()
         }
 
         fn prove_preparation(
@@ -3003,15 +3147,12 @@ mod commit_tests {
                         tx.anchor_boundary
                             .expect("every transfer carries its boundary"),
                     );
-                    assert_eq!(b % crate::scheduling::BOUNDARY_MODULUS, 0);
+                    let interval =
+                        crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval();
+                    assert!(interval.is_boundary(BlockHeight::from_u32(b)));
                     assert!(b > 10, "boundary above the regtest NU6.3 activation");
-                    assert!(
-                        b >= u32::from(est_last_prep).div_ceil(crate::scheduling::BOUNDARY_MODULUS)
-                            * crate::scheduling::BOUNDARY_MODULUS
-                    );
-                    assert!(
-                        b < u32::from(crate::scheduling::most_recent_boundary(tx.scheduled_height))
-                    );
+                    assert!(b >= u32::from(interval.boundary_at_or_above(est_last_prep)));
+                    assert!(b < u32::from(interval.boundary_at_or_below(tx.scheduled_height)));
                 }
             }
         }
@@ -3097,13 +3238,9 @@ mod commit_tests {
             new.anchor_boundary
                 .expect("the rebuilt transfer carries a boundary"),
         );
-        assert_eq!(boundary % crate::scheduling::BOUNDARY_MODULUS, 0);
-        assert!(
-            boundary
-                < u32::from(crate::scheduling::most_recent_boundary(
-                    new.scheduled_height
-                ))
-        );
+        let interval = crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval();
+        assert!(interval.is_boundary(BlockHeight::from_u32(boundary)));
+        assert!(boundary < u32::from(interval.boundary_at_or_below(new.scheduled_height)));
 
         // The rebuilt PCZT is a valid pre-signed transfer with deferred anchors and the new expiry.
         let parsed = pczt::Pczt::parse(&new.pczt).expect("the rebuilt PCZT parses");
@@ -3419,6 +3556,7 @@ mod commit_tests {
         let mut layer_base = BlockHeight::from_u32(2_000_000);
         for layer in preparation.layers() {
             let heights = crate::scheduling::schedule_prep_broadcast_heights(
+                &crate::scheduling::SchedulingParams::ZIP_318,
                 layer_base,
                 layer.len(),
                 &mut rng,
@@ -3435,9 +3573,17 @@ mod commit_tests {
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .expect("NU6.3 is active on the test network")
         };
-        let schedule_base =
-            crate::scheduling::earliest_broadcast_height(nu63_activation, layer_base);
-        let schedule = crate::scheduling::schedule(schedule_base, funding.len(), &mut rng);
+        let schedule_base = crate::scheduling::earliest_broadcast_height(
+            crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval(),
+            nu63_activation,
+            layer_base,
+        );
+        let schedule = crate::scheduling::schedule(
+            &crate::scheduling::SchedulingParams::ZIP_318,
+            schedule_base,
+            funding.len(),
+            &mut rng,
+        );
         let plan = MigrationPlan {
             note_split,
             preparation,
@@ -3451,6 +3597,7 @@ mod commit_tests {
             ask: SpendAuthorizingKey::from(&sk),
             stored: None,
             tip: BlockHeight::from_u32(2_000_000),
+            sched_params: crate::scheduling::SchedulingParams::ZIP_318,
         };
         let params = regtest_network(true);
         let prep_count = plan.preparation().transaction_count();
@@ -3924,5 +4071,76 @@ mod commit_tests {
             prove_transfer(&mut backend, &mut state, prep_id),
             Err(ProveError::NotATransfer(_))
         ));
+    }
+
+    /// A committed migration records the anchor bucket grid it was scheduled against, and both the
+    /// proving and rebuild paths refuse to act once the backend's grid has moved.
+    ///
+    /// Without this, a wallet reconfigured mid-migration would stop retaining the boundaries its
+    /// transfers anchored to; the failure would only appear much later, as an unexplained missing
+    /// checkpoint at witness-resolution time.
+    #[test]
+    fn a_changed_anchor_grid_is_rejected_rather_than_left_unprovable() {
+        use crate::scheduling::{AnchorBucketInterval, SchedulingParams};
+        use core::num::NonZeroU32;
+
+        let seed = 7u64;
+        let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration");
+
+        // The grid the backend was committed under is recorded on the state.
+        let committed = AnchorBucketInterval::ZIP_318;
+        assert_eq!(state.anchor_bucket_interval(), committed);
+
+        // Reconfigure the backend onto a different grid, as an application would by changing its
+        // wallet's anchor retention interval.
+        let moved = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+        backend.sched_params = SchedulingParams::new(
+            moved,
+            SchedulingParams::ZIP_318.transfer_delay(),
+            SchedulingParams::ZIP_318.preparation_delay(),
+        );
+
+        let transfer_id = state
+            .transactions
+            .iter()
+            .find(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
+            .expect("a committed migration has transfers")
+            .id;
+
+        // Proving reports the mismatch instead of resolving a boundary the wallet no longer retains.
+        assert!(matches!(
+            prove_transfer(&mut backend, &mut state, transfer_id),
+            Err(ProveError::AnchorIntervalMismatch {
+                committed: c,
+                configured: g,
+            }) if c == committed && g == moved
+        ));
+
+        // Rebuilding is rejected too, ahead of any per-transfer condition: a fresh anchor would
+        // come from the new grid while the siblings' remain on the old one, so the whole migration
+        // is invalid rather than this transfer being repairable.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, transfer_id, &mut rng),
+            Err(RebuildError::AnchorIntervalMismatch {
+                committed: c,
+                configured: g,
+            }) if c == committed && g == moved
+        ));
+
+        // Restoring the committed grid makes the migration provable again.
+        backend.sched_params = SchedulingParams::ZIP_318;
+        prove_transfer(&mut backend, &mut state, transfer_id)
+            .expect("the transfer proves once the grid matches again");
     }
 }

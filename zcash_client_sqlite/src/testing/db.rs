@@ -22,6 +22,7 @@ use shardtree::{ShardTree, error::ShardTreeError};
 use zcash_client_backend::{
     data_api::{
         TargetValue,
+        anchor_retention::AnchorRetentionInterval,
         chain::{ChainState, CommitmentTreeRoot},
         error::{LockError, RewindError},
         scanning::{ScanPriority, ScanRange},
@@ -205,11 +206,15 @@ impl DataStoreFactory for TestDbFactory {
     fn new_data_store(
         &self,
         network: LocalNetwork,
+        anchor_retention_interval: Option<AnchorRetentionInterval>,
         #[cfg(feature = "transparent-inputs")] gap_limits: Option<GapLimits>,
     ) -> Result<Self::DataStore, Self::Error> {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =
             WalletDb::for_path(data_file.path(), network, test_clock(), test_rng()).unwrap();
+        if let Some(interval) = anchor_retention_interval {
+            db_data = db_data.with_anchor_retention_interval(interval);
+        }
         #[cfg(feature = "transparent-inputs")]
         if let Some(gap_limits) = gap_limits {
             db_data = db_data.with_gap_limits(gap_limits);
@@ -234,6 +239,7 @@ impl Reset for TestDb {
 
     fn reset<C>(st: &mut TestState<C, Self, LocalNetwork>) -> NamedTempFile {
         let network = *st.network();
+        let anchor_retention_interval = st.wallet().db().anchor_retention_interval;
         #[cfg(feature = "transparent-inputs")]
         let gap_limits = st.wallet().db().gap_limits;
         let old_db = std::mem::replace(
@@ -241,6 +247,7 @@ impl Reset for TestDb {
             TestDbFactory::default()
                 .new_data_store(
                     network,
+                    Some(anchor_retention_interval),
                     #[cfg(feature = "transparent-inputs")]
                     Some(gap_limits),
                 )

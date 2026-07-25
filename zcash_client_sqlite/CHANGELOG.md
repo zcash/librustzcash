@@ -49,6 +49,16 @@ workspace.
   and `transparent_received_outputs` tables to support explicit note locking
   during concurrent proposal creation: `lock_expiry_height` bounds how long a
   lock lasts, and `lock_owner` records the flow that acquired it.
+- `zcash_client_sqlite::WalletDb::with_anchor_retention_interval` configures the
+  interval on which the wallet retains note commitment tree checkpoints as
+  durable anchors, for use on test networks where waiting out the ZIP 318
+  144-block interval makes exercising a pool migration impractical. The setting
+  governs what grid the next migration is planned against; the grid an in-flight
+  migration was committed under is recorded with it and keeps being retained
+  regardless, so reopening the wallet without reapplying the setting cannot
+  strand a migration.
+- `zcash_client_sqlite::WalletDb::set_anchor_retention_interval`, the
+  by-reference form of `with_anchor_retention_interval`.
 
 ### Fixed
 - The coinbase branch of the transparent account-balance tally now classifies

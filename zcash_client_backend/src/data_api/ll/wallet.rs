@@ -26,7 +26,8 @@ use crate::{
     TransferType,
     data_api::{
         DecryptedTransaction, SAPLING_SHARD_HEIGHT, ScannedBlock, TransactionStatus,
-        WalletCommitmentTrees, chain::ChainState, ll::ReceivedShieldedOutput,
+        WalletCommitmentTrees, anchor_retention::AnchorRetention, chain::ChainState,
+        ll::ReceivedShieldedOutput,
     },
     wallet::{Recipient, WalletTransparentOutput},
 };
@@ -618,15 +619,16 @@ where
 /// - `blocks`: The scanned block data to be added to the data store. This vector must contain
 ///   data for blocks in sequentially increasing height order;
 ///   [`PutBlocksError::NonSequentialBlocks`] will be returned if this invariant is violated.
-/// - `anchor_retention_height`: If `Some(h)`, checkpoints established at or above height `h` whose
-///   height falls on the [`ANCHOR_RETENTION_INTERVAL`] are retained as durable anchors, exempting
-///   them from automatic pruning of excess checkpoints. `None` disables anchor retention.
+/// - `anchor_retention`: If `Some(retention)`, the checkpoints the policy
+///   [retains](AnchorRetention::retains) — those at or above its floor that fall on its interval —
+///   are kept as durable anchors, exempting them from automatic pruning of excess checkpoints.
+///   `None` disables anchor retention.
 pub fn put_blocks<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
     from_state: &ChainState,
     blocks: Vec<ScannedBlock<<DbT as LowLevelWalletRead>::AccountId>>,
-    anchor_retention_height: Option<BlockHeight>,
+    anchor_retention: Option<&AnchorRetention>,
 ) -> Result<(), PutBlocksError<SE, TE>>
 where
     DbT: PutBlocksDbT<SE, TE, <DbT as LowLevelWalletRead>::AccountRef>,
@@ -724,7 +726,7 @@ where
                     from_state.final_sapling_tree(),
                     from_state.block_height(),
                     sapling_tree,
-                    anchor_retention_height,
+                    anchor_retention,
                     &mut sapling_subtrees,
                     #[cfg(feature = "orchard")]
                     &mut missing_checkpoints,
@@ -748,7 +750,7 @@ where
                     from_state.final_orchard_tree(),
                     from_state.block_height(),
                     orchard_tree,
-                    anchor_retention_height,
+                    anchor_retention,
                     &mut orchard_subtrees,
                     &mut missing_checkpoints,
                 )
@@ -771,7 +773,7 @@ where
                     from_state.final_ironwood_tree(),
                     from_state.block_height(),
                     ironwood_tree,
-                    anchor_retention_height,
+                    anchor_retention,
                     &mut ironwood_subtrees,
                     &mut missing_checkpoints,
                 )
@@ -1604,31 +1606,24 @@ fn should_track_nullifiers(
     nullifier_tracking_floor.is_none_or(|floor| block_height >= floor)
 }
 
-/// The interval, in blocks, at which checkpoints are retained as durable "anchors" once anchor
-/// retention is active. At 75-second blocks this is roughly every 3 hours (8 per day).
-pub(crate) const ANCHOR_RETENTION_INTERVAL: u32 = 144;
-
-/// Returns whether the checkpoint at `height` should be retained as a durable anchor.
-///
-/// Anchor retention is active for `height` when `anchor_retention_height` is `Some` and `height`
-/// is at or above it (i.e. at or after the network upgrade that enables anchor retention), and
-/// `height` falls on the [`ANCHOR_RETENTION_INTERVAL`].
-fn should_retain_anchor(anchor_retention_height: Option<BlockHeight>, height: BlockHeight) -> bool {
-    anchor_retention_height.is_some_and(|floor| height >= floor)
-        && u32::from(height) % ANCHOR_RETENTION_INTERVAL == 0
+/// Returns whether the checkpoint at `height` should be retained as a durable anchor: anchor
+/// retention is enabled at all (`anchor_retention` is `Some`) and its policy
+/// [retains](AnchorRetention::retains) `height`.
+fn should_retain_anchor(anchor_retention: Option<&AnchorRetention>, height: BlockHeight) -> bool {
+    anchor_retention.is_some_and(|retention| retention.retains(height))
 }
 
 /// Retains `height` as a durable anchor checkpoint when [`should_retain_anchor`] holds.
 fn retain_anchor_checkpoint<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
-    anchor_retention_height: Option<BlockHeight>,
+    anchor_retention: Option<&AnchorRetention>,
     height: BlockHeight,
 ) -> Result<(), ShardTreeError<S::Error>>
 where
     S: ShardStore<CheckpointId = BlockHeight>,
     S::H: Clone + PartialEq + Hashable,
 {
-    if should_retain_anchor(anchor_retention_height, height) {
+    if should_retain_anchor(anchor_retention, height) {
         tree.ensure_retained(height)?;
     }
     Ok(())
@@ -1663,8 +1658,8 @@ pub fn cross_pool_ensure_heights(
 /// Updates the given note commitment tree with all newly read note commitments starting
 /// at the block `frontier_height + 1`.
 ///
-/// If `anchor_retention_height` is `Some`, every checkpoint established at or above that height
-/// whose height falls on the [`ANCHOR_RETENTION_INTERVAL`] is retained as a durable anchor.
+/// If `anchor_retention` is `Some`, every checkpoint the policy
+/// [retains](AnchorRetention::retains) is kept as a durable anchor.
 ///
 /// This is generic over the [`ShardStore`] backing the tree, so stores that maintain their note
 /// commitment trees by other means (for example, accumulating updates in memory and flushing
@@ -1674,7 +1669,7 @@ pub fn update_tree<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
     frontier: &Frontier<S::H, DEPTH>,
     frontier_height: BlockHeight,
     tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
-    anchor_retention_height: Option<BlockHeight>,
+    anchor_retention: Option<&AnchorRetention>,
     subtrees: impl Iterator<Item = (LocatedPrunableTree<S::H>, BTreeMap<BlockHeight, Position>)>,
     #[cfg(feature = "orchard")] missing_checkpoints: impl Iterator<Item = (BlockHeight, Checkpoint)>,
 ) -> Result<(), ShardTreeError<S::Error>>
@@ -1695,7 +1690,7 @@ where
             marking: Marking::Reference,
         },
     )?;
-    retain_anchor_checkpoint(tree, anchor_retention_height, frontier_height)?;
+    retain_anchor_checkpoint(tree, anchor_retention, frontier_height)?;
 
     for (subtree, checkpoints) in subtrees {
         // Register anchor retention for this batch's checkpoint heights *before* `insert_tree`,
@@ -1704,7 +1699,7 @@ where
         // retention must be recorded first; `ShardTree::ensure_retained` accepts a checkpoint
         // height whose checkpoint does not yet exist.
         for height in checkpoints.keys() {
-            retain_anchor_checkpoint(tree, anchor_retention_height, *height)?;
+            retain_anchor_checkpoint(tree, anchor_retention, *height)?;
         }
         tree.insert_tree(subtree, checkpoints)?;
     }
@@ -1730,7 +1725,7 @@ where
                 tree.store_mut()
                     .add_checkpoint(height, checkpoint.clone())
                     .map_err(ShardTreeError::Storage)?;
-                retain_anchor_checkpoint(tree, anchor_retention_height, height)?;
+                retain_anchor_checkpoint(tree, anchor_retention, height)?;
             }
         }
     }
@@ -1743,15 +1738,18 @@ mod tests {
     #[cfg(feature = "orchard")]
     use std::collections::BTreeSet;
 
+    use core::num::NonZeroU32;
+
     use proptest::prelude::*;
     use zcash_protocol::consensus::BlockHeight;
 
     #[cfg(feature = "orchard")]
     use super::cross_pool_ensure_heights;
     use super::{
-        ANCHOR_RETENTION_INTERVAL, NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor,
-        should_retain_anchor, should_track_nullifiers,
+        NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor, should_retain_anchor,
+        should_track_nullifiers,
     };
+    use crate::data_api::anchor_retention::{AnchorRetention, AnchorRetentionInterval};
 
     /// A range scanned after a gap of unscanned history (or below the frontier, or with no
     /// frontier at all) must track every nullifier: a skipped entry could belong to a note
@@ -1824,39 +1822,48 @@ mod tests {
         assert!(!should_track_nullifiers(Some(floor), BlockHeight::from(0)));
     }
 
+    /// The gating semantics hold identically at the ZIP 318 interval and at a non-default one, so
+    /// a wallet configured with a short interval retains exactly its own grid.
     #[test]
     fn anchor_retention_gating() {
-        let interval = ANCHOR_RETENTION_INTERVAL;
-        let floor = BlockHeight::from(4 * interval);
+        for interval in [
+            AnchorRetentionInterval::ZIP_318,
+            AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero")),
+        ] {
+            let blocks = interval.block_count().get();
+            let floor = BlockHeight::from(4 * blocks);
+            let policy = AnchorRetention::new(floor, interval);
+            let retention = Some(&policy);
 
-        // With no retention floor, nothing is retained, even on the interval.
-        assert!(!should_retain_anchor(None, BlockHeight::from(8 * interval)));
+            // With retention disabled, nothing is retained, even on the interval.
+            assert!(!should_retain_anchor(None, BlockHeight::from(8 * blocks)));
 
-        // On the interval and at or above the floor: retained.
-        assert!(should_retain_anchor(
-            Some(floor),
-            BlockHeight::from(4 * interval)
-        ));
-        assert!(should_retain_anchor(
-            Some(floor),
-            BlockHeight::from(8 * interval)
-        ));
+            // On the interval and at or above the floor: retained.
+            assert!(should_retain_anchor(
+                retention,
+                BlockHeight::from(4 * blocks)
+            ));
+            assert!(should_retain_anchor(
+                retention,
+                BlockHeight::from(8 * blocks)
+            ));
 
-        // On the interval but below the floor: not retained.
-        assert!(!should_retain_anchor(
-            Some(floor),
-            BlockHeight::from(3 * interval)
-        ));
+            // On the interval but below the floor: not retained.
+            assert!(!should_retain_anchor(
+                retention,
+                BlockHeight::from(3 * blocks)
+            ));
 
-        // At or above the floor but not on the interval: not retained.
-        assert!(!should_retain_anchor(
-            Some(floor),
-            BlockHeight::from(4 * interval + 1)
-        ));
-        assert!(!should_retain_anchor(
-            Some(floor),
-            BlockHeight::from(5 * interval - 1)
-        ));
+            // At or above the floor but not on the interval: not retained.
+            assert!(!should_retain_anchor(
+                retention,
+                BlockHeight::from(4 * blocks + 1)
+            ));
+            assert!(!should_retain_anchor(
+                retention,
+                BlockHeight::from(5 * blocks - 1)
+            ));
+        }
     }
 
     #[cfg(feature = "orchard")]

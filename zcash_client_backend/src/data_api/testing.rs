@@ -52,6 +52,7 @@ use super::{
     ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance,
     SentTransaction, TransactionDataRequest, TransactionStatus, WalletCommitmentTrees, WalletRead,
     WalletSummary, WalletTest, WalletWrite, Zip32Derivation,
+    anchor_retention::AnchorRetentionInterval,
     chain::{BlockSource, ChainState, CommitmentTreeRoot, ScanSummary, scan_cached_blocks},
     error::Error,
     scanning::{ScanPriority, ScanRange},
@@ -1631,6 +1632,7 @@ pub trait DataStoreFactory {
     fn new_data_store(
         &self,
         network: LocalNetwork,
+        anchor_retention_interval: Option<AnchorRetentionInterval>,
         #[cfg(feature = "transparent-inputs")] gap_limits: Option<GapLimits>,
     ) -> Result<Self::DataStore, Self::Error>;
 }
@@ -1644,6 +1646,7 @@ pub struct TestBuilder<Cache, DataStoreFactory> {
     initial_chain_state: Option<InitialChainState>,
     account_birthday: Option<AccountBirthday>,
     account_index: Option<zip32::AccountId>,
+    anchor_retention_interval: Option<AnchorRetentionInterval>,
     #[cfg(feature = "transparent-inputs")]
     gap_limits: Option<GapLimits>,
 }
@@ -1678,6 +1681,7 @@ impl TestBuilder<(), ()> {
             initial_chain_state: None,
             account_birthday: None,
             account_index: None,
+            anchor_retention_interval: None,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: None,
         }
@@ -1701,6 +1705,7 @@ impl<A> TestBuilder<(), A> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            anchor_retention_interval: self.anchor_retention_interval,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         }
@@ -1721,6 +1726,7 @@ impl<A> TestBuilder<A, ()> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            anchor_retention_interval: self.anchor_retention_interval,
             #[cfg(feature = "transparent-inputs")]
             gap_limits: self.gap_limits,
         }
@@ -1738,6 +1744,16 @@ impl<A, B> TestBuilder<A, B> {
         self
     }
 
+    /// Overrides the interval on which the wallet retains durable anchor checkpoints (the default
+    /// is [`AnchorRetentionInterval::ZIP_318`]).
+    ///
+    /// A test that must scan past a retained anchor otherwise has to generate 144 blocks per
+    /// boundary; a short interval makes the same coverage cheap.
+    pub fn with_anchor_retention_interval(mut self, interval: AnchorRetentionInterval) -> Self {
+        self.anchor_retention_interval = Some(interval);
+        self
+    }
+
     #[cfg(feature = "transparent-inputs")]
     pub fn with_gap_limits(self, gap_limits: GapLimits) -> TestBuilder<A, B> {
         TestBuilder {
@@ -1748,6 +1764,7 @@ impl<A, B> TestBuilder<A, B> {
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
+            anchor_retention_interval: self.anchor_retention_interval,
             gap_limits: Some(gap_limits),
         }
     }
@@ -1915,6 +1932,7 @@ impl<Cache, DsFactory: DataStoreFactory> TestBuilder<Cache, DsFactory> {
             .ds_factory
             .new_data_store(
                 self.network,
+                self.anchor_retention_interval,
                 #[cfg(feature = "transparent-inputs")]
                 self.gap_limits,
             )

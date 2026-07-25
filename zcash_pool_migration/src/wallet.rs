@@ -51,6 +51,7 @@ use crate::engine::{
     MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTxId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
+use crate::scheduling::{AnchorBucketInterval, DelayDistribution, SchedulingParams};
 
 /// A failure of the wallet-backed migration adapter. Parameterized by the error types of the two
 /// wallet traits and the store, which for `zcash_client_sqlite`'s `WalletDb` are all one type but in
@@ -119,6 +120,9 @@ where
     account: <W as InputSource>::AccountId,
     usk: UnifiedSpendingKey,
     store: St,
+    /// The inter-arrival delays to schedule under, or `None` to derive them from the wallet's own
+    /// anchor bucket interval by the ZIP 318 ratios.
+    scheduling_delays: Option<(DelayDistribution, DelayDistribution)>,
 }
 
 impl<'a, W, St> WalletMigration<'a, W, St>
@@ -128,6 +132,13 @@ where
     St: PoolMigrationRead,
 {
     /// Wrap a wallet, an account, its spending key, and a store as a migration wallet.
+    ///
+    /// The migration is scheduled under the wallet's own anchor retention interval — not
+    /// configurable here; see [`MigrationBackend::scheduling_params`] — with inter-arrival delays
+    /// derived from that interval by the ZIP 318 ratios. A wallet on the standard grid therefore
+    /// gets exactly the ZIP 318 delays, and a wallet configured with a shortened grid gets the same
+    /// schedule shape compressed by the same factor, rather than a short grid crossed with
+    /// three-hour delays. Override the delays with [`Self::with_scheduling_delays`].
     pub fn new(
         wallet: &'a W,
         account: <W as InputSource>::AccountId,
@@ -139,7 +150,22 @@ where
             account,
             usk,
             store,
+            scheduling_delays: None,
         }
+    }
+
+    /// Sets the inter-arrival delay distributions between successive transfer and preparation
+    /// broadcasts, replacing the ones otherwise derived from the wallet's anchor bucket interval.
+    ///
+    /// Only the delays are settable. The anchor bucket interval is read from the wallet, because a
+    /// transfer can only be proved against a boundary whose checkpoint the wallet retained.
+    pub fn with_scheduling_delays(
+        mut self,
+        transfer_delay: DelayDistribution,
+        preparation_delay: DelayDistribution,
+    ) -> Self {
+        self.scheduling_delays = Some((transfer_delay, preparation_delay));
+        self
     }
 
     /// Recover the store.
@@ -209,6 +235,20 @@ where
             .chain_height()
             .map_err(Error::WalletRead)?
             .ok_or(Error::ChainTipUnknown)
+    }
+
+    /// The anchor bucket interval is the wallet's own anchor retention interval, converted; the
+    /// delays are derived from it unless [`Self::with_scheduling_delays`] overrode them. Deriving
+    /// the grid from the wallet rather than accepting it here is what makes it impossible for a
+    /// migration to anchor to a boundary whose checkpoint the wallet has not retained.
+    fn scheduling_params(&self) -> SchedulingParams {
+        let interval = self.wallet.anchor_retention_interval().into();
+        match self.scheduling_delays {
+            Some((transfer_delay, preparation_delay)) => {
+                SchedulingParams::new(interval, transfer_delay, preparation_delay)
+            }
+            None => SchedulingParams::new_with_default_distributions(interval),
+        }
     }
 }
 
@@ -608,6 +648,13 @@ where
         anchor: BlockHeight,
     ) -> Result<::pczt::Pczt, Self::Error> {
         self.prove_orchard(pczt, anchor)
+    }
+
+    /// The grid the wallet this prover reads its commitment trees from currently retains anchor
+    /// checkpoints on, so a transfer committed against a different grid is rejected before its
+    /// (by then pruned) checkpoint is looked up.
+    fn anchor_bucket_interval(&self) -> AnchorBucketInterval {
+        self.wallet.anchor_retention_interval().into()
     }
 }
 
