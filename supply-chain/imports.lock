@@ -9,6 +9,10 @@ audited_as = "0.24.0-rc.1"
 version = "0.16.0"
 audited_as = "0.15.0"
 
+[[unpublished.zcash_pool_migration]]
+version = "0.1.0-rc.1"
+audited_as = "0.1.0-alpha.1"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
