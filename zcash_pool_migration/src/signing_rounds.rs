@@ -498,52 +498,6 @@ fn div_ceil_u64(a: u64, b: u64) -> u64 {
 mod tests {
     use super::*;
 
-    fn synth(n_prep: usize, n_transfer: usize) -> Vec<PlannedTx> {
-        let mut txs = Vec::new();
-        let mut id = 0u32;
-        for i in 0..n_prep {
-            txs.push(PlannedTx::new(
-                MigrationTxId::new(id),
-                MigrationTxKind::Preparation { layer: 0, index: i },
-            ));
-            id += 1;
-        }
-        for c in 0..n_transfer {
-            txs.push(PlannedTx::new(
-                MigrationTxId::new(id),
-                MigrationTxKind::Transfer { crossing: c },
-            ));
-            id += 1;
-        }
-        txs
-    }
-
-    // A brute-force minimum round count for small instances, to check `MinRounds` optimality.
-    fn brute_min_rounds(n_prep: usize, n_transfer: usize, cap: u32) -> usize {
-        // Try increasing round counts; feasible if preparations fit (<= mp each) and transfers fit
-        // in the residual capacity, maximizing residual by an inner DP identical to production.
-        if n_prep == 0 && n_transfer == 0 {
-            return 0;
-        }
-        let w_hi = PREPARATION_ACTIONS;
-        let w_lo = TRANSFER_ACTIONS;
-        if cap < w_hi {
-            let per = (cap / w_lo).max(1) as usize;
-            return n_prep + n_transfer.div_ceil(per);
-        }
-        let mp = (cap / w_hi) as usize;
-        let lo_cap = |k: usize| -> usize { ((cap - (k as u32) * w_hi) / w_lo) as usize };
-        for r in 1.. {
-            if r * mp < n_prep {
-                continue;
-            }
-            if best_prep_distribution(n_prep, mp, &lo_cap, r, n_transfer).is_some() {
-                return r;
-            }
-        }
-        unreachable!()
-    }
-
     fn assert_valid(
         strategy: &dyn SigningRoundStrategy,
         n_prep: usize,
@@ -551,7 +505,7 @@ mod tests {
         cap: u32,
     ) {
         let budget = SigningRoundBudget::new(NonZeroU32::new(cap).unwrap());
-        let txs = synth(n_prep, n_transfer);
+        let txs = crate::testing::planned_txs(n_prep, n_transfer);
         let rounds = strategy.pack(&txs, budget);
         // Coverage: every id exactly once.
         let mut ids: Vec<u32> = rounds
@@ -591,16 +545,13 @@ mod tests {
     }
 
     #[test]
-    fn min_rounds_matches_brute_force() {
+    fn min_rounds_matches_the_reference() {
         for n_prep in 0..14 {
             for n_transfer in 0..40 {
                 for &cap in &[16u32, 18, 24, 48, 96, 100] {
-                    let want = brute_min_rounds(n_prep, n_transfer, cap);
-                    let got = min_signing_rounds(
-                        n_prep,
-                        n_transfer,
-                        SigningRoundBudget::new(NonZeroU32::new(cap).unwrap()),
-                    );
+                    let budget = SigningRoundBudget::new(NonZeroU32::new(cap).unwrap());
+                    let want = crate::testing::min_rounds_reference(n_prep, n_transfer, budget);
+                    let got = min_signing_rounds(n_prep, n_transfer, budget);
                     assert_eq!(
                         got, want,
                         "n_prep={n_prep} n_transfer={n_transfer} cap={cap}"

@@ -21,23 +21,21 @@
 
 use core::num::NonZeroU32;
 
-use orchard::keys::SpendAuthorizingKey;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::COIN;
 
-use zcash_pool_migration::build::sign_pczt;
 use zcash_pool_migration::engine::{
-    MigrationPlan, MigrationTxState, PoolMigrationWrite, build_preparation_unsigned,
-    estimate_migration_runs, plan_migration,
+    MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
+    UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
 };
 #[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::note_splitting::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
 use zcash_pool_migration::signing_rounds::{MinRounds, NextFit, SigningRoundBudget};
 #[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::testing::MIGRATION_SCENARIOS;
-use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};
+use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network};
 
 /// Plan a migration for a wallet holding the given raw note values (in zatoshi).
 fn plan_notes(seed: u64, notes: &[u64]) -> (CommitMock, MigrationPlan) {
@@ -54,22 +52,22 @@ fn plan_for(seed: u64, values_zec: &[u64]) -> (CommitMock, MigrationPlan) {
     plan_notes(seed, &notes)
 }
 
-/// Sign one round's unsigned PCZTs on the "device" and apply the signatures back, exactly as a
-/// wallet does with the bytes a Keystone returns.
-fn sign_round_and_apply(
-    seed: u64,
-    state: &mut zcash_pool_migration::engine::MigrationState,
-    round: Vec<zcash_pool_migration::engine::UnsignedMigrationTx>,
-) {
-    let ask = SpendAuthorizingKey::from(&spending_key(seed));
+/// Sign one round's unsigned PCZTs with the wallet's signer and apply the signatures back. The
+/// `signer` is anything implementing [`MigrationCrypto`] — the trait a wallet plugs its Orchard
+/// spend authority into (here the `CommitMock` backend; a real wallet passes its own implementation,
+/// or routes the bytes to a hardware device that returns the signed PCZT).
+fn sign_round_and_apply<C>(signer: &C, state: &mut MigrationState, round: Vec<UnsignedMigrationTx>)
+where
+    C: MigrationCrypto,
+    C::Error: std::fmt::Debug,
+{
     for unsigned_tx in round {
-        // The wallet keeps the id to match the signed PCZT back; the bytes go to the device.
+        // The wallet keeps the id to match the signed PCZT back; the bytes go to the signer.
         let (id, bytes) = unsigned_tx.into_parts();
-        let signed = sign_pczt(
-            pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses"),
-            &ask,
-        )
-        .expect("the device signs the transaction");
+        let unsigned = pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses");
+        let signed = signer
+            .sign(unsigned)
+            .expect("the signer authorizes the transaction");
         assert!(state.apply_signature(id, signed.serialize().expect("serializes the signed PCZT")));
     }
 }
@@ -132,11 +130,12 @@ fn keystone_external_signing_end_to_end() {
         "signing matches the preview exactly"
     );
 
-    // 5. Sign each round on the device and apply the signatures.
+    // 5. Sign each round with the wallet's signer (its `MigrationCrypto` impl) and apply the
+    //    signatures. A hardware wallet routes each round's bytes to the device instead.
     for round in rounds {
         // Each round honours the signer's 96-action budget.
         assert!(round.iter().map(|u| u.actions()).sum::<usize>() <= budget.max_actions() as usize);
-        sign_round_and_apply(seed, &mut state, round);
+        sign_round_and_apply(&backend, &mut state, round);
     }
 
     // The whole migration is signed, without anything having been broadcast or mined.

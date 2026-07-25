@@ -507,6 +507,54 @@ pub fn assert_no_worse_than<A: SigningRoundStrategy, B: SigningRoundStrategy>(
     );
 }
 
+/// A REFERENCE minimum-rounds computation for the two-item-size signing-round packing problem,
+/// written independently of the production packer, so a `SigningRoundStrategy` claiming optimality
+/// can be cross-checked against it (and a downstream implementer can validate a new strategy).
+///
+/// It searches upward for the smallest round count that can hold every preparation transaction
+/// (16 actions, at most `floor(budget/16)` per round) while leaving room for every transfer
+/// (3 actions), maximizing the per-round transfer capacity with a small dynamic program.
+pub fn min_rounds_reference(n_prep: usize, n_transfer: usize, budget: SigningRoundBudget) -> usize {
+    if n_prep == 0 && n_transfer == 0 {
+        return 0;
+    }
+    let cap = budget.max_actions();
+    let (w_hi, w_lo) = (PREPARATION_ACTIONS, TRANSFER_ACTIONS);
+    // A single preparation exceeds the budget: each gets its own round; transfers pack under it.
+    if cap < w_hi {
+        let per = (cap / w_lo).max(1) as usize;
+        return n_prep + n_transfer.div_ceil(per);
+    }
+    let mp = (cap / w_hi) as usize;
+    let lo_cap = |k: usize| -> i64 { i64::from((cap - (k as u32) * w_hi) / w_lo) };
+    const NEG: i64 = i64::MIN / 2;
+    let mut rounds = n_prep.div_ceil(mp).max(1);
+    loop {
+        // dp[u] = max total transfer capacity having placed `u` preparations across the rounds so far.
+        let mut dp = alloc::vec![NEG; n_prep + 1];
+        dp[0] = 0;
+        for _ in 0..rounds {
+            let mut next = alloc::vec![NEG; n_prep + 1];
+            for u in 0..=n_prep {
+                if dp[u] == NEG {
+                    continue;
+                }
+                for k in 0..=mp.min(n_prep - u) {
+                    let cand = dp[u] + lo_cap(k);
+                    if cand > next[u + k] {
+                        next[u + k] = cand;
+                    }
+                }
+            }
+            dp = next;
+        }
+        if dp[n_prep] >= n_transfer as i64 {
+            return rounds;
+        }
+        rounds += 1;
+    }
+}
+
 // --- golden vectors for the signing-round packing problem ---
 //
 // The reusable INPUTS of the NP problem (preparation-tx count, transfer-tx count, per-round action
