@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0-rc.2] - 2026-07-24
+
 ### Added
 - `zcash_client_backend::data_api::WalletRead::get_wallet_recover_until`
 - `zcash_client_backend::data_api::WalletWrite::prune_scan_queue_below`
@@ -88,6 +90,8 @@ workspace.
 - `zcash_client_backend::data_api::testing::TestBuilder::with_anchor_retention_interval`
 
 ### Changed
+- Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`,
+  `zcash_proofs 0.30.0`, `pczt 0.8.0`, `zcash_keys 0.16.0`.
 - `zcash_client_backend::data_api::ll::wallet::put_blocks` and
   `zcash_client_backend::data_api::ll::wallet::update_tree` now take
   `Option<&AnchorRetention>` in place of `anchor_retention_height:
@@ -101,8 +105,6 @@ workspace.
   argument; pass `None` to keep the default grid.
 - `zcash_client_backend::data_api::testing::pool::anchor_checkpoints_retained_across_deep_scan`
   takes the `AnchorRetentionInterval` to exercise as an additional argument.
-- Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`,
-  `zcash_proofs 0.30.0`, `pczt 0.8.0`.
 - `zcash_client_backend::data_api::wallet::create_proposed_transactions` now
   takes an `expiry_height: Option<BlockHeight>` parameter, mirroring the
   one already accepted by `create_pczt_from_proposal`. This lets callers
