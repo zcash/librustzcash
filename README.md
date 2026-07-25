@@ -23,6 +23,7 @@ graph TB
         direction TB
         subgraph main
             zcash_address
+            zcash_history
             zcash_primitives
             zcash_transparent
             zcash_proofs
@@ -40,7 +41,6 @@ graph TB
             equihash
             f4jumble
             zcash_encoding
-            zcash_history
         end
     end
 
