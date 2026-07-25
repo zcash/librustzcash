@@ -89,6 +89,13 @@ user-id = 6289
 user-login = "str4d"
 user-name = "Jack Grigg"
 
+[[publisher.orchard]]
+version = "0.15.3"
+when = "2026-07-22"
+user-id = 1244
+user-login = "ebfull"
+user-name = "Sean Bowe"
+
 [[publisher.pczt]]
 version = "0.8.0"
 when = "2026-07-24"
