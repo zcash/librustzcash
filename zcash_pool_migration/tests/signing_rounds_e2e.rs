@@ -32,17 +32,25 @@ use zcash_pool_migration::engine::{
     MigrationPlan, MigrationTxState, PoolMigrationWrite, build_preparation_unsigned,
     estimate_migration_runs, plan_migration,
 };
+use zcash_pool_migration::note_splitting::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
 use zcash_pool_migration::signing_rounds::{MinRounds, NextFit, SigningRoundBudget};
+#[cfg(feature = "test-dependencies")]
+use zcash_pool_migration::testing::MIGRATION_SCENARIOS;
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};
 
-/// Plan a migration for a wallet holding notes of the given `values` (in ZEC).
-fn plan_for(seed: u64, values_zec: &[u64]) -> (CommitMock, MigrationPlan) {
-    let notes: Vec<u64> = values_zec.iter().map(|v| v * COIN).collect();
-    let backend = CommitMock::new(seed, &notes);
+/// Plan a migration for a wallet holding the given raw note values (in zatoshi).
+fn plan_notes(seed: u64, notes: &[u64]) -> (CommitMock, MigrationPlan) {
+    let backend = CommitMock::new(seed, notes);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let plan = plan_migration(&regtest_network(true), &backend, &mut rng)
         .expect("a fundable balance plans");
     (backend, plan)
+}
+
+/// Plan a migration for a wallet holding notes of the given `values` (in ZEC).
+fn plan_for(seed: u64, values_zec: &[u64]) -> (CommitMock, MigrationPlan) {
+    let notes: Vec<u64> = values_zec.iter().map(|v| v * COIN).collect();
+    plan_notes(seed, &notes)
 }
 
 /// Sign one round's unsigned PCZTs on the "device" and apply the signatures back, exactly as a
@@ -206,5 +214,153 @@ fn choosing_a_packing_strategy() {
     // Both are valid: every round is within the budget.
     for round in optimal.iter().chain(greedy.iter()) {
         assert!(round.total_actions() <= budget.max_actions());
+    }
+}
+/// GOLDEN VECTORS keyed on the USER'S WALLET BALANCE, reusing the shared `MIGRATION_SCENARIOS` (the
+/// SAME scenarios the real-proving `prove_chain_sim` test drives). For each wallet, plan the
+/// migration and assert the FEE-AWARE shape: the number of quanta (crossings), the preparation
+/// transactions, and the migrated value all match the scenario, and the signing rounds for a
+/// Keystone and a default signer follow from those counts. Enforces the invariant that a migration
+/// always migrates every funding note it prepares (transfers == funding notes, never zero). Gated on
+/// `test-dependencies`, which exposes the reusable fixtures.
+#[cfg(feature = "test-dependencies")]
+#[test]
+fn migration_scenarios_end_to_end() {
+    // Any fixed seed works: the canonical strategy is RNG-independent, so the plan shape (quanta,
+    // preparations, migrated value, rounds) does not depend on this value.
+    let seed = 7;
+
+    for sc in MIGRATION_SCENARIOS {
+        let (_backend, plan) = plan_notes(seed, sc.source_notes);
+
+        // The starting point is the balance; the planner quantizes it into crossings AFTER reserving
+        // the transfer buffers and preparation fees.
+        assert_eq!(
+            plan.transfer_tx_count(),
+            sc.expected_transfers,
+            "{}: quanta (crossings)",
+            sc.label
+        );
+        assert_eq!(
+            plan.preparation_tx_count(),
+            sc.expected_preparations,
+            "{}: preparation transactions",
+            sc.label
+        );
+        assert_eq!(
+            u64::from(plan.value_migrated()),
+            sc.expected_migrated,
+            "{}: migrated value (balance less reserved fees)",
+            sc.label
+        );
+
+        // Invariant: a migration always migrates something, and every prepared funding note is
+        // migrated (transfers == funding notes, never zero).
+        assert!(
+            plan.transfer_tx_count() >= 1,
+            "{}: a migration must migrate at least one output",
+            sc.label
+        );
+        assert_eq!(
+            plan.transfer_tx_count(),
+            plan.funding_notes().len(),
+            "{}: every funding note the preparation creates is migrated",
+            sc.label
+        );
+
+        // Every scenario's quanta fit one run (within the per-run note cap).
+        assert!(
+            sc.expected_transfers <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+            "{}: quanta fit one run",
+            sc.label
+        );
+
+        // The EXACT number of Keystone (96-action) signing rounds this run takes: the countable
+        // golden value from the scenario. The whole run fits one default-budget round.
+        assert_eq!(
+            plan.signing_round_count(SigningRoundBudget::KEYSTONE),
+            sc.expected_keystone_rounds,
+            "{}: Keystone signing rounds",
+            sc.label
+        );
+        assert_eq!(
+            plan.signing_round_count(SigningRoundBudget::DEFAULT),
+            1,
+            "{}: one default-budget round",
+            sc.label
+        );
+    }
+}
+
+/// The quanta -> RUNS step: a balance beyond one run's note cap migrates over several runs. A whale
+/// (1,200,000 ZEC) generates far more quanta than one run can prepare, so `estimate_migration_runs`
+/// splits it into multiple runs (each within the note cap), and the signer interactions are summed
+/// per run.
+#[test]
+fn many_quanta_span_several_runs() {
+    let seed = 55;
+    let backend = CommitMock::new(seed, &[1_200_000 * COIN]);
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let est = estimate_migration_runs(&regtest_network(true), &backend, &mut rng)
+        .expect("estimates the whale migration");
+
+    // More quanta than one run can prepare => several runs, each within the note cap.
+    assert!(est.run_count() > 1, "a whale migrates over several runs");
+    assert!(est.total_crossings() > MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+    for run in est.runs() {
+        assert!(run.crossings() >= 1);
+        assert!(run.crossings() <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+    }
+
+    // Signer interactions are summed per run (rounds cannot span runs); a tighter signer never needs
+    // fewer, and with the default budget each run is a single round.
+    let keystone = est.total_signing_rounds(SigningRoundBudget::KEYSTONE);
+    let software = est.total_signing_rounds(SigningRoundBudget::DEFAULT);
+    assert!(keystone >= software && software >= est.run_count());
+}
+
+/// How the Keystone (96-action) round count EVOLVES as the migration's action total grows: larger
+/// balances produce more quanta and preparations, so the round count steps up each time the action
+/// total crosses a multiple of 96 (1 round at 46 actions, 2 at 114-190, 3 at 221-230). Reuses the
+/// plan-only `SIGNING_ROUND_EVOLUTION` table.
+#[cfg(feature = "test-dependencies")]
+#[test]
+fn keystone_rounds_evolve_with_actions() {
+    use zcash_pool_migration::testing::SIGNING_ROUND_EVOLUTION;
+
+    let seed = 7;
+    for case in SIGNING_ROUND_EVOLUTION {
+        let (_backend, plan) = plan_notes(seed, &[case.balance_zec * COIN]);
+
+        assert_eq!(
+            plan.transfer_tx_count(),
+            case.expected_crossings,
+            "{} ZEC: crossings",
+            case.balance_zec
+        );
+        assert_eq!(
+            plan.preparation_tx_count(),
+            case.expected_preparations,
+            "{} ZEC: preparations",
+            case.balance_zec
+        );
+        assert_eq!(
+            plan.total_actions(),
+            case.expected_actions,
+            "{} ZEC: total actions",
+            case.balance_zec
+        );
+        assert_eq!(
+            plan.signing_round_count(SigningRoundBudget::KEYSTONE),
+            case.expected_keystone_rounds,
+            "{} ZEC: Keystone rounds",
+            case.balance_zec
+        );
+    }
+
+    // The round count is non-decreasing in the action total across the table.
+    for pair in SIGNING_ROUND_EVOLUTION.windows(2) {
+        assert!(pair[0].expected_actions <= pair[1].expected_actions);
+        assert!(pair[0].expected_keystone_rounds <= pair[1].expected_keystone_rounds);
     }
 }

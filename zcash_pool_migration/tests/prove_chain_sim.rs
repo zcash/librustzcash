@@ -116,13 +116,7 @@ struct Scenario {
 }
 
 impl Scenario {
-    /// Starts a scenario whose account is funded with a single Orchard note worth `funding`.
-    fn funded(label: &'static str, funding: Zatoshis) -> Self {
-        Self::funded_notes(label, vec![funding])
-    }
-
-    /// Starts a scenario whose account is funded with several source Orchard notes (the "exchange" /
-    /// dusty shapes whose consolidation drives multi-layer preparation).
+    /// Starts a scenario whose account is funded with the given source Orchard notes.
     fn funded_notes(label: &'static str, funding: Vec<Zatoshis>) -> Self {
         Self {
             label,
@@ -468,75 +462,18 @@ impl Run {
 /// balances, the minimum-denomination and buffer-pruned edges, and the many-note "exchange" / dust /
 /// whale shapes whose consolidation drives multi-layer preparation.
 fn scenarios() -> Vec<Scenario> {
-    // 0.02 ZEC dust notes.
-    let dust = zats(COIN / 50);
-    let dust_heavy: Vec<Zatoshis> = std::iter::once(zats(COIN))
-        .chain(std::iter::repeat_n(dust, 12))
-        .collect();
-    // The migrated total is the balance less the reserved transfer buffers and preparation fees, so
-    // it is a multiple of the 0.01-ZEC minimum denomination; expressed here in hundredths of a ZEC.
-    let hundredths = COIN / 100;
-    vec![
-        // Single-note balances.
-        Scenario::funded("small holder, 2 ZEC", zats(2 * COIN))
-            .expect_preparations(1)
-            .expect_transfers(7)
-            .expect_migrated(zats(199 * hundredths)),
-        Scenario::funded("retail, 15 ZEC", zats(15 * COIN))
-            .expect_preparations(1)
-            .expect_transfers(9)
-            .expect_migrated(zats(1_499 * hundredths)),
-        Scenario::funded("denominations, 60 ZEC", zats(60 * COIN))
-            .expect_preparations(1)
-            .expect_transfers(10)
-            .expect_migrated(zats(5_999 * hundredths)),
-        Scenario::funded("78 ZEC in a single note", zats(78 * COIN))
-            .expect_preparations(1)
-            .expect_transfers(10)
-            .expect_migrated(zats(7_799 * hundredths)),
-        Scenario::funded(
-            "Gwen, 0.0152 ZEC (a single minimum-denomination note)",
-            zats(1_520_000),
-        )
-        .expect_preparations(1)
-        .expect_transfers(1)
-        .expect_migrated(zats(hundredths)),
-        Scenario::funded(
-            "Priya, 7.1101 ZEC (the buffer prunes the trailing crossing)",
-            zats(711_010_000),
-        )
-        .expect_preparations(1)
-        .expect_transfers(3)
-        .expect_migrated(zats(710 * hundredths)),
-        // Many-note shapes, consolidated across preparation layers.
-        Scenario::funded_notes("exchange, ten 5 ZEC notes", vec![zats(5 * COIN); 10])
-            .expect_preparations(2)
-            .expect_transfers(3)
-            .expect_migrated(zats(4_500 * hundredths)),
-        Scenario::funded_notes("monotonic, ten 12 ZEC notes", vec![zats(12 * COIN); 10])
-            .expect_preparations(5)
-            .expect_transfers(11)
-            .expect_migrated(zats(11_999 * hundredths)),
-        Scenario::funded_notes("dust-heavy, 1 ZEC and twelve 0.02 ZEC notes", dust_heavy)
-            .expect_preparations(4)
-            .expect_transfers(4)
-            .expect_migrated(zats(123 * hundredths)),
-        Scenario::funded_notes(
-            "whale plus dust, 40 ZEC and a six-note dust tail",
-            vec![
-                zats(40 * COIN),
-                zats(COIN / 50),
-                zats(COIN / 50),
-                zats(COIN / 20),
-                zats(COIN / 20),
-                zats(COIN / 10),
-                zats(COIN / 10),
-            ],
-        )
-        .expect_preparations(4)
-        .expect_transfers(6)
-        .expect_migrated(zats(4_033 * hundredths)),
-    ]
+    // The source balances and their fee-aware expected outputs are defined ONCE in the reusable
+    // `testing::MIGRATION_SCENARIOS` (shared with the signing-round end-to-end test); this builds a
+    // proving `Scenario` from each.
+    zcash_pool_migration::testing::MIGRATION_SCENARIOS
+        .iter()
+        .map(|sc| {
+            Scenario::funded_notes(sc.label, sc.source_notes.iter().map(|&z| zats(z)).collect())
+                .expect_preparations(sc.expected_preparations)
+                .expect_transfers(sc.expected_transfers)
+                .expect_migrated(zats(sc.expected_migrated))
+        })
+        .collect()
 }
 
 #[test]

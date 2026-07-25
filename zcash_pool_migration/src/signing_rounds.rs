@@ -576,15 +576,18 @@ mod tests {
         );
     }
 
+    // The reusable golden vectors (inputs + expected optimal outputs, in `crate::testing`) validate
+    // the optimal packer against a fixed, human-checked table, and every strategy produces a valid
+    // packing on those inputs.
     #[test]
-    fn keystone_pure_cases() {
-        // 6 preparations of 16 == 96 fits one round; 32 transfers of 3 == 96 fits one round.
-        assert_eq!(min_signing_rounds(6, 0, SigningRoundBudget::KEYSTONE), 1);
-        assert_eq!(min_signing_rounds(0, 32, SigningRoundBudget::KEYSTONE), 1);
-        assert_eq!(min_signing_rounds(7, 0, SigningRoundBudget::KEYSTONE), 2);
-        assert_eq!(min_signing_rounds(0, 33, SigningRoundBudget::KEYSTONE), 2);
-        // Mixed: 6 preps + 32 transfers = 192 actions => 2 rounds.
-        assert_eq!(min_signing_rounds(6, 32, SigningRoundBudget::KEYSTONE), 2);
+    fn golden_vectors_hold() {
+        crate::testing::assert_golden_min_rounds();
+        crate::testing::assert_golden_vectors_optimal(&MinRounds);
+        for gv in crate::testing::SIGNING_ROUND_GOLDEN_VECTORS {
+            let budget = SigningRoundBudget::new(NonZeroU32::new(gv.budget_actions).unwrap());
+            let txs = crate::testing::planned_txs(gv.n_prep, gv.n_transfer);
+            crate::testing::assert_valid_packing(&NextFit, &txs, budget);
+        }
     }
 
     #[test]
