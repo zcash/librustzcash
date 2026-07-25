@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.22.0-rc.2] - 2026-07-24
+
 ### Added
 - `WalletDb` now implements the new `zcash_client_backend` storage-trait
   methods `WalletRead::get_wallet_recover_until`,
@@ -60,6 +62,22 @@ workspace.
 - `zcash_client_sqlite::WalletDb::set_anchor_retention_interval`, the
   by-reference form of `with_anchor_retention_interval`.
 
+### Changed
+- Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`,
+  `zcash_proofs 0.30.0`, `zcash_keys 0.16.0`, `zcash_client_backend 0.24.0-rc.2`.
+- The `zip-233` feature flag now also enables `zcash_client_backend/zip-233`,
+  keeping the two crates' feature-gated `zcash_primitives` call signatures in
+  agreement when this crate is built with ZIP 233 support.
+- `WalletWrite::truncate_to_height` now accepts a truncation height that a
+  pool's note commitment tree checkpoints do not cover whenever the truncation
+  leaves that pool's tree in a consistent state — the same per-pool tolerances
+  applied by `rewind_to_chain_state` (see under "Fixed" above). Callers that
+  relied on `RequestedRewindInvalid` being returned for such heights should
+  note that the truncation now succeeds, resetting any tree whose scanned
+  contents lie entirely above the truncation height to only the roots of
+  subtrees completed at or below it.
+
+
 ### Fixed
 - The coinbase branch of the transparent account-balance tally now classifies
   locked value into `Balance::locked_value`: previously a mature coinbase UTXO
@@ -99,23 +117,6 @@ workspace.
   `RequestedRewindInvalid` (it reflects valid wallet state, not corruption); a
   pool whose checkpoints lie both above and below the truncation height
   without one at it is still reported as corruption.
-
-### Changed
-- Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`,
-  `zcash_proofs 0.30.0`.
-- The `zip-233` feature flag now also enables `zcash_client_backend/zip-233`,
-  keeping the two crates' feature-gated `zcash_primitives` call signatures in
-  agreement when this crate is built with ZIP 233 support.
-- `WalletWrite::truncate_to_height` now accepts a truncation height that a
-  pool's note commitment tree checkpoints do not cover whenever the truncation
-  leaves that pool's tree in a consistent state — the same per-pool tolerances
-  applied by `rewind_to_chain_state` (see under "Fixed" above). Callers that
-  relied on `RequestedRewindInvalid` being returned for such heights should
-  note that the truncation now succeeds, resetting any tree whose scanned
-  contents lie entirely above the truncation height to only the roots of
-  subtrees completed at or below it.
-
-### Fixed
 - Value in immature transparent coinbase outputs is now reported as pending
   spendability (in the `value_pending_spendability` field of the coinbase
   bucket) in wallet-summary account balances. Previously it was incorrectly
