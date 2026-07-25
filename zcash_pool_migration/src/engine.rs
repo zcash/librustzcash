@@ -963,6 +963,18 @@ impl RunEstimate {
         self.prep_transactions + self.crossings
     }
 
+    /// The total Orchard-family ACTIONS a signer processes for this run: 16 per preparation
+    /// transaction and 3 per transfer. This is the signing WORKLOAD (a proxy for signing time),
+    /// distinct from the number of interactions ([`signing_rounds`](Self::signing_rounds)): combine
+    /// it with the device's per-action time to estimate how long signing this run will take.
+    pub fn actions(&self) -> u32 {
+        let prep = (self.prep_transactions as u64)
+            .saturating_mul(u64::from(crate::signing_rounds::PREPARATION_ACTIONS));
+        let xfer = (self.crossings as u64)
+            .saturating_mul(u64::from(crate::signing_rounds::TRANSFER_ACTIONS));
+        u32::try_from(prep.saturating_add(xfer)).unwrap_or(u32::MAX)
+    }
+
     /// The number of signing ROUNDS this run needs when an external signer is bounded by `budget`
     /// total Orchard ACTIONS per interaction (for example a Keystone,
     /// [`SigningRoundBudget::KEYSTONE`]). This is the per-round-total-action model, NOT a
@@ -1048,6 +1060,18 @@ impl MigrationRunEstimate {
     /// [`total_crossings`](Self::total_crossings)).
     pub fn total_transactions(&self) -> usize {
         self.runs.iter().map(RunEstimate::transactions).sum()
+    }
+
+    /// The total Orchard-family ACTIONS the whole migration asks the user to sign, across all runs
+    /// (the sum of each run's [`actions`](RunEstimate::actions)). This is the total signing WORKLOAD,
+    /// a proxy for how long the user will spend signing: multiply it by the device's per-action time
+    /// to show a time estimate. Distinct from [`total_signing_rounds`](Self::total_signing_rounds),
+    /// which counts the number of separate interactions.
+    pub fn total_actions(&self) -> u32 {
+        self.runs
+            .iter()
+            .map(RunEstimate::actions)
+            .fold(0u32, |acc, a| acc.saturating_add(a))
     }
 
     /// The total number of signing ROUNDS the whole migration needs when an external signer is

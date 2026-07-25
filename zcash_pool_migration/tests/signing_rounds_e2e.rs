@@ -32,6 +32,7 @@ use zcash_pool_migration::engine::{
     MigrationPlan, MigrationTxState, PoolMigrationWrite, build_preparation_unsigned,
     estimate_migration_runs, plan_migration,
 };
+#[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::note_splitting::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
 use zcash_pool_migration::signing_rounds::{MinRounds, NextFit, SigningRoundBudget};
 #[cfg(feature = "test-dependencies")]
@@ -180,6 +181,15 @@ fn preview_signer_interactions_without_building() {
         "a tighter signer never needs fewer interactions"
     );
 
+    // The signing WORKLOAD: the total Orchard actions the user must sign across the whole migration.
+    // A wallet multiplies this by the device's per-action time to show a signing-time estimate; it is
+    // independent of the signer's per-round budget (that only splits the work into interactions). It
+    // is the sum of the per-run workloads.
+    let actions_to_sign = est.total_actions();
+    assert!(actions_to_sign > 0);
+    let summed_per_run: u32 = est.runs().iter().map(|r| r.actions()).sum();
+    assert_eq!(actions_to_sign, summed_per_run);
+
     // For a single planned run, the inverse query: the smallest budget that signs it in one round.
     let (_backend, plan) = plan_for(seed, &[78]);
     let need = plan.min_budget_for_single_round();
@@ -292,31 +302,67 @@ fn migration_scenarios_end_to_end() {
     }
 }
 
-/// The quanta -> RUNS step: a balance beyond one run's note cap migrates over several runs. A whale
-/// (1,200,000 ZEC) generates far more quanta than one run can prepare, so `estimate_migration_runs`
-/// splits it into multiple runs (each within the note cap), and the signer interactions are summed
-/// per run.
+/// The quanta -> RUNS -> total-rounds evolution: a balance beyond one run's note cap migrates over
+/// several runs (each within the cap), and the signer interactions are SUMMED per run because rounds
+/// cannot span runs. Reuses the plan-only `MULTI_RUN_EVOLUTION` table to show the total Keystone
+/// rounds grow with the balance (2 runs / 5 rounds, up to 11 runs / 32 rounds).
+#[cfg(feature = "test-dependencies")]
 #[test]
-fn many_quanta_span_several_runs() {
-    let seed = 55;
-    let backend = CommitMock::new(seed, &[1_200_000 * COIN]);
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let est = estimate_migration_runs(&regtest_network(true), &backend, &mut rng)
-        .expect("estimates the whale migration");
+fn total_keystone_rounds_evolve_across_runs() {
+    use zcash_pool_migration::testing::MULTI_RUN_EVOLUTION;
 
-    // More quanta than one run can prepare => several runs, each within the note cap.
-    assert!(est.run_count() > 1, "a whale migrates over several runs");
-    assert!(est.total_crossings() > MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
-    for run in est.runs() {
-        assert!(run.crossings() >= 1);
-        assert!(run.crossings() <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+    let seed = 7;
+    for case in MULTI_RUN_EVOLUTION {
+        let backend = CommitMock::new(seed, &[case.balance_zec * COIN]);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let est = estimate_migration_runs(&regtest_network(true), &backend, &mut rng)
+            .expect("estimates the whale migration");
+
+        assert_eq!(
+            est.run_count(),
+            case.expected_runs,
+            "{} ZEC: runs",
+            case.balance_zec
+        );
+        assert_eq!(
+            est.total_crossings(),
+            case.expected_total_crossings,
+            "{} ZEC: total quanta",
+            case.balance_zec
+        );
+        // The total ACTIONS to sign across the whole migration: the signing workload the app turns
+        // into a time estimate for the user.
+        assert_eq!(
+            est.total_actions(),
+            case.expected_total_actions,
+            "{} ZEC: total actions to sign",
+            case.balance_zec
+        );
+        assert_eq!(
+            est.total_signing_rounds(SigningRoundBudget::KEYSTONE),
+            case.expected_total_keystone_rounds,
+            "{} ZEC: total Keystone rounds",
+            case.balance_zec
+        );
+
+        // Each run migrates at least one quantum, stays within the note cap, and the total is the
+        // per-run sum (rounds cannot span runs).
+        for run in est.runs() {
+            assert!(run.crossings() >= 1);
+            assert!(run.crossings() <= MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
+        }
+        let summed: usize = est
+            .runs()
+            .iter()
+            .map(|r| r.signing_rounds(SigningRoundBudget::KEYSTONE))
+            .sum();
+        assert_eq!(summed, case.expected_total_keystone_rounds);
     }
 
-    // Signer interactions are summed per run (rounds cannot span runs); a tighter signer never needs
-    // fewer, and with the default budget each run is a single round.
-    let keystone = est.total_signing_rounds(SigningRoundBudget::KEYSTONE);
-    let software = est.total_signing_rounds(SigningRoundBudget::DEFAULT);
-    assert!(keystone >= software && software >= est.run_count());
+    // The total round count is non-decreasing in the balance across the table.
+    for pair in MULTI_RUN_EVOLUTION.windows(2) {
+        assert!(pair[0].expected_total_keystone_rounds <= pair[1].expected_total_keystone_rounds);
+    }
 }
 
 /// How the Keystone (96-action) round count EVOLVES as the migration's action total grows: larger

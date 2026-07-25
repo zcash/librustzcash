@@ -868,3 +868,56 @@ pub const SIGNING_ROUND_EVOLUTION: &[RoundEvolutionCase] = {
         e(500_000, 50, 5, 3), // 230 actions  -> 3 rounds (the 50-note run cap)
     ]
 };
+
+// --- how the TOTAL Keystone round count evolves across multiple runs ---
+//
+// A balance beyond one run's note cap (50 crossings, ~500,000 ZEC) migrates over several runs; the
+// runs are serialized (a later run spends notes an earlier run must mine first), so a signer's
+// interactions are SUMMED per run, never packed across them. This plan-only table shows how the
+// total Keystone rounds grow with the balance: each full run contributes 3 rounds (50 crossings plus
+// its preparation is ~230 actions), and the final partial run contributes fewer.
+
+/// One row of the multi-run evolution table: a single-note whale balance (in whole ZEC) and the
+/// whole-migration estimate it produces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MultiRunEvolutionCase {
+    /// The single source note's value, in whole ZEC.
+    pub balance_zec: u64,
+    /// The expected number of migration runs.
+    pub expected_runs: usize,
+    /// The expected total number of crossings (quanta) across all runs.
+    pub expected_total_crossings: usize,
+    /// The expected total Orchard actions to sign across all runs (the signing workload; a proxy for
+    /// signing time).
+    pub expected_total_actions: u32,
+    /// The expected total Keystone signing rounds, summed per run (rounds cannot span runs).
+    pub expected_total_keystone_rounds: usize,
+}
+
+/// How the total Keystone round count evolves across runs. Plan-only (estimate only, nothing built
+/// or proved). Captured from the canonical planner on the regtest network.
+pub const MULTI_RUN_EVOLUTION: &[MultiRunEvolutionCase] = {
+    const fn m(
+        balance_zec: u64,
+        expected_runs: usize,
+        expected_total_crossings: usize,
+        expected_total_actions: u32,
+        expected_total_keystone_rounds: usize,
+    ) -> MultiRunEvolutionCase {
+        MultiRunEvolutionCase {
+            balance_zec,
+            expected_runs,
+            expected_total_crossings,
+            expected_total_actions,
+            expected_total_keystone_rounds,
+        }
+    }
+    &[
+        //   balance     runs  quanta  actions  total Keystone rounds (summed per run)
+        m(600_000, 2, 77, 359, 5),       // per run [3, 2]
+        m(1_000_000, 3, 116, 556, 7),    // [3, 3, 1]
+        m(1_200_000, 3, 136, 632, 8),    // [3, 3, 2]
+        m(2_000_000, 5, 215, 997, 13),   // [3, 3, 3, 3, 1]
+        m(5_000_000, 11, 517, 2399, 32), // ten full runs of 3, then a tail of 2
+    ]
+};
