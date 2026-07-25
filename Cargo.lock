@@ -3009,8 +3009,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.15.0"
-source = "git+https://github.com/zcash/orchard.git?rev=3bd2b736d1273226595773265313fc3f3428af16#3bd2b736d1273226595773265313fc3f3428af16"
+version = "0.15.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8b67beade27dbebdbfee0819e23170b0b263dc7b4f558ee936151716baf6e1f"
 dependencies = [
  "aes",
  "bitvec",
