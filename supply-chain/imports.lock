@@ -5,6 +5,10 @@
 version = "0.9.0"
 audited_as = "0.8.0"
 
+[[unpublished.zcash_client_backend]]
+version = "0.24.0-rc.3"
+audited_as = "0.24.0-rc.2"
+
 [[publisher.bumpalo]]
 version = "3.16.0"
 when = "2024-04-08"
