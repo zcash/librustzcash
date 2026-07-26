@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-26
+
 ### Added
 - `pczt::orchard::Bundle::zkproof`
 - `pczt::orchard::Spend::dummy_sk`
