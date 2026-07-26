@@ -775,6 +775,18 @@ pub mod v1 {
 
     impl From<Bundle> for super::Bundle {
         fn from(bundle: Bundle) -> Self {
+            // The v1 encoding has no placeholder for a missing anchor, so an empty
+            // bundle's anchor is substituted with `DEFAULT_ANCHOR` on encode (see
+            // `TryFrom<super::Bundle> for Bundle` above). Undo that substitution here
+            // so that decoding an empty bundle reproduces `super::EMPTY_ORCHARD`
+            // exactly, mirroring the `is_default_empty` treatment the v2 encoder
+            // applies for the same case.
+            let anchor = if bundle.actions.is_empty() && bundle.anchor == super::DEFAULT_ANCHOR {
+                None
+            } else {
+                Some(bundle.anchor)
+            };
+
             Self {
                 actions: bundle
                     .actions
@@ -783,7 +795,7 @@ pub mod v1 {
                     .collect(),
                 flags: bundle.flags,
                 value_sum: bundle.value_sum,
-                anchor: Some(bundle.anchor),
+                anchor,
                 note_version: NoteVersion::V2,
                 zkproof: bundle.zkproof,
                 bsk: bundle.bsk,
@@ -1170,8 +1182,9 @@ pub(crate) mod v2 {
         use alloc::{collections::BTreeMap, vec::Vec};
 
         use super::super::{
-            Action as LogicalAction, Bundle as LogicalBundle, EncCiphertext, MEMO_SIZE,
-            MemoPlaintext, NoteVersion, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED, Output, Spend,
+            Action as LogicalAction, Bundle as LogicalBundle, EMPTY_ORCHARD, EncCiphertext,
+            MEMO_SIZE, MemoPlaintext, NoteVersion, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED, Output,
+            Spend,
         };
 
         fn logical_action(cv_net: Option<[u8; 32]>, cmx: Option<[u8; 32]>) -> LogicalAction {
@@ -1558,6 +1571,29 @@ pub(crate) mod v2 {
                 )),
                 Err(crate::EncodingError::RequiresV2)
             ));
+        }
+
+        #[test]
+        fn v1_empty_bundle_anchor_falls_back_to_default() {
+            // An empty bundle has no anchor to commit to, so the v1 encoding (whose
+            // anchor field is mandatory) falls back to `DEFAULT_ANCHOR`.
+            let bundle = LogicalBundle {
+                actions: Vec::new(),
+                flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+                value_sum: (0, false),
+                anchor: None,
+                note_version: NoteVersion::V2,
+                zkproof: None,
+                bsk: None,
+            };
+
+            let encoded = crate::orchard::v1::Bundle::try_from(bundle)
+                .expect("an empty bundle's anchor falls back to DEFAULT_ANCHOR");
+
+            // Decoding must undo the fallback substitution, reproducing the logical
+            // empty bundle exactly rather than materializing the placeholder anchor.
+            let decoded = super::super::Bundle::from(encoded);
+            assert_eq!(decoded, EMPTY_ORCHARD);
         }
     }
 }

@@ -34,6 +34,11 @@ workspace.
   even though they carry no Orchard-protocol data. An empty Orchard bundle
   now falls back to a placeholder anchor for the v1 encoding, matching the
   existing behavior for an empty Sapling bundle.
+- Parsing a v1-encoded PCZT with an empty Orchard bundle no longer
+  materializes the placeholder anchor substituted for it on encode. The
+  logical bundle now round-trips to its canonical empty form (with no
+  anchor), matching the invariant that the v1 decoder produces exactly the
+  same empty bundle as the Creator and the v2 decoder.
 
 ## [0.8.0] - 2026-07-23
 
