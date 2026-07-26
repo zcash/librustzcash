@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.3] - 2026-07-26
+
+### Changed
+- Migrated to `zcash_client_backend 0.24.0-rc.4`.
+
 ### Removed
 - The `transparent-inputs` feature flag. It enabled nothing, existing only as a
   marker for an end-to-end test that has moved to `zcash_client_sqlite`.
