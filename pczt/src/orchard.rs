@@ -71,6 +71,7 @@ pub struct Bundle {
     /// The Orchard bundle proof.
     ///
     /// This is `None` until it is set by the Prover.
+    #[getset(get = "pub")]
     pub(crate) zkproof: Option<Vec<u8>>,
 
     /// The Orchard binding signature signing key.
@@ -589,6 +590,7 @@ pub struct Spend {
     /// - This is chosen by the Constructor.
     /// - This is required by the IO Finalizer, and is cleared by it once used.
     /// - Signers MUST reject PCZTs that contain `dummy_sk` values.
+    #[getset(get = "pub")]
     pub(crate) dummy_sk: Option<[u8; 32]>,
 
     /// Proprietary fields related to the note being spent.
@@ -750,6 +752,12 @@ pub mod v1 {
                 return Err(crate::EncodingError::UnsupportedOrchardNoteVersion);
             }
 
+            let anchor = match bundle.anchor {
+                Some(anchor) => anchor,
+                None if bundle.actions.is_empty() => super::DEFAULT_ANCHOR,
+                None => return Err(crate::EncodingError::RequiresV2),
+            };
+
             Ok(Self {
                 actions: bundle
                     .actions
@@ -758,7 +766,7 @@ pub mod v1 {
                     .collect::<Result<Vec<_>, _>>()?,
                 flags: bundle.flags,
                 value_sum: bundle.value_sum,
-                anchor: bundle.anchor.ok_or(crate::EncodingError::RequiresV2)?,
+                anchor,
                 zkproof: bundle.zkproof,
                 bsk: bundle.bsk,
             })

@@ -83,7 +83,7 @@ use zcash_protocol::{PoolType, TxId};
 
 #[cfg(feature = "pczt")]
 use {
-    crate::data_api::wallet::{redact_pczt_for_batch_signer, redact_pczt_for_signer},
+    crate::data_api::wallet::{SignerView, redact_pczt_for_batch_signer, redact_pczt_for_signer},
     pczt::roles::{combiner::Combiner, prover::Prover, signer::Signer},
     rand_core::OsRng,
     transparent::builder::TransparentSigningSet,
@@ -8032,7 +8032,7 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     // exercises redaction of data that the external Signer does not need.
     let original_sighash = Signer::new(pczt_proven.clone()).unwrap().shielded_sighash();
     let original_len = pczt_proven.clone().serialize().unwrap().len();
-    let signer_view = redact_pczt_for_signer(&pczt_proven);
+    let signer_view = redact_pczt_for_signer(&pczt_proven, SignerView::Compact);
     assert_eq!(
         *signer_view.global().tx_version(),
         zcash_protocol::constants::V5_TX_VERSION,
@@ -8063,6 +8063,41 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         Signer::new(signer_view.clone()).unwrap().shielded_sighash(),
         original_sighash,
     );
+
+    // The full signer view is for receivers that predate the compact view:
+    // it commits to the same transaction effects, retains proofs and anchors,
+    // clears witnesses and dummy signing keys, and (for v5 transactions)
+    // remains representable in the v1 PCZT encoding.
+    let full_view = redact_pczt_for_signer(&pczt_proven, SignerView::Full);
+    assert_eq!(
+        Signer::new(full_view.clone()).unwrap().shielded_sighash(),
+        original_sighash,
+    );
+    assert_eq!(full_view.orchard().anchor(), pczt_proven.orchard().anchor());
+    assert_eq!(full_view.sapling().anchor(), pczt_proven.sapling().anchor());
+    assert_eq!(
+        full_view.orchard().zkproof().is_some(),
+        pczt_proven.orchard().zkproof().is_some(),
+    );
+    assert!(full_view.orchard().actions().iter().all(|action| {
+        action.spend().witness().is_none() && action.spend().dummy_sk().is_none()
+    }));
+    assert!(
+        full_view
+            .sapling()
+            .spends()
+            .iter()
+            .all(|spend| spend.witness().is_none())
+    );
+    if *full_view.global().tx_version() == zcash_protocol::constants::V5_TX_VERSION {
+        let full_view_bytes = full_view.clone().serialize().unwrap();
+        assert!(pczt::v1::Pczt::try_from(full_view).is_ok());
+        assert_eq!(
+            u32::from_le_bytes(full_view_bytes[4..8].try_into().unwrap()),
+            1,
+            "the full signer view of a v5 PCZT serializes in the v1 encoding",
+        );
+    }
 
     // Apply signatures to the transported signer view, then combine the
     // contribution with the proof-bearing authoritative copy.
@@ -9400,7 +9435,7 @@ where
     let original_sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
     let original_spend_states = spend_states(pczt.clone());
     let original_len = pczt.clone().serialize().unwrap().len();
-    let signer_view = redact_pczt_for_signer(&pczt);
+    let signer_view = redact_pczt_for_signer(&pczt, SignerView::Compact);
     let signer_view_bytes = signer_view.serialize().unwrap();
     assert!(signer_view_bytes.len() < original_len);
     let signer_view = pczt::Pczt::parse(&signer_view_bytes).unwrap();

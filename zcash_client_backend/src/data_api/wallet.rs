@@ -3078,27 +3078,97 @@ where
     Ok(pczt)
 }
 
+/// Selects the view produced by [`redact_pczt_for_signer`], according to the
+/// capabilities of the receiving Signer.
+#[cfg(feature = "pczt")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignerView {
+    /// The conservative signer view, for general-purpose Signers including
+    /// deployed hardware signers (e.g. the Keystone ordinary send flow), which
+    /// this view is validated against in the field.
+    ///
+    /// It removes wallet metadata, Orchard-protocol and Sapling spend
+    /// witnesses, and dummy signing keys (a defensive no-op for IO-finalized
+    /// PCZTs, whose dummy keys were consumed by the IO Finalizer; per the PCZT
+    /// specification, Signers MUST reject PCZTs that contain them). It retains
+    /// proofs, binding-signature keys, and anchors, and performs no field
+    /// compaction, so the view of a v5 transaction remains representable in
+    /// the v1 PCZT encoding (which [`pczt::Pczt::serialize`] selects for it).
+    Full,
+    /// The compact signer view, for receivers that support the v2 PCZT
+    /// encoding and can restore compacted fields with
+    /// [`pczt::Pczt::resolve_fields`].
+    ///
+    /// In addition to the `Full` redactions — except that Sapling spend
+    /// witnesses are retained so that the Signer may verify nullifiers —
+    /// this clears zk-proofs and binding-signature keys, compacts resolvable
+    /// Orchard-protocol fields, and removes v6 shielded anchors (v5 anchors
+    /// are retained because signatures commit to them).
+    Compact,
+}
+
 /// Creates a redacted copy of a wallet PCZT for an external Signer.
 ///
-/// This is intended for PCZTs returned by [`create_pczt_from_proposal`]. It removes
-/// wallet metadata, proof data, binding and dummy signing keys, and Orchard-protocol
-/// spend witnesses that a Signer does not need. Sapling spend witnesses are retained
-/// because a Signer may use them to verify nullifiers. It also compacts Orchard and
-/// Ironwood fields that the receiver can restore with [`pczt::Pczt::resolve_fields`].
-/// For v6 transactions, it removes shielded anchors; v5 anchors are retained because
-/// signatures commit to them. The compact signer view requires the v2 PCZT encoding
-/// whenever it contains Orchard or Ironwood actions whose fields could be compacted.
+/// This is intended for PCZTs returned by [`create_pczt_from_proposal`]. The
+/// `view` argument selects the redaction policy; see [`SignerView`] for the
+/// receiver capabilities each view requires. When in doubt — in particular for
+/// hardware signers whose firmware predates the compact view — use
+/// [`SignerView::Full`].
 ///
-/// The returned PCZT retains information that a general-purpose Signer may need,
-/// including full viewing keys, spend authorization randomizers, key derivation
-/// paths, output recovery keys, and user-facing addresses. Applications may apply
-/// additional redaction when they know their Signer's capabilities.
+/// The returned PCZT retains information that a general-purpose Signer may
+/// need, including full viewing keys, spend authorization randomizers, key
+/// derivation paths, output recovery keys, and user-facing addresses.
+/// Applications may apply additional redaction when they know their Signer's
+/// capabilities. A Signer that independently obtains the relevant full viewing
+/// keys and returns only Orchard-protocol signature contributions can instead
+/// use [`redact_pczt_for_batch_signer`].
 ///
-/// The caller must retain `pczt` and combine the Signer's contribution into that
-/// authoritative copy. The returned signer view omits wallet metadata and other
-/// fields that [`extract_and_store_transaction_from_pczt`] requires.
+/// The caller must retain `pczt` and combine the Signer's contribution into
+/// that authoritative copy. The returned signer view omits wallet metadata and
+/// other fields that [`extract_and_store_transaction_from_pczt`] requires.
 #[cfg(feature = "pczt")]
-pub fn redact_pczt_for_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
+pub fn redact_pczt_for_signer(pczt: &pczt::Pczt, view: SignerView) -> pczt::Pczt {
+    match view {
+        SignerView::Full => full_signer_view(pczt),
+        SignerView::Compact => compact_signer_view(pczt),
+    }
+}
+
+#[cfg(feature = "pczt")]
+fn full_signer_view(pczt: &pczt::Pczt) -> pczt::Pczt {
+    fn redact_orchard_bundle(mut redactor: pczt::roles::redactor::orchard::OrchardRedactor<'_>) {
+        redactor.redact_actions(|mut action| {
+            action.clear_spend_witness();
+            action.clear_spend_dummy_sk();
+            action.redact_output_proprietary(PROPRIETARY_OUTPUT_INFO);
+        });
+    }
+
+    Redactor::new(pczt.clone())
+        .redact_global_with(|mut redactor| {
+            redactor.redact_proprietary(PROPRIETARY_PROPOSAL_INFO);
+        })
+        .redact_transparent_with(|mut redactor| {
+            redactor.redact_outputs(|mut output| {
+                output.redact_proprietary(PROPRIETARY_OUTPUT_INFO);
+            });
+        })
+        .redact_sapling_with(|mut redactor| {
+            redactor.redact_spends(|mut spend| {
+                spend.clear_witness();
+                spend.clear_dummy_ask();
+            });
+            redactor.redact_outputs(|mut output| {
+                output.redact_proprietary(PROPRIETARY_OUTPUT_INFO);
+            });
+        })
+        .redact_orchard_with(redact_orchard_bundle)
+        .redact_ironwood_with(redact_orchard_bundle)
+        .finish()
+}
+
+#[cfg(feature = "pczt")]
+fn compact_signer_view(pczt: &pczt::Pczt) -> pczt::Pczt {
     let redact_v6_anchors = *pczt.global().tx_version() == zcash_protocol::constants::V6_TX_VERSION;
 
     fn redact_orchard_bundle(
@@ -3155,10 +3225,11 @@ pub fn redact_pczt_for_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
 /// Creates a compact wallet PCZT for a batch Signer that obtains its full viewing key
 /// independently and returns only new Orchard and Ironwood signatures.
 ///
-/// In addition to [`redact_pczt_for_signer`], this removes spend full viewing keys and
-/// existing signatures. It also removes the randomizer from actions already authorized
-/// in `pczt`, while unsigned actions such as wallet controlled zero value spends retain
-/// theirs. Sapling signatures require a separate signing path.
+/// In addition to the [`SignerView::Compact`] policy of [`redact_pczt_for_signer`],
+/// this removes spend full viewing keys and existing signatures. It also removes the
+/// randomizer from actions already authorized in `pczt`, while unsigned actions such
+/// as wallet controlled zero value spends retain theirs. Sapling signatures require a
+/// separate signing path.
 ///
 /// The caller must retain the authoritative PCZT and apply the returned signature
 /// contributions to it. This function must run before its existing signatures are
@@ -3197,7 +3268,7 @@ pub fn redact_pczt_for_batch_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
     let ironwood_preauthorized = preauthorized_action_indices(pczt.ironwood());
 
     // Apply the policy shared by every external Signer first.
-    Redactor::new(redact_pczt_for_signer(pczt))
+    Redactor::new(redact_pczt_for_signer(pczt, SignerView::Compact))
         .redact_orchard_with(|redactor| {
             redact_orchard_bundle(redactor, &orchard_preauthorized);
         })
