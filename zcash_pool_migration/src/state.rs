@@ -23,7 +23,7 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState,
 };
 
@@ -42,13 +42,13 @@ pub enum AdvanceStep {
     /// must be proved while its boundary is fresh, not deferred to its (later) broadcast height.
     Prove {
         /// The transaction to prove.
-        id: MigrationTxId,
+        id: MigrationTransferId,
     },
     /// Broadcast this already-proven transaction: it is `Proved`, its dependencies are mined, and its
     /// scheduled broadcast height has arrived.
     Broadcast {
         /// The transaction to broadcast.
-        id: MigrationTxId,
+        id: MigrationTransferId,
     },
     /// Rebuild this TRANSFER: its [`expiry_height`](MigrationTransaction::expiry_height) has passed
     /// without it mining, so it can no longer be included in a block (ZIP 203). The pre-signed
@@ -66,7 +66,7 @@ pub enum AdvanceStep {
     /// one is holding up the schedule.
     Rebuild {
         /// The transaction to rebuild.
-        id: MigrationTxId,
+        id: MigrationTransferId,
     },
     /// Nothing to do now: waiting for one or more transactions to mine, for an anchor boundary to
     /// settle, or for a scheduled height to arrive.
@@ -128,7 +128,7 @@ pub enum Blocker {
 pub struct TransactionStatus {
     /// This transaction's stable id.
     #[getset(get_copy = "pub")]
-    pub(crate) id: MigrationTxId,
+    pub(crate) id: MigrationTransferId,
     /// What it does (a preparation transaction, carrying its layer / anchor bucket, or a transfer).
     #[getset(get_copy = "pub")]
     pub(crate) kind: MigrationTxKind,
@@ -137,7 +137,7 @@ pub struct TransactionStatus {
     pub(crate) state: MigrationTxState,
     /// The transactions that must be mined before this one can be built or broadcast.
     #[getset(get = "pub")]
-    pub(crate) depends_on: Vec<MigrationTxId>,
+    pub(crate) depends_on: Vec<MigrationTransferId>,
     /// The height at or after which it is due to broadcast.
     #[getset(get_copy = "pub")]
     pub(crate) scheduled_height: BlockHeight,
@@ -165,7 +165,7 @@ pub struct TransactionStatus {
 
 impl MigrationState {
     /// Whether every transaction in `depends_on` is mined.
-    pub fn deps_mined(&self, depends_on: &[MigrationTxId]) -> bool {
+    pub fn deps_mined(&self, depends_on: &[MigrationTransferId]) -> bool {
         depends_on.iter().all(|dep| {
             self.transactions
                 .iter()
@@ -198,7 +198,7 @@ impl MigrationState {
     /// is also surfaced as [`AdvanceStep::Rebuild`]; a PREPARATION is not (rebuilding it means
     /// re-signing its whole dependent subtree, a remediation beyond a single advance step), so a
     /// wallet uses this list to tell the user the migration needs a new signing ceremony.
-    pub fn expired_transactions(&self, target_height: BlockHeight) -> Vec<MigrationTxId> {
+    pub fn expired_transactions(&self, target_height: BlockHeight) -> Vec<MigrationTransferId> {
         self.transactions
             .iter()
             .filter(|t| Self::is_expired(t, target_height))
@@ -212,7 +212,7 @@ impl MigrationState {
     /// single-transaction remediation — its dependents' pre-signatures commit to the notes it would
     /// have minted, so rebuilding it means re-signing the whole dependent subtree (a follow-on
     /// slice); it stays visible through [`Blocker::Expired`] and [`Self::expired_transactions`].
-    fn next_rebuildable(&self, target_height: BlockHeight) -> Option<MigrationTxId> {
+    fn next_rebuildable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
         self.transactions
             .iter()
             .filter(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
@@ -255,7 +255,7 @@ impl MigrationState {
     /// is resolvable now (see [`Self::prove_ready`]). Proving is decoupled from broadcasting so a
     /// transfer is proved while its anchor boundary checkpoint is still within the wallet's pruning
     /// window, then broadcast later at its scheduled height.
-    pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTxId> {
+    pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
         self.transactions
             .iter()
             .find(|t| {
@@ -266,7 +266,7 @@ impl MigrationState {
 
     /// The id of the next transaction ready to BROADCAST: already `Proved`, its dependencies mined,
     /// and scheduled at or before `target_height` (`chain_tip + 1`).
-    pub fn next_broadcastable(&self, target_height: BlockHeight) -> Option<MigrationTxId> {
+    pub fn next_broadcastable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
         self.transactions
             .iter()
             .find(|t| {
@@ -323,7 +323,7 @@ impl MigrationState {
     /// Records that the transaction `id` was broadcast with the given `txid`, then recomputes the
     /// overall status. The consumer calls this after it broadcasts the transaction the engine handed
     /// it.
-    pub fn mark_broadcast(&mut self, id: MigrationTxId, txid: TxId) {
+    pub fn mark_broadcast(&mut self, id: MigrationTransferId, txid: TxId) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
             tx.state = MigrationTxState::Broadcast { txid };
         }
@@ -333,7 +333,7 @@ impl MigrationState {
     /// Records that the transaction `id` was mined at `height`, then recomputes the overall status. The
     /// consumer detects mining through its own chain view (matching a broadcast transaction's txid) and
     /// calls this, which is what lets a later preparation layer or the transfers become actionable.
-    pub fn mark_mined(&mut self, id: MigrationTxId, height: BlockHeight) {
+    pub fn mark_mined(&mut self, id: MigrationTransferId, height: BlockHeight) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
             tx.state = MigrationTxState::Mined { height };
         }
@@ -352,7 +352,7 @@ impl MigrationState {
     /// transaction has that `id` or it is not awaiting a signature (already signed, still an unbuilt
     /// placeholder, or already broadcast or mined), so a caller can detect a stale or misrouted signature.
     #[must_use]
-    pub fn apply_signature(&mut self, id: MigrationTxId, signed_pczt: Vec<u8>) -> bool {
+    pub fn apply_signature(&mut self, id: MigrationTransferId, signed_pczt: Vec<u8>) -> bool {
         let Some(tx) = self
             .transactions
             .iter_mut()
@@ -495,14 +495,14 @@ mod tests {
     use crate::engine::MigrationTransaction;
     use zcash_protocol::value::Zatoshis;
 
-    use crate::note_splitting::NoteSplitPlan;
+    use crate::denomination::DenominationPlan;
     use crate::preparation::PreparationPlan;
     use alloc::vec;
 
     // A migration transaction with the given id/kind/state, no dependencies, scheduled at height 0.
     fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
         MigrationTransaction {
-            id: MigrationTxId(id),
+            id: MigrationTransferId(id),
             kind,
             pczt: Vec::new(),
             depends_on: Vec::new(),
@@ -526,7 +526,7 @@ mod tests {
     fn state_with(transactions: Vec<MigrationTransaction>) -> MigrationState {
         MigrationState {
             status: MigrationStatus::Committed,
-            note_split: NoteSplitPlan::from_stored_parts(
+            denominations: DenominationPlan::from_stored_parts(
                 Vec::new(),
                 Zatoshis::ZERO,
                 None,
@@ -547,10 +547,83 @@ mod tests {
         }
     }
 
+    /// A state whose denomination plan carries the given crossing values and fee buffer, so the
+    /// funding notes are each crossing plus the buffer.
+    fn state_with_crossings(
+        crossings: &[u64],
+        buffer: u64,
+        transactions: Vec<MigrationTransaction>,
+    ) -> MigrationState {
+        let zats = |v: u64| Zatoshis::from_u64(v).expect("test values are valid");
+        let total = zats(crossings.iter().sum());
+        MigrationState {
+            status: MigrationStatus::Committed,
+            denominations: DenominationPlan::from_stored_parts(
+                crossings.iter().copied().map(zats).collect(),
+                zats(buffer),
+                None,
+                Zatoshis::ZERO,
+                total,
+                total,
+            )
+            .expect("a consistent stored plan reconstructs"),
+            preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            transactions,
+            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
+        }
+    }
+
+    /// A transfer reports what it MOVES (its crossing value), not what it spends: the funding note
+    /// it spends is that value plus the fee buffer funding its own fee, and reporting the spend
+    /// side overstates every transfer by a fee.
+    #[test]
+    fn transfer_crossing_value_is_the_funding_note_less_the_fee_buffer() {
+        let buffer = 15_000;
+        let crossings = [100_000_000u64, 200_000_000];
+        let state = state_with_crossings(
+            &crossings,
+            buffer,
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                tx(1, transfer(0), MigrationTxState::Signed),
+                tx(2, transfer(1), MigrationTxState::Signed),
+            ],
+        );
+
+        for (i, &crossing) in crossings.iter().enumerate() {
+            let tx = &state.transactions[i + 1];
+            assert_eq!(
+                state.transfer_crossing_value(tx),
+                Some(Zatoshis::from_u64(crossing).expect("valid")),
+                "transfer {i} must report its crossing value"
+            );
+            assert_eq!(
+                state.funding_notes()[i],
+                Zatoshis::from_u64(crossing + buffer).expect("valid"),
+                "the funding note it spends is that value plus the buffer"
+            );
+        }
+    }
+
+    /// A preparation transaction crosses nothing, so it has no crossing value to report.
+    #[test]
+    fn transfer_crossing_value_is_none_for_a_preparation() {
+        let state = state_with_crossings(
+            &[100_000_000],
+            15_000,
+            vec![tx(0, prep(0, 0), MigrationTxState::Signed)],
+        );
+        assert_eq!(
+            state.transfer_crossing_value(&state.transactions[0]),
+            None,
+            "a preparation transaction crosses nothing"
+        );
+    }
+
     #[test]
     fn apply_signature_moves_awaiting_to_signed() {
         let mut state = state_with(vec![tx(0, prep(0, 0), MigrationTxState::AwaitingSignature)]);
-        assert!(state.apply_signature(MigrationTxId(0), vec![1u8, 2, 3]));
+        assert!(state.apply_signature(MigrationTransferId(0), vec![1u8, 2, 3]));
         assert_eq!(state.transactions[0].state, MigrationTxState::Signed);
         assert_eq!(state.transactions[0].pczt, vec![1u8, 2, 3]);
     }
@@ -563,16 +636,16 @@ mod tests {
         ]);
         // An unknown id, and a transaction not awaiting a signature (already signed), are both
         // rejected without changing any state.
-        assert!(!state.apply_signature(MigrationTxId(9), vec![1u8]));
-        assert!(!state.apply_signature(MigrationTxId(1), vec![1u8]));
+        assert!(!state.apply_signature(MigrationTransferId(9), vec![1u8]));
+        assert!(!state.apply_signature(MigrationTransferId(1), vec![1u8]));
         assert_eq!(
             state.transactions[0].state,
             MigrationTxState::AwaitingSignature
         );
         // The first signature applies; a second, after it is already Signed, is rejected (a stale or
         // misrouted signature cannot overwrite the stored one).
-        assert!(state.apply_signature(MigrationTxId(0), vec![1u8]));
-        assert!(!state.apply_signature(MigrationTxId(0), vec![2u8]));
+        assert!(state.apply_signature(MigrationTransferId(0), vec![1u8]));
+        assert!(!state.apply_signature(MigrationTransferId(0), vec![2u8]));
         assert_eq!(state.transactions[0].pczt, vec![1u8]);
     }
 
@@ -591,8 +664,8 @@ mod tests {
             tx(0, prep(0, 0), mined(10)),
             tx(1, prep(0, 1), MigrationTxState::Signed),
         ]);
-        assert!(s.deps_mined(&[MigrationTxId(0)]));
-        assert!(!s.deps_mined(&[MigrationTxId(1)]));
+        assert!(s.deps_mined(&[MigrationTransferId(0)]));
+        assert!(!s.deps_mined(&[MigrationTransferId(1)]));
         assert!(s.deps_mined(&[])); // empty deps are trivially satisfied
     }
 
@@ -600,7 +673,7 @@ mod tests {
     fn next_broadcastable_respects_state_deps_and_schedule() {
         // Only a PROVED transaction is broadcastable (proving is a separate earlier step).
         let mut proved = tx(1, transfer(0), MigrationTxState::Proved);
-        proved.depends_on = vec![MigrationTxId(0)];
+        proved.depends_on = vec![MigrationTransferId(0)];
         proved.scheduled_height = BlockHeight::from_u32(5);
         let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), proved]);
 
@@ -609,7 +682,7 @@ mod tests {
         // Due and deps mined.
         assert_eq!(
             s.next_broadcastable(BlockHeight::from_u32(5)),
-            Some(MigrationTxId(1))
+            Some(MigrationTransferId(1))
         );
 
         // A Signed (not yet proved) transaction is NOT broadcastable: it must be proved first.
@@ -631,23 +704,23 @@ mod tests {
         // then layer 1 once layer 0 mines, then the transfer once the whole preparation mines. Each
         // transaction is PROVED (`Signed -> Proved`) before it is broadcast.
         let mut l1 = tx(1, prep(1, 0), MigrationTxState::Signed);
-        l1.depends_on = vec![MigrationTxId(0)];
+        l1.depends_on = vec![MigrationTransferId(0)];
         let mut xfer = tx(2, transfer(0), MigrationTxState::Signed);
-        xfer.depends_on = vec![MigrationTxId(1)];
+        xfer.depends_on = vec![MigrationTransferId(1)];
         let mut s = state_with(vec![tx(0, prep(0, 0), MigrationTxState::Signed), l1, xfer]);
 
         // 1) Layer 0 is signed and due -> prove it first, then broadcast it once proved.
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Prove {
-                id: MigrationTxId(0)
+                id: MigrationTransferId(0)
             }
         );
         s.transactions[0].state = MigrationTxState::Proved;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
-                id: MigrationTxId(0)
+                id: MigrationTransferId(0)
             }
         );
 
@@ -665,14 +738,14 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Prove {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
         s.transactions[1].state = MigrationTxState::Proved;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
 
@@ -681,14 +754,14 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Prove {
-                id: MigrationTxId(2)
+                id: MigrationTransferId(2)
             }
         );
         s.transactions[2].state = MigrationTxState::Proved;
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Broadcast {
-                id: MigrationTxId(2)
+                id: MigrationTransferId(2)
             }
         );
 
@@ -712,7 +785,7 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(50)),
             AdvanceStep::Prove {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
     }
@@ -725,7 +798,7 @@ mod tests {
         ]);
         assert_eq!(s.status, MigrationStatus::Committed);
 
-        s.mark_broadcast(MigrationTxId(0), TxId::from_bytes([7; 32]));
+        s.mark_broadcast(MigrationTransferId(0), TxId::from_bytes([7; 32]));
         assert!(matches!(
             s.transactions[0].state,
             MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([7; 32])
@@ -733,8 +806,8 @@ mod tests {
         assert_eq!(s.status, MigrationStatus::InProgress);
         assert!(!s.is_terminal());
 
-        s.mark_mined(MigrationTxId(0), BlockHeight::from_u32(10));
-        s.mark_mined(MigrationTxId(1), BlockHeight::from_u32(11));
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(10));
+        s.mark_mined(MigrationTransferId(1), BlockHeight::from_u32(11));
         assert_eq!(s.status, MigrationStatus::Complete);
         assert!(s.is_terminal());
     }
@@ -771,16 +844,16 @@ mod tests {
         );
 
         // Detecting a mined transaction still does not resurrect it.
-        s.mark_mined(MigrationTxId(0), BlockHeight::from_u32(10));
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(10));
         assert_eq!(s.status, MigrationStatus::Failed);
     }
 
     #[test]
     fn transaction_statuses_report_ready_and_blockers() {
         let mut l1 = tx(1, prep(1, 0), MigrationTxState::Signed);
-        l1.depends_on = vec![MigrationTxId(0)];
+        l1.depends_on = vec![MigrationTransferId(0)];
         let mut xfer = tx(2, transfer(0), MigrationTxState::Signed);
-        xfer.depends_on = vec![MigrationTxId(1)];
+        xfer.depends_on = vec![MigrationTransferId(1)];
         xfer.scheduled_height = BlockHeight::from_u32(30);
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), l1, xfer]);
 
@@ -821,7 +894,7 @@ mod tests {
         // A transfer anchors to a drawn boundary; it is not provable until the boundary block is
         // strictly below the tip (its checkpoint has settled), decoupled from the broadcast schedule.
         let mut xfer = tx(1, transfer(0), MigrationTxState::Signed);
-        xfer.depends_on = vec![MigrationTxId(0)];
+        xfer.depends_on = vec![MigrationTransferId(0)];
         xfer.anchor_boundary = Some(BlockHeight::from_u32(40));
         xfer.scheduled_height = BlockHeight::from_u32(60);
         let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
@@ -838,7 +911,7 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(42)),
             AdvanceStep::Prove {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
 
@@ -853,7 +926,7 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(60)),
             AdvanceStep::Broadcast {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
     }
@@ -893,14 +966,14 @@ mod tests {
         // At target 50 (tip 49) it can still be mined -> broadcastable.
         assert_eq!(
             s.next_broadcastable(BlockHeight::from_u32(50)),
-            Some(MigrationTxId(1))
+            Some(MigrationTransferId(1))
         );
         // At target 51 (tip 50) expiry has passed (51 > 50) -> not broadcastable, must be rebuilt.
         assert_eq!(s.next_broadcastable(BlockHeight::from_u32(51)), None);
         assert_eq!(
             s.next_step(BlockHeight::from_u32(51)),
             AdvanceStep::Rebuild {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
 
@@ -910,7 +983,7 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(51)),
             AdvanceStep::Rebuild {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
     }
@@ -927,7 +1000,7 @@ mod tests {
         assert_eq!(v[1].expiry_height, BlockHeight::from_u32(50));
         assert_eq!(
             s.expired_transactions(BlockHeight::from_u32(51)),
-            vec![MigrationTxId(1)]
+            vec![MigrationTransferId(1)]
         );
     }
 
@@ -958,7 +1031,7 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(51)),
             AdvanceStep::Prove {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
         // Once the valid transfer is proved and broadcast, the expired one is surfaced for rebuild.
@@ -968,7 +1041,7 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(51)),
             AdvanceStep::Rebuild {
-                id: MigrationTxId(2)
+                id: MigrationTransferId(2)
             }
         );
     }
@@ -989,7 +1062,7 @@ mod tests {
             50,
         );
         let mut dependent = tx(1, transfer(0), MigrationTxState::Signed);
-        dependent.depends_on = vec![MigrationTxId(0)];
+        dependent.depends_on = vec![MigrationTransferId(0)];
         let s = state_with(vec![expired_prep, dependent]);
 
         assert_eq!(s.next_step(BlockHeight::from_u32(51)), AdvanceStep::Waiting);
@@ -997,7 +1070,7 @@ mod tests {
         assert_eq!(v[0].blocked_on, Some(Blocker::Expired));
         assert_eq!(
             s.expired_transactions(BlockHeight::from_u32(51)),
-            vec![MigrationTxId(0)]
+            vec![MigrationTransferId(0)]
         );
     }
 
@@ -1019,7 +1092,7 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(51)),
             AdvanceStep::Rebuild {
-                id: MigrationTxId(1)
+                id: MigrationTransferId(1)
             }
         );
     }

@@ -9,7 +9,7 @@
 //!
 //! - The *sources* are the wallet's spendable note values `W = {w_1, ..., w_m}` (in zatoshi); the
 //!   *sinks* are the funding-note values `F = {f_1, ..., f_l}` chosen by
-//!   [`note_splitting`](crate::note_splitting), plus at most one residual `r`.
+//!   [`denomination`](crate::denomination), plus at most one residual `r`.
 //! - A transaction `t = (I_t, O_t)` spends the notes `I_t` and creates the notes `O_t` subject to
 //!   three constraints:
 //!   - *budget*: `|I_t| + |O_t| <= A`, where `A` is [`PREP_TX_ACTIONS`], i.e. 16 Orchard actions;
@@ -244,7 +244,7 @@ mod tests {
     };
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::note_splitting::zat;
+    use crate::denomination::zat;
 
     /// The ZIP-317 fee of a padded [`PREP_TX_ACTIONS`]-action preparation transaction (each action
     /// costs one marginal fee), which the planner reserves per transaction.

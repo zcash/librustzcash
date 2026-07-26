@@ -26,12 +26,12 @@ use rand_core::SeedableRng;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::COIN;
 
+#[cfg(feature = "test-dependencies")]
+use zcash_pool_migration::denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
 use zcash_pool_migration::engine::{
     MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
     UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
 };
-#[cfg(feature = "test-dependencies")]
-use zcash_pool_migration::note_splitting::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
 use zcash_pool_migration::signing_rounds::{MinRounds, NextFit, SigningRoundBudget};
 #[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::testing::MIGRATION_SCENARIOS;

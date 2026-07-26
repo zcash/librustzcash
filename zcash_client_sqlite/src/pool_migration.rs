@@ -6,7 +6,7 @@
 //! committed migration is a set of pre-signed PCZTs plus their schedule and lifecycle state, so a
 //! wallet resumes a migration entirely from these tables after being closed or restarted.
 //!
-//! The schema is fully NORMALIZED: every structured value (the note-split plan, the preparation
+//! The schema is fully NORMALIZED: every structured value (the denomination plan, the preparation
 //! plan's transaction inputs/outputs and direct-funding notes, the transaction kind, and the
 //! dependency graph) is stored in typed columns and child tables, so it can be queried directly.
 //! The `BLOB` columns are the pre-signed transaction (`pczt`), which is genuinely unstructured,
@@ -42,7 +42,7 @@
 //!
 //! There is at most one migration in progress per pool per account, stored as a row in the pool's
 //! migrations table keyed by an `account_id` foreign key into `accounts` (with `ON DELETE CASCADE`,
-//! so an account's migration is removed with the account), with its transactions, note split, and
+//! so an account's migration is removed with the account), with its transactions, denomination plan, and
 //! preparation plan in the pool's child tables (addressed through that row's synthetic primary
 //! key). The pool's `PoolMigrations` type is the store: construct it over a `rusqlite::Connection`
 //! (the same one [`WalletDb`](crate::WalletDb) uses) and the [`AccountUuid`](crate::AccountUuid)

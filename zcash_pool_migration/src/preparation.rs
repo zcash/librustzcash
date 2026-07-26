@@ -4,7 +4,7 @@
 //!
 //! # The problem
 //!
-//! The [`note_splitting`](super::note_splitting) planner decides the *values* of the self-funding
+//! The [`denomination`](super::denomination) planner decides the *values* of the self-funding
 //! notes to mint. This module decides the *transactions* that mint them. [ZIP 318] requires each
 //! note-preparation transaction to be padded to exactly [`PREP_TX_ACTIONS`] Orchard actions (a
 //! mobile-proving-time and on-chain-uniformity constraint). Under NU6.3 a bundle's action count is

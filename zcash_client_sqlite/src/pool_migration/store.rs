@@ -16,7 +16,7 @@
 //! produces has at least one input and one output (and no layer is empty), so the store
 //! reconstructs the grid from those rows (and rejects a state it could not reconstruct with
 //! [`Error::Unrepresentable`]). Likewise the funding-note values have no table: the engine derives
-//! them from the note split (each crossing value plus the fee buffer).
+//! them from the denomination plan (each crossing value plus the fee buffer).
 //!
 //! The column set is the same for every pool; only the table and index names change.
 //!
@@ -30,11 +30,11 @@ use std::num::NonZeroU32;
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 
 use zcash_client_backend::wallet::LockOwner;
+use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState,
 };
-use zcash_pool_migration::note_splitting::NoteSplitPlan;
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
 use zcash_protocol::consensus::BlockHeight;
@@ -48,9 +48,9 @@ use super::error::Error;
 /// supplies a `'static` value of this for its own pool; the generic store interpolates these into
 /// every DDL and query, so one implementation serves every pool.
 pub(crate) struct Tables {
-    /// The migration-state table (one row per account; holds the note-split scalars).
+    /// The migration-state table (one row per account; holds the denomination scalars).
     pub migrations: &'static str,
-    /// The note-split crossing values (an ordered list).
+    /// The denomination crossing values (an ordered list).
     pub crossing_values: &'static str,
     /// The inputs of each preparation transaction, keyed by the transaction's `(layer, tx_index)`
     /// grid coordinate.
@@ -282,7 +282,7 @@ impl<C: BorrowMut<Connection>> Store<C> {
 
     pub(crate) fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Error> {
         let tables = self.tables;
@@ -406,7 +406,7 @@ fn read_migration(
         .ok_or(Error::Corrupt("anchor_bucket_interval"))?;
 
     let crossing_values = read_zatoshi_list(conn, t.crossing_values, migration_id)?;
-    let note_split = NoteSplitPlan::from_stored_parts(
+    let denominations = DenominationPlan::from_stored_parts(
         crossing_values,
         Zatoshis::from_u64(fee_buffer)?,
         change.map(Zatoshis::from_u64).transpose()?,
@@ -414,7 +414,7 @@ fn read_migration(
         Zatoshis::from_u64(total_input)?,
         Zatoshis::from_u64(total_migratable)?,
     )
-    .map_err(|_| Error::Corrupt("note_split"))?;
+    .map_err(|_| Error::Corrupt("denominations"))?;
 
     let preparation = read_preparation(conn, t, migration_id)?;
     let transactions = read_transactions(conn, t, migration_id)?;
@@ -423,7 +423,7 @@ fn read_migration(
         MigrationStatus::try_from(status.as_str()).map_err(|_| Error::Corrupt("status"))?;
     Ok(Some(MigrationState::from_parts(
         status,
-        note_split,
+        denominations,
         preparation,
         transactions,
         anchor_bucket_interval,
@@ -622,7 +622,7 @@ fn read_transactions(
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-        let id = MigrationTxId::new(r.tx_id);
+        let id = MigrationTransferId::new(r.tx_id);
         let kind = MigrationTxKind::from_stored(
             &r.kind,
             r.kind_layer.map(|x| x as usize),
@@ -712,7 +712,7 @@ fn read_deps(
     t: &Tables,
     migration_id: i64,
     tx_id: u32,
-) -> Result<Vec<MigrationTxId>, Error> {
+) -> Result<Vec<MigrationTransferId>, Error> {
     let mut stmt = conn.prepare(&format!(
         "SELECT depends_on_tx_id FROM {}
           WHERE migration_id = ? AND tx_id = ?
@@ -722,7 +722,7 @@ fn read_deps(
     let rows = stmt.query_map(params![migration_id, tx_id], |row| row.get::<_, u32>(0))?;
     let mut out = Vec::new();
     for r in rows {
-        out.push(MigrationTxId::new(r?));
+        out.push(MigrationTransferId::new(r?));
     }
     Ok(out)
 }
@@ -779,7 +779,7 @@ fn replace_migration(
         )?;
     }
 
-    let ns = state.note_split();
+    let ns = state.denominations();
     tx.execute(
         &format!(
             "INSERT INTO {} (account_id, status, note_split_fee_buffer, note_split_change,

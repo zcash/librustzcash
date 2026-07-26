@@ -13,7 +13,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 
 use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
@@ -137,7 +137,7 @@ impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
 
     fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         self.0.update_transaction(id, state)
@@ -162,10 +162,10 @@ mod retention_follows_the_committed_migration {
         TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
     };
     use zcash_client_backend::data_api::{Account as _, WalletCommitmentTrees, WalletRead};
+    use zcash_pool_migration::denomination::DenominationPlan;
     use zcash_pool_migration::engine::{
         MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite,
     };
-    use zcash_pool_migration::note_splitting::NoteSplitPlan;
     use zcash_pool_migration::preparation::PreparationPlan;
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_primitives::block::BlockHash;
@@ -179,7 +179,7 @@ mod retention_follows_the_committed_migration {
     fn migration_committed_under(interval: AnchorBucketInterval) -> MigrationState {
         MigrationState::from_parts(
             MigrationStatus::Committed,
-            NoteSplitPlan::from_stored_parts(
+            DenominationPlan::from_stored_parts(
                 Vec::new(),
                 Zatoshis::ZERO,
                 None,
@@ -310,7 +310,7 @@ mod tests {
     use uuid::Uuid;
 
     use zcash_pool_migration::engine::{
-        MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+        MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_pool_migration::testing::{
@@ -374,15 +374,15 @@ mod tests {
     /// covers the type more broadly.
     #[test]
     fn lock_owner_round_trips() {
+        use zcash_pool_migration::denomination::DenominationPlan;
         use zcash_pool_migration::engine::{
             MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
         };
-        use zcash_pool_migration::note_splitting::NoteSplitPlan;
         use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::consensus::BlockHeight;
         use zcash_protocol::value::Zatoshis;
 
-        let note_split = NoteSplitPlan::from_stored_parts(
+        let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
             None,
@@ -394,7 +394,7 @@ mod tests {
 
         let owner_bytes = [7u8; 32];
         let locked = MigrationTransaction::from_parts(
-            MigrationTxId::new(0),
+            MigrationTransferId::new(0),
             MigrationTxKind::Preparation { layer: 0, index: 0 },
             vec![1, 2, 3],
             Vec::new(),
@@ -405,7 +405,7 @@ mod tests {
             Some(owner_bytes),
         );
         let unlocked = MigrationTransaction::from_parts(
-            MigrationTxId::new(1),
+            MigrationTransferId::new(1),
             MigrationTxKind::Transfer { crossing: 0 },
             vec![4, 5, 6],
             Vec::new(),
@@ -417,7 +417,7 @@ mod tests {
         );
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
-            note_split,
+            denominations,
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             vec![locked, unlocked],
             AnchorBucketInterval::ZIP_318,
@@ -454,10 +454,10 @@ mod tests {
         use std::collections::BTreeSet;
 
         use zcash_client_backend::wallet::LockOwner;
+        use zcash_pool_migration::denomination::DenominationPlan;
         use zcash_pool_migration::engine::{
             MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
         };
-        use zcash_pool_migration::note_splitting::NoteSplitPlan;
         use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::consensus::BlockHeight;
         use zcash_protocol::value::Zatoshis;
@@ -472,7 +472,7 @@ mod tests {
         let owner_a_bytes = [0xA1u8; 32];
         let owner_b_bytes = [0xB2u8; 32];
 
-        let note_split = NoteSplitPlan::from_stored_parts(
+        let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
             None,
@@ -484,7 +484,7 @@ mod tests {
 
         let tx = |id: u32, crossing: usize, lock_owner: Option<[u8; 32]>| {
             MigrationTransaction::from_parts(
-                MigrationTxId::new(id),
+                MigrationTransferId::new(id),
                 MigrationTxKind::Transfer { crossing },
                 vec![id as u8],
                 Vec::new(),
@@ -498,7 +498,7 @@ mod tests {
 
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
-            note_split,
+            denominations,
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             vec![
                 tx(0, 0, Some(owner_a_bytes)),
@@ -525,12 +525,12 @@ mod tests {
     /// so an empty layer would leave no trace (and the engine never produces one).
     #[test]
     fn empty_prep_layer_is_rejected() {
+        use zcash_pool_migration::denomination::DenominationPlan;
         use zcash_pool_migration::engine::{MigrationState, MigrationStatus};
-        use zcash_pool_migration::note_splitting::NoteSplitPlan;
         use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::value::Zatoshis;
 
-        let note_split = NoteSplitPlan::from_stored_parts(
+        let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
             None,
@@ -541,7 +541,7 @@ mod tests {
         .expect("an empty stored plan reconstructs");
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
-            note_split,
+            denominations,
             PreparationPlan::from_parts(vec![Vec::new()], Vec::new()),
             Vec::new(),
             AnchorBucketInterval::ZIP_318,
@@ -558,8 +558,8 @@ mod tests {
     /// cleanup the wallet's account-deletion path now relies on entirely (no explicit delete).
     #[test]
     fn deleting_an_account_cascades_to_its_migration() {
+        use zcash_pool_migration::denomination::DenominationPlan;
         use zcash_pool_migration::engine::{MigrationState, MigrationStatus};
-        use zcash_pool_migration::note_splitting::NoteSplitPlan;
         use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_protocol::value::Zatoshis;
 
@@ -574,7 +574,7 @@ mod tests {
 
         // A minimal but non-trivial migration (one crossing value) so the cascade is observed to
         // reach a child table, not only the parent row.
-        let note_split = NoteSplitPlan::from_stored_parts(
+        let denominations = DenominationPlan::from_stored_parts(
             vec![Zatoshis::const_from_u64(1)],
             Zatoshis::ZERO,
             None,
@@ -585,7 +585,7 @@ mod tests {
         .expect("a one-crossing stored plan reconstructs");
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
-            note_split,
+            denominations,
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             Vec::new(),
             AnchorBucketInterval::ZIP_318,
@@ -679,7 +679,7 @@ mod tests {
             s.replace_migration(&state).expect("write");
             // Generated ids are `0..transactions.len()` (< 6), so `u32::MAX` is always absent.
             let err = s
-                .update_transaction(MigrationTxId::new(u32::MAX), MigrationTxState::Proved)
+                .update_transaction(MigrationTransferId::new(u32::MAX), MigrationTxState::Proved)
                 .expect_err("no such transaction");
             prop_assert!(matches!(err, Error::Corrupt(_)));
         }

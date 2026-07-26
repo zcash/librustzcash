@@ -24,11 +24,11 @@ use zcash_protocol::consensus::testing::arb_block_height;
 use zcash_protocol::value::testing::arb_zatoshis;
 use zcash_protocol::value::{COIN, Zatoshis};
 
+use crate::denomination::DenominationPlan;
 use crate::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
-use crate::note_splitting::NoteSplitPlan;
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::scheduling::AnchorBucketInterval;
 use crate::signing_rounds::{
@@ -45,9 +45,9 @@ fn zat(value: u64) -> Zatoshis {
 
 // --- leaf strategies ---
 
-/// An arbitrary [`MigrationTxId`] row key.
-pub fn arb_migration_tx_id() -> impl Strategy<Value = MigrationTxId> {
-    (0u32..1000).prop_map(MigrationTxId::new)
+/// An arbitrary [`MigrationTransferId`] row key.
+pub fn arb_migration_transfer_id() -> impl Strategy<Value = MigrationTransferId> {
+    (0u32..1000).prop_map(MigrationTransferId::new)
 }
 
 // --- preparation-plan strategies (moved from `preparation`'s codec tests) ---
@@ -99,12 +99,12 @@ pub fn arb_preparation_plan() -> impl Strategy<Value = PreparationPlan> {
         .prop_map(|(layers, direct)| PreparationPlan::from_parts(layers, direct))
 }
 
-// --- note-split strategy (moved from `note_splitting`'s codec tests) ---
+// --- denomination strategy (moved from `denomination`'s codec tests) ---
 
-/// An arbitrary [`NoteSplitPlan`], covering all stored fields (an empty or populated crossing set,
+/// An arbitrary [`DenominationPlan`], covering all stored fields (an empty or populated crossing set,
 /// present or absent change). Bounded so every `crossing + note_fee_buffer` is representable, which
-/// is what [`NoteSplitPlan::from_stored_parts`] requires.
-pub fn arb_note_split_plan() -> impl Strategy<Value = NoteSplitPlan> {
+/// is what [`DenominationPlan::from_stored_parts`] requires.
+pub fn arb_denomination_plan() -> impl Strategy<Value = DenominationPlan> {
     (
         prop::collection::vec(arb_zatoshis(), 0..8),
         (0u64..1_000_000).prop_map(zat),
@@ -122,7 +122,7 @@ pub fn arb_note_split_plan() -> impl Strategy<Value = NoteSplitPlan> {
                 total_input,
                 total_migratable,
             )| {
-                NoteSplitPlan::from_stored_parts(
+                DenominationPlan::from_stored_parts(
                     crossing_values,
                     note_fee_buffer,
                     change,
@@ -182,10 +182,10 @@ pub fn arb_lock_owner() -> impl Strategy<Value = Option<[u8; 32]>> {
 /// unique within a migration.
 pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction> {
     (
-        arb_migration_tx_id(),
+        arb_migration_transfer_id(),
         arb_migration_tx_kind(),
         prop::collection::vec(any::<u8>(), 0..64),
-        prop::collection::vec(arb_migration_tx_id(), 0..4),
+        prop::collection::vec(arb_migration_transfer_id(), 0..4),
         arb_block_height(),
         arb_block_height(),
         prop::option::of(arb_block_height()),
@@ -231,20 +231,20 @@ pub fn arb_anchor_bucket_interval() -> impl Strategy<Value = AnchorBucketInterva
 }
 
 /// An arbitrary whole [`MigrationState`], built through [`MigrationState::from_parts`]: a status, a
-/// note split (from which the funding-note values derive), a preparation plan, a small set of
-/// transactions re-keyed with sequential [`MigrationTxId`]s (so their row keys are unique, as a
+/// denomination plan (from which the funding-note values derive), a preparation plan, a small set of
+/// transactions re-keyed with sequential [`MigrationTransferId`]s (so their row keys are unique, as a
 /// store requires), and the anchor bucket grid it was committed under. Generated values are
 /// self-consistent enough to persist and read back unchanged.
 pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
     (
         arb_migration_status(),
-        arb_note_split_plan(),
+        arb_denomination_plan(),
         arb_preparation_plan(),
         prop::collection::vec(arb_migration_transaction(), 0..6),
         arb_anchor_bucket_interval(),
     )
         .prop_map(
-            |(status, note_split, preparation, txs, anchor_bucket_interval)| {
+            |(status, denominations, preparation, txs, anchor_bucket_interval)| {
                 // Re-key the transactions with sequential ids so their row keys are unique; a store
                 // keys transaction rows by id and returns them in id order.
                 let transactions = txs
@@ -252,7 +252,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                     .enumerate()
                     .map(|(i, tx)| {
                         MigrationTransaction::from_parts(
-                            MigrationTxId::new(i as u32),
+                            MigrationTransferId::new(i as u32),
                             tx.kind(),
                             tx.pczt().clone(),
                             tx.depends_on().clone(),
@@ -266,7 +266,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                     .collect();
                 MigrationState::from_parts(
                     status,
-                    note_split,
+                    denominations,
                     preparation,
                     transactions,
                     anchor_bucket_interval,
@@ -340,7 +340,7 @@ pub fn assert_put_replaces<S: PoolMigrationWrite>(
 pub fn assert_update_transaction<S: PoolMigrationWrite>(
     store: &mut S,
     state: &MigrationState,
-    id: MigrationTxId,
+    id: MigrationTransferId,
     new: MigrationTxState,
 ) where
     S::Error: Debug,
@@ -365,7 +365,7 @@ pub fn assert_update_transaction<S: PoolMigrationWrite>(
 
 /// The id of the first transaction of `state`, or `None` if it has no transactions. A convenience
 /// for driving [`assert_update_transaction`] from a generated [`MigrationState`].
-pub fn first_transaction_id(state: &MigrationState) -> Option<MigrationTxId> {
+pub fn first_transaction_id(state: &MigrationState) -> Option<MigrationTransferId> {
     state.transactions().first().map(|t| t.id())
 }
 
@@ -407,14 +407,14 @@ pub fn planned_txs(n_prep: usize, n_transfer: usize) -> Vec<PlannedTx> {
     let mut id = 0u32;
     for index in 0..n_prep {
         txs.push(PlannedTx::new(
-            MigrationTxId::new(id),
+            MigrationTransferId::new(id),
             MigrationTxKind::Preparation { layer: 0, index },
         ));
         id += 1;
     }
     for crossing in 0..n_transfer {
         txs.push(PlannedTx::new(
-            MigrationTxId::new(id),
+            MigrationTransferId::new(id),
             MigrationTxKind::Transfer { crossing },
         ));
         id += 1;

@@ -1,7 +1,7 @@
 //! Building a migration transfer transaction: spending one self-funding note and crossing its value
 //! into the Ironwood pool.
 //!
-//! [`build_transfer_pczt`] spends a single self-funding note (one the note split minted, worth its
+//! [`build_transfer_pczt`] spends a single self-funding note (one the denomination plan minted, worth its
 //! crossing value plus a fee buffer) and outputs that crossing value into the destination Ironwood
 //! pool, to the account's own internal (change) address as ZIP 318 requires. It has no change output:
 //! the self-funding note's buffer funds the transfer's fee exactly. The Orchard spend pads to the
@@ -54,8 +54,8 @@ const IRONWOOD_TRANSFER_PADDING: BundlePadding = BundlePadding {
 /// destination: per ZIP 318 the crossing is sent to the account's own internal Ironwood change
 /// address. `target_height` and `expiry_height` bound the transaction; the pre-signature commits to
 /// the expiry, so the caller passes the canonical expiry for the transfer's drawn broadcast
-/// schedule. It mirrors the note split's
-/// [`crossing_values`](crate::note_splitting::NoteSplitPlan::crossing_values): one transfer per
+/// schedule. It mirrors the denomination plan's
+/// [`crossing_values`](crate::denomination::DenominationPlan::crossing_values): one transfer per
 /// self-funding note.
 ///
 /// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `OsRng`; tests can
@@ -124,7 +124,7 @@ mod tests {
     use crate::build::test_util::{account, regtest_network, single_note_witness};
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::note_splitting::{
+    use crate::denomination::{
         DESTINATION_ACTIONS_PER_TRANSFER, RESIDUAL_MIGRATION_MIN, SOURCE_ACTIONS_PER_TRANSFER, zat,
     };
 

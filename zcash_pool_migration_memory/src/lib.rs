@@ -36,7 +36,7 @@ use zcash_protocol::value::Zatoshis;
 
 use zcash_pool_migration::build::sign_pczt;
 use zcash_pool_migration::engine::{
-    MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTxId,
+    MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTransferId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 use zcash_pool_migration::scheduling::SchedulingParams;
@@ -211,7 +211,11 @@ pub fn shared_anchor_witnesses(
 /// untouched. The engine's [`MigrationState`] keeps its transactions behind read-only accessors, so
 /// an external test backend advances one transaction's lifecycle by reconstructing the state from
 /// its public parts.
-fn set_transaction_state(stored: &mut MigrationState, id: MigrationTxId, state: MigrationTxState) {
+fn set_transaction_state(
+    stored: &mut MigrationState,
+    id: MigrationTransferId,
+    state: MigrationTxState,
+) {
     let transactions: Vec<MigrationTransaction> = stored
         .transactions()
         .iter()
@@ -235,7 +239,7 @@ fn set_transaction_state(stored: &mut MigrationState, id: MigrationTxId, state: 
         .collect();
     *stored = MigrationState::from_parts(
         stored.status(),
-        stored.note_split().clone(),
+        stored.denominations().clone(),
         stored.preparation().clone(),
         transactions,
         stored.anchor_bucket_interval(),
@@ -308,7 +312,7 @@ impl PoolMigrationWrite for MockBackend {
 
     fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         if let Some(stored) = &mut self.stored {
@@ -401,7 +405,7 @@ impl PoolMigrationWrite for CommitMock {
 
     fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         if let Some(stored) = &mut self.stored {

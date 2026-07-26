@@ -13,12 +13,12 @@ use rand_core::SeedableRng;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{COIN, Zatoshis};
 
+use zcash_pool_migration::denomination::{DenominationPlan, plan_denominations};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationError, MigrationState, MigrationStatus, MigrationTransaction,
-    MigrationTxId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     plan_migration,
 };
-use zcash_pool_migration::note_splitting::{NoteSplitPlan, plan_note_split};
 use zcash_pool_migration::preparation::{
     FUNDING_OUTPUTS_PER_TX, PreparationPlan, plan_preparation,
 };
@@ -51,7 +51,7 @@ fn plans_a_migration_from_a_balance() {
         plan.preparation().funding_notes().len(),
         plan.funding_notes().len()
     );
-    assert!(plan.funding_notes().len() <= plan.note_split().migration_outputs().len());
+    assert!(plan.funding_notes().len() <= plan.denominations().migration_outputs().len());
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn empty_balance_has_nothing_to_migrate() {
     ));
 }
 
-/// The full migration pipeline (note splitting then preparation) for the smallest migratable
+/// The full migration pipeline (denomination planning then preparation) for the smallest migratable
 /// balance: a lone source note of exactly one quantum plus its fees. A quantum is a canonical
 /// `{1, 2, 5} * 10^k` denomination; its fees are the ZIP-317 transfer buffer that funds the crossing
 /// note plus one padded preparation-transaction fee. Such a balance migrates that one denomination
@@ -82,8 +82,8 @@ fn full_migration_of_one_quantum_is_one_layer_one_transaction() {
     let mut rng = ChaCha8Rng::seed_from_u64(1);
     let probe_plan = plan_migration(&params, &probe, &mut rng).expect("the probe balance plans");
     assert_eq!(probe_plan.preparation().transaction_count(), 1);
-    let buffer = u64::from(probe_plan.note_split().note_fee_buffer());
-    let prep_tx_fee = u64::from(probe_plan.note_split().prep_fees());
+    let buffer = u64::from(probe_plan.denominations().note_fee_buffer());
+    let prep_tx_fee = u64::from(probe_plan.denominations().prep_fees());
 
     // A few example quanta spanning the series from the 0.01 ZEC minimum to the 10,000 ZEC cap.
     let quanta = [
@@ -102,7 +102,7 @@ fn full_migration_of_one_quantum_is_one_layer_one_transaction() {
 
         // The split: one crossing of exactly the quantum, and the whole balance consumed (no change).
         assert_eq!(
-            plan.note_split()
+            plan.denominations()
                 .crossing_values()
                 .iter()
                 .map(|&v| u64::from(v))
@@ -110,7 +110,7 @@ fn full_migration_of_one_quantum_is_one_layer_one_transaction() {
             vec![quantum],
             "quantum {quantum}",
         );
-        assert_eq!(plan.note_split().change(), None, "quantum {quantum}");
+        assert_eq!(plan.denominations().change(), None, "quantum {quantum}");
 
         // The preparation: exactly one layer holding exactly one transaction, minting exactly the
         // single funding note (the crossing plus its transfer buffer).
@@ -153,13 +153,13 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
 
     let kept = plan.funding_notes();
 
-    // The baseline: the same split with an always-fundable preparation stub, i.e. what the strategy
-    // proposes for this balance absent the equal-note source's fundability constraint. Recover the
-    // exact fees `plan_migration` used from the produced note split so the baseline matches.
-    let transfer_buffer = plan.note_split().note_fee_buffer();
-    let prep_tx_fee = plan.note_split().prep_fees();
+    // The baseline: the same denominations with an always-fundable preparation stub, i.e. what the
+    // strategy proposes for this balance absent the equal-note source's fundability constraint.
+    // Recover the exact fees `plan_migration` used from the produced plan so the baseline matches.
+    let transfer_buffer = plan.denominations().note_fee_buffer();
+    let prep_tx_fee = plan.denominations().prep_fees();
     let mut ref_rng = ChaCha8Rng::seed_from_u64(1);
-    let proposed = plan_note_split(
+    let proposed = plan_denominations(
         zat(balance),
         transfer_buffer,
         prep_tx_fee,
@@ -219,8 +219,8 @@ fn stores_loads_and_updates_a_migration() {
     let mut backend = MockBackend::new(Vec::new(), 0);
     assert!(backend.get_migration().unwrap().is_none());
 
-    // A consistent stored note split (its exact values are immaterial to the store round-trip).
-    let note_split = NoteSplitPlan::from_stored_parts(
+    // A consistent stored denomination plan (its exact values are immaterial to the store round-trip).
+    let denominations = DenominationPlan::from_stored_parts(
         vec![zat(100 * COIN)],
         zat(10_000),
         None,
@@ -230,7 +230,7 @@ fn stores_loads_and_updates_a_migration() {
     )
     .expect("a consistent stored split reconstructs");
     let tx = MigrationTransaction::from_parts(
-        MigrationTxId::new(0),
+        MigrationTransferId::new(0),
         MigrationTxKind::Transfer { crossing: 0 },
         vec![1, 2, 3], // a stand-in for the serialized pre-signed PCZT
         Vec::new(),
@@ -242,7 +242,7 @@ fn stores_loads_and_updates_a_migration() {
     );
     let state = MigrationState::from_parts(
         MigrationStatus::Committed,
-        note_split,
+        denominations,
         PreparationPlan::from_parts(Vec::new(), Vec::new()),
         vec![tx],
         AnchorBucketInterval::ZIP_318,
@@ -259,7 +259,7 @@ fn stores_loads_and_updates_a_migration() {
 
     backend
         .update_transaction(
-            MigrationTxId::new(0),
+            MigrationTransferId::new(0),
             MigrationTxState::Mined {
                 height: BlockHeight::from_u32(2_000_105),
             },
