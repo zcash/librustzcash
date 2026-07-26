@@ -7,4 +7,6 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.2] - 2026-07-26
+
 Initial release of the `zcash_pool_migration` crate.

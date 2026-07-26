@@ -11,7 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Changed
-- Migrated to `zcash_client_backend 0.24.0-rc.3`.
+- Migrated to `zcash_client_backend 0.24.0-rc.3`,
+  `zcash_pool_migration 0.1.0-rc.2`.
 
 ## [0.22.0-rc.2] - 2026-07-24
 
