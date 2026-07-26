@@ -1,6 +1,6 @@
 //! The migration engine: orchestrating a pool migration end to end through a wallet backend.
 //!
-//! The crate's other modules are the individual planners and builders: [`note_splitting`] decides the
+//! The crate's other modules are the individual planners and builders: [`denomination`] decides the
 //! denominations, [`preparation`] plans the transactions that mint them, [`scheduling`] shuffles and
 //! times the phase-2 transfers, and the `build` module turns plans into PCZTs. This module ties
 //! them together behind a [`MigrationBackend`] trait, so the engine drives the whole flow
@@ -37,7 +37,7 @@
 //! wallet closed between planning and broadcast, or restarted partway through, resumes from the stored
 //! PCZTs.
 //!
-//! [`note_splitting`]: crate::note_splitting
+//! [`denomination`]: crate::denomination
 //! [`preparation`]: crate::preparation
 //! [`scheduling`]: crate::scheduling
 
@@ -56,7 +56,7 @@ use zcash_protocol::value::{BalanceError, Zatoshis};
 use zcash_primitives::transaction::fees::FeeRule as _;
 use zcash_primitives::transaction::fees::{transparent, zip317};
 
-use crate::note_splitting::{NoteSplitPlan, plan_note_split};
+use crate::denomination::{DenominationPlan, plan_denominations};
 use crate::preparation::{PrepError, PrepInput, PreparationPlan, plan_preparation};
 use crate::scheduling::{self, Schedule};
 use crate::signing_rounds::{
@@ -478,7 +478,7 @@ impl MigrationTxState {
     }
 }
 
-/// The persisted state of a migration: the note split (for the preview and residual accounting) and
+/// The persisted state of a migration: the denomination plan (for the preview and residual accounting) and
 /// every transaction, each as its pre-signed PCZT and metadata. A wallet resumes a migration entirely
 /// from this state after being closed or restarted; this is what a [`MigrationBackend`] stores.
 #[derive(Clone, Debug, PartialEq, Eq, Getters, CopyGetters)]
@@ -486,9 +486,9 @@ pub struct MigrationState {
     /// The overall status.
     #[getset(get_copy = "pub")]
     pub(crate) status: MigrationStatus,
-    /// The note-split decomposition (the denominations and residual).
+    /// The denomination decomposition (the denominations and residual).
     #[getset(get = "pub")]
-    pub(crate) note_split: NoteSplitPlan,
+    pub(crate) denominations: DenominationPlan,
     /// The preparation plan (its layers and direct-funding notes), retained for auditability and
     /// for rebuilding expired PREPARATION transactions (a follow-on slice). A
     /// `Preparation { layer, index }` transaction's spends resolve against
@@ -515,14 +515,14 @@ impl MigrationState {
     /// (the inverse of the accessors).
     pub fn from_parts(
         status: MigrationStatus,
-        note_split: NoteSplitPlan,
+        denominations: DenominationPlan,
         preparation: PreparationPlan,
         transactions: Vec<MigrationTransaction>,
         anchor_bucket_interval: crate::scheduling::AnchorBucketInterval,
     ) -> Self {
         Self {
             status,
-            note_split,
+            denominations,
             preparation,
             transactions,
             anchor_bucket_interval,
@@ -531,10 +531,10 @@ impl MigrationState {
 
     /// The self-funding note values (in zatoshi), one per crossing: a `Transfer { crossing }`
     /// transaction spends `funding_notes()[crossing]` and crosses that value minus the fee buffer
-    /// into the destination pool. Derived from the note split (each crossing value plus the fee
-    /// buffer), so a store persists only the note split.
+    /// into the destination pool. Derived from the denomination plan (each crossing value plus the
+    /// fee buffer), so a store persists only that plan.
     pub fn funding_notes(&self) -> Vec<Zatoshis> {
-        self.note_split.migration_outputs()
+        self.denominations.migration_outputs()
     }
 
     /// Replace transfer `id`'s stored PCZT with its proven bytes and move it to
@@ -558,24 +558,24 @@ impl MigrationState {
 /// preview a wallet shows the user for consent (ZIP 318) to the pool-crossing amounts.
 #[derive(Clone, Debug)]
 pub struct MigrationPlan {
-    note_split: NoteSplitPlan,
+    denominations: DenominationPlan,
     preparation: PreparationPlan,
     prep_schedule: Vec<Vec<BlockHeight>>,
     schedule: Vec<Schedule>,
 }
 
 impl MigrationPlan {
-    /// The note-split decomposition (the denominations and residual). The split already reflects
+    /// The denomination decomposition (the denominations and residual). It already reflects
     /// reconciliation against the preparation fees: when the fees did not fit the balance, the
     /// smallest denominations were dropped (left in the source pool) during the decomposition.
-    pub fn note_split(&self) -> &NoteSplitPlan {
-        &self.note_split
+    pub fn denominations(&self) -> &DenominationPlan {
+        &self.denominations
     }
 
     /// The funding-note values this migration will mint, one per phase-2 crossing. Derived from the
-    /// note split (each crossing value plus the fee buffer).
+    /// denomination plan (each crossing value plus the fee buffer).
     pub fn funding_notes(&self) -> Vec<Zatoshis> {
-        self.note_split.migration_outputs()
+        self.denominations.migration_outputs()
     }
 
     /// The preparation transactions (in dependency layers) that mint the funding notes.
@@ -642,7 +642,7 @@ impl MigrationPlan {
 
     /// The number of pool-crossing transfers (one per funding note).
     pub fn transfer_tx_count(&self) -> usize {
-        self.note_split.migration_outputs().len()
+        self.denominations.migration_outputs().len()
     }
 
     /// The number of sequential preparation layers (the phase's wall-clock depth).
@@ -661,13 +661,13 @@ impl MigrationPlan {
 
     /// The total value that migrates to the destination pool (the sum of the crossing values).
     pub fn value_migrated(&self) -> Zatoshis {
-        self.note_split.total_migratable()
+        self.denominations.total_migratable()
     }
 
     /// The source-pool value left untouched by this plan (change plus dust below a self-funding
     /// note); zero when the balance decomposed exactly.
     pub fn residual(&self) -> Zatoshis {
-        self.note_split.change().unwrap_or(Zatoshis::ZERO)
+        self.denominations.change().unwrap_or(Zatoshis::ZERO)
     }
 
     /// Group this plan's transactions into signing ROUNDS for a signer bounded by `budget` total
@@ -767,7 +767,7 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
     params: &P,
     height: BlockHeight,
 ) -> Result<(Zatoshis, Zatoshis), zip317::FeeError> {
-    use crate::note_splitting::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
+    use crate::denomination::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
     use crate::preparation::PREP_TX_ACTIONS;
 
     let fee_rule = zip317::FeeRule::standard();
@@ -802,9 +802,9 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
 /// the canonical fee, since a nonstandard fee would partition the anonymity set), so it is not a
 /// parameter. The decomposition reserves the TRUE preparation cost at each step, consulting the
 /// preparation planner as it grows the split. `rng` must be a cryptographically secure RNG (the
-/// schedule's shuffle, delays, and the note split's optional randomization draw from it).
+/// schedule's shuffle, delays, and the denomination plan's optional randomization draw from it).
 ///
-/// This is pure orchestration of the note-split, preparation, and scheduling planners: no cryptography,
+/// This is pure orchestration of the denomination, preparation, and scheduling planners: no cryptography,
 /// and nothing is built, signed, or persisted. The result is the [`MigrationPlan`] preview to present
 /// for user consent before committing the migration.
 pub fn plan_migration<P, B, R>(
@@ -849,14 +849,14 @@ where
             .ok()
             .map(|plan| plan.transaction_count())
     };
-    let note_split = plan_note_split(
+    let denominations = plan_denominations(
         balance,
         transfer_fee_buffer,
         prep_tx_fee,
         &prep_tx_count,
         rng,
     );
-    let funding_notes = note_split.migration_outputs();
+    let funding_notes = denominations.migration_outputs();
     if funding_notes.is_empty() {
         return Err(MigrationError::NothingToMigrate);
     }
@@ -917,14 +917,14 @@ where
     }
 
     Ok(MigrationPlan {
-        note_split,
+        denominations,
         preparation,
         prep_schedule,
         schedule,
     })
 }
 
-/// A per-run entry of a [`MigrationRunEstimate`]: what one migration run migrates (the note-split
+/// A per-run entry of a [`MigrationRunEstimate`]: what one migration run migrates (the denomination
 /// side) and what preparing it costs (the note-preparation side), so the two can be compared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunEstimate {
@@ -940,7 +940,7 @@ impl RunEstimate {
         self.migratable
     }
 
-    /// The number of pool-crossing transfers this run makes: one per self-funding note the note split
+    /// The number of pool-crossing transfers this run makes: one per self-funding note the denomination plan
     /// produced for it.
     pub fn crossings(&self) -> usize {
         self.crossings
@@ -995,7 +995,7 @@ impl RunEstimate {
 /// A balance beyond one run's capacity (the note cap times the maximum denomination) migrates over
 /// several runs, each run's spent notes and preparation residuals forming the next run's note
 /// structure (see [`estimate_migration_runs`]). Each run carries BOTH sides so an application can
-/// compare them: the note-split crossings it migrates and the note-preparation layers and
+/// compare them: the denomination crossings it migrates and the note-preparation layers and
 /// transactions it costs.
 ///
 /// A capacity-limited external signer adds a third dimension: given the signer's per-interaction
@@ -1089,7 +1089,7 @@ impl MigrationRunEstimate {
 
 /// Estimate how the account the `backend` represents will migrate its whole spendable balance: the
 /// number of migration RUNS ("rounds") it takes, and for each run BOTH what it migrates (the
-/// note-split crossings) and what preparing it costs (the note-preparation layers and transactions),
+/// denomination crossings) and what preparing it costs (the note-preparation layers and transactions),
 /// so an application can preview and compare the two before anything is planned or committed.
 ///
 /// A run prepares a bounded number of capped self-funding notes, so a balance beyond one run's
@@ -1098,16 +1098,16 @@ impl MigrationRunEstimate {
 /// (so its feasibility and fees are exact, exactly as [`plan_migration`] plans one run), and the notes
 /// that run spends and the residuals it leaves form the next run's structure.
 ///
-/// The note-split run count itself does NOT depend on an external signer's capacity. When a
+/// The denomination run count itself does NOT depend on an external signer's capacity. When a
 /// capacity-limited hardware signer (for example a Keystone) is bounded by a per-interaction action
 /// budget, pass that user-configured [`SigningRoundBudget`] to
 /// [`MigrationRunEstimate::total_signing_rounds`] to get the number of signing interactions the
 /// migration requires (each run is signed on its own; see that method). Because this iterates the
-/// note-split and preparation planners once per run, its cost is roughly one [`plan_migration`] per
+/// denomination and preparation planners once per run, its cost is roughly one [`plan_migration`] per
 /// run.
 ///
 /// A zero (or fully sub-quantum) balance yields a zero-run estimate rather than an error, since this
-/// is a preview. `rng` is drawn from only by a randomized note-split strategy; the recommended
+/// is a preview. `rng` is drawn from only by a randomized denomination strategy; the recommended
 /// canonical strategy ignores it.
 pub fn estimate_migration_runs<P, B, R>(
     params: &P,
@@ -1138,18 +1138,18 @@ where
             .sum::<Option<Zatoshis>>()
             .ok_or(MigrationError::InvalidBalance(BalanceError::Overflow))?;
 
-        // This run's note split, decomposing the CURRENT note set. Its per-step preparation cost and
+        // This run's denomination plan, decomposing the CURRENT note set. Its per-step preparation cost and
         // feasibility are backed by the real preparation planner over the current notes, so the split
         // — and hence the whole run count — depends on the wallet's note structure, not just its
         // total value. The closure's borrow of `notes` is released with the block, before `notes` is
         // reassigned below.
-        let note_split = {
+        let denominations = {
             let prep_tx_count = |funding: &[Zatoshis]| {
                 plan_preparation(&notes, funding, prep_tx_fee)
                     .ok()
                     .map(|plan| plan.transaction_count())
             };
-            plan_note_split(
+            plan_denominations(
                 balance,
                 transfer_fee_buffer,
                 prep_tx_fee,
@@ -1158,7 +1158,7 @@ where
             )
         };
 
-        let funding = note_split.migration_outputs();
+        let funding = denominations.migration_outputs();
         if funding.is_empty() {
             // Nothing more migrates from this note set: the remaining balance is the final residual
             // and the migration is complete.
@@ -1170,12 +1170,12 @@ where
 
         // The preparation that mints this run's funding notes: its layer and transaction counts are
         // the note-preparation side of the estimate, and which notes it spends and which residuals it
-        // leaves give the next run's note structure. The note split only ever proposes a funding
+        // leaves give the next run's note structure. The denomination plan only ever proposes a funding
         // multiset the preparation planner accepted, so this plan succeeds by construction.
         let preparation =
             plan_preparation(&notes, &funding, prep_tx_fee).map_err(MigrationError::Preparation)?;
         runs.push(RunEstimate {
-            migratable: note_split.total_migratable(),
+            migratable: denominations.total_migratable(),
             crossings: funding.len(),
             prep_layers: preparation.layer_count(),
             prep_transactions: preparation.transaction_count(),
@@ -1587,7 +1587,7 @@ pub enum RebuildError<E> {
     /// still valid, or it has already mined. Guards against reissuing a live transaction as a second,
     /// double-spending copy.
     NotExpired(MigrationTxId),
-    /// The stored migration state is internally inconsistent: the note split carries no crossing or
+    /// The stored migration state is internally inconsistent: the denomination plan carries no crossing or
     /// funding value for this transfer's crossing index, or the transfer's stored PCZT is
     /// malformed.
     InconsistentPlan(alloc::string::String),
@@ -1829,14 +1829,14 @@ where
         .unwrap_or(nu63_activation);
 
     let crossing_value = *state
-        .note_split
+        .denominations
         .crossing_values()
         .get(crossing)
         .ok_or_else(|| {
             RebuildError::InconsistentPlan(format!("no crossing value for transfer {crossing}"))
         })?;
     let funding_value = *state
-        .note_split
+        .denominations
         .migration_outputs()
         .get(crossing)
         .ok_or_else(|| {
@@ -1928,8 +1928,8 @@ where
             let unsigned = UnsignedMigrationTx {
                 id,
                 pczt: bytes.clone(),
-                actions: crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
-                    + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER,
+                actions: crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
+                    + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER,
             };
             (bytes, MigrationTxState::AwaitingSignature, Some(unsigned))
         }
@@ -2593,7 +2593,7 @@ where
             // is mined.
             let depends_on: Vec<MigrationTxId> = producer.into_iter().collect();
             let crossing_value = *plan
-                .note_split()
+                .denominations()
                 .crossing_values()
                 .get(crossing)
                 .ok_or_else(|| {
@@ -2625,8 +2625,8 @@ where
                 self.unsigned.push(UnsignedMigrationTx {
                     id,
                     pczt: bytes.clone(),
-                    actions: crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
-                        + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER,
+                    actions: crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
+                        + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER,
                 });
             }
             self.transactions.push(MigrationTransaction {
@@ -2653,7 +2653,7 @@ where
     fn into_state(self, plan: &MigrationPlan) -> CommitOutput {
         let state = MigrationState {
             status: MigrationStatus::Committed,
-            note_split: plan.note_split().clone(),
+            denominations: plan.denominations().clone(),
             preparation: plan.preparation().clone(),
             transactions: self.transactions,
             // Stamp the grid the transfers were anchored to, so a later reconfiguration of the
@@ -2882,7 +2882,7 @@ mod tests {
         ));
     }
 
-    /// A typical balance migrates in a single run, whose entry carries BOTH the note-split side
+    /// A typical balance migrates in a single run, whose entry carries BOTH the denomination side
     /// (migratable value and crossing count) and the note-preparation side (layers and transactions),
     /// and the aggregates match the single run.
     #[test]
@@ -2894,7 +2894,7 @@ mod tests {
 
         assert_eq!(est.run_count(), 1);
         let run = est.runs()[0];
-        // Note-split side: it crosses value in one or more canonical denominations.
+        // Denomination side: it crosses value in one or more canonical denominations.
         assert!(u64::from(run.migratable()) > 0);
         assert!(run.crossings() >= 1);
         // Note-preparation side: minting those notes costs at least one layer and one transaction.
@@ -2924,7 +2924,7 @@ mod tests {
     /// cap of 50 * 10,000 ZEC in 50 notes, and the aggregate crossings sum the per-run counts.
     #[test]
     fn whale_migrates_over_several_runs() {
-        use crate::note_splitting::{
+        use crate::denomination::{
             MIGRATION_MAX_DENOMINATION_ZEC, MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
         };
         let mut rng = ChaCha8Rng::seed_from_u64(1);
@@ -3023,7 +3023,7 @@ mod tests {
 
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let (prep_tx_fee, transfer_buffer) = test_fees();
-        let note_split = crate::note_splitting::plan_note_split(
+        let denominations = crate::denomination::plan_denominations(
             Zatoshis::from_u64(100 * COIN).expect("test balance is valid"),
             transfer_buffer,
             prep_tx_fee,
@@ -3043,7 +3043,7 @@ mod tests {
         };
         let state = MigrationState {
             status: MigrationStatus::Committed,
-            note_split,
+            denominations,
             preparation: crate::preparation::PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions: vec![tx],
             anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
@@ -3089,8 +3089,8 @@ mod commit_tests {
     use crate::build::test_util::{
         TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
     };
-    use crate::note_splitting::{
-        DESTINATION_ACTIONS_PER_TRANSFER, NoteSplitPlan, SOURCE_ACTIONS_PER_TRANSFER,
+    use crate::denomination::{
+        DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
     };
     use crate::preparation::{PREP_TX_ACTIONS, plan_preparation};
 
@@ -3716,10 +3716,10 @@ mod commit_tests {
             "15 funding notes fan out across two layers"
         );
 
-        // A note split whose outputs are the funding notes and whose crossings are those less
+        // A denomination plan whose outputs are the funding notes and whose crossings are those less
         // the buffer, so each transfer crosses one ZEC.
         let crossings: Vec<u64> = funding.iter().map(|&f| f - buffer).collect();
-        let note_split = NoteSplitPlan::from_stored_parts(
+        let denominations = DenominationPlan::from_stored_parts(
             crossings
                 .iter()
                 .map(|&v| Zatoshis::from_u64(v).expect("test crossings are valid"))
@@ -3768,7 +3768,7 @@ mod commit_tests {
             &mut rng,
         );
         let plan = MigrationPlan {
-            note_split,
+            denominations,
             preparation,
             prep_schedule,
             schedule,
@@ -4086,8 +4086,8 @@ mod commit_tests {
         // PREP_TX_ACTIONS actions, so a budget of one preparation plus one transfer splits the
         // list without ever exceeding the budget (every round is non-empty and within budget).
         let budget_actions = PREP_TX_ACTIONS
-            + crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
-            + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER;
+            + crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
+            + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER;
         let budget = crate::signing_rounds::SigningRoundBudget::new(
             core::num::NonZeroU32::new(budget_actions as u32).unwrap(),
         );

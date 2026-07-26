@@ -36,7 +36,7 @@
 //!
 //! # Common structure
 //!
-//! Whatever the strategy, the result is a [`NoteSplitPlan`]: a multiset of *denomination notes*,
+//! Whatever the strategy, the result is a [`DenominationPlan`]: a multiset of *denomination notes*,
 //! each holding `denomination + fee buffer` so that when it is later spent in a migration transfer
 //! it pays its own fee (the buffer is the ZIP-317 fee of the canonical transfer shape). Every note is bounded by a maximum
 //! denomination, so even a whale crosses many bounded, collision-prone amounts rather than one
@@ -47,9 +47,9 @@
 //!
 //! # Relation to known problems
 //!
-//! Note splitting is fundamentally a *constrained integer partition* problem: writing a known integer
+//! Denomination planning is fundamentally a *constrained integer partition* problem: writing a known integer
 //! as an unordered sum of positive parts. The known integer is `N`, the migratable balance to
-//! decompose (in zatoshi, after the note-split transaction fee is reserved), with
+//! decompose (in zatoshi, after the preparation transaction fee is reserved), with
 //! `0 <= N <= MAX_MONEY`. We choose a multiset of parts `n_1, n_2, ..., n_k` (the crossing values)
 //! such that
 //!
@@ -160,7 +160,7 @@ pub(crate) const SOURCE_ACTIONS_PER_TRANSFER: usize = 2;
 /// reveal.
 pub(crate) const DESTINATION_ACTIONS_PER_TRANSFER: usize = 1;
 
-/// The outcome of planning a note split: the self-funding notes to create, the values that will
+/// The outcome of denomination planning: the self-funding notes to create, the values that will
 /// cross the turnstile, and the residual kept in the source pool. Produced by a
 /// [`DenominationStrategy`].
 ///
@@ -178,7 +178,7 @@ pub(crate) const DESTINATION_ACTIONS_PER_TRANSFER: usize = 1;
 /// Value the strategy could not pack into a whole self-funding note is neither of these; it is
 /// [`change`](Self::change), left untouched in the source pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NoteSplitPlan {
+pub struct DenominationPlan {
     crossing_values: Vec<Zatoshis>,
     note_fee_buffer: Zatoshis,
     change: Option<Zatoshis>,
@@ -187,7 +187,7 @@ pub struct NoteSplitPlan {
     total_migratable: Zatoshis,
 }
 
-impl NoteSplitPlan {
+impl DenominationPlan {
     /// Assemble a plan from a strategy's computed `crossing_values`, the per-note fee buffer they each
     /// carry (the prepared-note values are `crossing + note_fee_buffer`), and the `remaining_budget`
     /// left after them, which becomes source-pool change. The strategy's arithmetic partitions the
@@ -318,7 +318,7 @@ pub trait DenominationStrategy {
         prep_tx_fee: Zatoshis,
         prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
         rng: &mut R,
-    ) -> NoteSplitPlan;
+    ) -> DenominationPlan;
 }
 
 /// Convert a strategy-internal value to [`Zatoshis`]. Infallible by construction: the strategies'
@@ -330,13 +330,13 @@ pub(crate) fn zat(value: u64) -> Zatoshis {
 
 /// Convenience wrapper: plan with the recommended [`CanonicalOneTwoFive`] strategy (ZIP 318 canonical
 /// quantization), sized by the caller-computed canonical fees (see [`DenominationStrategy::plan`]).
-pub fn plan_note_split<R: RngCore + CryptoRng>(
+pub fn plan_denominations<R: RngCore + CryptoRng>(
     total_input: Zatoshis,
     transfer_fee_buffer: Zatoshis,
     prep_tx_fee: Zatoshis,
     prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
     rng: &mut R,
-) -> NoteSplitPlan {
+) -> DenominationPlan {
     CanonicalOneTwoFive::recommended(transfer_fee_buffer).plan(
         total_input,
         prep_tx_fee,

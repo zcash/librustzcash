@@ -19,7 +19,7 @@
 //! separate concern of the schedule.
 //!
 //! The pluggable [`SigningRoundStrategy`] is the "named solution of the NP problem" seam, mirroring
-//! [`DenominationStrategy`](crate::note_splitting::DenominationStrategy): [`MinRounds`] (the optimal
+//! [`DenominationStrategy`](crate::denomination::DenominationStrategy): [`MinRounds`] (the optimal
 //! default) and [`NextFit`] (an order-preserving greedy). Any new solution inherits the crate's
 //! reusable conformance suite (`crate::testing`).
 
@@ -32,8 +32,8 @@ use crate::engine::{MigrationTxId, MigrationTxKind};
 pub const PREPARATION_ACTIONS: u32 = crate::preparation::PREP_TX_ACTIONS as u32;
 
 /// The Orchard-family actions a canonical migration transfer carries (2 source + 1 destination).
-pub const TRANSFER_ACTIONS: u32 = (crate::note_splitting::SOURCE_ACTIONS_PER_TRANSFER
-    + crate::note_splitting::DESTINATION_ACTIONS_PER_TRANSFER)
+pub const TRANSFER_ACTIONS: u32 = (crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
+    + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER)
     as u32;
 
 /// The number of Orchard-family actions a signer processes for a migration transaction of `kind`.

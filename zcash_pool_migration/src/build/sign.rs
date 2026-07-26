@@ -53,7 +53,7 @@ mod tests {
     use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::note_splitting::zat;
+    use crate::denomination::zat;
 
     /// Builds a note-preparation PCZT spending one note owned by `fvk`. Deterministic in `note_seed`.
     /// It uses one spend and `PREP_TX_ACTIONS - 1` outputs so the bundle fills the action budget

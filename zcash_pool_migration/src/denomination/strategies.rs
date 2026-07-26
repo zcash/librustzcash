@@ -17,8 +17,8 @@ use super::utils::largest_one_two_five;
 use zcash_protocol::value::Zatoshis;
 
 use super::{
-    DenominationStrategy, MIGRATION_MAX_DENOMINATION_ZEC, MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
-    NoteSplitPlan, RESIDUAL_MIGRATION_MIN, zat,
+    DenominationPlan, DenominationStrategy, MIGRATION_MAX_DENOMINATION_ZEC,
+    MIGRATION_MAX_PREPARED_NOTES_PER_RUN, RESIDUAL_MIGRATION_MIN, zat,
 };
 
 /// The canonical `{1, 2, 5} * 10^k` quantization of [ZIP 318]: at each step it takes the largest such
@@ -79,7 +79,7 @@ impl DenominationStrategy for CanonicalOneTwoFive {
         prep_tx_fee: Zatoshis,
         prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
         _rng: &mut R,
-    ) -> NoteSplitPlan {
+    ) -> DenominationPlan {
         // The greedy partition arithmetic below runs in the u64 domain; every value it derives is
         // bounded by the validated total input, so `zat` conversions at the capability boundary and
         // in `from_notes` are infallible.
@@ -150,7 +150,7 @@ impl DenominationStrategy for CanonicalOneTwoFive {
         let remaining = total_input_zatoshi
             .saturating_sub(notes.iter().sum::<u64>())
             .saturating_sub(prep_fees_zatoshi);
-        NoteSplitPlan::from_notes(
+        DenominationPlan::from_notes(
             total_input_zatoshi,
             prep_fees_zatoshi,
             crossing_values,
@@ -169,7 +169,7 @@ mod tests {
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
     use zcash_protocol::value::MAX_MONEY;
 
-    use crate::note_splitting::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
+    use crate::denomination::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
     use crate::preparation::FUNDING_OUTPUTS_PER_TX;
 
     /// The ZIP-317 transfer-fee buffer of the canonical transfer shape (all four actions exceed the
@@ -187,7 +187,7 @@ mod tests {
     }
 
     /// Read a plan's crossing values back into the tests' u64 domain.
-    fn crossings_u64(p: &NoteSplitPlan) -> Vec<u64> {
+    fn crossings_u64(p: &DenominationPlan) -> Vec<u64> {
         p.crossing_values().iter().map(|&v| u64::from(v)).collect()
     }
 

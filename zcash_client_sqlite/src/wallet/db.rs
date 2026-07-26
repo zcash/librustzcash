@@ -600,7 +600,7 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 // install into `wallet.db`. Every structured value is stored in typed columns and child tables; the
 // only `BLOB` is the pre-signed transaction (`pczt`), which is already-versioned, unstructured bytes.
 
-/// One row per account's active migration: its status and the scalar fields of its note-split
+/// One row per account's active migration: its status and the scalar fields of its denomination
 /// plan. The crossing values are an ordered list in `orchard_ironwood_migration_crossing_values`.
 /// `account_id` is enforced unique by `INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`, so an account
 /// has at most one migration in progress. It is a foreign key into `accounts` with `ON DELETE
@@ -622,8 +622,8 @@ CREATE TABLE orchard_ironwood_migrations (
     note_split_total_migratable INTEGER NOT NULL,
     anchor_bucket_interval INTEGER NOT NULL
 )";
-/// The note-split crossing values (an ordered list of zatoshi amounts). The funding-note values
-/// have no table of their own: each is its crossing value plus the note-split fee buffer.
+/// The denomination crossing values (an ordered list of zatoshi amounts). The funding-note values
+/// have no table of their own: each is its crossing value plus the denomination fee buffer.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_CROSSING_VALUES: &str = "
 CREATE TABLE orchard_ironwood_migration_crossing_values (
     migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,

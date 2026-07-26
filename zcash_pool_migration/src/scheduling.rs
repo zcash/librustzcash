@@ -10,7 +10,7 @@
 //!
 //! # The problem
 //!
-//! The note split ([`crate::note_splitting`]) decides the crossing VALUES (quantized denominations)
+//! The denomination plan ([`crate::denomination`]) decides the crossing VALUES (quantized denominations)
 //! so many wallets emit colliding amounts. Scheduling decides the TEMPORAL and ANCHOR dimensions of
 //! the same crossings, which leak just as much if left predictable:
 //!

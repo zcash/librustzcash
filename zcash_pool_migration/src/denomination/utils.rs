@@ -1,4 +1,4 @@
-//! Shared denomination-value helper for the note-split strategy: finding the largest
+//! Shared denomination-value helper for the denomination strategy: finding the largest
 //! `{1, 2, 5} * 10^k` denomination not exceeding a value. Pure integer arithmetic.
 
 /// The base of the denomination scale: every denomination is a multiple of a power of this radix.

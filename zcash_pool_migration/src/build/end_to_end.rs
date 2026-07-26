@@ -1,5 +1,5 @@
 //! End-to-end test of the migration pipeline for a typical wallet, using only the crate's public API.
-//! It doubles as a usage example: plan the note split, plan the preparation transactions, build and
+//! It doubles as a usage example: plan the denomination plan, plan the preparation transactions, build and
 //! pre-sign one, then build and pre-sign a pool-crossing transfer.
 
 use orchard::keys::{FullViewingKey, SpendAuthorizingKey};
@@ -14,12 +14,12 @@ use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 
-use crate::note_splitting::{
-    DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER, plan_note_split,
+use crate::denomination::{
+    DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER, plan_denominations,
 };
 use crate::preparation::{PREP_TX_ACTIONS, PrepInput, plan_preparation};
 
-/// note split -> preparation plan -> build + sign a preparation transaction -> build + sign a
+/// denomination plan -> preparation plan -> build + sign a preparation transaction -> build + sign a
 /// pool-crossing transfer, for a typical single-note wallet.
 #[test]
 fn migration_pipeline_end_to_end() {
@@ -32,7 +32,7 @@ fn migration_pipeline_end_to_end() {
     let ask = SpendAuthorizingKey::from(&sk);
     let balance = 78 * COIN;
 
-    // 1. Note split: decompose the balance into canonical self-funding denominations, accounting
+    // 1. Denomination planning: decompose the balance into canonical self-funding denominations, accounting
     //    the true preparation cost (via the real preparation planner) at each step.
     let prep_fee = Zatoshis::const_from_u64(PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64());
     let buffer = Zatoshis::const_from_u64(
@@ -47,7 +47,7 @@ fn migration_pipeline_end_to_end() {
     };
     let split = {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        plan_note_split(
+        plan_denominations(
             Zatoshis::const_from_u64(balance),
             buffer,
             prep_fee,

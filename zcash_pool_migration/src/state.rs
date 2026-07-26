@@ -495,7 +495,7 @@ mod tests {
     use crate::engine::MigrationTransaction;
     use zcash_protocol::value::Zatoshis;
 
-    use crate::note_splitting::NoteSplitPlan;
+    use crate::denomination::DenominationPlan;
     use crate::preparation::PreparationPlan;
     use alloc::vec;
 
@@ -526,7 +526,7 @@ mod tests {
     fn state_with(transactions: Vec<MigrationTransaction>) -> MigrationState {
         MigrationState {
             status: MigrationStatus::Committed,
-            note_split: NoteSplitPlan::from_stored_parts(
+            denominations: DenominationPlan::from_stored_parts(
                 Vec::new(),
                 Zatoshis::ZERO,
                 None,

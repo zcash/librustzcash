@@ -243,8 +243,8 @@ impl Run {
             let plan = engine::plan_migration(&self.network, &adapter, &mut rng)
                 .expect("plans the migration");
             let funding_notes = plan.funding_notes();
-            let migrated = plan.note_split().total_migratable();
-            let change = plan.note_split().change().map(u64::from).unwrap_or(0);
+            let migrated = plan.denominations().total_migratable();
+            let change = plan.denominations().change().map(u64::from).unwrap_or(0);
             let mut adapter = adapter;
             let (state, _) = engine::commit_preparation_with_funding(
                 &self.network,
@@ -458,7 +458,7 @@ impl Run {
 }
 
 /// Every proving scenario, spanning the migration personas exercised across the codebase (the Python
-/// integration-test suite and the note-split golden vectors): single small / medium / large
+/// integration-test suite and the denomination golden vectors): single small / medium / large
 /// balances, the minimum-denomination and buffer-pruned edges, and the many-note "exchange" / dust /
 /// whale shapes whose consolidation drives multi-layer preparation.
 fn scenarios() -> Vec<Scenario> {
