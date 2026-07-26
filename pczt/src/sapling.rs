@@ -146,6 +146,7 @@ pub struct Spend {
     ///
     /// - This is set by the Updater.
     /// - This is required by the Prover.
+    #[getset(get = "pub")]
     pub(crate) witness: Option<(u32, [[u8; 32]; 32])>,
 
     /// The spend authorization randomizer.

@@ -10,6 +10,21 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::wallet::SignerView`, selecting the signer
+  view produced by `redact_pczt_for_signer` according to the receiving
+  Signer's capabilities.
+
+### Changed
+- `zcash_client_backend::data_api::wallet::redact_pczt_for_signer` now takes a
+  `SignerView` argument. `SignerView::Compact` preserves the previous
+  behavior; the new `SignerView::Full` produces a conservative view for
+  Signers that predate the compact view (including deployed hardware
+  signers): it retains proofs, binding-signature keys, and anchors, clears
+  Orchard-protocol and Sapling spend witnesses and dummy signing keys, and
+  performs no field compaction, so its view of a v5 transaction remains
+  representable in the v1 PCZT encoding.
+
 ## [0.24.0-rc.2] - 2026-07-24
 
 ### Added
