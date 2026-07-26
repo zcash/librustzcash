@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- PCZTs created by `create_pczt_from_proposal` for post-NU6.3 (v6) transactions
+  now carry ZIP 32 derivation metadata on wallet-controlled zero-value spends,
+  so external Signers can identify and sign them; previously such actions
+  were unsignable and transaction extraction failed with a missing
+  spend-auth signature.
+
 ## [0.24.0-rc.3] - 2026-07-26
 
 ### Added
