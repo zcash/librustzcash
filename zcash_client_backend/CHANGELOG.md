@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0-rc.4] - 2026-07-26
+
 ### Changed
 - `zcash_client_backend::proposal::ProposalError` is now `#[non_exhaustive]`
   and has added variant `OrchardPoolPayment`.
