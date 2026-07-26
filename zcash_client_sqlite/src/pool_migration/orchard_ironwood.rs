@@ -13,7 +13,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 
 use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
@@ -137,7 +137,7 @@ impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
 
     fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         self.0.update_transaction(id, state)
@@ -310,7 +310,7 @@ mod tests {
     use uuid::Uuid;
 
     use zcash_pool_migration::engine::{
-        MigrationTxId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+        MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_pool_migration::testing::{
@@ -394,7 +394,7 @@ mod tests {
 
         let owner_bytes = [7u8; 32];
         let locked = MigrationTransaction::from_parts(
-            MigrationTxId::new(0),
+            MigrationTransferId::new(0),
             MigrationTxKind::Preparation { layer: 0, index: 0 },
             vec![1, 2, 3],
             Vec::new(),
@@ -405,7 +405,7 @@ mod tests {
             Some(owner_bytes),
         );
         let unlocked = MigrationTransaction::from_parts(
-            MigrationTxId::new(1),
+            MigrationTransferId::new(1),
             MigrationTxKind::Transfer { crossing: 0 },
             vec![4, 5, 6],
             Vec::new(),
@@ -484,7 +484,7 @@ mod tests {
 
         let tx = |id: u32, crossing: usize, lock_owner: Option<[u8; 32]>| {
             MigrationTransaction::from_parts(
-                MigrationTxId::new(id),
+                MigrationTransferId::new(id),
                 MigrationTxKind::Transfer { crossing },
                 vec![id as u8],
                 Vec::new(),
@@ -679,7 +679,7 @@ mod tests {
             s.replace_migration(&state).expect("write");
             // Generated ids are `0..transactions.len()` (< 6), so `u32::MAX` is always absent.
             let err = s
-                .update_transaction(MigrationTxId::new(u32::MAX), MigrationTxState::Proved)
+                .update_transaction(MigrationTransferId::new(u32::MAX), MigrationTxState::Proved)
                 .expect_err("no such transaction");
             prop_assert!(matches!(err, Error::Corrupt(_)));
         }

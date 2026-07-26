@@ -32,7 +32,7 @@ use rusqlite::{Connection, OptionalExtension, named_params, params};
 use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
@@ -282,7 +282,7 @@ impl<C: BorrowMut<Connection>> Store<C> {
 
     pub(crate) fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Error> {
         let tables = self.tables;
@@ -622,7 +622,7 @@ fn read_transactions(
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-        let id = MigrationTxId::new(r.tx_id);
+        let id = MigrationTransferId::new(r.tx_id);
         let kind = MigrationTxKind::from_stored(
             &r.kind,
             r.kind_layer.map(|x| x as usize),
@@ -712,7 +712,7 @@ fn read_deps(
     t: &Tables,
     migration_id: i64,
     tx_id: u32,
-) -> Result<Vec<MigrationTxId>, Error> {
+) -> Result<Vec<MigrationTransferId>, Error> {
     let mut stmt = conn.prepare(&format!(
         "SELECT depends_on_tx_id FROM {}
           WHERE migration_id = ? AND tx_id = ?
@@ -722,7 +722,7 @@ fn read_deps(
     let rows = stmt.query_map(params![migration_id, tx_id], |row| row.get::<_, u32>(0))?;
     let mut out = Vec::new();
     for r in rows {
-        out.push(MigrationTxId::new(r?));
+        out.push(MigrationTransferId::new(r?));
     }
     Ok(out)
 }

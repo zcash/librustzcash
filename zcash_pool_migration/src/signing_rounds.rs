@@ -26,7 +26,7 @@
 use alloc::vec::Vec;
 use core::num::{NonZeroU32, NonZeroUsize};
 
-use crate::engine::{MigrationTxId, MigrationTxKind};
+use crate::engine::{MigrationTransferId, MigrationTxKind};
 
 /// The Orchard-family actions a padded preparation transaction carries.
 pub const PREPARATION_ACTIONS: u32 = crate::preparation::PREP_TX_ACTIONS as u32;
@@ -100,11 +100,11 @@ const fn nz(n: u32) -> NonZeroU32 {
 }
 
 /// A transaction a migration plan WILL build, described before it is built: its stable ordinal (the
-/// [`MigrationTxId`] the build later assigns, since the plan enumerates in commit order), what it
+/// [`MigrationTransferId`] the build later assigns, since the plan enumerates in commit order), what it
 /// does, and how many Orchard actions the signer processes for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlannedTx {
-    id: MigrationTxId,
+    id: MigrationTransferId,
     kind: MigrationTxKind,
     actions: u32,
 }
@@ -112,7 +112,7 @@ pub struct PlannedTx {
 impl PlannedTx {
     /// A planned transaction of `kind`, identified by `id`, with its canonical [`action_weight`].
     #[must_use]
-    pub const fn new(id: MigrationTxId, kind: MigrationTxKind) -> Self {
+    pub const fn new(id: MigrationTransferId, kind: MigrationTxKind) -> Self {
         Self {
             id,
             kind,
@@ -122,7 +122,7 @@ impl PlannedTx {
 
     /// The stable ordinal this transaction will carry once built.
     #[must_use]
-    pub const fn id(&self) -> MigrationTxId {
+    pub const fn id(&self) -> MigrationTransferId {
         self.id
     }
 

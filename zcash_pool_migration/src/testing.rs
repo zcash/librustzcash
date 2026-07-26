@@ -26,7 +26,7 @@ use zcash_protocol::value::{COIN, Zatoshis};
 
 use crate::denomination::DenominationPlan;
 use crate::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTxId, MigrationTxKind,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
@@ -45,9 +45,9 @@ fn zat(value: u64) -> Zatoshis {
 
 // --- leaf strategies ---
 
-/// An arbitrary [`MigrationTxId`] row key.
-pub fn arb_migration_tx_id() -> impl Strategy<Value = MigrationTxId> {
-    (0u32..1000).prop_map(MigrationTxId::new)
+/// An arbitrary [`MigrationTransferId`] row key.
+pub fn arb_migration_transfer_id() -> impl Strategy<Value = MigrationTransferId> {
+    (0u32..1000).prop_map(MigrationTransferId::new)
 }
 
 // --- preparation-plan strategies (moved from `preparation`'s codec tests) ---
@@ -182,10 +182,10 @@ pub fn arb_lock_owner() -> impl Strategy<Value = Option<[u8; 32]>> {
 /// unique within a migration.
 pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction> {
     (
-        arb_migration_tx_id(),
+        arb_migration_transfer_id(),
         arb_migration_tx_kind(),
         prop::collection::vec(any::<u8>(), 0..64),
-        prop::collection::vec(arb_migration_tx_id(), 0..4),
+        prop::collection::vec(arb_migration_transfer_id(), 0..4),
         arb_block_height(),
         arb_block_height(),
         prop::option::of(arb_block_height()),
@@ -232,7 +232,7 @@ pub fn arb_anchor_bucket_interval() -> impl Strategy<Value = AnchorBucketInterva
 
 /// An arbitrary whole [`MigrationState`], built through [`MigrationState::from_parts`]: a status, a
 /// denomination plan (from which the funding-note values derive), a preparation plan, a small set of
-/// transactions re-keyed with sequential [`MigrationTxId`]s (so their row keys are unique, as a
+/// transactions re-keyed with sequential [`MigrationTransferId`]s (so their row keys are unique, as a
 /// store requires), and the anchor bucket grid it was committed under. Generated values are
 /// self-consistent enough to persist and read back unchanged.
 pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
@@ -252,7 +252,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                     .enumerate()
                     .map(|(i, tx)| {
                         MigrationTransaction::from_parts(
-                            MigrationTxId::new(i as u32),
+                            MigrationTransferId::new(i as u32),
                             tx.kind(),
                             tx.pczt().clone(),
                             tx.depends_on().clone(),
@@ -340,7 +340,7 @@ pub fn assert_put_replaces<S: PoolMigrationWrite>(
 pub fn assert_update_transaction<S: PoolMigrationWrite>(
     store: &mut S,
     state: &MigrationState,
-    id: MigrationTxId,
+    id: MigrationTransferId,
     new: MigrationTxState,
 ) where
     S::Error: Debug,
@@ -365,7 +365,7 @@ pub fn assert_update_transaction<S: PoolMigrationWrite>(
 
 /// The id of the first transaction of `state`, or `None` if it has no transactions. A convenience
 /// for driving [`assert_update_transaction`] from a generated [`MigrationState`].
-pub fn first_transaction_id(state: &MigrationState) -> Option<MigrationTxId> {
+pub fn first_transaction_id(state: &MigrationState) -> Option<MigrationTransferId> {
     state.transactions().first().map(|t| t.id())
 }
 
@@ -407,14 +407,14 @@ pub fn planned_txs(n_prep: usize, n_transfer: usize) -> Vec<PlannedTx> {
     let mut id = 0u32;
     for index in 0..n_prep {
         txs.push(PlannedTx::new(
-            MigrationTxId::new(id),
+            MigrationTransferId::new(id),
             MigrationTxKind::Preparation { layer: 0, index },
         ));
         id += 1;
     }
     for crossing in 0..n_transfer {
         txs.push(PlannedTx::new(
-            MigrationTxId::new(id),
+            MigrationTransferId::new(id),
             MigrationTxKind::Transfer { crossing },
         ));
         id += 1;

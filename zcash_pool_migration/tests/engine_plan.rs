@@ -16,7 +16,7 @@ use zcash_protocol::value::{COIN, Zatoshis};
 use zcash_pool_migration::denomination::{DenominationPlan, plan_denominations};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationError, MigrationState, MigrationStatus, MigrationTransaction,
-    MigrationTxId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     plan_migration,
 };
 use zcash_pool_migration::preparation::{
@@ -230,7 +230,7 @@ fn stores_loads_and_updates_a_migration() {
     )
     .expect("a consistent stored split reconstructs");
     let tx = MigrationTransaction::from_parts(
-        MigrationTxId::new(0),
+        MigrationTransferId::new(0),
         MigrationTxKind::Transfer { crossing: 0 },
         vec![1, 2, 3], // a stand-in for the serialized pre-signed PCZT
         Vec::new(),
@@ -259,7 +259,7 @@ fn stores_loads_and_updates_a_migration() {
 
     backend
         .update_transaction(
-            MigrationTxId::new(0),
+            MigrationTransferId::new(0),
             MigrationTxState::Mined {
                 height: BlockHeight::from_u32(2_000_105),
             },

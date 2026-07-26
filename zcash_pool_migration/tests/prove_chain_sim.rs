@@ -45,8 +45,8 @@ use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, Zatoshis};
 
 use zcash_pool_migration::engine::{
-    self, MigrationState, MigrationTxId, MigrationTxKind, MigrationTxState, PoolMigrationRead,
-    PoolMigrationWrite,
+    self, MigrationState, MigrationTransferId, MigrationTxKind, MigrationTxState,
+    PoolMigrationRead, PoolMigrationWrite,
 };
 use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
 
@@ -93,7 +93,7 @@ impl PoolMigrationWrite for MigrationTestStore {
 
     fn update_transaction(
         &mut self,
-        _id: MigrationTxId,
+        _id: MigrationTransferId,
         _state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         // Not exercised: the chain simulation advances proving state through the engine's
@@ -285,7 +285,7 @@ impl Run {
     /// (asserting it is Orchard-only), then mines and scans it so its minted funding notes become
     /// spendable; finally checks the wallet balance is the funding less the reserved preparation fees.
     fn prove_preparations(&mut self, committed: &mut Committed, scenario: &Scenario) {
-        let prep_ids: Vec<MigrationTxId> = committed
+        let prep_ids: Vec<MigrationTransferId> = committed
             .state
             .transactions()
             .iter()
@@ -358,7 +358,7 @@ impl Run {
     /// checks the destination pool: the migration created exactly one Ironwood note per transfer,
     /// together holding the whole migrated value.
     fn prove_transfers(&mut self, committed: &mut Committed, scenario: &Scenario) {
-        let mut transfers: Vec<(MigrationTxId, BlockHeight)> = committed
+        let mut transfers: Vec<(MigrationTransferId, BlockHeight)> = committed
             .state
             .transactions()
             .iter()
@@ -493,7 +493,7 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
 fn migration_anchors_to_the_wallets_configured_retention_grid() {
     use core::num::NonZeroU32;
     use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
-    use zcash_pool_migration::engine::{MigrationBackend, MigrationTxId, MigrationTxKind};
+    use zcash_pool_migration::engine::{MigrationBackend, MigrationTransferId, MigrationTxKind};
     use zcash_pool_migration::scheduling::{AnchorBucketInterval, SchedulingParams};
 
     // A short grid, so a migration reaches anchor viability without waiting out 144-block buckets.
@@ -573,7 +573,7 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
     // checkpoint survives only because the wallet RETAINED it, and prove against it. Without
     // retention on the wallet's configured grid this fails with `AnchorNotFound`.
     let mut state = state;
-    let prep_ids: Vec<MigrationTxId> = state
+    let prep_ids: Vec<MigrationTransferId> = state
         .transactions()
         .iter()
         .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { .. }))

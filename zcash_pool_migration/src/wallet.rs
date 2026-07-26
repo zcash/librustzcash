@@ -48,7 +48,7 @@ use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
 
 use crate::build::sign_pczt;
 use crate::engine::{
-    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTxId,
+    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransferId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 use crate::scheduling::{AnchorBucketInterval, DelayDistribution, SchedulingParams};
@@ -301,7 +301,7 @@ where
 
     fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
         self.store

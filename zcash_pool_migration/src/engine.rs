@@ -132,7 +132,7 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
     /// it, or the chain mines it).
     fn update_transaction(
         &mut self,
-        id: MigrationTxId,
+        id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error>;
 }
@@ -142,14 +142,20 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
 /// deferred preparation layers and transfers are recorded as unbuilt placeholders); it is NOT a
 /// Zcash transaction id. The real [`TxId`] becomes available once a transaction is built and signed
 /// (it commits only effecting data), and is carried by [`MigrationTxState::Broadcast`].
+///
+/// The two identities are not interchangeable, and this one is the one to key on. A [`TxId`]
+/// identifies a single broadcast ATTEMPT: [`rebuild_expired_transfer`] keeps this id while
+/// producing a new transaction with a new [`TxId`], so a consumer that keyed its own records on
+/// the [`TxId`] loses track of the transfer exactly when it most needs to follow it. Use the
+/// [`TxId`] to talk to the network about a transaction, and this id to talk about the transfer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MigrationTxId(pub(crate) u32);
+pub struct MigrationTransferId(pub(crate) u32);
 
-impl MigrationTxId {
+impl MigrationTransferId {
     /// Wrap a stored ordinal as a migration-transaction row key (for a store reading a persisted
     /// migration back).
     pub const fn new(index: u32) -> Self {
-        MigrationTxId(index)
+        MigrationTransferId(index)
     }
 
     /// Writes this id as an unsigned 32-bit little-endian integer.
@@ -161,12 +167,12 @@ impl MigrationTxId {
     pub fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut bytes = [0u8; 4];
         reader.read_exact(&mut bytes)?;
-        Ok(MigrationTxId::new(u32::from_le_bytes(bytes)))
+        Ok(MigrationTransferId::new(u32::from_le_bytes(bytes)))
     }
 }
 
-impl From<MigrationTxId> for u32 {
-    fn from(id: MigrationTxId) -> u32 {
+impl From<MigrationTransferId> for u32 {
+    fn from(id: MigrationTransferId) -> u32 {
         id.0
     }
 }
@@ -272,7 +278,7 @@ pub enum MigrationTxState {
 pub struct MigrationTransaction {
     /// This transaction's stable id.
     #[getset(get_copy = "pub")]
-    pub(crate) id: MigrationTxId,
+    pub(crate) id: MigrationTransferId,
     /// What it does (a preparation transaction or a transfer).
     #[getset(get_copy = "pub")]
     pub(crate) kind: MigrationTxKind,
@@ -288,7 +294,7 @@ pub struct MigrationTransaction {
     /// The transactions that must be mined before this one may be broadcast (the preparation layer
     /// dependency graph; empty for an independent transaction).
     #[getset(get = "pub")]
-    pub(crate) depends_on: Vec<MigrationTxId>,
+    pub(crate) depends_on: Vec<MigrationTransferId>,
     /// The height at which to broadcast (for a transfer; a preparation transaction waits for its
     /// dependencies to mine and a boundary to pass rather than a fixed height).
     #[getset(get_copy = "pub")]
@@ -328,10 +334,10 @@ impl MigrationTransaction {
     /// consistent row.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
-        id: MigrationTxId,
+        id: MigrationTransferId,
         kind: MigrationTxKind,
         pczt: Vec<u8>,
-        depends_on: Vec<MigrationTxId>,
+        depends_on: Vec<MigrationTransferId>,
         scheduled_height: BlockHeight,
         expiry_height: BlockHeight,
         anchor_boundary: Option<BlockHeight>,
@@ -572,7 +578,7 @@ impl MigrationState {
     /// anchor and witnesses and proves the transaction, so the durable artifact becomes the proven,
     /// ready-to-broadcast PCZT.
     #[cfg(feature = "orchard")]
-    pub fn set_transaction_proved(&mut self, id: MigrationTxId, proven_pczt: Vec<u8>) {
+    pub fn set_transaction_proved(&mut self, id: MigrationTransferId, proven_pczt: Vec<u8>) {
         for tx in &mut self.transactions {
             if tx.id() == id {
                 tx.pczt = proven_pczt;
@@ -644,7 +650,7 @@ impl MigrationPlan {
     }
 
     /// Every transaction this plan will build, enumerated BEFORE building in the exact order the
-    /// commit assigns [`MigrationTxId`]s (each preparation layer in order, then each transfer by
+    /// commit assigns [`MigrationTransferId`]s (each preparation layer in order, then each transfer by
     /// crossing), so a [`PlannedTx`]'s id equals the id the built transaction will carry. Each
     /// carries its [`action_weight`](crate::signing_rounds::action_weight). This is a pure function
     /// of the plan, recomputed on demand, so planning stays unchanged.
@@ -654,7 +660,7 @@ impl MigrationPlan {
         for (layer, layer_txs) in self.preparation.layers().iter().enumerate() {
             for index in 0..layer_txs.len() {
                 txs.push(PlannedTx::new(
-                    MigrationTxId::new(next),
+                    MigrationTransferId::new(next),
                     MigrationTxKind::Preparation { layer, index },
                 ));
                 next += 1;
@@ -662,7 +668,7 @@ impl MigrationPlan {
         }
         for crossing in 0..self.transfer_tx_count() {
             txs.push(PlannedTx::new(
-                MigrationTxId::new(next),
+                MigrationTransferId::new(next),
                 MigrationTxKind::Transfer { crossing },
             ));
             next += 1;
@@ -1423,19 +1429,19 @@ impl<E: core::error::Error> core::error::Error for CommitError<E> {}
 #[derive(Debug)]
 pub enum ProveError<E> {
     /// No transaction with the given id belongs to the migration.
-    UnknownTransaction(MigrationTxId),
+    UnknownTransaction(MigrationTransferId),
     /// The transaction is a preparation transaction, not a transfer; only transfers are proved
     /// against a drawn anchor boundary (a preparation transaction carries no boundary).
-    NotATransfer(MigrationTxId),
+    NotATransfer(MigrationTransferId),
     /// The transaction is a transfer, not a preparation transaction; only preparation transactions
     /// are proved against a caller-supplied anchor (a transfer proves against its drawn boundary).
-    NotAPreparation(MigrationTxId),
+    NotAPreparation(MigrationTransferId),
     /// The transaction is not in the [`Signed`](MigrationTxState::Signed) state, so it is not ready
     /// to prove (it is unsigned, already proved, or already broadcast).
-    NotReady(MigrationTxId),
+    NotReady(MigrationTransferId),
     /// A transfer carries no anchor boundary. Every transfer draws one at scheduling time, so this
     /// indicates a corrupt stored state rather than a normal condition.
-    NoAnchorBoundary(MigrationTxId),
+    NoAnchorBoundary(MigrationTransferId),
     /// The wallet's anchor retention grid has changed since this migration was committed, so the
     /// boundaries its transfers anchored to are no longer retained and their checkpoints will have
     /// been pruned. The migration cannot be proved and must be re-planned under the current grid
@@ -1523,7 +1529,7 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 pub fn prove_transfer<P>(
     prover: &mut P,
     state: &mut MigrationState,
-    id: MigrationTxId,
+    id: MigrationTransferId,
 ) -> Result<(), ProveError<P::Error>>
 where
     P: MigrationProver,
@@ -1584,7 +1590,7 @@ where
 pub fn prove_preparation<P>(
     prover: &mut P,
     state: &mut MigrationState,
-    id: MigrationTxId,
+    id: MigrationTransferId,
     anchor: BlockHeight,
 ) -> Result<(), ProveError<P::Error>>
 where
@@ -1617,17 +1623,17 @@ where
 #[derive(Debug)]
 pub enum RebuildError<E> {
     /// No transaction with the given id belongs to the migration.
-    UnknownTransaction(MigrationTxId),
+    UnknownTransaction(MigrationTransferId),
     /// The transaction is a preparation transaction, not a transfer. Only a transfer — a leaf of
     /// the dependency graph — is rebuilt this way (with a fresh boundary anchor and canonical
     /// expiry). An expired preparation has no single-transaction rebuild: its dependents'
     /// pre-signatures commit to the notes it would have minted, so its remediation (re-signing the
     /// affected subtree) is a follow-on slice.
-    NotATransfer(MigrationTxId),
+    NotATransfer(MigrationTransferId),
     /// The transaction has not expired at the current chain tip, so there is nothing to rebuild: it is
     /// still valid, or it has already mined. Guards against reissuing a live transaction as a second,
     /// double-spending copy.
-    NotExpired(MigrationTxId),
+    NotExpired(MigrationTransferId),
     /// The stored migration state is internally inconsistent: the denomination plan carries no crossing or
     /// funding value for this transfer's crossing index, or the transfer's stored PCZT is
     /// malformed.
@@ -1757,7 +1763,7 @@ pub fn rebuild_expired_transfer<P, B, R>(
     params: &P,
     backend: &B,
     state: &mut MigrationState,
-    id: MigrationTxId,
+    id: MigrationTransferId,
     rng: &mut R,
 ) -> Result<(), RebuildError<<B as MigrationBackend>::Error>>
 where
@@ -1786,7 +1792,7 @@ pub fn rebuild_expired_transfer_unsigned<P, B, R>(
     params: &P,
     backend: &B,
     state: &mut MigrationState,
-    id: MigrationTxId,
+    id: MigrationTransferId,
     rng: &mut R,
 ) -> Result<UnsignedMigrationTx, RebuildError<<B as MigrationBackend>::Error>>
 where
@@ -1806,7 +1812,7 @@ fn rebuild_expired_transfer_inner<P, B, R>(
     params: &P,
     backend: &B,
     state: &mut MigrationState,
-    id: MigrationTxId,
+    id: MigrationTransferId,
     rng: &mut R,
     signing: Signing,
 ) -> Result<Option<UnsignedMigrationTx>, RebuildError<<B as MigrationBackend>::Error>>
@@ -2013,7 +2019,7 @@ enum Signing {
 pub struct UnsignedMigrationTx {
     /// The transaction's id in the committed migration.
     #[getset(get_copy = "pub")]
-    pub(crate) id: MigrationTxId,
+    pub(crate) id: MigrationTransferId,
     /// The serialized UNSIGNED PCZT to sign out of band.
     #[getset(get = "pub")]
     pub(crate) pczt: Vec<u8>,
@@ -2029,7 +2035,7 @@ impl UnsignedMigrationTx {
     /// Take the id and the unsigned PCZT bytes (to route the bytes to the external signer while
     /// keeping the id to match the signed result back; see
     /// [`MigrationState::apply_signature`](crate::engine::MigrationState)).
-    pub fn into_parts(self) -> (MigrationTxId, Vec<u8>) {
+    pub fn into_parts(self) -> (MigrationTransferId, Vec<u8>) {
         (self.id, self.pczt)
     }
 }
@@ -2149,7 +2155,7 @@ struct MintedNote {
     value: Zatoshis,
     note: orchard::note::Note,
     consumed: bool,
-    producer: Option<MigrationTxId>,
+    producer: Option<MigrationTransferId>,
 }
 
 /// Commit a planned migration: build and pre-sign EVERY transaction — each preparation layer, in
@@ -2319,7 +2325,7 @@ struct Committer<'a, P, B, R> {
     transactions: Vec<MigrationTransaction>,
     unsigned: Vec<UnsignedMigrationTx>,
     next_id: u32,
-    layer_ids: Vec<Vec<MigrationTxId>>,
+    layer_ids: Vec<Vec<MigrationTransferId>>,
     minted: Vec<MintedNote>,
     /// Each transfer paired with the funding note it spends, captured as the transfer is built.
     /// The commit path already recovers every funding note's plaintext to build the transfer; a
@@ -2378,8 +2384,8 @@ where
     }
 
     /// Assign and consume the next sequential transaction id.
-    fn next_id(&mut self) -> MigrationTxId {
-        let id = MigrationTxId(self.next_id);
+    fn next_id(&mut self) -> MigrationTransferId {
+        let id = MigrationTransferId(self.next_id);
         self.next_id += 1;
         id
     }
@@ -2445,7 +2451,7 @@ where
         use crate::preparation::PrepOutput;
 
         for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
-            let mut this_layer_ids: Vec<MigrationTxId> = Vec::with_capacity(prep_layer.len());
+            let mut this_layer_ids: Vec<MigrationTransferId> = Vec::with_capacity(prep_layer.len());
             for (index, prep_tx) in prep_layer.iter().enumerate() {
                 let id = self.next_id();
                 this_layer_ids.push(id);
@@ -2632,7 +2638,7 @@ where
             // Depend only on the preparation transaction that mints this funding note (or nothing,
             // for a direct-funding wallet note), so this crossing releases as soon as its own note
             // is mined.
-            let depends_on: Vec<MigrationTxId> = producer.into_iter().collect();
+            let depends_on: Vec<MigrationTransferId> = producer.into_iter().collect();
             let crossing_value = *plan
                 .denominations()
                 .crossing_values()
@@ -2713,7 +2719,7 @@ where
 /// bundles during a commit pass. A prover needs it to locate each transfer's spend in the wallet's
 /// commitment tree at proving time.
 #[cfg(feature = "orchard")]
-type TransferFunding = Vec<(MigrationTxId, orchard::note::Note)>;
+type TransferFunding = Vec<(MigrationTransferId, orchard::note::Note)>;
 
 /// What one commit pass produces. The public commit entry points drop the parts they do not
 /// surface.
@@ -2820,7 +2826,7 @@ mod tests {
 
         fn update_transaction(
             &mut self,
-            id: MigrationTxId,
+            id: MigrationTransferId,
             state: MigrationTxState,
         ) -> Result<(), Self::Error> {
             if let Some(stored) = &mut self.stored
@@ -3072,7 +3078,7 @@ mod tests {
             &mut rng,
         );
         let tx = MigrationTransaction {
-            id: MigrationTxId(0),
+            id: MigrationTransferId(0),
             kind: MigrationTxKind::Transfer { crossing: 0 },
             pczt: vec![1, 2, 3], // a stand-in for the serialized pre-signed PCZT
             depends_on: Vec::new(),
@@ -3101,7 +3107,7 @@ mod tests {
 
         backend
             .update_transaction(
-                MigrationTxId(0),
+                MigrationTransferId(0),
                 MigrationTxState::Mined {
                     height: BlockHeight::from_u32(2_000_105),
                 },
@@ -3216,7 +3222,7 @@ mod commit_tests {
 
         fn update_transaction(
             &mut self,
-            id: MigrationTxId,
+            id: MigrationTransferId,
             state: MigrationTxState,
         ) -> Result<(), Self::Error> {
             if let Some(stored) = &mut self.stored
@@ -3705,7 +3711,7 @@ mod commit_tests {
             Err(RebuildError::NotExpired(rejected)) if rejected == id
         ));
         // An unknown id: rejected.
-        let unknown = MigrationTxId::new(9999);
+        let unknown = MigrationTransferId::new(9999);
         assert!(matches!(
             rebuild_expired_transfer(&params, &backend, &mut state, unknown, &mut rng),
             Err(RebuildError::UnknownTransaction(rejected)) if rejected == unknown
@@ -3842,7 +3848,7 @@ mod commit_tests {
             assert_eq!(tx.state, MigrationTxState::Signed, "signed at commit");
             assert!(!tx.pczt.is_empty());
         }
-        let layer0_ids: Vec<MigrationTxId> = state
+        let layer0_ids: Vec<MigrationTransferId> = state
             .transactions
             .iter()
             .filter(|t| matches!(t.kind, MigrationTxKind::Preparation { layer: 0, .. }))
@@ -3884,7 +3890,7 @@ mod commit_tests {
         for id in &layer0_ids {
             state.mark_mined(*id, BlockHeight::from_u32(2_000_010));
         }
-        let layer1_ids: Vec<MigrationTxId> = state
+        let layer1_ids: Vec<MigrationTransferId> = state
             .transactions
             .iter()
             .filter(|t| matches!(t.kind, MigrationTxKind::Preparation { layer: 1, .. }))
@@ -3946,7 +3952,7 @@ mod commit_tests {
 
         // The crossings are funded by more than one preparation transaction (each transfer depends
         // on exactly its own producer).
-        let mut producers: Vec<MigrationTxId> = state
+        let mut producers: Vec<MigrationTransferId> = state
             .transactions
             .iter()
             .filter(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
@@ -4017,7 +4023,7 @@ mod commit_tests {
         )
         .expect("commits the migration");
 
-        let layer_ids = |s: &MigrationState, layer: usize| -> Vec<MigrationTxId> {
+        let layer_ids = |s: &MigrationState, layer: usize| -> Vec<MigrationTransferId> {
             s.transactions
                 .iter()
                 .filter(|t| {
