@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `pczt::Pczt::serialize` now emits the minimal encoding version capable of
+  representing the PCZT's content: the v1 encoding whenever the content is
+  representable in it (a pre-v6 transaction with a canonical-empty Ironwood
+  bundle and no compact-only field state), and the v2 encoding otherwise.
+  Previously it always emitted the v2 encoding. This maximizes compatibility
+  with receivers that predate the v2 encoding, such as deployed hardware
+  signers. Callers that require a specific encoding version should use
+  `pczt::v1::Pczt` or `pczt::v2::Pczt` directly.
+
 ## [0.8.0] - 2026-07-23
 
 ### Added

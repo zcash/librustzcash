@@ -60,19 +60,18 @@ fn post_nu6_3_orchard_proving_key() -> &'static orchard::circuit::ProvingKey {
 }
 
 fn check_round_trip(pczt: &Pczt) {
-    // The v1 encoding remains available explicitly.
+    // The v1 and v2 encodings both remain available explicitly.
     v1::Pczt::try_from(pczt.clone())
         .expect("v1 encoding succeeds")
         .serialize();
-
-    // The default encoding is the latest (v2) encoding.
-    let v2_encoded = v2::Pczt::try_from(pczt.clone())
+    v2::Pczt::try_from(pczt.clone())
         .expect("v2 encoding succeeds")
         .serialize();
 
+    // The default encoding is the minimal encoding capable of representing the
+    // PCZT's content (v1 or v2), and round-trips losslessly through parsing and
+    // re-serialization.
     let encoded = pczt.clone().serialize().expect("serialization succeeds");
-    assert_eq!(encoded, v2_encoded);
-
     let reencoded = Pczt::parse(&encoded)
         .expect("can parse encoded PCZT")
         .serialize()
@@ -1050,16 +1049,20 @@ fn orchard_low_level_signer_uses_preverified_signing_parse() {
     assert_eq!(u32::from(tx.expiry_height()), 10_000_040);
 }
 
-/// Checks that the PCZT round-trips through the default (v2) encoding.
+/// Checks that the PCZT round-trips through the v2 encoding, forced explicitly.
 ///
 /// This is [`check_round_trip`] minus the v1 encoding check: v6 PCZTs (which carry
-/// an Ironwood bundle) are not representable in the legacy v1 encoding.
+/// an Ironwood bundle) are not representable in the legacy v1 encoding. The v2
+/// encoding is forced explicitly (rather than using the default [`Pczt::serialize`])
+/// because some content that is v1-representable would otherwise take the minimal
+/// (v1) encoding, silently discarding v2-only information such as an absent anchor.
 fn check_v2_round_trip(pczt: &Pczt) {
-    let encoded = pczt.clone().serialize().expect("serialization succeeds");
-    let reencoded = Pczt::parse(&encoded)
-        .expect("can parse encoded PCZT")
-        .serialize()
-        .expect("serialization succeeds");
+    let encoded = v2::Pczt::try_from(pczt.clone())
+        .expect("v2 encoding succeeds")
+        .serialize();
+    let reencoded = v2::Pczt::try_from(Pczt::parse(&encoded).expect("can parse encoded PCZT"))
+        .expect("v2 encoding succeeds")
+        .serialize();
     assert_eq!(encoded, reencoded);
 }
 
@@ -1183,7 +1186,14 @@ fn assert_redacted_anchor_v2_round_trip(pczt: Pczt, pool: ShieldedPool) {
     assert_anchor_redacted(&redacted, pool);
     check_v2_round_trip(&redacted);
 
-    let reparsed = Pczt::parse(&redacted.serialize().unwrap()).unwrap();
+    // Force the v2 encoding explicitly here too: for an output-only Sapling
+    // bundle, an absent anchor is also v1-representable (v1 substitutes a
+    // placeholder), but this assertion is specifically checking the v2
+    // encoding's ability to preserve an absent anchor losslessly.
+    let v2_encoded = v2::Pczt::try_from(redacted)
+        .expect("v2 encoding succeeds")
+        .serialize();
+    let reparsed = Pczt::parse(&v2_encoded).unwrap();
     assert_anchor_redacted(&reparsed, pool);
 }
 

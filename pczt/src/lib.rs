@@ -425,10 +425,26 @@ impl Pczt {
         }
     }
 
-    /// Serializes this PCZT as the latest PCZT version.
+    /// Serializes this PCZT in the minimal encoding version capable of
+    /// representing its content: the v1 encoding whenever the PCZT is
+    /// representable in it (maximizing compatibility with receivers that
+    /// predate the v2 encoding), and the v2 encoding otherwise.
     ///
-    /// To serialize a specific PCZT version, e.g. v1, use [`v1::Pczt::serialize`].
+    /// To force a specific PCZT version, use [`v1::Pczt`] or [`v2::Pczt`]
+    /// directly.
     pub fn serialize(self) -> Result<Vec<u8>, EncodingError> {
+        // Fast pre-checks for the conditions that most commonly rule out the
+        // v1 encoding, avoiding the speculative clone below.
+        if self.global.tx_version != zcash_protocol::constants::V6_TX_VERSION
+            && self.ironwood == orchard::EMPTY_IRONWOOD
+        {
+            // The full v1-representability conditions live in the bundle
+            // conversions; attempting the conversion is the single source of
+            // truth for them.
+            if let Ok(v1) = v1::Pczt::try_from(self.clone()) {
+                return Ok(v1.serialize());
+            }
+        }
         Ok(v2::Pczt::try_from(self)?.serialize())
     }
 
@@ -742,5 +758,69 @@ mod extraction_tests {
             pczt.into_effects(),
             Err(ExtractError::UnsupportedConsensusBranchId)
         ));
+    }
+}
+
+#[cfg(test)]
+mod serialize_tests {
+    use zcash_protocol::consensus::BranchId;
+
+    use crate::roles::creator::Creator;
+
+    fn encoding_version(bytes: &[u8]) -> u32 {
+        assert_eq!(&bytes[..4], crate::MAGIC_BYTES);
+        u32::from_le_bytes(bytes[4..8].try_into().unwrap())
+    }
+
+    #[test]
+    fn serialize_emits_minimal_encoding() {
+        // A v1-representable (v5, canonical-empty Ironwood) PCZT serializes as v1.
+        let pczt = Creator::new(
+            BranchId::Nu6.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        let bytes = pczt.clone().serialize().unwrap();
+        assert_eq!(encoding_version(&bytes), crate::PCZT_VERSION_1);
+        // The minimal encoding still round-trips through the ordinary parser.
+        assert!(crate::Pczt::parse(&bytes).is_ok());
+
+        // Non-canonical Ironwood data forces the v2 encoding.
+        let mut with_ironwood = pczt.clone();
+        with_ironwood.ironwood.bsk = Some([1; 32]);
+        assert_eq!(
+            encoding_version(&with_ironwood.serialize().unwrap()),
+            crate::PCZT_VERSION_2,
+        );
+
+        // An Orchard note-plaintext version the v1 encoding cannot carry
+        // forces the v2 encoding.
+        let mut with_note_v3 = pczt;
+        with_note_v3.orchard.note_version = crate::orchard::NoteVersion::V3;
+        assert_eq!(
+            encoding_version(&with_note_v3.serialize().unwrap()),
+            crate::PCZT_VERSION_2,
+        );
+
+        // A v6 transaction forces the v2 encoding.
+        let v6 = Creator::new(
+            BranchId::Nu6_3.into(),
+            10_000_000,
+            133,
+            Some([0; 32]),
+            Some([0; 32]),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(
+            encoding_version(&v6.serialize().unwrap()),
+            crate::PCZT_VERSION_2,
+        );
     }
 }

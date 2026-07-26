@@ -1378,7 +1378,14 @@ pub(crate) mod v2 {
                 .actions
                 .push(decryptable_action_with_memo(memo));
 
-            let encrypted_size = pczt.clone().serialize().unwrap().len();
+            // Pin both sides to the v2 encoding explicitly: `Pczt::serialize` now
+            // picks the minimal encoding capable of representing its content, and
+            // this comparison is measuring the size effect of the memo-plaintext
+            // compaction, not of the encoding version chosen for either PCZT.
+            let encrypted_size = crate::v2::Pczt::try_from(pczt.clone())
+                .unwrap()
+                .serialize()
+                .len();
             let redacted = Redactor::new(pczt)
                 .redact_orchard_with(|mut orchard| {
                     orchard.redact_actions(|mut action| {
@@ -1387,7 +1394,10 @@ pub(crate) mod v2 {
                     });
                 })
                 .finish();
-            let redacted_size = redacted.clone().serialize().unwrap().len();
+            let redacted_size = crate::v2::Pczt::try_from(redacted.clone())
+                .unwrap()
+                .serialize()
+                .len();
 
             assert_eq!(
                 redacted.orchard.actions[0].output.enc_ciphertext,
