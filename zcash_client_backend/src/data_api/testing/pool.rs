@@ -8089,6 +8089,32 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
             .iter()
             .all(|spend| spend.witness().is_none())
     );
+    // Redaction's primary purpose is removing the wallet's proprietary metadata,
+    // which the Signer has no use for and should never see.
+    assert!(
+        !full_view
+            .global()
+            .proprietary()
+            .contains_key("zcash_client_backend:proposal_info")
+    );
+    for bundle in [full_view.orchard(), full_view.ironwood()] {
+        assert!(bundle.actions().iter().all(|action| {
+            !action
+                .output()
+                .proprietary()
+                .contains_key("zcash_client_backend:output_info")
+        }));
+    }
+    assert!(full_view.sapling().outputs().iter().all(|output| {
+        !output
+            .proprietary()
+            .contains_key("zcash_client_backend:output_info")
+    }));
+    assert!(full_view.transparent().outputs().iter().all(|output| {
+        !output
+            .proprietary()
+            .contains_key("zcash_client_backend:output_info")
+    }));
     if *full_view.global().tx_version() == zcash_protocol::constants::V5_TX_VERSION {
         let full_view_bytes = full_view.clone().serialize().unwrap();
         assert!(pczt::v1::Pczt::try_from(full_view).is_ok());
@@ -9507,6 +9533,42 @@ where
     let memo_plaintexts = assert_redacted_bundle(pczt.orchard(), signer_view.orchard())
         + assert_redacted_bundle(pczt.ironwood(), signer_view.ironwood());
     assert!(memo_plaintexts > 0);
+
+    // The full signer view (for receivers that predate the compact view) commits to
+    // the same transaction effects and, unlike the compact view, retains v6 anchors.
+    let full_view = redact_pczt_for_signer(&pczt, SignerView::Full);
+    assert_eq!(
+        Signer::new(full_view.clone()).unwrap().shielded_sighash(),
+        original_sighash,
+    );
+    assert!(full_view.ironwood().actions().iter().all(|action| {
+        action.spend().witness().is_none() && action.spend().dummy_sk().is_none()
+    }));
+    assert_eq!(full_view.ironwood().anchor(), pczt.ironwood().anchor());
+    assert!(
+        !full_view
+            .global()
+            .proprietary()
+            .contains_key("zcash_client_backend:proposal_info")
+    );
+    for bundle in [full_view.orchard(), full_view.ironwood()] {
+        assert!(bundle.actions().iter().all(|action| {
+            !action
+                .output()
+                .proprietary()
+                .contains_key("zcash_client_backend:output_info")
+        }));
+    }
+    assert!(full_view.sapling().outputs().iter().all(|output| {
+        !output
+            .proprietary()
+            .contains_key("zcash_client_backend:output_info")
+    }));
+    assert!(full_view.transparent().outputs().iter().all(|output| {
+        !output
+            .proprietary()
+            .contains_key("zcash_client_backend:output_info")
+    }));
 
     let batch_view = redact_pczt_for_batch_signer(&pczt);
     let batch_view_bytes = batch_view.serialize().unwrap();
