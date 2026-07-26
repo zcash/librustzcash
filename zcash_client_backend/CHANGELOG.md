@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::proposal::ProposalError` is now `#[non_exhaustive]`
+  and has added variant `OrchardPoolPayment`.
+
 ### Fixed
 - PCZTs created by `create_pczt_from_proposal` for post-NU6.3 (v6) transactions
   now carry ZIP 32 derivation metadata on wallet-controlled zero-value spends,
