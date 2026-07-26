@@ -478,9 +478,21 @@ fn scenarios() -> Vec<Scenario> {
 
 #[test]
 fn migration_proves_end_to_end_against_a_funded_wallet() {
-    for scenario in scenarios() {
-        scenario.prove_end_to_end();
-    }
+    // Proving dominates this test's cost: each preparation proves an Orchard bundle, and each
+    // transfer proves both an Orchard AND an Ironwood bundle, so proving every scenario in
+    // `MIGRATION_SCENARIOS` is ~149 real Halo2 proofs in a single test. The per-scenario
+    // accounting (preparations, transfers, migrated value, signing rounds) is already asserted for
+    // ALL scenarios without any proving by `migration_scenarios_end_to_end` in
+    // `signing_rounds_e2e.rs`; the only thing this test adds is exercising the real proving path.
+    // We therefore prove ONE representative scenario end to end. The "exchange" shape is the
+    // cheapest that still spans multi-layer preparation (2 preparations) and multiple transfers
+    // (3), so every proving code path runs exactly as it would for the larger shapes.
+    const REPRESENTATIVE: &str = "exchange, ten 5 ZEC notes";
+    let scenario = scenarios()
+        .into_iter()
+        .find(|scenario| scenario.label == REPRESENTATIVE)
+        .expect("the representative proving scenario exists");
+    scenario.prove_end_to_end();
 }
 
 /// The adapter reports the WALLET's anchor retention interval as its anchor bucket interval, and
