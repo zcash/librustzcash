@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-26
+
 ### Fixed
 - Parsing a v1-encoded PCZT with an empty Orchard bundle no longer
   materializes the placeholder anchor substituted for it on encode. The
