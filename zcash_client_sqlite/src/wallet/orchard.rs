@@ -1773,8 +1773,10 @@ pub(crate) mod tests {
         use zcash_keys::address::Address;
         use zcash_primitives::block::BlockHash;
         use zcash_protocol::{
-            PoolType, ShieldedPool, consensus::BlockHeight, local_consensus::LocalNetwork,
-            value::Zatoshis,
+            PoolType, ShieldedPool,
+            consensus::BlockHeight,
+            local_consensus::LocalNetwork,
+            value::{ZatBalance, Zatoshis},
         };
         use zip321::{Payment, TransactionRequest};
 
@@ -2740,6 +2742,149 @@ pub(crate) mod tests {
                     "the Ironwood spend and routed payment must be carried by the Ironwood bundle",
                 );
             }
+        }
+
+        /// A payment funded from both the Orchard and Sapling pools, delivered to an Orchard
+        /// receiver (and therefore routed through the Ironwood bundle post-NU6.3), where the
+        /// change is small enough that the turnstile permits its return to the Orchard pool.
+        ///
+        /// Change stays in Orchard rather than following the Sapling inputs, and that is what
+        /// keeps the spent Orchard notes ambiguous: the Orchard bundle's value balance is
+        /// publicly visible, so an Orchard change output leaves it a *lower bound* on the value
+        /// of the notes spent — an observer cannot distinguish spending 100_000 and retaining
+        /// 20_000 from spending 80_000 outright. Routing the change to Sapling would leave no
+        /// Orchard output to absorb any of the input value, publishing the spent notes' total
+        /// exactly. Neither assignment discloses the change amount itself: the value entering
+        /// the Ironwood bundle is exactly the payment either way.
+        #[test]
+        fn orchard_sapling_spend_returns_change_to_orchard_within_the_turnstile() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let account_id = account.id();
+
+            // Neither note can fund the 150_000 payment alone, so both pools are drawn upon.
+            let orchard_note_value = Zatoshis::const_from_u64(100_000);
+            let sapling_note_value = Zatoshis::const_from_u64(100_000);
+            let payment_value = Zatoshis::const_from_u64(150_000);
+
+            let (h, _, _) = st.generate_next_block(
+                &OrchardPoolTester::test_account_fvk(&st),
+                AddressType::DefaultExternal,
+                orchard_note_value,
+            );
+            st.generate_next_block(
+                &SaplingPoolTester::test_account_fvk(&st),
+                AddressType::DefaultExternal,
+                sapling_note_value,
+            );
+            st.scan_cached_blocks(h, 2);
+
+            for _ in 0..5 {
+                let (h, _) = st.generate_empty_block();
+                st.scan_cached_blocks(h, 1);
+            }
+
+            let proposal = st
+                .propose_transfer(
+                    account_id,
+                    &GreedyInputSelector::new(),
+                    &orchard_change_strategy(),
+                    orchard_payment_request(st.network(), payment_value.into_u64()),
+                    ConfirmationsPolicy::MIN,
+                )
+                .unwrap();
+
+            let step = &proposal.steps().head;
+
+            // The payment is routed through the Ironwood bundle, funded by one Orchard note and
+            // one Sapling note; no Ironwood note exists to spend.
+            assert_eq!(
+                step.payment_pools().get(&0),
+                Some(&PoolType::IRONWOOD),
+                "post-NU6.3 an Orchard-receiver payment is delivered via the Ironwood pool",
+            );
+            assert_eq!(
+                input_pool_counts(&proposal),
+                (1, 1, 0),
+                "the payment must combine the Sapling and Orchard notes",
+            );
+
+            let fee = step.balance().fee_required();
+            let expected_change = ((orchard_note_value + sapling_note_value).unwrap()
+                - payment_value)
+                .and_then(|v| v - fee)
+                .expect("the notes cover the payment and its fee");
+
+            // The change returns to Orchard, not Sapling: it is strictly less than the Orchard
+            // input value, so the turnstile permits it and `select_change_pool` keeps it there.
+            assert_eq!(
+                step.balance()
+                    .proposed_change()
+                    .iter()
+                    .map(|c| (c.output_pool(), c.value()))
+                    .collect::<Vec<_>>(),
+                vec![(PoolType::ORCHARD, expected_change)],
+            );
+            assert!(
+                expected_change < orchard_note_value,
+                "the change stays in Orchard only because it is below the Orchard input value",
+            );
+
+            let created = st
+                .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                    account.usk(),
+                    OvkPolicy::Sender,
+                    &proposal,
+                )
+                .unwrap();
+            assert_eq!(created.len(), 1);
+
+            let tx = st
+                .wallet()
+                .get_transaction(created[0])
+                .unwrap()
+                .expect("the sent transaction was stored");
+
+            // The publicly-visible value balances: the Orchard bundle discloses only
+            // `orchard_note_value - change`, keeping the value of the spent Orchard notes
+            // ambiguous; Sapling is drained in full; and the Ironwood bundle receives exactly
+            // the payment, so the change amount is not recoverable by the recipient.
+            let orchard_value_balance = *tx
+                .orchard_bundle()
+                .expect("the Orchard spend and its change are carried by the Orchard bundle")
+                .value_balance();
+            let sapling_value_balance = *tx
+                .sapling_bundle()
+                .expect("the Sapling spend is carried by the Sapling bundle")
+                .value_balance();
+            let ironwood_value_balance = *tx
+                .ironwood_bundle()
+                .expect("the routed payment is carried by the Ironwood bundle")
+                .value_balance();
+
+            assert_eq!(
+                i64::from(orchard_value_balance),
+                i64::from(ZatBalance::from(orchard_note_value))
+                    - i64::from(ZatBalance::from(expected_change)),
+                "the Orchard change output keeps the value balance a lower bound on the \
+                 value of the notes spent",
+            );
+            assert_eq!(
+                i64::from(sapling_value_balance),
+                i64::from(ZatBalance::from(sapling_note_value)),
+                "the Sapling pool is drained in full",
+            );
+            assert_eq!(
+                i64::from(ironwood_value_balance),
+                -i64::from(ZatBalance::from(payment_value)),
+                "exactly the payment enters the Ironwood pool, so the change amount is hidden",
+            );
         }
 
         proptest! {
