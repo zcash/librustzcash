@@ -498,6 +498,18 @@ Maintenance branches exist for released crate versions (e.g. `maint/zcash_client
 
 New features and non-fix changes should branch from `main`.
 
+## Plans & Design Documents
+
+Plans, design specs, and brainstorming documents produced by agents are working
+artifacts of a development session, not repository history. Never commit them.
+
+- Write them to the `.plans/` directory at the repository root, which is listed
+  in `.gitignore`.
+- If `.plans/` does not exist yet, create it (and ensure `.plans/` appears in
+  the checked-in `.gitignore`).
+- After writing a plan or spec, report its full absolute path, untruncated, so
+  it can be copy-pasted.
+
 ## Changelog & Commit Discipline
 
 - Update the crate's `CHANGELOG.md` for any public API change, bug fix, or
