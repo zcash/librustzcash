@@ -530,11 +530,41 @@ impl MigrationState {
     }
 
     /// The self-funding note values (in zatoshi), one per crossing: a `Transfer { crossing }`
-    /// transaction spends `funding_notes()[crossing]` and crosses that value minus the fee buffer
-    /// into the destination pool. Derived from the denomination plan (each crossing value plus the
-    /// fee buffer), so a store persists only that plan.
+    /// transaction SPENDS `funding_notes()[crossing]`, of which the fee buffer pays that
+    /// transaction's own fee and the remainder crosses into the destination pool. Derived from the
+    /// denomination plan (each crossing value plus the fee buffer), so a store persists only that
+    /// plan.
+    ///
+    /// This is a SPEND-side value: it is neither what arrives in the destination pool nor the round
+    /// denomination the user consented to. To report what a transfer moves, use
+    /// [`crossing_values`](Self::crossing_values), or
+    /// [`transfer_crossing_value`](Self::transfer_crossing_value) for a single transaction.
     pub fn funding_notes(&self) -> Vec<Zatoshis> {
         self.denominations.migration_outputs()
+    }
+
+    /// The values (in zatoshi) that cross into the destination pool, one per crossing and
+    /// index-aligned with [`funding_notes`](Self::funding_notes): each is its funding note less the
+    /// fee buffer that funds the transfer's own fee, and so is one of the round denominations the
+    /// user was shown at proposal time.
+    ///
+    /// This is the value to display for a transfer, and the one the receiving wallet's own
+    /// accounting will agree with once the transfer mines.
+    pub fn crossing_values(&self) -> &[Zatoshis] {
+        self.denominations.crossing_values()
+    }
+
+    /// The value transaction `tx` crosses into the destination pool, or `None` when `tx` is not a
+    /// transfer (a preparation transaction crosses nothing).
+    ///
+    /// Equivalent to indexing [`crossing_values`](Self::crossing_values) by the transaction's
+    /// [`transfer_crossing`](MigrationTxKind::transfer_crossing) — the accessor to reach for when
+    /// marshaling one stored transaction into a user-facing amount, so consumers do not re-derive
+    /// the funding-note-minus-buffer arithmetic and get it wrong by a fee.
+    pub fn transfer_crossing_value(&self, tx: &MigrationTransaction) -> Option<Zatoshis> {
+        tx.kind()
+            .transfer_crossing()
+            .and_then(|crossing| self.crossing_values().get(crossing).copied())
     }
 
     /// Replace transfer `id`'s stored PCZT with its proven bytes and move it to
@@ -574,8 +604,19 @@ impl MigrationPlan {
 
     /// The funding-note values this migration will mint, one per phase-2 crossing. Derived from the
     /// denomination plan (each crossing value plus the fee buffer).
+    ///
+    /// A SPEND-side value, as on [`MigrationState::funding_notes`]: to display what a transfer
+    /// moves, use [`crossing_values`](Self::crossing_values).
     pub fn funding_notes(&self) -> Vec<Zatoshis> {
         self.denominations.migration_outputs()
+    }
+
+    /// The values that cross into the destination pool, one per phase-2 crossing, index-aligned
+    /// with both [`funding_notes`](Self::funding_notes) and [`schedule`](Self::schedule): each is
+    /// its funding note less the fee buffer, and so is one of the round denominations to show the
+    /// user for consent.
+    pub fn crossing_values(&self) -> &[Zatoshis] {
+        self.denominations.crossing_values()
     }
 
     /// The preparation transactions (in dependency layers) that mint the funding notes.

@@ -547,6 +547,79 @@ mod tests {
         }
     }
 
+    /// A state whose denomination plan carries the given crossing values and fee buffer, so the
+    /// funding notes are each crossing plus the buffer.
+    fn state_with_crossings(
+        crossings: &[u64],
+        buffer: u64,
+        transactions: Vec<MigrationTransaction>,
+    ) -> MigrationState {
+        let zats = |v: u64| Zatoshis::from_u64(v).expect("test values are valid");
+        let total = zats(crossings.iter().sum());
+        MigrationState {
+            status: MigrationStatus::Committed,
+            denominations: DenominationPlan::from_stored_parts(
+                crossings.iter().copied().map(zats).collect(),
+                zats(buffer),
+                None,
+                Zatoshis::ZERO,
+                total,
+                total,
+            )
+            .expect("a consistent stored plan reconstructs"),
+            preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            transactions,
+            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
+        }
+    }
+
+    /// A transfer reports what it MOVES (its crossing value), not what it spends: the funding note
+    /// it spends is that value plus the fee buffer funding its own fee, and reporting the spend
+    /// side overstates every transfer by a fee.
+    #[test]
+    fn transfer_crossing_value_is_the_funding_note_less_the_fee_buffer() {
+        let buffer = 15_000;
+        let crossings = [100_000_000u64, 200_000_000];
+        let state = state_with_crossings(
+            &crossings,
+            buffer,
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                tx(1, transfer(0), MigrationTxState::Signed),
+                tx(2, transfer(1), MigrationTxState::Signed),
+            ],
+        );
+
+        for (i, &crossing) in crossings.iter().enumerate() {
+            let tx = &state.transactions[i + 1];
+            assert_eq!(
+                state.transfer_crossing_value(tx),
+                Some(Zatoshis::from_u64(crossing).expect("valid")),
+                "transfer {i} must report its crossing value"
+            );
+            assert_eq!(
+                state.funding_notes()[i],
+                Zatoshis::from_u64(crossing + buffer).expect("valid"),
+                "the funding note it spends is that value plus the buffer"
+            );
+        }
+    }
+
+    /// A preparation transaction crosses nothing, so it has no crossing value to report.
+    #[test]
+    fn transfer_crossing_value_is_none_for_a_preparation() {
+        let state = state_with_crossings(
+            &[100_000_000],
+            15_000,
+            vec![tx(0, prep(0, 0), MigrationTxState::Signed)],
+        );
+        assert_eq!(
+            state.transfer_crossing_value(&state.transactions[0]),
+            None,
+            "a preparation transaction crosses nothing"
+        );
+    }
+
     #[test]
     fn apply_signature_moves_awaiting_to_signed() {
         let mut state = state_with(vec![tx(0, prep(0, 0), MigrationTxState::AwaitingSignature)]);
