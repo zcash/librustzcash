@@ -10,12 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0-rc.3] - 2026-07-26
+
 ### Added
 - `zcash_client_backend::data_api::wallet::SignerView`, selecting the signer
   view produced by `redact_pczt_for_signer` according to the receiving
   Signer's capabilities.
 
 ### Changed
+- Migrated to `pczt 0.9.0`.
 - `zcash_client_backend::data_api::wallet::redact_pczt_for_signer` now takes a
   `SignerView` argument. `SignerView::Compact` preserves the previous
   behavior; the new `SignerView::Full` produces a conservative view for
