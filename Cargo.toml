@@ -38,7 +38,6 @@ categories = ["cryptography::cryptocurrencies"]
 equihash = { version = "0.3", path = "components/equihash", default-features = false }
 zcash_address = { version = "0.13.0", path = "components/zcash_address", default-features = false }
 zcash_client_backend = { version = "0.24.0-rc.3", path = "zcash_client_backend" }
-zcash_client_sqlite = { version = "0.22.0-rc.3", path = "zcash_client_sqlite" }
 # zcash_encoding 0.5.0 is a breaking release (MSRV bump + `CompactSize::write` now
 # rejects values above `MAX_COMPACT_SIZE`). To avoid forcing every dependent to
 # migrate at once, the workspace default stays pinned to the published 0.4; only

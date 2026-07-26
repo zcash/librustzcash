@@ -12,6 +12,7 @@ use zcash_client_backend::{
     proto::compact_formats::CompactBlock,
 };
 use zcash_protocol::TxId;
+#[cfg(feature = "orchard")]
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::{chain::init::init_cache_database, error::SqliteClientError};

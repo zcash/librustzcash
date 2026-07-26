@@ -106,6 +106,7 @@ bls12_381.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 incrementalmerkletree-testing.workspace = true
 pasta_curves.workspace = true
+pczt = { workspace = true, features = ["orchard", "tx-extractor"] }
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
@@ -121,7 +122,9 @@ zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 # The backend's shared conformance suite and proptest strategies, so the pool-migration store is
-# exercised by the ONE per-store framework instead of hand-rolled fixtures.
+# exercised by the ONE per-store framework instead of hand-rolled fixtures. The `WalletMigration`
+# adapter that the end-to-end proving simulation drives comes from `wallet`, which the `orchard`
+# feature below enables; see the note there for why it may not be enabled from here.
 zcash_pool_migration = { workspace = true, features = ["test-dependencies"] }
 zip321 = { workspace = true }
 
@@ -134,7 +137,20 @@ multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
 
 ## Enables support for storing data related to the sending and receiving of
 ## Orchard funds.
-orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
+##
+## This also enables `zcash_pool_migration/wallet`, which supplies the `WalletMigration` adapter
+## the end-to-end migration proving simulation drives. That feature forces
+## `zcash_client_backend/orchard` on, so it must never be reachable while this crate's `orchard`
+## feature is off — including from a dev-dependency, whose features unify into every workspace
+## build. This crate's storage-trait impls are gated on this feature while the backend traits grow
+## their Orchard and Ironwood methods under theirs, so the two must turn on together or the impls
+## stop satisfying the traits.
+orchard = [
+    "dep:orchard",
+    "zcash_client_backend/orchard",
+    "zcash_keys/orchard",
+    "zcash_pool_migration/wallet",
+]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
