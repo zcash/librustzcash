@@ -12,6 +12,15 @@ workspace.
 
 ### Added
 - `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
+- `zcash_client_backend::fees::SplitPolicy::standard`, along with the associated
+  constants `SplitPolicy::STANDARD_OUTPUT_COUNT` and
+  `SplitPolicy::STANDARD_MIN_OUTPUT_VALUE`, providing the general-purpose
+  change-splitting policy (at least 4 spendable notes of value at least 0.1 ZEC)
+  used by the mobile wallet SDKs.
+- `zcash_client_backend::fees::zip317::MultiOutputChangeStrategy::standard`,
+  which constructs the standard general-purpose multi-output change strategy
+  (ZIP 317 fees, Orchard change fallback, default dust policy, and
+  `SplitPolicy::standard`) previously hand-written in the mobile wallet SDKs.
 
 ### Changed
 - Every public error enum in this crate is now `#[non_exhaustive]` 
