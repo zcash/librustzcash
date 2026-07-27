@@ -2494,18 +2494,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
 
     let (colliding_addr, _) = &known_addrs[usize::try_from(gap_limits.ephemeral() - 1).unwrap()];
     let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::MIN,
-            &Address::from(*colliding_addr),
-            utxo_value,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let to = Address::from(*colliding_addr);
+    let proposal = st.propose_transfer_to(&to, utxo_value);
 
     // Create the transaction. This will cause the the gap start to move & a new
     // `gap_limits.ephemeral()` of addresses to be created.
@@ -2801,20 +2791,9 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     let tex_addr = Address::Tex([0x4; 20]);
 
     let change_memo: Option<MemoBytes> = None;
-    // We use `st.propose_standard_transfer` here in order to also test round-trip
-    // serialization of the proposal.
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::MIN,
-            &tex_addr,
-            transfer_amount,
-            None,
-            change_memo.clone(),
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    // `propose_transfer_to` proposes a standard transfer, so this also tests
+    // round-trip serialization of the proposal.
+    let proposal = st.propose_transfer_to(&tex_addr, transfer_amount);
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 2);
@@ -2946,18 +2925,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
 
     // Generate a ZIP 320 proposal, sending to an external TEX address.
     let tex_addr = Address::Tex([0x4; 20]);
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::MIN,
-            &tex_addr,
-            transfer_amount,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let proposal = st.propose_transfer_to(&tex_addr, transfer_amount);
 
     // This is somewhat redundant with `send_multi_step_proposed_transfer`,
     // but tests the case with no change memo and ensures we haven't messed
@@ -3329,24 +3297,11 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
     let value = Zatoshis::const_from_u64(70000);
     st.add_a_single_note_checking_balance(value);
 
-    let fee_rule = StandardFeeRule::Zip317;
-
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(50000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let amount_sent = Zatoshis::const_from_u64(50000);
+    let proposal = st.propose_transfer_to(&to, amount_sent);
 
     // Executing the proposal should succeed
     assert_matches!(
@@ -3387,22 +3342,10 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
         .find_map(|note| (note.note().value() == value).then_some(note.spending_key_scope()));
     assert_matches!(change_note_scope, Some(Scope::Internal));
 
-    let fee_rule = StandardFeeRule::Zip317;
-
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(50000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let amount_sent = Zatoshis::const_from_u64(50000);
+    let proposal = st.propose_transfer_to(&to, amount_sent);
 
     // Executing the proposal should succeed
     assert_matches!(
