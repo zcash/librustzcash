@@ -22,6 +22,7 @@ use crate::{
 
 /// Errors that can occur in construction of a [`Step`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ProposalError {
     /// The total output value of the transaction request is not a valid Zcash amount.
     RequestTotalInvalid,
@@ -102,7 +103,7 @@ pub enum ProposalError {
     /// only when strictly less value returns than the step's Orchard inputs remove.
     /// (Payments may never be directed to the Orchard pool after Ironwood activation;
     /// payment classification maintains that invariant, and step construction enforces it
-    /// by assertion.)
+    /// via [`ProposalError::OrchardPoolPayment`].)
     #[cfg(feature = "orchard")]
     OrchardPoolValueCreation {
         /// The total value of the Orchard notes spent by the step.
@@ -110,6 +111,12 @@ pub enum ProposalError {
         /// The total value of the Orchard-pool change outputs created by the step.
         output_total: Zatoshis,
     },
+    /// After Ironwood activation, the payment at the wrapped index of the step's
+    /// transaction request was directed to the Orchard pool. The turnstile only permits
+    /// value to leave the pool, so no payment may be directed to it; payment
+    /// classification routes Orchard-receiver payments to the Ironwood pool instead.
+    #[cfg(feature = "orchard")]
+    OrchardPoolPayment(usize),
 }
 
 impl Display for ProposalError {
@@ -215,6 +222,11 @@ impl Display for ProposalError {
                 "After Ironwood activation, a step that spends {} zatoshis from the Orchard pool may not return {} zatoshis to it.",
                 u64::from(*input_total),
                 u64::from(*output_total),
+            ),
+            #[cfg(feature = "orchard")]
+            ProposalError::OrchardPoolPayment(index) => write!(
+                f,
+                "After Ironwood activation, no payment may be directed to the Orchard pool (payment index {index})."
             ),
             ProposalError::IncompatibleTxVersion(branch_id) => write!(
                 f,
@@ -676,17 +688,18 @@ impl<NoteRef> Step<NoteRef> {
         if ironwood_active {
             // With Ironwood active, payment classification routes every Orchard-receiver
             // payment to the Ironwood pool before a step is constructed, so a payment
-            // directed to the Orchard pool here is a programming error, not a condition a
-            // well-formed proposal can exhibit. The only Orchard-pool outputs a step may
-            // create are change, which is validated below. This is a `debug_assert!` for the
-            // internal (input-selection) caller; the untrusted decode path must reject such a
-            // payment pool before calling `from_parts` (see `try_into_standard_proposal`).
-            debug_assert!(
-                !payment_pools
-                    .iter()
-                    .any(|(_, pool)| *pool == PoolType::ORCHARD),
-                "with Ironwood active, no payment may be directed to the Orchard pool",
-            );
+            // directed to the Orchard pool here can only arise through direct misuse of
+            // this public constructor; reject it rather than construct a step whose
+            // transaction could never be mined. The only Orchard-pool outputs a step may
+            // create are change, which is validated below. The untrusted decode path
+            // rejects such a payment pool before calling `from_parts` (see
+            // `try_into_standard_proposal`).
+            if let Some((index, _)) = payment_pools
+                .iter()
+                .find(|(_, pool)| **pool == PoolType::ORCHARD)
+            {
+                return Err(ProposalError::OrchardPoolPayment(*index));
+            }
 
             let orchard_input_total = shielded_inputs
                 .iter()
@@ -1311,11 +1324,14 @@ mod tests {
     }
 
     // Post-activation, payment classification never assigns a payment to the Orchard pool,
-    // so a step constructed with one is a programming error and step construction asserts.
+    // so a step constructed with one can only arise through direct misuse of the public
+    // constructor, which rejects it.
     #[test]
-    #[should_panic(expected = "no payment may be directed to the Orchard pool")]
-    fn orchard_pool_payment_with_ironwood_active_is_a_programming_error() {
-        let _ = orchard_payment_step(PoolType::ORCHARD, true);
+    fn orchard_pool_payment_with_ironwood_active_is_an_error() {
+        assert_matches!(
+            orchard_payment_step(PoolType::ORCHARD, true),
+            Err(ProposalError::OrchardPoolPayment(0))
+        );
     }
 
     // Builds `orchard.0` version-2 (Orchard) notes of value `orchard.1`, followed by `ironwood.0`

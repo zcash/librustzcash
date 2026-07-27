@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -7111,7 +7111,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.24.0-rc.3"
+version = "0.24.0-rc.4"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -7186,7 +7186,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.22.0-rc.3"
+version = "0.22.0-rc.4"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -7207,6 +7207,7 @@ dependencies = [
  "nonempty",
  "orchard",
  "pasta_curves",
+ "pczt",
  "proptest",
  "prost",
  "rand 0.8.5",
@@ -7331,7 +7332,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_pool_migration"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 dependencies = [
  "corez",
  "getset",
@@ -7340,18 +7341,13 @@ dependencies = [
  "orchard",
  "pczt",
  "proptest",
- "prost",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
- "rusqlite",
  "shardtree",
- "tempfile",
  "zcash_client_backend",
- "zcash_client_sqlite",
  "zcash_keys",
  "zcash_pool_migration_memory",
  "zcash_primitives",
- "zcash_proofs",
  "zcash_protocol",
 ]
 

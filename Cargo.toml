@@ -37,8 +37,7 @@ categories = ["cryptography::cryptocurrencies"]
 # Intra-workspace dependencies
 equihash = { version = "0.3", path = "components/equihash", default-features = false }
 zcash_address = { version = "0.13.0", path = "components/zcash_address", default-features = false }
-zcash_client_backend = { version = "0.24.0-rc.3", path = "zcash_client_backend" }
-zcash_client_sqlite = { version = "0.22.0-rc.3", path = "zcash_client_sqlite" }
+zcash_client_backend = { version = "0.24.0-rc.4", path = "zcash_client_backend" }
 # zcash_encoding 0.5.0 is a breaking release (MSRV bump + `CompactSize::write` now
 # rejects values above `MAX_COMPACT_SIZE`). To avoid forcing every dependent to
 # migrate at once, the workspace default stays pinned to the published 0.4; only
@@ -47,7 +46,7 @@ zcash_client_sqlite = { version = "0.22.0-rc.3", path = "zcash_client_sqlite" }
 # time, then flip this back to `path = "components/zcash_encoding"` at "0.5".
 zcash_encoding = { version = "0.4", default-features = false }
 zcash_keys = { version = "0.16.0", path = "zcash_keys", default-features = false  }
-zcash_pool_migration = { version = "0.1.0-rc.2", path = "zcash_pool_migration" }
+zcash_pool_migration = { version = "0.1.0-rc.3", path = "zcash_pool_migration" }
 zcash_protocol = { version = "0.10.0", path = "components/zcash_protocol", default-features = false }
 zip321 = { version = "0.9.0-rc.1", path = "components/zip321" }
 
@@ -55,7 +54,7 @@ zcash_note_encryption = "0.4.1"
 zcash_primitives = { version = "0.30.0", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.30.0", path = "zcash_proofs", default-features = false }
 
-pczt = { version = "0.9.0", path = "pczt" }
+pczt = { version = "0.9.1", path = "pczt" }
 
 # Shielded protocols
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }

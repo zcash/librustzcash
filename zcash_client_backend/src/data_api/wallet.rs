@@ -2700,8 +2700,6 @@ where
     FeeRuleT: FeeRule,
     DbT::AccountId: serde::Serialize,
 {
-    use std::collections::HashSet;
-
     let account = wallet_db
         .get_account(account_id)
         .map_err(Error::DataSource)?
@@ -2784,13 +2782,6 @@ where
         .collect::<HashMap<_, _>>();
 
     #[cfg(feature = "orchard")]
-    let orchard_spends = (0..)
-        .map(|i| build_result.orchard_meta.spend_action_index(i))
-        .take_while(|item| item.is_some())
-        .flatten()
-        .collect::<HashSet<_>>();
-
-    #[cfg(feature = "orchard")]
     let ironwood_outputs = build_state
         .ironwood_output_meta
         .into_iter()
@@ -2807,13 +2798,6 @@ where
             )
         })
         .collect::<HashMap<_, _>>();
-
-    #[cfg(feature = "orchard")]
-    let ironwood_spends = (0..)
-        .map(|i| build_result.ironwood_meta.spend_action_index(i))
-        .take_while(|item| item.is_some())
-        .flatten()
-        .collect::<HashSet<_>>();
 
     let sapling_outputs = build_state
         .sapling_output_meta
@@ -2844,13 +2828,26 @@ where
             )
         })
         .update_orchard_with(|mut updater| {
-            for index in 0..updater.bundle().actions().len() {
+            // An action still needs a spend authorization signature if and only if its spend
+            // requires one: this covers both the requested real spends and the wallet-controlled
+            // zero-value spends the builder pairs with change outputs in the vanilla-Orchard-pool
+            // bundle under the post-NU6.3 cross-address rule. Protocol padding dummies are
+            // pre-signed and cleared by the IO Finalizer, so they are excluded by this check.
+            let spend_needs_derivation = updater
+                .bundle()
+                .actions()
+                .iter()
+                .map(|action| action.spend().spend_auth_sig().is_none())
+                .collect::<Vec<_>>();
+
+            for (index, needs_derivation) in spend_needs_derivation.iter().enumerate() {
                 updater.update_action_with(index, |mut action_updater| {
-                    // If the account has a known derivation, add the Orchard key path to the PCZT.
+                    // If the account has a known derivation, add the Orchard key path to the PCZT
+                    // for every spend that still requires a signature (real spends and
+                    // wallet-controlled zero-value spends), so an external Signer can identify
+                    // and sign it.
                     if let Some(derivation) = account_derivation {
-                        // orchard_spends will only contain action indices for the real spends, and
-                        // not the dummy inputs
-                        if orchard_spends.contains(&index) {
+                        if *needs_derivation {
                             // All spent notes are from the same account.
                             action_updater.set_spend_zip32_derivation(
                                 orchard::pczt::Zip32Derivation::parse(
@@ -2890,14 +2887,27 @@ where
             Ok(())
         })?
         .update_ironwood_with(|mut updater| {
-            for index in 0..updater.bundle().actions().len() {
+            // An action still needs a spend authorization signature if and only if its spend
+            // requires one: this covers both the requested real spends and the wallet-controlled
+            // zero-value spends the builder pairs with change outputs in the vanilla-Orchard-pool
+            // bundle under the post-NU6.3 cross-address rule. Protocol padding dummies are
+            // pre-signed and cleared by the IO Finalizer, so they are excluded by this check.
+            let spend_needs_derivation = updater
+                .bundle()
+                .actions()
+                .iter()
+                .map(|action| action.spend().spend_auth_sig().is_none())
+                .collect::<Vec<_>>();
+
+            for (index, needs_derivation) in spend_needs_derivation.iter().enumerate() {
                 updater.update_action_with(index, |mut action_updater| {
                     // Ironwood notes are spent with the account's Orchard spending key, so the key
-                    // path added here is the Orchard one.
+                    // path added here is the Orchard one. If the account has a known derivation,
+                    // add it for every spend that still requires a signature (real spends and
+                    // wallet-controlled zero-value spends), so an external Signer can identify
+                    // and sign it.
                     if let Some(derivation) = account_derivation {
-                        // ironwood_spends contains action indices only for the real spends, not the
-                        // dummy inputs.
-                        if ironwood_spends.contains(&index) {
+                        if *needs_derivation {
                             // All spent notes are from the same account.
                             action_updater.set_spend_zip32_derivation(
                                 orchard::pczt::Zip32Derivation::parse(

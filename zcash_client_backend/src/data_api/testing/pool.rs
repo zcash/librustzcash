@@ -7996,6 +7996,46 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
         consensus::BranchId::try_from(*pczt_created.global().consensus_branch_id())
             .expect("the PCZT carries a valid consensus branch ID");
 
+    // Signability invariant: the test account's derivation is known, so every
+    // shielded spend must be signable by SOME party: already signed
+    // (IO-finalized protocol dummies), carrying the dummy key that lets the IO
+    // Finalizer sign it, or exposing the ZIP 32 derivation metadata by which
+    // an external Signer identifies the spend as its own. A spend meeting none
+    // of these is unsignable and dooms transaction extraction.
+    fn assert_signable_orchard_bundle(bundle: &orchard::pczt::Bundle) {
+        for action in bundle.actions() {
+            assert!(
+                action.spend().spend_auth_sig().is_some()
+                    || action.spend().dummy_sk().is_some()
+                    || action.spend().zip32_derivation().is_some(),
+                "unsignable Orchard-protocol spend: no signature, dummy key, or derivation",
+            );
+        }
+    }
+    pczt::roles::verifier::Verifier::new(pczt_created.clone())
+        .with_orchard::<Infallible, _>(|bundle| {
+            assert_signable_orchard_bundle(bundle);
+            Ok(())
+        })
+        .unwrap()
+        .with_ironwood::<Infallible, _>(|bundle| {
+            assert_signable_orchard_bundle(bundle);
+            Ok(())
+        })
+        .unwrap()
+        .with_sapling::<Infallible, _>(|bundle| {
+            for spend in bundle.spends() {
+                assert!(
+                    spend.spend_auth_sig().is_some()
+                        || spend.proof_generation_key().is_some()
+                        || spend.zip32_derivation().is_some(),
+                    "unsignable Sapling spend: no signature, dummy proving material, or derivation",
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
+
     // If we don't create proofs or signatures, we will fail to extract a transaction.
     assert_matches!(
         st.extract_and_store_transaction_from_pczt(pczt_created.clone()),
@@ -9425,6 +9465,7 @@ where
         has_fvk: bool,
         has_signature: bool,
         has_alpha: bool,
+        has_derivation: bool,
         value: Option<u64>,
     }
 
@@ -9437,6 +9478,7 @@ where
                     has_fvk: action.spend().fvk().is_some(),
                     has_signature: action.spend().spend_auth_sig().is_some(),
                     has_alpha: action.spend().alpha().is_some(),
+                    has_derivation: action.spend().zip32_derivation().is_some(),
                     value: action.spend().value().as_ref().map(|value| value.inner()),
                 })
                 .collect()
@@ -9460,6 +9502,36 @@ where
 
     let original_sighash = Signer::new(pczt.clone()).unwrap().shielded_sighash();
     let original_spend_states = spend_states(pczt.clone());
+
+    // Every action in both bundles is either already signed (a pre-signed protocol padding
+    // dummy, cleared by the IO Finalizer) or carries ZIP 32 derivation metadata so that an
+    // external Signer that matches by derivation path can identify and sign it. Real spends
+    // and the wallet-controlled zero-value spends the builder pairs with vanilla-pool change
+    // outputs (post-NU6.3 cross-address rule) both need the derivation; only the pre-signed
+    // dummies are allowed to lack it.
+    for state in original_spend_states
+        .0
+        .iter()
+        .chain(original_spend_states.1.iter())
+    {
+        assert!(
+            state.has_signature || state.has_derivation,
+            "every action must be either pre-signed or identifiable by an external signer \
+             via ZIP 32 derivation: {state:?}",
+        );
+    }
+    // Confirm this scenario actually exercises a wallet-controlled zero-value spend: the
+    // vanilla Orchard-pool bundle pairs a zero-value dummy spend (unsigned, carrying `alpha`)
+    // with the change output, and it is this spend that regressed by being left unsignable.
+    assert!(
+        original_spend_states
+            .0
+            .iter()
+            .any(|state| state.value == Some(0) && !state.has_signature),
+        "expected at least one unsigned zero-value Orchard spend (the wallet-controlled \
+         change-pairing dummy)",
+    );
+
     let original_len = pczt.clone().serialize().unwrap().len();
     let signer_view = redact_pczt_for_signer(&pczt, SignerView::Compact);
     let signer_view_bytes = signer_view.serialize().unwrap();

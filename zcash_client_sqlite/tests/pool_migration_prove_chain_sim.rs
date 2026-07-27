@@ -1,8 +1,8 @@
 //! End-to-end, real-proving chain simulation of a whole migration over a genuine wallet.
 //!
-//! This drives a real (in-memory) `zcash_client_sqlite` `WalletDb` through the
-//! `zcash_client_backend` testing framework, exercising the migration engine's proving path against
-//! the wallet's OWN Orchard commitment tree instead of a hand-built one:
+//! This drives a real (in-memory) [`WalletDb`] through the `zcash_client_backend` testing
+//! framework, exercising the `zcash_pool_migration` engine's proving path against the wallet's OWN
+//! Orchard commitment tree instead of a hand-built one:
 //!
 //! 1. fund an account with a spendable Orchard note and commit a migration over the
 //!    [`WalletMigration`] adapter (so the plan, the prep transactions, and the transfers all come
@@ -16,10 +16,16 @@
 //!
 //! [`WalletMigrationProver`] resolves every spend's tree position from the wallet's own note store
 //! (no hand-supplied map), so this test also covers that production lookup path. It keeps each
-//! transfer's boundary within `zcash_client_sqlite`'s checkpoint pruning window (100 blocks of the
-//! tip), so it needs no migration anchor-checkpoint retention, which is a wallet backend concern
-//! out of the migration crate's control.
-#![cfg(all(feature = "wallet", feature = "test-dependencies"))]
+//! transfer's boundary within this crate's checkpoint pruning window (100 blocks of the tip), so it
+//! needs no migration anchor-checkpoint retention, which is a wallet backend concern out of the
+//! migration crate's control.
+//!
+//! [`WalletDb`]: zcash_client_sqlite::WalletDb
+#![cfg(all(
+    feature = "orchard",
+    feature = "pczt-tests",
+    feature = "test-dependencies"
+))]
 
 use std::convert::Infallible;
 
@@ -32,8 +38,8 @@ use zcash_client_backend::data_api::testing::{
     AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
 };
 use zcash_client_backend::data_api::{Account, WalletRead};
-// The wallet, block cache, DB factory, and Orchard-checkpoint helper come from
-// `zcash_client_sqlite`'s own test harness, exposed under its `test-dependencies` feature.
+// The wallet, block cache, DB factory, and Orchard-checkpoint helper come from this crate's own
+// test harness, exposed under its `test-dependencies` feature.
 use zcash_client_sqlite::testing::db::{TestDb, TestDbFactory};
 use zcash_client_sqlite::testing::{BlockCache, highest_rooted_orchard_checkpoint};
 use zcash_keys::keys::UnifiedSpendingKey;
