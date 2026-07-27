@@ -137,6 +137,7 @@ graph TB
     %% zcash_client_backend --> zcash_note_encryption
 
     %% zcash_client_sqlite --> zip32
+    %% zcash_pool_migration --> zip32
     %% zcash_client_backend --> zip32
     %% zcash_keys --> zip32
     orchard --> zip32
