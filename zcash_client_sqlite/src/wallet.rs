@@ -161,6 +161,11 @@ pub(crate) mod common;
 mod db;
 pub(crate) mod encoding;
 pub mod init;
+// Scaffolding for the paired "remove" commit: this copy commit lands the new
+// wallet::locking module with the extracted functions but does not yet wire any
+// caller to them, so they are dead until the removal commit redirects callers.
+#[allow(dead_code)]
+pub(crate) mod locking;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
 pub(crate) mod sapling;
