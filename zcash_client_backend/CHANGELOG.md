@@ -12,6 +12,10 @@ workspace.
 
 ### Added
 - `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
+- `zcash_client_backend::tor::Timeouts`
+- `zcash_client_backend::tor::Client::create_with_timeouts`
+- `zcash_client_backend::tor::http::TimeoutPhase`
+- `zcash_client_backend::tor::http::HttpError::Timeout`
 
 ### Changed
 - Every public error enum in this crate is now `#[non_exhaustive]` 
@@ -35,6 +39,14 @@ workspace.
   already authorized or still authorizable. A batch Signer's response
   consequently carries the retained signatures back alongside the new ones;
   re-applying them to the authoritative PCZT is a no-op.
+- The Tor HTTP and gRPC transports now bound how long each network operation may
+  take. Previously a server that accepted a connection and then never responded
+  would leave the request pending indefinitely, and could thereby stall any caller
+  that aggregates several servers (such as `tor::Client::get_latest_zec_to_usd_rate`).
+  `tor::Client::create` applies `tor::Timeouts::default`; use
+  `tor::Client::create_with_timeouts` if those deadlines are too aggressive for your
+  expected circuit latency. HTTP requests that exceed a deadline now fail with
+  `tor::http::HttpError::Timeout` instead of hanging.
 
 ## [0.24.0-rc.4] - 2026-07-26
 
