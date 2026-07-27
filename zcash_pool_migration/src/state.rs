@@ -284,29 +284,36 @@ impl MigrationState {
     }
 
     /// The minimal schedule of sync/proving wake-ups for the transfers that still need proofs, as
-    /// of `target_height` (`chain_tip + 1`): each entry is a height at which to wake, sync, and
+    /// of the observed chain tip `current_tip`: each entry is a height at which to wake, sync, and
     /// prove (see [`crate::scheduling::schedule_sync_wakeups`], which defines the windows, the
     /// minimality guarantee, the jitter, and the immediate wake-up that collects overdue
     /// transfers). This is the schedule a background-constrained wallet registers with its OS,
     /// alongside the (independent) broadcast heights the transfers themselves carry.
     ///
+    /// Unlike the sibling query methods, which take a `target_height` (`chain_tip + 1`, the next
+    /// block a transaction could mine in), this method takes the tip itself: wake-up heights are
+    /// floored at the tip (a wake-up at exactly `current_tip` means "right now"). Expiry is still
+    /// judged at `current_tip + 1`, consistent with [`Self::expired_transactions`].
+    ///
     /// Covered are transfers in the `Signed` or `AwaitingSignature` state — proving and signature
     /// application are independent operations, so a transfer whose signed PCZT has not yet been
     /// returned by the external signer still needs its proof on the same schedule — while `Proved`,
-    /// `Broadcast`, and `Mined` transfers, transfers expired at `target_height` (their rebuild
-    /// reschedules them), and preparations (which anchor at the tip when proved, driven by
-    /// [`Self::next_step`] at their own broadcast wake-ups) are not. A transfer lacking a drawn
-    /// anchor boundary (impossible for a state committed by this crate) likewise contributes no
-    /// wake-up: like a preparation, it is driven by [`Self::next_step`] at its scheduled height.
-    /// Nothing is persisted: the schedule is derived from the migration state, so recompute it —
-    /// with fresh jitter — after any state change (a proof stored, a rebuild, a missed wake-up).
+    /// `Broadcast`, and `Mined` transfers, expired transfers (their rebuild reschedules them), and
+    /// preparations (which anchor at the tip when proved, driven by [`Self::next_step`] at their
+    /// own broadcast wake-ups) are not. A transfer lacking a drawn anchor boundary (impossible for
+    /// a state committed by this crate) likewise contributes no wake-up: like a preparation, it is
+    /// driven by [`Self::next_step`] at its scheduled height. Nothing is persisted: the schedule
+    /// is derived from the migration state, so recompute it — with fresh jitter — after any state
+    /// change (a proof stored, a rebuild, a missed wake-up).
     pub fn sync_wakeup_schedule<R: RngCore + CryptoRng>(
         &self,
-        target_height: BlockHeight,
+        current_tip: BlockHeight,
         params: &WakeupParams,
         rng: &mut R,
     ) -> Result<Vec<SyncWakeup<MigrationTransferId>>, WakeupScheduleError<MigrationTransferId>>
     {
+        // Expiry semantics are defined against the next block a transaction could mine in.
+        let target_height = current_tip + 1;
         let transfers: Vec<(MigrationTransferId, BlockHeight, BlockHeight)> = self
             .transactions
             .iter()
@@ -320,7 +327,7 @@ impl MigrationState {
             })
             .filter_map(|t| t.anchor_boundary.map(|a| (t.id, a, t.scheduled_height)))
             .collect();
-        scheduling::schedule_sync_wakeups(params, target_height, &transfers, rng)
+        scheduling::schedule_sync_wakeups(params, current_tip, &transfers, rng)
     }
 
     /// Recomputes the overall [`MigrationStatus`]: `Complete` once every transaction is mined,
@@ -798,13 +805,13 @@ mod tests {
     }
 
     /// An expired transfer is excluded (its rebuild reschedules it and the schedule is recomputed);
-    /// an overdue-but-unexpired transfer collapses into an immediate wake-up at the target height.
+    /// an overdue-but-unexpired transfer collapses into an immediate wake-up at the current tip.
     #[test]
     fn sync_wakeup_schedule_overdue_and_expired() {
         let mut expired = scheduled_transfer(0, 0, 144, 400, MigrationTxState::Signed);
         expired.expiry_height = BlockHeight::from_u32(999);
         let state = state_with(vec![
-            expired, // expired at target 2000: excluded entirely
+            expired, // expired at tip 2000 (expiry 999 < 2001): excluded entirely
             scheduled_transfer(1, 1, 144, 400, MigrationTxState::Signed), // never expires: overdue
             scheduled_transfer(2, 2, 4320, 4700, MigrationTxState::Signed),
         ]);
