@@ -251,6 +251,38 @@ pub enum SqliteClientError {
     /// [`FeeRule`]: zcash_primitives::transaction::fees::FeeRule
     #[cfg(feature = "transparent-inputs")]
     FeeRuleError(Box<dyn error::Error + Send + Sync>),
+
+    /// A `zcash_client_backend` error value carried a variant that this crate has no
+    /// translation for; the wrapped value identifies which error type it came from.
+    ///
+    /// Those error types are `#[non_exhaustive]`, so a variant introduced by a future
+    /// `zcash_client_backend` release can reach this crate before there is a specific
+    /// [`SqliteClientError`] counterpart for it. This error is therefore unreachable with
+    /// the `zcash_client_backend` release this crate is built against; encountering it
+    /// means this crate needs updating to translate the new variant.
+    UnrecognizedBackendError(BackendErrorSource),
+}
+
+/// The `zcash_client_backend` error type whose unrecognized variant produced a
+/// [`SqliteClientError::UnrecognizedBackendError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BackendErrorSource {
+    /// `zcash_client_backend::data_api::ll::wallet::PutBlocksError`, reported while inserting
+    /// scanned blocks into the wallet.
+    PutBlocks,
+    /// `zcash_client_backend::data_api::error::RewindError`, reported while rewinding the
+    /// wallet to a previous chain state.
+    Rewind,
+}
+
+impl fmt::Display for BackendErrorSource {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BackendErrorSource::PutBlocks => write!(f, "block insertion"),
+            BackendErrorSource::Rewind => write!(f, "rewind to a previous chain state"),
+        }
+    }
 }
 
 impl error::Error for SqliteClientError {
@@ -445,6 +477,11 @@ impl fmt::Display for SqliteClientError {
             }
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::FeeRuleError(e) => write!(f, "Fee rule error: {e}"),
+            SqliteClientError::UnrecognizedBackendError(source) => write!(
+                f,
+                "The zcash_client_backend error reported for {source} is not one this version of \
+                 zcash_client_sqlite recognizes; this crate must be updated to handle it."
+            ),
         }
     }
 }
@@ -562,9 +599,7 @@ impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteC
             // `PutBlocksError` is `#[non_exhaustive]`, so a variant introduced by a future
             // `zcash_client_backend` release reaches this conversion with no counterpart
             // here until this crate is updated to map it. Report it rather than panicking.
-            _ => SqliteClientError::CorruptedData(
-                "Unrecognized zcash_client_backend block-insertion error.".to_owned(),
-            ),
+            _ => SqliteClientError::UnrecognizedBackendError(BackendErrorSource::PutBlocks),
         }
     }
 }

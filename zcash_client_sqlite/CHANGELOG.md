@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::error::SqliteClientError::UnrecognizedBackendError` and
+  the `zcash_client_sqlite::error::BackendErrorSource` it wraps, reported when a
+  `zcash_client_backend` error value carries a variant this crate has no
+  translation for. Those error types are `#[non_exhaustive]`, so this is
+  unreachable with the `zcash_client_backend` release this crate is built
+  against; it exists so that a variant added upstream degrades to a diagnosable
+  error rather than a compilation failure.
+
 ### Changed
 - Every public error enum in this crate is now `#[non_exhaustive]`, so that
   future variants can be added without a breaking release. A `match` over any

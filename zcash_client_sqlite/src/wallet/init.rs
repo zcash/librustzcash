@@ -206,7 +206,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         | SqliteClientError::KeyDerivationError(_)
         | SqliteClientError::Zip32AccountIndexOutOfRange
         | SqliteClientError::AccountCollision(_)
-        | SqliteClientError::CacheMiss(_) => {
+        | SqliteClientError::CacheMiss(_)
+        | SqliteClientError::UnrecognizedBackendError(_) => {
             unreachable!("we only call WalletRead methods; mutations can't occur")
         }
         #[cfg(feature = "transparent-inputs")]
