@@ -19,6 +19,7 @@
 use alloc::vec::Vec;
 
 use getset::{CopyGetters, Getters};
+use rand_core::{CryptoRng, RngCore};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
@@ -26,6 +27,7 @@ use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState,
 };
+use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 
 /// The next thing to do to advance a committed migration, decided purely from its state. The consumer
 /// performs the corresponding I/O and updates the state (via the commit functions and
@@ -281,6 +283,46 @@ impl MigrationState {
             .map(|t| t.id)
     }
 
+    /// The minimal schedule of sync/proving wake-ups for the transfers that still need proofs, as
+    /// of `target_height` (`chain_tip + 1`): each entry is a height at which to wake, sync, and
+    /// prove (see [`crate::scheduling::schedule_sync_wakeups`], which defines the windows, the
+    /// minimality guarantee, the jitter, and the immediate wake-up that collects overdue
+    /// transfers). This is the schedule a background-constrained wallet registers with its OS,
+    /// alongside the (independent) broadcast heights the transfers themselves carry.
+    ///
+    /// Covered are transfers in the `Signed` or `AwaitingSignature` state — proving and signature
+    /// application are independent operations, so a transfer whose signed PCZT has not yet been
+    /// returned by the external signer still needs its proof on the same schedule — while `Proved`,
+    /// `Broadcast`, and `Mined` transfers, transfers expired at `target_height` (their rebuild
+    /// reschedules them), and preparations (which anchor at the tip when proved, driven by
+    /// [`Self::next_step`] at their own broadcast wake-ups) are not. A transfer lacking a drawn
+    /// anchor boundary (impossible for a state committed by this crate) likewise contributes no
+    /// wake-up: like a preparation, it is driven by [`Self::next_step`] at its scheduled height.
+    /// Nothing is persisted: the schedule is derived from the migration state, so recompute it —
+    /// with fresh jitter — after any state change (a proof stored, a rebuild, a missed wake-up).
+    pub fn sync_wakeup_schedule<R: RngCore + CryptoRng>(
+        &self,
+        target_height: BlockHeight,
+        params: &WakeupParams,
+        rng: &mut R,
+    ) -> Result<Vec<SyncWakeup<MigrationTransferId>>, WakeupScheduleError<MigrationTransferId>>
+    {
+        let transfers: Vec<(MigrationTransferId, BlockHeight, BlockHeight)> = self
+            .transactions
+            .iter()
+            .filter(|t| {
+                matches!(t.kind, MigrationTxKind::Transfer { .. })
+                    && matches!(
+                        t.state,
+                        MigrationTxState::Signed | MigrationTxState::AwaitingSignature
+                    )
+                    && !Self::is_expired(t, target_height)
+            })
+            .filter_map(|t| t.anchor_boundary.map(|a| (t.id, a, t.scheduled_height)))
+            .collect();
+        scheduling::schedule_sync_wakeups(params, target_height, &transfers, rng)
+    }
+
     /// Recomputes the overall [`MigrationStatus`]: `Complete` once every transaction is mined,
     /// `InProgress` once any has been broadcast or mined. Leaves the status unchanged otherwise (an
     /// uncommitted or freshly committed migration keeps its `Planning`/`Committed` status until work
@@ -499,6 +541,10 @@ mod tests {
     use crate::preparation::PreparationPlan;
     use alloc::vec;
 
+    use crate::scheduling::WakeupParams;
+    use rand_chacha::ChaCha8Rng;
+    use rand_core::SeedableRng;
+
     // A migration transaction with the given id/kind/state, no dependencies, scheduled at height 0.
     fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
         MigrationTransaction {
@@ -695,6 +741,86 @@ mod tests {
             txid: TxId::from_bytes([0; 32]),
         };
         assert_eq!(s.next_broadcastable(BlockHeight::from_u32(5)), None);
+    }
+
+    /// A transfer with the given anchor boundary and scheduled broadcast height, in the given
+    /// lifecycle state (never expiring, like `tx`).
+    fn scheduled_transfer(
+        id: u32,
+        crossing: usize,
+        anchor: u32,
+        broadcast: u32,
+        state: MigrationTxState,
+    ) -> MigrationTransaction {
+        let mut t = tx(id, transfer(crossing), state);
+        t.anchor_boundary = Some(BlockHeight::from_u32(anchor));
+        t.scheduled_height = BlockHeight::from_u32(broadcast);
+        t
+    }
+
+    /// Only transfers still needing a proof are scheduled: preparations and already-proved,
+    /// broadcast, or mined transfers contribute no wake-ups; a not-yet-signed transfer still needs
+    /// its wake-up once its signature arrives.
+    #[test]
+    fn sync_wakeup_schedule_filters_lifecycle_states() {
+        let state = state_with(vec![
+            tx(0, prep(0, 0), MigrationTxState::Signed),
+            scheduled_transfer(1, 0, 1440, 1700, MigrationTxState::Signed),
+            scheduled_transfer(2, 1, 1584, 1800, MigrationTxState::AwaitingSignature),
+            scheduled_transfer(3, 2, 2880, 3100, MigrationTxState::Proved),
+            scheduled_transfer(
+                4,
+                3,
+                2880,
+                3100,
+                MigrationTxState::Broadcast {
+                    txid: TxId::from_bytes([9; 32]),
+                },
+            ),
+            scheduled_transfer(5, 4, 2880, 3100, mined(3000)),
+        ]);
+        let mut r = ChaCha8Rng::seed_from_u64(1);
+        let wakeups = state
+            .sync_wakeup_schedule(
+                BlockHeight::from_u32(100),
+                &WakeupParams::new(10, 0),
+                &mut r,
+            )
+            .expect("feasible");
+        // Windows [1450, 1699] and [1594, 1799] overlap: one wake-up covers both pending
+        // transfers; everything else is filtered out.
+        assert_eq!(wakeups.len(), 1);
+        assert_eq!(u32::from(wakeups[0].height()), 1594);
+        assert_eq!(
+            wakeups[0].covers(),
+            &[MigrationTransferId(1), MigrationTransferId(2)]
+        );
+    }
+
+    /// An expired transfer is excluded (its rebuild reschedules it and the schedule is recomputed);
+    /// an overdue-but-unexpired transfer collapses into an immediate wake-up at the target height.
+    #[test]
+    fn sync_wakeup_schedule_overdue_and_expired() {
+        let mut expired = scheduled_transfer(0, 0, 144, 400, MigrationTxState::Signed);
+        expired.expiry_height = BlockHeight::from_u32(999);
+        let state = state_with(vec![
+            expired, // expired at target 2000: excluded entirely
+            scheduled_transfer(1, 1, 144, 400, MigrationTxState::Signed), // never expires: overdue
+            scheduled_transfer(2, 2, 4320, 4700, MigrationTxState::Signed),
+        ]);
+        let mut r = ChaCha8Rng::seed_from_u64(1);
+        let wakeups = state
+            .sync_wakeup_schedule(
+                BlockHeight::from_u32(2000),
+                &WakeupParams::new(10, 0),
+                &mut r,
+            )
+            .expect("feasible");
+        assert_eq!(wakeups.len(), 2);
+        assert_eq!(u32::from(wakeups[0].height()), 2000);
+        assert_eq!(wakeups[0].covers(), &[MigrationTransferId(1)]);
+        assert_eq!(u32::from(wakeups[1].height()), 4330);
+        assert_eq!(wakeups[1].covers(), &[MigrationTransferId(2)]);
     }
 
     #[test]

@@ -15,6 +15,8 @@ and this library adheres to Rust's notion of
 - `zcash_pool_migration::scheduling::{WakeupParams, SyncWakeup, WakeupScheduleError, schedule_sync_wakeups}`,
   computing the minimal schedule of sync-and-proving wake-up heights implied by a
   transfer schedule's drawn anchor boundaries and broadcast heights.
+- `zcash_pool_migration::engine::MigrationState::sync_wakeup_schedule`, the above computed over a
+  committed migration's transfers that still need proofs.
 
 ### Changed
 - `zcash_pool_migration::build::{build_prep_tx, build_transfer_pczt}` take an
