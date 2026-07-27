@@ -123,6 +123,7 @@ where
     Ok(())
 }
 
+#[non_exhaustive]
 pub enum PutBlocksError<SE, TE> {
     /// Returned if a provided block sequence has gaps.
     NonSequentialBlocks {

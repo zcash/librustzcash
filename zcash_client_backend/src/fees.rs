@@ -262,6 +262,7 @@ impl TransactionBalance {
 
 /// Errors that can occur in computing suggested change and/or fees.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ChangeError<E, NoteRefT> {
     /// Insufficient inputs were provided to change selection to fund the
     /// required outputs and fees.

@@ -15,6 +15,16 @@ workspace.
 ### Changed
 - `zcash_client_backend::proposal::ProposalError` is now `#[non_exhaustive]`
   and has added variant `OrchardPoolPayment`.
+- Every other public error enum in this crate is now `#[non_exhaustive]` as
+  well, so that future variants can be added without a breaking release. A
+  `match` over any of them must now include a wildcard arm:
+  `data_api::chain::Error`, `data_api::error::{Error, RewindError, PcztError,
+  LockError}`, `data_api::ll::wallet::PutBlocksError`,
+  `data_api::wallet::input_selection::{InputSelectorError,
+  GreedyInputSelectorError}`, `data_api::BirthdayError`, `fees::ChangeError`,
+  `proto::{CompactFormatError, ProposalDecodingError}`, `scanning::ScanError`,
+  `sync::Error`, `sync::decryptor::TryQueueError`, `tor::Error`,
+  `tor::grpc::GrpcError`, and `tor::http::HttpError`.
 
 ### Fixed
 - PCZTs created by `create_pczt_from_proposal` for post-NU6.3 (v6) transactions

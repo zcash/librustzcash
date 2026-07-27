@@ -329,6 +329,7 @@ where
 
 /// Errors that can occurr while using HTTP-over-Tor.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum HttpError {
     /// A non-HTTP URL was encountered.
     NonHttpUrl,

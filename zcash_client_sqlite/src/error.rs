@@ -39,6 +39,7 @@ use {
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SqliteClientError {
     /// Decoding of a stored value from its serialized form has failed.
     CorruptedData(String),
@@ -558,6 +559,12 @@ impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteC
             },
             #[cfg(feature = "transparent-inputs")]
             ll::wallet::PutBlocksError::GapAddresses(e) => SqliteClientError::from(e),
+            // `PutBlocksError` is `#[non_exhaustive]`, so a variant introduced by a future
+            // `zcash_client_backend` release reaches this conversion with no counterpart
+            // here until this crate is updated to map it. Report it rather than panicking.
+            _ => SqliteClientError::CorruptedData(
+                "Unrecognized zcash_client_backend block-insertion error.".to_owned(),
+            ),
         }
     }
 }

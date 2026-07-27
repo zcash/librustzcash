@@ -30,6 +30,7 @@ const MIGRATIONS_TABLE: &str = "schemer_migrations";
 
 /// Errors that can occur when applying migrations to the wallet database.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WalletMigrationError {
     /// A feature required by the wallet database is not supported by the version of
     /// SQLite that the migration is running against.

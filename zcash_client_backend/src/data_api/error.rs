@@ -26,6 +26,7 @@ use ::transparent::address::TransparentAddress;
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, ChangeErrT, NoteRefT>
 {
     /// An error occurred retrieving data from the underlying data source
@@ -118,6 +119,7 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
 }
 
 /// Errors that may occur when rewinding the wallet to a previous chain state.
+#[non_exhaustive]
 pub enum RewindError<AccountId: Hash + Eq, E> {
     /// An error occurred retrieving data from the underlying data source.
     DataSource(E),
@@ -175,6 +177,7 @@ impl<AccountId: Hash + Eq + Debug, E: error::Error + 'static> error::Error
 /// Errors that can occur while working with PCZTs.
 #[cfg(feature = "pczt")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PcztError {
     /// An error occurred while building a PCZT.
     Build,
@@ -558,6 +561,7 @@ impl<E: error::Error + 'static> error::Error for FindAccountForAddressError<E> {
 
 /// Errors that occur when attempting to lock an output.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LockError<S> {
     /// Wrapper for storage errors.
     Storage(S),

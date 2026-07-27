@@ -3162,6 +3162,7 @@ pub struct AccountBirthday {
 }
 
 /// Errors that can occur in the construction of an [`AccountBirthday`] from a [`TreeState`].
+#[non_exhaustive]
 pub enum BirthdayError {
     HeightInvalid(TryFromIntError),
     Decode(io::Error),

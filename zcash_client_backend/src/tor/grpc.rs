@@ -115,6 +115,7 @@ impl Service<Uri> for HttpTcpConnector {
 
 /// Errors that can occurr while using HTTP-over-Tor.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum GrpcError {
     /// A [`tonic`] error.
     Tonic(tonic::transport::Error),

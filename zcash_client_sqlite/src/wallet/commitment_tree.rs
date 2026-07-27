@@ -41,6 +41,7 @@ use super::common::{TableConstants, table_constants};
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Errors in deserializing stored shard data
     Serialization(io::Error),

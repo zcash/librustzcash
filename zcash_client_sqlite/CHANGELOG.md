@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Every public error enum in this crate is now `#[non_exhaustive]`, so that
+  future variants can be added without a breaking release. A `match` over any
+  of them must now include a wildcard arm: `error::SqliteClientError`,
+  `FsBlockDbError`, `pool_migration::error::Error`,
+  `wallet::commitment_tree::Error`, `wallet::init::WalletMigrationError`, and
+  `zewif::ZewifImportError`.
+
 ## [0.22.0-rc.4] - 2026-07-26
 
 ### Changed

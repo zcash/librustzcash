@@ -53,6 +53,7 @@ use zcash_primitives::transaction::TxVersion;
 
 /// The type of errors that may be produced in input selection.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum InputSelectorError<DbErrT, SelectorErrT, ChangeErrT, N> {
     /// An error occurred accessing the underlying data store.
     DataSource(DbErrT),
@@ -343,6 +344,7 @@ pub trait ShieldingSelector {
 
 /// Errors that can occur as a consequence of greedy input selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum GreedyInputSelectorError {
     /// An intermediate value overflowed or underflowed the valid monetary range.
     Balance(BalanceError),

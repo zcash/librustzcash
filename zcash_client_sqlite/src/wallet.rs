@@ -604,6 +604,14 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                  reset_account_birthdays set"
             );
         }
+        // `RewindError` is `#[non_exhaustive]`, so a variant introduced by a future
+        // `zcash_client_backend` release has no specific handling here until this crate is
+        // updated. Fail the account addition rather than proceeding on an unknown outcome.
+        Err(e) => {
+            return Err(SqliteClientError::CorruptedData(format!(
+                "Unrecognized error rewinding to the new account's birthday: {e}"
+            )));
+        }
     }
 
     // The ignored range always starts at Sapling activation
