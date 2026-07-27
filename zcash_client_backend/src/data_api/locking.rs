@@ -139,7 +139,10 @@ impl LockOwner {
     }
 
     /// Generates a fresh random `LockOwner`.
-    pub fn random<R: rand_core::RngCore>(rng: &mut R) -> Self {
+    pub fn random<R>(rng: &mut R) -> Self
+    where
+        R: rand_core::RngCore,
+    {
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         Self(bytes)
@@ -179,7 +182,10 @@ pub enum LockError<S> {
     LockFailure(OutputRef),
 }
 
-impl<S: Display> Display for LockError<S> {
+impl<S> Display for LockError<S>
+where
+    S: Display,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LockError::Storage(e) => write!(f, "Note locking failed: {e}"),
@@ -193,7 +199,10 @@ impl<S: Display> Display for LockError<S> {
     }
 }
 
-impl<S: error::Error + 'static> error::Error for LockError<S> {
+impl<S> error::Error for LockError<S>
+where
+    S: error::Error + 'static,
+{
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             LockError::Storage(e) => Some(e),
