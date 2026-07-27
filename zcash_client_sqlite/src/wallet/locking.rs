@@ -21,6 +21,7 @@ use zcash_client_backend::{
     data_api::wallet::{TargetHeight, input_selection::LockFilter},
     wallet::{LockOwner, OutputRef},
 };
+#[cfg(any(test, feature = "test-dependencies"))]
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight};
 
