@@ -63,7 +63,7 @@ use zcash_primitives::transaction::fees::zip317::{
 use zcash_protocol::consensus::{BlockHeight, Parameters};
 use zcash_protocol::memo::MemoBytes;
 
-use super::{BuildError, finalize_pczt, output_action_index};
+use super::{AccountDerivation, BuildError, finalize_pczt, output_action_index};
 use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
 
 /// The internal-scope diversifier index for the wallet's own preparation outputs.
@@ -108,10 +108,19 @@ pub type PlacedPrepOutput = (u32, PrepOutput, orchard::note::Note);
 /// (including when the spent notes do not balance the outputs plus the fee, and when
 /// `target_height` precedes NU6.3, whose V6 format is what permits deferring the anchor).
 ///
+/// `account_derivation` is the ZIP 32 account the spent notes belong to. When supplied, every
+/// spend the transaction still needs a signature for — the real spends AND the wallet-controlled
+/// zero-value spends the builder pairs with each change output — is stamped with the account's
+/// Orchard key path, so an EXTERNAL Signer can identify them as the account's. Pass `None` only
+/// when the account has no known derivation; a PCZT built without it can be signed in process
+/// (see [`sign_pczt`](super::sign_pczt), which matches by key rather than by path) but not by a
+/// derivation-matching Signer.
+///
 /// The caller supplies `rng` (a cryptographically secure RNG in production, e.g. `OsRng`; tests can
 /// pass a seeded one), keeping this builder pure.
 ///
 /// [ZIP 374]: https://zips.z.cash/zip-0374
+#[allow(clippy::too_many_arguments)]
 pub fn build_prep_tx<P, R>(
     params: &P,
     target_height: u32,
@@ -119,6 +128,7 @@ pub fn build_prep_tx<P, R>(
     orchard_fvk: &FullViewingKey,
     spends: Vec<orchard::note::Note>,
     outputs: &[PrepOutput],
+    account_derivation: Option<&AccountDerivation>,
     rng: R,
 ) -> Result<(pczt::Pczt, Vec<PlacedPrepOutput>), BuildError>
 where
@@ -227,7 +237,7 @@ where
         })
         .collect::<Result<_, BuildError>>()?;
 
-    let finalized = finalize_pczt(build_result.pczt_parts)?;
+    let finalized = finalize_pczt(params, build_result.pczt_parts, account_derivation)?;
     Ok((finalized, placed))
 }
 
@@ -240,7 +250,8 @@ mod tests {
     use zcash_protocol::value::COIN;
 
     use crate::build::test_util::{
-        TARGET_HEIGHT, account, regtest_network, shared_anchor_witnesses, single_note_witness,
+        TARGET_HEIGHT, account, account_derivation, assert_every_spend_is_identifiable,
+        regtest_network, shared_anchor_witnesses, single_note_witness,
     };
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
@@ -304,6 +315,7 @@ mod tests {
                 &fvk,
                 spends,
                 &outputs,
+                None,
                 rng,
             )
             .expect("a balanced preparation transaction builds");
@@ -337,6 +349,7 @@ mod tests {
                 &fvk,
                 vec![note],
                 &outputs,
+                None,
                 rng,
             )
             .expect("a balanced preparation transaction should build");
@@ -351,6 +364,42 @@ mod tests {
             indices.sort_unstable();
             indices.dedup();
             prop_assert_eq!(indices.len(), outputs.len());
+        }
+    }
+
+    /// Given the account's derivation, every spend a preparation transaction still needs a
+    /// signature for carries ZIP 32 derivation metadata, so an external Signer can identify it.
+    ///
+    /// This covers BOTH the real spend and the wallet-controlled zero-value spends that the
+    /// post-NU6.3 Orchard builder pairs with each internal change output; only the protocol
+    /// padding dummies, which the IO Finalizer has already signed, are allowed to lack it. Two
+    /// shapes are checked: a lightly-loaded transaction, which pads out with pre-signed dummies,
+    /// and one that fills the action budget exactly, which has none.
+    #[test]
+    fn stamps_derivation_on_every_spend_needing_a_signature() {
+        let fvk = account(11);
+        let derivation = account_derivation(11);
+        let params = regtest_network(true);
+        let fee = prep_fee();
+
+        for n_out in [2usize, PREP_TX_ACTIONS - 1] {
+            let outputs: Vec<PrepOutput> =
+                (0..n_out).map(|_| PrepOutput::Funding(zat(COIN))).collect();
+            let (note, _path, _anchor) = single_note_witness(&fvk, n_out as u64 * COIN + fee, 11);
+            let (pczt, _) = build_prep_tx(
+                &params,
+                TARGET_HEIGHT,
+                test_expiry(),
+                &fvk,
+                vec![note],
+                &outputs,
+                Some(&derivation),
+                ChaCha8Rng::seed_from_u64(11),
+            )
+            .expect("a balanced preparation transaction builds");
+
+            // One real spend plus one wallet-controlled zero-value spend per change output.
+            assert_eq!(assert_every_spend_is_identifiable(&pczt), 1 + n_out);
         }
     }
 
@@ -369,6 +418,7 @@ mod tests {
             &fvk,
             vec![note],
             &outputs,
+            None,
             ChaCha8Rng::seed_from_u64(7),
         )
         .unwrap();
@@ -391,6 +441,7 @@ mod tests {
             &fvk,
             Vec::new(),
             &one_output,
+            None,
             ChaCha8Rng::seed_from_u64(0),
         );
         assert!(matches!(no_spends, Err(BuildError::Balance(_))));
@@ -403,6 +454,7 @@ mod tests {
             &fvk,
             vec![note],
             &[],
+            None,
             ChaCha8Rng::seed_from_u64(0),
         );
         assert!(matches!(no_outputs, Err(BuildError::Balance(_))));
@@ -419,6 +471,7 @@ mod tests {
             &fvk,
             vec![note2],
             &too_many,
+            None,
             ChaCha8Rng::seed_from_u64(0),
         );
         assert!(matches!(over_budget, Err(BuildError::Balance(_))));
