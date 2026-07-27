@@ -2552,6 +2552,8 @@ mod tests {
     /// covers the type more broadly.
     #[test]
     fn lock_owner_round_trips() {
+        use zcash_pool_migration::engine::MigrationLockOwner;
+
         let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
@@ -2571,7 +2573,7 @@ mod tests {
         let spend_nullifiers: Vec<[u8; 32]> = Vec::new();
         let broadcast_failure_at: Option<BlockHeight> = None;
 
-        let owner_bytes = [7u8; 32];
+        let owner = MigrationLockOwner::from_bytes([7u8; 32]);
         let locked = MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Preparation { layer: 0, index: 0 },
@@ -2582,7 +2584,7 @@ mod tests {
             anchor_boundary,
             TxId::from_bytes([0; 32]),
             MigrationTxState::Signed,
-            Some(owner_bytes),
+            Some(owner),
             unsatisfiable,
             spend_nullifiers.clone(),
             broadcast_failure_at,
@@ -2624,7 +2626,7 @@ mod tests {
         );
         assert_eq!(
             loaded.transactions()[0].lock_owner(),
-            Some(owner_bytes),
+            Some(owner),
             "a `Some` lock_owner must survive exactly"
         );
         assert_eq!(
@@ -2639,6 +2641,8 @@ mod tests {
     /// a `None` lock_owner contributes nothing, and repeated owners collapse to one entry.
     #[test]
     fn migration_lock_owners_collects_distinct_non_none_owners() {
+        use zcash_pool_migration::engine::MigrationLockOwner;
+
         let mut store = fresh_store();
         assert_eq!(
             store.migration_lock_owners().expect("read succeeds"),
@@ -2646,8 +2650,8 @@ mod tests {
             "an account with no migration must report no lock owners"
         );
 
-        let owner_a_bytes = [0xA1u8; 32];
-        let owner_b_bytes = [0xB2u8; 32];
+        let owner_a = MigrationLockOwner::from_bytes([0xA1u8; 32]);
+        let owner_b = MigrationLockOwner::from_bytes([0xB2u8; 32]);
 
         let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
@@ -2659,7 +2663,7 @@ mod tests {
         )
         .expect("an empty stored plan reconstructs");
 
-        let tx = |id: u32, crossing: usize, lock_owner: Option<[u8; 32]>| {
+        let tx = |id: u32, crossing: usize, lock_owner: Option<MigrationLockOwner>| {
             MigrationTransaction::from_parts(
                 MigrationTransferId::new(id),
                 MigrationTxKind::Transfer { crossing },
@@ -2682,11 +2686,11 @@ mod tests {
             denominations,
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             vec![
-                tx(0, 0, Some(owner_a_bytes)),
-                tx(1, 1, Some(owner_b_bytes)),
+                tx(0, 0, Some(owner_a)),
+                tx(1, 1, Some(owner_b)),
                 tx(2, 2, None),
                 // A second transaction locked by A, to prove duplicates collapse.
-                tx(3, 3, Some(owner_a_bytes)),
+                tx(3, 3, Some(owner_a)),
             ],
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
@@ -2697,7 +2701,10 @@ mod tests {
         let owners = store.migration_lock_owners().expect("read succeeds");
         assert_eq!(
             owners,
-            BTreeSet::from([LockOwner::new(owner_a_bytes), LockOwner::new(owner_b_bytes)]),
+            BTreeSet::from([
+                LockOwner::new(*owner_a.as_bytes()),
+                LockOwner::new(*owner_b.as_bytes()),
+            ]),
             "must contain exactly the distinct non-None lock owners, deduped"
         );
     }

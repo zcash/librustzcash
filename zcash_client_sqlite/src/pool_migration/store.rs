@@ -39,8 +39,8 @@ use rusqlite::{Connection, OptionalExtension, named_params, params};
 use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState,
+    MigrationLockOwner, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+    MigrationTxKind, MigrationTxState,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_pool_migration::satisfiability::{
@@ -1117,7 +1117,7 @@ fn read_transactions(
             r.anchor_boundary.map(BlockHeight::from_u32),
             txid,
             state,
-            r.lock_owner,
+            r.lock_owner.map(MigrationLockOwner::from_bytes),
             unsatisfiable,
             spend_nullifiers,
             r.broadcast_failure_at.map(BlockHeight::from_u32),
@@ -1809,7 +1809,7 @@ fn replace_migration_row(
                 ":state": tx_state.as_ref(),
                 ":txid": hex::encode(mtx.txid().as_ref()),
                 ":mined_height": tx_state.mined_height().map(u32::from),
-                ":lock_owner": mtx.lock_owner(),
+                ":lock_owner": mtx.lock_owner().map(|o| *o.as_bytes()),
                 ":unsatisfiable_at": unsatisfiable_at.map(u32::from),
                 ":unsatisfiable_kind": unsatisfiable_kind.as_ref().map(|k| k.as_ref()),
                 ":broadcast_failure_at": mtx.broadcast_failure_at().map(u32::from),
