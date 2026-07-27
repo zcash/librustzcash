@@ -73,7 +73,7 @@ where
     CaT: BlockCache,
     CaT::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite + WalletCommitmentTrees,
-    DbT::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
     <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
     <DbT as WalletCommitmentTrees>::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -103,8 +103,8 @@ where
     CaT: BlockCache,
     CaT::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite,
-    DbT::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
-    DbT::Error: std::error::Error + Send + Sync + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
+    <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
 {
     // 3) Download chain tip metadata from lightwalletd
     // 4) Notify the wallet of the updated chain tip.
@@ -309,7 +309,7 @@ where
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
     DbT: WalletWrite,
-    DbT::Error: std::error::Error + Send + Sync + 'static,
+    <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
 {
     let tip_height: BlockHeight = client
         .get_latest_block(service::ChainSpec::default())
@@ -407,8 +407,8 @@ where
     CaT: BlockCache,
     CaT::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite,
-    DbT::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
-    DbT::Error: std::error::Error + Send + Sync + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
+    <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
 {
     info!("Scanning {}", scan_range);
     let scan_result = scan_cached_blocks(
@@ -496,7 +496,7 @@ async fn refresh_utxos<P, ChT, DbT, CaErr, TrErr>(
     params: &P,
     client: &mut CompactTxStreamerClient<ChT>,
     db_data: &mut DbT,
-    account_id: DbT::AccountId,
+    account_id: <DbT as WalletRead>::AccountId,
     start_height: BlockHeight,
 ) -> Result<(), Error<CaErr, <DbT as WalletRead>::Error, TrErr>>
 where
@@ -506,7 +506,7 @@ where
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
     DbT: WalletWrite,
-    DbT::Error: std::error::Error + Send + Sync + 'static,
+    <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
 {
     let request = service::GetAddressUtxosArg {
         addresses: db_data

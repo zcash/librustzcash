@@ -109,64 +109,7 @@ impl From<NoteId> for OutputRef {
     }
 }
 
-/// An opaque token identifying the holder of an output lock.
-///
-/// A caller that locks outputs (directly via [`WalletWrite::lock_outputs`], or through a
-/// proposal-creation function's lock request) supplies an owner token and must retain it: the
-/// token is what authorizes releasing the locks ([`WalletWrite::unlock_output`],
-/// [`unlock_proposal_inputs`]) and what makes re-locking idempotent (an owner may re-acquire or
-/// extend its own active lock, for example when retrying a flow after a crash, while a different
-/// owner's lock attempt fails until the lock expires).
-///
-/// The token is not a cryptographic secret: everything that can reach the wallet database can
-/// read it. It exists to prevent *accidental* cross-flow interference between concurrent
-/// in-process operations, not to protect against an adversary with database access.
-///
-/// [`WalletWrite::lock_outputs`]: crate::data_api::WalletWrite::lock_outputs
-/// [`WalletWrite::unlock_output`]: crate::data_api::WalletWrite::unlock_output
-/// [`unlock_proposal_inputs`]: crate::data_api::wallet::unlock_proposal_inputs
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LockOwner([u8; 32]);
-
-impl LockOwner {
-    /// Constructs a `LockOwner` from the given bytes.
-    ///
-    /// Callers that persist their own operation state may derive a stable token from it; all
-    /// others should prefer [`LockOwner::random`].
-    pub const fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    /// Generates a fresh random `LockOwner`.
-    pub fn random<R: rand_core::RngCore>(rng: &mut R) -> Self {
-        let mut bytes = [0u8; 32];
-        rng.fill_bytes(&mut bytes);
-        Self(bytes)
-    }
-
-    /// Returns the byte representation of this token.
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-/// A transaction id may serve as a lock owner.
-///
-/// This is the right owner choice for flows that hold a durable transaction identity while
-/// their locks are alive; most notably a persisted PCZT, whose v5 txid is fixed once its
-/// effecting data is final. Deriving the owner from the txid lets such a flow re-derive its
-/// token after a restart and release (or re-acquire) exactly its own locks.
-///
-/// It is NOT a suitable owner for proposal-time locking in general: at proposal creation no
-/// transaction exists yet, a multi-step proposal builds several transactions, and a
-/// transaction rebuilt after a crash generally has a different txid, which would defeat the
-/// idempotent same-owner re-lock. Flows without a durable transaction identity should use
-/// [`LockOwner::random`] and retain the token.
-impl From<TxId> for LockOwner {
-    fn from(txid: TxId) -> Self {
-        Self(txid.into())
-    }
-}
+pub use crate::data_api::locking::LockOwner;
 
 /// A type that represents the recipient of a transaction output.
 ///
@@ -1317,15 +1260,6 @@ mod output_ref_tests {
             let other_txid = OutputRef::new(TxId::from_bytes(txid), a.pool(), a.output_index());
             prop_assert_ne!(a, other_txid);
             prop_assert_ne!(a.cmp(&other_txid), std::cmp::Ordering::Equal);
-        }
-
-        /// A txid-derived [`super::LockOwner`] preserves the txid bytes, so two owners
-        /// derived from distinct transactions are distinct (a persisted PCZT re-derives
-        /// exactly its own token after a restart).
-        #[test]
-        fn lock_owner_from_txid_preserves_bytes(txid in any::<[u8; 32]>()) {
-            let owner = super::LockOwner::from(TxId::from_bytes(txid));
-            prop_assert_eq!(*owner.as_bytes(), txid);
         }
 
         /// Two independently drawn references are equal exactly when all three components
