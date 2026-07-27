@@ -1211,12 +1211,12 @@ pub(crate) mod tests {
                 Account, WalletRead,
                 testing::{
                     AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
-                    pool::ShieldedPoolTester,
+                    pool::ShieldedPoolTester, single_output_change_strategy,
                 },
                 wallet::ConfirmationsPolicy,
                 wallet::input_selection::GreedyInputSelector,
             },
-            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            fees::StandardFeeRule,
             wallet::OvkPolicy,
         };
         use zcash_keys::address::Address;
@@ -1274,12 +1274,7 @@ pub(crate) mod tests {
         .unwrap();
 
         let fee_rule = StandardFeeRule::Zip317;
-        let change_strategy = standard::SingleOutputChangeStrategy::new(
-            fee_rule,
-            None,
-            ShieldedPool::Orchard,
-            DustOutputPolicy::default(),
-        );
+        let change_strategy = single_output_change_strategy(fee_rule, None, ShieldedPool::Orchard);
         let input_selector = GreedyInputSelector::new();
 
         let proposal = st
@@ -1383,13 +1378,13 @@ pub(crate) mod tests {
                 Account, WalletRead,
                 testing::{
                     AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
-                    pool::ShieldedPoolTester,
+                    pool::ShieldedPoolTester, single_output_change_strategy,
                 },
                 wallet::ConfirmationsPolicy,
                 wallet::input_selection::GreedyInputSelector,
             },
             decrypt_transaction,
-            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            fees::StandardFeeRule,
             wallet::OvkPolicy,
         };
         use zcash_keys::address::Address;
@@ -1441,12 +1436,8 @@ pub(crate) mod tests {
         )])
         .unwrap();
 
-        let change_strategy = standard::SingleOutputChangeStrategy::new(
-            StandardFeeRule::Zip317,
-            None,
-            ShieldedPool::Orchard,
-            DustOutputPolicy::default(),
-        );
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
         let input_selector = GreedyInputSelector::new();
         let proposal = st
             .propose_transfer(

@@ -7,6 +7,7 @@ use std::{
 };
 
 use assert_matches::assert_matches;
+use nonempty::NonEmpty;
 use zcash_keys::address::Address;
 use zcash_primitives::{block::BlockHash, transaction::fees::zip317};
 use zcash_protocol::{
@@ -443,6 +444,31 @@ where
         .unwrap()[0]
     }
 
+    /// Creates the transactions for `proposal` with [`OvkPolicy::Sender`],
+    /// asserts that exactly `expected` transactions were produced, and returns
+    /// their ids.
+    ///
+    /// This collapses the common
+    /// [`TestState::create_proposed_transactions`]-then-assert-count
+    /// boilerplate. It fixes the values that are constant across nearly every
+    /// execution site: the test account's spending key and
+    /// [`OvkPolicy::Sender`]. On failure it reports the full result (including
+    /// any error), matching the diagnostics of the hand-written form.
+    pub fn create_proposed_expecting(
+        &mut self,
+        proposal: &Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef>,
+        expected: usize,
+    ) -> NonEmpty<TxId> {
+        let account = self.get_account();
+        let result = self.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            proposal,
+        );
+        assert_matches!(&result, Ok(txids) if txids.len() == expected);
+        result.unwrap()
+    }
+
     /// Asserts that proposing a transfer of `amount` zatoshis to `to` fails with
     /// [`Error::InsufficientFunds`], reporting `available` available and exactly
     /// `required` required.
@@ -455,12 +481,31 @@ where
         available: Zatoshis,
         required: Zatoshis,
     ) {
+        self.expect_insufficient_funds_with(
+            to,
+            amount,
+            ConfirmationsPolicy::MIN,
+            available,
+            required,
+        )
+    }
+
+    /// Like [`Self::expect_insufficient_funds`], but with an explicit
+    /// `confirmations_policy` instead of the fixed [`ConfirmationsPolicy::MIN`].
+    pub fn expect_insufficient_funds_with(
+        &mut self,
+        to: &Address,
+        amount: Zatoshis,
+        confirmations_policy: ConfirmationsPolicy,
+        available: Zatoshis,
+        required: Zatoshis,
+    ) {
         let account_id = self.get_account().id();
         assert_matches!(
             self.propose_standard_transfer::<Infallible>(
                 account_id,
                 StandardFeeRule::Zip317,
-                ConfirmationsPolicy::MIN,
+                confirmations_policy,
                 to,
                 amount,
                 None,
