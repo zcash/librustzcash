@@ -265,8 +265,10 @@ to aid with PR stacking.
 - We have a strong preference for a clean commit history. We will actively
   rebase PRs to squash changes (such as bugfixes or responses to review
   comments) into the relevant earlier commits on the PR branch. We recommend
-  the use of the `git revise` tool to help maintain such a clean history within
-  the context of a single PR.
+  the use of the [git revise](https://github.com/mystor/git-revise) tool, which
+  is **extremely** useful for applying a review comment to the commit it
+  concerns, to help maintain such a clean history within the context of a
+  single PR.
 - When a commit alters the public API, fixes a bug, or changes the underlying
   semantics of existing code, the commit MUST also modify the affected
   crates' `CHANGELOG.md` files to clearly document the change. See
@@ -309,8 +311,11 @@ To get around this GitHub UI limitation, the general process we follow is:
   the PR, they avoid rebasing or force-pushing.
 - The PR author adjusts the branch as necessary to address any comments. They
   may always add new commits. If `S-please-do-not-rebase` is not present then
-  they can also force-push or rebase previous commits. In any case they push
-  the result to the branch.
+  they can also force-push or rebase previous commits; in that case, applying
+  each change to the commit that introduced the code under discussion is
+  preferred over accumulating separate "addressed review comments" commits, as
+  described under [Branch History](#branch-history). In any case they push the
+  result to the branch.
 - In cases where it is likely to aid reviewers, the PR author also posts a
   comment to the PR with a diff link between the previous branch tip and the
   new branch tip. When submitting a review for a PR, reviewers note the commit
@@ -360,26 +365,16 @@ the old PR.
   the commit message to include everyone who is responsible for the contents of
   the commit; this is important for determining who has the most complete
   understanding of the changes.
-
-#### Pull Request Review
-
-- It is acceptable and desirable to use a rebase-based workflow within the
-  context of a single pull request in order to produce a clean commit history.
-  Two important points:
-  - When changes are requested in pull request review, it is desirable to apply
-    those changes to the affected commit in order to avoid excessive noise in the
-    commit history. The [git revise](https://github.com/mystor/git-revise) plugin
-    is **extremely** useful for this purpose.
-  - If a maintainer or other user uses the GitHub `suggestion` feature to
-    suggest explicit code changes, it's usually best to accept those changes
-    via the "Apply Suggested Changes" GitHub workflow, and then to amend the
-    resulting commit to fix any related compilation or test errors or
-    formatting/lint-related changes; this ensures that correct co-author
-    metadata is included in the commit. If the changes are substantial enough
-    that it makes more sense to rewrite the original commit, make sure to
-    include co-author metadata in the commit message when doing so (squashing
-    the GitHub-generate suggestion acceptance commit(s) together with the
-    original commit in an interactive rebase can make this easy).
+- If a maintainer or other user uses the GitHub `suggestion` feature to suggest
+  explicit code changes, it's usually best to accept those changes via the
+  "Apply Suggested Changes" GitHub workflow, and then to amend the resulting
+  commit to fix any related compilation or test errors or formatting/lint-related
+  changes; this ensures that correct co-author metadata is included in the
+  commit. If the changes are substantial enough that it makes more sense to
+  rewrite the original commit, make sure to include co-author metadata in the
+  commit message when doing so (squashing the GitHub-generated suggestion
+  acceptance commit(s) together with the original commit in an interactive
+  rebase can make this easy).
 
 ### Changelog Entries
 
