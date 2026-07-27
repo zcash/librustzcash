@@ -37,6 +37,12 @@
 //!    validity as a pure function of the current height, so the expiry height itself carries no
 //!    per-wallet information.
 //!
+//! Beyond the ZIP 318 draws, [`schedule_sync_wakeups`] derives from a committed transfer schedule
+//! the MINIMAL set of sync/proving wake-ups a background-constrained wallet needs: every transfer
+//! is proved after its drawn anchor boundary settles and strictly before its broadcast height, and
+//! each wake-up lands a settle margin past a bucketed anchor height plus an anti-thundering-herd
+//! jitter ([`WakeupParams`]).
+//!
 //! # Cohorts
 //!
 //! Transfers (across all wallets) that prove against the same boundary anchor form a COHORT: to an
@@ -63,6 +69,7 @@
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
 use alloc::vec::Vec;
+use core::fmt;
 use core::num::NonZeroU32;
 
 use rand_core::{CryptoRng, RngCore};
@@ -349,6 +356,115 @@ impl Default for SchedulingParams {
     }
 }
 
+/// Parameters shaping the sync/proving wake-up schedule ([`schedule_sync_wakeups`]): how many
+/// blocks past an anchor boundary a wake-up waits for that boundary to settle, and how much random
+/// jitter spreads independent wallets' wake-ups apart as a thundering-herd defense. These values
+/// are provisional; they are not specified by ZIP 318.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WakeupParams {
+    settle_margin: u32,
+    jitter_cap: u32,
+}
+
+impl WakeupParams {
+    /// The provisional defaults: a 10-block settle margin (about 12.5 minutes at the target block
+    /// spacing, so the synced boundary is one a reorg can no longer plausibly displace) and a
+    /// 24-block jitter cap (about 30 minutes).
+    ///
+    /// The jitter cap exists as a THUNDERING-HERD defense, and for nothing else: anchor
+    /// boundaries sit on a GLOBAL grid shared by every migrating wallet, so un-jittered wake-ups
+    /// would all land exactly `settle_margin` blocks after the same grid heights, hitting the
+    /// light wallet servers in synchronized bursts. A uniform draw over `[0, jitter_cap]` divides
+    /// that per-block peak load by roughly the cap, while staying small against the 133-block
+    /// worst-case slack a transfer's proving window guarantees, so most of the window remains as
+    /// headroom for wake-ups the operating system delivers late.
+    pub const DEFAULT: Self = Self {
+        settle_margin: 10,
+        jitter_cap: 24,
+    };
+
+    /// Constructs wake-up parameters from their parts, for a test network that scales the schedule
+    /// down (a production migration uses [`Self::DEFAULT`]).
+    pub const fn new(settle_margin: u32, jitter_cap: u32) -> Self {
+        Self {
+            settle_margin,
+            jitter_cap,
+        }
+    }
+
+    /// The number of blocks past an anchor boundary at which a wake-up may be scheduled, giving
+    /// the boundary time to settle. A zero margin is treated as one block when scheduling: a
+    /// wake-up AT the boundary height cannot prove against it (the boundary must be strictly below
+    /// the tip for its checkpoint to exist).
+    pub fn settle_margin(&self) -> u32 {
+        self.settle_margin
+    }
+
+    /// The inclusive upper bound on the uniform random jitter added to each wake-up height — a
+    /// thundering-herd defense that spreads wallets' otherwise-synchronized wake-ups across the
+    /// blocks after each shared grid point (see [`Self::DEFAULT`]). The jitter actually drawn is
+    /// also bounded by the group's slack to its earliest broadcast deadline, so it never pushes a
+    /// wake-up past a deadline.
+    pub fn jitter_cap(&self) -> u32 {
+        self.jitter_cap
+    }
+}
+
+impl Default for WakeupParams {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// One sync/proving wake-up of the schedule produced by [`schedule_sync_wakeups`]: the block
+/// height at which to wake, and the transfers this wake-up is RESPONSIBLE for proving. At runtime
+/// a wallet proves every transfer whose anchor boundary has settled at the time of the wake-up, so
+/// a transfer may well be proved earlier than the wake-up that covers it; `covers` is the
+/// assignment that guarantees every transfer is proved before its broadcast, not a restriction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncWakeup<T> {
+    height: BlockHeight,
+    covers: Vec<T>,
+}
+
+impl<T> SyncWakeup<T> {
+    /// The block height at which the wallet should wake to sync and prove.
+    pub fn height(&self) -> BlockHeight {
+        self.height
+    }
+
+    /// The transfers this wake-up is responsible for proving, in a deterministic order (any
+    /// overdue transfers first, then in broadcast-deadline order).
+    pub fn covers(&self) -> &[T] {
+        &self.covers
+    }
+}
+
+/// The error returned when a transfer passed to [`schedule_sync_wakeups`] admits no valid wake-up
+/// height.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WakeupScheduleError<T> {
+    /// The transfer's broadcast height is not at least two blocks above its anchor boundary, so no
+    /// height exists at which the boundary has settled (is strictly below the tip) strictly before
+    /// the broadcast. Unreachable for a schedule produced by this crate — a drawn anchor sits at
+    /// least one full bucket interval below its broadcast height — so it indicates an inconsistent
+    /// hand-assembled schedule, or a degenerate custom bucket interval of one block.
+    InfeasibleTransfer(T),
+}
+
+impl<T: fmt::Debug> fmt::Display for WakeupScheduleError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WakeupScheduleError::InfeasibleTransfer(id) => write!(
+                f,
+                "transfer {id:?} has no height at which its anchor has settled strictly before its broadcast"
+            ),
+        }
+    }
+}
+
+impl<T: fmt::Debug> core::error::Error for WakeupScheduleError<T> {}
+
 /// Maximum anchor AGE, in boundaries, that the recency-weighted draw will accept. Age `a` counts
 /// boundaries strictly before the most recent boundary observed at proving time; a draw exceeding
 /// this cap (a very old anchor) is discarded and redrawn. Bounds how stale a proof's anchor can be
@@ -530,6 +646,145 @@ pub fn expiry_height(current_height: BlockHeight) -> BlockHeight {
     let h = u32::from(current_height);
     // `BlockHeight`'s delta addition saturates at `u32::MAX`.
     BlockHeight::from_u32(h - (h % EXPIRY_MODULUS)) + EXPIRY_WINDOW
+}
+
+/// Compute the MINIMAL schedule of sync/proving wake-ups covering `transfers`, each given as
+/// `(id, anchor_boundary, broadcast_height)` — for a committed migration, a transfer's drawn
+/// [`MigrationTransaction::anchor_boundary`] and [`Schedule::broadcast_height`]. Returns one
+/// [`SyncWakeup`] per wake-up, in strictly increasing height order; at each, the wallet syncs to
+/// the wake-up height and proves every transfer whose anchor boundary has settled.
+///
+/// Each transfer must be proved after its anchor boundary settles (strictly below the tip, at
+/// least [`WakeupParams::settle_margin`] blocks past it) and strictly before its broadcast height
+/// (sync and broadcast never share a wake window), giving it a proving WINDOW of heights. The
+/// fewest wake-ups piercing every window is the classic minimum piercing-set problem, solved
+/// optimally by a greedy pass over the windows in deadline order; each wake-up lands at the
+/// latest window-opening height of the group it covers — under real parameters, a bucketed anchor
+/// height plus the settle margin — plus a uniform random jitter bounded by both
+/// [`WakeupParams::jitter_cap`] and the group's slack. The jitter exists as a THUNDERING-HERD
+/// defense: anchor boundaries sit on a global grid shared by every migrating wallet, so
+/// un-jittered wake-ups would all land on the same heights and stampede the light wallet servers
+/// (as well as mark the wallet as migrating). It is drawn from a [`CryptoRng`] because wake-up
+/// times are observables.
+///
+/// No wake-up is scheduled below `not_before` (the caller's current target height, or the commit
+/// height for a fresh schedule). A transfer whose deadline has already passed but which still
+/// needs a proof joins an immediate wake-up at exactly `not_before` instead (mirroring
+/// [`MigrationState::next_step`], which offers `Prove` for it now); this is not an error. That
+/// immediate wake-up also absorbs any transfer whose proving window CONTAINS `not_before` (i.e.
+/// whose clamped ready height is exactly `not_before`): its mandatory piercing point covers them
+/// for free, which is what keeps the schedule minimal whenever overdue transfers are present.
+///
+/// Returns [`WakeupScheduleError::InfeasibleTransfer`] for a transfer whose broadcast height is
+/// not at least two blocks above its anchor boundary (no settle-then-prove height exists), which
+/// no schedule produced by this crate contains.
+///
+/// [`MigrationTransaction::anchor_boundary`]: crate::engine::MigrationTransaction::anchor_boundary
+/// [`MigrationState::next_step`]: crate::engine::MigrationState::next_step
+pub fn schedule_sync_wakeups<T: Copy, R: RngCore + CryptoRng>(
+    params: &WakeupParams,
+    not_before: BlockHeight,
+    transfers: &[(T, BlockHeight, BlockHeight)],
+    rng: &mut R,
+) -> Result<Vec<SyncWakeup<T>>, WakeupScheduleError<T>> {
+    let nb = u32::from(not_before);
+    // A zero margin would place a wake-up AT the boundary height, where the boundary is not yet
+    // strictly below the tip and cannot be proved against; clamp up to one block.
+    let margin = params.settle_margin().max(1);
+
+    // Assemble each transfer's proving window `[ready, deadline]`, splitting off the overdue ones
+    // (deadline already below `not_before`).
+    let mut overdue: Vec<T> = Vec::new();
+    let mut windows: Vec<(u32, u32, T)> = Vec::new();
+    for &(id, anchor, broadcast) in transfers {
+        let a = u32::from(anchor);
+        let b = u32::from(broadcast);
+        if b <= a.saturating_add(1) {
+            return Err(WakeupScheduleError::InfeasibleTransfer(id));
+        }
+        let deadline = b - 1;
+        // The min-clamp keeps a window whose gap is below the margin feasible (tiny test-network
+        // intervals); the max-clamp keeps the wake-up out of the past.
+        let ready = a.saturating_add(margin).min(deadline).max(nb);
+        if deadline < nb {
+            overdue.push(id);
+        } else {
+            windows.push((deadline, ready, id));
+        }
+    }
+    windows.sort_by_key(|&(deadline, ready, _)| (deadline, ready));
+
+    // When an overdue transfer forces a mandatory wake-up at `not_before`, that wake-up's
+    // piercing point is fixed in advance; every window whose clamped ready height is exactly
+    // `not_before` (its proving window CONTAINS `not_before`) is covered by it for free. Fold
+    // those ids into the immediate wake-up instead of letting them enter the greedy below, where
+    // they could open (or worse, drag later windows into) a suboptimal group. Without an overdue
+    // transfer there is no mandatory point, and the classic greedy over all windows is already
+    // optimal on its own.
+    if !overdue.is_empty() {
+        let mut surviving = Vec::with_capacity(windows.len());
+        for (deadline, ready, id) in windows {
+            if ready == nb {
+                overdue.push(id);
+            } else {
+                surviving.push((deadline, ready, id));
+            }
+        }
+        windows = surviving;
+    }
+
+    // Greedy grouping in deadline order: a window joins the open group iff it still contains the
+    // group's first (smallest) deadline; the group's wake-up point will lie in
+    // `[max_ready, first_deadline]`, which every member's window contains. A window that fails the
+    // open group fails every earlier (smaller-deadline) group too, so a new group is opened
+    // exactly when the classic optimal greedy would place a new piercing point.
+    struct Group<T> {
+        first_deadline: u32,
+        max_ready: u32,
+        covers: Vec<T>,
+    }
+    let mut groups: Vec<Group<T>> = Vec::new();
+    for (deadline, ready, id) in windows {
+        match groups.last_mut() {
+            Some(g) if ready <= g.first_deadline => {
+                g.max_ready = g.max_ready.max(ready);
+                g.covers.push(id);
+            }
+            _ => groups.push(Group {
+                first_deadline: deadline,
+                max_ready: ready,
+                covers: vec![id],
+            }),
+        }
+    }
+
+    // Assemble: an immediate wake-up covering the overdue transfers plus every window that
+    // contains `not_before` (folded in above), then one jittered wake-up per surviving group.
+    // Every surviving group's ready height is strictly above `not_before` (windows landing on it
+    // were folded into the immediate wake-up), and group heights were already strictly increasing
+    // among themselves, so no merge between the immediate wake-up and the first group is needed.
+    let mut wakeups: Vec<SyncWakeup<T>> = Vec::with_capacity(groups.len() + 1);
+    if !overdue.is_empty() {
+        wakeups.push(SyncWakeup {
+            height: BlockHeight::from_u32(nb),
+            covers: overdue,
+        });
+    }
+    for g in groups {
+        let slack = g.first_deadline - g.max_ready;
+        let bound = params.jitter_cap().min(slack);
+        let jitter = if bound == 0 {
+            0
+        } else {
+            gen_index(rng, bound as usize + 1) as u32
+        };
+        let height = g.max_ready + jitter;
+        wakeups.push(SyncWakeup {
+            height: BlockHeight::from_u32(height),
+            covers: g.covers,
+        });
+    }
+    Ok(wakeups)
 }
 
 /// Assemble a [`Schedule`] for each part: draw the cumulative broadcast heights from `commit_height`
@@ -960,6 +1215,372 @@ mod tests {
         check_delay_golden(1, &exp_seed1);
         check_delay_golden(42, &exp_seed42);
         check_delay_golden(7, &exp_seed7);
+    }
+
+    // --- schedule_sync_wakeups ----------------------------------------------------------------
+
+    /// The provisional default wake-up parameters: the task-specified 10-block settle margin and a
+    /// 24-block (about 30 minute) thundering-herd jitter cap.
+    #[test]
+    fn wakeup_params_default() {
+        assert_eq!(WakeupParams::DEFAULT.settle_margin(), 10);
+        assert_eq!(WakeupParams::DEFAULT.jitter_cap(), 24);
+        assert_eq!(WakeupParams::default(), WakeupParams::DEFAULT);
+        let custom = WakeupParams::new(3, 5);
+        assert_eq!(custom.settle_margin(), 3);
+        assert_eq!(custom.jitter_cap(), 5);
+    }
+
+    /// The infeasibility error names the offending transfer and renders a diagnostic.
+    #[test]
+    fn wakeup_error_display() {
+        let e = WakeupScheduleError::InfeasibleTransfer(7u32);
+        assert_eq!(
+            alloc::format!("{e}"),
+            "transfer 7 has no height at which its anchor has settled strictly before its broadcast"
+        );
+    }
+
+    /// No pending transfers need no wake-ups.
+    #[test]
+    fn no_transfers_no_wakeups() {
+        let got = schedule_sync_wakeups::<u32, _>(&WakeupParams::DEFAULT, bh(0), &[], &mut rng(1))
+            .expect("an empty schedule is feasible");
+        assert!(got.is_empty());
+    }
+
+    /// A single transfer gets one wake-up inside its proving window: at or after its anchor plus
+    /// the settle margin, within the jitter cap of that base, and strictly before its broadcast.
+    #[test]
+    fn single_transfer_single_wakeup() {
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::DEFAULT,
+            bh(0),
+            &[(7u32, bh(1440), bh(1600))],
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(wakeups.len(), 1);
+        let w = u32::from(wakeups[0].height());
+        assert!(
+            (1450..=1450 + WakeupParams::DEFAULT.jitter_cap()).contains(&w),
+            "height {w} outside jitter range"
+        );
+        assert!(w < 1600, "height {w} not before the broadcast");
+        assert_eq!(wakeups[0].covers(), &[7]);
+    }
+
+    /// A broadcast not at least two blocks above its anchor admits no settle-then-prove height.
+    #[test]
+    fn adjacent_broadcast_is_infeasible() {
+        for (id, a, b) in [(1u32, 100, 101), (2, 100, 100), (3, 100, 99)] {
+            assert_eq!(
+                schedule_sync_wakeups(
+                    &WakeupParams::DEFAULT,
+                    bh(0),
+                    &[(id, bh(a), bh(b))],
+                    &mut rng(1)
+                ),
+                Err(WakeupScheduleError::InfeasibleTransfer(id)),
+            );
+        }
+    }
+
+    /// Transfers whose proving windows overlap share one wake-up at the latest ready height among
+    /// them (a bucketed anchor + margin), which is what makes the schedule minimal.
+    #[test]
+    fn overlapping_windows_share_a_wakeup() {
+        // Jitter cap 0 makes the chosen heights exact. Windows [154, 999] and [298, 1099] overlap.
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::new(10, 0),
+            bh(0),
+            &[(0u32, bh(144), bh(1000)), (1, bh(288), bh(1100))],
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(wakeups.len(), 1);
+        assert_eq!(u32::from(wakeups[0].height()), 298);
+        assert_eq!(wakeups[0].covers(), &[0, 1]);
+    }
+
+    /// A transfer whose window opens after an earlier group's deadline gets its own wake-up.
+    #[test]
+    fn disjoint_windows_get_separate_wakeups() {
+        // Window [154, 299] closes before window [1450, 2000] opens.
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::new(10, 0),
+            bh(0),
+            &[(0u32, bh(144), bh(300)), (1, bh(1440), bh(2001))],
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(wakeups.len(), 2);
+        assert_eq!(u32::from(wakeups[0].height()), 154);
+        assert_eq!(wakeups[0].covers(), &[0]);
+        assert_eq!(u32::from(wakeups[1].height()), 1450);
+        assert_eq!(wakeups[1].covers(), &[1]);
+    }
+
+    /// A transfer whose broadcast deadline already passed while it is unproved joins an immediate
+    /// wake-up at `not_before`, which also absorbs any transfer whose proving window contains
+    /// `not_before`.
+    #[test]
+    fn overdue_transfers_wake_immediately() {
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::new(10, 0),
+            bh(5000),
+            &[
+                (0u32, bh(144), bh(300)), // deadline 299 < 5000: overdue
+                (1, bh(4320), bh(6000)), // window [4330, 5999] contains 5000: absorbed into the immediate wake-up
+                (2, bh(7200), bh(8000)), // ready 7210: its own group
+            ],
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(wakeups.len(), 2);
+        assert_eq!(u32::from(wakeups[0].height()), 5000);
+        assert_eq!(wakeups[0].covers(), &[0, 1]);
+        assert_eq!(u32::from(wakeups[1].height()), 7210);
+        assert_eq!(wakeups[1].covers(), &[2]);
+    }
+
+    /// When an overdue transfer forces an immediate wake-up, a transfer whose proving window
+    /// contains `not_before` is absorbed by that mandatory wake-up even under nonzero jitter,
+    /// rather than paying for a jittered wake-up of its own.
+    #[test]
+    fn overdue_wakeup_absorbs_contained_windows_despite_jitter() {
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::DEFAULT, // jitter cap 24: a separate group would almost surely jitter off 5000
+            bh(5000),
+            &[
+                (0u32, bh(144), bh(300)), // deadline 299 < 5000: overdue
+                (1, bh(4320), bh(6000)),  // window [4330, 5999] contains 5000: absorbed
+            ],
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(wakeups.len(), 1);
+        assert_eq!(u32::from(wakeups[0].height()), 5000);
+        assert_eq!(wakeups[0].covers(), &[0, 1]);
+    }
+
+    /// Folding `not_before`-containing windows into the mandatory wake-up keeps the schedule
+    /// minimal even when such a window would otherwise drag later windows into a worse grouping:
+    /// here the greedy over all three windows would produce three wake-ups, but the mandatory
+    /// point covers the first window for free, letting the remaining two share one.
+    #[test]
+    fn overdue_wakeup_folding_preserves_minimality() {
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::new(10, 0),
+            bh(100),
+            &[
+                (0u32, bh(10), bh(50)), // overdue
+                (1, bh(50), bh(106)), // window clamps to [100, 105]: absorbed by the mandatory point
+                (2, bh(92), bh(111)), // window [102, 110]
+                (3, bh(96), bh(301)), // window [106, 300]: groups with the previous one
+            ],
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(wakeups.len(), 2);
+        assert_eq!(u32::from(wakeups[0].height()), 100);
+        assert_eq!(wakeups[0].covers(), &[0, 1]);
+        assert_eq!(u32::from(wakeups[1].height()), 106);
+        assert_eq!(wakeups[1].covers(), &[2, 3]);
+    }
+
+    /// At a tiny custom bucket interval the default margin exceeds the anchor->broadcast gap; the
+    /// ready height clamps to the deadline so the schedule stays feasible.
+    #[test]
+    fn tiny_interval_clamps_the_margin() {
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::new(10, 0),
+            bh(0),
+            &[(0u32, bh(100), bh(104))], // window would be [110, 103]; ready clamps to 103
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(u32::from(wakeups[0].height()), 103);
+    }
+
+    /// A zero settle margin is clamped up to one block: a wake-up AT the boundary height cannot
+    /// prove against it (the boundary must be strictly below the tip).
+    #[test]
+    fn zero_margin_clamps_to_one() {
+        let wakeups = schedule_sync_wakeups(
+            &WakeupParams::new(0, 0),
+            bh(0),
+            &[(0u32, bh(100), bh(300))],
+            &mut rng(1),
+        )
+        .expect("feasible");
+        assert_eq!(u32::from(wakeups[0].height()), 101);
+    }
+
+    /// A brute-force optimum for the piercing problem: the fewest points covering every window
+    /// `(ready, deadline)`, with candidate points drawn from the window deadlines (an optimal
+    /// solution always exists on deadlines: any piercing point can be shifted up to the deadline
+    /// of the earliest-ending window it pierces without uncovering anything). Exponential in the
+    /// window count; usable only for the small inputs the minimality proptest generates.
+    fn brute_force_min_wakeups(windows: &[(u32, u32)]) -> usize {
+        let n = windows.len();
+        let candidates: Vec<u32> = windows.iter().map(|&(_, d)| d).collect();
+        let mut best = n;
+        for mask in 0u32..(1u32 << n) {
+            let covers_all = windows.iter().all(|&(r, d)| {
+                (0..n).any(|j| mask & (1 << j) != 0 && r <= candidates[j] && candidates[j] <= d)
+            });
+            if covers_all {
+                best = best.min(mask.count_ones() as usize);
+            }
+        }
+        best
+    }
+
+    proptest! {
+        /// Every transfer is covered by exactly one wake-up, inside its proving window (or at
+        /// exactly `not_before` when overdue); no wake-up is scheduled in the past; wake heights
+        /// strictly increase.
+        #[test]
+        fn wakeups_cover_every_transfer(
+            seed in any::<u64>(),
+            nb in 0u32..3_000_000,
+            xs in prop::collection::vec((0u32..2_000_000, 2u32..100_000), 1..40),
+        ) {
+            let transfers: Vec<(usize, BlockHeight, BlockHeight)> = xs
+                .iter()
+                .enumerate()
+                .map(|(i, &(a, gap))| (i, bh(a), bh(a + gap)))
+                .collect();
+            let wakeups =
+                schedule_sync_wakeups(&WakeupParams::DEFAULT, bh(nb), &transfers, &mut rng(seed))
+                    .expect("a gap of at least 2 blocks is feasible");
+            let margin = WakeupParams::DEFAULT.settle_margin().max(1);
+
+            let mut prev: Option<u32> = None;
+            for w in &wakeups {
+                let h = u32::from(w.height());
+                prop_assert!(h >= nb, "wake-up {h} below not_before {nb}");
+                if let Some(p) = prev {
+                    prop_assert!(h > p, "wake-up heights not strictly increasing");
+                }
+                prev = Some(h);
+            }
+
+            let mut covered = alloc::vec![0usize; transfers.len()];
+            for w in &wakeups {
+                let h = u32::from(w.height());
+                for &i in w.covers() {
+                    covered[i] += 1;
+                    let (a, gap) = xs[i];
+                    let deadline = a + gap - 1;
+                    if deadline < nb {
+                        prop_assert_eq!(h, nb, "overdue transfer {} not woken immediately", i);
+                    } else {
+                        let ready = a.saturating_add(margin).min(deadline).max(nb);
+                        prop_assert!(h >= ready, "wake-up {h} before transfer {}'s window", i);
+                        prop_assert!(h <= deadline, "wake-up {h} after transfer {}'s deadline", i);
+                    }
+                }
+            }
+            prop_assert!(
+                covered.iter().all(|&c| c == 1),
+                "every transfer must be covered exactly once: {covered:?}"
+            );
+        }
+
+        /// The wake-up count is MINIMAL: it equals the brute-force optimum over the clamped
+        /// proving windows — plus, when overdue transfers force a mandatory immediate wake-up,
+        /// exactly one for that wake-up, with every window containing `not_before` covered by it
+        /// for free.
+        #[test]
+        fn wakeup_count_is_minimal(
+            seed in any::<u64>(),
+            nb in 0u32..15_000,
+            xs in prop::collection::vec((0u32..10_000, 2u32..2_000), 1..8),
+        ) {
+            let transfers: Vec<(usize, BlockHeight, BlockHeight)> = xs
+                .iter()
+                .enumerate()
+                .map(|(i, &(a, gap))| (i, bh(a), bh(a + gap)))
+                .collect();
+            let wakeups =
+                schedule_sync_wakeups(&WakeupParams::DEFAULT, bh(nb), &transfers, &mut rng(seed))
+                    .expect("feasible");
+            let margin = WakeupParams::DEFAULT.settle_margin().max(1);
+            let mut overdue_exists = false;
+            let mut windows: Vec<(u32, u32)> = Vec::new();
+            for &(a, gap) in &xs {
+                let deadline = a + gap - 1;
+                if deadline < nb {
+                    overdue_exists = true;
+                } else {
+                    windows.push((a.saturating_add(margin).min(deadline).max(nb), deadline));
+                }
+            }
+            let expected = if overdue_exists {
+                // The mandatory wake-up at `not_before` covers every window containing it for
+                // free; only the windows opening strictly after it need piercing.
+                windows.retain(|&(ready, _)| ready > nb);
+                1 + brute_force_min_wakeups(&windows)
+            } else {
+                brute_force_min_wakeups(&windows)
+            };
+            prop_assert_eq!(wakeups.len(), expected);
+        }
+    }
+
+    /// Assert one golden wake-up schedule for a fixed input and seed, pinning the exact
+    /// deterministic [`ChaCha8Rng`] jitter draws as a regression guard. Inputs are ZIP 318-shaped:
+    /// anchors on the 144-block grid, broadcasts a few hundred blocks later.
+    fn check_sync_wakeups_golden(
+        seed: u64,
+        transfers: &[(u32, u32, u32)],
+        expected: &[(u32, &[u32])],
+    ) {
+        let input: Vec<(u32, BlockHeight, BlockHeight)> = transfers
+            .iter()
+            .map(|&(id, a, b)| (id, bh(a), bh(b)))
+            .collect();
+        let wakeups = schedule_sync_wakeups(&WakeupParams::DEFAULT, bh(0), &input, &mut rng(seed))
+            .expect("feasible");
+        let got: Vec<(u32, Vec<u32>)> = wakeups
+            .iter()
+            .map(|w| (u32::from(w.height()), w.covers().to_vec()))
+            .collect();
+        let exp: Vec<(u32, Vec<u32>)> = expected.iter().map(|&(h, c)| (h, c.to_vec())).collect();
+        assert_eq!(got, exp, "schedule_sync_wakeups(seed={seed})");
+    }
+
+    /// Golden vectors for [`schedule_sync_wakeups`]: fixed inputs and seeds pinned to their exact
+    /// wake-up schedules (heights are group-base + jitter; the jitter is the pinned draw).
+    #[test]
+    fn sync_wakeups_golden() {
+        // One cohort pair sharing a wake-up plus a distant third transfer.
+        check_sync_wakeups_golden(
+            1,
+            &[(0, 1440, 1700), (1, 1584, 1800), (2, 4320, 4600)],
+            // heights: max(1440, 1584) + 10 + j1 = 1594 + 10 = 1604 (group of [0, 1]),
+            // 4320 + 10 + j2 = 4330 + 2 = 4332 (transfer 2 alone) — bases are the group max
+            // anchors + 10.
+            &[(1604, &[0, 1]), (4332, &[2])],
+        );
+        // A longer mixed schedule under a different seed.
+        check_sync_wakeups_golden(
+            42,
+            &[
+                (0, 144, 400),
+                (1, 288, 500),
+                (2, 288, 600),
+                (3, 1440, 1700),
+                (4, 2880, 3200),
+            ],
+            // heights: max(144, 288, 288) + 10 + j0 = 298 + 17 = 315 (group of [0, 1, 2]),
+            // 1440 + 10 + j1 = 1450 + 23 = 1473 (transfer 3 alone),
+            // 2880 + 10 + j2 = 2890 + 10 = 2900 (transfer 4 alone) — bases are the group max
+            // anchors + 10.
+            &[(315, &[0, 1, 2]), (1473, &[3]), (2900, &[4])],
+        );
     }
 
     // --- shuffle ------------------------------------------------------------------------------

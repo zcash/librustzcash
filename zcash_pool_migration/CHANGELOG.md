@@ -12,6 +12,9 @@ and this library adheres to Rust's notion of
   spending key authorizes a migration's Orchard spends. Behind the `orchard`
   feature; convertible from `zcash_client_backend`'s `Zip32Derivation` behind
   the `wallet` feature.
+- `zcash_pool_migration::scheduling::{WakeupParams, SyncWakeup, WakeupScheduleError, schedule_sync_wakeups}`,
+  computing the minimal schedule of sync-and-proving wake-up heights implied by a
+  transfer schedule's drawn anchor boundaries and broadcast heights.
 
 ### Changed
 - `zcash_pool_migration::build::{build_prep_tx, build_transfer_pczt}` take an
