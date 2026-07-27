@@ -336,23 +336,7 @@ where
     if is_https {
         let stream = with_timeout(timeouts.connect, TimeoutPhase::Connect, async {
             let stream = tor_client.connect((host.as_str(), port)).await?;
-
-            // On apple-darwin targets there's an issue with the native TLS implementation
-            // when used over Tor circuits. We use Rustls instead.
-            //
-            // https://gitlab.torproject.org/tpo/core/arti/-/issues/715
-            let root_store = RootCertStore {
-                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-            };
-            let config = ClientConfig::builder()
-                .with_root_certificates(root_store)
-                .with_no_client_auth();
-            let connector = TlsConnector::from(Arc::new(config));
-            let dnsname = ServerName::try_from(host).expect("Already checked");
-            Ok(connector
-                .connect(dnsname, stream)
-                .await
-                .map_err(HttpError::Tls)?)
+            tls_handshake(stream, host).await
         })
         .await?;
 
@@ -375,6 +359,38 @@ where
         )
         .await
     }
+}
+
+/// Completes a TLS handshake with `host` over an already-open stream.
+///
+/// Split out of [`one_http_request`] so that the handshake can be exercised on its own by
+/// the tests. It is the part of the `Timeouts::connect` phase that runs *above* the Tor
+/// stream: opening the stream itself is bounded separately by `arti`. Over Tor this is a
+/// real exposure, because a half-open circuit can leave the handshake waiting on a
+/// `ServerHello` that never arrives and never fails.
+async fn tls_handshake<S>(
+    stream: S,
+    host: String,
+) -> Result<tokio_rustls::client::TlsStream<S>, Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    // On apple-darwin targets there's an issue with the native TLS implementation when
+    // used over Tor circuits. We use Rustls instead.
+    //
+    // https://gitlab.torproject.org/tpo/core/arti/-/issues/715
+    let root_store = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(config));
+    let dnsname = ServerName::try_from(host).expect("Already checked");
+    Ok(connector
+        .connect(dnsname, stream)
+        .await
+        .map_err(HttpError::Tls)?)
 }
 
 async fn make_http_request<B>(
@@ -502,38 +518,148 @@ impl From<futures_util::task::SpawnError> for HttpError {
     }
 }
 
+/// Tests that drive the HTTP-over-Tor timeout machinery against a fake, adversarial
+/// server.
+///
+/// The transport is generic over the byte stream, so an in-memory [`tokio::io::duplex`]
+/// pair stands in for a Tor `DataStream`: one end is handed to the client code, the other
+/// is driven by [`serve`] as the server. This is a faithful model of the failure this
+/// layer exists to survive, because every stalling scenario *holds the peer end open and
+/// silent* (see [`hold_open`]). Over Tor a stalled peer delivers neither more bytes nor a
+/// close: a half-open circuit persists without the peer's TCP stack sending a reset, so
+/// the future would hang forever without a deadline. Dropping the peer instead would
+/// deliver an EOF, which is the clearnet case, not the one under test.
+///
+/// What this harness does *not* cover, because it needs a real `TorClient`:
+/// - opening the Tor stream (the other half of the `Connect` phase; `arti` bounds that
+///   itself via `StreamTimeoutConfig::connect_timeout`), and
+/// - the circuit-isolating retry loop in [`Client::http_request`].
+///
+/// Deadlines fire deterministically and with no real delay under `start_paused`: virtual
+/// time only advances when every task is blocked, at which point the sole pending timer
+/// (the client's deadline) elapses.
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{future::pending, time::Duration};
 
-    use http_body_util::Empty;
+    use http_body_util::{BodyExt, Empty};
     use hyper::{Uri, body::Bytes};
+    use proptest::prelude::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
     use super::{
-        HttpError, TimeoutPhase, make_http_request, parse_url, url_is_https, with_timeout,
+        HttpError, TimeoutPhase, make_http_request, parse_url, tls_handshake, url_is_https,
+        with_timeout,
     };
     use crate::tor::Error;
 
-    /// A server that accepts the connection and then never speaks must not be able to
-    /// hold a request pending forever.
-    #[tokio::test]
-    async fn silent_server_times_out() {
-        // The far end of this duplex stream is held open for the duration of the test but
-        // never read from or written to, modelling a peer that stalls after connecting.
-        let (stream, _silent_peer) = tokio::io::duplex(1024);
+    // The absolute values are irrelevant under `start_paused`; they only need to be
+    // positive so the deadline exists to be advanced to.
+    const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+    const RESPONSE_BODY_TIMEOUT: Duration = Duration::from_secs(5);
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-        let res = with_timeout(
-            Duration::from_millis(100),
+    /// How the fake server behaves once a client has connected. Each stalling variant
+    /// models a half-open Tor circuit: the peer accepted the stream, but no further bytes
+    /// and no close will ever arrive.
+    enum Behavior {
+        /// Read the request, then go silent without sending any response.
+        StallBeforeHead,
+        /// Send response headers promising `content_length` body bytes, send `sent` of
+        /// them (`sent < content_length`), then go silent. Models a circuit that trickles
+        /// and then half-opens partway through the body.
+        StallDuringBody { sent: usize, content_length: usize },
+        /// Send a complete, well-formed response. The control: a responsive peer must not
+        /// be timed out.
+        Complete { body: Vec<u8> },
+    }
+
+    /// Holds `peer` open forever, reading and writing nothing. This is what makes the
+    /// duplex a faithful model of a half-open Tor circuit rather than a clean close.
+    async fn hold_open(peer: DuplexStream) {
+        let _held = peer;
+        pending::<()>().await;
+    }
+
+    /// Consumes bytes from `peer` up to the end of the HTTP request head (`\r\n\r\n`). The
+    /// GET requests issued here carry no body, so this reads the whole request.
+    async fn read_request_head(peer: &mut DuplexStream) {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 256];
+        loop {
+            let n = peer.read(&mut chunk).await.expect("read from client");
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+    }
+
+    /// Serves one connection according to `behavior`.
+    async fn serve(mut peer: DuplexStream, behavior: Behavior) {
+        read_request_head(&mut peer).await;
+        match behavior {
+            Behavior::StallBeforeHead => hold_open(peer).await,
+            Behavior::StallDuringBody {
+                sent,
+                content_length,
+            } => {
+                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n");
+                peer.write_all(head.as_bytes()).await.expect("write head");
+                peer.write_all(&vec![b'a'; sent])
+                    .await
+                    .expect("write partial body");
+                peer.flush().await.expect("flush");
+                hold_open(peer).await;
+            }
+            Behavior::Complete { body } => {
+                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                peer.write_all(head.as_bytes()).await.expect("write head");
+                peer.write_all(&body).await.expect("write body");
+                peer.flush().await.expect("flush");
+                // Return, closing the connection; the body is already complete.
+            }
+        }
+    }
+
+    /// Runs one GET request against a fake server exhibiting `behavior`, applying the
+    /// `Request` and `ResponseBody` deadlines exactly as [`Client::http_request`] does,
+    /// and returns the collected body.
+    async fn run_get(behavior: Behavior) -> Result<Vec<u8>, Error> {
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(serve(peer, behavior));
+
+        let response = with_timeout(
+            REQUEST_TIMEOUT,
             TimeoutPhase::Request,
             make_http_request(
-                stream,
+                client,
                 "http://example.com/".parse().unwrap(),
                 |builder| builder.method("GET"),
                 Empty::<Bytes>::new(),
             ),
         )
-        .await;
+        .await?;
 
+        with_timeout(RESPONSE_BODY_TIMEOUT, TimeoutPhase::ResponseBody, async {
+            Ok(response
+                .into_body()
+                .collect()
+                .await
+                .map_err(HttpError::from)?
+                .to_bytes()
+                .to_vec())
+        })
+        .await
+    }
+
+    /// A peer that never sends response headers must surface as a `Request` timeout.
+    #[tokio::test(start_paused = true)]
+    async fn stall_before_head_times_out_as_request() {
+        let res = run_get(Behavior::StallBeforeHead).await;
         assert!(
             matches!(
                 res,
@@ -541,6 +667,142 @@ mod tests {
             ),
             "expected a request timeout, got {res:?}",
         );
+    }
+
+    /// A peer that sends headers then stalls partway through the body must surface as a
+    /// `ResponseBody` timeout, not a `Request` one: the phase boundary is the arrival of
+    /// the response head.
+    #[tokio::test(start_paused = true)]
+    async fn stall_during_body_times_out_as_response_body() {
+        let res = run_get(Behavior::StallDuringBody {
+            sent: 8,
+            content_length: 1024,
+        })
+        .await;
+        assert!(
+            matches!(
+                res,
+                Err(Error::Http(HttpError::Timeout(TimeoutPhase::ResponseBody)))
+            ),
+            "expected a response-body timeout, got {res:?}",
+        );
+    }
+
+    /// A responsive peer must complete without ever tripping a deadline.
+    #[tokio::test(start_paused = true)]
+    async fn well_behaved_server_is_not_timed_out() {
+        let body = b"hello over tor".to_vec();
+        let res = run_get(Behavior::Complete { body: body.clone() }).await;
+        assert!(
+            matches!(res, Ok(ref got) if *got == body),
+            "expected the body back, got {res:?}",
+        );
+    }
+
+    /// A peer that accepts the stream but never completes the TLS handshake must surface
+    /// as a `Connect` timeout. Models a half-open circuit mid-handshake: the `ServerHello`
+    /// never arrives.
+    #[tokio::test(start_paused = true)]
+    async fn tls_handshake_stall_times_out_as_connect() {
+        let (client, peer) = tokio::io::duplex(16 * 1024);
+        let res = with_timeout(CONNECT_TIMEOUT, TimeoutPhase::Connect, async {
+            tls_handshake(client, "example.com".to_string()).await
+        })
+        .await;
+        // Keep the peer alive across the handshake so it stalls rather than EOFs.
+        drop(peer);
+        assert!(
+            matches!(
+                res,
+                Err(Error::Http(HttpError::Timeout(TimeoutPhase::Connect)))
+            ),
+            "expected a connect timeout, got {res:?}",
+        );
+    }
+
+    #[derive(Clone, Debug)]
+    enum Scenario {
+        StallHead,
+        StallBody { sent: usize, content_length: usize },
+        Complete { body: Vec<u8> },
+    }
+
+    #[derive(Debug)]
+    enum Expected {
+        Timeout(TimeoutPhase),
+        Body(Vec<u8>),
+    }
+
+    impl Scenario {
+        fn expected(&self) -> Expected {
+            match self {
+                Scenario::StallHead => Expected::Timeout(TimeoutPhase::Request),
+                Scenario::StallBody { .. } => Expected::Timeout(TimeoutPhase::ResponseBody),
+                Scenario::Complete { body } => Expected::Body(body.clone()),
+            }
+        }
+
+        fn into_behavior(self) -> Behavior {
+            match self {
+                Scenario::StallHead => Behavior::StallBeforeHead,
+                Scenario::StallBody {
+                    sent,
+                    content_length,
+                } => Behavior::StallDuringBody {
+                    sent,
+                    content_length,
+                },
+                Scenario::Complete { body } => Behavior::Complete { body },
+            }
+        }
+    }
+
+    /// Strategy over adversarial and well-behaved servers. `StallBody` always promises
+    /// more than it sends (`content_length = sent + remaining`, `remaining >= 1`), so the
+    /// body never completes.
+    fn arb_scenario() -> impl Strategy<Value = Scenario> {
+        prop_oneof![
+            Just(Scenario::StallHead),
+            (0usize..64, 1usize..2048).prop_map(|(sent, remaining)| Scenario::StallBody {
+                sent,
+                content_length: sent + remaining,
+            }),
+            proptest::collection::vec(any::<u8>(), 0..512)
+                .prop_map(|body| Scenario::Complete { body }),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(48))]
+
+        /// The safety property the timeout layer must satisfy: against any of these
+        /// servers the request resolves in bounded time, and when it stalls, the phase
+        /// named by the `Timeout` error is exactly the phase that stalled (or it returns
+        /// the body when the server is well-behaved).
+        #[test]
+        fn timeout_phase_matches_the_stalled_phase(scenario in arb_scenario()) {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .start_paused(true)
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let expected = scenario.expected();
+                let res = run_get(scenario.into_behavior()).await;
+                match expected {
+                    Expected::Timeout(phase) => prop_assert!(
+                        matches!(res, Err(Error::Http(HttpError::Timeout(p))) if p == phase),
+                        "expected Timeout({phase:?}), got {res:?}",
+                    ),
+                    Expected::Body(body) => prop_assert!(
+                        matches!(res, Ok(ref got) if *got == body),
+                        "expected body of {} bytes, got {res:?}",
+                        body.len(),
+                    ),
+                }
+                Ok(())
+            })?;
+        }
     }
 
     #[test]
