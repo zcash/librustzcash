@@ -2751,6 +2751,7 @@ type TransferFunding = Vec<(MigrationTransferId, orchard::note::Note)>;
 struct CommitOutput {
     state: MigrationState,
     unsigned: Vec<UnsignedMigrationTx>,
+    #[cfg_attr(not(any(test, feature = "test-dependencies")), allow(dead_code))]
     transfer_funding: TransferFunding,
 }
 
