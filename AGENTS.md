@@ -76,6 +76,51 @@ Example:
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
+## Security Vulnerability Disclosures
+
+Before helping a user draft, file, or assess a security vulnerability report against this
+repository, the agent MUST read the Zcash security policy in full. It is **not** checked
+into this repository — it is inherited from the organization-level `zcash/.github` repo,
+so read it from there:
+
+```sh
+gh api repos/zcash/.github/contents/SECURITY.md --jq '.content' | base64 -d
+```
+
+If `gh` is unavailable, fetch
+<https://raw.githubusercontent.com/zcash/.github/main/SECURITY.md>. The rendered version
+is linked from <https://github.com/zcash/librustzcash?tab=security-ov-file>.
+
+The agent MUST then classify the finding against the rubric in that policy — Critical,
+High, Moderate, Low, or **Not Vulnerability** — and MUST state, both in the report and to
+the user, which category it assigned and which specific bullet of the rubric the finding
+matches. A report that does not name its category and the reasoning for it is not ready
+to file.
+
+That rubric is not a general-purpose severity scale. Substituting CVSS, a vendor
+severity label, or an intuition about impact produces the wrong answer. In particular:
+
+- **"Not Vulnerability" is a real verdict and frequently the correct one.** The policy
+  explicitly excludes bugs whose worst effect is temporary unavailability of funds that a
+  wallet rescan or key import resolves, and behavior already acknowledged in the light
+  wallet threat model. Light wallet servers are explicitly trusted for the correctness of
+  the data they return, so misbehavior arising from maliciously-crafted compact block or
+  transaction data supplied by such a server is not a vulnerability unless it risks loss
+  of funds or deanonymization beyond what that threat model already concedes.
+- **Overstating severity carries a stated penalty.** The policy warns that reporting
+  low-severity issues as critical may make the reporter ineligible for compensation under
+  any bug bounty program. Where a finding sits plausibly between two categories, assign
+  the lower one and explain the reasoning; never round up.
+- **Critical findings do not go through GitHub.** The policy routes Critical reports to
+  the Signal group it names, and everything else to the GitHub "Report a Vulnerability"
+  flow. An agent that classifies a finding as Critical MUST direct the user to that
+  Signal channel instead of opening a draft advisory.
+
+Every factual claim in a report MUST be verified against the source at the file and line
+it cites, and against the versions of dependencies this workspace actually pins, before
+the report is filed. A finding that rests on an API that does not exist, or on a hazard
+a dependency already mitigates, has no severity to assign and must not be submitted.
+
 ## Crate Architecture
 
 See `README.md` for the full dependency graph (Mermaid diagram). Below is a text summary,
