@@ -67,7 +67,13 @@ async fn with_timeout<T>(
 }
 
 pub(super) fn url_is_https(url: &Uri) -> Result<bool, HttpError> {
-    Ok(url.scheme().ok_or_else(|| HttpError::NonHttpUrl)? == &Scheme::HTTPS)
+    // Only HTTP and HTTPS are supported. A missing scheme, or any other scheme (`ftp`,
+    // `ws`, `file`, ...), is rejected rather than silently treated as plaintext HTTP.
+    match url.scheme() {
+        Some(scheme) if scheme == &Scheme::HTTPS => Ok(true),
+        Some(scheme) if scheme == &Scheme::HTTP => Ok(false),
+        _ => Err(HttpError::NonHttpUrl),
+    }
 }
 
 pub(super) fn parse_url(url: &Uri) -> Result<(bool, String, u16), Error> {
@@ -501,9 +507,11 @@ mod tests {
     use std::time::Duration;
 
     use http_body_util::Empty;
-    use hyper::body::Bytes;
+    use hyper::{Uri, body::Bytes};
 
-    use super::{HttpError, TimeoutPhase, make_http_request, with_timeout};
+    use super::{
+        HttpError, TimeoutPhase, make_http_request, parse_url, url_is_https, with_timeout,
+    };
     use crate::tor::Error;
 
     /// A server that accepts the connection and then never speaks must not be able to
@@ -533,6 +541,60 @@ mod tests {
             ),
             "expected a request timeout, got {res:?}",
         );
+    }
+
+    #[test]
+    fn parse_url_infers_default_ports() {
+        assert_eq!(
+            parse_url(&"https://example.com/".parse::<Uri>().unwrap()).unwrap(),
+            (true, "example.com".to_string(), 443),
+        );
+        assert_eq!(
+            parse_url(&"http://example.com/".parse::<Uri>().unwrap()).unwrap(),
+            (false, "example.com".to_string(), 80),
+        );
+    }
+
+    #[test]
+    fn parse_url_respects_explicit_port() {
+        assert_eq!(
+            parse_url(&"http://example.com:8080/".parse::<Uri>().unwrap()).unwrap(),
+            (false, "example.com".to_string(), 8080),
+        );
+    }
+
+    #[test]
+    fn non_http_schemes_are_rejected() {
+        // The bug this guards against: a URL with an explicit non-HTTP(S) scheme used to
+        // be accepted and treated as plaintext HTTP, contradicting `NonHttpUrl`'s "only
+        // HTTP or HTTPS" contract. A non-HTTP(S) URL must never yield a usable request,
+        // by either of two paths: it fails to parse as a URI at all (`file:///...` has an
+        // empty authority, which hyper rejects), or it parses and `url_is_https` /
+        // `parse_url` reject its scheme.
+        for url in [
+            "ftp://example.com/",
+            "ws://example.com/",
+            "wss://example.com/",
+            "file:///etc/passwd",
+        ] {
+            let Ok(uri) = url.parse::<Uri>() else {
+                continue; // rejected at the URI-parse boundary; nothing reaches the transport
+            };
+            assert!(
+                matches!(url_is_https(&uri), Err(HttpError::NonHttpUrl)),
+                "{url} should be rejected by url_is_https",
+            );
+            assert!(
+                matches!(parse_url(&uri), Err(Error::Http(HttpError::NonHttpUrl))),
+                "{url} should be rejected by parse_url",
+            );
+        }
+    }
+
+    #[test]
+    fn missing_scheme_is_rejected() {
+        let uri = "//example.com/".parse::<Uri>().unwrap();
+        assert!(matches!(url_is_https(&uri), Err(HttpError::NonHttpUrl)));
     }
 }
 
