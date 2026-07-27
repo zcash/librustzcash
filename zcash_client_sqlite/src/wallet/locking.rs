@@ -436,6 +436,8 @@ mod tests {
     ///   is already selectable at the next target height, so replacing an expired lock never
     ///   removes protection from a still-protected output.
     mod lock_predicate_tests {
+        use std::collections::BTreeSet;
+
         use proptest::prelude::*;
         use rusqlite::{Connection, ToSql, named_params};
         use zcash_client_backend::{
@@ -453,6 +455,14 @@ mod tests {
         /// A distinguished lock owner NOT admitted by the policies, standing in for "some other
         /// flow's" lock; an output it holds must never be eligible under a `Policy`.
         const OWNER_B: LockOwner = LockOwner::new([0xB2; 32]);
+        /// A third distinguished lock owner, so the eligibility Galois-connection test in
+        /// [`eligibility_is_monotone_and_exact`] can draw admitted-owner sets `A` subset-of `B`
+        /// from a universe of more than two owners.
+        const OWNER_C: LockOwner = LockOwner::new([0xC3; 32]);
+
+        /// The owner universe from which [`eligibility_is_monotone_and_exact`] draws both the
+        /// candidates' lock owners and the admitted-owner sets `A` subset-of `B`.
+        const OWNER_UNIVERSE: [LockOwner; 3] = [OWNER_A, OWNER_B, OWNER_C];
 
         fn lock_state_db(
             lock_expiry_height: Option<u32>,
@@ -677,6 +687,92 @@ mod tests {
         /// (and frequently differs from) the owner recorded on the row.
         fn arb_owner() -> impl Strategy<Value = [u8; 32]> {
             prop_oneof![Just([0xAA; 32]), Just([0xBB; 32])]
+        }
+
+        /// The lock state of one candidate in the eligibility scenario: either unlocked (`None`)
+        /// or locked with an expiry height near `target` (so the scenario routinely straddles the
+        /// active/expired boundary) held by an owner drawn from [`OWNER_UNIVERSE`] (as an index).
+        fn arb_candidate_lock(target: u32) -> impl Strategy<Value = Option<(u32, usize)>> {
+            prop_oneof![
+                1 => Just(None),
+                3 => (arb_height_near(target), 0..OWNER_UNIVERSE.len()).prop_map(Some),
+            ]
+        }
+
+        /// A scenario for [`eligibility_is_monotone_and_exact`]: a target height, a list of
+        /// candidate lock states, and two admitted-owner masks over [`OWNER_UNIVERSE`] with the
+        /// invariant that mask `A` implies mask `B` bit-for-bit (so the admitted set `A` is a
+        /// subset of `B`).
+        #[allow(clippy::type_complexity)]
+        fn arb_eligibility_scenario()
+        -> impl Strategy<Value = (u32, Vec<Option<(u32, usize)>>, Vec<bool>, Vec<bool>)> {
+            any::<u32>()
+                .prop_flat_map(|target| {
+                    (
+                        Just(target),
+                        proptest::collection::vec(arb_candidate_lock(target), 1..=8),
+                        proptest::collection::vec(any::<bool>(), OWNER_UNIVERSE.len()),
+                    )
+                })
+                .prop_flat_map(|(target, candidates, b_mask)| {
+                    // Draw `A` as a submask of `B`: a universe owner can be admitted by `A` only
+                    // where `B` already admits it, guaranteeing `A` is a subset of `B`.
+                    let a_mask: Vec<BoxedStrategy<bool>> = b_mask
+                        .iter()
+                        .map(|&b| {
+                            if b {
+                                any::<bool>().boxed()
+                            } else {
+                                Just(false).boxed()
+                            }
+                        })
+                        .collect();
+                    (Just(target), Just(candidates), a_mask, Just(b_mask))
+                })
+        }
+
+        /// The admitted-owner set selected by a mask over [`OWNER_UNIVERSE`].
+        fn owner_set(mask: &[bool]) -> BTreeSet<LockOwner> {
+            OWNER_UNIVERSE
+                .iter()
+                .zip(mask)
+                .filter(|(_, m)| **m)
+                .map(|(owner, _)| *owner)
+                .collect()
+        }
+
+        /// The lock filter admitting exactly the owners in `admitted`: `Exclude` for the empty
+        /// set (which admits no owner's lock), otherwise a preference policy carrying the set.
+        /// Eligibility (`output_eligible_condition`) is identical across the preference variants,
+        /// so which preference is used does not affect the admitted set.
+        fn policy_admitting(admitted: BTreeSet<LockOwner>) -> LockedInputPolicy {
+            match NonEmptyBTreeSet::from_set(admitted) {
+                None => LockedInputPolicy::Exclude,
+                Some(owners) => LockedInputPolicy::PreferUnlocked(owners),
+            }
+        }
+
+        /// The model eligible set for the given candidates, target height, and admitted-owner set:
+        /// an unlocked candidate is always eligible, a locked candidate whose expiry is below the
+        /// target (expired) is always eligible, and an active lock is eligible exactly when its
+        /// owner is admitted. Ids are the candidates' positions, returned in id order.
+        fn model_eligible(
+            candidates: &[Option<(u32, usize)>],
+            target: u32,
+            admitted: &BTreeSet<LockOwner>,
+        ) -> Vec<i64> {
+            candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(id, lock)| {
+                    let eligible = match lock {
+                        None => true,
+                        Some((expiry, _)) if *expiry < target => true,
+                        Some((_, owner)) => admitted.contains(&OWNER_UNIVERSE[*owner]),
+                    };
+                    eligible.then_some(id as i64)
+                })
+                .collect()
         }
 
         /// Two unlocked notes, two locked by [`OWNER_A`] (the admitted owner), and one locked by
@@ -907,6 +1003,65 @@ mod tests {
                     prop_assert!(exclude_eligible(lock, tip + 1));
                 }
             }
+
+            /// Eligibility as a function of the admitted-owner set `f(A)` (the Galois-connection
+            /// view of `output_eligible_condition`) is both MONOTONE and EXACT:
+            ///
+            /// - monotone: for admitted-owner sets `A` subset-of `B`, `f(A)` is a subset of
+            ///   `f(B)` (admitting more owners never removes an eligible output); and
+            /// - exact: `f(A)` is precisely the unlocked and expired outputs plus the outputs
+            ///   whose active lock is held by an owner in `A`, and never an output locked by an
+            ///   owner outside `A`.
+            ///
+            /// The existing `exclude_*` and `unfiltered_*` tests pin only the `A = {}` (Exclude)
+            /// and "all admitted" (Unfiltered) endpoints; this pins the law across the lattice of
+            /// admitted-owner sets in between.
+            #[test]
+            fn eligibility_is_monotone_and_exact(
+                (target, candidates, a_mask, b_mask) in arb_eligibility_scenario(),
+            ) {
+                let set_a = owner_set(&a_mask);
+                let set_b = owner_set(&b_mask);
+
+                let rows: Vec<Candidate> = candidates
+                    .iter()
+                    .enumerate()
+                    .map(|(id, lock)| match lock {
+                        None => unlocked(id as i64, 100),
+                        Some((expiry, owner)) => {
+                            locked(id as i64, 100, *expiry, OWNER_UNIVERSE[*owner])
+                        }
+                    })
+                    .collect();
+
+                let policy_a = policy_admitting(set_a.clone());
+                let policy_b = policy_admitting(set_b.clone());
+                let eligible_a = eligible_ids(&rows, target, LockFilter::Policy(&policy_a));
+                let eligible_b = eligible_ids(&rows, target, LockFilter::Policy(&policy_b));
+
+                // Exact: the SQL admits precisely the modeled set for each admitted-owner set.
+                prop_assert_eq!(
+                    &eligible_a,
+                    &model_eligible(&candidates, target, &set_a),
+                    "eligible(A) diverged from the model"
+                );
+                prop_assert_eq!(
+                    &eligible_b,
+                    &model_eligible(&candidates, target, &set_b),
+                    "eligible(B) diverged from the model"
+                );
+
+                // Monotone: every output eligible under the smaller admitted set A is still
+                // eligible under the larger admitted set B.
+                let eligible_b_set: BTreeSet<i64> = eligible_b.iter().copied().collect();
+                for id in &eligible_a {
+                    prop_assert!(
+                        eligible_b_set.contains(id),
+                        "output {} eligible under A but not under the superset B",
+                        id
+                    );
+                }
+            }
         }
     }
 
@@ -1080,6 +1235,144 @@ mod tests {
         }
     }
 
+    /// Regression guard for the (expiry, owner) pairing invariant of the lock columns.
+    ///
+    /// The lock state of a received output is meant to be two-valued: an output is either UNLOCKED
+    /// (both `lock_expiry_height` and `lock_owner` NULL) or LOCKED (both set). The schema does not
+    /// enforce this with a CHECK constraint, so the half-states `(expiry set, owner NULL)` and
+    /// `(expiry NULL, owner set)` are representable at the storage layer, and every other locking
+    /// test silently ASSUMES they never arise. This module drives random lock-operation sequences
+    /// against a real wallet database and asserts, after every step, that no row in any of the four
+    /// received-output tables is in a half-state, i.e. that
+    /// `(lock_expiry_height IS NULL) == (lock_owner IS NULL)` holds for every row.
+    ///
+    /// It is expected to PASS: the lock/unlock/clear/unlock-on-store statements all write the two
+    /// columns together (both to the expiry+owner pair, or both to NULL), so the pairing is
+    /// maintained by construction. Its value is as a guard against a future change breaking that
+    /// coupling. If it ever fails, the shrunk operation sequence is a real bug: a code path that
+    /// leaves the columns out of step.
+    mod lock_column_pairing {
+        use zcash_client_backend::{
+            data_api::{
+                Account as _, OutputLockStore as _, WalletTest as _,
+                testing::pool::{LockOp, ShieldedPoolTester, dsl::TestDsl},
+            },
+            wallet::{LockOwner, OutputRef},
+        };
+        use zcash_protocol::{PoolType, consensus::BlockHeight, value::Zatoshis};
+
+        use crate::testing::{BlockCache, db::TestDbFactory};
+
+        /// Two lock owners, matched to the two-owner index pool that [`arb_lock_ops`] draws from.
+        ///
+        /// [`arb_lock_ops`]: zcash_client_backend::data_api::testing::pool::arb_lock_ops
+        const OWNERS: [LockOwner; 2] = [LockOwner::new([0xA1; 32]), LockOwner::new([0xB2; 32])];
+
+        /// Asserts the (expiry, owner) pairing invariant across all four received-output tables:
+        /// no row may have exactly one of `lock_expiry_height` / `lock_owner` NULL.
+        fn assert_lock_columns_paired(conn: &rusqlite::Connection) {
+            for table in [
+                "sapling_received_notes",
+                "orchard_received_notes",
+                "ironwood_received_notes",
+                "transparent_received_outputs",
+            ] {
+                let half_states: i64 = conn
+                    .query_row(
+                        &format!(
+                            "SELECT COUNT(*) FROM {table}
+                             WHERE (lock_expiry_height IS NULL) <> (lock_owner IS NULL)"
+                        ),
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    half_states, 0,
+                    "{table} has {half_states} row(s) with exactly one of \
+                     lock_expiry_height / lock_owner NULL (a forbidden half-locked state)"
+                );
+            }
+        }
+
+        /// Funds a wallet with three notes, replays `ops` against it, and asserts the pairing
+        /// invariant after each operation (and before the first). See the module docs.
+        pub(super) fn check<T: ShieldedPoolTester>(
+            ds_factory: TestDbFactory,
+            cache: BlockCache,
+            ops: &[LockOp],
+        ) {
+            let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+            // Fund the wallet with three notes of distinct values in a single block, so a note
+            // can be matched to its model index by value (the same funding as the backend's
+            // `check_note_locking_model`).
+            let values = [
+                Zatoshis::const_from_u64(60000),
+                Zatoshis::const_from_u64(70000),
+                Zatoshis::const_from_u64(80000),
+            ];
+            st.add_notes_checking_balance([values]);
+
+            let account_id = st.test_account().unwrap().id();
+            let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+            assert_eq!(notes.len(), values.len());
+            let refs: Vec<OutputRef> = values
+                .iter()
+                .map(|value| {
+                    let note = notes
+                        .iter()
+                        .find(|n| n.note().value() == *value)
+                        .expect("a note with the requested value exists");
+                    OutputRef::new(
+                        *note.txid(),
+                        PoolType::Shielded(note.note().pool()),
+                        u32::from(note.output_index()),
+                    )
+                })
+                .collect();
+
+            // Track the chain tip so `Lock` expiry heights are taken relative to it, exactly as
+            // `arb_lock_ops` intends (`expiry = tip + expiry_delta`).
+            let mut tip = u32::from(st.latest_cached_block().unwrap().height());
+
+            assert_lock_columns_paired(st.wallet().conn());
+
+            for op in ops {
+                match op {
+                    LockOp::Lock {
+                        notes,
+                        owner,
+                        expiry_delta,
+                    } => {
+                        let batch: Vec<OutputRef> = notes.iter().map(|&i| refs[i]).collect();
+                        // The lock may succeed or fail (a batch conflict fails atomically); the
+                        // invariant must hold in either case, so the outcome is not asserted here.
+                        let _ = st.wallet_mut().lock_outputs(
+                            &batch,
+                            OWNERS[*owner],
+                            BlockHeight::from(tip + *expiry_delta),
+                        );
+                    }
+                    LockOp::Unlock { note, owner } => {
+                        st.wallet_mut()
+                            .unlock_output(&refs[*note], OWNERS[*owner])
+                            .unwrap();
+                    }
+                    LockOp::ClearLocked => {
+                        st.wallet_mut().clear_locked_outputs(account_id).unwrap();
+                    }
+                    LockOp::MineBlocks { count } => {
+                        st.add_empty_blocks(*count);
+                        tip += *count as u32;
+                    }
+                }
+
+                assert_lock_columns_paired(st.wallet().conn());
+            }
+        }
+    }
+
     mod sapling {
         use zcash_client_backend::data_api::testing::{pool, sapling::SaplingPoolTester};
 
@@ -1173,6 +1466,15 @@ mod tests {
             #[test]
             fn note_locking_model(ops in pool::arb_lock_ops(3, 10)) {
                 pool::check_note_locking_model::<SaplingPoolTester>(
+                    TestDbFactory::default(),
+                    BlockCache::new(),
+                    &ops,
+                )
+            }
+
+            #[test]
+            fn note_lock_columns_paired(ops in pool::arb_lock_ops(3, 10)) {
+                super::lock_column_pairing::check::<SaplingPoolTester>(
                     TestDbFactory::default(),
                     BlockCache::new(),
                     &ops,
@@ -1275,6 +1577,15 @@ mod tests {
             #[test]
             fn note_locking_model(ops in pool::arb_lock_ops(3, 10)) {
                 pool::check_note_locking_model::<OrchardPoolTester>(
+                    TestDbFactory::default(),
+                    BlockCache::new(),
+                    &ops,
+                )
+            }
+
+            #[test]
+            fn note_lock_columns_paired(ops in pool::arb_lock_ops(3, 10)) {
+                super::lock_column_pairing::check::<OrchardPoolTester>(
                     TestDbFactory::default(),
                     BlockCache::new(),
                     &ops,
