@@ -10,22 +10,28 @@ use assert_matches::assert_matches;
 use zcash_keys::address::Address;
 use zcash_primitives::{block::BlockHash, transaction::fees::zip317};
 use zcash_protocol::{
-    TxId, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
+    PoolType, TxId, consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis,
 };
+
+use zip321::Payment;
 
 use crate::{
     data_api::{
-        Account, AccountBalance, InputSource, WalletRead,
+        Account, AccountBalance, InputSource, WalletRead, WalletTest,
         chain::ScanSummary,
         testing::{
             AddressType, DataStoreFactory, FakeCompactOutput, TestAccount, TestBuilder, TestCache,
-            TestFvk, TestState,
+            TestFvk, TestState, single_output_change_strategy,
         },
-        wallet::ConfirmationsPolicy,
+        wallet::{
+            ConfirmationsPolicy, LockRequest,
+            input_selection::{GreedyInputSelector, SpendPolicy},
+            propose_transfer,
+        },
     },
     fees::StandardFeeRule,
     proposal::Proposal,
-    wallet::OvkPolicy,
+    wallet::{LockOwner, OutputRef, OvkPolicy},
 };
 
 use super::ShieldedPoolTester;
@@ -494,5 +500,78 @@ where
             last = Some(self.mine_decoy_block(seed, value));
         }
         last
+    }
+
+    /// Returns an [`OutputRef`] for the wallet's single received note in the
+    /// tester's shielded pool, asserting that exactly one such note exists.
+    pub fn sole_note_ref(&self) -> OutputRef {
+        let notes = self.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+        assert_eq!(notes.len(), 1);
+        let note = &notes[0];
+        OutputRef::new(
+            *note.txid(),
+            PoolType::Shielded(note.note().pool()),
+            u32::from(note.output_index()),
+        )
+    }
+
+    /// Returns an [`OutputRef`] for the single received note whose value equals
+    /// `value`, panicking if no such note exists.
+    ///
+    /// Used by the multi-note scenarios, which fund the account with notes of
+    /// distinct values so that each note can be identified by its value.
+    pub fn note_ref_by_value(&self, value: Zatoshis) -> OutputRef {
+        let notes = self.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
+        let note = notes
+            .iter()
+            .find(|n| n.note().value() == value)
+            .expect("a note with the requested value exists");
+        OutputRef::new(
+            *note.txid(),
+            PoolType::Shielded(note.note().pool()),
+            u32::from(note.output_index()),
+        )
+    }
+
+    /// Proposes a ZIP 317 transfer of `amount` zatoshis to `to` that locks its
+    /// own selected inputs on behalf of `owner` for `lock_for_blocks` blocks,
+    /// panicking if proposal construction fails.
+    ///
+    /// This is the locking counterpart of [`Self::propose_transfer_to`]: it
+    /// goes through the lower-level [`propose_transfer`] so that a
+    /// [`LockRequest`] can be attached, and fixes the same constants (the test
+    /// account, a [`GreedyInputSelector`], the tester's single-output change
+    /// strategy, [`ConfirmationsPolicy::MIN`], the default [`SpendPolicy`], and
+    /// no requested transaction version).
+    pub fn propose_locking_transfer(
+        &mut self,
+        to: &Address,
+        amount: Zatoshis,
+        owner: LockOwner,
+        lock_for_blocks: u32,
+    ) -> Proposal<StandardFeeRule, <Dsf::DataStore as InputSource>::NoteRef> {
+        let account_id = self.get_account().id();
+        let input_selector = GreedyInputSelector::new();
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+        let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+            to.to_zcash_address(self.network()),
+            amount,
+        )])
+        .unwrap();
+        let network = *self.network();
+        propose_transfer::<_, _, _, _, Infallible>(
+            self.wallet_mut(),
+            &network,
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+            &SpendPolicy::default(),
+            Some(LockRequest::new(owner, lock_for_blocks)),
+            None,
+        )
+        .unwrap()
     }
 }

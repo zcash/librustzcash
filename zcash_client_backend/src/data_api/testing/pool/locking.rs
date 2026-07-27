@@ -19,7 +19,7 @@ use crate::{
         error::LockError,
         testing::{DataStoreFactory, TestCache, single_output_change_strategy},
         wallet::{
-            ConfirmationsPolicy, LockRequest, TargetHeight,
+            ConfirmationsPolicy, TargetHeight,
             input_selection::{GreedyInputSelector, LockFilter, LockedInputPolicy},
         },
     },
@@ -208,14 +208,7 @@ pub fn note_locking_height_boundary<T: ShieldedPoolTester>(
     let target_height = chain_tip + 1;
 
     // Find the received note and construct an OutputRef for it
-    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
-    assert_eq!(notes.len(), 1);
-    let note = &notes[0];
-    let output_ref = OutputRef::new(
-        *note.txid(),
-        PoolType::Shielded(note.note().pool()),
-        u32::from(note.output_index()),
-    );
+    let output_ref = st.sole_note_ref();
 
     // Lock with expiry exactly at the target height: the output must be treated as locked.
     let owner = LockOwner::new([1; 32]);
@@ -277,14 +270,7 @@ pub fn clear_locked_outputs<T: ShieldedPoolTester>(
     let account_id = account.id();
 
     // Find the received note and construct an OutputRef for it
-    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
-    assert_eq!(notes.len(), 1);
-    let note = &notes[0];
-    let output_ref = OutputRef::new(
-        *note.txid(),
-        PoolType::Shielded(note.note().pool()),
-        u32::from(note.output_index()),
-    );
+    let output_ref = st.sole_note_ref();
 
     // Lock the note with a far-future expiry.
     let owner = LockOwner::new([1; 32]);
@@ -338,39 +324,12 @@ pub fn proposal_level_note_locking<T: ShieldedPoolTester>(
 
     // Remember the funding note's reference; it is spent at the end of this test, where the
     // lock-a-spent-note behavior is pinned.
-    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
-    assert_eq!(notes.len(), 1);
-    let funding_note_ref = OutputRef::new(
-        *notes[0].txid(),
-        PoolType::Shielded(notes[0].note().pool()),
-        u32::from(notes[0].output_index()),
-    );
+    let funding_note_ref = st.sole_note_ref();
 
     // Create a proposal with lock_for_blocks: Some(100) using propose_transfer
-    let input_selector = GreedyInputSelector::new();
-    let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
-
-    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        to.to_zcash_address(st.network()),
-        Zatoshis::const_from_u64(15000),
-    )])
-    .unwrap();
-
-    let network = *st.network();
     let owner = LockOwner::new([1; 32]);
-    let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
-        st.wallet_mut(),
-        &network,
-        account_id,
-        &input_selector,
-        &change_strategy,
-        request,
-        ConfirmationsPolicy::MIN,
-        &crate::data_api::wallet::input_selection::SpendPolicy::default(),
-        Some(LockRequest::new(owner, 100)),
-        None,
-    )
-    .unwrap();
+    let amount_sent = Zatoshis::const_from_u64(15000);
+    let proposal = st.propose_locking_transfer(&to, amount_sent, owner, 100);
 
     // Notes should now be locked; a second proposal should fail
     assert_matches!(
@@ -456,41 +415,17 @@ pub fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
-    let fee_rule = StandardFeeRule::Zip317;
-
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(50000);
     let (_, _, _) = st.add_a_single_note_checking_balance(value);
 
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
+    let account_id = st.test_account().unwrap().id();
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
 
-    let input_selector = GreedyInputSelector::new();
-    let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
-
-    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        to.to_zcash_address(st.network()),
-        Zatoshis::const_from_u64(15000),
-    )])
-    .unwrap();
-
-    let network = *st.network();
     let owner = LockOwner::new([1; 32]);
-    let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
-        st.wallet_mut(),
-        &network,
-        account_id,
-        &input_selector,
-        &change_strategy,
-        request,
-        ConfirmationsPolicy::MIN,
-        &crate::data_api::wallet::input_selection::SpendPolicy::default(),
-        Some(LockRequest::new(owner, 100)),
-        None,
-    )
-    .unwrap();
+    let amount_sent = Zatoshis::const_from_u64(15000);
+    let proposal = st.propose_locking_transfer(&to, amount_sent, owner, 100);
 
     // The proposal's input is locked.
     assert!(
@@ -503,6 +438,7 @@ pub fn locked_proposal_proto_roundtrip<T: ShieldedPoolTester>(
 
     // The serialized proposal must decode back to an identical proposal even though its inputs
     // are locked (a proposal legitimately references its own locked inputs).
+    let network = *st.network();
     let proto = crate::proto::proposal::Proposal::from_standard_proposal(&proposal);
     let decoded = proto
         .try_into_standard_proposal(&network, st.wallet())
@@ -530,14 +466,7 @@ pub fn lock_expiry_restores_spendability<T: ShieldedPoolTester>(
     let account_id = st.test_account().unwrap().id();
     let tip = st.latest_cached_block().unwrap().height();
 
-    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
-    assert_eq!(notes.len(), 1);
-    let note = &notes[0];
-    let output_ref = OutputRef::new(
-        *note.txid(),
-        PoolType::Shielded(note.note().pool()),
-        u32::from(note.output_index()),
-    );
+    let output_ref = st.sole_note_ref();
 
     // Lock the note until three blocks past the current tip.
     let owner = LockOwner::new([1; 32]);
@@ -631,21 +560,13 @@ pub fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>(
     let account_id = st.test_account().unwrap().id();
     let far_expiry = BlockHeight::from(u32::MAX);
 
-    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
-    assert_eq!(notes.len(), 2);
-    let output_ref = |value: Zatoshis| {
-        let note = notes
-            .iter()
-            .find(|n| n.note().value() == value)
-            .expect("a note with the requested value exists");
-        OutputRef::new(
-            *note.txid(),
-            PoolType::Shielded(note.note().pool()),
-            u32::from(note.output_index()),
-        )
-    };
-    let r1 = output_ref(value1);
-    let r2 = output_ref(value2);
+    // Each note is identified by its (distinct) value.
+    assert_eq!(
+        st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap().len(),
+        2
+    );
+    let r1 = st.note_ref_by_value(value1);
+    let r2 = st.note_ref_by_value(value2);
 
     let owner_a = LockOwner::new([0xA1; 32]);
     let owner_b = LockOwner::new([0xB2; 32]);
@@ -750,6 +671,7 @@ pub fn lock_conflict_and_batch_atomicity<T: ShieldedPoolTester>(
 /// recovery path), and that the release is scoped to the owner that took the locks.
 ///
 /// [`unlock_proposal_inputs`]: crate::data_api::wallet::unlock_proposal_inputs
+/// [`LockRequest`]: crate::data_api::wallet::LockRequest
 pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
@@ -766,30 +688,9 @@ pub fn unlock_proposal_inputs_releases_locks<T: ShieldedPoolTester>(
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
 
-    let input_selector = GreedyInputSelector::new();
-    let change_strategy = single_output_change_strategy(fee_rule, None, T::SHIELDED_PROTOCOL);
-
-    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        to.to_zcash_address(st.network()),
-        Zatoshis::const_from_u64(15000),
-    )])
-    .unwrap();
-
-    let network = *st.network();
     let owner = LockOwner::new([1; 32]);
-    let proposal = crate::data_api::wallet::propose_transfer::<_, _, _, _, Infallible>(
-        st.wallet_mut(),
-        &network,
-        account_id,
-        &input_selector,
-        &change_strategy,
-        request,
-        ConfirmationsPolicy::MIN,
-        &crate::data_api::wallet::input_selection::SpendPolicy::default(),
-        Some(LockRequest::new(owner, 100)),
-        None,
-    )
-    .unwrap();
+    let amount_sent = Zatoshis::const_from_u64(15000);
+    let proposal = st.propose_locking_transfer(&to, amount_sent, owner, 100);
 
     // The proposal's input is locked; a competing proposal cannot be created.
     assert_eq!(st.get_locked_balance(account_id), value);
@@ -878,21 +779,12 @@ pub fn spend_policy_locked_input_policy_reaches_selection<T: ShieldedPoolTester>
     let account = st.test_account().cloned().unwrap();
     let account_id = account.id();
 
-    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
-    assert_eq!(notes.len(), 3);
-    let output_ref = |value: Zatoshis| {
-        let note = notes
-            .iter()
-            .find(|n| n.note().value() == value)
-            .expect("a note with the requested value exists");
-        OutputRef::new(
-            *note.txid(),
-            PoolType::Shielded(note.note().pool()),
-            u32::from(note.output_index()),
-        )
-    };
-    let locked_a_ref = output_ref(locked_a_value);
-    let locked_b_ref = output_ref(locked_b_value);
+    assert_eq!(
+        st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap().len(),
+        3
+    );
+    let locked_a_ref = st.note_ref_by_value(locked_a_value);
+    let locked_b_ref = st.note_ref_by_value(locked_b_value);
 
     let owner_a = LockOwner::new([0xA1; 32]);
     let owner_b = LockOwner::new([0xB2; 32]);
@@ -1069,22 +961,11 @@ pub fn check_note_locking_model<T: ShieldedPoolTester>(
 
     let account_id = st.test_account().unwrap().id();
 
-    let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
-    assert_eq!(notes.len(), values.len());
-    let refs: Vec<OutputRef> = values
-        .iter()
-        .map(|value| {
-            let note = notes
-                .iter()
-                .find(|n| n.note().value() == *value)
-                .expect("a note with the requested value exists");
-            OutputRef::new(
-                *note.txid(),
-                PoolType::Shielded(note.note().pool()),
-                u32::from(note.output_index()),
-            )
-        })
-        .collect();
+    assert_eq!(
+        st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap().len(),
+        values.len()
+    );
+    let refs: Vec<OutputRef> = values.iter().map(|v| st.note_ref_by_value(*v)).collect();
 
     // The model: per-note lock expiry height and owner index, and the chain tip.
     let mut model: Vec<Option<(u32, usize)>> = vec![None; refs.len()];
