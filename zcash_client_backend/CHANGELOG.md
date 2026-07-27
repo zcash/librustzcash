@@ -25,6 +25,17 @@ workspace.
   `sync::Error`, `sync::decryptor::TryQueueError`, `tor::Error`,
   `tor::grpc::GrpcError`, and `tor::http::HttpError`.
 
+### Fixed
+- `zcash_client_backend::data_api::wallet::redact_pczt_for_batch_signer` no
+  longer removes existing spend authorization signatures. It previously
+  stripped the signatures of the pre-signed protocol padding dummies while
+  also removing their randomizers and (via the compact signer view) their
+  dummy signing keys, leaving actions that neither the batch Signer nor the
+  wallet could authorize. Every action in the returned view is now either
+  already authorized or still authorizable. A batch Signer's response
+  consequently carries the retained signatures back alongside the new ones;
+  re-applying them to the authoritative PCZT is a no-op.
+
 ## [0.24.0-rc.4] - 2026-07-26
 
 ### Changed
