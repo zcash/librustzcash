@@ -163,3 +163,64 @@ impl From<tonic::transport::Error> for GrpcError {
         GrpcError::Tonic(e)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        future::{Future, pending},
+        pin::Pin,
+        task::{Context, Poll},
+        time::Duration,
+    };
+
+    use hyper_util::rt::TokioIo;
+    use tokio::io::DuplexStream;
+    use tonic::transport::{Endpoint, Uri};
+    use tower::Service;
+
+    /// A connector that accepts a connection request and then never completes it, modelling
+    /// a Tor circuit that hangs while opening. Unlike the HTTP transport, the gRPC deadlines
+    /// live in `tonic`'s `Endpoint`, so this checks that the `connect_timeout` we configure
+    /// there actually bounds a connector that never returns.
+    #[derive(Clone)]
+    struct StallingConnector;
+
+    impl Service<Uri> for StallingConnector {
+        // The connector never returns a stream, so this type is only a phantom to satisfy
+        // tonic's bounds; `TokioIo<DuplexStream>` is a convenient one that is `Read + Write`.
+        type Response = TokioIo<DuplexStream>;
+        type Error = std::io::Error;
+        type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: Uri) -> Self::Future {
+            Box::pin(pending::<Result<Self::Response, Self::Error>>())
+        }
+    }
+
+    /// The gRPC `connect_timeout` must bound a connector that never completes, so a Tor
+    /// circuit that hangs on open cannot leave `connect_to_lightwalletd` pending forever.
+    /// The outer timeout is a safety net that must not be the one to fire; if it does, the
+    /// `connect_timeout` we set on the `Endpoint` is not being applied.
+    #[tokio::test(start_paused = true)]
+    async fn connect_timeout_bounds_a_stalling_connector() {
+        let endpoint = Endpoint::from_static("http://198.51.100.1:8232")
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(60));
+
+        let connect = endpoint.connect_with_connector(StallingConnector);
+        let res = tokio::time::timeout(Duration::from_secs(30), connect).await;
+
+        assert!(
+            res.is_ok(),
+            "connect_timeout did not bound the stalling connector; the 30s safety net fired",
+        );
+        assert!(
+            res.unwrap().is_err(),
+            "expected the connect to fail once connect_timeout elapsed",
+        );
+    }
+}
