@@ -264,6 +264,7 @@ tor = [
     "dep:serde",
     "dep:serde_json",
     "dep:tokio",
+    "tokio?/time",
     "dep:tokio-rustls",
     "dep:tor-rtcompat",
     "dep:trait-variant",

@@ -22,6 +22,14 @@ impl Client {
     /// Tor hidden services (`.onion` addresses). The caller is responsible for deciding
     /// whether onion connections are appropriate for the given endpoint; this crate
     /// does not infer that from the endpoint host.
+    ///
+    /// The returned client applies this `Client`'s [`Timeouts`] to every request it makes.
+    /// Note that the request deadline bounds the wait for a response's headers, not the
+    /// duration of the response itself, so long-running streaming methods such as
+    /// `GetBlockRange` are not capped by it; a peer that stalls partway through a stream
+    /// is instead detected by the HTTP/2 keep-alive.
+    ///
+    /// [`Timeouts`]: super::Timeouts
     pub async fn connect_to_lightwalletd(
         &self,
         endpoint: Uri,
@@ -37,7 +45,12 @@ impl Client {
             HttpTcpConnector::new(self.clone())
         };
 
-        let channel = Endpoint::from(endpoint);
+        let channel = Endpoint::from(endpoint)
+            .connect_timeout(self.timeouts.connect)
+            .timeout(self.timeouts.request)
+            .http2_keep_alive_interval(self.timeouts.grpc_keepalive_interval)
+            .keep_alive_timeout(self.timeouts.grpc_keepalive_timeout)
+            .keep_alive_while_idle(false);
         let channel = if is_https {
             channel
                 .tls_config(ClientTlsConfig::new().with_webpki_roots())

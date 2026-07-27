@@ -1,6 +1,6 @@
 //! Tor support for Zcash wallets.
 
-use std::{fmt, io, path::Path};
+use std::{fmt, io, path::Path, time::Duration};
 
 use arti_client::{TorClient, config::TorClientConfigBuilder};
 use tor_rtcompat::PreferredRuntime;
@@ -15,14 +15,99 @@ pub mod http;
 // our minimal client API.
 pub use arti_client::DormantMode;
 
+/// Deadlines applied to network operations performed by a [`Client`].
+///
+/// Without these, a server that accepts a connection and then goes silent would leave the
+/// corresponding future pending forever. Tor circuits make this more likely than it is on
+/// the clearnet: a half-open circuit can persist for a long time without the peer's TCP
+/// stack ever delivering a reset.
+///
+/// Use [`Timeouts::default`] for values suitable for typical Tor circuit latency, or the
+/// `with_*` methods to tune them.
+#[derive(Clone, Copy, Debug)]
+pub struct Timeouts {
+    connect: Duration,
+    request: Duration,
+    response_body: Duration,
+    grpc_keepalive_interval: Duration,
+    grpc_keepalive_timeout: Duration,
+}
+
+impl Default for Timeouts {
+    fn default() -> Self {
+        Self {
+            connect: Duration::from_secs(30),
+            request: Duration::from_secs(60),
+            response_body: Duration::from_secs(60),
+            grpc_keepalive_interval: Duration::from_secs(30),
+            grpc_keepalive_timeout: Duration::from_secs(20),
+        }
+    }
+}
+
+impl Timeouts {
+    /// Sets the maximum time allowed to establish a usable connection to a server.
+    ///
+    /// This covers opening the Tor stream and, for HTTPS or gRPC-over-TLS endpoints,
+    /// completing the TLS handshake.
+    ///
+    /// The default is 30 seconds.
+    #[must_use]
+    pub fn with_connect(mut self, timeout: Duration) -> Self {
+        self.connect = timeout;
+        self
+    }
+
+    /// Sets the maximum time allowed to send a request and receive its response headers.
+    ///
+    /// This does not bound the time taken to receive a response body; see
+    /// [`Self::with_response_body`] for HTTP, and [`Self::with_grpc_keepalive`] for gRPC.
+    ///
+    /// The default is 60 seconds.
+    #[must_use]
+    pub fn with_request(mut self, timeout: Duration) -> Self {
+        self.request = timeout;
+        self
+    }
+
+    /// Sets the maximum time allowed to receive a complete HTTP response body.
+    ///
+    /// This is not applied to gRPC responses, because a gRPC response may be a
+    /// long-running stream (such as `GetBlockRange`) for which no fixed deadline is
+    /// appropriate. Use [`Self::with_grpc_keepalive`] to bound those instead.
+    ///
+    /// The default is 60 seconds.
+    #[must_use]
+    pub fn with_response_body(mut self, timeout: Duration) -> Self {
+        self.response_body = timeout;
+        self
+    }
+
+    /// Sets the HTTP/2 keep-alive parameters used for gRPC connections.
+    ///
+    /// A ping is sent every `interval` while a request is in flight, and the connection is
+    /// closed if no acknowledgement is received within `timeout`. This is what detects a
+    /// gRPC peer that stalls partway through streaming a response, which no request
+    /// deadline can bound without also capping legitimately long streams.
+    ///
+    /// The defaults are a 30 second interval and a 20 second timeout.
+    #[must_use]
+    pub fn with_grpc_keepalive(mut self, interval: Duration, timeout: Duration) -> Self {
+        self.grpc_keepalive_interval = interval;
+        self.grpc_keepalive_timeout = timeout;
+        self
+    }
+}
+
 /// A Tor client that exposes capabilities designed for Zcash wallets.
 #[derive(Clone)]
 pub struct Client {
     inner: TorClient<PreferredRuntime>,
+    timeouts: Timeouts,
 }
 
 impl Client {
-    /// Creates and bootstraps a Tor client.
+    /// Creates and bootstraps a Tor client with default [`Timeouts`].
     ///
     /// The client's persistent data and cache are both stored in the given directory.
     /// Preserving the contents of this directory will speed up subsequent calls to
@@ -37,6 +122,19 @@ impl Client {
     pub async fn create(
         tor_dir: &Path,
         with_permissions: impl FnOnce(&mut fs_mistrust::MistrustBuilder),
+    ) -> Result<Self, Error> {
+        Self::create_with_timeouts(tor_dir, with_permissions, Timeouts::default()).await
+    }
+
+    /// Creates and bootstraps a Tor client that applies the given [`Timeouts`] to its
+    /// network operations.
+    ///
+    /// This is otherwise identical to [`Client::create`]; see its documentation for
+    /// details of the other arguments.
+    pub async fn create_with_timeouts(
+        tor_dir: &Path,
+        with_permissions: impl FnOnce(&mut fs_mistrust::MistrustBuilder),
+        timeouts: Timeouts,
     ) -> Result<Self, Error> {
         let runtime = PreferredRuntime::current()?;
 
@@ -61,7 +159,7 @@ impl Client {
         let inner = client_builder.create_bootstrapped().await?;
         debug!("Tor bootstrapped");
 
-        Ok(Self { inner })
+        Ok(Self { inner, timeouts })
     }
 
     /// Ensures the Tor client is bootstrapped.
@@ -97,10 +195,13 @@ impl Client {
     ///
     /// (Connections made with clones of the returned `tor::Client` may share circuits
     /// with each other.)
+    ///
+    /// The returned handle uses the same [`Timeouts`] as this one.
     #[must_use]
     pub fn isolated_client(&self) -> Self {
         Self {
             inner: self.inner.isolated_client(),
+            timeouts: self.timeouts,
         }
     }
 
