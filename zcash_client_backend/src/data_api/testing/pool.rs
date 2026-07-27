@@ -93,6 +93,11 @@ use {
 };
 
 pub mod dsl;
+// Scaffolding for the paired "remove" commit: this copy commit lands the
+// consolidated locking test suite alongside the originals it will replace. The
+// glob re-export (`pub use locking::*;`) and the deletion of the originals are
+// deferred to the removal commit to avoid a name clash while both coexist.
+pub mod locking;
 use dsl::{TestDsl, TestNoteConfig};
 
 /// Trait that exposes the pool-specific types and operations necessary to run the
