@@ -17,7 +17,7 @@ use crate::{
     data_api::{
         self, Account as _, InputSource, OutputLockStore, WalletRead, WalletTest, WalletWrite,
         error::LockError,
-        testing::{AddressType, DataStoreFactory, TestCache, single_output_change_strategy},
+        testing::{DataStoreFactory, TestCache, single_output_change_strategy},
         wallet::{
             ConfirmationsPolicy, LockRequest, TargetHeight,
             input_selection::{GreedyInputSelector, LockFilter, LockedInputPolicy},
@@ -49,8 +49,6 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
 ) {
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
-    let fee_rule = StandardFeeRule::Zip317;
-
     // Add funds to the wallet in a single note
     let value = Zatoshis::const_from_u64(50000);
     let (h1, _, _) = st.add_a_single_note_checking_balance(value);
@@ -58,82 +56,30 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // Send some of the funds to another address, but don't mine the tx.
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(15000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let account_id = st.test_account().unwrap().id();
+    let amount_sent1 = Zatoshis::const_from_u64(15000);
+    st.spend_to(&to, amount_sent1);
 
-    // Executing the proposal should succeed
-    assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible, _>(account.usk(), OvkPolicy::Sender, &proposal,),
-        Ok(txids) if txids.len() == 1
-    );
-
-    // A second proposal fails because there are no usable notes
-    assert_matches!(
-        st.propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(2000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        Err(data_api::error::Error::InsufficientFunds {
-            available,
-            required
-        })
-        if available == Zatoshis::ZERO && required == Zatoshis::const_from_u64(12000)
-    );
+    // A second proposal fails because there are no usable notes: the sole note is
+    // committed to the unmined first transaction, so nothing is available even
+    // though the request plus the ZIP 317 fee would require `retry_required`.
+    let amount_retry = Zatoshis::const_from_u64(2000);
+    let zip317_fee = Zatoshis::const_from_u64(10000);
+    let nothing_available = Zatoshis::ZERO;
+    let retry_required = (amount_retry + zip317_fee).unwrap();
+    st.expect_insufficient_funds(&to, amount_retry, nothing_available, retry_required);
 
     // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
     // until just before the first transaction expires
-    for i in 1..42 {
-        st.generate_next_block(
-            &T::sk_to_fvk(&T::sk(&[i as u8; 32])),
-            AddressType::DefaultExternal,
-            value,
-        );
-    }
+    st.mine_decoy_blocks(1u8..42, value);
     st.scan_cached_blocks(h1 + 1, 40);
 
     // Second proposal still fails
-    assert_matches!(
-        st.propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(2000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        Err(data_api::error::Error::InsufficientFunds {
-            available,
-            required
-        })
-        if available == Zatoshis::ZERO && required == Zatoshis::const_from_u64(12000)
-    );
+    st.expect_insufficient_funds(&to, amount_retry, nothing_available, retry_required);
 
     // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
-    let (h43, _, _) = st.generate_next_block(
-        &T::sk_to_fvk(&T::sk(&[42; 32])),
-        AddressType::DefaultExternal,
-        value,
-    );
+    let expiring_block_seed = 42;
+    let h43 = st.mine_decoy_block(expiring_block_seed, value);
     st.scan_cached_blocks(h43, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -144,27 +90,8 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     );
 
     // Second spend should now succeed
-    let amount_sent2 = Zatoshis::const_from_u64(2000);
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            amount_sent2,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
-
-    let txid2 = st
-        .create_proposed_transactions::<Infallible, _, Infallible, _>(
-            account.usk(),
-            OvkPolicy::Sender,
-            &proposal,
-        )
-        .unwrap()[0];
+    let amount_sent2 = amount_retry;
+    let txid2 = st.spend_to(&to, amount_sent2);
 
     let (h, _) = st.generate_next_block_including(txid2);
     st.scan_cached_blocks(h, 1);
@@ -172,7 +99,7 @@ pub fn spend_fails_on_locked_notes<T: ShieldedPoolTester>(
     // TODO: send to an account so that we can check its balance.
     assert_eq!(
         st.get_total_balance(account_id),
-        (value - (amount_sent2 + Zatoshis::from_u64(10000).unwrap()).unwrap()).unwrap()
+        (value - (amount_sent2 + zip317_fee).unwrap()).unwrap()
     );
 }
 
@@ -188,8 +115,7 @@ pub fn explicit_note_locking<T: ShieldedPoolTester>(
     let value = Zatoshis::const_from_u64(50000);
     let (_, _, _) = st.add_a_single_note_checking_balance(value);
 
-    let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
+    let account_id = st.test_account().unwrap().id();
 
     // Find the received note and construct an OutputRef for it
     let notes = st.wallet().get_notes(T::SHIELDED_PROTOCOL).unwrap();
@@ -254,27 +180,8 @@ pub fn explicit_note_locking<T: ShieldedPoolTester>(
     );
 
     // Proposal should now succeed
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(15000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
-
-    assert_matches!(
-        st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-            account.usk(),
-            OvkPolicy::Sender,
-            &proposal,
-        ),
-        Ok(txids) if txids.len() == 1
-    );
+    let amount_sent = Zatoshis::const_from_u64(15000);
+    st.spend_to(&to, amount_sent);
 }
 
 /// Exercises the exact height boundary of the note-locking semantics.
