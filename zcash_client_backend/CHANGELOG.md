@@ -32,6 +32,11 @@ workspace.
   `tor::grpc::GrpcError`, and `tor::http::HttpError`.
 
 ### Fixed
+- The Tor HTTP and gRPC transports now reject a URL whose scheme is neither
+  `http` nor `https` (for example `ftp` or `ws`) with `tor::http::HttpError::NonHttpUrl`.
+  Previously such a URL was silently treated as plaintext HTTP, contradicting the
+  documented "only HTTP or HTTPS URLs are supported" contract. A URL with no scheme
+  at all was, and remains, rejected the same way.
 - `zcash_client_backend::data_api::wallet::redact_pczt_for_batch_signer` no
   longer removes existing spend authorization signatures. It previously
   stripped the signatures of the pre-signed protocol padding dummies while
