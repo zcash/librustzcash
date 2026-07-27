@@ -36,7 +36,7 @@ use shardtree::error::ShardTreeError;
 use ::pczt::roles::prover::Prover;
 use ::pczt::roles::updater::{AnchorUpdateError, SpendWitnessUpdateError, Updater};
 use zcash_client_backend::data_api::{
-    InputSource, WalletCommitmentTrees, WalletRead,
+    Account as _, InputSource, WalletCommitmentTrees, WalletRead,
     wallet::{
         TargetHeight,
         input_selection::{LockFilter, LockedInputPolicy},
@@ -46,7 +46,7 @@ use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_primitives::transaction::builder::cached_orchard_proving_key;
 use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
 
-use crate::build::sign_pczt;
+use crate::build::{AccountDerivation, sign_pczt};
 use crate::engine::{
     MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransferId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
@@ -254,7 +254,9 @@ where
 
 impl<'a, W, St> MigrationCrypto for WalletMigration<'a, W, St>
 where
-    W: WalletRead + InputSource,
+    // Reading the account record requires the wallet's two account-id types to agree; a wallet
+    // whose note source and account store disagree could not identify one account anyway.
+    W: WalletRead<AccountId = <W as InputSource>::AccountId> + InputSource,
     <W as InputSource>::AccountId: Copy,
     St: PoolMigrationRead,
 {
@@ -262,6 +264,21 @@ where
 
     fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
         Ok(FullViewingKey::from(self.usk.orchard()))
+    }
+
+    /// The account's derivation as the wallet records it, or `None` for an account the wallet
+    /// holds no ZIP 32 derivation for.
+    fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error> {
+        Ok(self
+            .wallet
+            .get_account(self.account)
+            .map_err(Error::WalletRead)?
+            .and_then(|account| {
+                account
+                    .source()
+                    .key_derivation()
+                    .map(AccountDerivation::from)
+            }))
     }
 
     fn resolve_wallet_note(&self, index: usize) -> Result<OrchardNote, Self::Error> {
@@ -679,7 +696,7 @@ mod tests {
     fn assert_commit_bounds<'a, P, W, St, R>()
     where
         P: Parameters + Clone,
-        W: WalletRead + InputSource + 'a,
+        W: WalletRead<AccountId = <W as InputSource>::AccountId> + InputSource + 'a,
         <W as InputSource>::AccountId: Copy,
         St: PoolMigrationWrite,
         R: RngCore + CryptoRng,

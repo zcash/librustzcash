@@ -7,7 +7,10 @@ use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
 use zcash_protocol::value::COIN;
 
-use super::test_util::{TARGET_HEIGHT, regtest_network, single_note_witness, spending_key};
+use super::test_util::{
+    TARGET_HEIGHT, account_derivation, assert_every_spend_is_identifiable, regtest_network,
+    single_note_witness, spending_key,
+};
 use super::{build_prep_tx, build_transfer_pczt, sign_pczt};
 use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
@@ -81,6 +84,7 @@ fn migration_pipeline_end_to_end() {
         &fvk,
         vec![note],
         tx.outputs(),
+        Some(&account_derivation(seed)),
         ChaCha8Rng::seed_from_u64(seed + 1),
     )
     .expect("the preparation transaction builds");
@@ -90,6 +94,12 @@ fn migration_pipeline_end_to_end() {
         "the preparation bundle is padded to exactly 16 actions"
     );
     assert_eq!(placed.len(), tx.outputs().len(), "every output is located");
+    // Every spend the preparation transaction needs authorized is identifiable to an external
+    // Signer: the real spend plus one wallet-controlled zero-value spend per change output.
+    assert_eq!(
+        assert_every_spend_is_identifiable(&prep_pczt),
+        1 + tx.outputs().len(),
+    );
 
     // The REAL constructed preparation transaction pays exactly the canonical ZIP-317 fee of its
     // padded shape: the value its spends bring in, minus the value its outputs (including change
@@ -136,9 +146,12 @@ fn migration_pipeline_end_to_end() {
         &fvk,
         fnote,
         crossing,
+        Some(&account_derivation(seed)),
         ChaCha8Rng::seed_from_u64(seed + 3),
     )
     .expect("the transfer builds");
+    // Likewise for the transfer's single real Orchard spend.
+    assert_eq!(assert_every_spend_is_identifiable(&transfer_pczt), 1);
 
     // The REAL constructed transfer pays exactly the canonical fee of the 2-Orchard +
     // 1-Ironwood-action transfer

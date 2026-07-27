@@ -7349,6 +7349,7 @@ dependencies = [
  "zcash_pool_migration_memory",
  "zcash_primitives",
  "zcash_protocol",
+ "zip32",
 ]
 
 [[package]]
@@ -7362,6 +7363,7 @@ dependencies = [
  "rand_core 0.6.4",
  "zcash_pool_migration",
  "zcash_protocol",
+ "zip32",
 ]
 
 [[package]]

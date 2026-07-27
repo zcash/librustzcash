@@ -78,6 +78,7 @@ mod tests {
             fvk,
             vec![note],
             &outputs,
+            None,
             rng,
         )
         .expect("the preparation transaction builds");

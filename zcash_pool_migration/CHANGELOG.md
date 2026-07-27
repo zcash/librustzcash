@@ -7,6 +7,29 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_pool_migration::build::AccountDerivation`, the ZIP 32 account whose
+  spending key authorizes a migration's Orchard spends. Behind the `orchard`
+  feature; convertible from `zcash_client_backend`'s `Zip32Derivation` behind
+  the `wallet` feature.
+
+### Changed
+- `zcash_pool_migration::build::{build_prep_tx, build_transfer_pczt}` take an
+  additional `Option<&AccountDerivation>` argument, before the RNG. When it is
+  supplied, every spend the built transaction still needs a signature for is
+  stamped with the account's Orchard ZIP 32 key path, so an external Signer can
+  identify those spends as the account's; previously they carried no derivation
+  and such a Signer skipped them, leaving transactions that could not be
+  extracted. Pass the account's derivation whenever the wallet knows it; pass
+  `None` only for an account with no known derivation, whose transactions then
+  only an in-process signer (which matches by key) can authorize.
+- `zcash_pool_migration::engine::MigrationCrypto` has a new required method,
+  `account_derivation`, supplying the above to the builders. Implement it by
+  returning the account's derivation as the wallet records it.
+- `zcash_pool_migration::wallet::WalletMigration` implements `MigrationCrypto`
+  only where the wallet's `WalletRead::AccountId` and `InputSource::AccountId`
+  are the same type, which is required to read the account's derivation.
+
 ## [0.1.0-rc.3] - 2026-07-26
 
 ### Changed

@@ -56,6 +56,8 @@ use zcash_protocol::value::{BalanceError, Zatoshis};
 use zcash_primitives::transaction::fees::FeeRule as _;
 use zcash_primitives::transaction::fees::{transparent, zip317};
 
+#[cfg(feature = "orchard")]
+use crate::build::AccountDerivation;
 use crate::denomination::{DenominationPlan, plan_denominations};
 use crate::preparation::{PrepError, PrepInput, PreparationPlan, plan_preparation};
 use crate::scheduling::{self, Schedule};
@@ -1286,6 +1288,16 @@ pub trait MigrationCrypto {
     /// The account's Orchard full viewing key.
     fn orchard_fvk(&self) -> Result<orchard::keys::FullViewingKey, Self::Error>;
 
+    /// The ZIP 32 account the migration's notes belong to, or `None` if the account has no known
+    /// derivation (an imported viewing key, say).
+    ///
+    /// The builders stamp this onto every spend a migration transaction still needs a signature
+    /// for, which is how an EXTERNAL Signer recognizes those spends as the account's. A backend
+    /// that returns `None` while signing is delegated (see [`Signing::External`]) produces
+    /// transactions no derivation-matching Signer can authorize, so return the derivation whenever
+    /// the wallet knows it, even if it currently signs in process.
+    fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error>;
+
     /// The plaintext of the spendable wallet note at `index` (into
     /// `spendable_orchard_note_values`).
     fn resolve_wallet_note(&self, index: usize) -> Result<orchard::note::Note, Self::Error>;
@@ -1919,6 +1931,9 @@ where
     // outside the migration), the remaining balance must be re-planned rather than this part
     // rebuilt, so a different note of coincidentally equal value is deliberately NOT substituted.
     let fvk = backend.orchard_fvk().map_err(RebuildError::Backend)?;
+    let account_derivation = backend
+        .account_derivation()
+        .map_err(RebuildError::Backend)?;
     let spendable_values = backend
         .spendable_orchard_note_values()
         .map_err(RebuildError::Backend)?;
@@ -1961,6 +1976,7 @@ where
         &fvk,
         note,
         crossing_value,
+        account_derivation.as_ref(),
         &mut *rng,
     )
     .map_err(RebuildError::Build)?;
@@ -2322,6 +2338,9 @@ struct Committer<'a, P, B, R> {
     rng: &'a mut R,
     signing: Signing,
     fvk: orchard::keys::FullViewingKey,
+    /// The ZIP 32 account every built transaction's spends are stamped with, so an external Signer
+    /// can identify them. Resolved once in [`Committer::start`], alongside `fvk`.
+    account_derivation: Option<AccountDerivation>,
     transactions: Vec<MigrationTransaction>,
     unsigned: Vec<UnsignedMigrationTx>,
     next_id: u32,
@@ -2366,6 +2385,7 @@ where
         }
 
         let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
+        let account_derivation = backend.account_derivation().map_err(CommitError::Backend)?;
 
         Ok(Self {
             params,
@@ -2374,6 +2394,7 @@ where
             rng,
             signing,
             fvk,
+            account_derivation,
             transactions: Vec::new(),
             unsigned: Vec::new(),
             next_id: 0,
@@ -2480,9 +2501,10 @@ where
                         ))
                     })?;
                 let expiry_height = crate::scheduling::expiry_height(scheduled_height);
-                // The field accesses `self.params`/`self.fvk`/`self.rng` are DISJOINT, so the
-                // borrow checker accepts them together here — as long as no whole-`self` method
-                // call (like `next_id`/`resolve_prep_spends` above) is interleaved.
+                // The field accesses `self.params`/`self.fvk`/`self.account_derivation`/`self.rng`
+                // are DISJOINT, so the borrow checker accepts them together here — as long as no
+                // whole-`self` method call (like `next_id`/`resolve_prep_spends` above) is
+                // interleaved.
                 let (pczt, placed) = build_prep_tx(
                     self.params,
                     u32::from(self.target_height),
@@ -2490,6 +2512,7 @@ where
                     &self.fvk,
                     spends,
                     prep_tx.outputs(),
+                    self.account_derivation.as_ref(),
                     &mut *self.rng,
                 )
                 .map_err(CommitError::Build)?;
@@ -2656,6 +2679,7 @@ where
                 &self.fvk,
                 note,
                 crossing_value,
+                self.account_derivation.as_ref(),
                 &mut *self.rng,
             )
             .map_err(CommitError::Build)?;
@@ -3134,7 +3158,8 @@ mod commit_tests {
 
     use crate::build::sign_pczt;
     use crate::build::test_util::{
-        TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
+        TARGET_HEIGHT, account_derivation, assert_every_spend_is_identifiable, regtest_network,
+        single_note_witness, spend_signability, spending_key,
     };
     use crate::denomination::{
         DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
@@ -3160,6 +3185,7 @@ mod commit_tests {
         wallet_notes: Vec<orchard::note::Note>,
         fvk: FullViewingKey,
         ask: SpendAuthorizingKey,
+        account_derivation: Option<AccountDerivation>,
         stored: Option<MigrationState>,
         tip: BlockHeight,
         sched_params: crate::scheduling::SchedulingParams,
@@ -3179,6 +3205,7 @@ mod commit_tests {
                 wallet_notes,
                 fvk,
                 ask: SpendAuthorizingKey::from(&sk),
+                account_derivation: Some(account_derivation(seed)),
                 stored: None,
                 tip: BlockHeight::from_u32(2_000_000),
                 sched_params: crate::scheduling::SchedulingParams::ZIP_318,
@@ -3239,6 +3266,10 @@ mod commit_tests {
 
         fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
             Ok(self.fvk.clone())
+        }
+
+        fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error> {
+            Ok(self.account_derivation.clone())
         }
 
         fn resolve_wallet_note(&self, index: usize) -> Result<orchard::note::Note, Self::Error> {
@@ -3387,6 +3418,79 @@ mod commit_tests {
             }
         }
         assert!(backend.get_migration().unwrap().is_some());
+    }
+
+    /// Every transaction a commit hands to an EXTERNAL signer is identifiable to it: each spend
+    /// still awaiting a signature carries the account's ZIP 32 derivation, and the only actions
+    /// without it are the padding dummies the IO Finalizer already signed. A signer that matches
+    /// spends by derivation path skips what it cannot recognize, so an unstamped spend is one no
+    /// signature ever arrives for and the transaction can never be extracted.
+    ///
+    /// Covers the whole commit path — preparation layers and transfers alike — and its converse:
+    /// a backend that reports no derivation produces transactions only an in-process signer, which
+    /// matches by key, can authorize.
+    #[test]
+    fn externally_signed_migrations_identify_every_spend_to_the_signer() {
+        let seed = 77u64;
+        let params = regtest_network(true);
+        // A balance large enough to need preparation, so both builders are exercised.
+        let mut backend = CommitMock::new(seed, &[400 * COIN]);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        assert!(
+            plan.preparation().transaction_count() > 0,
+            "the balance needs preparation, so preparation transactions are built",
+        );
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let (state, unsigned) = build_preparation_unsigned(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration for external signing");
+        assert!(
+            !unsigned.is_empty(),
+            "there is work for the external signer"
+        );
+
+        let mut spends_awaiting_signature = 0;
+        for tx in &state.transactions {
+            let pczt = pczt::Pczt::parse(&tx.pczt).expect("a stored PCZT parses");
+            spends_awaiting_signature += assert_every_spend_is_identifiable(&pczt);
+        }
+        assert!(
+            spends_awaiting_signature > 0,
+            "the external signer has spends to authorize",
+        );
+
+        // Without a known derivation nothing is stamped, so the same spends are left unidentifiable.
+        let mut anonymous = CommitMock::new(seed, &[400 * COIN]);
+        anonymous.account_derivation = None;
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let (anonymous_state, _) = build_preparation_unsigned(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut anonymous,
+            &plan,
+            &mut rng,
+        )
+        .expect("commits the migration for external signing");
+        let unidentifiable = anonymous_state
+            .transactions
+            .iter()
+            .map(|tx| {
+                let pczt = pczt::Pczt::parse(&tx.pczt).expect("a stored PCZT parses");
+                spend_signability(&pczt).1
+            })
+            .sum::<usize>();
+        assert_eq!(
+            unidentifiable, spends_awaiting_signature,
+            "a backend with no derivation leaves every awaiting spend unidentifiable",
+        );
     }
 
     /// An expired transfer is rebuilt in place: rescheduled forward with a fresh boundary anchor and
@@ -3671,6 +3775,10 @@ mod commit_tests {
                 .all(|a| a.spend().spend_auth_sig().is_none()),
             "the account's spend authorization was not attached in-process"
         );
+        // Awaiting an external signer is only useful if that signer can RECOGNIZE the spend as
+        // the account's: the rebuild stamps the account's ZIP 32 derivation on the one spend it
+        // leaves unsigned.
+        assert_eq!(assert_every_spend_is_identifiable(&parsed), 1);
         assert_eq!(
             real_spend_nullifier(&rebuilt.pczt),
             real_spend_nullifier(&old.pczt),
@@ -3825,6 +3933,7 @@ mod commit_tests {
             wallet_notes: vec![single_note_witness(&fvk, whale, seed).0],
             fvk,
             ask: SpendAuthorizingKey::from(&sk),
+            account_derivation: Some(account_derivation(seed)),
             stored: None,
             tip: BlockHeight::from_u32(2_000_000),
             sched_params: crate::scheduling::SchedulingParams::ZIP_318,

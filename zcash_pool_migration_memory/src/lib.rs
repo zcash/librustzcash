@@ -34,7 +34,7 @@ use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::Zatoshis;
 
-use zcash_pool_migration::build::sign_pczt;
+use zcash_pool_migration::build::{AccountDerivation, sign_pczt};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTransferId,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
@@ -62,6 +62,19 @@ pub fn spending_key(seed: u64) -> SpendingKey {
             return sk;
         }
     }
+}
+
+/// The ZIP 32 account derivation a wallet seeded with `seed` would report, matching the account
+/// [`spending_key`] derives. The seed fingerprint is a stand-in, not a real ZIP 32 fingerprint of
+/// the test seed: nothing downstream re-derives keys from it, and an external Signer only needs the
+/// derivation to be a stable identifier for the account.
+pub fn account_derivation(seed: u64) -> AccountDerivation {
+    let mut seed_fingerprint = [0u8; 32];
+    seed_fingerprint[..8].copy_from_slice(&seed.to_le_bytes());
+    AccountDerivation::new(
+        zip32::fingerprint::SeedFingerprint::from_bytes(seed_fingerprint),
+        zip32::AccountId::ZERO,
+    )
 }
 
 /// A regtest network with the pre-NU6.3 upgrades active, and NU6.3 active only when requested.
@@ -335,6 +348,9 @@ pub struct CommitMock {
     pub fvk: FullViewingKey,
     /// The account's Orchard spend-authorizing key, used to sign the migration PCZTs.
     pub ask: SpendAuthorizingKey,
+    /// The ZIP 32 account the notes belong to, as a seeded wallet would report it. `None` models a
+    /// wallet that knows no derivation for the account (an imported viewing key).
+    pub account_derivation: Option<AccountDerivation>,
     /// The in-memory migration state (`None` until a migration is committed).
     pub stored: Option<MigrationState>,
     /// The scheduling parameters this backend reports to the engine.
@@ -355,9 +371,17 @@ impl CommitMock {
             wallet_notes,
             fvk,
             ask: SpendAuthorizingKey::from(&sk),
+            account_derivation: Some(account_derivation(seed)),
             stored: None,
             sched_params: SchedulingParams::ZIP_318,
         }
+    }
+
+    /// Models a wallet that knows no ZIP 32 derivation for the account, so the migration's spends
+    /// carry no derivation metadata and only an in-process signer can authorize them.
+    pub fn without_account_derivation(mut self) -> Self {
+        self.account_derivation = None;
+        self
     }
 
     /// Overrides the scheduling parameters this backend reports (the default is
@@ -420,6 +444,10 @@ impl MigrationCrypto for CommitMock {
 
     fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
         Ok(self.fvk.clone())
+    }
+
+    fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error> {
+        Ok(self.account_derivation.clone())
     }
 
     fn resolve_wallet_note(&self, index: usize) -> Result<Note, Self::Error> {

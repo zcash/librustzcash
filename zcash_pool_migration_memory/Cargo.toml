@@ -24,6 +24,8 @@ zcash_pool_migration = { path = "../zcash_pool_migration", features = [
 
 orchard = { workspace = true }
 pczt = { workspace = true }
+# Constructs the `AccountDerivation` the crypto mock reports.
+zip32 = { workspace = true }
 rand_chacha.workspace = true
 rand_core.workspace = true
 incrementalmerkletree.workspace = true

@@ -32,6 +32,7 @@ proptest = { workspace = true, optional = true }
 
 # Enabled by the `orchard` feature.
 orchard = { workspace = true, optional = true }
+zip32 = { workspace = true, optional = true }
 pczt = { workspace = true, optional = true, features = [
     "io-finalizer",
     "orchard",
@@ -76,7 +77,7 @@ zcash_pool_migration_memory = { path = "../zcash_pool_migration_memory" }
 ## the cryptographic ingredients a wallet supplies into an unproven migration PCZT. Requires the
 ## Orchard pool; pulls in `orchard` and `pczt`. The caller supplies the RNG, so no `rand` dependency
 ## is added.
-orchard = ["dep:orchard", "dep:pczt"]
+orchard = ["dep:orchard", "dep:pczt", "dep:zip32"]
 ## Builds the wallet-backed adapter (`wallet` module): a `WalletMigration` that implements the
 ## engine's backend/crypto/store traits over a `zcash_client_backend` wallet, so any such wallet is a
 ## migration wallet with no hand-wired crypto. Implies `orchard`.
