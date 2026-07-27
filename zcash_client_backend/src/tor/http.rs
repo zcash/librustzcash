@@ -620,6 +620,15 @@ mod tests {
             sent_len: usize,
             content_length: usize,
         },
+        /// Send response headers, then dribble the body one byte at a time, pausing
+        /// `chunk_gap` between bytes, so the body never completes within the deadline
+        /// *despite continuous progress*. Distinct from `StallDuringBody`, which goes
+        /// idle: this shows the response-body deadline is a total-duration cap, not an
+        /// inter-byte idle cap (the job the gRPC keep-alive does instead).
+        TrickleBody {
+            chunk_gap: Duration,
+            content_length: usize,
+        },
         /// Send a complete, well-formed response. The control: a responsive peer must not
         /// be timed out.
         Complete { body: Vec<u8> },
@@ -664,6 +673,19 @@ mod tests {
                     .await
                     .expect("write partial body");
                 peer.flush().await.expect("flush");
+                hold_open(peer).await;
+            }
+            Behavior::TrickleBody {
+                chunk_gap,
+                content_length,
+            } => {
+                let head = ResponseHead::ok(content_length).render();
+                peer.write_all(head.as_bytes()).await.expect("write head");
+                for _ in 0..content_length {
+                    peer.write_all(b"a").await.expect("write body byte");
+                    peer.flush().await.expect("flush");
+                    tokio::time::sleep(chunk_gap).await;
+                }
                 hold_open(peer).await;
             }
             Behavior::Complete { body } => {
@@ -762,6 +784,56 @@ mod tests {
             timeout_phase(&res),
             Some(TimeoutPhase::Connect),
             "expected a connect timeout, got {res:?}",
+        );
+    }
+
+    /// A body that arrives continuously but too slowly must still time out as
+    /// `ResponseBody`: the deadline caps total duration, not idle time.
+    #[tokio::test(start_paused = true)]
+    async fn slowly_trickled_body_still_times_out_as_response_body() {
+        // A byte every 2s against a 5s budget: progress never stops, yet the 1000-byte
+        // body cannot complete in time.
+        let res = run_get(Behavior::TrickleBody {
+            chunk_gap: Duration::from_secs(2),
+            content_length: 1_000,
+        })
+        .await;
+        assert_eq!(
+            timeout_phase(&res),
+            Some(TimeoutPhase::ResponseBody),
+            "expected a response-body timeout, got {res:?}",
+        );
+    }
+
+    /// A genuine TLS failure (here a plaintext server answering a TLS `ClientHello`, a
+    /// realistic misconfiguration) must be reported as [`HttpError::Tls`] and must not be
+    /// masked by the `Connect` deadline: a fast, specific failure beats a slow, generic
+    /// timeout.
+    #[tokio::test(start_paused = true)]
+    async fn tls_protocol_error_is_reported_as_tls_not_timeout() {
+        let (client, mut peer) = tokio::io::duplex(DUPLEX_BUF_SIZE);
+        tokio::spawn(async move {
+            // The first byte (0x48, 'H') is not a valid TLS content type, so rustls
+            // rejects the record immediately rather than waiting for more data.
+            peer.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+                .await
+                .expect("write");
+            peer.flush().await.expect("flush");
+            // Stay open so the failure is a protocol error, not an EOF.
+            hold_open(peer).await;
+        });
+        let res = with_timeout(CONNECT_TIMEOUT, TimeoutPhase::Connect, async {
+            tls_handshake(client, "example.com".to_string()).await
+        })
+        .await;
+        assert!(
+            matches!(res, Err(Error::Http(HttpError::Tls(_)))),
+            "expected a TLS error, got {res:?}",
+        );
+        assert_eq!(
+            timeout_phase(&res),
+            None,
+            "a real TLS error must not be reported as a timeout, got {res:?}",
         );
     }
 
