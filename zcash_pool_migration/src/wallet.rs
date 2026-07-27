@@ -860,7 +860,7 @@ where
     }
 
     /// Lock the account's notes that this proven transaction spends, under a token derived from
-    /// those very notes ([`migration_lock_owner`]), until `lock_expiry_height`.
+    /// those very notes, until `lock_expiry_height`.
     ///
     /// Locking is all-or-nothing at the storage layer, and re-locking under the same owner is
     /// idempotent, so re-proving a transaction (after a crash, or a rebuild that reuses the same
@@ -869,7 +869,7 @@ where
     /// A note already locked by a DIFFERENT owner means another flow has committed to spending it,
     /// most likely a user payment created while this transaction was being proved. That is a real
     /// conflict this transaction cannot win: the notes it spends are fixed by its signature, so
-    /// the failure is surfaced as [`WalletProveError::InputsLocked`] and the transaction stays
+    /// the failure is surfaced as [`WalletProveError::Lock`] and the transaction stays
     /// `Signed`. The proof just computed is discarded, which is the correct trade: the user's
     /// payment takes precedence, and a proof over a note the wallet has promised elsewhere is
     /// worth nothing.
