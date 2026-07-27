@@ -543,7 +543,7 @@ mod tests {
     use std::{future::pending, time::Duration};
 
     use http_body_util::{BodyExt, Empty};
-    use hyper::{Uri, body::Bytes};
+    use hyper::{StatusCode, Uri, body::Bytes};
     use proptest::prelude::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
@@ -559,16 +559,67 @@ mod tests {
     const RESPONSE_BODY_TIMEOUT: Duration = Duration::from_secs(5);
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+    /// Backing buffer for the in-memory duplex. Large enough that neither side's writes
+    /// block on the other draining, so the tests never deadlock on buffer pressure.
+    const DUPLEX_BUF_SIZE: usize = 64 * 1024;
+
+    /// Per-read buffer size in [`read_request_head`]. The loop accumulates across reads, so
+    /// this bounds only how much is read at once, not how much the peer may send.
+    const CHUNK_SIZE: usize = 1024;
+
+    /// Extracts the phase from a `Timeout` error, or `None` for any other result. Keeps the
+    /// assertions from spelling out `Err(Error::Http(HttpError::Timeout(_)))` each time.
+    fn timeout_phase<T>(res: &Result<T, Error>) -> Option<TimeoutPhase> {
+        match res {
+            Err(Error::Http(HttpError::Timeout(phase))) => Some(*phase),
+            _ => None,
+        }
+    }
+
+    /// A minimal, typed HTTP/1.1 response head for the fake server. Typed rather than a
+    /// bare format string so new cases (other status codes or versions, extra headers) are
+    /// a field change, not a new string to get subtly wrong.
+    struct ResponseHead {
+        version: &'static str,
+        status: StatusCode,
+        content_length: usize,
+    }
+
+    impl ResponseHead {
+        /// A `200 OK` head declaring a body of `content_length` bytes.
+        fn ok(content_length: usize) -> Self {
+            Self {
+                version: "HTTP/1.1",
+                status: StatusCode::OK,
+                content_length,
+            }
+        }
+
+        /// Renders the head, including the terminating blank line.
+        fn render(&self) -> String {
+            format!(
+                "{} {} {}\r\nContent-Length: {}\r\n\r\n",
+                self.version,
+                self.status.as_u16(),
+                self.status.canonical_reason().unwrap_or(""),
+                self.content_length,
+            )
+        }
+    }
+
     /// How the fake server behaves once a client has connected. Each stalling variant
     /// models a half-open Tor circuit: the peer accepted the stream, but no further bytes
     /// and no close will ever arrive.
     enum Behavior {
         /// Read the request, then go silent without sending any response.
         StallBeforeHead,
-        /// Send response headers promising `content_length` body bytes, send `sent` of
-        /// them (`sent < content_length`), then go silent. Models a circuit that trickles
-        /// and then half-opens partway through the body.
-        StallDuringBody { sent: usize, content_length: usize },
+        /// Send response headers promising `content_length` body bytes, send `sent_len` of
+        /// them (`sent_len < content_length`), then go silent. Models a circuit that
+        /// trickles and then half-opens partway through the body.
+        StallDuringBody {
+            sent_len: usize,
+            content_length: usize,
+        },
         /// Send a complete, well-formed response. The control: a responsive peer must not
         /// be timed out.
         Complete { body: Vec<u8> },
@@ -585,7 +636,7 @@ mod tests {
     /// GET requests issued here carry no body, so this reads the whole request.
     async fn read_request_head(peer: &mut DuplexStream) {
         let mut buf = Vec::new();
-        let mut chunk = [0u8; 256];
+        let mut chunk = [0u8; CHUNK_SIZE];
         loop {
             let n = peer.read(&mut chunk).await.expect("read from client");
             if n == 0 {
@@ -604,19 +655,19 @@ mod tests {
         match behavior {
             Behavior::StallBeforeHead => hold_open(peer).await,
             Behavior::StallDuringBody {
-                sent,
+                sent_len,
                 content_length,
             } => {
-                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {content_length}\r\n\r\n");
+                let head = ResponseHead::ok(content_length).render();
                 peer.write_all(head.as_bytes()).await.expect("write head");
-                peer.write_all(&vec![b'a'; sent])
+                peer.write_all(&vec![b'a'; sent_len])
                     .await
                     .expect("write partial body");
                 peer.flush().await.expect("flush");
                 hold_open(peer).await;
             }
             Behavior::Complete { body } => {
-                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
+                let head = ResponseHead::ok(body.len()).render();
                 peer.write_all(head.as_bytes()).await.expect("write head");
                 peer.write_all(&body).await.expect("write body");
                 peer.flush().await.expect("flush");
@@ -629,7 +680,7 @@ mod tests {
     /// `Request` and `ResponseBody` deadlines exactly as [`Client::http_request`] does,
     /// and returns the collected body.
     async fn run_get(behavior: Behavior) -> Result<Vec<u8>, Error> {
-        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (client, peer) = tokio::io::duplex(DUPLEX_BUF_SIZE);
         tokio::spawn(serve(peer, behavior));
 
         let response = with_timeout(
@@ -660,11 +711,9 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn stall_before_head_times_out_as_request() {
         let res = run_get(Behavior::StallBeforeHead).await;
-        assert!(
-            matches!(
-                res,
-                Err(Error::Http(HttpError::Timeout(TimeoutPhase::Request)))
-            ),
+        assert_eq!(
+            timeout_phase(&res),
+            Some(TimeoutPhase::Request),
             "expected a request timeout, got {res:?}",
         );
     }
@@ -675,15 +724,13 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn stall_during_body_times_out_as_response_body() {
         let res = run_get(Behavior::StallDuringBody {
-            sent: 8,
+            sent_len: 8,
             content_length: 1024,
         })
         .await;
-        assert!(
-            matches!(
-                res,
-                Err(Error::Http(HttpError::Timeout(TimeoutPhase::ResponseBody)))
-            ),
+        assert_eq!(
+            timeout_phase(&res),
+            Some(TimeoutPhase::ResponseBody),
             "expected a response-body timeout, got {res:?}",
         );
     }
@@ -704,18 +751,16 @@ mod tests {
     /// never arrives.
     #[tokio::test(start_paused = true)]
     async fn tls_handshake_stall_times_out_as_connect() {
-        let (client, peer) = tokio::io::duplex(16 * 1024);
+        let (client, peer) = tokio::io::duplex(DUPLEX_BUF_SIZE);
         let res = with_timeout(CONNECT_TIMEOUT, TimeoutPhase::Connect, async {
             tls_handshake(client, "example.com".to_string()).await
         })
         .await;
         // Keep the peer alive across the handshake so it stalls rather than EOFs.
         drop(peer);
-        assert!(
-            matches!(
-                res,
-                Err(Error::Http(HttpError::Timeout(TimeoutPhase::Connect)))
-            ),
+        assert_eq!(
+            timeout_phase(&res),
+            Some(TimeoutPhase::Connect),
             "expected a connect timeout, got {res:?}",
         );
     }
@@ -723,8 +768,13 @@ mod tests {
     #[derive(Clone, Debug)]
     enum Scenario {
         StallHead,
-        StallBody { sent: usize, content_length: usize },
-        Complete { body: Vec<u8> },
+        StallBody {
+            sent_len: usize,
+            content_length: usize,
+        },
+        Complete {
+            body: Vec<u8>,
+        },
     }
 
     #[derive(Debug)]
@@ -746,10 +796,10 @@ mod tests {
             match self {
                 Scenario::StallHead => Behavior::StallBeforeHead,
                 Scenario::StallBody {
-                    sent,
+                    sent_len,
                     content_length,
                 } => Behavior::StallDuringBody {
-                    sent,
+                    sent_len,
                     content_length,
                 },
                 Scenario::Complete { body } => Behavior::Complete { body },
@@ -758,14 +808,14 @@ mod tests {
     }
 
     /// Strategy over adversarial and well-behaved servers. `StallBody` always promises
-    /// more than it sends (`content_length = sent + remaining`, `remaining >= 1`), so the
-    /// body never completes.
+    /// more than it sends (`content_length = sent_len + remaining`, `remaining >= 1`), so
+    /// the body never completes.
     fn arb_scenario() -> impl Strategy<Value = Scenario> {
         prop_oneof![
             Just(Scenario::StallHead),
-            (0usize..64, 1usize..2048).prop_map(|(sent, remaining)| Scenario::StallBody {
-                sent,
-                content_length: sent + remaining,
+            (0usize..64, 1usize..2048).prop_map(|(sent_len, remaining)| Scenario::StallBody {
+                sent_len,
+                content_length: sent_len + remaining,
             }),
             proptest::collection::vec(any::<u8>(), 0..512)
                 .prop_map(|body| Scenario::Complete { body }),
@@ -790,9 +840,12 @@ mod tests {
                 let expected = scenario.expected();
                 let res = run_get(scenario.into_behavior()).await;
                 match expected {
-                    Expected::Timeout(phase) => prop_assert!(
-                        matches!(res, Err(Error::Http(HttpError::Timeout(p))) if p == phase),
-                        "expected Timeout({phase:?}), got {res:?}",
+                    Expected::Timeout(phase) => prop_assert_eq!(
+                        timeout_phase(&res),
+                        Some(phase),
+                        "expected Timeout({:?}), got {:?}",
+                        phase,
+                        res,
                     ),
                     Expected::Body(body) => prop_assert!(
                         matches!(res, Ok(ref got) if *got == body),
