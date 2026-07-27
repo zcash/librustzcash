@@ -129,7 +129,7 @@ use self::{
 use crate::{
     AccountRef, AccountUuid, AddressRef, PRUNING_DEPTH, SqlTransaction, TransferType, TxRef,
     WalletCommitmentTrees, WalletDb,
-    error::{BackendErrorSource, LockError, SqliteClientError},
+    error::{BackendError, LockError, SqliteClientError},
     util::Clock,
     wallet::{
         commitment_tree::{SqliteShardStore, get_max_checkpointed_height},
@@ -607,10 +607,10 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         // `RewindError` is `#[non_exhaustive]`, so a variant introduced by a future
         // `zcash_client_backend` release has no specific handling here until this crate is
         // updated. Fail the account addition rather than proceeding on an unknown outcome.
-        Err(_) => {
-            return Err(SqliteClientError::UnrecognizedBackendError(
-                BackendErrorSource::Rewind,
-            ));
+        Err(e) => {
+            return Err(SqliteClientError::BackendError(BackendError::Rewind(
+                Box::new(e),
+            )));
         }
     }
 

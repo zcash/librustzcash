@@ -15,6 +15,7 @@ use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
+use zcash_client_backend::data_api::error::RewindError;
 use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
 use zcash_client_backend::wallet::OutputRef;
@@ -253,34 +254,35 @@ pub enum SqliteClientError {
     FeeRuleError(Box<dyn error::Error + Send + Sync>),
 
     /// A `zcash_client_backend` error value carried a variant that this crate has no
-    /// translation for; the wrapped value identifies which error type it came from.
+    /// translation for; the wrapped value carries the error itself.
     ///
     /// Those error types are `#[non_exhaustive]`, so a variant introduced by a future
     /// `zcash_client_backend` release can reach this crate before there is a specific
     /// [`SqliteClientError`] counterpart for it. This error is therefore unreachable with
     /// the `zcash_client_backend` release this crate is built against; encountering it
     /// means this crate needs updating to translate the new variant.
-    UnrecognizedBackendError(BackendErrorSource),
+    BackendError(BackendError),
 }
 
-/// The `zcash_client_backend` error type whose unrecognized variant produced a
-/// [`SqliteClientError::UnrecognizedBackendError`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A `zcash_client_backend` error carrying a variant that this crate has no translation for,
+/// as reported by [`SqliteClientError::BackendError`].
+///
+/// Each variant names the operation whose error type is wrapped. The errors are boxed because
+/// both are generic over [`SqliteClientError`] itself.
+#[derive(Debug)]
 #[non_exhaustive]
-pub enum BackendErrorSource {
-    /// `zcash_client_backend::data_api::ll::wallet::PutBlocksError`, reported while inserting
-    /// scanned blocks into the wallet.
-    PutBlocks,
-    /// `zcash_client_backend::data_api::error::RewindError`, reported while rewinding the
-    /// wallet to a previous chain state.
-    Rewind,
+pub enum BackendError {
+    /// An error reported while inserting scanned blocks into the wallet.
+    PutBlocks(Box<PutBlocksError<SqliteClientError, commitment_tree::Error>>),
+    /// An error reported while rewinding the wallet to a previous chain state.
+    Rewind(Box<RewindError<AccountUuid, SqliteClientError>>),
 }
 
-impl fmt::Display for BackendErrorSource {
+impl fmt::Display for BackendError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            BackendErrorSource::PutBlocks => write!(f, "block insertion"),
-            BackendErrorSource::Rewind => write!(f, "rewind to a previous chain state"),
+            BackendError::PutBlocks(_) => write!(f, "block insertion"),
+            BackendError::Rewind(_) => write!(f, "rewind to a previous chain state"),
         }
     }
 }
@@ -477,9 +479,9 @@ impl fmt::Display for SqliteClientError {
             }
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::FeeRuleError(e) => write!(f, "Fee rule error: {e}"),
-            SqliteClientError::UnrecognizedBackendError(source) => write!(
+            SqliteClientError::BackendError(e) => write!(
                 f,
-                "The zcash_client_backend error reported for {source} is not one this version of \
+                "The zcash_client_backend error reported for {e} is not one this version of \
                  zcash_client_sqlite recognizes; this crate must be updated to handle it."
             ),
         }
@@ -599,7 +601,7 @@ impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteC
             // `PutBlocksError` is `#[non_exhaustive]`, so a variant introduced by a future
             // `zcash_client_backend` release reaches this conversion with no counterpart
             // here until this crate is updated to map it. Report it rather than panicking.
-            _ => SqliteClientError::UnrecognizedBackendError(BackendErrorSource::PutBlocks),
+            other => SqliteClientError::BackendError(BackendError::PutBlocks(Box::new(other))),
         }
     }
 }
