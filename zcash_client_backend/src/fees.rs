@@ -14,7 +14,7 @@ use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    value::{BalanceError, Zatoshis},
+    value::{BalanceError, COIN, Zatoshis},
 };
 
 use crate::data_api::{InputSource, wallet::TargetHeight};
@@ -436,6 +436,14 @@ impl SplitPolicy {
     /// [`MARGINAL_FEE`]: zcash_primitives::transaction::fees::zip317::MARGINAL_FEE
     pub(crate) const MIN_NOTE_VALUE: Zatoshis = Zatoshis::const_from_u64(500000);
 
+    /// The number of spendable notes that [`SplitPolicy::standard`] attempts to keep available in
+    /// an account by splitting change.
+    pub const STANDARD_OUTPUT_COUNT: NonZeroUsize = NonZeroUsize::new(4).expect("4 is nonzero");
+
+    /// The minimum value (0.1 ZEC) permitted for each note that [`SplitPolicy::standard`] produces
+    /// when splitting change.
+    pub const STANDARD_MIN_OUTPUT_VALUE: Zatoshis = Zatoshis::const_from_u64(COIN / 10);
+
     /// Constructs a new [`SplitPolicy`] that splits change to ensure the given number of spendable
     /// outputs exists within an account, each having at least the specified minimum note value.
     pub fn with_min_output_value(
@@ -454,6 +462,16 @@ impl SplitPolicy {
             target_output_count: NonZeroUsize::MIN,
             min_split_output_value: None,
         }
+    }
+
+    /// Constructs the standard general-purpose [`SplitPolicy`].
+    ///
+    /// This policy attempts to keep at least [`Self::STANDARD_OUTPUT_COUNT`] spendable notes, each
+    /// having at least value [`Self::STANDARD_MIN_OUTPUT_VALUE`], available within the account. It
+    /// is the change-splitting policy used by the mobile wallet SDKs and is suitable as a
+    /// general-purpose default.
+    pub fn standard() -> Self {
+        Self::with_min_output_value(Self::STANDARD_OUTPUT_COUNT, Self::STANDARD_MIN_OUTPUT_VALUE)
     }
 
     /// Returns the number of outputs that this policy will attempt to ensure that the wallet has
@@ -661,6 +679,34 @@ pub(crate) mod tests {
     use zcash_protocol::value::Zatoshis;
 
     use super::sapling;
+
+    #[test]
+    fn standard_split_policy_matches_wallet_defaults() {
+        use super::{COIN, SplitPolicy};
+
+        // These values are consumed verbatim by the mobile wallet SDKs; pin them so any change
+        // here is deliberate rather than a silent drift (see librustzcash issue #2785).
+        assert_eq!(SplitPolicy::STANDARD_OUTPUT_COUNT.get(), 4);
+        // 0.1 ZEC, matching the historical hardcoded 10_000_000 zatoshi value and COIN / 10.
+        assert_eq!(
+            SplitPolicy::STANDARD_MIN_OUTPUT_VALUE,
+            Zatoshis::const_from_u64(10_000_000),
+        );
+        assert_eq!(
+            SplitPolicy::STANDARD_MIN_OUTPUT_VALUE,
+            Zatoshis::const_from_u64(COIN / 10),
+        );
+
+        let policy = SplitPolicy::standard();
+        assert_eq!(
+            policy.target_output_count(),
+            SplitPolicy::STANDARD_OUTPUT_COUNT,
+        );
+        assert_eq!(
+            policy.min_split_output_value(),
+            Some(SplitPolicy::STANDARD_MIN_OUTPUT_VALUE),
+        );
+    }
 
     #[derive(Debug)]
     pub(crate) struct TestTransparentInput {

@@ -296,6 +296,26 @@ impl<R, I> MultiOutputChangeStrategy<R, I> {
     }
 }
 
+impl<I> MultiOutputChangeStrategy<StandardFeeRule, I> {
+    /// Constructs the standard general-purpose multi-output change strategy.
+    ///
+    /// This is the change strategy used by the mobile wallet SDKs. It applies the ZIP 317 fee
+    /// rule, falls back to the Orchard pool for change when the transaction has no shielded
+    /// inputs, uses the default [`DustOutputPolicy`], and splits change according to
+    /// [`SplitPolicy::standard`]. It is equivalent to a
+    /// [`crate::fees::standard::MultiOutputChangeStrategy`] pre-configured with the wallet
+    /// defaults; use [`MultiOutputChangeStrategy::new`] to customize any of them.
+    pub fn standard(change_memo: Option<MemoBytes>) -> Self {
+        Self::new(
+            StandardFeeRule::Zip317,
+            change_memo,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+            SplitPolicy::standard(),
+        )
+    }
+}
+
 impl<R, I> ChangeStrategy for MultiOutputChangeStrategy<R, I>
 where
     R: Zip317FeeRule + Clone,
