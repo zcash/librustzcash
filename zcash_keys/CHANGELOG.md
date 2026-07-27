@@ -9,6 +9,9 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `impl Debug for zcash_keys::keys::transparent::gap_limits::GapAddressesError`
+
 ## [0.16.0] - 2026-07-24
 
 ### Changed

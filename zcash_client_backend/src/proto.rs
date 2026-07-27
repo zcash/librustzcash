@@ -125,6 +125,7 @@ impl compact_formats::CompactTx {
 
 /// An error indicating that a field of a compact format structure could not be parsed.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum CompactFormatError {
     /// A byte slice had an invalid length for the expected field.
     InvalidLength(TryFromSliceError),
@@ -472,6 +473,7 @@ pub const PROPOSAL_SER_V1: u32 = 1;
 /// Errors that can occur in the process of decoding a [`Proposal`] from its protobuf
 /// representation.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ProposalDecodingError<DbError> {
     /// The encoded proposal contained no steps.
     NoSteps,

@@ -4,6 +4,7 @@ use std::fmt;
 
 /// A failure reading or writing the pool-migration store.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// A `rusqlite` (SQLite) error.
     Db(rusqlite::Error),

@@ -10,6 +10,21 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
+
+### Changed
+- Every public error enum in this crate is now `#[non_exhaustive]` 
+  so that future variants can be added without a breaking release. A
+  `match` over any of them must now include a wildcard arm:
+  `data_api::chain::Error`, `data_api::error::{Error, RewindError, PcztError,
+  LockError}`, `data_api::ll::wallet::PutBlocksError`,
+  `data_api::wallet::input_selection::{InputSelectorError,
+  GreedyInputSelectorError}`, `data_api::BirthdayError`, `fees::ChangeError`,
+  `proto::{CompactFormatError, ProposalDecodingError}`, `scanning::ScanError`,
+  `sync::Error`, `sync::decryptor::TryQueueError`, `tor::Error`,
+  `tor::grpc::GrpcError`, and `tor::http::HttpError`.
+
 ## [0.24.0-rc.4] - 2026-07-26
 
 ### Changed

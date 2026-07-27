@@ -566,6 +566,7 @@ where
 /// Errors that can occur while syncing.
 #[cfg(feature = "sync")]
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error<CaErr, DbErr, TrErr> {
     /// An error while interacting with a [`BlockCache`].
     Cache(CaErr),

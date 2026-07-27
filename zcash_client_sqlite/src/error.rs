@@ -15,6 +15,7 @@ use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 use zcash_address::ParseError;
 use zcash_client_backend::data_api::NoteFilter;
+use zcash_client_backend::data_api::error::RewindError;
 use zcash_client_backend::data_api::ll;
 use zcash_client_backend::data_api::ll::wallet::PutBlocksError;
 use zcash_client_backend::wallet::OutputRef;
@@ -39,6 +40,7 @@ use {
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SqliteClientError {
     /// Decoding of a stored value from its serialized form has failed.
     CorruptedData(String),
@@ -250,6 +252,39 @@ pub enum SqliteClientError {
     /// [`FeeRule`]: zcash_primitives::transaction::fees::FeeRule
     #[cfg(feature = "transparent-inputs")]
     FeeRuleError(Box<dyn error::Error + Send + Sync>),
+
+    /// A `zcash_client_backend` error value carried a variant that this crate has no
+    /// translation for; the wrapped value carries the error itself.
+    ///
+    /// Those error types are `#[non_exhaustive]`, so a variant introduced by a future
+    /// `zcash_client_backend` release can reach this crate before there is a specific
+    /// [`SqliteClientError`] counterpart for it. This error is therefore unreachable with
+    /// the `zcash_client_backend` release this crate is built against; encountering it
+    /// means this crate needs updating to translate the new variant.
+    BackendError(BackendError),
+}
+
+/// A `zcash_client_backend` error carrying a variant that this crate has no translation for,
+/// as reported by [`SqliteClientError::BackendError`].
+///
+/// Each variant names the operation whose error type is wrapped. The errors are boxed because
+/// both are generic over [`SqliteClientError`] itself.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum BackendError {
+    /// An error reported while inserting scanned blocks into the wallet.
+    PutBlocks(Box<PutBlocksError<SqliteClientError, commitment_tree::Error>>),
+    /// An error reported while rewinding the wallet to a previous chain state.
+    Rewind(Box<RewindError<AccountUuid, SqliteClientError>>),
+}
+
+impl fmt::Display for BackendError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BackendError::PutBlocks(_) => write!(f, "block insertion"),
+            BackendError::Rewind(_) => write!(f, "rewind to a previous chain state"),
+        }
+    }
 }
 
 impl error::Error for SqliteClientError {
@@ -444,6 +479,11 @@ impl fmt::Display for SqliteClientError {
             }
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::FeeRuleError(e) => write!(f, "Fee rule error: {e}"),
+            SqliteClientError::BackendError(e) => write!(
+                f,
+                "The zcash_client_backend error reported for {e} is not one this version of \
+                 zcash_client_sqlite recognizes; this crate must be updated to handle it."
+            ),
         }
     }
 }
@@ -558,6 +598,10 @@ impl From<PutBlocksError<SqliteClientError, commitment_tree::Error>> for SqliteC
             },
             #[cfg(feature = "transparent-inputs")]
             ll::wallet::PutBlocksError::GapAddresses(e) => SqliteClientError::from(e),
+            // `PutBlocksError` is `#[non_exhaustive]`, so a variant introduced by a future
+            // `zcash_client_backend` release reaches this conversion with no counterpart
+            // here until this crate is updated to map it. Report it rather than panicking.
+            other => SqliteClientError::BackendError(BackendError::PutBlocks(Box::new(other))),
         }
     }
 }

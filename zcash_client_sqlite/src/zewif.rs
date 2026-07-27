@@ -159,6 +159,7 @@ impl SecretSink for DiscardSecrets {
 
 /// Errors that can occur while importing a ZeWIF document.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ZewifImportError<S> {
     /// A wallet in the document was recorded for a different network than the one
     /// described by the database's [`Parameters`].

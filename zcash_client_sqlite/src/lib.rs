@@ -3473,6 +3473,7 @@ pub struct FsBlockDb {
 /// block source.
 #[derive(Debug)]
 #[cfg(feature = "unstable")]
+#[non_exhaustive]
 pub enum FsBlockDbError {
     /// Filesystem I/O error.
     Fs(io::Error),

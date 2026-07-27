@@ -126,6 +126,7 @@ impl Builder {
 /// The rejected payload (the `Block` or `Transaction`) is returned in both cases, so that
 /// the caller may retry.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TryQueueError<T> {
     /// The batch decryptor has shut down.
     Shutdown(Box<T>),

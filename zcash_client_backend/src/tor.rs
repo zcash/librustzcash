@@ -118,6 +118,7 @@ impl Client {
 
 /// Errors that can occur while creating or using a Tor [`Client`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// The directory passed to [`Client::create`] does not exist.
     MissingTorDirectory,

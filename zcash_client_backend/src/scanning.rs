@@ -601,6 +601,7 @@ impl<AccountId: Copy> Nullifiers<AccountId> {
 
 /// Errors that may occur in chain scanning
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum ScanError {
     /// The encoding of a compact Sapling output or compact Orchard action was invalid.
     EncodingInvalid {

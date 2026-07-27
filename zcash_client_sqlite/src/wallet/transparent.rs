@@ -2112,6 +2112,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
 /// An enumeration of the types of errors that can occur when scheduling an event to happen at a
 /// specific time.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum SchedulingError {
     /// An error occurred in sampling a time offset using an exponential distribution.
     Distribution(rand_distr::ExpError),
