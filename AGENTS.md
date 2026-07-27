@@ -558,7 +558,10 @@ artifacts of a development session, not repository history. Never commit them.
 ## Changelog & Commit Discipline
 
 - Update the crate's `CHANGELOG.md` for any public API change, bug fix, or
-  semantic change. CHANGELOG updates must **only** reflect completed changes.
+  semantic change. This includes updating the version of a dependency whose
+  types appear in the public API: types from two semver-incompatible versions
+  of a crate do not unify, so a consumer must upgrade that dependency in
+  lockstep. CHANGELOG updates must **only** reflect completed changes.
   since the last release, and never interstitial changes in APIs that have been
   changed multiple times since the last release. The CHANGELOG entry **MUST** be
   part of the commit that makes the API change. For newly added crates, the CHANGELOG
@@ -567,12 +570,12 @@ artifacts of a development session, not repository history. Never commit them.
   provide **only** the information needed for end users to adapt to API changes, and
   **never** describe implementation details or contracts that are not visible to
   a user of the public API.
-- **Never modify a CHANGELOG entry under an already-published version heading**
-  (a released `## [x.y.z] - DATE` section). Those entries are the historical
-  record of what that release shipped; they must not be altered, even to add a
-  clarification, note a later re-export, or fix a detail. Anything a user needs
-  to adapt to a new change belongs in the `## [Unreleased]` section, never
-  edited into a past release.
+- **A CHANGELOG entry under an already-published version heading** (a released
+  `## [x.y.z] - DATE` section) is the historical record of what that release
+  shipped. Correct such an entry only when it was inaccurate as written; never
+  edit it to record something that happened after the release, such as a
+  clarification or a later re-export. Anything a user needs in order to adapt
+  to a new change belongs in the `## [Unreleased]` section.
 - Commits must be discrete semantic changes — no WIP commits in final PR history.
 - Each commit that alters public API must also update docs and changelog in the same commit.
 - Use `git revise` to maintain clean history within a PR.
