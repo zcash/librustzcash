@@ -1595,8 +1595,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
     }
 }
 
-impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R: RngCore>
-    OutputLockStore for WalletDb<C, P, CL, R>
+impl<C, P, CL, R> OutputLockStore for WalletDb<C, P, CL, R>
+where
+    C: BorrowMut<rusqlite::Connection>,
+    P: consensus::Parameters,
+    CL: Clock,
+    R: RngCore,
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
@@ -1885,8 +1889,11 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
 
 /// This impl block is only usable when you already have an [`SqlTransaction`], meaning
 /// you are inside a [`WalletDb::transactionally`] block with a lock on the database.
-impl<P: consensus::Parameters, CL: Clock, R: RngCore> OutputLockStore
-    for WalletDb<SqlTransaction<'_>, P, CL, R>
+impl<P, CL, R> OutputLockStore for WalletDb<SqlTransaction<'_>, P, CL, R>
+where
+    P: consensus::Parameters,
+    CL: Clock,
+    R: RngCore,
 {
     type Error = SqliteClientError;
     type AccountId = AccountUuid;
