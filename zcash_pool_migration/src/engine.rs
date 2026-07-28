@@ -165,7 +165,10 @@ impl MigrationTransferId {
     }
 
     /// Writes this id as an unsigned 32-bit little-endian integer.
-    pub fn write<W: io::Write>(&self, writer: W) -> io::Result<()> {
+    pub fn write<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
         Encodable::write(self, writer)
     }
 
@@ -176,7 +179,10 @@ impl MigrationTransferId {
 }
 
 impl Encodable for MigrationTransferId {
-    fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
         writer.write_all(&self.0.to_le_bytes())
     }
 
@@ -188,7 +194,10 @@ impl Encodable for MigrationTransferId {
 impl Decodable for MigrationTransferId {
     type Args<'a> = ();
 
-    fn read<R: io::Read>(mut reader: R, _args: ()) -> io::Result<Self> {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: io::Read,
+    {
         let mut bytes = [0u8; MIGRATION_TRANSFER_ID_SIZE];
         reader.read_exact(&mut bytes)?;
         Ok(MigrationTransferId::new(u32::from_le_bytes(bytes)))
@@ -4587,11 +4596,37 @@ mod codec_tests {
     use alloc::vec::Vec;
     use proptest::prelude::*;
     use zcash_encoding::{
-        Encodable,
+        Decodable, Encodable,
         testing::{check_canonical, check_codec_roundtrip},
     };
 
     use super::MigrationTransferId;
+
+    /// Golden vectors: the expected bytes are written out from the encoding's definition, so a
+    /// change altering the encoding consistently in both directions is still caught. A store
+    /// that has already persisted these ids depends on this staying fixed.
+    #[test]
+    fn transfer_id_is_u32_little_endian() {
+        for (id, expected) in [
+            (0u32, [0x00, 0x00, 0x00, 0x00]),
+            (1, [0x01, 0x00, 0x00, 0x00]),
+            (0x0102_0304, [0x04, 0x03, 0x02, 0x01]),
+            (u32::MAX, [0xFF, 0xFF, 0xFF, 0xFF]),
+        ] {
+            let value = MigrationTransferId::new(id);
+
+            let mut bytes = Vec::new();
+            Encodable::write(&value, &mut bytes).unwrap();
+            assert_eq!(bytes, expected, "encoding of {id} must match the vector");
+            assert_eq!(Encodable::serialized_size(&value), expected.len());
+
+            assert_eq!(
+                <MigrationTransferId as Decodable>::read(&expected[..], ()).unwrap(),
+                value,
+                "the vector for {id} must decode to the value"
+            );
+        }
+    }
 
     proptest! {
         #[test]

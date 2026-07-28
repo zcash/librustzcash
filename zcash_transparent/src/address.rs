@@ -60,7 +60,10 @@ impl PartialEq for Script {
 impl Eq for Script {}
 
 impl Encodable for Script {
-    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
         Vector::write(&mut writer, &self.0.0, |w, e| w.write_all(&[*e]))
     }
 
@@ -72,7 +75,10 @@ impl Encodable for Script {
 impl Decodable for Script {
     type Args<'a> = ();
 
-    fn read<R: Read>(mut reader: R, _args: ()) -> io::Result<Self> {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
         let script = Vector::read(&mut reader, |r| {
             let mut bytes = [0; 1];
             r.read_exact(&mut bytes).map(|_| bytes[0])

@@ -7334,6 +7334,7 @@ dependencies = [
  "rand_core 0.6.4",
  "shardtree",
  "zcash_client_backend",
+ "zcash_encoding",
  "zcash_keys",
  "zcash_pool_migration_memory",
  "zcash_primitives",

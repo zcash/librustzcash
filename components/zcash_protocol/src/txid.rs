@@ -78,7 +78,10 @@ impl TxId {
 }
 
 impl Encodable for TxId {
-    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
         writer.write_all(&self.0)
     }
 
@@ -90,7 +93,10 @@ impl Encodable for TxId {
 impl Decodable for TxId {
     type Args<'a> = ();
 
-    fn read<R: Read>(mut reader: R, _args: ()) -> io::Result<Self> {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
         let mut hash = [0u8; 32];
         reader.read_exact(&mut hash)?;
         Ok(TxId::from_bytes(hash))

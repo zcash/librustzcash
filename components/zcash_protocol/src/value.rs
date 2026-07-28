@@ -360,7 +360,10 @@ impl Zatoshis {
     }
 
     /// Writes this Zatoshis as an unsigned 64-bit little-endian integer.
-    pub fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
         writer.write_all(&self.to_u64_le_bytes())
     }
 
@@ -396,7 +399,10 @@ impl Zatoshis {
 }
 
 impl zcash_encoding::Encodable for Zatoshis {
-    fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
         writer.write_all(&self.to_u64_le_bytes())
     }
 
@@ -408,7 +414,10 @@ impl zcash_encoding::Encodable for Zatoshis {
 impl zcash_encoding::Decodable for Zatoshis {
     type Args<'a> = ();
 
-    fn read<R: io::Read>(mut reader: R, _args: ()) -> io::Result<Self> {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: io::Read,
+    {
         let mut bytes = [0u8; 8];
         reader.read_exact(&mut bytes)?;
         Self::from_u64_le_bytes(bytes)

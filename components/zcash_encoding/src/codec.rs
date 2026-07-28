@@ -107,7 +107,9 @@ use crate::{Array, CompactSize, Optional, Vector};
 /// A type with a canonical binary encoding.
 pub trait Encodable {
     /// Writes the canonical encoding of `self`.
-    fn write<W: Write>(&self, writer: W) -> io::Result<()>;
+    fn write<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: Write;
 
     /// Returns the number of bytes [`Encodable::write`] will produce.
     ///
@@ -129,7 +131,9 @@ pub trait Decodable: Sized {
     type Args<'a>;
 
     /// Parses a value from `reader`.
-    fn read<R: Read>(reader: R, args: Self::Args<'_>) -> io::Result<Self>;
+    fn read<R>(reader: R, args: Self::Args<'_>) -> io::Result<Self>
+    where
+        R: Read;
 }
 
 /// Marker alias for a type with a complete, context-free codec.
@@ -163,8 +167,14 @@ impl Write for ByteCounter {
 // Combinators, expressed as impls on the container types.
 // ---------------------------------------------------------------------------
 
-impl<T: Encodable> Encodable for Vec<T> {
-    fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+impl<T> Encodable for Vec<T>
+where
+    T: Encodable,
+{
+    fn write<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
         Vector::write(writer, self, |w, e| e.write(w))
     }
 
@@ -174,19 +184,29 @@ impl<T: Encodable> Encodable for Vec<T> {
     }
 }
 
-impl<T: Decodable> Decodable for Vec<T>
+impl<T> Decodable for Vec<T>
 where
+    T: Decodable,
     for<'a> T::Args<'a>: Copy,
 {
     type Args<'a> = T::Args<'a>;
 
-    fn read<R: Read>(reader: R, args: Self::Args<'_>) -> io::Result<Self> {
+    fn read<R>(reader: R, args: Self::Args<'_>) -> io::Result<Self>
+    where
+        R: Read,
+    {
         Vector::read_collected_mut(reader, |r| T::read(r, args))
     }
 }
 
-impl<T: Encodable> Encodable for Option<T> {
-    fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+impl<T> Encodable for Option<T>
+where
+    T: Encodable,
+{
+    fn write<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
         Optional::write(writer, self.as_ref(), |w, e| e.write(w))
     }
 
@@ -195,19 +215,29 @@ impl<T: Encodable> Encodable for Option<T> {
     }
 }
 
-impl<T: Decodable> Decodable for Option<T>
+impl<T> Decodable for Option<T>
 where
+    T: Decodable,
     for<'a> T::Args<'a>: Copy,
 {
     type Args<'a> = T::Args<'a>;
 
-    fn read<R: Read>(reader: R, args: Self::Args<'_>) -> io::Result<Self> {
+    fn read<R>(reader: R, args: Self::Args<'_>) -> io::Result<Self>
+    where
+        R: Read,
+    {
         Optional::read(reader, |r| T::read(r, args))
     }
 }
 
-impl<T: Encodable> Encodable for NonEmpty<T> {
-    fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+impl<T> Encodable for NonEmpty<T>
+where
+    T: Encodable,
+{
+    fn write<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
         Vector::write_nonempty(writer, self, |w, e| e.write(w))
     }
 
@@ -217,13 +247,17 @@ impl<T: Encodable> Encodable for NonEmpty<T> {
     }
 }
 
-impl<T: Decodable> Decodable for NonEmpty<T>
+impl<T> Decodable for NonEmpty<T>
 where
+    T: Decodable,
     for<'a> T::Args<'a>: Copy,
 {
     type Args<'a> = T::Args<'a>;
 
-    fn read<R: Read>(reader: R, args: Self::Args<'_>) -> io::Result<Self> {
+    fn read<R>(reader: R, args: Self::Args<'_>) -> io::Result<Self>
+    where
+        R: Read,
+    {
         let items: Vec<T> = Vector::read_collected_mut(reader, |r| T::read(r, args))?;
         NonEmpty::from_vec(items)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "expected a non-empty list"))
@@ -248,8 +282,14 @@ pub struct UnprefixedArgs<A> {
     pub element: A,
 }
 
-impl<T: Encodable> Encodable for Unprefixed<T> {
-    fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+impl<T> Encodable for Unprefixed<T>
+where
+    T: Encodable,
+{
+    fn write<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
         Array::write(writer, &self.0, |w, e| e.write(w))
     }
 
@@ -258,13 +298,17 @@ impl<T: Encodable> Encodable for Unprefixed<T> {
     }
 }
 
-impl<T: Decodable> Decodable for Unprefixed<T>
+impl<T> Decodable for Unprefixed<T>
 where
+    T: Decodable,
     for<'a> T::Args<'a>: Copy,
 {
     type Args<'a> = UnprefixedArgs<T::Args<'a>>;
 
-    fn read<R: Read>(reader: R, args: Self::Args<'_>) -> io::Result<Self> {
+    fn read<R>(reader: R, args: Self::Args<'_>) -> io::Result<Self>
+    where
+        R: Read,
+    {
         Array::read_collected_mut(reader, args.count, |r| T::read(r, args.element)).map(Unprefixed)
     }
 }

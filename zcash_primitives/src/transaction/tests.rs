@@ -1197,6 +1197,7 @@ fn zip_0233() {
     }
 }
 
+#[cfg(test)]
 mod codec {
     use alloc::vec::Vec;
     use proptest::prelude::*;
@@ -1206,8 +1207,7 @@ mod codec {
     };
     use zcash_protocol::consensus::BranchId;
 
-    use super::arb_tx;
-    use crate::transaction::{Transaction, TxVersion};
+    use crate::transaction::{Transaction, TxVersion, testing::arb_tx};
 
     /// Every defined version, since the version field is a discriminant and the encoding
     /// differs in length between the Sprout form and the rest.
