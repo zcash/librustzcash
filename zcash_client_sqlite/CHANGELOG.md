@@ -47,6 +47,14 @@ workspace.
   in the Ironwood bundle, so this affected ordinary received payments. A
   migration corrects the affected view; no caller action is required beyond
   upgrading.
+- The funding account reported for a transparent output by
+  `zcash_client_backend::wallet::WalletTransparentOutput::funding_account` now
+  takes value spent from the Ironwood pool into account. Ironwood inputs were
+  not counted, so an output whose creating transaction was funded entirely from
+  Ironwood reported no funding account, and one funded from several pools could
+  report an account other than the largest contributor. Post-NU6.3 wallets hold
+  their shielded value in Ironwood, so this affected ordinary spends rather than
+  only unusual ones.
 
 ## [0.22.0-rc.4] - 2026-07-26
 
