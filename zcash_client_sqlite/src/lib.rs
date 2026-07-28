@@ -1569,6 +1569,13 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         })
     }
 
+    fn promote_account_to_spending(
+        &mut self,
+        account_uuid: Self::AccountId,
+    ) -> Result<(), Self::Error> {
+        self.transactionally(|wdb| wdb.promote_account_to_spending(account_uuid))
+    }
+
     fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
         self.transactionally(|wdb| wdb.delete_account(account_uuid))
     }
@@ -1874,6 +1881,13 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
             #[cfg(feature = "transparent-inputs")]
             &self.gap_limits,
         )
+    }
+
+    fn promote_account_to_spending(
+        &mut self,
+        account_uuid: Self::AccountId,
+    ) -> Result<(), Self::Error> {
+        wallet::promote_account_to_spending(self.conn.0, account_uuid)
     }
 
     fn delete_account(&mut self, account_uuid: Self::AccountId) -> Result<(), Self::Error> {
@@ -3971,6 +3985,62 @@ mod tests {
             &ufvk,
             &birthday,
             |e| matches!(e, SqliteClientError::AccountCollision(id) if *id == account.id()),
+        );
+    }
+
+    #[test]
+    pub(crate) fn promote_view_only_account_to_spending() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(st.network().sapling.unwrap() - 1, BlockHash([0; 32])),
+            None,
+        );
+        let seed = Secret::new(vec![0u8; 32]);
+        let usk = UnifiedSpendingKey::from_seed(
+            st.network(),
+            seed.expose_secret(),
+            zip32::AccountId::ZERO,
+        )
+        .unwrap();
+        let account = st
+            .wallet_mut()
+            .import_account_ufvk(
+                "",
+                &usk.to_unified_full_viewing_key(),
+                &birthday,
+                AccountPurpose::ViewOnly,
+                None,
+            )
+            .unwrap();
+        assert_eq!(account.purpose(), AccountPurpose::ViewOnly);
+
+        st.wallet_mut()
+            .promote_account_to_spending(account.id())
+            .unwrap();
+        st.wallet_mut()
+            .promote_account_to_spending(account.id())
+            .unwrap();
+
+        let promoted = st.wallet().get_account(account.id()).unwrap().unwrap();
+        assert_eq!(
+            promoted.purpose(),
+            AccountPurpose::Spending { derivation: None }
+        );
+    }
+
+    #[test]
+    pub(crate) fn promote_unknown_account_to_spending_fails() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
+
+        assert_matches!(
+            st.wallet_mut()
+                .promote_account_to_spending(AccountUuid(Uuid::new_v4())),
+            Err(SqliteClientError::AccountUnknown)
         );
     }
 

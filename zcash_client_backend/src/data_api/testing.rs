@@ -3296,6 +3296,13 @@ impl WalletWrite for MockWalletDb {
         todo!()
     }
 
+    fn promote_account_to_spending(
+        &mut self,
+        _account: Self::AccountId,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
     fn delete_account(&mut self, _account: Self::AccountId) -> Result<(), Self::Error> {
         todo!()
     }

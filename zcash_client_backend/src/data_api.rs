@@ -3409,6 +3409,23 @@ pub trait WalletWrite: WalletRead {
         key_source: Option<&str>,
     ) -> Result<Self::Account, Self::Error>;
 
+    /// Promotes an existing account from [`AccountPurpose::ViewOnly`] to
+    /// [`AccountPurpose::Spending`] after the application obtains its spending authority.
+    ///
+    /// This transition is monotonic and retry-safe. Applying it to an account that already has
+    /// spending purpose succeeds without changing the account's identity, viewing keys, or
+    /// history.
+    ///
+    /// Implementations may use an account's purpose to decide which data to retain while scanning.
+    /// Callers therefore should perform this transition before scanning any blocks that the newly
+    /// available spending authority must be able to spend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `account` is not recognized, or if the backend cannot safely apply the
+    /// transition.
+    fn promote_account_to_spending(&mut self, account: Self::AccountId) -> Result<(), Self::Error>;
+
     /// Deletes the specified account, and all transactions that exclusively involve it, from the
     /// wallet database.
     ///

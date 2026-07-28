@@ -678,6 +678,28 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     Ok(account)
 }
 
+/// Promotes an account to spending purpose without changing its identity or key material.
+///
+/// This is idempotent so an application can safely retry an interrupted operation that pairs this
+/// transition with persistence of externally managed spending-key material.
+pub(crate) fn promote_account_to_spending(
+    conn: &rusqlite::Connection,
+    account_uuid: AccountUuid,
+) -> Result<(), SqliteClientError> {
+    let rows_updated = conn.execute(
+        "UPDATE accounts
+         SET has_spend_key = TRUE
+         WHERE uuid = :account_uuid",
+        named_params![":account_uuid": account_uuid.0],
+    )?;
+
+    if rows_updated == 1 {
+        Ok(())
+    } else {
+        Err(SqliteClientError::AccountUnknown)
+    }
+}
+
 pub(crate) fn delete_account(
     conn: &rusqlite::Transaction,
     account_uuid: AccountUuid,

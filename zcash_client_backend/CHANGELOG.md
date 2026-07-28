@@ -11,6 +11,9 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `WalletWrite::promote_account_to_spending`, which lets an application monotonically
+  promote an imported view-only account after obtaining its externally managed spending
+  authority.
 - `zcash_client_backend::data_api::wallet::{redact_pczt_for_signer,
   redact_pczt_for_batch_signer}`, which create compact signer views of a
   wallet-created PCZT. The batch variant additionally removes fields that a

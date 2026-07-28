@@ -11,6 +11,8 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `WalletDb` implements `WalletWrite::promote_account_to_spending` as an idempotent
+  update to the account's spending purpose.
 - `WalletDb::get_unspent_ironwood_notes_at_historical_height` returns all Ironwood
   notes that existed and were unspent at a given height.
 - `WalletDb::transactionally_with_extension` performs wallet operations and writes to
