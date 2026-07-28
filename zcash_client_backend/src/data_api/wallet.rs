@@ -75,6 +75,7 @@ use zcash_primitives::transaction::{
     components::sapling::zip212_enforcement,
     fees::FeeRule,
 };
+use zcash_protocol::zip318::AnchorBucketInterval;
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
@@ -575,6 +576,52 @@ impl ConfirmationsPolicy {
     /// [`crate::proposal::Step::anchor_height`]).
     pub fn anchor_height(&self, target_height: TargetHeight) -> BlockHeight {
         target_height.saturating_sub(u32::from(self.trusted()))
+    }
+
+    /// Returns this policy adjusted so that the shielded anchor for `target_height` lands on a
+    /// boundary of `interval`, or `None` if no boundary is reachable.
+    ///
+    /// A [ZIP 318] pool crossing is proved against a boundary block rather than the chain tip, so
+    /// that many wallets' crossings share a small set of anchors instead of each pinning a unique
+    /// recent block.
+    ///
+    /// Bucketing is expressed as a RAISED CONFIRMATION REQUIREMENT rather than as a separately
+    /// lowered anchor, because the anchor and the bound on which notes may be spent are the same
+    /// quantity: `target_height` less the required confirmations. Moving that one number moves
+    /// both together, which is what makes it impossible to select a note having no witness at the
+    /// bucketed anchor. Lowering the anchor on its own would leave two numbers free to drift.
+    ///
+    /// The untrusted requirement is raised to match when it would otherwise fall below the trusted
+    /// one, preserving this type's `trusted <= untrusted` invariant.
+    ///
+    /// Returns `None` when no usable boundary is reachable: when the ordinary anchor lies below
+    /// the interval's first boundary above genesis, or where the required confirmations would
+    /// reach back past the genesis block.
+    ///
+    /// Height zero is rejected even though it is arithmetically a boundary of every interval: the
+    /// note commitment tree is empty there, so a policy anchored to it could never fund anything.
+    /// Reporting that as "unable to bucket" is what lets a caller fall back, rather than build a
+    /// proposal that is bound to fail.
+    ///
+    /// [ZIP 318]: https://zips.z.cash/zip-0318
+    pub fn bucketed(
+        &self,
+        interval: AnchorBucketInterval,
+        target_height: TargetHeight,
+    ) -> Option<Self> {
+        let boundary = interval.boundary_at_or_below(self.anchor_height(target_height));
+        if boundary == BlockHeight::from_u32(0) {
+            return None;
+        }
+        let bucketed = u32::from(target_height).checked_sub(u32::from(boundary))?;
+        let trusted = NonZeroU32::new(bucketed)?;
+        Self::new(
+            trusted,
+            core::cmp::max(self.untrusted(), trusted),
+            #[cfg(feature = "transparent-inputs")]
+            self.allow_zero_conf_shielding(),
+        )
+        .ok()
     }
 
     /// Returns whether or not transparent inputs may be spent with zero confirmations in shielding
@@ -3704,4 +3751,96 @@ where
         &proposal,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use zcash_protocol::zip318::AnchorBucketInterval;
+
+    fn policy(confirmations: u32) -> ConfirmationsPolicy {
+        ConfirmationsPolicy::new_symmetrical_unchecked(
+            confirmations,
+            #[cfg(feature = "transparent-inputs")]
+            false,
+        )
+    }
+
+    fn target(height: u32) -> TargetHeight {
+        TargetHeight::from(BlockHeight::from_u32(height))
+    }
+
+    /// Bucketing raises the confirmation requirement so that the resulting anchor lands exactly on
+    /// a grid boundary. Because the anchor and the note-eligibility bound are the same quantity,
+    /// this is what guarantees every selected note has a witness at that anchor.
+    #[test]
+    fn bucketed_policy_lands_the_anchor_on_a_boundary() {
+        let interval = AnchorBucketInterval::ZIP_318;
+        let policy = policy(10);
+
+        for height in [2_000_000u32, 2_000_143, 2_000_144, 1_000_000] {
+            let target = target(height);
+            let bucketed = policy
+                .bucketed(interval, target)
+                .expect("a boundary is reachable well above the grid's origin");
+            let anchor = bucketed.anchor_height(target);
+
+            assert!(
+                interval.is_boundary(anchor),
+                "anchor {anchor:?} off the grid"
+            );
+            assert_eq!(
+                anchor,
+                interval.boundary_at_or_below(policy.anchor_height(target)),
+                "bucketing must round the ordinary anchor DOWN, never up"
+            );
+            // Never fewer confirmations than asked for, and the invariant is preserved.
+            assert!(bucketed.trusted() >= policy.trusted());
+            assert!(bucketed.untrusted() >= bucketed.trusted());
+            // The extra wait is bounded by one interval.
+            assert!(
+                u32::from(bucketed.trusted()) - u32::from(policy.trusted())
+                    < interval.block_count().get()
+            );
+        }
+    }
+
+    /// An anchor already on a boundary is left where it is, costing no extra confirmations.
+    #[test]
+    fn bucketing_an_aligned_anchor_is_a_no_op() {
+        let interval = AnchorBucketInterval::ZIP_318;
+        let policy = policy(10);
+        // 2_000_010 - 10 = 2_000_000, which is not a multiple of 144; pick one that is.
+        let aligned_anchor = interval.boundary_at_or_below(BlockHeight::from_u32(2_000_000));
+        let target = target(u32::from(aligned_anchor) + 10);
+
+        let bucketed = policy.bucketed(interval, target).expect("reachable");
+        assert_eq!(bucketed.trusted(), policy.trusted());
+        assert_eq!(bucketed.anchor_height(target), aligned_anchor);
+    }
+
+    /// Below the first boundary there is no grid to bucket to, and the policy declines rather than
+    /// producing a zero or negative confirmation count.
+    #[test]
+    fn bucketing_declines_below_the_first_boundary() {
+        let interval = AnchorBucketInterval::ZIP_318;
+        let policy = policy(10);
+        // The ordinary anchor is 90, whose boundary-at-or-below is 0; requiring 100 confirmations
+        // to reach height 0 is not a usable policy.
+        assert!(policy.bucketed(interval, target(100)).is_none());
+    }
+
+    /// A shorter test-network interval buckets on its own grid.
+    #[test]
+    fn bucketing_honours_a_custom_interval() {
+        let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+        let policy = policy(3);
+        let target = target(1_000);
+
+        let bucketed = policy.bucketed(interval, target).expect("reachable");
+        let anchor = bucketed.anchor_height(target);
+        assert!(interval.is_boundary(anchor));
+        assert_eq!(u32::from(anchor), 996);
+    }
 }
