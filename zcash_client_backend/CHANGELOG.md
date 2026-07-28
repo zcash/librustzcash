@@ -12,6 +12,8 @@ workspace.
 
 ### Added
 - `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
+- `zcash_client_backend::data_api::BirthdayError` now implements `Debug`,
+  `Display` and `std::error::Error`.
 - `zcash_client_backend::tor::Timeouts`
 - `zcash_client_backend::tor::Client::create_with_timeouts`
 - `zcash_client_backend::tor::http::TimeoutPhase`
