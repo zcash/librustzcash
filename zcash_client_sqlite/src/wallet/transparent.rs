@@ -823,11 +823,23 @@ pub(crate) fn store_address_range<P: consensus::Parameters>(
 
             // If the import was recorded under a different account, the outputs received at
             // the address follow the (derivation-proven) attribution to this account.
+            //
+            // Only the transparent update can match today: a `Foreign` row is a transparent-only
+            // import, so no shielded note can be attached to it. A shielded note's `address_id`
+            // is only ever produced by `upsert_address`, which always writes the external key
+            // scope and a non-null diversifier index, whereas the `addresses` check constraint
+            // requires a `Foreign` row to have a null diversifier index; and no code path demotes
+            // an existing row to the `Foreign` scope. The shielded pools are nonetheless updated
+            // here so that this reattribution stays complete if that invariant is ever relaxed:
+            // mis-attributing a shielded note to the wrong account is silent and permanent,
+            // whereas these statements cost nothing on a path that only runs when an import is
+            // upgraded across accounts.
             if foreign_account != account_id.0 {
                 for table in [
                     "transparent_received_outputs",
                     "sapling_received_notes",
                     "orchard_received_notes",
+                    "ironwood_received_notes",
                 ] {
                     conn.execute(
                         &format!(
@@ -3353,6 +3365,284 @@ mod tests {
             )
             .unwrap();
         assert_eq!((utxo_addr_id, utxo_account_id), (foreign_id, account_a.0));
+
+        tx.commit().unwrap();
+    }
+
+    /// When the upgrade of a standalone (`Foreign`) import moves the address record to the
+    /// deriving account, notes attached to that record follow it for *every* shielded pool that
+    /// has a received-note table, not just some of them.
+    ///
+    /// The rows this seeds are ones the current code does not produce: a `Foreign` record is a
+    /// transparent-only import, and a shielded note's `address_id` only ever comes from
+    /// `upsert_address`, which writes the external key scope and a non-null diversifier index
+    /// (see `foreign_addresses_cannot_carry_a_diversifier_index`). They are written directly so
+    /// that the reattribution is covered pool-by-pool even though nothing can reach this state
+    /// today; a pool omitted here would mis-attribute funds silently and permanently if that
+    /// invariant were ever relaxed.
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn store_address_range_reattributes_shielded_notes_of_imported_receiver() {
+        use rusqlite::named_params;
+        use transparent::address::TransparentAddress;
+        use zcash_client_backend::data_api::{AccountBirthday, chain::ChainState};
+        use zcash_keys::{address::Address, encoding::AddressCodec};
+        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
+
+        use crate::wallet::encoding::{KeyScope, ReceiverFlags};
+
+        /// The transparent receiver imported under account B and derived by account A. Its
+        /// bytes are arbitrary; nothing derives from or validates them.
+        const IMPORTED_RECEIVER_HASH: [u8; 20] = [0x33; 20];
+        /// The compressed pubkey recorded against the import. Only its presence matters: the
+        /// `addresses` check constraint requires exactly one import column to be set, and
+        /// nothing here parses it as a key.
+        const IMPORTED_PUBKEY: [u8; 33] = [0x02; 33];
+        /// Above the account's default external gap limit, so no derived record already occupies
+        /// this index and the derivation below reaches the import-upgrade path.
+        const DERIVED_CHILD_INDEX: u32 = 100;
+        /// The height at which the import was recorded as exposed.
+        const IMPORT_EXPOSURE_HEIGHT: u32 = 55;
+        /// The single transaction that all of the seeded notes belong to, and the columns it
+        /// needs; the reattribution does not read any of them.
+        const TX_ROW_ID: i64 = 1;
+        const TXID: [u8; 32] = [7; 32];
+        const OBSERVED_HEIGHT: u32 = 1;
+        /// Placeholders for the note columns that these assertions never read back; they exist
+        /// only to satisfy the received-note tables' NOT NULL constraints.
+        const NOTE_INDEX: i64 = 0;
+        const DIVERSIFIER: [u8; 11] = [0; 11];
+        const NOTE_VALUE_ZATS: i64 = 100_000;
+        const NOTE_COMPONENT: [u8; 32] = [0; 32];
+        /// The note plaintext version recorded for the seeded Orchard and Ironwood notes. Only
+        /// the Ironwood table requires it, and its value is immaterial here.
+        const NOTE_VERSION: i64 = 2;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_a_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+
+        // A second account, under which the address will be imported.
+        let birthday = AccountBirthday::from_parts(
+            ChainState::empty(
+                network.activation_height(NetworkUpgrade::Sapling).unwrap() - 1,
+                BlockHash([0; 32]),
+            ),
+            None,
+        );
+        let seed_b = Secret::new(vec![42u8; 32]);
+        let (account_b_uuid, _) = st
+            .wallet_mut()
+            .create_account("b", &seed_b, &birthday, None)
+            .unwrap();
+
+        let taddr = TransparentAddress::PublicKeyHash(IMPORTED_RECEIVER_HASH);
+        let taddr_enc = taddr.encode(&network);
+        let child_index = NonHardenedChildIndex::from_index(DERIVED_CHILD_INDEX).unwrap();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_a = get_account_ref(&tx, account_a_uuid).unwrap();
+        let account_b = get_account_ref(&tx, account_b_uuid).unwrap();
+
+        // The standalone (`Foreign`) row under account B.
+        tx.execute(
+            "INSERT INTO addresses
+                 (account_id, key_scope, address, cached_transparent_receiver_address,
+                  imported_transparent_receiver_pubkey, receiver_flags, exposed_at_height)
+             VALUES (:account_id, :foreign, :address, :taddr, :pubkey, :receiver_flags,
+                  :exposed_at_height)",
+            named_params! {
+                ":account_id": account_b.0,
+                ":foreign": KeyScope::Foreign.encode(),
+                ":address": &taddr_enc,
+                ":taddr": &taddr_enc,
+                ":pubkey": &IMPORTED_PUBKEY[..],
+                ":receiver_flags": ReceiverFlags::P2PKH.bits(),
+                ":exposed_at_height": IMPORT_EXPOSURE_HEIGHT,
+            },
+        )
+        .unwrap();
+        let foreign_id = tx.last_insert_rowid();
+
+        tx.execute(
+            "INSERT INTO transactions (id_tx, txid, min_observed_height)
+             VALUES (:id_tx, :txid, :min_observed_height)",
+            named_params! {
+                ":id_tx": TX_ROW_ID,
+                ":txid": &TXID[..],
+                ":min_observed_height": OBSERVED_HEIGHT,
+            },
+        )
+        .unwrap();
+
+        // One note in each shielded pool, attached to the imported record and attributed to
+        // account B.
+        tx.execute(
+            "INSERT INTO sapling_received_notes
+                 (transaction_id, output_index, account_id, address_id, diversifier, value,
+                  rcm, is_change)
+             VALUES (:tx, :note_index, :account_id, :address_id, :diversifier, :value,
+                  :note_component, :is_change)",
+            named_params! {
+                ":tx": TX_ROW_ID,
+                ":note_index": NOTE_INDEX,
+                ":account_id": account_b.0,
+                ":address_id": foreign_id,
+                ":diversifier": &DIVERSIFIER[..],
+                ":value": NOTE_VALUE_ZATS,
+                ":note_component": &NOTE_COMPONENT[..],
+                ":is_change": false,
+            },
+        )
+        .unwrap();
+
+        for table in ["orchard_received_notes", "ironwood_received_notes"] {
+            tx.execute(
+                &format!(
+                    "INSERT INTO {table}
+                         (transaction_id, action_index, account_id, address_id, diversifier,
+                          value, rho, rseed, is_change, note_version)
+                     VALUES (:tx, :note_index, :account_id, :address_id, :diversifier,
+                          :value, :note_component, :note_component, :is_change, :note_version)"
+                ),
+                named_params! {
+                    ":tx": TX_ROW_ID,
+                    ":note_index": NOTE_INDEX,
+                    ":account_id": account_b.0,
+                    ":address_id": foreign_id,
+                    ":diversifier": &DIVERSIFIER[..],
+                    ":value": NOTE_VALUE_ZATS,
+                    ":note_component": &NOTE_COMPONENT[..],
+                    ":is_change": false,
+                    ":note_version": NOTE_VERSION,
+                },
+            )
+            .unwrap();
+        }
+
+        // Account A derives the same address.
+        super::store_address_range(
+            &tx,
+            &network,
+            account_a,
+            TransparentKeyScope::EXTERNAL,
+            vec![(Address::from(taddr), taddr, child_index)],
+        )
+        .unwrap();
+
+        // Every seeded note followed the record to the deriving account.
+        for table in [
+            "sapling_received_notes",
+            "orchard_received_notes",
+            "ironwood_received_notes",
+        ] {
+            let note_account_id: i64 = tx
+                .query_row(
+                    &format!("SELECT account_id FROM {table} WHERE address_id = :address_id"),
+                    named_params! { ":address_id": foreign_id },
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                note_account_id, account_a.0,
+                "{table} was not reattributed to the deriving account"
+            );
+        }
+
+        tx.commit().unwrap();
+    }
+
+    /// Pins the invariant that makes the shielded arms of the reattribution above unreachable in
+    /// practice, so that they stay provably redundant rather than quietly becoming load-bearing.
+    ///
+    /// A shielded note's `address_id` is only ever produced by `upsert_address`, which writes the
+    /// external key scope and a non-null diversifier index. The `addresses` check constraint
+    /// makes a null diversifier index and the `Foreign` key scope equivalent, so a `Foreign`
+    /// record can be neither inserted nor matched by that function, and no shielded note can
+    /// resolve to one.
+    #[test]
+    fn foreign_addresses_cannot_carry_a_diversifier_index() {
+        use rusqlite::named_params;
+        use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest};
+
+        use crate::wallet::{
+            encoding::{KeyScope, ReceiverFlags, encode_diversifier_index_be},
+            upsert_address,
+        };
+
+        /// An address string for the rejected insert. It is never decoded, only stored.
+        const UNUSED_ADDRESS: &str = "placeholder-address";
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().unwrap();
+        let account_uuid = account.id();
+        let uivk = account.uivk();
+        let network = *st.network();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+        // The lowest diversifier index at which this account has a shielded address, and the
+        // address itself. A Sapling receiver is required so that the address exists whether or
+        // not the `orchard` feature is enabled; the search skips the indices at which the
+        // account's Sapling key has no valid diversifier.
+        let shielded_request = UnifiedAddressRequest::custom(
+            ReceiverRequirement::Omit,
+            ReceiverRequirement::Require,
+            ReceiverRequirement::Allow,
+        )
+        .unwrap();
+        let (ua, diversifier_index) = uivk.default_address(shielded_request).unwrap();
+
+        // A `Foreign` record carrying a diversifier index is rejected by the schema.
+        let rejected = tx.execute(
+            "INSERT INTO addresses
+                 (account_id, key_scope, diversifier_index_be, address, receiver_flags)
+             VALUES (:account_id, :foreign, :diversifier_index_be, :address, :receiver_flags)",
+            named_params! {
+                ":account_id": account_id.0,
+                ":foreign": KeyScope::Foreign.encode(),
+                ":diversifier_index_be": encode_diversifier_index_be(diversifier_index),
+                ":address": UNUSED_ADDRESS,
+                ":receiver_flags": ReceiverFlags::P2PKH.bits(),
+            },
+        );
+        assert!(
+            rejected.is_err(),
+            "a Foreign address record must not carry a diversifier index"
+        );
+
+        // The records that shielded notes are attached to are the complement of that: external
+        // scope, with a diversifier index.
+        let address_id = upsert_address(
+            &tx,
+            &network,
+            account_id,
+            diversifier_index,
+            &ua,
+            None,
+            false,
+        )
+        .unwrap();
+
+        let (key_scope, has_diversifier_index): (i64, bool) = tx
+            .query_row(
+                "SELECT key_scope, diversifier_index_be IS NOT NULL
+                 FROM addresses WHERE id = :id",
+                named_params! { ":id": address_id.0 },
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(key_scope, KeyScope::EXTERNAL.encode());
+        assert!(has_diversifier_index);
 
         tx.commit().unwrap();
     }
