@@ -14,10 +14,9 @@ workspace.
 - `zcash_client_backend::proposal::Step::{is_canonical_crossing, ironwood_bundle_padding}`
 - `zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`, the ZIP 318
   parameters in force for a wallet: the specified values, with the anchor bucket grid
-  taken from the grid that wallet retains.
-- `zcash_client_backend::data_api::WalletRead::pool_migration_params`, with a default
-  implementation composing `anchor_retention_interval`. A backend that makes retention
-  configurable needs only override the latter.
+  taken from `WalletRead::anchor_retention_interval`.
+- `zcash_client_backend::data_api::WalletRead::pool_migration_params`, defaulting to
+  the above.
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::bucketed`
 - `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
 - `zcash_client_backend::data_api::BirthdayError` now implements `Debug`,
@@ -28,46 +27,38 @@ workspace.
 - `zcash_client_backend::tor::http::HttpError::Timeout`
 
 ### Changed
-- A payment that carries value across the Orchard turnstile into Ironwood is now
-  built with a single unpadded Ironwood action, instead of the default two, when its
-  shape is indistinguishable from a ZIP 318 migration transfer: exactly one Orchard
-  input, no Ironwood spends or change, a single Ironwood output whose value is a
-  canonical ZIP 318 denomination (a `{1, 2, 5} * 10^k` amount between 0.01 ZEC and
-  10,000 ZEC), and an anchor on the wallet's ZIP 318 bucket grid. Such a payment is
-  proposed against a bucketed anchor and funded from a single Orchard note, and pays
-  one fewer ZIP 317 marginal-fee action; when the wallet cannot fund it that way, an
-  ordinary transaction is proposed instead. Every other transaction is unaffected.
+- `zcash_client_backend::data_api::OutputLockStore::get_locked_outputs` is no longer
+  gated behind `test-dependencies`; every implementor must now provide it
+  unconditionally.
+- A payment across the Orchard turnstile whose value is a canonical ZIP 318
+  denomination (a `{1, 2, 5} * 10^k` amount between 0.01 ZEC and 10,000 ZEC) is now
+  proposed against an anchor on the wallet's ZIP 318 bucket grid, funded from a single
+  Orchard note, and built with one unpadded Ironwood action instead of two; it
+  therefore pays one fewer ZIP 317 marginal-fee action and requires up to one bucket
+  interval of additional confirmations on its inputs. When the wallet cannot fund it
+  that way, an ordinary transaction is proposed instead.
 - `zcash_client_backend::fees::ChangeStrategy::compute_balance` takes two additional
   arguments after `target_height`: `anchor_height: BlockHeight` and
   `zip318: &PoolMigrationParams`. The same applies to
   `InputSelector::{propose_transaction, propose_shielding}`. Pass the anchor height the
-  transaction will be proved against, and the parameters from
-  `WalletRead::pool_migration_params`. Both determine whether a transaction qualifies
-  for the unpadded Ironwood bundle above, so the fee model needs them to compute the
-  same action count the builder will produce.
+  transaction will be proved against, and `WalletRead::pool_migration_params`.
 - `create_pczt_from_proposal`'s `orchard_pool_padding` argument now selects the
   padding for the Orchard bundle only; the Ironwood bundle's padding is derived from
   the proposal. Pass `BundlePadding::DEFAULT`.
 - `zcash_client_backend::proposal::Step::{orchard_action_count, ironwood_action_count}`
   take a `zcash_primitives::transaction::builder::BundlePadding` in place of an
-  `orchard::builder::BundleType`. A proposal step describes a wallet spend, which is
-  never a coinbase transaction, so only the padding rule was ever meaningful here;
-  passing `BundleType::Coinbase` is now unrepresentable rather than reported as an
-  error. Replace `BundleType::DEFAULT` with `BundlePadding::DEFAULT`,
+  `orchard::builder::BundleType`; `BundleType::Coinbase` is no longer representable.
+  Replace `BundleType::DEFAULT` with `BundlePadding::DEFAULT`,
   `BundleType::UNPADDED` with `BundlePadding::UNPADDED`, and a
   `BundleType::Transactional { .. }` literal with the identically-fielded
   `BundlePadding { .. }`.
 - `zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval` is
-  now a re-export of `zcash_protocol::zip318::AnchorBucketInterval`, the single
-  type shared with `zcash_pool_migration`. Its API and behaviour are unchanged and
-  code naming it through this path still compiles, but it is no longer a distinct
-  type from `zcash_pool_migration`'s bucket interval, so the `From` conversion
-  between them is gone; remove any `.into()` at that boundary.
-  `AnchorRetentionInterval::custom` is no longer gated behind the `unstable`
-  feature, since a store reconstructing a persisted interval needs it from
-  ordinary library code; its documentation carries the test-networks-only
-  restriction that the gate used to imply. `AnchorRetentionInterval::from_stored_block_count`
-  is removed — use `custom`, which does the same thing.
+  now a re-export of `zcash_protocol::zip318::AnchorBucketInterval`. Its API and
+  behaviour are unchanged, but it is no longer distinct from `zcash_pool_migration`'s
+  bucket interval, so the `From` conversion between them is gone; remove any `.into()`
+  at that boundary. `AnchorRetentionInterval::custom` is no longer gated behind
+  `unstable`, and `AnchorRetentionInterval::from_stored_block_count` is removed — use
+  `custom`.
 - Every public error enum in this crate is now `#[non_exhaustive]` 
   so that future variants can be added without a breaking release. A
   `match` over any of them must now include a wildcard arm:
@@ -81,9 +72,8 @@ workspace.
 
 ### Removed
 - `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}::with_unpadded_orchard_pool_bundles`.
-  The Orchard bundle is now always padded to the default action floor, and the
-  Ironwood bundle's padding is derived from the transaction's shape rather than
-  chosen by the caller, so the setting no longer had an effect to control.
+  The Orchard bundle is always padded to the default action floor, and the Ironwood
+  bundle's padding is derived from the transaction's shape.
 
 ### Fixed
 - The Tor HTTP and gRPC transports now reject a URL whose scheme is neither

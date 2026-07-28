@@ -77,7 +77,10 @@ use {
     zcash_protocol::value::ZatBalance,
 };
 
-use zcash_protocol::{PoolType, TxId};
+#[cfg(feature = "orchard")]
+use zcash_protocol::PoolType;
+#[cfg(feature = "transparent-inputs")]
+use zcash_protocol::TxId;
 
 #[cfg(feature = "pczt")]
 use {
@@ -1248,8 +1251,7 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
         Receiver::Orchard([0xab; 43]),
     ])
     .unwrap();
-    let addy =
-        ZcashAddress::try_from_encoded(&ua.encode(&st.wallet().pool_migration_params())).unwrap();
+    let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -1308,8 +1310,7 @@ pub fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>(
     // Without the `orchard` feature, the Orchard receiver's contents are not parsed,
     // so arbitrary receiver bytes suffice.
     let ua = unified::Address::try_from_items(vec![Receiver::Orchard([0xab; 43])]).unwrap();
-    let addy =
-        ZcashAddress::try_from_encoded(&ua.encode(&st.wallet().pool_migration_params())).unwrap();
+    let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
 

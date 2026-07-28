@@ -79,7 +79,6 @@ pub struct SingleOutputChangeStrategy<R, I> {
     change_memo: Option<MemoBytes>,
     fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
-    #[cfg(feature = "orchard")]
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
     meta_source: PhantomData<I>,
@@ -102,7 +101,6 @@ impl<R, I> SingleOutputChangeStrategy<R, I> {
             change_memo,
             fallback_change_pool,
             dust_output_policy,
-            #[cfg(feature = "orchard")]
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy: TransparentChangePolicy::ShieldChange,
             meta_source: PhantomData,
@@ -210,7 +208,6 @@ pub struct MultiOutputChangeStrategy<R, I> {
     fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
     split_policy: SplitPolicy,
-    #[cfg(feature = "orchard")]
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
     meta_source: PhantomData<I>,
@@ -241,7 +238,6 @@ impl<R, I> MultiOutputChangeStrategy<R, I> {
             fallback_change_pool,
             dust_output_policy,
             split_policy,
-            #[cfg(feature = "orchard")]
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy: TransparentChangePolicy::ShieldChange,
             meta_source: PhantomData,

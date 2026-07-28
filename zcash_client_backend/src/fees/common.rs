@@ -311,8 +311,8 @@ pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clo
     // boundary of the bucket grid, so the padding decision depends on both. The grid comes from
     // the wallet rather than the network defaults: the wallet is the side that retains the
     // checkpoints, so its grid is the only one a crossing can actually be proved against.
-    anchor_height: BlockHeight,
-    zip318: &PoolMigrationParams,
+    _anchor_height: BlockHeight,
+    _zip318: &PoolMigrationParams,
     change_memo: Option<&MemoBytes>,
     ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
@@ -412,7 +412,7 @@ where
     // above the default floor and the padding is irrelevant.
     #[cfg(feature = "orchard")]
     let ironwood_is_canonical_crossing = |change_count: usize| {
-        let constants = zip318;
+        let constants = _zip318;
         orchard.inputs().len() == 1
             && ironwood.inputs().is_empty()
             && change_count == 0
@@ -422,7 +422,7 @@ where
             }
             && constants
                 .anchor_bucket_interval()
-                .is_boundary(anchor_height)
+                .is_boundary(_anchor_height)
     };
     #[cfg(feature = "orchard")]
     let ironwood_action_count = |change_count| {
@@ -586,8 +586,10 @@ where
             ironwood,
             #[cfg(feature = "orchard")]
             orchard_padding,
-            anchor_height,
-            zip318,
+            #[cfg(feature = "orchard")]
+            _anchor_height,
+            #[cfg(feature = "orchard")]
+            _zip318,
             cfg.marginal_fee,
             cfg.grace_actions,
             &possible_change[..],
@@ -823,8 +825,8 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     // The Orchard-pool bundle type the builder will use; the action counts computed
     // for the grace-input check must match it (see `single_pool_output_balance`).
     #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
-    anchor_height: BlockHeight,
-    zip318: &PoolMigrationParams,
+    #[cfg(feature = "orchard")] anchor_height: BlockHeight,
+    #[cfg(feature = "orchard")] zip318: &PoolMigrationParams,
     marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],

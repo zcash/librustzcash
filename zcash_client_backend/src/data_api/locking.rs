@@ -302,8 +302,8 @@ pub trait OutputLockStore {
     /// Returns the set of currently locked outputs for the given account.
     ///
     /// Locked outputs are excluded from note selection, and are tallied separately in balance
-    /// computations.
-    #[cfg(any(test, feature = "test-dependencies"))]
+    /// computations. A wallet needs this to show the user which funds are reserved by an in-flight
+    /// proposal, so it is part of the ordinary interface rather than a testing affordance.
     fn get_locked_outputs(&self, account: Self::AccountId) -> Result<Vec<OutputRef>, Self::Error>;
 }
 
