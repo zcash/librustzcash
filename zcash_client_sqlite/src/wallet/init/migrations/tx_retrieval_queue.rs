@@ -275,6 +275,8 @@ fn queue_unmined_tx_retrieval<AccountId>(
     let detectable_via_scanning = d_tx.tx().sapling_bundle().is_some();
     #[cfg(feature = "orchard")]
     let detectable_via_scanning = detectable_via_scanning | d_tx.tx().orchard_bundle().is_some();
+    #[cfg(feature = "orchard")]
+    let detectable_via_scanning = detectable_via_scanning | d_tx.tx().ironwood_bundle().is_some();
 
     if d_tx.mined_height().is_none() && !detectable_via_scanning {
         queue_tx_retrieval(conn, std::iter::once(d_tx.tx().txid()), None)?

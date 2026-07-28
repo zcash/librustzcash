@@ -3718,7 +3718,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     // at present for fully transparent transactions, because any transaction with a shielded
     // component will be detected via ordinary chain scanning and/or nullifier checking.
     if !detectable_via_scanning {
-        queue_tx_retrieval(conn, std::iter::once(sent_tx.tx().txid()), None)?;
+        queue_tx_retrieval(conn, params, std::iter::once(sent_tx.tx().txid()), None)?;
     }
 
     Ok(())
@@ -3733,22 +3733,24 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let chain_tip = chain_tip_height(conn)?.ok_or(SqliteClientError::ChainHeightUnknown)?;
 
-    // It is safe to unconditionally delete the request from `tx_retrieval_queue` below (both in
-    // the expired case and the case where it has been mined), because we already have all the data
-    // we need about this transaction:
-    // * if the status is being set in response to a `GetStatus` request, we know that we already
-    //   have the transaction data (`GetStatus` requests are only generated if we already have that
-    //   data)
-    // * if it is being set in response to an `Enhancement` request, we know that the status must
-    //   be `TxidNotRecognized` because otherwise the transaction data should have been provided to
-    //   the backend directly instead of calling `set_transaction_status`
+    // Because `tx_retrieval_queue` is the sole source of transaction data requests (transactions
+    // having shielded components are never polled for status, as their mined status is learned
+    // via chain scanning, making a txid-scoped status query for them redundant), a
+    // `Status`-type queue entry must not be deleted until the
+    // transaction it refers to has reached a terminal state; otherwise, an as-yet-unmined
+    // fully-transparent transaction would silently stop being polled after a single
+    // not-yet-mined answer.
     //
-    // In general `Enhancement` requests are only generated in response to situations where a
-    // transaction has already been mined - either the transaction was detected by scanning the
-    // chain of `CompactBlock` values, or was discovered by walking backward from the inputs of a
-    // transparent transaction; in the case that a transaction was read from the mempool, complete
-    // transaction data will have been available and the only question that we are concerned with
-    // is whether that transaction ends up being mined or expires.
+    // * `Enhancement`-type entries may always be deleted: if the status of such a request is
+    //   being set via this method, the status must be `TxidNotRecognized`, because otherwise the
+    //   transaction data would have been provided to the backend directly instead of calling
+    //   `set_transaction_status`, and no more information about such a transaction can be
+    //   obtained by asking again.
+    // * `Status`-type entries are deleted only when the answer is terminal: either the
+    //   transaction has been mined, or we have positive confirmation that it remained unmined at
+    //   a height at which it can no longer be mined. For transactions with a known expiry height
+    //   of 0, we continue to query indefinitely; such transactions should be rebroadcast by the
+    //   wallet until they are either mined or conflict with another mined transaction.
     match status {
         TransactionStatus::TxidNotRecognized | TransactionStatus::NotInMainChain => {
             conn.execute(
@@ -3759,6 +3761,49 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
                 named_params![
                     ":txid": txid.as_ref(),
                     ":chain_tip": u32::from(chain_tip)
+                ],
+            )?;
+
+            // Delete the queue entry unless it is a `Status`-type entry for a transaction that
+            // may yet be mined. A transaction is in a terminal state if:
+            // * it has been mined (its queue entry, if any, is no longer needed), or
+            // * a nonzero expiry height is known for it, and we have confirmation that it
+            //   remained unmined at a height greater than or equal to that expiry height, or
+            // * its expiry height is unknown, and we have confirmation that it remained unmined
+            //   after the default expiry height for it entered the stable block range according
+            //   to the `PRUNING_DEPTH`.
+            conn.execute(
+                "DELETE FROM tx_retrieval_queue
+                 WHERE txid = :txid
+                 AND (
+                    query_type = :enhancement_type
+                    OR NOT EXISTS (
+                        SELECT 1 FROM transactions t
+                        WHERE t.txid = :txid
+                        AND t.mined_height IS NULL
+                        AND (
+                            -- the transaction will never expire; poll indefinitely
+                            t.expiry_height = 0
+                            -- a nonzero expiry height is known, and we have no confirmation that
+                            -- the transaction remained unmined at or beyond that height
+                            OR (
+                                t.expiry_height > 0
+                                AND t.confirmed_unmined_at_height < t.expiry_height
+                            )
+                            -- the expiry height is unknown, and the default expiry height for the
+                            -- transaction is not yet in the stable block range
+                            OR (
+                                t.expiry_height IS NULL
+                                AND t.confirmed_unmined_at_height
+                                    < t.min_observed_height + :certainty_depth
+                            )
+                        )
+                    )
+                 )",
+                named_params![
+                    ":txid": txid.as_ref(),
+                    ":enhancement_type": TxQueryType::Enhancement.code(),
+                    ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA,
                 ],
             )?;
         }
@@ -3794,10 +3839,11 @@ pub(crate) fn set_transaction_status<P: consensus::Parameters>(
 
             #[cfg(feature = "transparent-inputs")]
             transparent::update_gap_limits(conn, _params, gap_limits, txid, height)?;
+
+            // Mined status is terminal, so the queue entry is unconditionally deleted.
+            delete_retrieval_queue_entries(conn, txid)?;
         }
     }
-
-    delete_retrieval_queue_entries(conn, txid)?;
 
     Ok(())
 }
@@ -5083,7 +5129,17 @@ pub(crate) fn put_tx_data(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TxQueryType {
+    /// A request for the chain's view of the mined status of a transaction.
+    ///
+    /// INVARIANT: `Status`-type entries may only be created for transactions that ordinary
+    /// compact-block scanning cannot detect, i.e. fully-transparent transactions. A transaction
+    /// having any shielded component (Sapling, Orchard, or Ironwood) must never be the subject of
+    /// a status request: its mined status is always learned via chain scanning, so a
+    /// txid-scoped status query for it is redundant and out of scope for this queue.
+    /// This invariant is enforced by [`queue_tx_retrieval`], the sole producer of
+    /// queue entries.
     Status,
+    /// A request for the complete data of a transaction, identified by its txid.
     Enhancement,
 }
 
@@ -5105,8 +5161,9 @@ impl TxQueryType {
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn queue_transparent_input_retrieval<AccountId>(
+pub(crate) fn queue_transparent_input_retrieval<P: consensus::Parameters, AccountId>(
     conn: &rusqlite::Transaction<'_>,
+    params: &P,
     tx_ref: TxRef,
     d_tx: &DecryptedTransaction<Transaction, AccountId>,
 ) -> Result<(), SqliteClientError> {
@@ -5116,6 +5173,7 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
         // queue the transparent inputs for enhancement
         queue_tx_retrieval(
             conn,
+            params,
             b.vin.iter().map(|txin| *txin.prevout().txid()),
             Some(tx_ref),
         )?;
@@ -5124,39 +5182,100 @@ pub(crate) fn queue_transparent_input_retrieval<AccountId>(
     Ok(())
 }
 
-pub(crate) fn queue_tx_retrieval(
+/// Adds entries to the transaction retrieval queue for the given txids, if they would not be
+/// redundant.
+///
+/// The type of request queued for each txid depends upon the wallet's knowledge of the
+/// transaction:
+/// * If the wallet does not have the complete transaction data, an
+///   [`Enhancement`][TxQueryType::Enhancement] entry is created in order to retrieve it.
+/// * If the wallet has the complete transaction data for a fully-transparent transaction whose
+///   mined status is unknown, a [`Status`][TxQueryType::Status] entry is created. Mined status
+///   for fully-transparent transactions can only be learned by actively querying, because such
+///   transactions are invisible to compact-block scanning.
+/// * If the wallet has the complete transaction data for a transaction having any shielded
+///   component, no entry is created: the wallet will learn the transaction's mined status via
+///   ordinary chain scanning, so a txid-scoped status query for it would be redundant and is
+///   out of scope for this queue. See [`TxQueryType::Status`] for a statement
+///   of this invariant.
+pub(crate) fn queue_tx_retrieval<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
+    params: &P,
     txids: impl Iterator<Item = TxId>,
     dependent_tx_ref: Option<TxRef>,
 ) -> Result<(), SqliteClientError> {
+    let chain_tip = chain_tip_height(conn)?;
+
+    let mut stmt_tx_data = conn.prepare_cached(
+        "SELECT raw, mined_height
+         FROM transactions
+         WHERE txid = :txid",
+    )?;
+
     // Add an entry to the transaction retrieval queue if it would not be redundant.
     let mut stmt_insert_tx = conn.prepare_cached(
         "INSERT INTO tx_retrieval_queue (txid, query_type, dependent_transaction_id)
-         SELECT
-            :txid,
-            IIF(
-                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
-                :status_type,
-                :enhancement_type
-            ),
-            :dependent_transaction_id
-        ON CONFLICT (txid) DO UPDATE
-        SET query_type =
-            IIF(
-                EXISTS (SELECT 1 FROM transactions WHERE txid = :txid AND raw IS NOT NULL),
-                :status_type,
-                :enhancement_type
-            ),
-            dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
+         VALUES (:txid, :query_type, :dependent_transaction_id)
+         ON CONFLICT (txid) DO UPDATE
+         SET query_type = :query_type,
+             dependent_transaction_id = IFNULL(:dependent_transaction_id, dependent_transaction_id)",
     )?;
 
     for txid in txids {
-        stmt_insert_tx.execute(named_params! {
-            ":txid": txid.as_ref(),
-            ":status_type": TxQueryType::Status.code(),
-            ":enhancement_type": TxQueryType::Enhancement.code(),
-            ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
-        })?;
+        let tx_data = stmt_tx_data
+            .query_row(named_params![":txid": txid.as_ref()], |row| {
+                Ok((
+                    row.get::<_, Option<Vec<u8>>>("raw")?,
+                    row.get::<_, Option<u32>>("mined_height")?
+                        .map(BlockHeight::from),
+                ))
+            })
+            .optional()?;
+
+        let query_type = match tx_data {
+            // We already have the complete transaction data, so the only information that could
+            // still be required is the transaction's mined status.
+            Some((Some(raw), mined_height)) => {
+                if mined_height.is_some() {
+                    // The transaction is already known to have been mined; no request of any kind
+                    // is required.
+                    None
+                } else {
+                    // We assume that unmined transactions were created under the current
+                    // consensus branch.
+                    let branch_id = chain_tip
+                        .map_or(BranchId::Sapling, |h| BranchId::for_height(params, h + 1));
+
+                    match Transaction::read(&raw[..], branch_id) {
+                        Ok(tx) => {
+                            let detectable_via_scanning = tx.sapling_bundle().is_some()
+                                || tx.orchard_bundle().is_some()
+                                || tx.ironwood_bundle().is_some();
+
+                            // Only fully-transparent transactions may be the subject of `Status`
+                            // requests; the mined status of a transaction having any shielded
+                            // component will be learned via chain scanning, making a status
+                            // request for it by txid redundant.
+                            (!detectable_via_scanning).then_some(TxQueryType::Status)
+                        }
+                        // If the stored transaction data cannot be parsed, we cannot rule out
+                        // that the transaction has shielded components, so we treat it as out
+                        // of scope and do not create a status request for it.
+                        Err(_) => None,
+                    }
+                }
+            }
+            // We do not have complete transaction data, so request enhancement.
+            _ => Some(TxQueryType::Enhancement),
+        };
+
+        if let Some(query_type) = query_type {
+            stmt_insert_tx.execute(named_params! {
+                ":txid": txid.as_ref(),
+                ":query_type": query_type.code(),
+                ":dependent_transaction_id": dependent_tx_ref.map(|r| r.0),
+            })?;
+        }
     }
 
     Ok(())
@@ -5164,60 +5283,35 @@ pub(crate) fn queue_tx_retrieval(
 
 /// Returns the vector of [`TransactionDataRequest`]s that represents the information needed by the
 /// wallet backend in order to be able to present a complete view of wallet history and memo data.
+///
+/// Requests are drawn exclusively from the `tx_retrieval_queue` table; entries are only added to
+/// that queue for transactions that cannot be detected via ordinary compact-block scanning.
+/// [`TransactionDataRequest::GetStatus`] entries exist solely for fully-transparent transactions,
+/// which have no shielded component whose mining could be observed by scanning;
+/// [`TransactionDataRequest::Enhancement`] entries exist for transactions discovered by walking
+/// the transparent input graph. Transactions having any shielded component are deliberately never
+/// the subject of status requests: their mined status is always learned via chain scanning, so a
+/// txid-scoped status query for them is redundant and out of scope for the queue.
 pub(crate) fn transaction_data_requests(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<TransactionDataRequest>, SqliteClientError> {
-    // We will return both explicitly constructed status requests, and a status request for each
-    // transaction that is known to the wallet for which we don't have the mined height,
-    // and for which we have no positive confirmation that the transaction expired unmined.
-    //
-    // For transactions with a known expiry height of 0, we will continue to query indefinitely.
-    // Such transactions should be rebroadcast by the wallet until they are either mined or
-    // conflict with another mined transaction.
-    let mut tx_retrieval_stmt = conn.prepare_cached(
-        "SELECT txid, query_type FROM tx_retrieval_queue
-         UNION
-         SELECT txid, :status_type
-         FROM transactions
-         WHERE mined_height IS NULL
-         AND (
-            -- we have no confirmation of expiry
-            confirmed_unmined_at_height IS NULL
-            -- a nonzero expiry height is known, and we have confirmation that the transaction was
-            -- not unmined as of a height greater than or equal to that expiry height
-            OR (
-                expiry_height > 0
-                AND confirmed_unmined_at_height < expiry_height
-            )
-            -- the expiry height is unknown and the default expiry height for it is not yet in the
-            -- stable block range according to the PRUNING_DEPTH
-            OR (
-                expiry_height IS NULL
-                AND confirmed_unmined_at_height < min_observed_height + :certainty_depth
-            )
-        )",
-    )?;
+    let mut tx_retrieval_stmt =
+        conn.prepare_cached("SELECT txid, query_type FROM tx_retrieval_queue")?;
 
     let result = tx_retrieval_stmt
-        .query_and_then(
-            named_params![
-                ":status_type": TxQueryType::Status.code(),
-                ":certainty_depth": PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA
-            ],
-            |row| {
-                let txid = row.get(0).map(TxId::from_bytes)?;
-                let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
-                    SqliteClientError::CorruptedData(
-                        "Unrecognized transaction data request type.".to_owned(),
-                    )
-                })?;
+        .query_and_then([], |row| {
+            let txid = row.get(0).map(TxId::from_bytes)?;
+            let query_type = row.get(1).map(TxQueryType::from_code)?.ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Unrecognized transaction data request type.".to_owned(),
+                )
+            })?;
 
-                Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
-                    TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
-                    TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
-                })
-            },
-        )?
+            Ok::<TransactionDataRequest, SqliteClientError>(match query_type {
+                TxQueryType::Status => TransactionDataRequest::GetStatus(txid),
+                TxQueryType::Enhancement => TransactionDataRequest::Enhancement(txid),
+            })
+        })?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(result)
@@ -5996,6 +6090,154 @@ mod tests {
             ),
             Err(SqliteClientError::AccountUnknown)
         );
+    }
+
+    /// `Status`-type entries in `tx_retrieval_queue` are the sole source of `GetStatus` requests,
+    /// so a not-yet-mined `set_transaction_status` answer must only delete an entry once the
+    /// transaction has reached a terminal state:
+    /// * a transaction with a known expiry height of 0 never expires, and is polled indefinitely;
+    /// * a transaction with a known nonzero expiry height is terminal once it is confirmed to
+    ///   have remained unmined at or beyond that height;
+    /// * a transaction with an unknown expiry height is terminal once it is confirmed to have
+    ///   remained unmined at or beyond `min_observed_height + PRUNING_DEPTH +
+    ///   DEFAULT_TX_EXPIRY_DELTA`.
+    #[test]
+    fn status_request_retention_terminal_conditions() {
+        use zcash_client_backend::data_api::{TransactionDataRequest, TransactionStatus};
+        use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+        use zcash_protocol::TxId;
+
+        use super::TxQueryType;
+        use crate::PRUNING_DEPTH;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        // Scan a few blocks so that the wallet has a chain tip.
+        let dfvk = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+        let value = Zatoshis::const_from_u64(10000);
+        let start_height = st.sapling_activation_height();
+        st.generate_block_at(
+            start_height,
+            BlockHash([0; 32]),
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                value,
+            )],
+            0,
+            0,
+            0,
+            false,
+        );
+        for _ in 1..5 {
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        }
+        st.scan_cached_blocks(start_height, 5);
+
+        let tip = u32::from(start_height) + 4;
+        let certainty_depth = PRUNING_DEPTH + DEFAULT_TX_EXPIRY_DELTA;
+
+        // Inserts an unmined transaction row along with a `Status`-type retrieval queue entry
+        // for it. The queue entries are inserted directly because these code paths do not read
+        // the raw transaction data, which lets each terminal condition be exercised precisely.
+        let insert_status_request =
+            |conn: &Connection, txid: &TxId, expiry_height: Option<u32>, min_observed: u32| {
+                conn.execute(
+                    "INSERT INTO transactions (txid, expiry_height, min_observed_height)
+                     VALUES (:txid, :expiry_height, :min_observed_height)",
+                    named_params![
+                        ":txid": txid.as_ref(),
+                        ":expiry_height": expiry_height,
+                        ":min_observed_height": min_observed,
+                    ],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO tx_retrieval_queue (txid, query_type)
+                     VALUES (:txid, :query_type)",
+                    named_params![
+                        ":txid": txid.as_ref(),
+                        ":query_type": TxQueryType::Status.code(),
+                    ],
+                )
+                .unwrap();
+            };
+
+        // A transaction with expiry height 0 never expires; its entry survives a confirmed-
+        // unmined answer regardless of how old the transaction is.
+        let tx_no_expiry = TxId::from_bytes([1; 32]);
+        insert_status_request(
+            st.wallet().conn(),
+            &tx_no_expiry,
+            Some(0),
+            tip - certainty_depth,
+        );
+
+        // A transaction whose known expiry height is above the chain tip is not yet terminal.
+        let tx_unexpired = TxId::from_bytes([2; 32]);
+        insert_status_request(st.wallet().conn(), &tx_unexpired, Some(tip + 10), tip);
+
+        // A transaction whose known expiry height is at or below the chain tip becomes terminal
+        // as soon as it is confirmed unmined.
+        let tx_expired = TxId::from_bytes([3; 32]);
+        insert_status_request(st.wallet().conn(), &tx_expired, Some(tip), tip - 50);
+
+        // A transaction with an unknown expiry height that was first observed recently is not
+        // yet terminal.
+        let tx_unknown_expiry_recent = TxId::from_bytes([4; 32]);
+        insert_status_request(st.wallet().conn(), &tx_unknown_expiry_recent, None, tip);
+
+        // A transaction with an unknown expiry height becomes terminal once confirmed unmined at
+        // or beyond `min_observed_height + certainty_depth`.
+        let tx_unknown_expiry_old = TxId::from_bytes([5; 32]);
+        insert_status_request(
+            st.wallet().conn(),
+            &tx_unknown_expiry_old,
+            None,
+            tip - certainty_depth,
+        );
+
+        let contains_status_request = |st: &TestState<_, crate::testing::db::TestDb, _>, txid| {
+            st.wallet()
+                .transaction_data_requests()
+                .unwrap()
+                .contains(&TransactionDataRequest::GetStatus(txid))
+        };
+
+        for txid in [
+            tx_no_expiry,
+            tx_unexpired,
+            tx_expired,
+            tx_unknown_expiry_recent,
+            tx_unknown_expiry_old,
+        ] {
+            assert!(contains_status_request(&st, txid));
+            st.wallet_mut()
+                .set_transaction_status(txid, TransactionStatus::NotInMainChain)
+                .unwrap();
+        }
+
+        // Non-terminal transactions are still being polled after the confirmed-unmined answer.
+        assert!(contains_status_request(&st, tx_no_expiry));
+        assert!(contains_status_request(&st, tx_unexpired));
+        assert!(contains_status_request(&st, tx_unknown_expiry_recent));
+
+        // Terminal transactions are no longer polled.
+        assert!(!contains_status_request(&st, tx_expired));
+        assert!(!contains_status_request(&st, tx_unknown_expiry_old));
+
+        // A `Mined` answer is terminal even for a transaction that never expires.
+        st.wallet_mut()
+            .set_transaction_status(
+                tx_no_expiry,
+                TransactionStatus::Mined(BlockHeight::from(tip)),
+            )
+            .unwrap();
+        assert!(!contains_status_request(&st, tx_no_expiry));
     }
 
     #[test]

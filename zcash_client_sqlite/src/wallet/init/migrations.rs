@@ -50,6 +50,7 @@ mod tree_retained_checkpoints;
 mod tx_observation_height;
 mod tx_retrieval_queue;
 mod tx_retrieval_queue_expiry;
+mod tx_status_queue_scoping;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
@@ -159,6 +160,9 @@ pub(super) fn all_migrations<
     //                                             /                        \    fix_bad_ironwood_change_flagging
     //                                          ivk_item_cache    add_transparent_receiver_address_index
     //
+    // (not shown above: tx_status_queue_scoping, which depends on tx_retrieval_queue and
+    // account_delete_cascade)
+    //
     let rng = Rc::new(Mutex::new(rng));
     vec![
         Box::new(initial_setup::Migration {}),
@@ -266,6 +270,9 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
         Box::new(note_locking::Migration),
+        Box::new(tx_status_queue_scoping::Migration {
+            params: params.clone(),
+        }),
     ]
 }
 
@@ -417,6 +424,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     orchard_ironwood_migration_tables::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     note_locking::MIGRATION_ID,
+    tx_status_queue_scoping::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
