@@ -10,7 +10,8 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::shardtree_support;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xeeec0d0d_fee0_4231_8c68_5f3a7c7c2245);
+/// This migration adds a birthday height to each account record.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xeeec0d0d_fee0_4231_8c68_5f3a7c7c2245);
 
 const DEPENDENCIES: &[Uuid] = &[shardtree_support::MIGRATION_ID];
 

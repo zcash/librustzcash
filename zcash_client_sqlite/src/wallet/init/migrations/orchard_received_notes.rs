@@ -11,7 +11,9 @@ use zcash_protocol::PoolType;
 use super::full_account_ids;
 use crate::wallet::{init::WalletMigrationError, pool_code};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x51d7a273_aa19_4109_9325_80e4a5545048);
+/// This migration adds tables to the wallet database that are needed to persist Orchard received
+/// notes.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x51d7a273_aa19_4109_9325_80e4a5545048);
 
 const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
 

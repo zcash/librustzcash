@@ -21,7 +21,8 @@ use {
     zip32::DiversifierIndex,
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x0e1d4274_1f8e_44e2_909d_689a4bc2967b);
+/// The migration that records ephemeral addresses for each account.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x0e1d4274_1f8e_44e2_909d_689a4bc2967b);
 
 const DEPENDENCIES: &[Uuid] = &[utxos_to_txos::MIGRATION_ID];
 

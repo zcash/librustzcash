@@ -23,7 +23,9 @@ use uuid::Uuid;
 use super::account_delete_cascade;
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x47c0e9c2_2eda_4b9c_be15_63c636c0e1c7);
+/// Adds an index on `transparent_received_outputs.value_zat` to support value-descending selection
+/// of spendable transparent outputs for an account.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x47c0e9c2_2eda_4b9c_be15_63c636c0e1c7);
 
 // `account_delete_cascade` is the topologically-latest migration that rebuilds the
 // `transparent_received_outputs` table (via `CREATE TABLE` + `INSERT INTO ... SELECT` +

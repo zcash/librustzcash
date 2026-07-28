@@ -33,7 +33,8 @@ use crate::{
     },
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
+/// This migration adds decryption key scope to persisted information about received notes.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
 
 const DEPENDENCIES: &[Uuid] = &[shardtree_support::MIGRATION_ID];
 

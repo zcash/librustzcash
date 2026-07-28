@@ -29,7 +29,8 @@ use zcash_protocol::consensus;
 use super::standalone_p2sh;
 use crate::wallet::{encoding::KeyScope, init::WalletMigrationError};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x3d4f12d6_3da9_4ace_ac65_a0dd0a7adc32);
+/// Adds a `UNIQUE` index on `addresses.cached_transparent_receiver_address`.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x3d4f12d6_3da9_4ace_ac65_a0dd0a7adc32);
 
 // `standalone_p2sh` is the topologically-latest migration that rebuilds the `addresses` table, so
 // depending on it is sufficient to ensure the table is in its final form (including the
