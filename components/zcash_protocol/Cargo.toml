@@ -29,9 +29,7 @@ memuse = { workspace = true, optional = true }
 document-features = { workspace = true, optional = true }
 
 # - Encodings
-# Prototype: takes the local 0.5 path dep, following the `zcash_history` precedent,
-# because the `Encodable`/`Decodable` traits live in the unpublished 0.5.
-zcash_encoding = { version = "0.5", path = "../zcash_encoding", default-features = false }
+zcash_encoding.workspace = true
 corez.workspace = true
 hex.workspace = true
 
@@ -44,7 +42,7 @@ incrementalmerkletree-testing = { workspace = true, optional = true }
 criterion.workspace = true
 nonempty.workspace = true
 proptest.workspace = true
-zcash_encoding = { version = "0.5", path = "../zcash_encoding", features = ["test-dependencies"] }
+zcash_encoding = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 default = ["std"]
