@@ -7,6 +7,30 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_encoding::Encodable`, `zcash_encoding::Decodable` and the
+  `zcash_encoding::Codec` marker alias over the pair, naming the canonical
+  binary encoding of a type. `Decodable::Args` carries context the byte stream
+  does not itself provide (`()` when the encoding is self-describing).
+  Implementations are provided for `Vec<T>`, `Option<T>` and `NonEmpty<T>`,
+  which encode exactly as `Vector`, `Optional` and `Vector::write_nonempty` do,
+  so a codec for `T` yields codecs for all of them.
+- `zcash_encoding::codec::Unprefixed`, the `Array` encoding (no length prefix,
+  element count supplied via `Decodable::Args`) as a type.
+- `zcash_encoding::testing::{check_codec_roundtrip, check_codec_roundtrip_with}`,
+  the round-trip property expressed over `Encodable`/`Decodable` rather than
+  over a pair of closures.
+- `zcash_encoding::testing::check_canonical`, which asserts that a codec admits
+  no more than one encoding per value. Unlike the round-trip property this
+  quantifies over arbitrary byte strings, so drive it with a fuzzer or a
+  `proptest` byte-string strategy.
+
+### Changed
+- `zcash_encoding::testing::check_roundtrip` no longer asserts that re-encoding
+  the decoded value reproduces the input bytes. That assertion was implied by
+  the round-trip assertion that precedes it, and so never tested the canonicity
+  it claimed to test. Use `check_canonical` for that property.
+
 ## [0.5.0] - 2026-07-24
 
 ### Added
