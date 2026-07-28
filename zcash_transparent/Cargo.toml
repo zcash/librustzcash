@@ -65,6 +65,7 @@ ripemd.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+zcash_encoding = { workspace = true, features = ["test-dependencies"] }
 zcash_protocol = { workspace = true, features = ["test-dependencies"] }
 
 [features]

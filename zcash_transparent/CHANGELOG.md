@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_transparent::address::Script`, `zcash_transparent::bundle::OutPoint`,
+  `zcash_transparent::bundle::TxOut` and `TxIn<Authorized>` now implement
+  `zcash_encoding::Encodable` and `zcash_encoding::Decodable`. The encodings are
+  unchanged and the inherent `read`/`write` methods remain, now delegating to
+  the trait implementations. Implementing the traits also provides the
+  corresponding encodings for containers such as `Vec<TxOut>`.
+
+### Changed
+- `TxIn::<Authorized>::read` and `TxOut::read` take `reader: &mut R` rather than
+  `mut reader: &mut R`; this is not a change to the call syntax.
+
 ## [0.10.0] - 2026-07-23
 
 ### Changed

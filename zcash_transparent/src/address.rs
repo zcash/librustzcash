@@ -6,7 +6,7 @@ use corez::io::{self, Read, Write};
 use zcash_address::{ToAddress, TryFromAddress, ZcashAddress};
 use zcash_protocol::consensus::NetworkType;
 
-use zcash_encoding::Vector;
+use zcash_encoding::{Decodable, Encodable, Vector};
 use zcash_script::{
     op,
     script::{self, Evaluable},
@@ -59,22 +59,40 @@ impl PartialEq for Script {
 
 impl Eq for Script {}
 
-impl Script {
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+impl Encodable for Script {
+    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        Vector::write(&mut writer, &self.0.0, |w, e| w.write_all(&[*e]))
+    }
+
+    fn serialized_size(&self) -> usize {
+        Vector::serialized_size_of_u8_vec(&self.0.0)
+    }
+}
+
+impl Decodable for Script {
+    type Args<'a> = ();
+
+    fn read<R: Read>(mut reader: R, _args: ()) -> io::Result<Self> {
         let script = Vector::read(&mut reader, |r| {
             let mut bytes = [0; 1];
             r.read_exact(&mut bytes).map(|_| bytes[0])
         })?;
         Ok(Script(script::Code(script)))
     }
+}
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        Vector::write(&mut writer, &self.0.0, |w, e| w.write_all(&[*e]))
+impl Script {
+    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+        <Self as Decodable>::read(reader, ())
+    }
+
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
     }
 
     /// Returns the length of this script as encoded (including the initial CompactSize).
     pub fn serialized_size(&self) -> usize {
-        Vector::serialized_size_of_u8_vec(&self.0.0)
+        Encodable::serialized_size(self)
     }
 }
 
