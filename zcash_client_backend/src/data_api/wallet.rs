@@ -76,6 +76,8 @@ use zcash_primitives::transaction::{
     fees::FeeRule,
 };
 use zcash_protocol::zip318::AnchorBucketInterval;
+#[cfg(feature = "orchard")]
+use zcash_protocol::zip318::PoolMigrationConstants;
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
@@ -787,18 +789,91 @@ where
     let (target_height, anchor_height) =
         maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
 
-    let proposal = input_selector.propose_transaction(
-        params,
-        wallet_db,
-        target_height,
-        anchor_height,
-        confirmations_policy,
-        spend_from_account,
-        request,
-        change_strategy,
-        spend_policy,
-        proposed_version,
-    )?;
+    // The ZIP 318 parameters in force for THIS wallet. The anchor bucket grid must come from the
+    // wallet rather than the network defaults: the wallet is the side that retains the
+    // checkpoints, so its grid is the only one a crossing can actually be proved against, and
+    // every decision below that depends on the grid consults this one value.
+    let zip318 = wallet_db.pool_migration_params();
+
+    // A payment of a canonical ZIP 318 denomination across the Orchard turnstile is proposed
+    // against a BUCKETED anchor and funded from a single Orchard note, so that the resulting
+    // transaction is indistinguishable from a ZIP 318 migration transfer (see
+    // `Step::is_canonical_crossing`). Whether that is achievable is decided here, before any
+    // proposal is kept, rather than discovered by failure: the common miss is not insufficient
+    // funds but a SUCCESSFUL multi-note selection, which funds perfectly well yet is not a
+    // canonical crossing. Falling back only on insufficient funds would leave such a transaction
+    // carrying a bucketed anchor — up to one interval of extra confirmations on its inputs — while
+    // still being built padded, which is worse than never having tried.
+    //
+    // Selection is restricted to the Orchard pool for the attempt. That is not merely a
+    // preference: a canonical crossing admits no Ironwood spends, and the ordinary selector
+    // prefers to avoid crossing pools, so for an Ironwood-destined payment it reaches for Ironwood
+    // notes whenever the wallet holds them. Without the restriction, a user migrating their own
+    // funds by sending themselves canonical amounts would stall as soon as the first crossing
+    // produced Ironwood notes: every later payment would be funded from Ironwood, crossing
+    // nothing, and no further value would ever leave the Orchard pool.
+    //
+    // The whole attempt is Orchard-gated: without that feature there is no Ironwood pool to cross
+    // into, so there is no canonical crossing to construct.
+    #[cfg(feature = "orchard")]
+    let canonical_proposal = canonical_crossing_candidate(params, &request, target_height)
+        .then(|| confirmations_policy.bucketed(zip318.anchor_bucket_interval(), target_height))
+        .flatten()
+        // A canonical crossing spends an Orchard note; if the caller forbids that, there is no
+        // canonical path to attempt.
+        .filter(|_| spend_policy.permits_shielded(ShieldedPool::Orchard))
+        .and_then(|bucketed_policy| {
+            let orchard_only =
+                input_selection::SpendPolicy::shielded_pools([ShieldedPool::Orchard])
+                    .with_locked_input_policy(spend_policy.locked_input_policy().clone());
+
+            input_selector
+                .propose_transaction(
+                    params,
+                    wallet_db,
+                    target_height,
+                    bucketed_policy.anchor_height(target_height),
+                    &zip318,
+                    bucketed_policy,
+                    spend_from_account,
+                    request.clone(),
+                    change_strategy,
+                    &orchard_only,
+                    proposed_version,
+                )
+                .ok()
+                // The authoritative test is the one the builder will also apply, so that there is
+                // exactly one definition of "canonical" and the two cannot disagree. A proposal
+                // that funded successfully but not from a single Orchard note fails it here and is
+                // discarded, costing a selection pass but no extra confirmations.
+                .filter(|proposal| {
+                    proposal.steps().len() == 1
+                        && proposal
+                            .steps()
+                            .first()
+                            .is_canonical_crossing(&params.network_type())
+                })
+        });
+
+    #[cfg(not(feature = "orchard"))]
+    let canonical_proposal = None;
+
+    let proposal = match canonical_proposal {
+        Some(proposal) => proposal,
+        None => input_selector.propose_transaction(
+            params,
+            wallet_db,
+            target_height,
+            anchor_height,
+            &zip318,
+            confirmations_policy,
+            spend_from_account,
+            request,
+            change_strategy,
+            spend_policy,
+            proposed_version,
+        )?,
+    };
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
         lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
@@ -807,6 +882,32 @@ where
     // Record the requested version on the proposal so that it is carried through to transaction
     // building; when `None`, building falls back to the version implied by the target height.
     Ok(proposal.with_proposed_version(proposed_version))
+}
+
+/// Returns whether `request` is worth attempting as a canonical ZIP 318 crossing: a single
+/// payment, of a canonical denomination, at a height where the Ironwood pool exists.
+///
+/// This is a cheap gate, not a decision. It deliberately does not resolve the recipient address to
+/// an output pool, nor consider which notes are available: those depend on input selection, which
+/// has not run yet. The authoritative test is [`Step::is_canonical_crossing`] applied to the
+/// resulting proposal, so a request that passes here but produces a non-canonical proposal is
+/// simply discarded. Keeping the gate loose avoids duplicating address-resolution logic that would
+/// then have to be kept in step with input selection.
+#[cfg(feature = "orchard")]
+fn canonical_crossing_candidate<ParamsT: consensus::Parameters>(
+    params: &ParamsT,
+    request: &zip321::TransactionRequest,
+    target_height: TargetHeight,
+) -> bool {
+    use zcash_protocol::zip318::PoolMigrationConstants;
+
+    params.is_nu_active(NetworkUpgrade::Nu6_3, target_height.into())
+        && match request.payments().values().collect::<Vec<_>>()[..] {
+            [payment] => payment
+                .amount()
+                .is_some_and(|amount| params.network_type().is_canonical_denomination(amount)),
+            _ => false,
+        }
 }
 
 /// Proposes making a payment to the specified address from the given account.
@@ -1058,6 +1159,7 @@ where
             to_account,
             target_height,
             anchor_height,
+            &wallet_db.pool_migration_params(),
             confirmations_policy,
             output_filter,
         )

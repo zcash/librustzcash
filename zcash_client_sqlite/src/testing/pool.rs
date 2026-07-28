@@ -321,6 +321,14 @@ pub(crate) fn anchor_checkpoints_retained_across_deep_scan<T: ShieldedPoolTester
 }
 
 #[cfg(feature = "orchard")]
+pub(crate) fn canonical_crossing_is_bucketed_and_unpadded() {
+    zcash_client_backend::data_api::testing::pool::canonical_crossing_is_bucketed_and_unpadded(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
 pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::pool_crossing_required::<P0, P1>(
         TestDbFactory::default(),

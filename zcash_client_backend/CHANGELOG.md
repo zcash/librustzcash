@@ -12,6 +12,13 @@ workspace.
 
 ### Added
 - `zcash_client_backend::proposal::Step::{is_canonical_crossing, ironwood_bundle_padding}`
+- `zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`, the ZIP 318
+  parameters in force for a wallet: the specified values, with the anchor bucket grid
+  taken from the grid that wallet retains.
+- `zcash_client_backend::data_api::WalletRead::pool_migration_params`, with a default
+  implementation composing `anchor_retention_interval`. A backend that makes retention
+  configurable needs only override the latter.
+- `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::bucketed`
 
 ### Removed
 - `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}::with_unpadded_orchard_pool_bundles`.
@@ -25,10 +32,16 @@ workspace.
   shape is indistinguishable from a ZIP 318 migration transfer: exactly one Orchard
   input, no Ironwood spends or change, a single Ironwood output whose value is a
   canonical ZIP 318 denomination (a `{1, 2, 5} * 10^k` amount between 0.01 ZEC and
-  10,000 ZEC), and an anchor on the ZIP 318 bucket grid. Such a transaction pays one
+  10,000 ZEC), and an anchor on the wallet's ZIP 318 bucket grid. Such a payment is
+  proposed against a bucketed anchor and funded from a single Orchard note; when the
+  wallet cannot do that, an ordinary transaction is proposed instead. Such a transaction pays one
   fewer ZIP 317 marginal-fee action. Every other transaction is unaffected.
-- `zcash_client_backend::fees::ChangeStrategy::compute_balance` takes an additional
-  `anchor_height: BlockHeight` argument, after `target_height`. The anchor determines
+- `zcash_client_backend::fees::ChangeStrategy::compute_balance` takes two additional
+  arguments after `target_height`: `anchor_height: BlockHeight` and
+  `zip318: &PoolMigrationParams`. The same applies to
+  `InputSelector::{propose_transaction, propose_shielding}`. Pass the anchor height the
+  transaction will be proved against, and the parameters from
+  `WalletRead::pool_migration_params`. The anchor determines
   whether a transaction qualifies for the unpadded Ironwood bundle above, so the fee
   model needs it to compute the same action count the builder will produce. Pass the
   anchor height the transaction will be proved against.

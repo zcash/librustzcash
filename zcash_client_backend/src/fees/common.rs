@@ -8,6 +8,8 @@ use zcash_primitives::transaction::fees::{
 };
 #[cfg(feature = "orchard")]
 use zcash_protocol::zip318::PoolMigrationConstants;
+
+use crate::data_api::anchor_retention::PoolMigrationParams;
 use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -304,9 +306,13 @@ pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clo
     // There is no matching Ironwood parameter. That bundle's padding is DERIVED from the
     // transaction's shape (see `ironwood_is_canonical_crossing` below), not chosen by the caller.
     #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
-    // The anchor the shielded bundles will be proved against. A canonical ZIP 318 crossing must be
-    // anchored to a boundary of the bucket grid, so the padding decision depends on it.
+    // The anchor the shielded bundles will be proved against, and the ZIP 318 parameters in force
+    // for the wallet proposing the transaction. A canonical crossing must be anchored to a
+    // boundary of the bucket grid, so the padding decision depends on both. The grid comes from
+    // the wallet rather than the network defaults: the wallet is the side that retains the
+    // checkpoints, so its grid is the only one a crossing can actually be proved against.
     anchor_height: BlockHeight,
+    zip318: &PoolMigrationParams,
     change_memo: Option<&MemoBytes>,
     ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
@@ -406,7 +412,7 @@ where
     // above the default floor and the padding is irrelevant.
     #[cfg(feature = "orchard")]
     let ironwood_is_canonical_crossing = |change_count: usize| {
-        let constants = cfg.params.network_type();
+        let constants = zip318;
         orchard.inputs().len() == 1
             && ironwood.inputs().is_empty()
             && change_count == 0
@@ -571,7 +577,6 @@ where
         };
 
         check_for_uneconomic_inputs(
-            cfg.params,
             transparent_inputs,
             transparent_outputs,
             sapling,
@@ -582,6 +587,7 @@ where
             #[cfg(feature = "orchard")]
             orchard_padding,
             anchor_height,
+            zip318,
             cfg.marginal_fee,
             cfg.grace_actions,
             &possible_change[..],
@@ -808,8 +814,7 @@ where
 /// transaction for each pool. The shape of the manifest does not depend on which
 /// protocol features are enabled.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn check_for_uneconomic_inputs<P: consensus::Parameters, NoteRefT: Clone, E>(
-    params: &P,
+pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -819,6 +824,7 @@ pub(crate) fn check_for_uneconomic_inputs<P: consensus::Parameters, NoteRefT: Cl
     // for the grace-input check must match it (see `single_pool_output_balance`).
     #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
     anchor_height: BlockHeight,
+    zip318: &PoolMigrationParams,
     marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],
@@ -976,7 +982,7 @@ pub(crate) fn check_for_uneconomic_inputs<P: consensus::Parameters, NoteRefT: Cl
             // chosen one, so that the two agree about what each candidate would cost.
             #[cfg(feature = "orchard")]
             let i_padding = {
-                let constants = params.network_type();
+                let constants = zip318;
                 let canonical = o_req_inputs + _o_extra == 1
                     && i_req_inputs + _i_extra == 0
                     && change.ironwood == 0

@@ -19,6 +19,8 @@ use zcash_protocol::{
 };
 use zip321::TransactionRequest;
 
+use crate::data_api::anchor_retention::PoolMigrationParams;
+
 pub use crate::data_api::locking::{LockFilter, LockedInputPolicy};
 use crate::{
     data_api::{
@@ -206,6 +208,7 @@ pub trait InputSelector {
         wallet_db: &Self::InputSource,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
         confirmations_policy: ConfirmationsPolicy,
         account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
@@ -263,6 +266,7 @@ pub trait ShieldingSelector {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
     ) -> Result<
@@ -835,6 +839,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         wallet_db: &Self::InputSource,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
         confirmations_policy: ConfirmationsPolicy,
         account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
@@ -1186,6 +1191,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                             params,
                             target_height,
                             anchor_height,
+                            zip318,
                             &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                             &tr1_transparent_outputs,
                             &sapling::EmptyBundleView,
@@ -1210,6 +1216,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         params,
                         target_height,
                         anchor_height,
+                        zip318,
                         &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                         &tr1_transparent_outputs,
                         &sapling::EmptyBundleView,
@@ -1275,6 +1282,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                 params,
                 target_height,
                 anchor_height,
+                zip318,
                 &transparent_inputs,
                 &transparent_outputs,
                 &(
@@ -1976,6 +1984,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         to_account: <Self::InputSource as InputSource>::AccountId,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
         confirmations_policy: ConfirmationsPolicy,
         output_filter: CoinbaseFilter,
     ) -> Result<
@@ -2005,6 +2014,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             params,
             target_height,
             anchor_height,
+            zip318,
             &mut transparent_inputs,
             &wallet_meta,
         )?;
@@ -2365,6 +2375,7 @@ fn compute_shielding_balance_with_dust_retry<DbT, ChangeT, ParamsT>(
     params: &ParamsT,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
+    zip318: &PoolMigrationParams,
     transparent_inputs: &mut Vec<WalletTransparentOutput<()>>,
     wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
 ) -> Result<
@@ -2386,6 +2397,7 @@ where
         params,
         target_height,
         anchor_height,
+        zip318,
         transparent_inputs,
         wallet_meta,
     );
@@ -2401,6 +2413,7 @@ where
                 params,
                 target_height,
                 anchor_height,
+                zip318,
                 transparent_inputs,
                 wallet_meta,
             )
@@ -2426,6 +2439,7 @@ fn compute_shielding_balance<DbT, ChangeT, ParamsT>(
     params: &ParamsT,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
+    zip318: &PoolMigrationParams,
     transparent_inputs: &[WalletTransparentOutput<()>],
     wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
 ) -> Result<TransactionBalance, ChangeError<ChangeT::Error, Infallible>>
@@ -2451,6 +2465,7 @@ where
         params,
         target_height,
         anchor_height,
+        zip318,
         transparent_inputs,
         &[] as &[TxOut],
         &sapling::EmptyBundleView,

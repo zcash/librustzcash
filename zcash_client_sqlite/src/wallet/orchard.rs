@@ -878,6 +878,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn canonical_crossing_is_bucketed_and_unpadded() {
+        testing::pool::canonical_crossing_is_bucketed_and_unpadded()
+    }
+
+    #[test]
     fn pool_crossing_required() {
         testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
     }

@@ -1248,7 +1248,8 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
         Receiver::Orchard([0xab; 43]),
     ])
     .unwrap();
-    let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
+    let addy =
+        ZcashAddress::try_from_encoded(&ua.encode(&st.wallet().pool_migration_params())).unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -1307,7 +1308,8 @@ pub fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>(
     // Without the `orchard` feature, the Orchard receiver's contents are not parsed,
     // so arbitrary receiver bytes suffice.
     let ua = unified::Address::try_from_items(vec![Receiver::Orchard([0xab; 43])]).unwrap();
-    let addy = ZcashAddress::try_from_encoded(&ua.encode(&st.network().network_type())).unwrap();
+    let addy =
+        ZcashAddress::try_from_encoded(&ua.encode(&st.wallet().pool_migration_params())).unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
 
@@ -8457,4 +8459,130 @@ where
         .try_into_standard_proposal(&network, st.wallet())
         .expect("a legacy proposal without a requested version must decode");
     assert_eq!(decoded_legacy.proposed_version(), None);
+}
+
+/// A payment whose value is a canonical ZIP 318 denomination, fundable from a single Orchard note,
+/// is proposed against a bucketed anchor and built with a single unpadded Ironwood action — the
+/// shape of a ZIP 318 migration transfer. Everything else keeps the ordinary anchor and the
+/// two-action floor.
+#[cfg(feature = "orchard")]
+pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) {
+    use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
+
+    use crate::data_api::testing::orchard::OrchardPoolTester;
+
+    // A short grid, so the test need not mine 144 blocks to cross a boundary.
+    let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+    let activation = BlockHeight::from_u32(100_000);
+    let ironwood_active_network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    let account = st.test_account().cloned().unwrap();
+    let fvk = OrchardPoolTester::test_account_fvk(&st);
+    let recipient = OrchardPoolTester::fvk_default_address(&fvk).to_zcash_address(st.network());
+
+    // One Orchard note, comfortably larger than a canonical denomination plus fees.
+    let note_value = Zatoshis::const_from_u64(10_000_000);
+    let (received_height, _, _) = st.add_a_single_note_checking_balance(note_value);
+
+    // Mine well past the next boundary, so the note is spendable at the bucketed anchor and a
+    // usable boundary exists at or below the ordinary anchor. This is a COUNTED loop over a
+    // precomputed block count: `generate_next_block` appends to the block cache, whereas
+    // `chain_height` reads the wallet and only advances on `scan_cached_blocks`, so looping until
+    // the wallet's height reaches a target would never terminate.
+    let received = u32::from(received_height);
+    let interval_blocks = interval.block_count().get();
+    let tip = u32::from(interval.boundary_at_or_above(received_height)) + 3 * interval_blocks;
+    let filler_count = tip - received;
+
+    // Fillers pay a non-wallet key, so each block adds a commitment (and thus a checkpoint)
+    // without changing the wallet's spendable set.
+    let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+    }
+    st.scan_cached_blocks(received_height + 1, filler_count as usize);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+
+    let propose = |st: &mut TestState<_, _, _>, amount: Zatoshis| {
+        let request =
+            TransactionRequest::new(vec![Payment::without_memo(recipient.clone(), amount)])
+                .unwrap();
+        st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+    };
+
+    // (1) A canonical denomination: bucketed anchor, one Orchard input, one Ironwood action.
+    let canonical = propose(&mut st, MAX_RESIDUAL_VALUE).expect("the wallet can fund this");
+    assert_eq!(canonical.steps().len(), 1);
+    let step = canonical.steps().first();
+    let anchor = step
+        .anchor_height()
+        .expect("a shielded step binds an anchor");
+    assert!(
+        interval.is_boundary(anchor),
+        "a canonical crossing must anchor to a grid boundary, got {anchor:?}"
+    );
+    assert_eq!(step.input_count_in_pool(PoolType::ORCHARD), 1);
+    assert_eq!(step.input_count_in_pool(PoolType::IRONWOOD), 0);
+    assert!(step.is_canonical_crossing(&st.wallet().pool_migration_params()));
+    assert_eq!(
+        step.ironwood_action_count(
+            step.ironwood_bundle_padding(&st.wallet().pool_migration_params()),
+            ::orchard::bundle::BundleVersion::ironwood_v3()
+        ),
+        Ok(1),
+        "the Ironwood bundle must be a single unpadded action"
+    );
+
+    // (2) One zatoshi off a canonical denomination: ordinary anchor, padded Ironwood bundle.
+    let off_by_one = propose(
+        &mut st,
+        (MAX_RESIDUAL_VALUE + Zatoshis::const_from_u64(1)).unwrap(),
+    )
+    .unwrap();
+    let step = off_by_one.steps().first();
+    assert!(!step.is_canonical_crossing(&st.wallet().pool_migration_params()));
+    assert_eq!(
+        step.ironwood_action_count(
+            step.ironwood_bundle_padding(&st.wallet().pool_migration_params()),
+            ::orchard::bundle::BundleVersion::ironwood_v3()
+        ),
+        Ok(2)
+    );
+    assert!(
+        !interval.is_boundary(step.anchor_height().unwrap())
+            || step.anchor_height() == canonical.steps().first().anchor_height(),
+        "a non-canonical payment should not pay for a bucketed anchor"
+    );
 }

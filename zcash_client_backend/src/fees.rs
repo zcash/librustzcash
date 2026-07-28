@@ -17,6 +17,7 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
+use crate::data_api::anchor_retention::PoolMigrationParams;
 use crate::data_api::{InputSource, wallet::TargetHeight};
 
 pub mod common;
@@ -645,6 +646,7 @@ pub trait ChangeStrategy {
         params: &P,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,

@@ -14,6 +14,7 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
+use crate::data_api::anchor_retention::PoolMigrationParams;
 use crate::{
     data_api::{
         AccountMeta, InputSource, NoteFilter,
@@ -154,6 +155,7 @@ where
         params: &P,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -193,6 +195,7 @@ where
             #[cfg(feature = "orchard")]
             BundlePadding::DEFAULT,
             anchor_height,
+            zip318,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -308,6 +311,7 @@ where
         params: &P,
         target_height: TargetHeight,
         anchor_height: BlockHeight,
+        zip318: &PoolMigrationParams,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -346,6 +350,7 @@ where
             #[cfg(feature = "orchard")]
             BundlePadding::DEFAULT,
             anchor_height,
+            zip318,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -354,6 +359,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
     use core::{convert::Infallible, num::NonZeroUsize};
     use zcash_protocol::consensus::BlockHeight;
 
@@ -403,6 +409,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -452,6 +459,7 @@ mod tests {
                         .unwrap()
                         .into(),
                     BlockHeight::from_u32(1),
+                    &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                     &[] as &[TestTransparentInput],
                     &[] as &[TxOut],
                     &(
@@ -506,6 +514,7 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -551,6 +560,7 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -591,6 +601,7 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -636,6 +647,7 @@ mod tests {
                     .unwrap()
                     .into(),
                 BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -689,6 +701,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -740,6 +753,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &sapling_fees::EmptyBundleView,
@@ -844,6 +858,7 @@ mod tests {
             &Network::TestNetwork,
             pre_nu6_3_height,
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &transparent_inputs,
             &transparent_outputs,
             &sapling_view,
@@ -870,6 +885,7 @@ mod tests {
             &Network::TestNetwork,
             post_nu6_3_height,
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &transparent_inputs,
             &transparent_outputs,
             &sapling_view,
@@ -926,6 +942,7 @@ mod tests {
                 &Network::TestNetwork,
                 height,
                 BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &sapling_view,
@@ -941,6 +958,7 @@ mod tests {
                 &Network::TestNetwork,
                 height,
                 BlockHeight::from_u32(1),
+                &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &sapling_view,
@@ -998,6 +1016,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[] as &[TestTransparentInput],
             &[TxOut::new(
                 Zatoshis::const_from_u64(40000),
@@ -1048,6 +1067,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1097,6 +1117,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1152,6 +1173,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1205,6 +1227,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1256,6 +1279,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1306,6 +1330,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -1360,6 +1385,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1413,6 +1439,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1468,6 +1495,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1520,6 +1548,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1580,6 +1609,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -1630,6 +1660,7 @@ mod tests {
                 .unwrap()
                 .into(),
             BlockHeight::from_u32(1),
+            &PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
