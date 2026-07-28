@@ -20,6 +20,7 @@ mod ensure_default_transparent_address;
 mod ensure_orchard_ua_receiver;
 mod ephemeral_addresses;
 mod fix_bad_change_flagging;
+mod fix_bad_ironwood_change_flagging;
 mod fix_broken_commitment_trees;
 mod fix_transparent_received_outputs;
 mod fix_v_transactions_expired_unmined;
@@ -151,8 +152,10 @@ pub(super) fn all_migrations<
     //                                                   /            \      orchard_note_version
     //                                                  /              \                      \
     //                                                 /                \               ironwood_received_notes
-    //                                                /                  \                     /           \
-    //                                               /                    \    ironwood_pool_code_views   note_locking
+    //                                                /                  \              /       |           \
+    //                                               /                    \  ironwood_  |  fix_bad_ironwood_
+    //                                              /                      \ pool_code_ |  change_flagging
+    //                                             /                        \ views     note_locking
     //                                              /                      \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
     //
@@ -258,6 +261,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_note_version::Migration),
         Box::new(ironwood_received_notes::Migration),
         Box::new(ironwood_pool_code_views::Migration),
+        Box::new(fix_bad_ironwood_change_flagging::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
         Box::new(note_locking::Migration),
@@ -407,6 +411,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     add_transparent_receiver_address_index::MIGRATION_ID,
     add_transparent_value_index::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
+    fix_bad_ironwood_change_flagging::MIGRATION_ID,
     orchard_ironwood_migration_tables::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     note_locking::MIGRATION_ID,

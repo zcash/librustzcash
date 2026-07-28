@@ -37,8 +37,8 @@ workspace.
   `received_note_count` and `sent_note_count` rather than reporting `has_change`,
   and `v_tx_outputs` reported the account's own change as a non-change output,
   which presents it to the user as a recipient of their own transaction. Balances
-  were not affected. Notes already recorded with the wrong classification are not
-  repaired by this change; a rescan of the affected range is required.
+  were not affected. Notes already recorded with the wrong classification are
+  repaired on upgrade by a new migration; no rescan is required.
 
 ## [0.22.0-rc.4] - 2026-07-26
 
