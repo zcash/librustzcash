@@ -23,7 +23,7 @@ impl schemerz::Migration<Uuid> for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Adds `ON DELETE CASCADE` to foreign keys to support account deletion."
+        "Adds missing key scope information to the received-output and transaction-output views."
     }
 }
 
