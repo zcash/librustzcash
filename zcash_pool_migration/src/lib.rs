@@ -26,6 +26,7 @@ extern crate std;
 pub mod build;
 pub mod denomination;
 pub mod engine;
+pub mod model;
 pub mod preparation;
 pub mod scheduling;
 pub mod signing_rounds;
