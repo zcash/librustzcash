@@ -23,7 +23,7 @@ use rand_core::{CryptoRng, RngCore};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
-use crate::engine::{
+use crate::model::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState,
 };
@@ -541,7 +541,7 @@ impl MigrationState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::MigrationTransaction;
+    use crate::model::MigrationTransaction;
     use zcash_protocol::value::Zatoshis;
 
     use crate::denomination::DenominationPlan;

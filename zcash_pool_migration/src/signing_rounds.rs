@@ -26,7 +26,7 @@
 use alloc::vec::Vec;
 use core::num::{NonZeroU32, NonZeroUsize};
 
-use crate::engine::{MigrationTransferId, MigrationTxKind};
+use crate::model::{MigrationTransferId, MigrationTxKind};
 
 /// The Orchard-family actions a padded preparation transaction carries.
 pub const PREPARATION_ACTIONS: u32 = crate::preparation::PREP_TX_ACTIONS as u32;

@@ -24,10 +24,11 @@ use zcash_protocol::consensus::testing::arb_block_height;
 use zcash_protocol::value::testing::arb_zatoshis;
 use zcash_protocol::value::{COIN, Zatoshis};
 
+use crate::backend::{PoolMigrationRead, PoolMigrationWrite};
 use crate::denomination::DenominationPlan;
-use crate::engine::{
+use crate::model::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationTxState,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::scheduling::AnchorBucketInterval;
