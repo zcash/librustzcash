@@ -1808,6 +1808,12 @@ CREATE VIEW v_address_uses AS
     JOIN addresses a ON a.id = orn.address_id
     JOIN transactions t ON t.id_tx = orn.transaction_id
 UNION
+    SELECT irn.address_id, irn.account_id, irn.transaction_id, t.mined_height,
+           a.key_scope, a.diversifier_index_be, a.transparent_child_index
+    FROM ironwood_received_notes irn
+    JOIN addresses a ON a.id = irn.address_id
+    JOIN transactions t ON t.id_tx = irn.transaction_id
+UNION
     SELECT srn.address_id, srn.account_id, srn.transaction_id, t.mined_height,
            a.key_scope, a.diversifier_index_be, a.transparent_child_index
     FROM sapling_received_notes srn
