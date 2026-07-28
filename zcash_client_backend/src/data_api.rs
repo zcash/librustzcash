@@ -66,7 +66,7 @@ use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Debug,
+    fmt::{self, Debug},
     hash::Hash,
     io,
     num::{NonZeroU32, TryFromIntError},
@@ -3154,10 +3154,36 @@ pub struct AccountBirthday {
 }
 
 /// Errors that can occur in the construction of an [`AccountBirthday`] from a [`TreeState`].
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum BirthdayError {
+    /// The block height of the [`TreeState`] was out of range for a [`BlockHeight`].
     HeightInvalid(TryFromIntError),
+    /// The note commitment tree frontiers of the [`TreeState`] could not be decoded.
     Decode(io::Error),
+}
+
+impl fmt::Display for BirthdayError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BirthdayError::HeightInvalid(e) => {
+                write!(f, "Invalid block height for account birthday: {e}")
+            }
+            BirthdayError::Decode(e) => write!(
+                f,
+                "Failed to decode the note commitment tree state for the account birthday: {e}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BirthdayError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            BirthdayError::HeightInvalid(e) => Some(e),
+            BirthdayError::Decode(e) => Some(e),
+        }
+    }
 }
 
 impl From<TryFromIntError> for BirthdayError {
