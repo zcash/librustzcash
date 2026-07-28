@@ -151,10 +151,17 @@ pub(super) fn all_migrations<
     //                                                   /            \      orchard_note_version
     //                                                  /              \                      \
     //                                                 /                \               ironwood_received_notes
-    //                                                /                  \                     /           \
+    //                                                /                  \                     /     |     \
     //                                               /                    \    ironwood_pool_code_views   note_locking
+    //                                              /                      \                         |
+    //                                             /                        \        orchard_ironwood_migration_tables
     //                                              /                      \
     //                                          ivk_item_cache    add_transparent_receiver_address_index
+    //
+    // Two edges are not drawn above, for want of horizontal room. They are still
+    // checked by tools/migration_dag.py:
+    //   witness_stabilized_notes -> tree_retained_checkpoints
+    //   orchard_shardtree, wallet_summaries -> ironwood_shardtree
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![

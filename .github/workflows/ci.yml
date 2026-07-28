@@ -549,6 +549,16 @@ jobs:
             uuidparse -n -o uuid $U4 | sort | uniq | wc -l
           )
 
+  migration-dag:
+    name: Migration DAG comment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the migration DAG comment against each migration's DEPENDENCIES
+        run: python3 zcash_client_sqlite/tools/migration_dag.py zcash_client_sqlite
+
   required-checks:
     name: Required status checks have passed
     needs:
@@ -563,6 +573,7 @@ jobs:
       - fmt
       - protobuf
       - uuid
+      - migration-dag
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
