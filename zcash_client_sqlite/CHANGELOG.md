@@ -39,6 +39,22 @@ workspace.
   which presents it to the user as a recipient of their own transaction. Balances
   were not affected. Notes already recorded with the wrong classification are
   repaired on upgrade by a new migration; no rescan is required.
+- An address that had received only Ironwood notes was treated as never having
+  been used. Such an address was still considered unused by the transparent
+  address gap-limit search, so it could be handed out again, and the account
+  that received the note was not reported as being involved in the transaction
+  that paid it. Since NU6.3 every payment to an Orchard receiver is delivered
+  in the Ironwood bundle, so this affected ordinary received payments. A
+  migration corrects the affected view; no caller action is required beyond
+  upgrading.
+- The funding account reported for a transparent output by
+  `zcash_client_backend::wallet::WalletTransparentOutput::funding_account` now
+  takes value spent from the Ironwood pool into account. Ironwood inputs were
+  not counted, so an output whose creating transaction was funded entirely from
+  Ironwood reported no funding account, and one funded from several pools could
+  report an account other than the largest contributor. Post-NU6.3 wallets hold
+  their shielded value in Ironwood, so this affected ordinary spends rather than
+  only unusual ones.
 
 ## [0.22.0-rc.4] - 2026-07-26
 
@@ -367,8 +383,8 @@ workspace.
   `SqliteClientError::CommitmentTree` variant.
 
 ### Changed
-- Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`, 
-  `zcash_protocol 0.8`, `zcash_address 0.11`, `zip321 0.7`, `zcash_transparent 0.7`, 
+- Migrated to `sapling-crypto 0.7`, `orchard 0.13`, `zcash_encoding 0.4`,
+  `zcash_protocol 0.8`, `zcash_address 0.11`, `zip321 0.7`, `zcash_transparent 0.7`,
   `zcash_primitives 0.27`, `zcash_proofs 0.27`, `zcash_keys 0.13`, `pczt 0.6`,
   `zcash_client_backend 0.22`
 - The `accounts` table now stores IVK item caches instead of FVK item caches for

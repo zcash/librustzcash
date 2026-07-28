@@ -53,6 +53,7 @@ mod tx_retrieval_queue_expiry;
 mod ufvk_support;
 mod utxos_table;
 mod utxos_to_txos;
+mod v_address_uses_ironwood;
 mod v_received_output_spends_account;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_additional_totals;
@@ -150,13 +151,13 @@ pub(super) fn all_migrations<
     //     add_transparent_value_index  v_tx_outputs_key_scopes  standalone_p2sh    witness_stabilized_notes
     //                                                    /          \         \
     //                                                   /            \      orchard_note_version
-    //                                                  /              \                      \
-    //                                                 /                \               ironwood_received_notes
-    //                                                /                  \                     /        |    \
-    //                                               /                    \    ironwood_pool_code_views |  note_locking
+    //                                                  /              \           \
+    //                                                 /                \  ironwood_received_notes -- note_locking
+    //                                                /                  \       |               |------|     |
+    //                                               /                    \    ironwood_pool_code_views |  v_address_uses_ironwood
     //                                              /                      \                            |
-    //                                             /                        \         fix_bad_ironwood_change_flagging
-    //                                         ivk_item_cache    add_transparent_receiver_address_index
+    //                                             /                        \    fix_bad_ironwood_change_flagging
+    //                                          ivk_item_cache    add_transparent_receiver_address_index
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -261,6 +262,7 @@ pub(super) fn all_migrations<
         Box::new(ironwood_received_notes::Migration),
         Box::new(ironwood_pool_code_views::Migration),
         Box::new(fix_bad_ironwood_change_flagging::Migration),
+        Box::new(v_address_uses_ironwood::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
         Box::new(note_locking::Migration),
@@ -411,6 +413,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     add_transparent_value_index::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
     fix_bad_ironwood_change_flagging::MIGRATION_ID,
+    v_address_uses_ironwood::MIGRATION_ID,
     orchard_ironwood_migration_tables::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     note_locking::MIGRATION_ID,
