@@ -17,93 +17,20 @@
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 //! [`WalletRead::anchor_retention_interval`]: super::WalletRead::anchor_retention_interval
 
-use core::num::NonZeroU32;
 use std::collections::BTreeSet;
 
 use zcash_protocol::consensus::BlockHeight;
 
 /// The interval, in blocks, between the durable anchor checkpoints a wallet retains.
 ///
-/// A height `h` is a BOUNDARY of this interval exactly when `h` is a multiple of it (see
-/// [`Self::is_boundary`]); those are the heights whose checkpoints are retained, and the only tree
-/// states a migration transfer may anchor to. The interval is a modulus, so it is necessarily
-/// non-zero.
+/// This is a re-export of [`zcash_protocol::zip318::AnchorBucketInterval`], the single definition
+/// shared with `zcash_pool_migration`. The grid a wallet retains its checkpoints on and the grid a
+/// pool-crossing transfer anchors to must be the same, so they are one type rather than two kept
+/// aligned by a conversion.
 ///
 /// The value recommended for use with this crate is supplied by the [`Default`] implementation,
-/// which is [`Self::ZIP_318`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AnchorRetentionInterval(NonZeroU32);
-
-impl AnchorRetentionInterval {
-    /// The interval specified by [ZIP 318]: 144 blocks, roughly three hours (8 per day) at the
-    /// Zcash ~75-second target block spacing.
-    ///
-    /// [ZIP 318]: https://zips.z.cash/zip-0318
-    pub const ZIP_318: Self = Self(NonZeroU32::new(144).expect("144 is nonzero"));
-
-    /// Constructs an interval other than the [ZIP 318] one.
-    ///
-    /// A wallet on the production network MUST use [`Self::ZIP_318`]: the anonymity set a shared
-    /// anchor provides is exactly the set of transfers that chose the same boundary, so a wallet
-    /// retaining (and anchoring to) a different grid than its peers is distinguishable from them.
-    /// A shorter interval is useful on test networks, where waiting out 144-block buckets makes
-    /// exercising a migration impractical.
-    ///
-    /// This constructor is only available under the `unstable` feature, as it is not recommended
-    /// for general use.
-    ///
-    /// [ZIP 318]: https://zips.z.cash/zip-0318
-    #[cfg(any(test, feature = "test-dependencies", feature = "unstable"))]
-    pub const fn custom(blocks: NonZeroU32) -> Self {
-        Self(blocks)
-    }
-
-    /// Reconstructs an interval from a block count that was previously persisted, for a store
-    /// reading back its own durable state.
-    ///
-    /// This is the inverse of [`Self::block_count`], and is not a way to CHOOSE an interval: a
-    /// caller deciding what grid to retain on wants [`Self::ZIP_318`] or, deliberately and on a
-    /// test network only, [`Self::custom`].
-    pub const fn from_stored_block_count(blocks: NonZeroU32) -> Self {
-        Self(blocks)
-    }
-
-    /// Returns the interval as a number of blocks.
-    pub fn block_count(&self) -> NonZeroU32 {
-        self.0
-    }
-
-    /// Returns whether `height` is a boundary of this interval, i.e. whether a checkpoint at
-    /// `height` is retained as a durable anchor.
-    pub fn is_boundary(&self, height: BlockHeight) -> bool {
-        u32::from(height) % self.0 == 0
-    }
-
-    /// Returns the greatest boundary height that does not exceed `height`, i.e. `height` rounded
-    /// DOWN to a multiple of this interval.
-    pub fn boundary_at_or_below(&self, height: BlockHeight) -> BlockHeight {
-        let h = u32::from(height);
-        BlockHeight::from_u32(h - (h % self.0))
-    }
-
-    /// Returns the least boundary height that is not below `height`, i.e. `height` rounded UP to a
-    /// multiple of this interval. Saturates at [`u32::MAX`].
-    pub fn boundary_at_or_above(&self, height: BlockHeight) -> BlockHeight {
-        let h = u32::from(height);
-        let r = h % self.0;
-        BlockHeight::from_u32(if r == 0 {
-            h
-        } else {
-            h.saturating_add(self.0.get() - r)
-        })
-    }
-}
-
-impl Default for AnchorRetentionInterval {
-    fn default() -> Self {
-        Self::ZIP_318
-    }
-}
+/// which is `AnchorBucketInterval::ZIP_318`.
+pub use zcash_protocol::zip318::AnchorBucketInterval as AnchorRetentionInterval;
 
 /// The anchor-retention policy in force while a range of blocks is being added to the wallet: the
 /// set of grids whose boundaries are retained, and the height from which retention applies.
@@ -170,6 +97,8 @@ impl AnchorRetention {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use core::num::NonZeroU32;
 
     use proptest::prelude::*;
 

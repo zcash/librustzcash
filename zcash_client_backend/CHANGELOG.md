@@ -10,6 +10,19 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval` is
+  now a re-export of `zcash_protocol::zip318::AnchorBucketInterval`, the single
+  type shared with `zcash_pool_migration`. Its API and behaviour are unchanged and
+  code naming it through this path still compiles, but it is no longer a distinct
+  type from `zcash_pool_migration`'s bucket interval, so the `From` conversion
+  between them is gone; remove any `.into()` at that boundary.
+  `AnchorRetentionInterval::custom` is no longer gated behind the `unstable`
+  feature, since a store reconstructing a persisted interval needs it from
+  ordinary library code; its documentation carries the test-networks-only
+  restriction that the gate used to imply. `AnchorRetentionInterval::from_stored_block_count`
+  is removed — use `custom`, which does the same thing.
+
 ### Added
 - `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
 - `zcash_client_backend::data_api::BirthdayError` now implements `Debug`,

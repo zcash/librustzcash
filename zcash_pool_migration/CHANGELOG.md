@@ -19,6 +19,25 @@ and this library adheres to Rust's notion of
   committed migration's transfers that still need proofs.
 
 ### Changed
+- The ZIP 318 constants this crate defined are now defined by
+  `zcash_protocol::zip318` and re-exported from their existing paths here, so that
+  `zcash_client_backend` can apply them without depending on this crate. Two
+  renames take the ZIP's own names for the values:
+  `denomination::MIGRATION_MAX_DENOMINATION_ZEC` is now `denomination::DENOM_CAP`
+  and `denomination::RESIDUAL_MIGRATION_MIN` is now
+  `denomination::MAX_RESIDUAL_VALUE`. `scheduling::{AnchorBucketInterval,
+  DELAY_CAP_RATIO, ANCHOR_AGE_CAP, EXPIRY_MODULUS, EXPIRY_WINDOW}` and
+  `preparation::PREP_TX_ACTIONS` keep both their paths and their values.
+- `denomination::DENOM_CAP` is a `Zatoshis` rather than a count of whole ZEC, and
+  `CanonicalOneTwoFive::new` takes its maximum denomination as a `Zatoshis` to
+  match. A call site that passed a ZEC count should pass the `Zatoshis` directly
+  and drop its `* COIN`.
+- `scheduling::AnchorBucketInterval` and `zcash_client_backend`'s
+  `AnchorRetentionInterval` are now the same type, so the `From` conversion
+  between them is gone. Remove any `.into()` at that boundary: a wallet's
+  retention interval already *is* a bucket interval.
+
+### Changed
 - `zcash_pool_migration::build::{build_prep_tx, build_transfer_pczt}` take an
   additional `Option<&AccountDerivation>` argument, before the RNG. When it is
   supplied, every spend the built transaction still needs a signature for is
