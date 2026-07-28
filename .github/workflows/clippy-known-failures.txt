@@ -1,7 +1,8 @@
 # Crate/feature configurations that do not currently lint clean, one "<crate> <feature>" per
 # line ("<none>" means --no-default-features with no extra feature).
 #
-# This file is DEBT, not policy. The `clippy-feature-combos` job lints every crate against every
+# This file is DEBT, not policy. Tracked in https://github.com/zcash/librustzcash/issues/2807,
+# which groups these into their ~8 root causes and suggests an order. The `clippy-feature-combos` job lints every crate against every
 # one of its features; a configuration listed here is allowed to fail, anything else is not. That
 # makes the job green today while still failing on any NEW breakage.
 #
