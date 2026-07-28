@@ -34,7 +34,10 @@ use crate::{
     data_api::{
         Account as _, AccountBalance, Balance, CoinbaseFilter, InputSource as _, MaxSpendMode,
         TargetValue, WalletRead as _, WalletTest as _, WalletWrite,
-        testing::{AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState},
+        testing::{
+            AddressType, DataStoreFactory, ShieldedPool, TestBuilder, TestCache, TestState,
+            single_output_change_strategy,
+        },
         wallet::{
             ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
             input_selection::{
@@ -43,7 +46,7 @@ use crate::{
             },
         },
     },
-    fees::{DustOutputPolicy, StandardFeeRule, standard},
+    fees::StandardFeeRule,
     wallet::WalletTransparentOutput,
 };
 
@@ -301,12 +304,8 @@ where
 
     // Shield the output.
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
     let txid = st
         .shield_transparent_funds(
             &input_selector,
@@ -444,12 +443,8 @@ where
 
     // Shield the transparent balance.
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
     let txids = st
         .shield_transparent_funds(
             &input_selector,
@@ -657,12 +652,8 @@ where
     // Propose shielding with a 1%-of-block-space input cap.
     let input_selector =
         GreedyInputSelector::new().with_shielding_block_space_percent(BLOCK_SPACE_PERCENT);
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
     let proposal = st
         .propose_shielding(
             &input_selector,
@@ -1490,12 +1481,8 @@ where
 
     // Shield the P2PKH UTXO.
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
 
     let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
     let network = *st.network();
@@ -1834,12 +1821,8 @@ where
 
     // Shield the P2SH UTXO.
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
 
     let prover = ::zcash_proofs::prover::LocalTxProver::bundled();
     let network = *st.network();
@@ -2184,12 +2167,8 @@ where
     let request = t2t_request(&network, Zatoshis::const_from_u64(40_000));
 
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
 
     let result = st.propose_transfer_with_policy(
         account.id(),
@@ -2222,12 +2201,8 @@ where
     let request = t2t_request(&network, transfer_amount);
 
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
 
     let proposal = st
         .propose_transfer_with_policy(
@@ -2345,12 +2320,8 @@ where
     .unwrap();
 
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
 
     // Independently reproduce the initial gather that `GreedyInputSelector` will perform
     // (bounded only by the payment amount, since that's the only information available
@@ -2480,12 +2451,8 @@ where
 
     let input_selector =
         GreedyInputSelector::new().with_shielding_block_space_percent(BLOCK_SPACE_PERCENT);
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
 
     let result = st.propose_transfer_with_policy(
         account.id(),
@@ -2577,12 +2544,8 @@ where
     let request = t2t_request(&network, Zatoshis::const_from_u64(40_000));
 
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling);
 
     let proposal = st
         .propose_transfer_with_policy(
@@ -2866,13 +2829,9 @@ where
     let request = t2t_request(&network, transfer_amount);
 
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    )
-    .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling)
+            .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
 
     let proposal = st
         .propose_transfer_with_policy(
@@ -3001,13 +2960,9 @@ where
     let request = t2t_request(&network, transfer_amount);
 
     let input_selector = GreedyInputSelector::new();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Sapling,
-        DustOutputPolicy::default(),
-    )
-    .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Sapling)
+            .with_transparent_change_policy(TransparentChangePolicy::TransparentChangeAllowed);
 
     let proposal = st
         .propose_transfer_with_policy(

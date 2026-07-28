@@ -261,14 +261,7 @@ pub fn send_single_step_proposed_transfer<T: ShieldedPoolTester>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
-
-    let sent_tx_id = create_proposed_result.unwrap()[0];
+    let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
     // Verify that the sent transaction was stored and that we can decrypt the memos
     let tx = st
@@ -391,12 +384,8 @@ pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
     )])
     .unwrap();
 
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
     let input_selector = GreedyInputSelector::new();
 
     let account = st.get_account();
@@ -711,14 +700,7 @@ pub fn spend_max_spendable_single_step_proposed_transfer<T: ShieldedPoolTester>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
-
-    let sent_tx_id = create_proposed_result.unwrap()[0];
+    let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
     // Verify that the sent transaction was stored and that we can decrypt the memos
     let tx = st
@@ -849,14 +831,7 @@ pub fn spend_everything_single_step_proposed_transfer<T: ShieldedPoolTester>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
-
-    let sent_tx_id = create_proposed_result.unwrap()[0];
+    let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
     // Verify that the sent transaction was stored and that we can decrypt the memos
     let tx = st
@@ -1044,12 +1019,7 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
         Some(payment) if payment.amount() == Some(expected_payment)
     );
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    st.create_proposed_expecting(&proposal, 1);
 }
 
 /// Tests that a send-max proposal whose total required fee overflows the maximum
@@ -1202,15 +1172,10 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
         BTreeSet::from([P0::SHIELDED_PROTOCOL, P1::SHIELDED_PROTOCOL])
     );
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    let txids = st.create_proposed_expecting(&proposal, 1);
 
     // Mine the transaction and verify that the entire balance has been spent.
-    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    let (h, _) = st.generate_next_block_including(txids[0]);
     st.scan_cached_blocks(h, 1);
     assert_eq!(st.get_total_balance(account.id()), Zatoshis::ZERO);
 }
@@ -1315,12 +1280,7 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
         Some(payment) if payment.amount() == Some(expected_payment)
     );
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    st.create_proposed_expecting(&proposal, 1);
 }
 
 /// Tests that a send-max proposal to a unified address whose only receiver cannot be
@@ -1525,14 +1485,7 @@ pub fn send_max_spendable_proposal_succeeds_when_unconfirmed_funds_present<
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
-
-    let sent_tx_id = create_proposed_result.unwrap()[0];
+    let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
     // Verify that the sent transaction was stored and that we can decrypt the memos
     let tx = st
@@ -1702,13 +1655,7 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
     );
     assert_eq!(steps[1].balance().proposed_change(), []);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
-    let txids = create_proposed_result.unwrap();
+    let txids = st.create_proposed_expecting(&proposal, 2);
 
     // Mine the created transactions.
     for txid in txids.iter() {
@@ -1853,13 +1800,7 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
     );
     assert_eq!(steps[1].balance().proposed_change(), []);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
-    let txids = create_proposed_result.unwrap();
+    let txids = st.create_proposed_expecting(&proposal, 2);
 
     // Mine the created transactions.
     for txid in txids.iter() {
@@ -2014,13 +1955,7 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     );
     assert_eq!(steps[1].balance().proposed_change(), []);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
-    let txids = create_proposed_result.unwrap();
+    let txids = st.create_proposed_expecting(&proposal, 2);
 
     // Mine the created transactions.
     for txid in txids.iter() {
@@ -2494,18 +2429,8 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
 
     let (colliding_addr, _) = &known_addrs[usize::try_from(gap_limits.ephemeral() - 1).unwrap()];
     let utxo_value = (value - zip317::MINIMUM_FEE).unwrap();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::MIN,
-            &Address::from(*colliding_addr),
-            utxo_value,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let to = Address::from(*colliding_addr);
+    let proposal = st.propose_transfer_to(&to, utxo_value);
 
     // Create the transaction. This will cause the the gap start to move & a new
     // `gap_limits.ephemeral()` of addresses to be created.
@@ -2651,14 +2576,7 @@ pub fn spend_all_funds_single_step_proposed_transfer<T: ShieldedPoolTester>(
         )
         .unwrap();
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
-
-    let sent_tx_id = create_proposed_result.unwrap()[0];
+    let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
 
     // Verify that the sent transaction was stored and that we can decrypt the memos
     let tx = st
@@ -2801,20 +2719,9 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     let tex_addr = Address::Tex([0x4; 20]);
 
     let change_memo: Option<MemoBytes> = None;
-    // We use `st.propose_standard_transfer` here in order to also test round-trip
-    // serialization of the proposal.
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::MIN,
-            &tex_addr,
-            transfer_amount,
-            None,
-            change_memo.clone(),
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    // `propose_transfer_to` proposes a standard transfer, so this also tests
+    // round-trip serialization of the proposal.
+    let proposal = st.propose_transfer_to(&tex_addr, transfer_amount);
 
     let steps: Vec<_> = proposal.steps().iter().cloned().collect();
     assert_eq!(steps.len(), 2);
@@ -2830,13 +2737,7 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     );
     assert_eq!(steps[1].balance().proposed_change(), []);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
-    let txids = create_proposed_result.unwrap();
+    let txids = st.create_proposed_expecting(&proposal, 2);
 
     // Mine the created transactions.
     for txid in txids.iter() {
@@ -2946,18 +2847,7 @@ pub fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTeste
 
     // Generate a ZIP 320 proposal, sending to an external TEX address.
     let tex_addr = Address::Tex([0x4; 20]);
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::MIN,
-            &tex_addr,
-            transfer_amount,
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let proposal = st.propose_transfer_to(&tex_addr, transfer_amount);
 
     // This is somewhat redundant with `send_multi_step_proposed_transfer`,
     // but tests the case with no change memo and ensures we haven't messed
@@ -3133,27 +3023,16 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     // Spend fails because there are insufficient verified notes
     let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
-    assert_matches!(
-        st.propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::new_symmetrical_unchecked(
-                2,
-                #[cfg(feature = "transparent-inputs")]
-                false
-            ),
-            &to,
-            Zatoshis::const_from_u64(70000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
+    st.expect_insufficient_funds_with(
+        &to,
+        Zatoshis::const_from_u64(70000),
+        ConfirmationsPolicy::new_symmetrical_unchecked(
+            2,
+            #[cfg(feature = "transparent-inputs")]
+            false,
         ),
-        Err(data_api::error::Error::InsufficientFunds {
-            available,
-            required
-        })
-        if available == Zatoshis::const_from_u64(50000)
-            && required == Zatoshis::const_from_u64(80000)
+        Zatoshis::const_from_u64(50000),
+        Zatoshis::const_from_u64(80000),
     );
 
     // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
@@ -3167,23 +3046,12 @@ pub fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>(
     assert_eq!(st.get_total_balance(account_id), (value * 10u64).unwrap());
 
     // Spend still fails
-    assert_matches!(
-        st.propose_standard_transfer::<Infallible>(
-            account_id,
-            StandardFeeRule::Zip317,
-            ConfirmationsPolicy::default(),
-            &to,
-            Zatoshis::const_from_u64(70000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        ),
-        Err(data_api::error::Error::InsufficientFunds {
-            available,
-            required
-        })
-        if available == Zatoshis::const_from_u64(50000)
-            && required == Zatoshis::const_from_u64(80000)
+    st.expect_insufficient_funds_with(
+        &to,
+        Zatoshis::const_from_u64(70000),
+        ConfirmationsPolicy::default(),
+        Zatoshis::const_from_u64(50000),
+        Zatoshis::const_from_u64(80000),
     );
 
     // Mine block 11 so that the second note becomes verified
@@ -3329,24 +3197,11 @@ pub fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>(
     let value = Zatoshis::const_from_u64(70000);
     st.add_a_single_note_checking_balance(value);
 
-    let fee_rule = StandardFeeRule::Zip317;
-
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
     let account = st.test_account().cloned().unwrap();
-    let account_id = account.id();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(50000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let amount_sent = Zatoshis::const_from_u64(50000);
+    let proposal = st.propose_transfer_to(&to, amount_sent);
 
     // Executing the proposal should succeed
     assert_matches!(
@@ -3387,22 +3242,10 @@ pub fn change_note_spends_succeed<T: ShieldedPoolTester>(
         .find_map(|note| (note.note().value() == value).then_some(note.spending_key_scope()));
     assert_matches!(change_note_scope, Some(Scope::Internal));
 
-    let fee_rule = StandardFeeRule::Zip317;
-
     // TODO: generate_next_block_from_tx does not currently support transparent outputs.
     let to = TransparentAddress::PublicKeyHash([7; 20]).into();
-    let proposal = st
-        .propose_standard_transfer::<Infallible>(
-            account_id,
-            fee_rule,
-            ConfirmationsPolicy::MIN,
-            &to,
-            Zatoshis::const_from_u64(50000),
-            None,
-            None,
-            T::SHIELDED_PROTOCOL,
-        )
-        .unwrap();
+    let amount_sent = Zatoshis::const_from_u64(50000);
+    let proposal = st.propose_transfer_to(&to, amount_sent);
 
     // Executing the proposal should succeed
     assert_matches!(
@@ -3461,12 +3304,8 @@ where
     ])
     .unwrap();
 
-    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
     let input_selector = GreedyInputSelector::new();
 
     let txid1 = st
@@ -3637,12 +3476,8 @@ pub fn account_deletion_with_internal_transfer<T: ShieldedPoolTester, DSF>(
     )])
     .unwrap();
 
-    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
     let input_selector = GreedyInputSelector::new();
 
     let txid = st
@@ -3737,12 +3572,8 @@ pub fn external_address_change_spends_detected_in_restore_from_seed<T: ShieldedP
     ])
     .unwrap();
 
-    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
     let input_selector = GreedyInputSelector::new();
 
     let txid = st
@@ -4490,14 +4321,9 @@ pub fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal0,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    let txids = st.create_proposed_expecting(&proposal0, 1);
 
-    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    let (h, _) = st.generate_next_block_including(txids[0]);
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(
@@ -4580,14 +4406,9 @@ pub fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester
     );
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal0,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    let txids = st.create_proposed_expecting(&proposal0, 1);
 
-    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    let (h, _) = st.generate_next_block_including(txids[0]);
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(
@@ -4666,14 +4487,9 @@ pub fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
     assert_eq!(change_output.output_pool(), PoolType::SAPLING);
     assert_eq!(change_output.value(), expected_change);
 
-    let create_proposed_result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
-        account.usk(),
-        OvkPolicy::Sender,
-        &proposal0,
-    );
-    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    let txids = st.create_proposed_expecting(&proposal0, 1);
 
-    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    let (h, _) = st.generate_next_block_including(txids[0]);
     st.scan_cached_blocks(h, 1);
 
     // Since the recipient address is in the same account, the total balance includes the transfer
@@ -5923,12 +5739,8 @@ where
         send_value,
     )])
     .unwrap();
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        T::SHIELDED_PROTOCOL,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
     let input_selector = GreedyInputSelector::new();
     let proposal = st
         .propose_transfer(
@@ -8076,12 +7888,8 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
     )])
     .unwrap();
 
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Orchard,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
     let input_selector = GreedyInputSelector::new();
 
     let account = st.get_account();
@@ -8153,12 +7961,8 @@ where
     )])
     .unwrap();
 
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Orchard,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
     let input_selector = GreedyInputSelector::new();
 
     let account_id = st.get_account().id();
@@ -8614,12 +8418,8 @@ where
     )])
     .unwrap();
 
-    let change_strategy = standard::SingleOutputChangeStrategy::new(
-        StandardFeeRule::Zip317,
-        None,
-        ShieldedPool::Orchard,
-        DustOutputPolicy::default(),
-    );
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
     let input_selector = GreedyInputSelector::new();
 
     let account_id = st.get_account().id();

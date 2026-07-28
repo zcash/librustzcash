@@ -1017,12 +1017,8 @@ where
         #[cfg(feature = "orchard")]
         let fallback_change_pool = ShieldedPool::Orchard;
 
-        let change_strategy = standard::SingleOutputChangeStrategy::new(
-            StandardFeeRule::Zip317,
-            None,
-            fallback_change_pool,
-            DustOutputPolicy::default(),
-        );
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, fallback_change_pool);
 
         let request =
             zip321::TransactionRequest::new(vec![Payment::without_memo(to, value)]).unwrap();
