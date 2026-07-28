@@ -36,7 +36,14 @@ use super::{ShieldedPoolTester, dsl::TestDsl};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{CoinbaseFilter, testing::TestBuilder},
+        data_api::{
+            CoinbaseFilter, InputSource, WalletRead, WalletWrite,
+            testing::TestBuilder,
+            wallet::{
+                TargetHeight,
+                input_selection::{LockFilter, LockedInputPolicy},
+            },
+        },
         wallet::WalletTransparentOutput,
     },
     transparent::{
