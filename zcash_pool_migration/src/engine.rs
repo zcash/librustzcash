@@ -49,6 +49,7 @@ use corez::io;
 
 use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
+use zcash_encoding::{Decodable, Encodable};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{BalanceError, Zatoshis};
@@ -153,6 +154,9 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MigrationTransferId(pub(crate) u32);
 
+/// The encoded size of a [`MigrationTransferId`]: a little-endian `u32`.
+const MIGRATION_TRANSFER_ID_SIZE: usize = 4;
+
 impl MigrationTransferId {
     /// Wrap a stored ordinal as a migration-transaction row key (for a store reading a persisted
     /// migration back).
@@ -161,13 +165,31 @@ impl MigrationTransferId {
     }
 
     /// Writes this id as an unsigned 32-bit little-endian integer.
-    pub fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.0.to_le_bytes())
+    pub fn write<W: io::Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
     }
 
     /// Reads an id written by [`write`](Self::write).
-    pub fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
-        let mut bytes = [0u8; 4];
+    pub fn read<R: io::Read>(reader: R) -> io::Result<Self> {
+        <Self as Decodable>::read(reader, ())
+    }
+}
+
+impl Encodable for MigrationTransferId {
+    fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.0.to_le_bytes())
+    }
+
+    fn serialized_size(&self) -> usize {
+        MIGRATION_TRANSFER_ID_SIZE
+    }
+}
+
+impl Decodable for MigrationTransferId {
+    type Args<'a> = ();
+
+    fn read<R: io::Read>(mut reader: R, _args: ()) -> io::Result<Self> {
+        let mut bytes = [0u8; MIGRATION_TRANSFER_ID_SIZE];
         reader.read_exact(&mut bytes)?;
         Ok(MigrationTransferId::new(u32::from_le_bytes(bytes)))
     }
@@ -4557,5 +4579,56 @@ mod commit_tests {
         backend.sched_params = SchedulingParams::ZIP_318;
         prove_transfer(&mut backend, &mut state, transfer_id)
             .expect("the transfer proves once the grid matches again");
+    }
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use alloc::vec::Vec;
+    use proptest::prelude::*;
+    use zcash_encoding::{
+        Encodable,
+        testing::{check_canonical, check_codec_roundtrip},
+    };
+
+    use super::MigrationTransferId;
+
+    proptest! {
+        #[test]
+        fn transfer_id_roundtrips(n in any::<u32>()) {
+            check_codec_roundtrip(&MigrationTransferId::new(n));
+        }
+
+        /// A store persists these ids in sequence, so the container encoding matters too.
+        #[test]
+        fn transfer_id_vec_roundtrips(ns in prop::collection::vec(any::<u32>(), 0..16)) {
+            let ids: Vec<MigrationTransferId> =
+                ns.into_iter().map(MigrationTransferId::new).collect();
+            check_codec_roundtrip(&ids);
+        }
+
+        #[test]
+        fn transfer_id_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..12)) {
+            check_canonical::<MigrationTransferId>(&bytes, ());
+        }
+
+        /// The inherent methods predate the traits and are what callers use today; they must
+        /// stay byte-identical.
+        #[test]
+        fn inherent_methods_agree_with_the_traits(n in any::<u32>()) {
+            let id = MigrationTransferId::new(n);
+
+            let mut via_inherent = Vec::new();
+            MigrationTransferId::write(&id, &mut via_inherent).unwrap();
+            let mut via_trait = Vec::new();
+            Encodable::write(&id, &mut via_trait).unwrap();
+            prop_assert_eq!(&via_inherent, &via_trait);
+
+            prop_assert_eq!(
+                MigrationTransferId::read(&via_inherent[..]).unwrap(),
+                id
+            );
+            prop_assert_eq!(Encodable::serialized_size(&id), via_inherent.len());
+        }
     }
 }

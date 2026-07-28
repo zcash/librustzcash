@@ -24,6 +24,7 @@ getset.workspace = true
 libm.workspace = true
 rand_core.workspace = true
 zcash_primitives.workspace = true
+zcash_encoding.workspace = true
 zcash_protocol.workspace = true
 
 # Enabled by the `test-dependencies` feature: the `testing` module's proptest strategies and
@@ -50,6 +51,7 @@ incrementalmerkletree = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
+zcash_encoding = { workspace = true, features = ["test-dependencies"] }
 pczt = { workspace = true, features = ["orchard", "tx-extractor"] }
 proptest.workspace = true
 rand_chacha.workspace = true
