@@ -11,6 +11,7 @@ categories.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+zcash_encoding = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 
 [dependencies]
