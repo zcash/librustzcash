@@ -783,7 +783,7 @@ pub enum CommitError<E> {
     Serialize(pczt::EncodingError),
     /// NU6.3 is not active on this network, so there is no destination pool to migrate into. The
     /// planning side models the same recoverable condition as
-    /// [`MigrationError::Nu63NotActive`](MigrationError::Nu63NotActive).
+    /// [`MigrationError::Nu63NotActive`].
     Nu63NotActive,
     /// No committed migration was found to build the transfers for (nothing was loaded from storage).
     NoMigrationInProgress,
