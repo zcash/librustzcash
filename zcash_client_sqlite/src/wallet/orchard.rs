@@ -883,6 +883,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn multi_note_crossing_is_not_bucketed() {
+        testing::pool::multi_note_crossing_is_not_bucketed()
+    }
+
+    #[test]
+    fn self_migration_keeps_spending_orchard() {
+        testing::pool::self_migration_keeps_spending_orchard()
+    }
+
+    #[test]
     fn pool_crossing_required() {
         testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
     }

@@ -848,10 +848,7 @@ where
                 // discarded, costing a selection pass but no extra confirmations.
                 .filter(|proposal| {
                     proposal.steps().len() == 1
-                        && proposal
-                            .steps()
-                            .first()
-                            .is_canonical_crossing(&params.network_type())
+                        && proposal.steps().first().is_canonical_crossing(&zip318)
                 })
         });
 
@@ -1816,7 +1813,8 @@ where
     // `fees::common::single_pool_output_balance`), which is what keeps the computed fee and the
     // built bundle in agreement.
     #[cfg(feature = "orchard")]
-    let ironwood_padding = proposal_step.ironwood_bundle_padding(&params.network_type());
+    let ironwood_padding =
+        proposal_step.ironwood_bundle_padding(&wallet_db.pool_migration_params());
     #[cfg(not(feature = "orchard"))]
     let ironwood_padding = orchard_pool_padding;
 

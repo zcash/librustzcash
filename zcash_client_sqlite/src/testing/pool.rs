@@ -329,6 +329,22 @@ pub(crate) fn canonical_crossing_is_bucketed_and_unpadded() {
 }
 
 #[cfg(feature = "orchard")]
+pub(crate) fn multi_note_crossing_is_not_bucketed() {
+    zcash_client_backend::data_api::testing::pool::multi_note_crossing_is_not_bucketed(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn self_migration_keeps_spending_orchard() {
+    zcash_client_backend::data_api::testing::pool::self_migration_keeps_spending_orchard(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
 pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::pool_crossing_required::<P0, P1>(
         TestDbFactory::default(),
