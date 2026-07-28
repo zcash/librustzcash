@@ -22,6 +22,8 @@ use super::{
 use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
+#[cfg(feature = "orchard")]
+use zcash_primitives::transaction::builder::BundlePadding;
 
 /// A change strategy that proposes change as a single output. The output pool is chosen
 /// as the most current pool that avoids unnecessary pool-crossing (with a specified
@@ -135,7 +137,8 @@ impl<I: InputSource> ChangeStrategy for SingleOutputChangeStrategy<I> {
             ironwood,
             // The fixed-fee strategy has no unpadded opt-in; keep the padded default.
             #[cfg(feature = "orchard")]
-            ::orchard::builder::BundleType::DEFAULT,
+            BundlePadding::DEFAULT,
+            BundlePadding::DEFAULT,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )

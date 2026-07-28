@@ -35,6 +35,8 @@ use super::{
 use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
+#[cfg(feature = "orchard")]
+use zcash_primitives::transaction::builder::BundlePadding;
 
 /// An extension to the [`FeeRule`] trait that exposes methods required for
 /// ZIP 317 fee calculation.
@@ -190,10 +192,10 @@ where
         );
 
         #[cfg(feature = "orchard")]
-        let orchard_pool_bundle_type = if self.unpadded_orchard_pool_bundles {
-            ::orchard::builder::BundleType::UNPADDED
+        let orchard_pool_padding = if self.unpadded_orchard_pool_bundles {
+            BundlePadding::UNPADDED
         } else {
-            ::orchard::builder::BundleType::DEFAULT
+            BundlePadding::DEFAULT
         };
 
         single_pool_output_balance(
@@ -208,7 +210,9 @@ where
             #[cfg(feature = "orchard")]
             ironwood,
             #[cfg(feature = "orchard")]
-            orchard_pool_bundle_type,
+            orchard_pool_padding,
+            #[cfg(feature = "orchard")]
+            orchard_pool_padding,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -362,10 +366,10 @@ where
         );
 
         #[cfg(feature = "orchard")]
-        let orchard_pool_bundle_type = if self.unpadded_orchard_pool_bundles {
-            ::orchard::builder::BundleType::UNPADDED
+        let orchard_pool_padding = if self.unpadded_orchard_pool_bundles {
+            BundlePadding::UNPADDED
         } else {
-            ::orchard::builder::BundleType::DEFAULT
+            BundlePadding::DEFAULT
         };
 
         single_pool_output_balance(
@@ -380,7 +384,9 @@ where
             #[cfg(feature = "orchard")]
             ironwood,
             #[cfg(feature = "orchard")]
-            orchard_pool_bundle_type,
+            orchard_pool_padding,
+            #[cfg(feature = "orchard")]
+            orchard_pool_padding,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )

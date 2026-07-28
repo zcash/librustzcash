@@ -1,6 +1,8 @@
 use core::cmp::{Ordering, max, min};
 use std::num::{NonZeroU64, NonZeroUsize};
 
+#[cfg(feature = "orchard")]
+use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::fees::{
     FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
 };
@@ -288,11 +290,18 @@ pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clo
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
-    // The transactional bundle type the transaction builder will use for both the
-    // Orchard and Ironwood bundles; the action counts computed here must match it so
-    // the builder's exact-balance check succeeds (see
-    // `orchard_fees::transactional_action_count`).
-    #[cfg(feature = "orchard")] orchard_pool_bundle_type: ::orchard::builder::BundleType,
+    // The transactional bundle padding the transaction builder will use for the Orchard and
+    // Ironwood bundles respectively; the action counts computed here must match them so the
+    // builder's exact-balance check succeeds (see `orchard_fees::transactional_action_count`).
+    //
+    // These are `BundlePadding` rather than `BundleType` deliberately. Padding legitimately
+    // differs between the two pools — a canonical ZIP 318 crossing pads its Orchard bundle to the
+    // default floor while leaving its single Ironwood action unpadded — but coinbase construction
+    // is a property of the whole transaction, never of one pool, and a fee is never computed for a
+    // coinbase transaction at all. Carrying padding keeps a per-pool coinbase unrepresentable, as
+    // `BuildConfig::Standard` does for the builder.
+    #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
+    #[cfg(feature = "orchard")] ironwood_padding: BundlePadding,
     change_memo: Option<&MemoBytes>,
     ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
@@ -355,7 +364,7 @@ where
     #[cfg(feature = "orchard")]
     let orchard_action_count = |change_count| {
         orchard_fees::transactional_action_count(
-            orchard_pool_bundle_type,
+            orchard_padding.bundle_type(),
             orchard.bundle_version(),
             orchard.inputs().len(),
             orchard.outputs().len() + change_count,
@@ -381,7 +390,7 @@ where
     #[cfg(feature = "orchard")]
     let ironwood_action_count = |change_count| {
         orchard_fees::transactional_action_count(
-            orchard_pool_bundle_type,
+            ironwood_padding.bundle_type(),
             ironwood.bundle_version(),
             ironwood.inputs().len(),
             ironwood.outputs().len() + change_count,
@@ -532,7 +541,9 @@ where
             #[cfg(feature = "orchard")]
             ironwood,
             #[cfg(feature = "orchard")]
-            orchard_pool_bundle_type,
+            orchard_padding,
+            #[cfg(feature = "orchard")]
+            ironwood_padding,
             cfg.marginal_fee,
             cfg.grace_actions,
             &possible_change[..],
@@ -767,7 +778,8 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
     // The Orchard-pool bundle type the builder will use; the action counts computed
     // for the grace-input check must match it (see `single_pool_output_balance`).
-    #[cfg(feature = "orchard")] orchard_pool_bundle_type: ::orchard::builder::BundleType,
+    #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
+    #[cfg(feature = "orchard")] ironwood_padding: BundlePadding,
     marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],
@@ -911,7 +923,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
             #[cfg(feature = "orchard")]
             let o_action_count = orchard_fees::transactional_action_count(
-                orchard_pool_bundle_type,
+                orchard_padding.bundle_type(),
                 orchard.bundle_version(),
                 o_req_inputs + _o_extra,
                 o_outputs_len + change.orchard,
@@ -922,7 +934,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
             #[cfg(feature = "orchard")]
             let i_action_count = orchard_fees::transactional_action_count(
-                orchard_pool_bundle_type,
+                ironwood_padding.bundle_type(),
                 ironwood.bundle_version(),
                 i_req_inputs + _i_extra,
                 i_outputs_len + change.ironwood,
