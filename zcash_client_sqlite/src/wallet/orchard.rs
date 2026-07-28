@@ -1035,6 +1035,16 @@ pub(crate) mod tests {
         testing::pool::propose_v5_payment_to_orchard_receiver_is_rejected();
     }
 
+    #[test]
+    fn orchard_to_ironwood_payment_reports_net_value_delta() {
+        testing::pool::orchard_to_ironwood_payment_reports_net_value_delta();
+    }
+
+    #[test]
+    fn orchard_to_ironwood_self_migration_reports_fee_only_delta() {
+        testing::pool::orchard_to_ironwood_self_migration_reports_fee_only_delta();
+    }
+
     /// `put_received_note` records a note in the received-notes table chosen by the caller,
     /// preserving the note's plaintext version in the `note_version` column. An Orchard-pool note
     /// and an Ironwood-pool note sharing an action index may both be recorded in their respective
