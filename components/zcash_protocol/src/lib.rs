@@ -28,6 +28,7 @@ pub mod constants;
 pub mod local_consensus;
 pub mod memo;
 pub mod value;
+pub mod zip318;
 
 mod txid;
 pub use txid::TxId;
