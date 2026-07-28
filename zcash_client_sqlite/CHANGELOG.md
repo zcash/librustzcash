@@ -28,6 +28,18 @@ workspace.
   `wallet::commitment_tree::Error`, `wallet::init::WalletMigrationError`, and
   `zewif::ZewifImportError`.
 
+### Fixed
+- An Ironwood note received on an account's internal address is now classified as
+  change once the wallet learns that the same account funded the transaction.
+  This was previously applied to Sapling and Orchard notes only, so an Ironwood
+  note recorded before its transaction's spends could be linked to the wallet
+  kept the wrong classification permanently: `v_transactions` counted it in
+  `received_note_count` and `sent_note_count` rather than reporting `has_change`,
+  and `v_tx_outputs` reported the account's own change as a non-change output,
+  which presents it to the user as a recipient of their own transaction. Balances
+  were not affected. Notes already recorded with the wrong classification are
+  repaired on upgrade by a new migration; no rescan is required.
+
 ## [0.22.0-rc.4] - 2026-07-26
 
 ### Changed
