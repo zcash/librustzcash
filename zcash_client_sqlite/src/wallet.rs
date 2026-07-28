@@ -5322,9 +5322,16 @@ fn flag_previously_received_change(
         .map_err(SqliteClientError::from)
     };
 
+    // Every pool with a `{prefix}_received_notes` table must appear here. Omitting one is not
+    // merely a missed opportunity to set the flag at this call: `is_change` is only ever
+    // raised, never lowered, and nothing revisits the row afterwards, so for any note whose
+    // spends were not linkable to the wallet at the time it was scanned the omission is
+    // permanent.
     flag_received_change(ShieldedPool::Sapling)?;
     #[cfg(feature = "orchard")]
     flag_received_change(ShieldedPool::Orchard)?;
+    #[cfg(feature = "orchard")]
+    flag_received_change(ShieldedPool::Ironwood)?;
 
     Ok(())
 }
@@ -5798,7 +5805,7 @@ pub mod testing {
 mod tests {
     use std::num::NonZeroU32;
 
-    use rusqlite::Connection;
+    use rusqlite::{Connection, named_params};
     use sapling::zip32::ExtendedSpendingKey;
     use secrecy::{ExposeSecret, SecretVec};
     use uuid::Uuid;
@@ -5817,7 +5824,10 @@ mod tests {
         testing::{BlockCache, db::TestDbFactory},
     };
 
-    use super::{account_birthday, min_shared_checkpoint_height, select_truncation_height};
+    use super::{
+        KeyScope, ShieldedPool, TxRef, account_birthday, flag_previously_received_change,
+        min_shared_checkpoint_height, select_truncation_height,
+    };
 
     #[cfg(feature = "orchard")]
     use {crate::testing::db::TestDb, zcash_protocol::local_consensus::LocalNetwork};
@@ -7135,6 +7145,225 @@ mod tests {
         assert_eq!(
             table_row_count(st.wallet().conn(), "ironwood_tree_shards"),
             0
+        );
+    }
+
+    /// The name of the received-note table for a pool, written out rather than derived from
+    /// `table_constants`, so that these tests do not assert through the same mapping the code
+    /// under test uses.
+    fn received_notes_table(pool: ShieldedPool) -> &'static str {
+        match pool {
+            ShieldedPool::Sapling => "sapling_received_notes",
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => "orchard_received_notes",
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => "ironwood_received_notes",
+            #[cfg(not(feature = "orchard"))]
+            other => panic!("pool {other:?} is unsupported without the `orchard` feature"),
+        }
+    }
+
+    /// Reproduces the state a wallet is left in when it scans a note before it can link the
+    /// transaction's spends to itself: one transaction, one received note recorded with
+    /// `is_change = 0` under `key_scope`, and one `sent_notes` row recording that
+    /// `funding_account` paid for the transaction.
+    ///
+    /// Returns the row id of the transaction.
+    fn seed_unflagged_received_note(
+        conn: &rusqlite::Connection,
+        pool: ShieldedPool,
+        receiving_account: i64,
+        funding_account: i64,
+        key_scope: KeyScope,
+    ) -> i64 {
+        // Placeholders for columns the repair statement never reads. They exist only to
+        // satisfy the tables' NOT NULL constraints, so any well-formed value will do.
+        const TX_ROW_ID: i64 = 1;
+        const TXID: [u8; 32] = [7; 32];
+        const OBSERVED_HEIGHT: i64 = 0;
+        const OUTPUT_INDEX: i64 = 0;
+        const DIVERSIFIER: [u8; 11] = [0; 11];
+        const NOTE_VALUE_ZATS: i64 = 1;
+        const NOTE_COMPONENT: [u8; 32] = [0; 32];
+        // `orchard_received_notes.note_version` defaults, but the Ironwood column does not,
+        // so it is supplied explicitly for both.
+        #[cfg(feature = "orchard")]
+        const NOTE_VERSION: i64 = 2;
+        // The pool a `sent_notes` row is attributed to is irrelevant here: the repair
+        // statement correlates on transaction and account only.
+        const SENT_OUTPUT_POOL: i64 = 0;
+
+        conn.execute(
+            "INSERT INTO transactions (id_tx, txid, min_observed_height)
+             VALUES (:id_tx, :txid, :min_observed_height)",
+            named_params! {
+                ":id_tx": TX_ROW_ID,
+                ":txid": &TXID[..],
+                ":min_observed_height": OBSERVED_HEIGHT,
+            },
+        )
+        .unwrap();
+
+        match pool {
+            ShieldedPool::Sapling => {
+                conn.execute(
+                    "INSERT INTO sapling_received_notes
+                     (transaction_id, output_index, account_id, diversifier, value, rcm,
+                      is_change, recipient_key_scope)
+                     VALUES (:tx, :output_index, :account, :diversifier, :value,
+                             :note_component, :is_change, :key_scope)",
+                    named_params! {
+                        ":tx": TX_ROW_ID,
+                        ":output_index": OUTPUT_INDEX,
+                        ":account": receiving_account,
+                        ":diversifier": &DIVERSIFIER[..],
+                        ":value": NOTE_VALUE_ZATS,
+                        ":note_component": &NOTE_COMPONENT[..],
+                        ":is_change": false,
+                        ":key_scope": key_scope.encode(),
+                    },
+                )
+                .unwrap();
+            }
+            // Ironwood notes are Orchard-shaped, so the two tables take the same columns.
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => {
+                conn.execute(
+                    &format!(
+                        "INSERT INTO {} (transaction_id, action_index, account_id, diversifier,
+                                         value, rho, rseed, note_version, is_change,
+                                         recipient_key_scope)
+                         VALUES (:tx, :output_index, :account, :diversifier, :value,
+                                 :note_component, :note_component, :note_version, :is_change,
+                                 :key_scope)",
+                        received_notes_table(pool)
+                    ),
+                    named_params! {
+                        ":tx": TX_ROW_ID,
+                        ":output_index": OUTPUT_INDEX,
+                        ":account": receiving_account,
+                        ":diversifier": &DIVERSIFIER[..],
+                        ":value": NOTE_VALUE_ZATS,
+                        ":note_component": &NOTE_COMPONENT[..],
+                        ":note_version": NOTE_VERSION,
+                        ":is_change": false,
+                        ":key_scope": key_scope.encode(),
+                    },
+                )
+                .unwrap();
+            }
+            #[cfg(not(feature = "orchard"))]
+            other => panic!("pool {other:?} is unsupported without the `orchard` feature"),
+        }
+
+        conn.execute(
+            "INSERT INTO sent_notes
+             (transaction_id, output_pool, output_index, from_account_id, value)
+             VALUES (:tx, :output_pool, :output_index, :from_account, :value)",
+            named_params! {
+                ":tx": TX_ROW_ID,
+                ":output_pool": SENT_OUTPUT_POOL,
+                ":output_index": OUTPUT_INDEX,
+                ":from_account": funding_account,
+                ":value": NOTE_VALUE_ZATS,
+            },
+        )
+        .unwrap();
+
+        TX_ROW_ID
+    }
+
+    fn only_account_id(conn: &rusqlite::Connection) -> i64 {
+        conn.query_row("SELECT id FROM accounts", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    }
+
+    fn is_change(conn: &rusqlite::Connection, pool: ShieldedPool) -> bool {
+        conn.query_row(
+            &format!("SELECT is_change FROM {}", received_notes_table(pool)),
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    }
+
+    /// A note received on the account's internal address, in a transaction that same account
+    /// funded, is change. The wallet cannot always know this when the note is first recorded,
+    /// because linking the transaction's spends requires the spent notes to already be
+    /// present, so `flag_previously_received_change` back-fills the classification when the
+    /// `sent_notes` rows are written.
+    ///
+    /// This must hold for every pool that has a received-note table. A pool left out of the
+    /// repair keeps the wrong classification forever, since `is_change` is only ever raised
+    /// and nothing revisits the row: the note is then reported as an ordinary received output
+    /// by `v_transactions` and `v_tx_outputs`, which surfaces the account's own change to the
+    /// user as a recipient of their own transaction.
+    fn assert_internal_scope_note_becomes_change(pool: ShieldedPool) {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = only_account_id(st.wallet().conn());
+        let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+
+        let tx_row_id =
+            seed_unflagged_received_note(&tx, pool, account_id, account_id, KeyScope::INTERNAL);
+        assert!(
+            !is_change(&tx, pool),
+            "{pool:?}: precondition, the note starts out unflagged"
+        );
+
+        flag_previously_received_change(&tx, TxRef(tx_row_id)).unwrap();
+
+        assert!(
+            is_change(&tx, pool),
+            "{pool:?}: an internal-scope note in a self-funded transaction must be flagged \
+             as change"
+        );
+    }
+
+    #[test]
+    fn flags_previously_received_sapling_change() {
+        assert_internal_scope_note_becomes_change(ShieldedPool::Sapling);
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn flags_previously_received_orchard_change() {
+        assert_internal_scope_note_becomes_change(ShieldedPool::Orchard);
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn flags_previously_received_ironwood_change() {
+        assert_internal_scope_note_becomes_change(ShieldedPool::Ironwood);
+    }
+
+    /// The repair is restricted to the internal key scope. A note received on the account's
+    /// external address is a payment the user made to themselves, not change, even though the
+    /// same account funded the transaction, and it must keep its classification so that it
+    /// remains visible as an output of the transaction.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn does_not_flag_external_scope_notes_as_change() {
+        let pool = ShieldedPool::Ironwood;
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = only_account_id(st.wallet().conn());
+        let tx = st.wallet_mut().conn_mut().transaction().unwrap();
+
+        let tx_row_id =
+            seed_unflagged_received_note(&tx, pool, account_id, account_id, KeyScope::EXTERNAL);
+
+        flag_previously_received_change(&tx, TxRef(tx_row_id)).unwrap();
+
+        assert!(
+            !is_change(&tx, pool),
+            "an external-scope note must not be reclassified as change"
         );
     }
 }
