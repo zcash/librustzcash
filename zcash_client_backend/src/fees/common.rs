@@ -6,6 +6,8 @@ use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::fees::{
     FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
 };
+#[cfg(feature = "orchard")]
+use zcash_protocol::zip318::PoolMigrationConstants;
 use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -23,7 +25,7 @@ use super::{
 #[cfg(feature = "transparent-inputs")]
 use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
-use super::orchard as orchard_fees;
+use super::orchard::{self as orchard_fees, OutputView as _};
 
 pub(crate) struct NetFlows {
     t_in: Zatoshis,
@@ -294,14 +296,17 @@ pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clo
     // Ironwood bundles respectively; the action counts computed here must match them so the
     // builder's exact-balance check succeeds (see `orchard_fees::transactional_action_count`).
     //
-    // These are `BundlePadding` rather than `BundleType` deliberately. Padding legitimately
-    // differs between the two pools — a canonical ZIP 318 crossing pads its Orchard bundle to the
-    // default floor while leaving its single Ironwood action unpadded — but coinbase construction
-    // is a property of the whole transaction, never of one pool, and a fee is never computed for a
+    // This is `BundlePadding` rather than `BundleType` deliberately: coinbase construction is a
+    // property of the whole transaction, never of one pool, and a fee is never computed for a
     // coinbase transaction at all. Carrying padding keeps a per-pool coinbase unrepresentable, as
     // `BuildConfig::Standard` does for the builder.
+    //
+    // There is no matching Ironwood parameter. That bundle's padding is DERIVED from the
+    // transaction's shape (see `ironwood_is_canonical_crossing` below), not chosen by the caller.
     #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
-    #[cfg(feature = "orchard")] ironwood_padding: BundlePadding,
+    // The anchor the shielded bundles will be proved against. A canonical ZIP 318 crossing must be
+    // anchored to a boundary of the bucket grid, so the padding decision depends on it.
+    anchor_height: BlockHeight,
     change_memo: Option<&MemoBytes>,
     ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
@@ -387,10 +392,43 @@ where
     // action floor. Callers route Ironwood inputs/outputs into the `ironwood`
     // view; it is empty (contributing no actions) when nothing targets the
     // Ironwood pool.
+    //
+    // A CANONICAL CROSSING drops the default padding: no Ironwood spends and a single Ironwood
+    // output whose value is a canonical ZIP 318 denomination, which is exactly the shape of a
+    // ZIP 318 migration transfer. Building it unpadded puts an ordinary turnstile-crossing
+    // payment into that anonymity set rather than leaving it distinguishable by action count.
+    // `Step::ironwood_bundle_padding` decides the same question from the finished proposal, and
+    // the two must agree or the builder's exact-balance check will reject the transaction.
+    //
+    // The value is only known here when the sole output is a PAYMENT, i.e. `change_count == 0`;
+    // an Ironwood change value is what this function is in the middle of solving for. That costs
+    // nothing: with a change output there are two real Ironwood outputs, so the bundle is at or
+    // above the default floor and the padding is irrelevant.
+    #[cfg(feature = "orchard")]
+    let ironwood_is_canonical_crossing = |change_count: usize| {
+        let constants = cfg.params.network_type();
+        orchard.inputs().len() == 1
+            && ironwood.inputs().is_empty()
+            && change_count == 0
+            && match ironwood.outputs() {
+                [output] => constants.is_canonical_denomination(output.value()),
+                _ => false,
+            }
+            && constants
+                .anchor_bucket_interval()
+                .is_boundary(anchor_height)
+    };
     #[cfg(feature = "orchard")]
     let ironwood_action_count = |change_count| {
+        // The Ironwood bundle drops its padding exactly when doing so makes the transaction look
+        // like a migration transfer, and is padded otherwise. This is not the caller's to choose.
+        let padding = if ironwood_is_canonical_crossing(change_count) {
+            BundlePadding::UNPADDED
+        } else {
+            BundlePadding::DEFAULT
+        };
         orchard_fees::transactional_action_count(
-            ironwood_padding.bundle_type(),
+            padding.bundle_type(),
             ironwood.bundle_version(),
             ironwood.inputs().len(),
             ironwood.outputs().len() + change_count,
@@ -533,6 +571,7 @@ where
         };
 
         check_for_uneconomic_inputs(
+            cfg.params,
             transparent_inputs,
             transparent_outputs,
             sapling,
@@ -542,8 +581,7 @@ where
             ironwood,
             #[cfg(feature = "orchard")]
             orchard_padding,
-            #[cfg(feature = "orchard")]
-            ironwood_padding,
+            anchor_height,
             cfg.marginal_fee,
             cfg.grace_actions,
             &possible_change[..],
@@ -770,7 +808,8 @@ where
 /// transaction for each pool. The shape of the manifest does not depend on which
 /// protocol features are enabled.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
+pub(crate) fn check_for_uneconomic_inputs<P: consensus::Parameters, NoteRefT: Clone, E>(
+    params: &P,
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -779,7 +818,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     // The Orchard-pool bundle type the builder will use; the action counts computed
     // for the grace-input check must match it (see `single_pool_output_balance`).
     #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
-    #[cfg(feature = "orchard")] ironwood_padding: BundlePadding,
+    anchor_height: BlockHeight,
     marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],
@@ -932,9 +971,31 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
             #[cfg(not(feature = "orchard"))]
             let o_action_count = 0;
 
+            // The Ironwood padding is derived here on the same rule as in
+            // `single_pool_output_balance`, over this hypothetical change manifest rather than the
+            // chosen one, so that the two agree about what each candidate would cost.
+            #[cfg(feature = "orchard")]
+            let i_padding = {
+                let constants = params.network_type();
+                let canonical = o_req_inputs + _o_extra == 1
+                    && i_req_inputs + _i_extra == 0
+                    && change.ironwood == 0
+                    && match ironwood.outputs() {
+                        [output] => constants.is_canonical_denomination(output.value()),
+                        _ => false,
+                    }
+                    && constants
+                        .anchor_bucket_interval()
+                        .is_boundary(anchor_height);
+                if canonical {
+                    BundlePadding::UNPADDED
+                } else {
+                    BundlePadding::DEFAULT
+                }
+            };
             #[cfg(feature = "orchard")]
             let i_action_count = orchard_fees::transactional_action_count(
-                ironwood_padding.bundle_type(),
+                i_padding.bundle_type(),
                 ironwood.bundle_version(),
                 i_req_inputs + _i_extra,
                 i_outputs_len + change.ironwood,

@@ -10,7 +10,31 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::proposal::Step::{is_canonical_crossing, ironwood_bundle_padding}`
+
+### Removed
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}::with_unpadded_orchard_pool_bundles`.
+  The Orchard bundle is now always padded to the default action floor, and the
+  Ironwood bundle's padding is derived from the transaction's shape rather than
+  chosen by the caller, so the setting no longer had an effect to control.
+
 ### Changed
+- A payment that carries value across the Orchard turnstile into Ironwood is now
+  built with a single unpadded Ironwood action, instead of the default two, when its
+  shape is indistinguishable from a ZIP 318 migration transfer: exactly one Orchard
+  input, no Ironwood spends or change, a single Ironwood output whose value is a
+  canonical ZIP 318 denomination (a `{1, 2, 5} * 10^k` amount between 0.01 ZEC and
+  10,000 ZEC), and an anchor on the ZIP 318 bucket grid. Such a transaction pays one
+  fewer ZIP 317 marginal-fee action. Every other transaction is unaffected.
+- `zcash_client_backend::fees::ChangeStrategy::compute_balance` takes an additional
+  `anchor_height: BlockHeight` argument, after `target_height`. The anchor determines
+  whether a transaction qualifies for the unpadded Ironwood bundle above, so the fee
+  model needs it to compute the same action count the builder will produce. Pass the
+  anchor height the transaction will be proved against.
+- `create_pczt_from_proposal`'s `orchard_pool_padding` argument now selects the
+  padding for the Orchard bundle only; the Ironwood bundle's padding is derived from
+  the proposal. Pass `BundlePadding::DEFAULT`.
 - `zcash_client_backend::proposal::Step::{orchard_action_count, ironwood_action_count}`
   take a `zcash_primitives::transaction::builder::BundlePadding` in place of an
   `orchard::builder::BundleType`. A proposal step describes a wallet spend, which is

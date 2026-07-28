@@ -1185,6 +1185,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .compute_balance::<_, DbT::NoteRef>(
                             params,
                             target_height,
+                            anchor_height,
                             &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                             &tr1_transparent_outputs,
                             &sapling::EmptyBundleView,
@@ -1208,6 +1209,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                     let tr1_balance = change_strategy.compute_balance::<_, DbT::NoteRef>(
                         params,
                         target_height,
+                        anchor_height,
                         &[] as &[WalletTransparentOutput<<DbT as InputSource>::AccountId>],
                         &tr1_transparent_outputs,
                         &sapling::EmptyBundleView,
@@ -1272,6 +1274,7 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             let tr0_balance = change_strategy.compute_balance(
                 params,
                 target_height,
+                anchor_height,
                 &transparent_inputs,
                 &transparent_outputs,
                 &(
@@ -2001,6 +2004,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             change_strategy,
             params,
             target_height,
+            anchor_height,
             &mut transparent_inputs,
             &wallet_meta,
         )?;
@@ -2360,6 +2364,7 @@ fn compute_shielding_balance_with_dust_retry<DbT, ChangeT, ParamsT>(
     change_strategy: &ChangeT,
     params: &ParamsT,
     target_height: TargetHeight,
+    anchor_height: BlockHeight,
     transparent_inputs: &mut Vec<WalletTransparentOutput<()>>,
     wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
 ) -> Result<
@@ -2380,6 +2385,7 @@ where
         change_strategy,
         params,
         target_height,
+        anchor_height,
         transparent_inputs,
         wallet_meta,
     );
@@ -2394,6 +2400,7 @@ where
                 change_strategy,
                 params,
                 target_height,
+                anchor_height,
                 transparent_inputs,
                 wallet_meta,
             )
@@ -2418,6 +2425,7 @@ fn compute_shielding_balance<DbT, ChangeT, ParamsT>(
     change_strategy: &ChangeT,
     params: &ParamsT,
     target_height: TargetHeight,
+    anchor_height: BlockHeight,
     transparent_inputs: &[WalletTransparentOutput<()>],
     wallet_meta: &<ChangeT as ChangeStrategy>::AccountMetaT,
 ) -> Result<TransactionBalance, ChangeError<ChangeT::Error, Infallible>>
@@ -2442,6 +2450,7 @@ where
     change_strategy.compute_balance(
         params,
         target_height,
+        anchor_height,
         transparent_inputs,
         &[] as &[TxOut],
         &sapling::EmptyBundleView,

@@ -1659,6 +1659,18 @@ where
     let ironwood_anchor = None;
 
     // Create the transaction. The type of the proposal ensures that there
+    // The Ironwood bundle's padding is DERIVED from the step, independently of the Orchard
+    // bundle's: it is unpadded for a canonical ZIP 318 crossing and padded otherwise. The two
+    // pools' padding is deliberately not coupled — an Orchard bundle is always padded, and the
+    // Ironwood bundle drops its padding only when doing so makes the transaction indistinguishable
+    // from a migration transfer. The fee model reaches the same conclusion from the same data (see
+    // `fees::common::single_pool_output_balance`), which is what keeps the computed fee and the
+    // built bundle in agreement.
+    #[cfg(feature = "orchard")]
+    let ironwood_padding = proposal_step.ironwood_bundle_padding(&params.network_type());
+    #[cfg(not(feature = "orchard"))]
+    let ironwood_padding = orchard_pool_padding;
+
     // are no possible transparent inputs, so we ignore those here.
     let mut builder = Builder::new(
         params.clone(),
@@ -1668,7 +1680,7 @@ where
             orchard_anchor,
             ironwood_anchor,
             orchard_padding: orchard_pool_padding,
-            ironwood_padding: orchard_pool_padding,
+            ironwood_padding,
         },
     );
     if let Some(expiry_height) = expiry_height {
@@ -2567,11 +2579,11 @@ where
 /// which disables expiry, is exempt from this check.
 ///
 /// `orchard_pool_padding` selects the transactional bundle padding for the Orchard
-/// and Ironwood bundles, and must match the change strategy used to create
-/// `proposal` (see
-/// `zip317::SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`); pass
-/// [`BundlePadding::DEFAULT`](zcash_primitives::transaction::builder::BundlePadding)
-/// otherwise.
+/// bundle; pass
+/// [`BundlePadding::DEFAULT`](zcash_primitives::transaction::builder::BundlePadding).
+/// The Ironwood bundle's padding is not a caller's to choose: it is derived from the
+/// proposal by [`Step::ironwood_bundle_padding`](crate::proposal::Step::ironwood_bundle_padding),
+/// so that it matches the action count the fee was computed from.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]

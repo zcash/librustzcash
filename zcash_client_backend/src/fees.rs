@@ -644,6 +644,7 @@ pub trait ChangeStrategy {
         &self,
         params: &P,
         target_height: TargetHeight,
+        anchor_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling::BundleView<NoteRefT>,

@@ -8,7 +8,8 @@ use core::marker::PhantomData;
 
 use zcash_primitives::transaction::fees::{FeeRule, transparent, zip317 as prim_zip317};
 use zcash_protocol::{
-    ShieldedPool, consensus,
+    ShieldedPool,
+    consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
 };
@@ -78,7 +79,6 @@ pub struct SingleOutputChangeStrategy<R, I> {
     fallback_change_pool: ShieldedPool,
     dust_output_policy: DustOutputPolicy,
     #[cfg(feature = "orchard")]
-    unpadded_orchard_pool_bundles: bool,
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
     meta_source: PhantomData<I>,
@@ -102,26 +102,10 @@ impl<R, I> SingleOutputChangeStrategy<R, I> {
             fallback_change_pool,
             dust_output_policy,
             #[cfg(feature = "orchard")]
-            unpadded_orchard_pool_bundles: false,
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy: TransparentChangePolicy::ShieldChange,
             meta_source: PhantomData,
         }
-    }
-
-    /// Requests unpadded Orchard-pool (Orchard and Ironwood) bundles: fee and
-    /// change calculation will count exactly the requested actions instead of
-    /// padding each bundle to the 2-action minimum.
-    ///
-    /// The transaction executing the proposal must be built with the matching
-    /// bundle type ([`BundleType::UNPADDED`](orchard::builder::BundleType)),
-    /// or the builder's balance check will fail. Intended for transactions whose
-    /// shape is already public (e.g. pool migrations); see the orchard
-    /// `pad_to_minimum` documentation for the privacy trade-off.
-    #[cfg(feature = "orchard")]
-    pub fn with_unpadded_orchard_pool_bundles(mut self) -> Self {
-        self.unpadded_orchard_pool_bundles = true;
-        self
     }
 
     /// Sets the [`TransparentChangePolicy`] to be used by this change strategy, determining
@@ -169,6 +153,7 @@ where
         &self,
         params: &P,
         target_height: TargetHeight,
+        anchor_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -191,13 +176,6 @@ where
             self.fee_rule.grace_actions(),
         );
 
-        #[cfg(feature = "orchard")]
-        let orchard_pool_padding = if self.unpadded_orchard_pool_bundles {
-            BundlePadding::UNPADDED
-        } else {
-            BundlePadding::DEFAULT
-        };
-
         single_pool_output_balance(
             cfg,
             None,
@@ -209,10 +187,12 @@ where
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+            // The Orchard bundle is always padded to the default floor. Only the Ironwood
+            // bundle's padding varies, and it is derived from the transaction's shape rather
+            // than chosen here.
             #[cfg(feature = "orchard")]
-            orchard_pool_padding,
-            #[cfg(feature = "orchard")]
-            orchard_pool_padding,
+            BundlePadding::DEFAULT,
+            anchor_height,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -228,7 +208,6 @@ pub struct MultiOutputChangeStrategy<R, I> {
     dust_output_policy: DustOutputPolicy,
     split_policy: SplitPolicy,
     #[cfg(feature = "orchard")]
-    unpadded_orchard_pool_bundles: bool,
     #[cfg(feature = "transparent-inputs")]
     transparent_change_policy: TransparentChangePolicy,
     meta_source: PhantomData<I>,
@@ -260,26 +239,10 @@ impl<R, I> MultiOutputChangeStrategy<R, I> {
             dust_output_policy,
             split_policy,
             #[cfg(feature = "orchard")]
-            unpadded_orchard_pool_bundles: false,
             #[cfg(feature = "transparent-inputs")]
             transparent_change_policy: TransparentChangePolicy::ShieldChange,
             meta_source: PhantomData,
         }
-    }
-
-    /// Requests unpadded Orchard-pool (Orchard and Ironwood) bundles: fee and
-    /// change calculation will count exactly the requested actions instead of
-    /// padding each bundle to the 2-action minimum.
-    ///
-    /// The transaction executing the proposal must be built with the matching
-    /// bundle type ([`BundleType::UNPADDED`](orchard::builder::BundleType)),
-    /// or the builder's balance check will fail. Intended for transactions whose
-    /// shape is already public (e.g. pool migrations); see the orchard
-    /// `pad_to_minimum` documentation for the privacy trade-off.
-    #[cfg(feature = "orchard")]
-    pub fn with_unpadded_orchard_pool_bundles(mut self) -> Self {
-        self.unpadded_orchard_pool_bundles = true;
-        self
     }
 
     /// Sets the [`TransparentChangePolicy`] to be used by this change strategy, determining
@@ -344,6 +307,7 @@ where
         &self,
         params: &P,
         target_height: TargetHeight,
+        anchor_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
         sapling: &impl sapling_fees::BundleView<NoteRefT>,
@@ -365,13 +329,6 @@ where
             self.fee_rule.grace_actions(),
         );
 
-        #[cfg(feature = "orchard")]
-        let orchard_pool_padding = if self.unpadded_orchard_pool_bundles {
-            BundlePadding::UNPADDED
-        } else {
-            BundlePadding::DEFAULT
-        };
-
         single_pool_output_balance(
             cfg,
             Some(wallet_meta),
@@ -383,10 +340,12 @@ where
             orchard,
             #[cfg(feature = "orchard")]
             ironwood,
+            // The Orchard bundle is always padded to the default floor. Only the Ironwood
+            // bundle's padding varies, and it is derived from the transaction's shape rather
+            // than chosen here.
             #[cfg(feature = "orchard")]
-            orchard_pool_padding,
-            #[cfg(feature = "orchard")]
-            orchard_pool_padding,
+            BundlePadding::DEFAULT,
+            anchor_height,
             self.change_memo.as_ref(),
             ephemeral_balance,
         )
@@ -396,6 +355,7 @@ where
 #[cfg(test)]
 mod tests {
     use core::{convert::Infallible, num::NonZeroUsize};
+    use zcash_protocol::consensus::BlockHeight;
 
     use ::transparent::{address::Script, bundle::TxOut};
     use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
@@ -442,6 +402,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -490,6 +451,7 @@ mod tests {
                         .activation_height(NetworkUpgrade::Nu5)
                         .unwrap()
                         .into(),
+                    BlockHeight::from_u32(1),
                     &[] as &[TestTransparentInput],
                     &[] as &[TxOut],
                     &(
@@ -543,6 +505,7 @@ mod tests {
                     .activation_height(NetworkUpgrade::Nu5)
                     .unwrap()
                     .into(),
+                BlockHeight::from_u32(1),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -587,6 +550,7 @@ mod tests {
                     .activation_height(NetworkUpgrade::Nu5)
                     .unwrap()
                     .into(),
+                BlockHeight::from_u32(1),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -626,6 +590,7 @@ mod tests {
                     .activation_height(NetworkUpgrade::Nu5)
                     .unwrap()
                     .into(),
+                BlockHeight::from_u32(1),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -670,6 +635,7 @@ mod tests {
                     .activation_height(NetworkUpgrade::Nu5)
                     .unwrap()
                     .into(),
+                BlockHeight::from_u32(1),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &(
@@ -722,6 +688,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -772,6 +739,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &sapling_fees::EmptyBundleView,
@@ -875,6 +843,7 @@ mod tests {
         let pre_nu6_3_balance = change_strategy.compute_balance::<_, Infallible>(
             &Network::TestNetwork,
             pre_nu6_3_height,
+            BlockHeight::from_u32(1),
             &transparent_inputs,
             &transparent_outputs,
             &sapling_view,
@@ -900,6 +869,7 @@ mod tests {
         let post_nu6_3_balance = change_strategy.compute_balance::<_, Infallible>(
             &Network::TestNetwork,
             post_nu6_3_height,
+            BlockHeight::from_u32(1),
             &transparent_inputs,
             &transparent_outputs,
             &sapling_view,
@@ -955,6 +925,7 @@ mod tests {
             .compute_balance(
                 &Network::TestNetwork,
                 height,
+                BlockHeight::from_u32(1),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &sapling_view,
@@ -969,6 +940,7 @@ mod tests {
             .compute_balance(
                 &Network::TestNetwork,
                 height,
+                BlockHeight::from_u32(1),
                 &[] as &[TestTransparentInput],
                 &[] as &[TxOut],
                 &sapling_view,
@@ -994,92 +966,6 @@ mod tests {
         assert_eq!(
             with_ironwood.fee_required(),
             Zatoshis::const_from_u64(30000)
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "orchard")]
-    fn unpadded_orchard_pool_bundles_lower_the_fee() {
-        // `with_unpadded_orchard_pool_bundles` drops the ZIP 317 2-action padding floor
-        // for the Orchard and Ironwood bundles. This reuses the
-        // `ironwood_outputs_are_charged_actions` scenario, where only the single-output
-        // Ironwood bundle is below the floor, so the unpadded strategy charges it 1
-        // action instead of 2 and the fee falls by exactly one 5000-zat action.
-        let height = Network::TestNetwork
-            .activation_height(NetworkUpgrade::Nu5)
-            .unwrap()
-            .into();
-        let sapling_inputs = [TestSaplingInput {
-            note_id: 0,
-            value: Zatoshis::const_from_u64(100000),
-        }];
-        let orchard_outputs = [OrchardPayment::new(Zatoshis::const_from_u64(30000))];
-        let sapling_view = (
-            sapling::builder::BundleType::DEFAULT,
-            &sapling_inputs[..],
-            &[] as &[Infallible],
-        );
-        let orchard_view = (
-            ::orchard::bundle::BundleVersion::orchard_v2(),
-            &[] as &[Infallible],
-            &orchard_outputs[..],
-        );
-        let ironwood_view = (
-            ::orchard::bundle::BundleVersion::ironwood_v3(),
-            &[] as &[Infallible],
-            &orchard_outputs[..],
-        );
-
-        let padded_fee = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
-            Zip317FeeRule::standard(),
-            None,
-            ShieldedPool::Orchard,
-            DustOutputPolicy::default(),
-        )
-        .compute_balance(
-            &Network::TestNetwork,
-            height,
-            &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
-            &sapling_view,
-            &orchard_view,
-            &ironwood_view,
-            None,
-            &(),
-        )
-        .unwrap()
-        .fee_required();
-
-        let unpadded_fee = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
-            Zip317FeeRule::standard(),
-            None,
-            ShieldedPool::Orchard,
-            DustOutputPolicy::default(),
-        )
-        .with_unpadded_orchard_pool_bundles()
-        .compute_balance(
-            &Network::TestNetwork,
-            height,
-            &[] as &[TestTransparentInput],
-            &[] as &[TxOut],
-            &sapling_view,
-            &orchard_view,
-            &ironwood_view,
-            None,
-            &(),
-        )
-        .unwrap()
-        .fee_required();
-
-        // Padded default matches `ironwood_outputs_are_charged_actions`: sapling (2) +
-        // orchard (1 payment + 1 change = 2) + ironwood (1 output, padded to 2) = 6
-        // actions = 30000 zat. Unpadded charges the single-output Ironwood bundle 1
-        // action, so the fee drops by one 5000-zat action to 25000.
-        assert_eq!(padded_fee, Zatoshis::const_from_u64(30000));
-        assert_eq!(unpadded_fee, Zatoshis::const_from_u64(25000));
-        assert_eq!(
-            padded_fee,
-            (unpadded_fee + Zatoshis::const_from_u64(5000)).unwrap()
         );
     }
 
@@ -1111,6 +997,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[] as &[TestTransparentInput],
             &[TxOut::new(
                 Zatoshis::const_from_u64(40000),
@@ -1160,6 +1047,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1208,6 +1096,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1262,6 +1151,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1314,6 +1204,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1364,6 +1255,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1413,6 +1305,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -1466,6 +1359,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1518,6 +1412,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1572,6 +1467,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1623,6 +1519,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[TestTransparentInput {
                 outpoint: OutPoint::fake(),
                 coin: TxOut::new(
@@ -1682,6 +1579,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
@@ -1731,6 +1629,7 @@ mod tests {
                 .activation_height(NetworkUpgrade::Nu5)
                 .unwrap()
                 .into(),
+            BlockHeight::from_u32(1),
             &[] as &[TestTransparentInput],
             &[] as &[TxOut],
             &(
