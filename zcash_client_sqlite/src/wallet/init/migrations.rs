@@ -358,9 +358,30 @@ pub(super) fn all_migrations<
 /// included.
 #[allow(dead_code)] // marked as dead code so that this appears in docs with --document-private-items
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
-    V_0_4_0, V_0_6_0, V_0_8_0, V_0_9_0, V_0_10_0, V_0_10_3, V_0_11_0, V_0_11_1, V_0_11_2, V_0_12_0,
-    V_0_13_0, V_0_14_0, V_0_15_0, V_0_16_0, V_0_16_2, V_0_16_4, V_0_17_2, V_0_17_3, V_0_18_0,
-    V_0_18_5, V_0_19_0,
+    V_0_4_0,
+    V_0_6_0,
+    V_0_8_0,
+    V_0_9_0,
+    V_0_10_0,
+    V_0_10_3,
+    V_0_11_0,
+    V_0_11_1,
+    V_0_11_2,
+    V_0_12_0,
+    V_0_13_0,
+    V_0_14_0,
+    V_0_15_0,
+    V_0_16_0,
+    V_0_16_2,
+    V_0_16_4,
+    V_0_17_2,
+    V_0_17_3,
+    V_0_18_0,
+    V_0_18_5,
+    V_0_19_0,
+    V_0_20_0,
+    V_0_22_0_RC1,
+    V_0_22_0_RC2,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -486,6 +507,35 @@ pub const V_0_18_5: &[Uuid] = &[
 
 /// Leaf migrations in the 0.19.0 release.
 pub const V_0_19_0: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
+
+/// Leaf migrations in the 0.20.0 release.
+pub const V_0_20_0: &[Uuid] = &[
+    v_tx_outputs_key_scopes::MIGRATION_ID,
+    ivk_item_cache::MIGRATION_ID,
+    witness_stabilized_notes::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.22.0-rc.1 release.
+pub const V_0_22_0_RC1: &[Uuid] = &[
+    v_tx_outputs_key_scopes::MIGRATION_ID,
+    ivk_item_cache::MIGRATION_ID,
+    add_transparent_receiver_address_index::MIGRATION_ID,
+    add_transparent_value_index::MIGRATION_ID,
+    ironwood_pool_code_views::MIGRATION_ID,
+    tree_retained_checkpoints::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.22.0-rc.2 release.
+pub const V_0_22_0_RC2: &[Uuid] = &[
+    v_tx_outputs_key_scopes::MIGRATION_ID,
+    ivk_item_cache::MIGRATION_ID,
+    add_transparent_receiver_address_index::MIGRATION_ID,
+    add_transparent_value_index::MIGRATION_ID,
+    ironwood_pool_code_views::MIGRATION_ID,
+    orchard_ironwood_migration_tables::MIGRATION_ID,
+    tree_retained_checkpoints::MIGRATION_ID,
+    note_locking::MIGRATION_ID,
+];
 
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
