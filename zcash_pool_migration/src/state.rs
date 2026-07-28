@@ -254,7 +254,7 @@ impl MigrationState {
     }
 
     /// The id of the next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor
-    /// is resolvable now (see [`Self::prove_ready`]). Proving is decoupled from broadcasting so a
+    /// is resolvable now. Proving is decoupled from broadcasting so a
     /// transfer is proved while its anchor boundary checkpoint is still within the wallet's pruning
     /// window, then broadcast later at its scheduled height.
     pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
