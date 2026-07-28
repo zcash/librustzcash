@@ -22,6 +22,7 @@ extern crate alloc;
 #[cfg(any(test, feature = "wallet", feature = "test-dependencies"))]
 extern crate std;
 
+pub mod backend;
 #[cfg(feature = "orchard")]
 pub mod build;
 pub mod denomination;
