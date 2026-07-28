@@ -20,7 +20,7 @@ use core::ops::Deref;
 use corez::io::{self, Read, Write};
 
 use ::transparent::bundle::{self as transparent, OutPoint, TxIn, TxOut};
-use zcash_encoding::{CompactSize, Vector};
+use zcash_encoding::{CompactSize, Decodable, Encodable, Vector};
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
     value::{BalanceError, ZatBalance, Zatoshis},
@@ -76,8 +76,26 @@ pub enum TxVersion {
     V6,
 }
 
-impl TxVersion {
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+impl Encodable for TxVersion {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        writer.write_u32_le(self.header())?;
+        match self {
+            TxVersion::Sprout(_) => Ok(()),
+            _ => writer.write_u32_le(self.version_group_id()),
+        }
+    }
+}
+
+impl Decodable for TxVersion {
+    type Args<'a> = ();
+
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
         let header = reader.read_u32_le()?;
         let overwintered = (header >> 31) == 1;
         let version = header & 0x7FFFFFFF;
@@ -101,6 +119,12 @@ impl TxVersion {
                 "Unknown transaction format",
             ))
         }
+    }
+}
+
+impl TxVersion {
+    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+        <Self as Decodable>::read(reader, ())
     }
 
     pub fn header(&self) -> u32 {
@@ -130,12 +154,8 @@ impl TxVersion {
         }
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_u32_le(self.header())?;
-        match self {
-            TxVersion::Sprout(_) => Ok(()),
-            _ => writer.write_u32_le(self.version_group_id()),
-        }
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
     }
 
     /// Returns `true` if this transaction version supports the Sprout protocol.
@@ -733,16 +753,7 @@ impl Transaction {
     }
 
     pub fn read<R: Read>(reader: R, consensus_branch_id: BranchId) -> io::Result<Self> {
-        let mut reader = HashReader::new(reader);
-
-        let version = TxVersion::read(&mut reader)?;
-        match version {
-            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
-                Self::read_v4(reader, version, consensus_branch_id)
-            }
-            TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
-            TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
-        }
+        <Self as Decodable>::read(reader, consensus_branch_id)
     }
 
     #[allow(clippy::redundant_closure)]
@@ -956,11 +967,7 @@ impl Transaction {
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
-        match self.version {
-            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
-            TxVersion::V5 => self.write_v5(writer),
-            TxVersion::V6 => self.write_v6(writer),
-        }
+        Encodable::write(self, writer)
     }
 
     pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
@@ -1294,6 +1301,44 @@ pub mod testing {
     prop_compose! {
         pub fn arb_tx(branch_id: BranchId)(tx_data in arb_txdata(branch_id)) -> Transaction {
             Transaction::from_data(tx_data).unwrap()
+        }
+    }
+}
+
+impl Encodable for Transaction {
+    fn write<W>(&self, writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        match self.version {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => self.write_v4(writer),
+            TxVersion::V5 => self.write_v5(writer),
+            TxVersion::V6 => self.write_v6(writer),
+        }
+    }
+}
+
+impl Decodable for Transaction {
+    /// The consensus branch in force for this transaction.
+    ///
+    /// Only v4 and earlier need it: from v5 the branch ID is part of the encoding, and the value
+    /// passed here is ignored. It is required unconditionally because the version is not known
+    /// until the first field has been read.
+    type Args<'a> = BranchId;
+
+    fn read<R>(reader: R, consensus_branch_id: BranchId) -> io::Result<Self>
+    where
+        R: Read,
+    {
+        let mut reader = HashReader::new(reader);
+
+        let version = <TxVersion as Decodable>::read(&mut reader, ())?;
+        match version {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
+                Self::read_v4(reader, version, consensus_branch_id)
+            }
+            TxVersion::V5 => Self::read_v5(reader.into_base_reader(), version),
+            TxVersion::V6 => Self::read_v6(reader.into_base_reader(), version),
         }
     }
 }

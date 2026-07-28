@@ -1196,3 +1196,100 @@ fn zip_0233() {
         );
     }
 }
+
+mod codec {
+    use alloc::vec::Vec;
+    use proptest::prelude::*;
+    use zcash_encoding::{
+        Decodable, Encodable,
+        testing::{check_canonical, check_codec_roundtrip, check_codec_roundtrip_with},
+    };
+    use zcash_protocol::consensus::BranchId;
+
+    use super::arb_tx;
+    use crate::transaction::{Transaction, TxVersion};
+
+    /// Every defined version, since the version field is a discriminant and the encoding
+    /// differs in length between the Sprout form and the rest.
+    fn all_versions() -> Vec<TxVersion> {
+        alloc::vec![
+            TxVersion::Sprout(1),
+            TxVersion::Sprout(2),
+            TxVersion::V3,
+            TxVersion::V4,
+            TxVersion::V5,
+            TxVersion::V6,
+        ]
+    }
+
+    #[test]
+    fn tx_version_roundtrips() {
+        for v in all_versions() {
+            check_codec_roundtrip(&v);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn tx_version_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..16)) {
+            check_canonical::<TxVersion>(&bytes, ());
+        }
+
+        /// `Decodable::Args` carries the consensus branch, which v4 and earlier need and the
+        /// encoding does not supply.
+        ///
+        /// Only pre-v5 branches are exercised here: `arb_tx` draws value commitments and
+        /// proofs uniformly at random, and v5 parsing validates them, so a generated v5
+        /// transaction generally fails to re-read. That is a property of the generator, not of
+        /// the codec, and it predates these traits. v5 and v6 are covered by
+        /// `tx_test_vectors_roundtrip_through_the_traits` below, against real encodings.
+        #[test]
+        fn tx_roundtrips_through_the_traits(tx in arb_tx(BranchId::Sapling)) {
+            check_codec_roundtrip_with(&tx, BranchId::Sapling);
+        }
+
+        /// The inherent methods are what callers use today, and must stay byte-identical to the
+        /// trait implementations they now delegate to.
+        ///
+        #[test]
+        fn inherent_methods_agree_with_the_traits(tx in arb_tx(BranchId::Sapling)) {
+            let mut via_inherent = Vec::new();
+            Transaction::write(&tx, &mut via_inherent).unwrap();
+            let mut via_trait = Vec::new();
+            Encodable::write(&tx, &mut via_trait).unwrap();
+            prop_assert_eq!(&via_inherent, &via_trait);
+
+            let a = Transaction::read(&via_inherent[..], BranchId::Sapling).unwrap();
+            let b = <Transaction as Decodable>::read(&via_inherent[..], BranchId::Sapling).unwrap();
+            prop_assert_eq!(a.txid(), b.txid());
+        }
+    }
+
+    /// Golden vectors: real v5 transaction encodings from the ZIP 244 test vectors, decoded
+    /// through the trait and re-encoded. This is what actually pins the encoding: the
+    /// round-trip and canonicity properties above are self-referential, and would still pass if
+    /// the encoding changed consistently in both directions.
+    #[test]
+    fn tx_test_vectors_roundtrip_through_the_traits() {
+        let vectors = crate::transaction::tests::data::zip_0244::make_test_vectors();
+        assert!(!vectors.is_empty(), "the golden vectors must not be empty");
+
+        for (i, tv) in vectors.iter().enumerate() {
+            let tx = <Transaction as Decodable>::read(&tv.tx[..], BranchId::Nu5)
+                .unwrap_or_else(|e| panic!("vector {i} must decode: {e}"));
+
+            assert_eq!(
+                tx.txid().as_ref(),
+                &tv.txid,
+                "vector {i}: decoded transaction must have the expected txid"
+            );
+
+            let mut reencoded = Vec::new();
+            Encodable::write(&tx, &mut reencoded).unwrap();
+            assert_eq!(
+                reencoded, tv.tx,
+                "vector {i}: re-encoding must reproduce the stored bytes exactly"
+            );
+        }
+    }
+}

@@ -10,6 +10,22 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::block::BlockHeader`, `zcash_primitives::block::Block`,
+  `zcash_primitives::transaction::TxVersion`,
+  `zcash_primitives::transaction::Transaction` and
+  `zcash_primitives::transaction::components::sprout::JsDescription` now
+  implement `zcash_encoding::Encodable` and `zcash_encoding::Decodable`. The
+  encodings are unchanged and the inherent `read`/`write` methods remain, now
+  delegating to the trait implementations.
+  - `Transaction`'s `Decodable::Args` is the `BranchId`, and `JsDescription`'s
+    is the `use_groth` flag, matching their inherent `read` methods.
+- `zcash_primitives::block::BranchSchedule`, the consensus context a `Block`
+  decoder needs, with a blanket implementation for every
+  `zcash_protocol::consensus::Parameters`. `Block`'s `Decodable::Args` is
+  `&dyn BranchSchedule` rather than `&impl Parameters` because `Parameters`
+  requires `Clone` and so cannot be used behind a `dyn` reference.
+
 ## [0.30.0] - 2026-07-23
 
 ### Added

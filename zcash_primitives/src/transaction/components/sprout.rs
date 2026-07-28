@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use corez::io::{self, Read, Write};
 
 use super::GROTH_PROOF_SIZE;
+use zcash_encoding::{Decodable, Encodable};
 use zcash_protocol::value::ZatBalance;
 
 // π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
@@ -86,7 +87,103 @@ impl core::fmt::Debug for JsDescription {
 }
 
 impl JsDescription {
-    pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
+    pub fn read<R: Read>(reader: R, use_groth: bool) -> io::Result<Self> {
+        <Self as Decodable>::read(reader, use_groth)
+    }
+
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
+    }
+
+    /// The net value for the JoinSplit. When this is positive,
+    /// its value is added to the transparent value pool; when it
+    /// is negative, its value is subtracted from the transparent
+    /// value pool.
+    pub fn net_value(&self) -> ZatBalance {
+        (self.vpub_new - self.vpub_old).expect("difference is in range [-MAX_MONEY..=MAX_MONEY]")
+    }
+
+    /// Returns the value added to the Sprout pool by this JoinSplit.
+    pub fn vpub_old(&self) -> ZatBalance {
+        self.vpub_old
+    }
+
+    /// Returns the value removed from the Sprout pool by this JoinSplit.
+    pub fn vpub_new(&self) -> ZatBalance {
+        self.vpub_new
+    }
+
+    /// Returns the Sprout note commitment tree anchor for this JoinSplit.
+    pub fn anchor(&self) -> &[u8; 32] {
+        &self.anchor
+    }
+
+    /// Returns the nullifiers for the input notes of this JoinSplit.
+    pub fn nullifiers(&self) -> &[[u8; 32]; ZC_NUM_JS_INPUTS] {
+        &self.nullifiers
+    }
+
+    /// Returns the note commitments for the output notes of this JoinSplit.
+    pub fn commitments(&self) -> &[[u8; 32]; ZC_NUM_JS_OUTPUTS] {
+        &self.commitments
+    }
+
+    /// Returns the random seed for this JoinSplit.
+    pub fn random_seed(&self) -> &[u8; 32] {
+        &self.random_seed
+    }
+
+    /// Returns the message authentication codes for this JoinSplit.
+    pub fn macs(&self) -> &[[u8; 32]; ZC_NUM_JS_INPUTS] {
+        &self.macs
+    }
+
+    /// Returns the Groth16 proof bytes for this JoinSplit, if it uses Groth16.
+    /// Returns `None` for PHGR proofs (pre-Sapling).
+    pub fn groth_proof_bytes(&self) -> Option<&[u8; GROTH_PROOF_SIZE]> {
+        match &self.proof {
+            SproutProof::Groth(bytes) => Some(bytes),
+            SproutProof::PHGR(_) => None,
+        }
+    }
+}
+
+impl Encodable for JsDescription {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        writer.write_all(&self.vpub_old.to_i64_le_bytes())?;
+        writer.write_all(&self.vpub_new.to_i64_le_bytes())?;
+        writer.write_all(&self.anchor)?;
+        writer.write_all(&self.nullifiers[0])?;
+        writer.write_all(&self.nullifiers[1])?;
+        writer.write_all(&self.commitments[0])?;
+        writer.write_all(&self.commitments[1])?;
+        writer.write_all(&self.ephemeral_key)?;
+        writer.write_all(&self.random_seed)?;
+        writer.write_all(&self.macs[0])?;
+        writer.write_all(&self.macs[1])?;
+
+        match &self.proof {
+            SproutProof::Groth(p) => writer.write_all(p)?,
+            SproutProof::PHGR(p) => writer.write_all(p)?,
+        }
+
+        writer.write_all(&self.ciphertexts[0])?;
+        writer.write_all(&self.ciphertexts[1])
+    }
+}
+
+impl Decodable for JsDescription {
+    /// Whether the joinsplit proof is a Groth16 proof (Sapling onwards) rather than a PHGR13
+    /// proof. The encoding does not distinguish them, and they differ in length.
+    type Args<'a> = bool;
+
+    fn read<R>(mut reader: R, use_groth: bool) -> io::Result<Self>
+    where
+        R: Read,
+    {
         // Consensus rule (§4.3): Canonical encoding is enforced here
         let vpub_old = {
             let mut tmp = [0u8; 8];
@@ -163,79 +260,5 @@ impl JsDescription {
             proof,
             ciphertexts,
         })
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.vpub_old.to_i64_le_bytes())?;
-        writer.write_all(&self.vpub_new.to_i64_le_bytes())?;
-        writer.write_all(&self.anchor)?;
-        writer.write_all(&self.nullifiers[0])?;
-        writer.write_all(&self.nullifiers[1])?;
-        writer.write_all(&self.commitments[0])?;
-        writer.write_all(&self.commitments[1])?;
-        writer.write_all(&self.ephemeral_key)?;
-        writer.write_all(&self.random_seed)?;
-        writer.write_all(&self.macs[0])?;
-        writer.write_all(&self.macs[1])?;
-
-        match &self.proof {
-            SproutProof::Groth(p) => writer.write_all(p)?,
-            SproutProof::PHGR(p) => writer.write_all(p)?,
-        }
-
-        writer.write_all(&self.ciphertexts[0])?;
-        writer.write_all(&self.ciphertexts[1])
-    }
-
-    /// The net value for the JoinSplit. When this is positive,
-    /// its value is added to the transparent value pool; when it
-    /// is negative, its value is subtracted from the transparent
-    /// value pool.
-    pub fn net_value(&self) -> ZatBalance {
-        (self.vpub_new - self.vpub_old).expect("difference is in range [-MAX_MONEY..=MAX_MONEY]")
-    }
-
-    /// Returns the value added to the Sprout pool by this JoinSplit.
-    pub fn vpub_old(&self) -> ZatBalance {
-        self.vpub_old
-    }
-
-    /// Returns the value removed from the Sprout pool by this JoinSplit.
-    pub fn vpub_new(&self) -> ZatBalance {
-        self.vpub_new
-    }
-
-    /// Returns the Sprout note commitment tree anchor for this JoinSplit.
-    pub fn anchor(&self) -> &[u8; 32] {
-        &self.anchor
-    }
-
-    /// Returns the nullifiers for the input notes of this JoinSplit.
-    pub fn nullifiers(&self) -> &[[u8; 32]; ZC_NUM_JS_INPUTS] {
-        &self.nullifiers
-    }
-
-    /// Returns the note commitments for the output notes of this JoinSplit.
-    pub fn commitments(&self) -> &[[u8; 32]; ZC_NUM_JS_OUTPUTS] {
-        &self.commitments
-    }
-
-    /// Returns the random seed for this JoinSplit.
-    pub fn random_seed(&self) -> &[u8; 32] {
-        &self.random_seed
-    }
-
-    /// Returns the message authentication codes for this JoinSplit.
-    pub fn macs(&self) -> &[[u8; 32]; ZC_NUM_JS_INPUTS] {
-        &self.macs
-    }
-
-    /// Returns the Groth16 proof bytes for this JoinSplit, if it uses Groth16.
-    /// Returns `None` for PHGR proofs (pre-Sapling).
-    pub fn groth_proof_bytes(&self) -> Option<&[u8; GROTH_PROOF_SIZE]> {
-        match &self.proof {
-            SproutProof::Groth(bytes) => Some(bytes),
-            SproutProof::PHGR(_) => None,
-        }
     }
 }

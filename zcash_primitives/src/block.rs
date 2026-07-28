@@ -17,7 +17,7 @@ use memuse::DynamicUsage;
 use nonempty::NonEmpty;
 use sha2::{Digest, Sha256};
 
-use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_encoding::{Array, CompactSize, Decodable, Encodable, Vector};
 use zcash_protocol::consensus::{self, BlockHeight};
 
 use crate::{
@@ -130,7 +130,40 @@ impl BlockHeader {
         self.hash
     }
 
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+        <Self as Decodable>::read(reader, ())
+    }
+
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
+    }
+}
+
+impl Encodable for BlockHeader {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        writer.write_i32_le(self.version)?;
+        writer.write_all(&self.prev_block.0)?;
+        writer.write_all(&self.merkle_root)?;
+        writer.write_all(&self.final_sapling_root)?;
+        writer.write_u32_le(self.time)?;
+        writer.write_u32_le(self.bits)?;
+        writer.write_all(&self.nonce)?;
+        Vector::write(&mut writer, &self.solution, |w, b| w.write_u8(*b))?;
+
+        Ok(())
+    }
+}
+
+impl Decodable for BlockHeader {
+    type Args<'a> = ();
+
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
         let version = reader.read_i32_le()?;
 
         let mut prev_block = BlockHash([0; 32]);
@@ -161,18 +194,27 @@ impl BlockHeader {
             solution,
         })
     }
+}
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_i32_le(self.version)?;
-        writer.write_all(&self.prev_block.0)?;
-        writer.write_all(&self.merkle_root)?;
-        writer.write_all(&self.final_sapling_root)?;
-        writer.write_u32_le(self.time)?;
-        writer.write_u32_le(self.bits)?;
-        writer.write_all(&self.nonce)?;
-        Vector::write(&mut writer, &self.solution, |w, b| w.write_u8(*b))?;
+/// The consensus context required to decode a [`Block`].
+///
+/// A block's encoding does not name the consensus branch its transactions were created under;
+/// that is derived from the height claimed by the coinbase transaction. Decoding therefore needs
+/// the network's branch schedule, and nothing else from [`consensus::Parameters`].
+///
+/// This is a separate trait because [`consensus::Parameters`] requires [`Clone`] and so cannot be
+/// used behind a `dyn` reference, which [`Decodable::Args`] needs in order to accept any network.
+pub trait BranchSchedule {
+    /// Returns the consensus branch in force at `height` on this network.
+    fn branch_id_for_height(&self, height: BlockHeight) -> consensus::BranchId;
+}
 
-        Ok(())
+impl<P> BranchSchedule for P
+where
+    P: consensus::Parameters,
+{
+    fn branch_id_for_height(&self, height: BlockHeight) -> consensus::BranchId {
+        consensus::BranchId::for_height(self, height)
     }
 }
 
@@ -188,7 +230,84 @@ impl Block {
     /// Parses a block from bytes.
     ///
     /// Limitation: currently this method returns an error if given a genesis block.
-    pub fn read<R: Read, P: consensus::Parameters>(mut reader: R, params: &P) -> io::Result<Self> {
+    pub fn read<R: Read, P: consensus::Parameters>(reader: R, params: &P) -> io::Result<Self> {
+        <Self as Decodable>::read(reader, params)
+    }
+
+    /// Writes the block to the given writer.
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
+    }
+
+    /// Constructs a block from its component parts.
+    ///
+    /// This does not validate any consensus rules; in particular, `claimed_height` is not
+    /// checked against the height encoded in the coinbase transaction. It is intended for
+    /// use in constructing test blocks.
+    #[cfg(feature = "test-dependencies")]
+    pub fn from_parts(
+        header: BlockHeader,
+        vtx: NonEmpty<Transaction>,
+        claimed_height: BlockHeight,
+    ) -> Self {
+        Block {
+            header,
+            vtx,
+            claimed_height,
+        }
+    }
+
+    /// Breaks this block into its component parts for further processing.
+    pub fn into_parts(self) -> (BlockHeader, NonEmpty<Transaction>) {
+        (self.header, self.vtx)
+    }
+
+    /// Returns the block's header.
+    pub fn header(&self) -> &BlockHeader {
+        &self.header
+    }
+
+    /// Returns the block's transactions, in consensus order (the order they are encoded
+    /// in the block and applied to chain state).
+    ///
+    /// The first transaction is always the coinbase transaction.
+    pub fn vtx(&self) -> &NonEmpty<Transaction> {
+        &self.vtx
+    }
+
+    /// Returns the claimed height of this block.
+    ///
+    /// This is a "claimed height" for two reasons:
+    /// - It is the value recorded in the `scriptSig` of the coinbase transaction's null
+    ///   transparent input, and thus can only be trusted if the block has been fully
+    ///   validated in the context of a chain.
+    /// - Blocks not in the main chain **do not have heights** (because heights are by
+    ///   definition measured with respect to the longest chain). This value can only be
+    ///   used as a "height" if the block is verified to be currently in the main chain.
+    pub fn claimed_height(&self) -> BlockHeight {
+        self.claimed_height
+    }
+}
+
+impl Encodable for Block {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        Encodable::write(&self.header, &mut writer)?;
+        Vector::write_nonempty(&mut writer, &self.vtx, |w, tx| tx.write(w))?;
+        Ok(())
+    }
+}
+
+impl Decodable for Block {
+    /// The network's consensus branch schedule; see [`BranchSchedule`].
+    type Args<'a> = &'a dyn BranchSchedule;
+
+    fn read<R>(mut reader: R, params: &dyn BranchSchedule) -> io::Result<Self>
+    where
+        R: Read,
+    {
         let header = BlockHeader::read(&mut reader)?;
 
         // Instead of using `Vector::read`, we manually read the length, so we can then
@@ -250,7 +369,7 @@ impl Block {
         };
 
         // Fix the coinbase tx's consensus branch ID if necessary.
-        let consensus_branch_id = consensus::BranchId::for_height(params, claimed_height);
+        let consensus_branch_id = params.branch_id_for_height(claimed_height);
         let coinbase = match coinbase.version() {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => coinbase
                 .into_data()
@@ -295,62 +414,6 @@ impl Block {
             vtx,
             claimed_height,
         })
-    }
-
-    /// Writes the block to the given writer.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.header.write(&mut writer)?;
-        Vector::write_nonempty(&mut writer, &self.vtx, |w, tx| tx.write(w))?;
-        Ok(())
-    }
-
-    /// Constructs a block from its component parts.
-    ///
-    /// This does not validate any consensus rules; in particular, `claimed_height` is not
-    /// checked against the height encoded in the coinbase transaction. It is intended for
-    /// use in constructing test blocks.
-    #[cfg(feature = "test-dependencies")]
-    pub fn from_parts(
-        header: BlockHeader,
-        vtx: NonEmpty<Transaction>,
-        claimed_height: BlockHeight,
-    ) -> Self {
-        Block {
-            header,
-            vtx,
-            claimed_height,
-        }
-    }
-
-    /// Breaks this block into its component parts for further processing.
-    pub fn into_parts(self) -> (BlockHeader, NonEmpty<Transaction>) {
-        (self.header, self.vtx)
-    }
-
-    /// Returns the block's header.
-    pub fn header(&self) -> &BlockHeader {
-        &self.header
-    }
-
-    /// Returns the block's transactions, in consensus order (the order they are encoded
-    /// in the block and applied to chain state).
-    ///
-    /// The first transaction is always the coinbase transaction.
-    pub fn vtx(&self) -> &NonEmpty<Transaction> {
-        &self.vtx
-    }
-
-    /// Returns the claimed height of this block.
-    ///
-    /// This is a "claimed height" for two reasons:
-    /// - It is the value recorded in the `scriptSig` of the coinbase transaction's null
-    ///   transparent input, and thus can only be trusted if the block has been fully
-    ///   validated in the context of a chain.
-    /// - Blocks not in the main chain **do not have heights** (because heights are by
-    ///   definition measured with respect to the longest chain). This value can only be
-    ///   used as a "height" if the block is verified to be currently in the main chain.
-    pub fn claimed_height(&self) -> BlockHeight {
-        self.claimed_height
     }
 }
 
