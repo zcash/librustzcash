@@ -21,7 +21,7 @@ use super::ufvk_support;
 
 /// The migration that removed the address columns from the `accounts` table, and created
 /// the `accounts` table.
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xd956978c_9c87_4d6e_815d_fb8f088d094c);
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd956978c_9c87_4d6e_815d_fb8f088d094c);
 
 const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
 

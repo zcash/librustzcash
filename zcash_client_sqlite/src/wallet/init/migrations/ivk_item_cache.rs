@@ -19,7 +19,8 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::standalone_p2sh;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x93278b0f_77fe_473c_b88e_7f285da38dd3);
+/// Replaces FVK item cache columns with IVK item cache columns in the `accounts` table.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x93278b0f_77fe_473c_b88e_7f285da38dd3);
 
 const DEPENDENCIES: &[Uuid] = &[standalone_p2sh::MIGRATION_ID];
 

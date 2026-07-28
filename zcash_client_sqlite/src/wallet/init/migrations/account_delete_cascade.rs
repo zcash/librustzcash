@@ -14,7 +14,9 @@ use crate::wallet::init::{
     },
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x07770bfd_c549_4069_9e05_822458f81cc4);
+/// This migration adds `ON DELETE CASCADE` triggers to foreign keys throughout the database to
+/// enable deletion of account records.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x07770bfd_c549_4069_9e05_822458f81cc4);
 
 const DEPENDENCIES: &[Uuid] = &[
     tx_retrieval_queue_expiry::MIGRATION_ID,

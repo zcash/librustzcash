@@ -11,7 +11,10 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::account_delete_cascade;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x944f8a1e_bdfa_4d52_90ca_663dee8efc62);
+/// This migration relaxes the addresses table constraint to allow standalone P2SH addresses that
+/// have an imported transparent receiver script but no imported public key and no transparent child
+/// index.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x944f8a1e_bdfa_4d52_90ca_663dee8efc62);
 
 const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 

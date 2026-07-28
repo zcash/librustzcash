@@ -13,7 +13,8 @@ use zcash_protocol::consensus;
 use super::orchard_received_notes;
 use crate::{UA_ORCHARD, UA_TRANSPARENT, wallet::init::WalletMigrationError};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x604349c7_5ce5_4768_bea6_12d106ccda93);
+/// This migration ensures that an Orchard receiver exists in the wallet's default Unified address.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x604349c7_5ce5_4768_bea6_12d106ccda93);
 
 const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
 

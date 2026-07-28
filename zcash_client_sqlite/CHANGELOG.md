@@ -11,6 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zcash_client_sqlite::wallet::init::migrations::ids`, behind the `unstable`
+  feature flag, exposing the identifier of each individual internal migration.
+  External migrations registered via `WalletMigrator::with_external_migrations`
+  can be anchored against a specific internal migration where the per-release
+  constants (such as `migrations::V_0_19_0`) are not precise enough — in
+  particular when depending on schema added since the most recent release. These
+  identifiers are unstable: the set of them changes between releases, so they are
+  intended for development against unreleased schema, with the anchor moved to
+  the release constant that covers it once that release exists.
 - `zcash_client_sqlite::error::SqliteClientError::BackendError` and the
   `zcash_client_sqlite::error::BackendError` it wraps, reported when a
   `zcash_client_backend` error value carries a variant this crate has no

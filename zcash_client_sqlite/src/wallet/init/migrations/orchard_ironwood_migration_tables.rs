@@ -23,7 +23,8 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::ironwood_received_notes;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x7b2f6a41_9c3d_4e58_8a17_2f6b9d0c4e11);
+/// Adds tables for storage of an in-progress Orchard -> Ironwood value-pool migration.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7b2f6a41_9c3d_4e58_8a17_2f6b9d0c4e11);
 
 // The pool-migration tables have no foreign keys into the note or shardtree tables, but the engine
 // works over both pools at runtime: it spends Orchard source notes (and their witnesses) and crosses
