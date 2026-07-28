@@ -32,6 +32,15 @@ workspace.
   `tor::grpc::GrpcError`, and `tor::http::HttpError`.
 
 ### Fixed
+- `data_api::ll::wallet::store_decrypted_tx` now classifies a transaction
+  containing an Ironwood bundle as detectable via chain scanning. Previously
+  only Sapling and Orchard bundles were considered, so an as-yet-unmined
+  Ironwood-only transaction stored via transaction enhancement was queued for
+  txid-based status retrieval, even though ordinary compact-block scanning
+  detects such a transaction and sets its mined height, making the status
+  request redundant. Since NU6.3 every
+  shielded spend or output involving an Orchard receiver is carried in the
+  Ironwood bundle, so this affected ordinary transactions.
 - The Tor HTTP and gRPC transports now reject a URL whose scheme is neither
   `http` nor `https` (for example `ftp` or `ws`) with `tor::http::HttpError::NonHttpUrl`.
   Previously such a URL was silently treated as plaintext HTTP, contradicting the
