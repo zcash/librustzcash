@@ -152,12 +152,11 @@ pub(super) fn all_migrations<
     //                                                   /            \      orchard_note_version
     //                                                  /              \                      \
     //                                                 /                \               ironwood_received_notes
-    //                                                /                  \              /       |           \
-    //                                               /                    \  ironwood_  |  fix_bad_ironwood_
-    //                                              /                      \ pool_code_ |  change_flagging
-    //                                             /                        \ views     note_locking
-    //                                              /                      \
-    //                                          ivk_item_cache    add_transparent_receiver_address_index
+    //                                                /                  \                     /        |    \
+    //                                               /                    \    ironwood_pool_code_views |  note_locking
+    //                                              /                      \                            |
+    //                                             /                        \         fix_bad_ironwood_change_flagging
+    //                                         ivk_item_cache    add_transparent_receiver_address_index
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
