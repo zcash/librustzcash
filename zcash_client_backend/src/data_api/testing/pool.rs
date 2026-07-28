@@ -8568,6 +8568,14 @@ pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
                 $phase,
             );
             assert!(tx.has_change(), "the transaction has change ({})", $phase);
+            // The payment has an external recipient, so it is not a pool crossing even though
+            // its value moves from the Orchard pool into the Ironwood pool.
+            assert!(
+                !tx.is_pool_crossing(),
+                "a payment to an external recipient is not a pool crossing ({})",
+                $phase,
+            );
+            assert_eq!(tx.pool_crossing_value(), None);
         }};
     }
 
@@ -8705,6 +8713,22 @@ pub fn orchard_to_ironwood_self_migration_reports_fee_only_delta<Dsf>(
                 tx.account_value_delta(),
                 -zcash_protocol::value::ZatBalance::from(fee),
                 "the migration ({}) reduces the account balance only by the fee",
+                $phase,
+            );
+            // Once the wallet has observed the payment output returning to its own account
+            // (the scanner marks such outputs as change), the transaction presents as a
+            // wallet-internal transfer between pools, and is classified as a pool crossing
+            // whose crossing value is the migrated payment amount — the quantity a wallet
+            // should display for it.
+            assert!(
+                tx.is_pool_crossing(),
+                "a mined payment to the wallet's own address is a pool crossing ({})",
+                $phase,
+            );
+            assert_eq!(
+                tx.pool_crossing_value(),
+                Some(transfer_amount),
+                "pool_crossing_value ({}) is the migrated payment amount",
                 $phase,
             );
         }};

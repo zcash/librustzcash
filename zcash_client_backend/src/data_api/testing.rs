@@ -126,6 +126,8 @@ pub struct TransactionSummary<AccountId> {
     memo_count: usize,
     expired_unmined: bool,
     is_shielding: bool,
+    is_pool_crossing: bool,
+    pool_crossing_value: Option<Zatoshis>,
 }
 
 impl<AccountId> TransactionSummary<AccountId> {
@@ -150,6 +152,8 @@ impl<AccountId> TransactionSummary<AccountId> {
         memo_count: usize,
         expired_unmined: bool,
         is_shielding: bool,
+        is_pool_crossing: bool,
+        pool_crossing_value: Option<Zatoshis>,
     ) -> Self {
         Self {
             account_id,
@@ -167,6 +171,8 @@ impl<AccountId> TransactionSummary<AccountId> {
             memo_count,
             expired_unmined,
             is_shielding,
+            is_pool_crossing,
+            pool_crossing_value,
         }
     }
 
@@ -267,6 +273,30 @@ impl<AccountId> TransactionSummary<AccountId> {
     /// above metrics.
     pub fn is_shielding(&self) -> bool {
         self.is_shielding
+    }
+
+    /// Returns `true` if this is detectably a wallet-internal transfer that moves the
+    /// account's own funds between shielded pools (for example, a ZIP 318
+    /// Orchard → Ironwood migration transfer).
+    ///
+    /// Specifically, `true` means that at a minimum:
+    /// - Every wallet-spent note and wallet-received output is shielded.
+    /// - The transaction spends at least one of the account's notes.
+    /// - At least one output was received in a pool the account spent nothing from.
+    /// - We do not know about any external outputs of the transaction.
+    ///
+    /// A payment that returns value to one of the wallet's own addresses is classified
+    /// once the wallet has observed the returned output (which the scanner marks as
+    /// change); while such a transaction is unmined it is treated as an ordinary payment.
+    pub fn is_pool_crossing(&self) -> bool {
+        self.is_pool_crossing
+    }
+
+    /// Returns the total value received in pools the account did not spend from — the
+    /// amount that crossed pools — when [`Self::is_pool_crossing`] is `true`, or `None`
+    /// otherwise.
+    pub fn pool_crossing_value(&self) -> Option<Zatoshis> {
+        self.pool_crossing_value
     }
 }
 

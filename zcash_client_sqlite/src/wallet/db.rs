@@ -1375,6 +1375,14 @@ notes AS (
          ON ros.pool = ro.pool
          AND ros.received_output_id = ro.id_within_pool_table
 ),
+-- The distinct pools from which each account spent notes in each transaction. An output
+-- received in a pool that does not appear here for its transaction is value that crossed
+-- into that pool from elsewhere.
+spent_note_pools AS (
+    SELECT account_id, transaction_id, pool
+    FROM v_received_output_spends
+    GROUP BY account_id, transaction_id, pool
+),
 -- Obtain a count of the notes that the wallet created in each transaction,
 -- not counting change notes.
 sent_note_counts AS (
@@ -1427,6 +1435,28 @@ SELECT accounts.uuid                AS account_uuid,
             -- We do not know about any external outputs of the transaction.
             AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
        ) AS is_shielding,
+       (
+            -- Every note spent and every output received by the wallet in this transaction
+            -- is shielded.
+            SUM(CASE WHEN notes.pool = 0 THEN notes.spent_note_count + notes.received_count + notes.change_note_count ELSE 0 END) = 0
+            -- The transaction spends at least one of the account's notes.
+            AND SUM(notes.spent_note_count) > 0
+            -- At least one output was received in a shielded pool from which the account
+            -- spent nothing, so value crossed between pools.
+            AND SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_count + notes.change_note_count ELSE 0 END) > 0
+            -- We do not know about any external outputs of the transaction.
+            AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
+       ) AS is_pool_crossing,
+       -- The value received in pools the account did not spend from, when the transaction
+       -- is a pool crossing; NULL otherwise.
+       CASE WHEN (
+            SUM(CASE WHEN notes.pool = 0 THEN notes.spent_note_count + notes.received_count + notes.change_note_count ELSE 0 END) = 0
+            AND SUM(notes.spent_note_count) > 0
+            AND SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_count + notes.change_note_count ELSE 0 END) > 0
+            AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
+       )
+       THEN SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_value ELSE 0 END)
+       END AS pool_crossing_value,
        transactions.trust_status
 FROM notes
 JOIN accounts ON accounts.id = notes.account_id
@@ -1436,6 +1466,10 @@ LEFT JOIN blocks ON blocks.height = transactions.mined_height
 LEFT JOIN sent_note_counts
      ON sent_note_counts.account_id = notes.account_id
      AND sent_note_counts.transaction_id = notes.transaction_id
+LEFT JOIN spent_note_pools
+     ON spent_note_pools.account_id = notes.account_id
+     AND spent_note_pools.transaction_id = notes.transaction_id
+     AND spent_note_pools.pool = notes.pool
 GROUP BY notes.account_id, notes.transaction_id";
 
 /// Selects all outputs received by the wallet, plus any outputs sent from the wallet to

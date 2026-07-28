@@ -60,6 +60,7 @@ mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_additional_totals;
 mod v_transactions_net;
 mod v_transactions_note_uniqueness;
+mod v_transactions_pool_crossing;
 mod v_transactions_shielding_balance;
 mod v_transactions_transparent_history;
 mod v_tx_outputs_key_scopes;
@@ -156,6 +157,7 @@ pub mod ids {
     pub use super::v_transactions_additional_totals::MIGRATION_ID as V_TRANSACTIONS_ADDITIONAL_TOTALS;
     pub use super::v_transactions_net::MIGRATION_ID as V_TRANSACTIONS_NET;
     pub use super::v_transactions_note_uniqueness::MIGRATION_ID as V_TRANSACTIONS_NOTE_UNIQUENESS;
+    pub use super::v_transactions_pool_crossing::MIGRATION_ID as V_TRANSACTIONS_POOL_CROSSING;
     pub use super::v_transactions_shielding_balance::MIGRATION_ID as V_TRANSACTIONS_SHIELDING_BALANCE;
     pub use super::v_transactions_transparent_history::MIGRATION_ID as V_TRANSACTIONS_TRANSPARENT_HISTORY;
     pub use super::v_tx_outputs_key_scopes::MIGRATION_ID as V_TX_OUTPUTS_KEY_SCOPES;
@@ -233,15 +235,18 @@ pub(super) fn all_migrations<
     //                       `------------------- account_delete_cascade ---------------------------------'
     //                              /               /                  |              \
     //     add_transparent_value_index  v_tx_outputs_key_scopes  standalone_p2sh    witness_stabilized_notes
-    //                                                    /          \         \
-    //                                                   /            \      orchard_note_version
-    //                                                  /              \           \
-    //                                                 /                \  ironwood_received_notes -- note_locking
-    //                                                /                  \       |               |------|     |
-    //                                               /                    \    ironwood_pool_code_views |  v_address_uses_ironwood
-    //                                              /                      \                            |
-    //                                             /                        \    fix_bad_ironwood_change_flagging
-    //                                          ivk_item_cache    add_transparent_receiver_address_index
+    //                                     /                      /            \
+    //                               ivk_item_cache              /           orchard_note_version
+    //                                                          /                  \
+    //                                add_transparent_receiver_address_index        \
+    //                                                                               \
+    //                                                                      ironwood_received_notes ----------------
+    //                                                                      /         |          \                  \
+    //                                                   ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging
+    //                                                           |                    |
+    //                                                           |             v_address_uses_ironwood
+    //                                                           |
+    //                                                v_transactions_pool_crossing
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -347,6 +352,7 @@ pub(super) fn all_migrations<
         Box::new(ironwood_pool_code_views::Migration),
         Box::new(fix_bad_ironwood_change_flagging::Migration),
         Box::new(v_address_uses_ironwood::Migration),
+        Box::new(v_transactions_pool_crossing::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
         Box::new(note_locking::Migration),
@@ -546,9 +552,9 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     ivk_item_cache::MIGRATION_ID,
     add_transparent_receiver_address_index::MIGRATION_ID,
     add_transparent_value_index::MIGRATION_ID,
-    ironwood_pool_code_views::MIGRATION_ID,
     fix_bad_ironwood_change_flagging::MIGRATION_ID,
     v_address_uses_ironwood::MIGRATION_ID,
+    v_transactions_pool_crossing::MIGRATION_ID,
     orchard_ironwood_migration_tables::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     tx_status_observation_intent::MIGRATION_ID,
@@ -704,6 +710,7 @@ pub(crate) mod tests {
             ids::V_TRANSACTIONS_ADDITIONAL_TOTALS,
             ids::V_TRANSACTIONS_NET,
             ids::V_TRANSACTIONS_NOTE_UNIQUENESS,
+            ids::V_TRANSACTIONS_POOL_CROSSING,
             ids::V_TRANSACTIONS_SHIELDING_BALANCE,
             ids::V_TRANSACTIONS_TRANSPARENT_HISTORY,
             ids::V_TX_OUTPUTS_KEY_SCOPES,

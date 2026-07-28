@@ -492,6 +492,19 @@ impl Run {
                 "{}: transfer balance delta is only the fee",
                 scenario.label
             );
+            // The transfer is classified as a pool crossing carrying the crossing value, which
+            // is the amount a wallet should display for it (the balance delta is only the fee).
+            assert!(
+                entry.is_pool_crossing(),
+                "{}: the transfer is a pool crossing",
+                scenario.label
+            );
+            assert_eq!(
+                entry.pool_crossing_value(),
+                Some(crossing_value),
+                "{}: transfer pool_crossing_value",
+                scenario.label
+            );
         }
 
         // After every transfer is mined and scanned, the wallet holds the migrated value (now in
