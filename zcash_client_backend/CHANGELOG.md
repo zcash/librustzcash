@@ -19,12 +19,13 @@ workspace.
   implementation composing `anchor_retention_interval`. A backend that makes retention
   configurable needs only override the latter.
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::bucketed`
-
-### Removed
-- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}::with_unpadded_orchard_pool_bundles`.
-  The Orchard bundle is now always padded to the default action floor, and the
-  Ironwood bundle's padding is derived from the transaction's shape rather than
-  chosen by the caller, so the setting no longer had an effect to control.
+- `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
+- `zcash_client_backend::data_api::BirthdayError` now implements `Debug`,
+  `Display` and `std::error::Error`.
+- `zcash_client_backend::tor::Timeouts`
+- `zcash_client_backend::tor::Client::create_with_timeouts`
+- `zcash_client_backend::tor::http::TimeoutPhase`
+- `zcash_client_backend::tor::http::HttpError::Timeout`
 
 ### Changed
 - A payment that carries value across the Orchard turnstile into Ironwood is now
@@ -33,18 +34,17 @@ workspace.
   input, no Ironwood spends or change, a single Ironwood output whose value is a
   canonical ZIP 318 denomination (a `{1, 2, 5} * 10^k` amount between 0.01 ZEC and
   10,000 ZEC), and an anchor on the wallet's ZIP 318 bucket grid. Such a payment is
-  proposed against a bucketed anchor and funded from a single Orchard note; when the
-  wallet cannot do that, an ordinary transaction is proposed instead. Such a transaction pays one
-  fewer ZIP 317 marginal-fee action. Every other transaction is unaffected.
+  proposed against a bucketed anchor and funded from a single Orchard note, and pays
+  one fewer ZIP 317 marginal-fee action; when the wallet cannot fund it that way, an
+  ordinary transaction is proposed instead. Every other transaction is unaffected.
 - `zcash_client_backend::fees::ChangeStrategy::compute_balance` takes two additional
   arguments after `target_height`: `anchor_height: BlockHeight` and
   `zip318: &PoolMigrationParams`. The same applies to
   `InputSelector::{propose_transaction, propose_shielding}`. Pass the anchor height the
   transaction will be proved against, and the parameters from
-  `WalletRead::pool_migration_params`. The anchor determines
-  whether a transaction qualifies for the unpadded Ironwood bundle above, so the fee
-  model needs it to compute the same action count the builder will produce. Pass the
-  anchor height the transaction will be proved against.
+  `WalletRead::pool_migration_params`. Both determine whether a transaction qualifies
+  for the unpadded Ironwood bundle above, so the fee model needs them to compute the
+  same action count the builder will produce.
 - `create_pczt_from_proposal`'s `orchard_pool_padding` argument now selects the
   padding for the Orchard bundle only; the Ironwood bundle's padding is derived from
   the proposal. Pass `BundlePadding::DEFAULT`.
@@ -68,17 +68,6 @@ workspace.
   ordinary library code; its documentation carries the test-networks-only
   restriction that the gate used to imply. `AnchorRetentionInterval::from_stored_block_count`
   is removed — use `custom`, which does the same thing.
-
-### Added
-- `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
-- `zcash_client_backend::data_api::BirthdayError` now implements `Debug`,
-  `Display` and `std::error::Error`.
-- `zcash_client_backend::tor::Timeouts`
-- `zcash_client_backend::tor::Client::create_with_timeouts`
-- `zcash_client_backend::tor::http::TimeoutPhase`
-- `zcash_client_backend::tor::http::HttpError::Timeout`
-
-### Changed
 - Every public error enum in this crate is now `#[non_exhaustive]` 
   so that future variants can be added without a breaking release. A
   `match` over any of them must now include a wildcard arm:
@@ -89,6 +78,12 @@ workspace.
   `proto::{CompactFormatError, ProposalDecodingError}`, `scanning::ScanError`,
   `sync::Error`, `sync::decryptor::TryQueueError`, `tor::Error`,
   `tor::grpc::GrpcError`, and `tor::http::HttpError`.
+
+### Removed
+- `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}::with_unpadded_orchard_pool_bundles`.
+  The Orchard bundle is now always padded to the default action floor, and the
+  Ironwood bundle's padding is derived from the transaction's shape rather than
+  chosen by the caller, so the setting no longer had an effect to control.
 
 ### Fixed
 - The Tor HTTP and gRPC transports now reject a URL whose scheme is neither

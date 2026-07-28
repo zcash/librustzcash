@@ -36,8 +36,6 @@ and this library adheres to Rust's notion of
   `AnchorRetentionInterval` are now the same type, so the `From` conversion
   between them is gone. Remove any `.into()` at that boundary: a wallet's
   retention interval already *is* a bucket interval.
-
-### Changed
 - `zcash_pool_migration::build::{build_prep_tx, build_transfer_pczt}` take an
   additional `Option<&AccountDerivation>` argument, before the RNG. When it is
   supplied, every spend the built transaction still needs a signature for is
