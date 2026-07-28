@@ -10,6 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::TxId` and `zcash_protocol::value::Zatoshis` now implement
+  `zcash_encoding::Encodable` and `zcash_encoding::Decodable`. The encodings are
+  unchanged; the inherent `read`/`write` methods remain available. Implementing
+  the traits also provides the corresponding encodings for `Vec<TxId>`,
+  `Option<Zatoshis>` and any other container `zcash_encoding` supports.
+
+### Changed
+- `zcash_encoding` is now depended upon at version 0.5, whose `Encodable` and
+  `Decodable` traits appear in this crate's public API. Consumers that implement
+  or name those traits must depend on `zcash_encoding` 0.5.
+
 ## [0.10.2] - 2026-07-28
 
 ### Added

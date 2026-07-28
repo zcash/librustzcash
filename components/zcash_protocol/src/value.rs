@@ -395,6 +395,27 @@ impl Zatoshis {
     }
 }
 
+impl zcash_encoding::Encodable for Zatoshis {
+    fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.to_u64_le_bytes())
+    }
+
+    fn serialized_size(&self) -> usize {
+        8
+    }
+}
+
+impl zcash_encoding::Decodable for Zatoshis {
+    type Args<'a> = ();
+
+    fn read<R: io::Read>(mut reader: R, _args: ()) -> io::Result<Self> {
+        let mut bytes = [0u8; 8];
+        reader.read_exact(&mut bytes)?;
+        Self::from_u64_le_bytes(bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "amount out of range"))
+    }
+}
+
 impl From<Zatoshis> for ZatBalance {
     fn from(n: Zatoshis) -> Self {
         ZatBalance(n.0 as i64)

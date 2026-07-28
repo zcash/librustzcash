@@ -7431,13 +7431,15 @@ name = "zcash_protocol"
 version = "0.10.2"
 dependencies = [
  "corez",
+ "criterion 0.5.1",
  "document-features",
  "hex",
  "incrementalmerkletree",
  "incrementalmerkletree-testing",
  "memuse",
+ "nonempty",
  "proptest",
- "zcash_encoding 0.4.0",
+ "zcash_encoding 0.5.0",
 ]
 
 [[package]]
