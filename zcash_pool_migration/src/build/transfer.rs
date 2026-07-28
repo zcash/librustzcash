@@ -137,7 +137,7 @@ mod tests {
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
     use crate::denomination::{
-        DESTINATION_ACTIONS_PER_TRANSFER, RESIDUAL_MIGRATION_MIN, SOURCE_ACTIONS_PER_TRANSFER, zat,
+        DESTINATION_ACTIONS_PER_TRANSFER, MAX_RESIDUAL_VALUE, SOURCE_ACTIONS_PER_TRANSFER, zat,
     };
 
     proptest! {
@@ -150,7 +150,7 @@ mod tests {
         /// the buffer funds the transfer fee exactly, since the transfer has no change output.
         #[test]
         fn self_funding_notes_build_balanced_transfers(
-            crossing_value in u64::from(RESIDUAL_MIGRATION_MIN)..=(1_000 * COIN),
+            crossing_value in u64::from(MAX_RESIDUAL_VALUE)..=(1_000 * COIN),
             account_seed in any::<u64>(),
             note_seed in any::<u64>(),
         ) {
