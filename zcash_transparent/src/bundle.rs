@@ -181,9 +181,7 @@ impl Encodable for OutPoint {
     }
 }
 
-impl Decodable for OutPoint {
-    type Args<'a> = ();
-
+impl Decodable<()> for OutPoint {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: Read,
@@ -226,7 +224,7 @@ impl OutPoint {
     /// Reads an `OutPoint` from its canonical binary encoding: a 32-byte txid
     /// followed by the output index as a little-endian `u32`.
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, ())
+        <Self as Decodable<()>>::read(reader, ())
     }
 
     /// Writes this `OutPoint` in its canonical binary encoding: a 32-byte txid
@@ -296,7 +294,7 @@ impl<A: Authorization> TxIn<A> {
 
 impl TxIn<Authorized> {
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, ())
+        <Self as Decodable<()>>::read(reader, ())
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
@@ -319,15 +317,13 @@ impl Encodable for TxIn<Authorized> {
     }
 }
 
-impl Decodable for TxIn<Authorized> {
-    type Args<'a> = ();
-
+impl Decodable<()> for TxIn<Authorized> {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: Read,
     {
-        let prevout = <OutPoint as Decodable>::read(&mut reader, ())?;
-        let script_sig = <Script as Decodable>::read(&mut reader, ())?;
+        let prevout = <OutPoint as Decodable<()>>::read(&mut reader, ())?;
+        let script_sig = <Script as Decodable<()>>::read(&mut reader, ())?;
         let sequence = {
             let mut sequence = [0; 4];
             reader.read_exact(&mut sequence)?;
@@ -442,7 +438,7 @@ impl TxOut {
     }
 
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, ())
+        <Self as Decodable<()>>::read(reader, ())
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
@@ -487,9 +483,7 @@ impl Encodable for TxOut {
     }
 }
 
-impl Decodable for TxOut {
-    type Args<'a> = ();
-
+impl Decodable<()> for TxOut {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: Read,
@@ -500,7 +494,7 @@ impl Decodable for TxOut {
             Zatoshis::from_nonnegative_i64_le_bytes(tmp)
         }
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
-        let script_pubkey = <Script as Decodable>::read(&mut reader, ())?;
+        let script_pubkey = <Script as Decodable<()>>::read(&mut reader, ())?;
 
         Ok(TxOut::new(value, script_pubkey))
     }
@@ -622,17 +616,17 @@ mod codec_tests {
 
         #[test]
         fn outpoint_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
-            check_canonical::<OutPoint>(&bytes, ());
+            check_canonical::<OutPoint, _>(&bytes, ());
         }
 
         #[test]
         fn script_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
-            check_canonical::<Script>(&bytes, ());
+            check_canonical::<Script, _>(&bytes, ());
         }
 
         #[test]
         fn txout_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
-            check_canonical::<TxOut>(&bytes, ());
+            check_canonical::<TxOut, _>(&bytes, ());
         }
 
         /// The inherent methods that callers already use must stay byte-identical to the trait
@@ -647,7 +641,7 @@ mod codec_tests {
             prop_assert_eq!(&via_inherent, &via_trait);
 
             let a = TxIn::<Authorized>::read(&mut &via_inherent[..]).unwrap();
-            let b = <TxIn<Authorized> as Decodable>::read(&via_inherent[..], ()).unwrap();
+            let b = <TxIn<Authorized> as Decodable<()>>::read(&via_inherent[..], ()).unwrap();
             let (mut ba, mut bb) = (Vec::new(), Vec::new());
             Encodable::write(&a, &mut ba).unwrap();
             Encodable::write(&b, &mut bb).unwrap();
@@ -696,11 +690,11 @@ mod codec_tests {
         /// A script is a `CompactSize` length followed by the raw opcodes.
         #[test]
         fn script_is_length_prefixed() {
-            let empty = <Script as Decodable>::read(&[0x00][..], ()).unwrap();
+            let empty = <Script as Decodable<()>>::read(&[0x00][..], ()).unwrap();
             assert_eq!(encode(&empty), vec![0x00]);
 
             // OP_1 (0x51) alone.
-            let one = <Script as Decodable>::read(&[0x01, 0x51][..], ()).unwrap();
+            let one = <Script as Decodable<()>>::read(&[0x01, 0x51][..], ()).unwrap();
             assert_eq!(encode(&one), vec![0x01, 0x51]);
         }
 
@@ -714,7 +708,7 @@ mod codec_tests {
             let op = OutPoint::new([0xABu8; 32], 0x0102_0304);
             assert_eq!(encode(&op), expected.to_vec());
             assert_eq!(
-                <OutPoint as Decodable>::read(&expected[..], ()).unwrap(),
+                <OutPoint as Decodable<()>>::read(&expected[..], ()).unwrap(),
                 op
             );
 
@@ -727,14 +721,17 @@ mod codec_tests {
         /// A TxOut is the value as a little-endian i64 followed by the script.
         #[test]
         fn txout_is_value_then_script() {
-            let script = <Script as Decodable>::read(&[0x01, 0x51][..], ()).unwrap();
+            let script = <Script as Decodable<()>>::read(&[0x01, 0x51][..], ()).unwrap();
             let out = TxOut::new(Zatoshis::const_from_u64(1_0000_0000), script);
 
             let mut expected = Vec::new();
             expected.extend_from_slice(&1_0000_0000i64.to_le_bytes());
             expected.extend_from_slice(&[0x01, 0x51]);
             assert_eq!(encode(&out), expected);
-            assert_eq!(<TxOut as Decodable>::read(&expected[..], ()).unwrap(), out);
+            assert_eq!(
+                <TxOut as Decodable<()>>::read(&expected[..], ()).unwrap(),
+                out
+            );
         }
     }
 

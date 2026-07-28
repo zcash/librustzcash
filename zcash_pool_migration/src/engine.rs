@@ -174,7 +174,7 @@ impl MigrationTransferId {
 
     /// Reads an id written by [`write`](Self::write).
     pub fn read<R: io::Read>(reader: R) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, ())
+        <Self as Decodable<()>>::read(reader, ())
     }
 }
 
@@ -191,9 +191,7 @@ impl Encodable for MigrationTransferId {
     }
 }
 
-impl Decodable for MigrationTransferId {
-    type Args<'a> = ();
-
+impl Decodable<()> for MigrationTransferId {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: io::Read,
@@ -4621,7 +4619,7 @@ mod codec_tests {
             assert_eq!(Encodable::serialized_size(&value), expected.len());
 
             assert_eq!(
-                <MigrationTransferId as Decodable>::read(&expected[..], ()).unwrap(),
+                <MigrationTransferId as Decodable<()>>::read(&expected[..], ()).unwrap(),
                 value,
                 "the vector for {id} must decode to the value"
             );
@@ -4644,7 +4642,7 @@ mod codec_tests {
 
         #[test]
         fn transfer_id_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..12)) {
-            check_canonical::<MigrationTransferId>(&bytes, ());
+            check_canonical::<MigrationTransferId, _>(&bytes, ());
         }
 
         /// The inherent methods predate the traits and are what callers use today; they must

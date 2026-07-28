@@ -99,7 +99,7 @@ impl NodeData {
         consensus_branch_id: u32,
         r: &mut R,
     ) -> corez::io::Result<Self> {
-        <Self as Decodable>::read(r, consensus_branch_id)
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
     }
 
     /// Convert to byte representation.
@@ -149,10 +149,10 @@ impl Encodable for NodeData {
     }
 }
 
-impl Decodable for NodeData {
-    /// The consensus branch ID in force for the node, which the encoding does not carry.
-    type Args<'a> = u32;
-
+impl Decodable<u32> for NodeData {
+    /// `consensus_branch_id` is the consensus branch ID in force for the node, which the
+    /// encoding does not carry.
+    ///
     /// # Errors
     ///
     /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
@@ -237,7 +237,7 @@ impl V2 {
         consensus_branch_id: u32,
         r: &mut R,
     ) -> corez::io::Result<Self> {
-        <Self as Decodable>::read(r, consensus_branch_id)
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
     }
 }
 
@@ -255,17 +255,16 @@ impl Encodable for V2 {
     }
 }
 
-impl Decodable for V2 {
-    /// The consensus branch ID in force for the node, which the encoding does not carry.
-    type Args<'a> = u32;
-
+impl Decodable<u32> for V2 {
+    /// `consensus_branch_id` is the consensus branch ID in force for the node, which the
+    /// encoding does not carry.
     fn read<R>(mut reader: R, consensus_branch_id: u32) -> corez::io::Result<Self>
     where
         R: corez::io::Read,
     {
         let r = &mut reader;
         let mut data = V2 {
-            v1: <NodeData as Decodable>::read(&mut *r, consensus_branch_id)?,
+            v1: <NodeData as Decodable<u32>>::read(&mut *r, consensus_branch_id)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_orchard_root)?;
@@ -322,7 +321,7 @@ impl V3 {
         consensus_branch_id: u32,
         r: &mut R,
     ) -> corez::io::Result<Self> {
-        <Self as Decodable>::read(r, consensus_branch_id)
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
     }
 }
 
@@ -340,17 +339,16 @@ impl Encodable for V3 {
     }
 }
 
-impl Decodable for V3 {
-    /// The consensus branch ID in force for the node, which the encoding does not carry.
-    type Args<'a> = u32;
-
+impl Decodable<u32> for V3 {
+    /// `consensus_branch_id` is the consensus branch ID in force for the node, which the
+    /// encoding does not carry.
     fn read<R>(mut reader: R, consensus_branch_id: u32) -> corez::io::Result<Self>
     where
         R: corez::io::Read,
     {
         let r = &mut reader;
         let mut data = V3 {
-            v2: <V2 as Decodable>::read(&mut *r, consensus_branch_id)?,
+            v2: <V2 as Decodable<u32>>::read(&mut *r, consensus_branch_id)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_ironwood_root)?;
@@ -792,12 +790,12 @@ mod codec_tests {
 
         #[test]
         fn node_data_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..400)) {
-            check_canonical::<NodeData>(&bytes, BRANCH_ID);
+            check_canonical::<NodeData, _>(&bytes, BRANCH_ID);
         }
 
         #[test]
         fn v3_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..400)) {
-            check_canonical::<V3>(&bytes, BRANCH_ID);
+            check_canonical::<V3, _>(&bytes, BRANCH_ID);
         }
 
         /// The inherent methods are what callers use today, and must stay byte-identical to the
@@ -813,7 +811,7 @@ mod codec_tests {
             prop_assert_eq!(&via_inherent, &via_trait);
 
             let a = NodeData::read(BRANCH_ID, &mut &via_inherent[..]).unwrap();
-            let b = <NodeData as Decodable>::read(&via_inherent[..], BRANCH_ID).unwrap();
+            let b = <NodeData as Decodable<u32>>::read(&via_inherent[..], BRANCH_ID).unwrap();
             prop_assert_eq!(a, b);
         }
     }

@@ -72,9 +72,7 @@ impl Encodable for Script {
     }
 }
 
-impl Decodable for Script {
-    type Args<'a> = ();
-
+impl Decodable<()> for Script {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: Read,
@@ -89,7 +87,7 @@ impl Decodable for Script {
 
 impl Script {
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, ())
+        <Self as Decodable<()>>::read(reader, ())
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {

@@ -88,7 +88,7 @@ impl core::fmt::Debug for JsDescription {
 
 impl JsDescription {
     pub fn read<R: Read>(reader: R, use_groth: bool) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, use_groth)
+        <Self as Decodable<bool>>::read(reader, use_groth)
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
@@ -175,11 +175,9 @@ impl Encodable for JsDescription {
     }
 }
 
-impl Decodable for JsDescription {
-    /// Whether the joinsplit proof is a Groth16 proof (Sapling onwards) rather than a PHGR13
-    /// proof. The encoding does not distinguish them, and they differ in length.
-    type Args<'a> = bool;
-
+impl Decodable<bool> for JsDescription {
+    /// `use_groth` is whether the joinsplit proof is a Groth16 proof (Sapling onwards) rather
+    /// than a PHGR13 proof. The encoding does not distinguish them, and they differ in length.
     fn read<R>(mut reader: R, use_groth: bool) -> io::Result<Self>
     where
         R: Read,

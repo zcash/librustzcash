@@ -18,13 +18,12 @@ workspace.
   implement `zcash_encoding::Encodable` and `zcash_encoding::Decodable`. The
   encodings are unchanged and the inherent `read`/`write` methods remain, now
   delegating to the trait implementations.
-  - `Transaction`'s `Decodable::Args` is the `BranchId`, and `JsDescription`'s
-    is the `use_groth` flag, matching their inherent `read` methods.
-- `zcash_primitives::block::BranchSchedule`, the consensus context a `Block`
-  decoder needs, with a blanket implementation for every
-  `zcash_protocol::consensus::Parameters`. `Block`'s `Decodable::Args` is
-  `&dyn BranchSchedule` rather than `&impl Parameters` because `Parameters`
-  requires `Clone` and so cannot be used behind a `dyn` reference.
+  - `Transaction` implements `Decodable<BranchId>` and `JsDescription`
+    implements `Decodable<bool>` (the `use_groth` flag), matching their
+    inherent `read` methods.
+  - `Block` implements `Decodable<&P>` for every
+    `P: zcash_protocol::consensus::Parameters`, so it decodes under any
+    network exactly as its inherent `read` does.
 
 ## [0.30.0] - 2026-07-23
 

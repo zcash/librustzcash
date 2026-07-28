@@ -411,9 +411,7 @@ impl zcash_encoding::Encodable for Zatoshis {
     }
 }
 
-impl zcash_encoding::Decodable for Zatoshis {
-    type Args<'a> = ();
-
+impl zcash_encoding::Decodable<()> for Zatoshis {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: io::Read,

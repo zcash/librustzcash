@@ -10,8 +10,8 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_history::NodeData`, `zcash_history::V2`, `zcash_history::V3` and
   `zcash_history::Entry` now implement `zcash_encoding::Encodable` and
-  `zcash_encoding::Decodable`, with `Decodable::Args = u32` carrying the
-  consensus branch ID that the encoding does not itself contain. The encodings
+  `zcash_encoding::Decodable<u32>`, where the `u32` is the consensus branch ID
+  that the encoding does not itself contain. The encodings
   are unchanged and the inherent `read`/`write` methods remain, now delegating
   to the trait implementations.
 

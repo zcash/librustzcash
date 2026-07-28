@@ -31,9 +31,7 @@ impl Encodable for Byte {
     }
 }
 
-impl Decodable for Byte {
-    type Args<'a> = ();
-
+impl Decodable<()> for Byte {
     fn read<R>(mut reader: R, _args: ()) -> corez::io::Result<Self>
     where
         R: corez::io::Read,
@@ -58,9 +56,9 @@ fn encode<T: Encodable>(value: &T) -> Vec<u8> {
 }
 
 /// Asserts a vector in both directions.
-fn check<T>(value: &T, expected: &[u8], args: T::Args<'_>)
+fn check<T, A>(value: &T, expected: &[u8], args: A)
 where
-    T: Encodable + Decodable + PartialEq + core::fmt::Debug,
+    T: Encodable + Decodable<A> + PartialEq + core::fmt::Debug,
 {
     assert_eq!(encode(value), expected, "encoding must match the vector");
     let decoded = T::read(expected, args).expect("the vector must decode");
@@ -161,10 +159,10 @@ fn nested_containers_compose_as_expected() {
 #[test]
 fn non_canonical_length_prefixes_are_rejected() {
     // 1 encoded in the u16 form rather than the single-byte form.
-    assert!(<Vec<Byte> as Decodable>::read(&[0xFD, 0x01, 0x00, 0xAA][..], ()).is_err());
+    assert!(<Vec<Byte> as Decodable<()>>::read(&[0xFD, 0x01, 0x00, 0xAA][..], ()).is_err());
 
     // 253 encoded in the u32 form rather than the u16 form.
     let mut input = vec![0xFE, 0xFD, 0x00, 0x00, 0x00];
     input.extend_from_slice(&[0u8; 253]);
-    assert!(<Vec<Byte> as Decodable>::read(&input[..], ()).is_err());
+    assert!(<Vec<Byte> as Decodable<()>>::read(&input[..], ()).is_err());
 }

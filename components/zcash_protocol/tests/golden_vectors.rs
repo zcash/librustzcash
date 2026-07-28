@@ -12,7 +12,7 @@ use zcash_protocol::{
 
 fn check<T>(value: &T, expected: &[u8])
 where
-    T: Encodable + Decodable + PartialEq + core::fmt::Debug + for<'a> Decodable<Args<'a> = ()>,
+    T: Encodable + Decodable<()> + PartialEq + core::fmt::Debug,
 {
     let mut bytes = Vec::new();
     value.write(&mut bytes).unwrap();
@@ -61,8 +61,8 @@ fn zatoshis_is_u64_little_endian() {
 #[test]
 fn zatoshis_rejects_out_of_range() {
     let too_big = (MAX_MONEY + 1).to_le_bytes();
-    assert!(<Zatoshis as Decodable>::read(&too_big[..], ()).is_err());
-    assert!(<Zatoshis as Decodable>::read(&u64::MAX.to_le_bytes()[..], ()).is_err());
+    assert!(<Zatoshis as Decodable<()>>::read(&too_big[..], ()).is_err());
+    assert!(<Zatoshis as Decodable<()>>::read(&u64::MAX.to_le_bytes()[..], ()).is_err());
 }
 
 /// A `Vec<TxId>` is a `CompactSize` count followed by the concatenated txids.

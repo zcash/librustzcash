@@ -31,9 +31,9 @@ where
 /// comparing bytes would add nothing, because it follows from (1) plus `write` being a function.
 /// Canonicity quantifies over arbitrary byte strings rather than over values, so it needs
 /// [`check_canonical`], driven by a fuzzer or a `proptest` byte-string strategy.
-pub fn check_codec_roundtrip_with<T>(value: &T, args: T::Args<'_>)
+pub fn check_codec_roundtrip_with<T, A>(value: &T, args: A)
 where
-    T: Encodable + Decodable + PartialEq + Debug,
+    T: Encodable + Decodable<A> + PartialEq + Debug,
 {
     let mut bytes = Vec::new();
     value
@@ -60,9 +60,9 @@ where
 /// A codec that fails this is malleable: two distinct encodings decode to the same value, so a
 /// value's serialization is not determined by the value. Transaction-ID malleability is exactly
 /// this failure mode.
-pub fn check_canonical<T>(bytes: &[u8], args: T::Args<'_>)
+pub fn check_canonical<T, A>(bytes: &[u8], args: A)
 where
-    T: Encodable + Decodable + Debug,
+    T: Encodable + Decodable<A> + Debug,
 {
     let mut cursor = bytes;
     let Ok(decoded) = T::read(&mut cursor, args) else {

@@ -89,9 +89,7 @@ impl Encodable for TxVersion {
     }
 }
 
-impl Decodable for TxVersion {
-    type Args<'a> = ();
-
+impl Decodable<()> for TxVersion {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: Read,
@@ -124,7 +122,7 @@ impl Decodable for TxVersion {
 
 impl TxVersion {
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, ())
+        <Self as Decodable<()>>::read(reader, ())
     }
 
     pub fn header(&self) -> u32 {
@@ -753,7 +751,7 @@ impl Transaction {
     }
 
     pub fn read<R: Read>(reader: R, consensus_branch_id: BranchId) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, consensus_branch_id)
+        <Self as Decodable<BranchId>>::read(reader, consensus_branch_id)
     }
 
     #[allow(clippy::redundant_closure)]
@@ -1318,21 +1316,19 @@ impl Encodable for Transaction {
     }
 }
 
-impl Decodable for Transaction {
-    /// The consensus branch in force for this transaction.
+impl Decodable<BranchId> for Transaction {
+    /// `consensus_branch_id` is the consensus branch in force for this transaction.
     ///
     /// Only v4 and earlier need it: from v5 the branch ID is part of the encoding, and the value
     /// passed here is ignored. It is required unconditionally because the version is not known
     /// until the first field has been read.
-    type Args<'a> = BranchId;
-
     fn read<R>(reader: R, consensus_branch_id: BranchId) -> io::Result<Self>
     where
         R: Read,
     {
         let mut reader = HashReader::new(reader);
 
-        let version = <TxVersion as Decodable>::read(&mut reader, ())?;
+        let version = <TxVersion as Decodable<()>>::read(&mut reader, ())?;
         match version {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => {
                 Self::read_v4(reader, version, consensus_branch_id)

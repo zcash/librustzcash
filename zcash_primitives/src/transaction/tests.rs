@@ -1232,7 +1232,7 @@ mod codec {
     proptest! {
         #[test]
         fn tx_version_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..16)) {
-            check_canonical::<TxVersion>(&bytes, ());
+            check_canonical::<TxVersion, _>(&bytes, ());
         }
 
         /// `Decodable::Args` carries the consensus branch, which v4 and earlier need and the
@@ -1260,7 +1260,7 @@ mod codec {
             prop_assert_eq!(&via_inherent, &via_trait);
 
             let a = Transaction::read(&via_inherent[..], BranchId::Sapling).unwrap();
-            let b = <Transaction as Decodable>::read(&via_inherent[..], BranchId::Sapling).unwrap();
+            let b = <Transaction as Decodable<BranchId>>::read(&via_inherent[..], BranchId::Sapling).unwrap();
             prop_assert_eq!(a.txid(), b.txid());
         }
     }
@@ -1275,7 +1275,7 @@ mod codec {
         assert!(!vectors.is_empty(), "the golden vectors must not be empty");
 
         for (i, tv) in vectors.iter().enumerate() {
-            let tx = <Transaction as Decodable>::read(&tv.tx[..], BranchId::Nu5)
+            let tx = <Transaction as Decodable<BranchId>>::read(&tv.tx[..], BranchId::Nu5)
                 .unwrap_or_else(|e| panic!("vector {i} must decode: {e}"));
 
             assert_eq!(

@@ -79,7 +79,7 @@ impl<V: Version> Entry<V> {
         consensus_branch_id: u32,
         r: &mut R,
     ) -> corez::io::Result<Self> {
-        <Self as Decodable>::read(r, consensus_branch_id)
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
     }
 
     /// Write to byte representation.
@@ -94,13 +94,12 @@ impl<V: Version> Entry<V> {
     }
 }
 
-impl<V> Decodable for Entry<V>
+impl<V> Decodable<u32> for Entry<V>
 where
     V: Version,
 {
-    /// The consensus branch ID in force for the entry, which the encoding does not carry.
-    type Args<'a> = u32;
-
+    /// `consensus_branch_id` is the consensus branch ID in force for the entry, which the
+    /// encoding does not carry.
     fn read<R>(mut reader: R, consensus_branch_id: u32) -> corez::io::Result<Self>
     where
         R: corez::io::Read,

@@ -62,7 +62,7 @@ fn bench_read(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("trait", n), &bytes, |b, bytes| {
             b.iter(|| {
-                let v = <Vec<TxId> as Decodable>::read(black_box(&bytes[..]), ()).unwrap();
+                let v = <Vec<TxId> as Decodable<()>>::read(black_box(&bytes[..]), ()).unwrap();
                 black_box(v)
             })
         });

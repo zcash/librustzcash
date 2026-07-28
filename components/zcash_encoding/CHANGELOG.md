@@ -10,8 +10,10 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_encoding::Encodable`, `zcash_encoding::Decodable` and the
   `zcash_encoding::Codec` marker alias over the pair, naming the canonical
-  binary encoding of a type. `Decodable::Args` carries context the byte stream
-  does not itself provide (`()` when the encoding is self-describing).
+  binary encoding of a type. `Decodable` is parameterized by the context the
+  byte stream does not itself provide, which is `()` when the encoding is
+  self-describing; a decoder generic over its context implements the trait for
+  each context it accepts.
   Implementations are provided for `Vec<T>`, `Option<T>` and `NonEmpty<T>`,
   which encode exactly as `Vector`, `Optional` and `Vector::write_nonempty` do,
   so a codec for `T` yields codecs for all of them.

@@ -170,9 +170,7 @@ impl Encodable for AddressIndex {
     }
 }
 
-impl Decodable for AddressIndex {
-    type Args<'a> = &'a Network;
-
+impl Decodable<&Network> for AddressIndex {
     fn read<R: corez::io::Read>(mut reader: R, params: &Network) -> corez::io::Result<Self> {
         let mut bytes = [0u8; 4];
         reader.read_exact(&mut bytes)?;
@@ -235,7 +233,7 @@ proptest! {
     fn prop_decodable_rejects_nothing_it_wrote(v in arb_zatoshis()) {
         let mut bytes = Vec::new();
         Encodable::write(&v, &mut bytes).unwrap();
-        let back = <Zatoshis as Decodable>::read(&bytes[..], ()).unwrap();
+        let back = <Zatoshis as Decodable<()>>::read(&bytes[..], ()).unwrap();
         prop_assert_eq!(v, back);
     }
 }
@@ -248,22 +246,22 @@ proptest! {
 proptest! {
     #[test]
     fn prop_txid_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
-        check_canonical::<TxId>(&bytes, ());
+        check_canonical::<TxId, _>(&bytes, ());
     }
 
     #[test]
     fn prop_zatoshis_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..24)) {
-        check_canonical::<Zatoshis>(&bytes, ());
+        check_canonical::<Zatoshis, _>(&bytes, ());
     }
 
     #[test]
     fn prop_option_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..24)) {
-        check_canonical::<Option<Zatoshis>>(&bytes, ());
+        check_canonical::<Option<Zatoshis>, _>(&bytes, ());
     }
 
     #[test]
     fn prop_vec_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..200)) {
-        check_canonical::<Vec<Zatoshis>>(&bytes, ());
+        check_canonical::<Vec<Zatoshis>, _>(&bytes, ());
     }
 
     /// Biased toward the CompactSize boundary encodings, where non-canonical forms live:
@@ -275,6 +273,6 @@ proptest! {
     ) {
         let mut bytes = vec![tag];
         bytes.extend_from_slice(&rest);
-        check_canonical::<Vec<Zatoshis>>(&bytes, ());
+        check_canonical::<Vec<Zatoshis>, _>(&bytes, ());
     }
 }

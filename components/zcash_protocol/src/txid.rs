@@ -90,9 +90,7 @@ impl Encodable for TxId {
     }
 }
 
-impl Decodable for TxId {
-    type Args<'a> = ();
-
+impl Decodable<()> for TxId {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: Read,

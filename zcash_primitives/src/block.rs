@@ -131,7 +131,7 @@ impl BlockHeader {
     }
 
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, ())
+        <Self as Decodable<()>>::read(reader, ())
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
@@ -157,9 +157,7 @@ impl Encodable for BlockHeader {
     }
 }
 
-impl Decodable for BlockHeader {
-    type Args<'a> = ();
-
+impl Decodable<()> for BlockHeader {
     fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
     where
         R: Read,
@@ -196,28 +194,6 @@ impl Decodable for BlockHeader {
     }
 }
 
-/// The consensus context required to decode a [`Block`].
-///
-/// A block's encoding does not name the consensus branch its transactions were created under;
-/// that is derived from the height claimed by the coinbase transaction. Decoding therefore needs
-/// the network's branch schedule, and nothing else from [`consensus::Parameters`].
-///
-/// This is a separate trait because [`consensus::Parameters`] requires [`Clone`] and so cannot be
-/// used behind a `dyn` reference, which [`Decodable::Args`] needs in order to accept any network.
-pub trait BranchSchedule {
-    /// Returns the consensus branch in force at `height` on this network.
-    fn branch_id_for_height(&self, height: BlockHeight) -> consensus::BranchId;
-}
-
-impl<P> BranchSchedule for P
-where
-    P: consensus::Parameters,
-{
-    fn branch_id_for_height(&self, height: BlockHeight) -> consensus::BranchId {
-        consensus::BranchId::for_height(self, height)
-    }
-}
-
 /// A Zcash block.
 #[derive(Debug)]
 pub struct Block {
@@ -231,7 +207,7 @@ impl Block {
     ///
     /// Limitation: currently this method returns an error if given a genesis block.
     pub fn read<R: Read, P: consensus::Parameters>(reader: R, params: &P) -> io::Result<Self> {
-        <Self as Decodable>::read(reader, params)
+        <Self as Decodable<&P>>::read(reader, params)
     }
 
     /// Writes the block to the given writer.
@@ -300,11 +276,11 @@ impl Encodable for Block {
     }
 }
 
-impl Decodable for Block {
-    /// The network's consensus branch schedule; see [`BranchSchedule`].
-    type Args<'a> = &'a dyn BranchSchedule;
-
-    fn read<R>(mut reader: R, params: &dyn BranchSchedule) -> io::Result<Self>
+impl<P> Decodable<&P> for Block
+where
+    P: consensus::Parameters,
+{
+    fn read<R>(mut reader: R, params: &P) -> io::Result<Self>
     where
         R: Read,
     {
@@ -369,7 +345,7 @@ impl Decodable for Block {
         };
 
         // Fix the coinbase tx's consensus branch ID if necessary.
-        let consensus_branch_id = params.branch_id_for_height(claimed_height);
+        let consensus_branch_id = consensus::BranchId::for_height(params, claimed_height);
         let coinbase = match coinbase.version() {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => coinbase
                 .into_data()
