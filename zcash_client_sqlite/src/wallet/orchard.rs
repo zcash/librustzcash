@@ -853,6 +853,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn shielded_send_generates_no_status_requests() {
+        testing::pool::shielded_send_generates_no_status_requests::<OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn transparent_status_requests_persist_until_terminal() {
+        testing::pool::transparent_status_requests_persist_until_terminal::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn birthday_in_anchor_shard() {
         testing::pool::birthday_in_anchor_shard::<OrchardPoolTester>()
     }

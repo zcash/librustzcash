@@ -3852,6 +3852,238 @@ where
     );
 }
 
+/// A wallet's own shielded send must never generate a `GetStatus` transaction data request, at
+/// any chain tip height: its mined status is learned via ordinary chain scanning, and a
+/// txid-scoped status query for it is redundant; status requests are limited to
+/// fully-transparent transactions, which scanning cannot detect.
+pub fn shielded_send_generates_no_status_requests<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
+    dsf: Dsf,
+    cache: impl TestCache,
+) {
+    use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
+
+    let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
+
+    // Add funds to the wallet in a single note.
+    st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(60000));
+
+    let to_extsk = T::sk(&[0xf5; 32]);
+    let to: Address = T::sk_default_address(&to_extsk);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        Zatoshis::const_from_u64(10000),
+    )])
+    .unwrap();
+
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
+    let input_selector = GreedyInputSelector::new();
+
+    let account = st.get_account();
+    let proposal = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .unwrap();
+
+    let sent_tx_id = st.create_proposed_expecting(&proposal, 1)[0];
+
+    let assert_no_requests_for = |st: &TestState<_, Dsf::DataStore, _>, txid| {
+        let requests = st.wallet().transaction_data_requests().unwrap();
+        assert!(
+            !requests
+                .iter()
+                .any(|req| req == &TransactionDataRequest::GetStatus(txid)
+                    || req == &TransactionDataRequest::Enhancement(txid)),
+            "unexpected transaction data request for {txid} in {requests:?}",
+        );
+    };
+
+    // The as-yet-unmined shielded send must not produce any transaction data request.
+    assert_no_requests_for(&st, sent_tx_id);
+
+    // Advancing the chain tip must not produce a status request either, no matter how far the
+    // tip advances (including beyond the transaction's expiry height).
+    st.add_empty_blocks(5);
+    assert_no_requests_for(&st, sent_tx_id);
+    st.add_empty_blocks(usize::try_from(DEFAULT_TX_EXPIRY_DELTA).unwrap());
+    assert_no_requests_for(&st, sent_tx_id);
+
+    // Mining the transaction and scanning the block containing it sets its mined height without
+    // any `set_transaction_status` call, and still produces no request for it.
+    let (h, _) = st.generate_next_block_including(sent_tx_id);
+    st.scan_cached_blocks(h, 1);
+    assert_eq!(
+        st.get_tx_from_history(sent_tx_id)
+            .unwrap()
+            .expect("sent transaction is in history")
+            .mined_height(),
+        Some(h)
+    );
+    assert_no_requests_for(&st, sent_tx_id);
+}
+
+/// The status of a fully-transparent transaction cannot be observed via compact-block scanning,
+/// so `Status`-type retrieval queue entries must continue to generate `GetStatus` requests across
+/// not-yet-mined `set_transaction_status` answers, until the transaction reaches a terminal
+/// state: either it is mined, or it is confirmed to have remained unmined at or beyond its expiry
+/// height.
+#[cfg(feature = "transparent-inputs")]
+pub fn transparent_status_requests_persist_until_terminal<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+{
+    use crate::data_api::TransactionStatus;
+
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    let account = st.test_account().cloned().unwrap();
+    let account_id = account.id();
+    let dfvk = T::test_account_fvk(&st);
+    let tex_addr = Address::Tex([0x4; 20]);
+
+    let add_funds = |st: &mut TestState<_, Dsf::DataStore, _>, value| {
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+        h
+    };
+
+    let value = Zatoshis::const_from_u64(100000);
+    let transfer_amount = Zatoshis::const_from_u64(50000);
+
+    // Creates a ZIP 320 transaction pair paying `tex_addr`; the first transaction is shielded,
+    // and the second (which sweeps the ephemeral output to the TEX address) is fully
+    // transparent.
+    let send_to_tex = |st: &mut TestState<_, Dsf::DataStore, _>| {
+        let proposal = st
+            .propose_standard_transfer::<Infallible>(
+                account_id,
+                StandardFeeRule::Zip317,
+                ConfirmationsPolicy::MIN,
+                &tex_addr,
+                transfer_amount,
+                None,
+                None,
+                T::SHIELDED_PROTOCOL,
+            )
+            .unwrap();
+        let result = st.create_proposed_transactions::<Infallible, _, Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        );
+        assert_matches!(&result, Ok(txids) if txids.len() == 2);
+        result.unwrap()
+    };
+
+    let contains_status_request = |st: &TestState<_, Dsf::DataStore, _>, txid| {
+        st.wallet()
+            .transaction_data_requests()
+            .unwrap()
+            .contains(&TransactionDataRequest::GetStatus(txid))
+    };
+
+    // Part 1: not-yet-mined answers must not stop the polling; a `Mined` answer is terminal.
+    add_funds(&mut st, value);
+    let txids = send_to_tex(&mut st);
+    let shielded_txid = *txids.first();
+    let transparent_txid = *txids.last();
+
+    // The fully-transparent transaction is queued for status retrieval; the shielded step must
+    // not generate a status request.
+    assert!(contains_status_request(&st, transparent_txid));
+    assert!(!contains_status_request(&st, shielded_txid));
+
+    // Repeated not-yet-mined answers prior to the transaction's expiry must leave the request in
+    // place; the wallet must keep asking, since a `NotInMainChain` answer for an unexpired
+    // transaction is not terminal.
+    for _ in 0..2 {
+        st.wallet_mut()
+            .set_transaction_status(transparent_txid, TransactionStatus::NotInMainChain)
+            .unwrap();
+        assert!(contains_status_request(&st, transparent_txid));
+        assert!(!contains_status_request(&st, shielded_txid));
+    }
+
+    // Mine the transaction pair. Scanning detects the shielded transaction and sets its mined
+    // height without any `set_transaction_status` call, but cannot detect the fully-transparent
+    // transaction, which therefore continues to be polled.
+    let mut mined_height = None;
+    for txid in txids.iter() {
+        let (h, _) = st.generate_next_block_including(*txid);
+        st.scan_cached_blocks(h, 1);
+        mined_height = Some(h);
+    }
+    let mined_height = mined_height.expect("blocks were mined");
+
+    assert_eq!(
+        st.get_tx_from_history(shielded_txid)
+            .unwrap()
+            .expect("shielded transaction is in history")
+            .mined_height(),
+        Some(mined_height - 1)
+    );
+    assert_eq!(
+        st.get_tx_from_history(transparent_txid)
+            .unwrap()
+            .expect("transparent transaction is in history")
+            .mined_height(),
+        None
+    );
+    assert!(contains_status_request(&st, transparent_txid));
+    assert!(!contains_status_request(&st, shielded_txid));
+
+    // A `Mined` answer is terminal: the request is deleted and the mined height is recorded.
+    st.wallet_mut()
+        .set_transaction_status(transparent_txid, TransactionStatus::Mined(mined_height))
+        .unwrap();
+    assert!(!contains_status_request(&st, transparent_txid));
+    assert_eq!(
+        st.get_tx_from_history(transparent_txid)
+            .unwrap()
+            .expect("transparent transaction is in history")
+            .mined_height(),
+        Some(mined_height)
+    );
+
+    // Part 2: confirmation that the transaction remained unmined at or beyond its expiry height
+    // is terminal.
+    add_funds(&mut st, value);
+    let txids = send_to_tex(&mut st);
+    let transparent_txid = *txids.last();
+    assert!(contains_status_request(&st, transparent_txid));
+
+    // A not-yet-mined answer before expiry is not terminal.
+    st.wallet_mut()
+        .set_transaction_status(transparent_txid, TransactionStatus::NotInMainChain)
+        .unwrap();
+    assert!(contains_status_request(&st, transparent_txid));
+
+    // Advance the chain tip to the transaction's expiry height. The request must remain in place
+    // until confirmation that the transaction remained unmined arrives.
+    let expiry_height = st
+        .get_tx_from_history(transparent_txid)
+        .unwrap()
+        .expect("transparent transaction is in history")
+        .expiry_height()
+        .expect("expiry height is known");
+    let chain_tip = st.wallet().chain_height().unwrap().unwrap();
+    st.add_empty_blocks(usize::try_from(u32::from(expiry_height) - u32::from(chain_tip)).unwrap());
+    assert!(contains_status_request(&st, transparent_txid));
+
+    // Confirmation that the transaction remained unmined at its expiry height is terminal.
+    st.wallet_mut()
+        .set_transaction_status(transparent_txid, TransactionStatus::NotInMainChain)
+        .unwrap();
+    assert!(!contains_status_request(&st, transparent_txid));
+}
+
 // FIXME: This requires fixes to the test framework.
 #[allow(dead_code)]
 pub fn birthday_in_anchor_shard<T: ShieldedPoolTester>(
@@ -7835,6 +8067,26 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
         Ok(txids) if txids.len() == 1,
         "create_proposed_transactions must succeed for proposal {:?}",
         proposal,
+    );
+    let sent_tx_id = build_result.unwrap().head;
+
+    // The transaction's Ironwood bundle makes it detectable via chain scanning, so storing it
+    // as an unmined decrypted transaction must not queue it for status retrieval: a txid-scoped
+    // status query for it would be redundant and out of scope for the retrieval queue.
+    let tx = st
+        .wallet()
+        .get_transaction(sent_tx_id)
+        .unwrap()
+        .expect("created transaction was stored");
+    decrypt_and_store_transaction(&params, st.wallet_mut(), &tx, None).unwrap();
+
+    let requests = st.wallet().transaction_data_requests().unwrap();
+    assert!(
+        !requests
+            .iter()
+            .any(|req| req == &TransactionDataRequest::GetStatus(sent_tx_id)
+                || req == &TransactionDataRequest::Enhancement(sent_tx_id)),
+        "unexpected transaction data request for {sent_tx_id} in {requests:?}",
     );
 }
 

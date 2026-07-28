@@ -289,6 +289,21 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn shielded_send_generates_no_status_requests<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::shielded_send_generates_no_status_requests::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn transparent_status_requests_persist_until_terminal<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::transparent_status_requests_persist_until_terminal::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 // FIXME: This requires fixes to the test framework.
 #[allow(dead_code)]
 pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
