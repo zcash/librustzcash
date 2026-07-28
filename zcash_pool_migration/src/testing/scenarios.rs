@@ -53,7 +53,8 @@ pub struct SigningRoundVector {
 }
 
 /// The golden vectors: reusable inputs and expected optimal outputs for the signing-round packing
-/// problem. See [`assert_golden_min_rounds`] and [`assert_golden_vectors_optimal`].
+/// problem. See [`assert_golden_min_rounds`](super::assert_golden_min_rounds) and
+/// [`assert_golden_vectors_optimal`](super::assert_golden_vectors_optimal).
 pub const SIGNING_ROUND_GOLDEN_VECTORS: &[SigningRoundVector] = {
     // A local constructor keeps the table terse and column-aligned.
     const fn v(
