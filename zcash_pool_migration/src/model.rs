@@ -14,7 +14,8 @@
 //! [`engine`](crate::engine), so the paths they have always had keep resolving.
 //!
 //! The behaviour that operates ON these types lives one layer up: the lifecycle queries and
-//! transitions in [`state`](crate::state), and the driving operations in [`engine`](crate::engine).
+//! transitions in [`lifecycle`](crate::lifecycle), and the driving operations in
+//! [`engine`](crate::engine).
 //! What remains here reads a value out of the data, or reassembles it from stored parts, with no
 //! notion of what step comes next.
 

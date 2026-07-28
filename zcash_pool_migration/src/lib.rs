@@ -27,13 +27,19 @@ pub mod backend;
 pub mod build;
 pub mod denomination;
 pub mod engine;
+pub mod lifecycle;
 pub mod model;
 pub mod preparation;
 pub mod scheduling;
 pub mod signing_rounds;
-pub mod state;
 #[cfg(feature = "wallet")]
 pub mod wallet;
+
+/// The lifecycle module's former name, kept so the paths downstream code already uses keep
+/// resolving. Prefer [`lifecycle`], which says what the module holds: this is not where
+/// `MigrationState` lives (that is [`model`]), it is where the queries and transitions over one
+/// live.
+pub use crate::lifecycle as state;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing;

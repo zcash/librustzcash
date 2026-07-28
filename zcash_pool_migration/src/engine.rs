@@ -1143,7 +1143,7 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 /// A transfer can only be included in a block at or below its expiry height (ZIP 203); once the
 /// chain passes it, the pre-signed transaction is dead and
 /// [`next_step`](MigrationState::next_step) surfaces it as
-/// [`AdvanceStep::Rebuild`](crate::state::AdvanceStep::Rebuild). NOTHING of the expired artifact is
+/// [`AdvanceStep::Rebuild`](crate::lifecycle::AdvanceStep::Rebuild). NOTHING of the expired artifact is
 /// reusable — the signature hash covers the expiry height, so its signatures cannot authorize any
 /// rescheduled copy. This is ZIP 318's expired-transaction handling: "a new transaction with a
 /// fresh anchor and expiry is constructed for the affected part, with its denomination unchanged".
@@ -3391,8 +3391,8 @@ mod commit_tests {
             .max()
             .expect("the committed migration has transactions");
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
             }
             other => panic!("expected a broadcast step, got {other:?}"),
@@ -3407,8 +3407,8 @@ mod commit_tests {
             .map(|t| t.id)
             .collect();
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 assert!(
                     layer1_ids.contains(&id),
                     "layer 1 broadcasts once layer 0 mines"
@@ -3420,8 +3420,8 @@ mod commit_tests {
             state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
         }
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 let tx = state
                     .transactions
                     .iter()
@@ -3574,8 +3574,8 @@ mod commit_tests {
         for layer in 0..layer_count {
             let ids = layer_ids(&state, layer);
             match state.next_step(target) {
-                crate::state::AdvanceStep::Prove { id }
-                | crate::state::AdvanceStep::Broadcast { id } => assert!(
+                crate::lifecycle::AdvanceStep::Prove { id }
+                | crate::lifecycle::AdvanceStep::Broadcast { id } => assert!(
                     ids.contains(&id),
                     "layer {layer} is proved or broadcast once its predecessor has mined"
                 ),
@@ -3604,8 +3604,8 @@ mod commit_tests {
             }
         }
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 let tx = state.transactions.iter().find(|t| t.id == id).unwrap();
                 assert!(
                     matches!(tx.kind, MigrationTxKind::Transfer { .. }),
