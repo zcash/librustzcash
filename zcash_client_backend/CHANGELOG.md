@@ -11,6 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Changed
+- `zcash_client_backend::proposal::Step::{orchard_action_count, ironwood_action_count}`
+  take a `zcash_primitives::transaction::builder::BundlePadding` in place of an
+  `orchard::builder::BundleType`. A proposal step describes a wallet spend, which is
+  never a coinbase transaction, so only the padding rule was ever meaningful here;
+  passing `BundleType::Coinbase` is now unrepresentable rather than reported as an
+  error. Replace `BundleType::DEFAULT` with `BundlePadding::DEFAULT`,
+  `BundleType::UNPADDED` with `BundlePadding::UNPADDED`, and a
+  `BundleType::Transactional { .. }` literal with the identically-fielded
+  `BundlePadding { .. }`.
 - `zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval` is
   now a re-export of `zcash_protocol::zip318::AnchorBucketInterval`, the single
   type shared with `zcash_pool_migration`. Its API and behaviour are unchanged and
