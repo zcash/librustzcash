@@ -28,10 +28,10 @@
 //!   once in determining the total value sent from the wallet as a whole.
 //! - `pool_crossing_value`: non-NULL exactly when the transaction is a wallet-internal transfer
 //!   that moves the account's own funds between shielded pools (for example, a ZIP 318
-//!   Orchard → Ironwood migration transfer): every wallet-spent note and wallet-received output
+//!   Orchard -> Ironwood migration transfer): every wallet-spent note and wallet-received output
 //!   is shielded, the account spent at least one note, at least one output was received in a pool
 //!   the account spent nothing from, and no external outputs of the transaction are known. Its
-//!   value is the total received in the pools the account did not spend from — the amount that
+//!   value is the total received in the pools the account did not spend from, the amount that
 //!   crossed. For such a transaction `account_balance_delta` is just the negated fee, so this is
 //!   the amount to present to a user rather than the balance delta; deriving one from
 //!   `total_spent` or `total_received` instead overstates the crossing whenever the transaction

@@ -461,7 +461,7 @@ impl Run {
 
             // Mine and scan the transfer, then check the wallet's view of it: the history entry
             // must report the funding note as spent, the crossing note as received, and a balance
-            // change of only the fee — not the whole value of the notes spent.
+            // change of only the fee, not the whole value of the notes spent.
             let (h, _) = self.st.generate_next_block_from_tx(1, &tx);
             self.st.scan_cached_blocks(h, 1);
 

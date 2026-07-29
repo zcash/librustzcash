@@ -8457,7 +8457,7 @@ where
 
 /// The transaction history entry for a payment funded from the Orchard pool and delivered
 /// through the Ironwood pool reports the amount that left the account (payment plus fee) as
-/// its balance delta — not the total value of the notes spent, which would ignore the change
+/// its balance delta, not the total value of the notes spent, which would ignore the change
 /// returned to the wallet.
 #[cfg(feature = "orchard")]
 pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
@@ -8466,7 +8466,7 @@ pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    // A network on which NU6.3 — the version 6 transaction format — is active from height 100_000.
+    // A network on which NU6.3, the version 6 transaction format, is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
         LocalNetwork {
@@ -8576,15 +8576,15 @@ pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
         }};
     }
 
-    // The history entry is correct as soon as the transaction is stored…
+    // The history entry is correct as soon as the transaction is stored...
     check_history!("before mining");
 
-    // …and remains correct once the transaction is mined and scanned…
+    // ...and remains correct once the transaction is mined and scanned...
     let (h, _) = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
     check_history!("after mining");
 
-    // …and remains correct after transaction enhancement, in which the wallet retrieves the
+    // ...and remains correct after transaction enhancement, in which the wallet retrieves the
     // full transaction and re-stores it via `decrypt_and_store_transaction` (as the mobile
     // SDKs do to recover memos and fee information).
     let tx = st
@@ -8597,8 +8597,8 @@ pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
     check_history!("after enhancement");
 }
 
-/// A migration of the wallet's own funds from the Orchard pool to the Ironwood pool — a payment
-/// to the wallet's own external Orchard receiver, delivered through the Ironwood pool — leaves
+/// A migration of the wallet's own funds from the Orchard pool to the Ironwood pool, namely a
+/// payment to the wallet's own external Orchard receiver delivered through the Ironwood pool, leaves
 /// the account balance unchanged except for the fee. The payment output returned to the wallet
 /// is not recorded at transaction-creation time (it is an address payment, which the wallet
 /// expects to detect by scanning), so this exercises detection of the wallet's own Ironwood
@@ -8610,7 +8610,7 @@ pub fn orchard_to_ironwood_self_migration_reports_fee_only_delta<Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    // A network on which NU6.3 — the version 6 transaction format — is active from height 100_000.
+    // A network on which NU6.3, the version 6 transaction format, is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
         LocalNetwork {
@@ -8713,7 +8713,7 @@ pub fn orchard_to_ironwood_self_migration_reports_fee_only_delta<Dsf>(
             // Once the wallet has observed the payment output returning to its own account
             // (the scanner marks such outputs as change), the transaction presents as a
             // wallet-internal transfer between pools, and is classified as a pool crossing
-            // whose crossing value is the migrated payment amount — the quantity a wallet
+            // whose crossing value is the migrated payment amount, the quantity a wallet
             // should display for it.
             assert!(
                 tx.is_pool_crossing(),

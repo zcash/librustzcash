@@ -1,7 +1,7 @@
 //! Adds pool-crossing classification to `v_transactions`.
 //!
-//! A wallet-internal transfer that moves an account's own funds between shielded pools — for
-//! example a ZIP 318 Orchard → Ironwood migration transfer — has an `account_balance_delta` of
+//! A wallet-internal transfer that moves an account's own funds between shielded pools, for
+//! example a ZIP 318 Orchard -> Ironwood migration transfer, has an `account_balance_delta` of
 //! only the transaction fee, which is correct but is not the quantity a wallet wants to present:
 //! the user-meaningful amount is the value that crossed pools. Nothing in the view identified
 //! such transactions or carried that amount, so clients could only improvise from `total_spent`

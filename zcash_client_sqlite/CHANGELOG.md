@@ -13,7 +13,7 @@ workspace.
 ### Added
 - The `v_transactions` view has a new `pool_crossing_value` column, which
   classifies wallet-internal transfers that move an account's own funds between
-  shielded pools (for example, ZIP 318 Orchard → Ironwood migration transfers)
+  shielded pools (for example, ZIP 318 Orchard -> Ironwood migration transfers)
   and reports the amount that crossed. It is non-NULL exactly when every
   wallet-spent note and wallet-received output in the transaction is shielded,
   the account spent at least one note, at least one output was received in a

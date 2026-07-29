@@ -274,7 +274,7 @@ impl<AccountId> TransactionSummary<AccountId> {
 
     /// Returns `true` if this is detectably a wallet-internal transfer that moves the
     /// account's own funds between shielded pools (for example, a ZIP 318
-    /// Orchard → Ironwood migration transfer).
+    /// Orchard -> Ironwood migration transfer).
     ///
     /// Specifically, `true` means that at a minimum:
     /// - Every wallet-spent note and wallet-received output is shielded.
@@ -292,8 +292,8 @@ impl<AccountId> TransactionSummary<AccountId> {
         self.pool_crossing_value.is_some()
     }
 
-    /// Returns the total value received in pools the account did not spend from — the
-    /// amount that crossed pools — when this is a pool-crossing transaction as described
+    /// Returns the total value received in pools the account did not spend from, which
+    /// is the amount that crossed pools, when this is a pool-crossing transaction as described
     /// by [`Self::is_pool_crossing`], or `None` otherwise.
     pub fn pool_crossing_value(&self) -> Option<Zatoshis> {
         self.pool_crossing_value
