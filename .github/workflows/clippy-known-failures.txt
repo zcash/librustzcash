@@ -45,10 +45,6 @@ zcash_client_sqlite unstable
 zcash_client_sqlite zcashd-compat
 zcash_client_sqlite zewif
 zcash_client_sqlite zip-233
-zcash_keys orchard
-zcash_keys sapling
-zcash_keys transparent-inputs
-zcash_keys unstable-frost
 zcash_primitives <none>
 zcash_primitives document-features
 zcash_primitives expensive-tests

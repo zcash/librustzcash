@@ -1715,24 +1715,23 @@ impl UnifiedIncomingViewingKey {
         mut j: DiversifierIndex,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        // Find a working diversifier and construct the associated address.
+        // Only a Sapling receiver can reject a diversifier index, so only that configuration
+        // has to search.
+        #[cfg(feature = "sapling")]
         loop {
-            let res = self.address(j, request);
-            match res {
-                Ok(ua) => {
-                    return Ok((ua, j));
-                }
-                #[cfg(feature = "sapling")]
+            match self.address(j, request) {
+                Ok(ua) => return Ok((ua, j)),
                 Err(AddressGenerationError::InvalidSaplingDiversifierIndex(_)) => {
                     if j.increment().is_err() {
                         return Err(AddressGenerationError::DiversifierSpaceExhausted);
                     }
                 }
-                Err(other) => {
-                    return Err(other);
-                }
+                Err(other) => return Err(other),
             }
         }
+
+        #[cfg(not(feature = "sapling"))]
+        self.address(j, request).map(|ua| (ua, j))
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
@@ -1754,6 +1753,9 @@ impl UnifiedIncomingViewingKey {
     /// Transparent receivers are not considered here, as recovering a diversifier index from a
     /// transparent receiver alone is not possible without additional context.
     pub fn decrypt_diversifiers(&self, ua: &UnifiedAddress) -> BTreeSet<DiversifierIndex> {
+        #[cfg(not(any(feature = "sapling", feature = "orchard")))]
+        let _ = ua;
+
         #[cfg(not(feature = "sapling"))]
         let sapling_di: Option<DiversifierIndex> = None;
 
