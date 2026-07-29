@@ -19,8 +19,9 @@ workspace.
     on and that pool-crossing transfers are anchored to.
   - `PREP_TX_ACTIONS`, `TRANSFER_DELAY_MEAN`, `TRANSFER_DELAY_CAP`,
     `DELAY_CAP_RATIO`, `ANCHOR_AGE_CAP`, `EXPIRY_MODULUS`, `EXPIRY_WINDOW`.
-  - `PoolMigrationConstants`, an unsealed trait carrying the above as per-network
-    parameters, every method defaulting to the ZIP 318 value.
+  - `PoolMigrationConstants`, an unsealed trait carrying the above as overridable
+    parameters, every method defaulting to the ZIP 318 value. There is no
+    implementation for `NetworkType`; obtain one from the wallet.
 
 ## [0.10.1] - 2026-07-23
 

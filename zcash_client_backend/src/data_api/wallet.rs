@@ -46,6 +46,8 @@ use shardtree::error::{QueryError, ShardTreeError};
 use super::InputSource;
 use super::locking::lock_proposal_inputs;
 pub use super::locking::{LockRequest, unlock_proposal_inputs};
+#[cfg(feature = "orchard")]
+use crate::data_api::anchor_retention::PoolMigrationParams;
 use crate::{
     data_api::{
         Account, MaxSpendMode, NoteCommitmentTree, SentTransaction, SentTransactionOutput,
@@ -816,7 +818,7 @@ where
     // The whole attempt is Orchard-gated: without that feature there is no Ironwood pool to cross
     // into, so there is no canonical crossing to construct.
     #[cfg(feature = "orchard")]
-    let canonical_proposal = canonical_crossing_candidate(params, &request, target_height)
+    let canonical_proposal = canonical_crossing_candidate(params, &zip318, &request, target_height)
         .then(|| confirmations_policy.bucketed(zip318.anchor_bucket_interval(), target_height))
         .flatten()
         // A canonical crossing spends an Orchard note; if the caller forbids that, there is no
@@ -893,16 +895,15 @@ where
 #[cfg(feature = "orchard")]
 fn canonical_crossing_candidate<ParamsT: consensus::Parameters>(
     params: &ParamsT,
+    zip318: &PoolMigrationParams,
     request: &zip321::TransactionRequest,
     target_height: TargetHeight,
 ) -> bool {
-    use zcash_protocol::zip318::PoolMigrationConstants;
-
     params.is_nu_active(NetworkUpgrade::Nu6_3, target_height.into())
         && match request.payments().values().collect::<Vec<_>>()[..] {
             [payment] => payment
                 .amount()
-                .is_some_and(|amount| params.network_type().is_canonical_denomination(amount)),
+                .is_some_and(|amount| zip318.is_canonical_denomination(amount)),
             _ => false,
         }
 }

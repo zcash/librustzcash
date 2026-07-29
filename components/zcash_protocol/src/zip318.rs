@@ -15,7 +15,7 @@
 
 use core::num::NonZeroU32;
 
-use crate::consensus::{BlockHeight, NetworkType};
+use crate::consensus::BlockHeight;
 use crate::value::{COIN, Zatoshis};
 
 /// The base of the denomination scale: every denomination is a multiple of a power of this radix.
@@ -232,7 +232,16 @@ impl Default for AnchorBucketInterval {
 /// shared denomination provides is exactly the set of transfers that chose the same one, so a wallet
 /// running on different parameters than its peers is distinguishable from them.
 ///
+/// There is deliberately **no implementation for [`NetworkType`]**, nor a blanket one over
+/// `Parameters`. The grid these parameters describe is the one a wallet actually retains its anchor
+/// checkpoints on, so the wallet is the only thing that can answer authoritatively; a crossing
+/// anchored to a boundary the wallet did not retain cannot be proved. Were the network types also
+/// implementors, every call site with consensus parameters in scope — which is nearly all of them —
+/// could reach a second, silently different answer, and on mainnet the two would agree by
+/// coincidence. Obtain an implementor from the wallet instead.
+///
 /// [`NetworkConstants`]: crate::consensus::NetworkConstants
+/// [`NetworkType`]: crate::consensus::NetworkType
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 pub trait PoolMigrationConstants {
     /// The grid that durable anchor checkpoints are retained on, and that pool-crossing transfers
@@ -279,8 +288,6 @@ pub trait PoolMigrationConstants {
         is_canonical_within(value, self.max_residual_value(), self.denomination_cap())
     }
 }
-
-impl PoolMigrationConstants for NetworkType {}
 
 #[cfg(test)]
 mod tests {
@@ -392,24 +399,26 @@ mod tests {
         assert_eq!(EXPIRY_WINDOW, 2 * EXPIRY_MODULUS);
     }
 
-    /// A network type carries the ZIP 318 values unmodified.
+    /// An implementor that overrides nothing carries the ZIP 318 values unmodified.
     #[test]
-    fn network_type_carries_the_zip_318_values() {
-        for network in [NetworkType::Main, NetworkType::Test, NetworkType::Regtest] {
-            assert_eq!(
-                network.anchor_bucket_interval(),
-                AnchorBucketInterval::ZIP_318
-            );
-            assert_eq!(network.denomination_cap(), DENOM_CAP);
-            assert_eq!(network.max_residual_value(), MAX_RESIDUAL_VALUE);
-            assert_eq!(network.preparation_tx_actions(), PREP_TX_ACTIONS);
-            assert_eq!(
-                network.transfer_delay(),
-                (TRANSFER_DELAY_MEAN, TRANSFER_DELAY_CAP)
-            );
-            assert_eq!(network.anchor_age_cap(), ANCHOR_AGE_CAP);
-            assert_eq!(network.expiry_window(), (EXPIRY_MODULUS, EXPIRY_WINDOW));
-        }
+    fn defaults_are_the_zip_318_values() {
+        #[derive(Clone)]
+        struct Specified;
+        impl PoolMigrationConstants for Specified {}
+
+        assert_eq!(
+            Specified.anchor_bucket_interval(),
+            AnchorBucketInterval::ZIP_318
+        );
+        assert_eq!(Specified.denomination_cap(), DENOM_CAP);
+        assert_eq!(Specified.max_residual_value(), MAX_RESIDUAL_VALUE);
+        assert_eq!(Specified.preparation_tx_actions(), PREP_TX_ACTIONS);
+        assert_eq!(
+            Specified.transfer_delay(),
+            (TRANSFER_DELAY_MEAN, TRANSFER_DELAY_CAP)
+        );
+        assert_eq!(Specified.anchor_age_cap(), ANCHOR_AGE_CAP);
+        assert_eq!(Specified.expiry_window(), (EXPIRY_MODULUS, EXPIRY_WINDOW));
     }
 
     /// The trait is unsealed with default bodies, so an implementor may shorten the grid while

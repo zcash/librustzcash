@@ -1067,7 +1067,8 @@ mod tests {
     use nonempty::NonEmpty;
     use zcash_address::ZcashAddress;
     use zcash_primitives::transaction::builder::BundlePadding;
-    use zcash_protocol::consensus::NetworkType;
+
+    use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
     use zcash_protocol::value::COIN;
     use zcash_protocol::zip318::PoolMigrationConstants;
     use zip321::Payment;
@@ -1178,6 +1179,13 @@ mod tests {
         )
     }
 
+    /// The ZIP 318 parameters a wallet retaining the specified grid would report. Tests take their
+    /// parameters from a wallet-shaped value, as production code does; there is deliberately no
+    /// implementation of `PoolMigrationConstants` for a network type.
+    fn zip318() -> PoolMigrationParams {
+        PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318)
+    }
+
     fn shielded_change(pool: ShieldedPool, value: u64) -> ChangeValue {
         ChangeValue::shielded(pool, Zatoshis::const_from_u64(value), None)
     }
@@ -1219,16 +1227,16 @@ mod tests {
         for value in [COIN, COIN / 2, COIN / 100, 20 * COIN, 10_000 * COIN] {
             let step = ironwood_payment_step(value, vec![]);
             assert!(
-                step.is_canonical_crossing(&NetworkType::Main),
+                step.is_canonical_crossing(&zip318()),
                 "{value} zatoshi should be a canonical crossing"
             );
             assert_eq!(
-                step.ironwood_bundle_padding(&NetworkType::Main),
+                step.ironwood_bundle_padding(&zip318()),
                 BundlePadding::UNPADDED
             );
             assert_eq!(
                 step.ironwood_action_count(
-                    step.ironwood_bundle_padding(&NetworkType::Main),
+                    step.ironwood_bundle_padding(&zip318()),
                     BundleVersion::ironwood_v3()
                 ),
                 Ok(1)
@@ -1243,16 +1251,16 @@ mod tests {
         for value in [COIN + 1, COIN - 1, 3 * COIN, 100_000, 20_000 * COIN] {
             let step = ironwood_payment_step(value, vec![]);
             assert!(
-                !step.is_canonical_crossing(&NetworkType::Main),
+                !step.is_canonical_crossing(&zip318()),
                 "{value} zatoshi should not be a canonical crossing"
             );
             assert_eq!(
-                step.ironwood_bundle_padding(&NetworkType::Main),
+                step.ironwood_bundle_padding(&zip318()),
                 BundlePadding::DEFAULT
             );
             assert_eq!(
                 step.ironwood_action_count(
-                    step.ironwood_bundle_padding(&NetworkType::Main),
+                    step.ironwood_bundle_padding(&zip318()),
                     BundleVersion::ironwood_v3()
                 ),
                 Ok(2)
@@ -1267,9 +1275,9 @@ mod tests {
     #[test]
     fn ironwood_change_is_not_a_canonical_crossing() {
         let step = ironwood_payment_step(COIN, vec![shielded_change(ShieldedPool::Ironwood, 5000)]);
-        assert!(!step.is_canonical_crossing(&NetworkType::Main));
+        assert!(!step.is_canonical_crossing(&zip318()));
         assert_eq!(
-            step.ironwood_bundle_padding(&NetworkType::Main),
+            step.ironwood_bundle_padding(&zip318()),
             BundlePadding::DEFAULT
         );
     }
@@ -1281,9 +1289,9 @@ mod tests {
         let mut step = ironwood_payment_step(COIN, vec![]);
         step.shielded_inputs =
             shielded_inputs_for(orchard_and_ironwood_notes((0, 0), (1, 2 * COIN)));
-        assert!(!step.is_canonical_crossing(&NetworkType::Main));
+        assert!(!step.is_canonical_crossing(&zip318()));
         assert_eq!(
-            step.ironwood_bundle_padding(&NetworkType::Main),
+            step.ironwood_bundle_padding(&zip318()),
             BundlePadding::DEFAULT
         );
     }
@@ -1298,18 +1306,18 @@ mod tests {
         for height in [143u32, 145, 1, 2_000_000] {
             step.anchor_height = Some(BlockHeight::from_u32(height));
             assert!(
-                !step.is_canonical_crossing(&NetworkType::Main),
+                !step.is_canonical_crossing(&zip318()),
                 "anchor {height} is not a grid boundary"
             );
             assert_eq!(
-                step.ironwood_bundle_padding(&NetworkType::Main),
+                step.ironwood_bundle_padding(&zip318()),
                 BundlePadding::DEFAULT
             );
         }
         // The neighbouring boundaries are.
         for height in [144u32, 288, 1_999_872] {
             step.anchor_height = Some(BlockHeight::from_u32(height));
-            assert!(step.is_canonical_crossing(&NetworkType::Main));
+            assert!(step.is_canonical_crossing(&zip318()));
         }
     }
 
@@ -1319,12 +1327,12 @@ mod tests {
     #[test]
     fn multiple_orchard_inputs_are_not_a_canonical_crossing() {
         let mut step = ironwood_payment_step(COIN, vec![]);
-        assert!(step.is_canonical_crossing(&NetworkType::Main));
+        assert!(step.is_canonical_crossing(&zip318()));
 
         step.shielded_inputs = shielded_inputs_for(orchard_and_ironwood_notes((3, COIN), (0, 0)));
-        assert!(!step.is_canonical_crossing(&NetworkType::Main));
+        assert!(!step.is_canonical_crossing(&zip318()));
         assert_eq!(
-            step.ironwood_bundle_padding(&NetworkType::Main),
+            step.ironwood_bundle_padding(&zip318()),
             BundlePadding::DEFAULT
         );
     }
@@ -1341,7 +1349,7 @@ mod tests {
         }
 
         let step = ironwood_payment_step(2 * COIN, vec![]);
-        assert!(step.is_canonical_crossing(&NetworkType::Main));
+        assert!(step.is_canonical_crossing(&zip318()));
         assert!(!step.is_canonical_crossing(&SmallCap));
         assert_eq!(
             step.ironwood_bundle_padding(&SmallCap),
