@@ -320,6 +320,13 @@ pub(crate) fn anchor_checkpoints_retained_across_deep_scan<T: ShieldedPoolTester
     }
 }
 
+pub(crate) fn oldest_note_is_selected_first<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::oldest_note_is_selected_first::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 /// Runs the empty-boundary retention check at a short interval, so a handful of filler blocks
 /// crosses two boundaries.
 #[cfg(feature = "orchard")]

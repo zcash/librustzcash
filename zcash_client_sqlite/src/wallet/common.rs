@@ -616,24 +616,28 @@ where
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
     //
+    // AGE is the note's commitment tree position: positions are assigned in strict chain
+    // order, so ordering by position is ordering by the age of the note on chain. The row
+    // id is NOT a usable proxy for age — ids are assigned in SCAN order, and priority
+    // scanning visits recent blocks before back-filling history, so a restored wallet's
+    // newest notes carry its lowest ids.
+    //
     // A `LockFilter::Policy` that prefers one lock tier (`PreferUnlocked`/`PreferLocked`)
-    // accumulates the running sum in tier order (via the window `ORDER BY`) so that the
-    // preferred tier is drawn upon first; the age order (`rn.id`) is retained as a secondary
+    // accumulates the running sum in tier order (via the leading window `ORDER BY` key) so
+    // that the preferred tier is drawn upon first; age order is retained as the secondary
     // key so that within each tier the oldest notes are still selected first. Because the
-    // tiered window order need not match the CTE's physical output order, the threshold-
-    // crossing note is chosen as the note with the smallest running sum at or above the
-    // target (`ORDER BY so_far`). For `Exclude`/`Unfiltered` the window and crossing-note
-    // selection are unchanged.
+    // window order need not match the CTE's physical output order, the threshold-crossing
+    // note is chosen as the note with the smallest running sum at or above the target
+    // (`ORDER BY so_far`).
     let tier_key = locked_tier_order_key(lock_filter, "rn");
     let window_frame = match &tier_key {
-        Some(tier_key) => format!("ORDER BY {tier_key}, rn.id ROWS UNBOUNDED PRECEDING"),
-        None => "ROWS UNBOUNDED PRECEDING".to_string(),
+        Some(tier_key) => {
+            format!("ORDER BY {tier_key}, rn.commitment_tree_position ROWS UNBOUNDED PRECEDING")
+        }
+        None => "ORDER BY rn.commitment_tree_position ROWS UNBOUNDED PRECEDING".to_string(),
     };
-    let crossing_note_subquery = if tier_key.is_some() {
-        "SELECT * from eligible WHERE so_far >= :target_value ORDER BY so_far LIMIT 1"
-    } else {
-        "SELECT * from eligible WHERE so_far >= :target_value LIMIT 1"
-    };
+    let crossing_note_subquery =
+        "SELECT * from eligible WHERE so_far >= :target_value ORDER BY so_far LIMIT 1";
     let eligible_condition = output_eligible_condition(lock_filter, "rn");
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "WITH eligible AS (

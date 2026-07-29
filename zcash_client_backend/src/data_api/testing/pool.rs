@@ -6482,6 +6482,53 @@ pub fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester, Dsf
     );
 }
 
+/// Note selection draws the OLDEST eligible notes first, where age is chain order — the note's
+/// commitment tree position — not discovery order. Priority scanning discovers recent blocks
+/// before back-filling history, so a restored wallet's newest notes carry its lowest row ids;
+/// ordering by id would spend fresh change while far older notes sat idle. The ordering must
+/// therefore survive scanning blocks out of order.
+pub fn oldest_note_is_selected_first<T: ShieldedPoolTester, Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+{
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+    let account = st.test_account().cloned().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Two notes; the OLDER one is larger, so which note a small selection returns identifies
+    // the ordering in use.
+    let older_value = Zatoshis::const_from_u64(500_000);
+    let newer_value = Zatoshis::const_from_u64(300_000);
+    let (older_height, _, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, older_value);
+    let (newer_height, _, _) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, newer_value);
+
+    // Scan the NEWER block first: its note is discovered first and takes the lower row id,
+    // exactly as happens to recent notes when a restored wallet syncs tip-first.
+    st.scan_cached_blocks(newer_height, 1);
+    st.scan_cached_blocks(older_height, 1);
+
+    // Either note alone covers the target, so selection returns exactly one — the OLDER.
+    let selected = T::select_spendable_notes(
+        &st,
+        account.id(),
+        TargetValue::AtLeast(Zatoshis::const_from_u64(200_000)),
+        TargetHeight::from(newer_height + 1),
+        ConfirmationsPolicy::MIN,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(selected.len(), 1, "a single note covers the target");
+    assert_eq!(
+        T::note_value(selected.first().expect("nonempty").note()),
+        older_value,
+        "the oldest sufficient note must be drawn first, not the first-discovered"
+    );
+}
+
 pub fn metadata_queries_exclude_unwanted_notes<T: ShieldedPoolTester, Dsf, TC>(
     ds_factory: Dsf,
     cache: TC,

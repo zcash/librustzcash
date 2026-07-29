@@ -878,6 +878,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn oldest_note_is_selected_first() {
+        testing::pool::oldest_note_is_selected_first::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn metadata_queries_exclude_unwanted_notes() {
         testing::pool::metadata_queries_exclude_unwanted_notes::<OrchardPoolTester>()
     }

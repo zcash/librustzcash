@@ -34,6 +34,12 @@ workspace.
   scanner marks as change); while such a transaction is unmined it is treated
   as an ordinary payment.
 
+### Fixed
+- Note selection now draws the oldest eligible notes first, ordering by note
+  commitment tree position (chain order). Previously notes were drawn in
+  scan-discovery order, which for a restored wallet prefers its most recently
+  discovered — typically newest — notes.
+
 ## [0.22.0-rc.5] - 2026-07-28
 
 ### Added
