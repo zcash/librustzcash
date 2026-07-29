@@ -361,6 +361,41 @@ Group imports in three blocks separated by blank lines:
 Feature-gated imports go at the end, separately. Consolidate multi-item imports with
 nested `use` syntax: `use zcash_protocol::{PoolType, consensus::BlockHeight};`
 
+Every `use` declaration belongs in that header. Do NOT open a function, block or
+`impl` with a `use` statement. An import buried in the middle of a file is invisible
+to anyone reading the header, so the next function that needs the same item imports it
+again; and it silently shadows a module-level import of the same name, which then
+reports as unused and gets deleted or wrongly feature-gated. Both failure modes have
+happened in this repository.
+
+Write each `#[cfg(...)]` predicate ONCE. Where several imports share a predicate,
+gather them into a single braced group instead of repeating the attribute per line:
+
+```rust
+// Good: the predicate appears once.
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::data_api::CoinbaseFilter,
+    std::str::FromStr,
+    transparent::bundle::{OutPoint, TxOut},
+};
+
+// Bad: the same predicate repeated, and easy to let the group drift apart.
+#[cfg(feature = "transparent-inputs")]
+use crate::data_api::CoinbaseFilter;
+#[cfg(feature = "transparent-inputs")]
+use std::str::FromStr;
+```
+
+A gate covering a single import stays on its own line; there is nothing to group it
+with. Prefer the weakest predicate that is correct: an item imported under both `X`
+and `not(X)` is simply unconditional.
+
+`rustfmt` will not do any of this for you. `imports_granularity` is nightly-only and
+unstable, and rustfmt deliberately leaves `#[cfg]`-gated imports untouched
+(rust-lang/rustfmt#6666), so it will neither merge these groups nor split them.
+Grouping is the author's responsibility, and is stable under `cargo fmt` once written.
+
 ### Error Handling
 
 - Always use `Result<T, E>` with custom error `enum`s.
