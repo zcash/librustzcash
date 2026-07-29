@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.22.0-rc.5] - 2026-07-28
+
 ### Added
 - `zcash_client_sqlite::wallet::init::migrations::V_0_20_0`, `V_0_22_0_RC1` and
   `V_0_22_0_RC2`, the leaf migration sets for the releases published since
