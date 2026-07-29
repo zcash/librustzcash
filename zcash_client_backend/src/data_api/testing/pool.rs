@@ -59,17 +59,8 @@ use crate::{
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 
-#[cfg(feature = "orchard")]
-use super::orchard::OrchardPoolTester;
-
 use crate::data_api::ll::wallet::PRUNING_DEPTH;
 use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
-#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-use crate::data_api::wallet::input_selection::LockedInputPolicy;
-#[cfg(feature = "orchard")]
-use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
-#[cfg(all(feature = "orchard", not(feature = "transparent-inputs")))]
-use crate::proposal::ProposalError;
 use crate::{
     data_api::BlockMetadata,
     scanning::{
@@ -77,66 +68,57 @@ use crate::{
         full::{decrypt_block, scan_block},
     },
 };
-#[cfg(feature = "transparent-inputs")]
-use crate::{
-    data_api::{OutputOfSentTx, TransactionStatus},
-    wallet::{Exposure, TransparentAddressSource},
-};
 use incrementalmerkletree::Retention;
 use nonempty::NonEmpty;
-#[cfg(feature = "transparent-inputs")]
-use secrecy::ExposeSecret;
 use shardtree::{ShardTree, store::ShardStore};
-#[cfg(feature = "orchard")]
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use zcash_primitives::block::{Block, BlockHeaderData};
+use zcash_protocol::PoolType;
+
+#[cfg(feature = "orchard")]
+use {
+    super::orchard::OrchardPoolTester,
+    crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer},
+    std::collections::BTreeMap,
+    zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
+    zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
+};
+
 #[cfg(not(feature = "orchard"))]
 use zcash_address::{
     ZcashAddress,
     unified::{self, Encoding as _, Receiver},
 };
-#[cfg(feature = "transparent-inputs")]
-use zcash_keys::keys::UnifiedAddressRequest;
-#[cfg(feature = "transparent-inputs")]
-use zcash_keys::keys::transparent::gap_limits::GapLimits;
-use zcash_primitives::block::{Block, BlockHeaderData};
-#[cfg(feature = "orchard")]
-use zcash_primitives::transaction::TxVersion;
-#[cfg(feature = "orchard")]
-use zcash_primitives::transaction::builder::BundlePadding;
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize};
-#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
-use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
-#[cfg(feature = "pczt")]
-use zcash_protocol::consensus::ZIP212_GRACE_PERIOD;
-#[cfg(feature = "transparent-inputs")]
-use zcash_protocol::value::{BalanceError, MAX_MONEY};
-#[cfg(feature = "orchard")]
-use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
+
+// `ProposalError` also reaches this module through the `transparent-inputs` group below,
+// so this arm covers only the configuration in which that group is absent.
+#[cfg(all(feature = "orchard", not(feature = "transparent-inputs")))]
+use crate::proposal::ProposalError;
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{CoinbaseFilter, TransactionDataRequest},
+        data_api::{CoinbaseFilter, OutputOfSentTx, TransactionDataRequest, TransactionStatus},
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
-        wallet::WalletTransparentOutput,
+        wallet::{Exposure, TransparentAddressSource, WalletTransparentOutput},
     },
+    secrecy::ExposeSecret,
     std::str::FromStr,
     transparent::{
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    zcash_primitives::transaction::fees::zip317,
-    zcash_protocol::value::ZatBalance,
+    zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+    zcash_primitives::transaction::{
+        builder::DEFAULT_TX_EXPIRY_DELTA,
+        fees::{FeeRule, transparent::InputSize, zip317},
+    },
+    zcash_protocol::{
+        TxId,
+        value::{BalanceError, MAX_MONEY, ZatBalance},
+    },
 };
-
-use zcash_protocol::PoolType;
-#[cfg(feature = "transparent-inputs")]
-use zcash_protocol::TxId;
 
 #[cfg(feature = "pczt")]
 use {
@@ -146,7 +128,14 @@ use {
     transparent::builder::TransparentSigningSet,
     zcash_primitives::transaction::builder::{BuildConfig, Builder},
     zcash_proofs::prover::LocalTxProver,
+    zcash_protocol::consensus::ZIP212_GRACE_PERIOD,
     zcash_script::opcode::PushValue,
+};
+
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+use {
+    crate::data_api::wallet::input_selection::LockedInputPolicy,
+    zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS,
 };
 
 pub mod dsl;
