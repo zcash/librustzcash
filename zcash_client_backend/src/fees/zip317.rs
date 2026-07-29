@@ -909,6 +909,7 @@ mod tests {
         use zcash_primitives::transaction::builder::BundlePadding;
         use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
 
+        use crate::data_api::wallet::TargetHeight;
         use crate::fees::tests::TestOrchardInput;
 
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(

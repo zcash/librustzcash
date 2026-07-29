@@ -2967,27 +2967,25 @@ where
                     // for every spend that still requires a signature (real spends and
                     // wallet-controlled zero-value spends), so an external Signer can identify
                     // and sign it.
-                    if let Some(derivation) = account_derivation {
-                        if *needs_derivation {
-                            // All spent notes are from the same account.
-                            action_updater.set_spend_zip32_derivation(
-                                orchard::pczt::Zip32Derivation::parse(
-                                    derivation.seed_fingerprint().to_bytes(),
-                                    vec![
-                                        zip32::ChildIndex::hardened(32).index(),
-                                        zip32::ChildIndex::hardened(
-                                            params.network_type().coin_type(),
-                                        )
+                    if let Some(derivation) = account_derivation
+                        && *needs_derivation
+                    {
+                        // All spent notes are from the same account.
+                        action_updater.set_spend_zip32_derivation(
+                            orchard::pczt::Zip32Derivation::parse(
+                                derivation.seed_fingerprint().to_bytes(),
+                                vec![
+                                    zip32::ChildIndex::hardened(32).index(),
+                                    zip32::ChildIndex::hardened(params.network_type().coin_type())
                                         .index(),
-                                        zip32::ChildIndex::hardened(u32::from(
-                                            derivation.account_index(),
-                                        ))
-                                        .index(),
-                                    ],
-                                )
-                                .expect("valid"),
-                            );
-                        }
+                                    zip32::ChildIndex::hardened(u32::from(
+                                        derivation.account_index(),
+                                    ))
+                                    .index(),
+                                ],
+                            )
+                            .expect("valid"),
+                        );
                     }
 
                     if let Some((pczt_recipient, external_address)) = orchard_outputs.get(&index) {
@@ -3027,27 +3025,25 @@ where
                     // add it for every spend that still requires a signature (real spends and
                     // wallet-controlled zero-value spends), so an external Signer can identify
                     // and sign it.
-                    if let Some(derivation) = account_derivation {
-                        if *needs_derivation {
-                            // All spent notes are from the same account.
-                            action_updater.set_spend_zip32_derivation(
-                                orchard::pczt::Zip32Derivation::parse(
-                                    derivation.seed_fingerprint().to_bytes(),
-                                    vec![
-                                        zip32::ChildIndex::hardened(32).index(),
-                                        zip32::ChildIndex::hardened(
-                                            params.network_type().coin_type(),
-                                        )
+                    if let Some(derivation) = account_derivation
+                        && *needs_derivation
+                    {
+                        // All spent notes are from the same account.
+                        action_updater.set_spend_zip32_derivation(
+                            orchard::pczt::Zip32Derivation::parse(
+                                derivation.seed_fingerprint().to_bytes(),
+                                vec![
+                                    zip32::ChildIndex::hardened(32).index(),
+                                    zip32::ChildIndex::hardened(params.network_type().coin_type())
                                         .index(),
-                                        zip32::ChildIndex::hardened(u32::from(
-                                            derivation.account_index(),
-                                        ))
-                                        .index(),
-                                    ],
-                                )
-                                .expect("valid"),
-                            );
-                        }
+                                    zip32::ChildIndex::hardened(u32::from(
+                                        derivation.account_index(),
+                                    ))
+                                    .index(),
+                                ],
+                            )
+                            .expect("valid"),
+                        );
                     }
 
                     if let Some((pczt_recipient, external_address)) = ironwood_outputs.get(&index) {
