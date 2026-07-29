@@ -1,0 +1,11 @@
+name: librustzcash CodeQL configuration
+
+# These heuristic queries have produced no actionable results in this
+# repository. Keep the remainder of CodeQL's default Rust and C/C++ suites.
+query-filters:
+  - exclude:
+      id: rust/hard-coded-cryptographic-value
+  - exclude:
+      id: rust/cleartext-storage-database
+  - exclude:
+      id: rust/cleartext-logging
