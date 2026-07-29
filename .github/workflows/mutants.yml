@@ -87,8 +87,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
+        with:
+          toolchain: stable
       - run: rustup override set "${TOOLCHAIN}"
         shell: sh
         env:
@@ -96,7 +98,9 @@ jobs:
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-mutants
-      - run: cargo mutants --package "${{ matrix.package }}" --all-features -vV --in-place
+      - run: cargo mutants --package "${PACKAGE}" --all-features -vV --in-place
+        env:
+          PACKAGE: ${{ matrix.package }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
