@@ -15,7 +15,9 @@ use super::{
     spend_key_available,
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
+/// Adds tables for tracking transactions to be downloaded for transparent output and/or memo
+/// retrieval.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xfec02b61_3988_4b4f_9699_98977fac9e7f);
 
 #[cfg(feature = "transparent-inputs")]
 use {

@@ -7,7 +7,9 @@ use uuid::Uuid;
 
 use crate::wallet::init::{WalletMigrationError, migrations::account_delete_cascade};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x97ac36a9_196f_4dd9_993d_722bde95bebc);
+/// This migration adds missing key scope information to the `v_received_outputs` and `v_tx_outputs`
+/// views.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x97ac36a9_196f_4dd9_993d_722bde95bebc);
 
 const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
@@ -23,7 +25,7 @@ impl schemerz::Migration<Uuid> for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Adds `ON DELETE CASCADE` to foreign keys to support account deletion."
+        "Adds missing key scope information to the received-output and transaction-output views."
     }
 }
 

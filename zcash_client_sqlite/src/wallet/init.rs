@@ -502,7 +502,16 @@ impl WalletMigrator {
     /// In order to enable anchoring your external migrations correctly with respect to
     /// this library's internal migrations, we provide constants in the [`migrations`]
     /// module (for each release that adds a migration) which you can include within your
-    /// [`schemerz::Migration::dependencies`] set.
+    /// [`schemerz::Migration::dependencies`] set. Prefer these release constants: each
+    /// names a state of the migration graph that a published release exposed, so it is
+    /// unaffected by the migrations that later releases add.
+    ///
+    /// When no released state is precise enough — most commonly when your migration
+    /// depends on schema that has been added since the most recent release — the
+    /// `migrations::ids` module, behind the `unstable` feature, provides the identifier
+    /// of each individual internal migration. Those identifiers are for developing
+    /// against unreleased schema; move the anchor to the release constant that covers
+    /// it once that release exists.
     ///
     /// Each migration runs inside a database transaction, which has the following
     /// implications:

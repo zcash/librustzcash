@@ -35,7 +35,8 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::ironwood_received_notes;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xdab89587_cd05_43b0_a5b5_8cb64a702791);
+/// Adds Ironwood received notes to the `v_address_uses` view.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xdab89587_cd05_43b0_a5b5_8cb64a702791);
 
 const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
 

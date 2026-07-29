@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use crate::wallet::init::{WalletMigrationError, migrations::ironwood_received_notes};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xa1d4a28c_7582_4457_b0f4_d3f297b62a71);
+/// This migration adds the note-locking columns to the received note/output tables.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xa1d4a28c_7582_4457_b0f4_d3f297b62a71);
 
 // This migration only appends a nullable column to each of the `sapling_received_notes`,
 // `orchard_received_notes`, `ironwood_received_notes`, and `transparent_received_outputs`

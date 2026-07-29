@@ -22,7 +22,9 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use crate::GapLimits;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x9fa43ce0_a387_45d1_be03_57a3edc76d01);
+/// Truncates away bad note commitment tree state for users whose wallets were broken by incorrect
+/// reorg handling.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x9fa43ce0_a387_45d1_be03_57a3edc76d01);
 
 const DEPENDENCIES: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
 

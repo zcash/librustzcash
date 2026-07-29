@@ -27,7 +27,8 @@ use crate::{
     },
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_678dafcf9754);
+/// Migration that adds support for unified full viewing keys.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_678dafcf9754);
 
 const DEPENDENCIES: &[Uuid] = &[initial_setup::MIGRATION_ID];
 

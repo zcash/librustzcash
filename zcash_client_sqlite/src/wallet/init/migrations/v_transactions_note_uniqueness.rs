@@ -10,7 +10,9 @@ use crate::wallet::init::WalletMigrationError;
 
 use super::v_transactions_shielding_balance;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xdba47c86_13b5_4601_94b2_0cde0abe1e45);
+/// This migration fixes a bug in `v_transactions` where distinct but otherwise identical notes were
+/// being incorrectly deduplicated.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xdba47c86_13b5_4601_94b2_0cde0abe1e45);
 
 const DEPENDENCIES: &[Uuid] = &[v_transactions_shielding_balance::MIGRATION_ID];
 

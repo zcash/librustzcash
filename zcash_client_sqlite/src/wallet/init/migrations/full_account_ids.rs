@@ -17,7 +17,7 @@ use crate::wallet::{account_kind_code, init::WalletMigrationError};
 
 /// The migration that switched from presumed seed-derived account IDs to supporting
 /// HD accounts and all sorts of imported keys.
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x6d02ec76_8720_4cc6_b646_c4e2ce69221c);
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x6d02ec76_8720_4cc6_b646_c4e2ce69221c);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) seed: Option<Rc<SecretVec<u8>>>,

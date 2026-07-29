@@ -14,7 +14,8 @@ use zcash_protocol::{
 use super::{add_utxo_account, sent_notes_to_internal};
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x282fad2e_8372_4ca0_8bed_71821320909f);
+/// Migration that adds transaction summary views & add fee information to transactions.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x282fad2e_8372_4ca0_8bed_71821320909f);
 
 const DEPENDENCIES: &[Uuid] = &[
     add_utxo_account::MIGRATION_ID,
