@@ -280,6 +280,14 @@ mod tests {
     };
 
     #[cfg(feature = "transparent-inputs")]
+    use crate::UA_TRANSPARENT;
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_client_backend::keys::UnifiedAddressRequest;
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_keys::keys::ReceiverRequirement::*;
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_protocol::value::Zatoshis;
+    #[cfg(feature = "transparent-inputs")]
     use {
         crate::wallet::init::migrations::{ufvk_support, utxos_table},
         ::transparent::{
@@ -293,6 +301,8 @@ mod tests {
             value::ZatBalance,
         },
     };
+    #[cfg(feature = "transparent-inputs")]
+    use {::transparent::address::Script, ::transparent::keys::NonHardenedChildIndex};
 
     #[test]
     fn transaction_views() {
@@ -394,13 +404,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
-        use ::transparent::{address::Script, keys::NonHardenedChildIndex};
-        use zcash_client_backend::keys::UnifiedAddressRequest;
-        use zcash_keys::keys::ReceiverRequirement::*;
-        use zcash_protocol::value::Zatoshis;
-
-        use crate::UA_TRANSPARENT;
-
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =

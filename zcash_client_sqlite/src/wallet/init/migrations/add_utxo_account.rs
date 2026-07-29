@@ -9,6 +9,12 @@ use super::{addresses_table, utxos_table};
 use crate::wallet::init::WalletMigrationError;
 
 #[cfg(feature = "transparent-inputs")]
+use crate::wallet::encoding::decode_diversifier_index_be;
+#[cfg(feature = "transparent-inputs")]
+use transparent::keys::TransparentKeyScope;
+#[cfg(feature = "transparent-inputs")]
+use zcash_client_backend::wallet::Exposure;
+#[cfg(feature = "transparent-inputs")]
 use {
     crate::error::SqliteClientError,
     ::transparent::{
@@ -131,11 +137,6 @@ fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     account: AccountId,
 ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
-    use transparent::keys::TransparentKeyScope;
-    use zcash_client_backend::wallet::Exposure;
-
-    use crate::wallet::encoding::decode_diversifier_index_be;
-
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
 
     // Get all UAs derived

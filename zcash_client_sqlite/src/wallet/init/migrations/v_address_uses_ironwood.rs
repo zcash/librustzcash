@@ -114,6 +114,8 @@ mod tests {
             init::{WalletMigrator, migrations::tests::test_migrate},
         },
     };
+    #[cfg(feature = "transparent-inputs")]
+    use {crate::TxRef, crate::wallet::involved_accounts};
 
     /// The wallet type the scenarios operate on: a file-backed database with the deterministic
     /// clock and RNG the crate's other tests use.
@@ -372,8 +374,6 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn scenario_ironwood_receipt_leaves_its_account_uninvolved() {
-        use crate::{TxRef, wallet::involved_accounts};
-
         let (_data_file, mut db_data) = wallet_before_migration();
 
         assert!(

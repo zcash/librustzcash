@@ -628,11 +628,14 @@ pub(crate) mod tests {
     use uuid::Uuid;
     use zcash_protocol::consensus::Network;
 
+    #[cfg(feature = "unstable")]
+    use super::ids;
     use crate::{
         WalletDb,
         testing::db::{test_clock, test_rng},
         wallet::init::WalletMigrator,
     };
+    use schemerz::Migration;
 
     /// `CURRENT_LEAF_MIGRATIONS` must list exactly the leaves of the migration dependency graph
     /// (the migrations that no other migration depends on), so that migrating to the current
@@ -641,8 +644,6 @@ pub(crate) mod tests {
     /// silently leave a stale entry behind.
     #[test]
     fn current_leaf_migrations_are_the_dag_leaves() {
-        use schemerz::Migration;
-
         let migrations =
             super::all_migrations(&Network::TestNetwork, test_clock(), test_rng(), None);
 
@@ -660,9 +661,6 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "unstable")]
     fn ids_module_covers_every_migration() {
-        use super::ids;
-        use schemerz::Migration;
-
         let exported: HashSet<Uuid> = HashSet::from([
             ids::ACCOUNT_DELETE_CASCADE,
             ids::ADD_ACCOUNT_BIRTHDAYS,

@@ -322,6 +322,18 @@ mod tests {
     use crate::AccountUuid;
 
     use super::Error;
+    use std::collections::BTreeSet;
+    use zcash_client_backend::wallet::LockOwner;
+    use zcash_pool_migration::denomination::DenominationPlan;
+    use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::value::Zatoshis;
+    use {
+        zcash_pool_migration::engine::MigrationState,
+        zcash_pool_migration::engine::MigrationStatus,
+        zcash_pool_migration::engine::MigrationTransaction,
+        zcash_pool_migration::engine::MigrationTxKind,
+    };
 
     /// A fresh in-memory database with a minimal `accounts` table (the `account_id` foreign-key
     /// target) and the migration tables created, but not yet wrapped as a store for any particular
@@ -374,14 +386,6 @@ mod tests {
     /// covers the type more broadly.
     #[test]
     fn lock_owner_round_trips() {
-        use zcash_pool_migration::denomination::DenominationPlan;
-        use zcash_pool_migration::engine::{
-            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
-        };
-        use zcash_pool_migration::preparation::PreparationPlan;
-        use zcash_protocol::consensus::BlockHeight;
-        use zcash_protocol::value::Zatoshis;
-
         let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
@@ -451,17 +455,6 @@ mod tests {
     /// a `None` lock_owner contributes nothing, and repeated owners collapse to one entry.
     #[test]
     fn migration_lock_owners_collects_distinct_non_none_owners() {
-        use std::collections::BTreeSet;
-
-        use zcash_client_backend::wallet::LockOwner;
-        use zcash_pool_migration::denomination::DenominationPlan;
-        use zcash_pool_migration::engine::{
-            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
-        };
-        use zcash_pool_migration::preparation::PreparationPlan;
-        use zcash_protocol::consensus::BlockHeight;
-        use zcash_protocol::value::Zatoshis;
-
         let mut store = fresh_store();
         assert_eq!(
             store.migration_lock_owners().expect("read succeeds"),
@@ -525,11 +518,6 @@ mod tests {
     /// so an empty layer would leave no trace (and the engine never produces one).
     #[test]
     fn empty_prep_layer_is_rejected() {
-        use zcash_pool_migration::denomination::DenominationPlan;
-        use zcash_pool_migration::engine::{MigrationState, MigrationStatus};
-        use zcash_pool_migration::preparation::PreparationPlan;
-        use zcash_protocol::value::Zatoshis;
-
         let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
@@ -558,11 +546,6 @@ mod tests {
     /// cleanup the wallet's account-deletion path now relies on entirely (no explicit delete).
     #[test]
     fn deleting_an_account_cascades_to_its_migration() {
-        use zcash_pool_migration::denomination::DenominationPlan;
-        use zcash_pool_migration::engine::{MigrationState, MigrationStatus};
-        use zcash_pool_migration::preparation::PreparationPlan;
-        use zcash_protocol::value::Zatoshis;
-
         let mut conn = fresh_conn();
         // Enforce foreign keys so the account -> migration -> child cascade actually fires, exactly
         // as the wallet database does at runtime.

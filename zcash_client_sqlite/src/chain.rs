@@ -10,6 +10,10 @@ use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats
 use crate::{BlockDb, error::SqliteClientError};
 
 #[cfg(feature = "unstable")]
+use rusqlite::OptionalExtension;
+#[cfg(feature = "unstable")]
+use rusqlite::named_params;
+#[cfg(feature = "unstable")]
 use {
     crate::{BlockHash, FsBlockDb, FsBlockDbError},
     rusqlite::Connection,
@@ -126,8 +130,6 @@ pub(crate) fn blockmetadb_insert(
     conn: &Connection,
     block_meta: &[BlockMeta],
 ) -> Result<(), rusqlite::Error> {
-    use rusqlite::named_params;
-
     let mut stmt_insert = conn.prepare(
         "INSERT INTO compactblocks_meta (
             height,
@@ -212,8 +214,6 @@ pub(crate) fn blockmetadb_find_block(
     conn: &Connection,
     height: BlockHeight,
 ) -> Result<Option<BlockMeta>, rusqlite::Error> {
-    use rusqlite::OptionalExtension;
-
     conn.query_row(
         "SELECT blockhash, time, sapling_outputs_count, orchard_actions_count
         FROM compactblocks_meta

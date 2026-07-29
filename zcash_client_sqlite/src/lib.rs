@@ -148,12 +148,18 @@ use {crate::wallet::encoding::KeyScope, zcash_keys::address::Address};
 #[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
 
+#[cfg(any(test, feature = "test-dependencies"))]
+use crate::wallet::encoding::pool_code;
+#[cfg(feature = "transparent-inputs")]
+use ReceiverRequirement::*;
+use zcash_keys::keys::AddressGenerationError::*;
 #[cfg(feature = "unstable")]
 use {
     crate::chain::{BlockMeta, fsblockdb_with_blocks},
     std::path::PathBuf,
     std::{fs, io},
 };
+use {rusqlite::hooks::AuthAction, rusqlite::hooks::Authorization};
 
 pub mod chain;
 pub mod error;
@@ -364,8 +370,6 @@ impl Drop for AuthorizerGuard<'_> {
 
 /// The authorizer callback enforcing the [`ExtensionTransaction`] policy.
 fn extension_authorizer(ctx: rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization {
-    use rusqlite::hooks::{AuthAction, Authorization};
-
     let allow_if_extension = |table: &str| {
         if table.starts_with(EXTENSION_SCHEMA_PREFIX) {
             Authorization::Allow
@@ -1482,8 +1486,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         txid: &TxId,
         protocol: ShieldedPool,
     ) -> Result<Vec<NoteId>, <Self as WalletRead>::Error> {
-        use crate::wallet::encoding::pool_code;
-
         let mut stmt_sent_notes = self.conn.borrow().prepare(
             "SELECT output_index
              FROM sent_notes
@@ -1509,8 +1511,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletTes
         &self,
         txid: &TxId,
     ) -> Result<Vec<OutputOfSentTx>, <Self as WalletRead>::Error> {
-        use zcash_protocol::value::Zatoshis;
-
         let mut stmt_sent = self.conn.borrow().prepare(
             "SELECT value, to_address,
                     a.cached_transparent_receiver_address, a.transparent_child_index
@@ -2187,8 +2187,6 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, <Self as WalletRead>::Error> {
         if let Some(account) = self.get_account(account)? {
-            use zcash_keys::keys::AddressGenerationError::*;
-
             match account.uivk().address(diversifier_index, request) {
                 Ok(address) => {
                     let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?;
@@ -2289,7 +2287,6 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
                 )?;
 
             if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
-                use ReceiverRequirement::*;
                 wallet::transparent::generate_gap_addresses(
                     self.conn.0,
                     &self.params,
@@ -3842,10 +3839,42 @@ mod tests {
         wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
     };
 
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    use crate::AccountRef;
+    #[cfg(feature = "unstable")]
+    use crate::testing::FsBlockCache;
     use crate::testing::db::TestDb;
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    use crate::wallet::transparent;
+    use incrementalmerkletree::Hashable as _;
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    use rusqlite::named_params;
+    #[cfg(feature = "transparent-inputs")]
+    use std::collections::BTreeSet;
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_client_backend::data_api::TransactionDataRequest;
+    #[cfg(feature = "unstable")]
+    use zcash_client_backend::data_api::testing::AddressType;
+    use zcash_keys::address::Address;
+    use zcash_keys::keys::ReceiverRequirement::*;
+    use zcash_keys::keys::UnifiedIncomingViewingKey;
     #[cfg(feature = "unstable")]
     use zcash_keys::keys::sapling;
     use zcash_protocol::local_consensus::LocalNetwork;
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        crate::GapLimits, crate::testing::BlockCache,
+        crate::wallet::transparent::transaction_data_requests,
+    };
+    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
+    use {::transparent::keys::NonHardenedChildIndex, ::transparent::keys::TransparentKeyScope};
+    use {
+        zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT,
+        zcash_client_backend::data_api::WalletCommitmentTrees,
+        zcash_client_backend::data_api::chain::CommitmentTreeRoot,
+    };
+    #[cfg(feature = "unstable")]
+    use {zcash_protocol::consensus::NetworkConstants, zcash_protocol::value::Zatoshis};
 
     #[test]
     fn get_wallet_recover_until_is_max_across_accounts() {
@@ -3868,10 +3897,6 @@ mod tests {
 
     #[test]
     fn get_subtree_root_round_trips_put_subtree_roots() {
-        use incrementalmerkletree::Hashable as _;
-        use zcash_client_backend::data_api::{
-            SAPLING_SHARD_HEIGHT, WalletCommitmentTrees, chain::CommitmentTreeRoot,
-        };
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .build();
@@ -4133,7 +4158,6 @@ mod tests {
 
         // Perform similar tests for shielded-only addresses. These should be timestamp-based; we
         // will tick the clock between each generation.
-        use zcash_keys::keys::ReceiverRequirement::*;
         #[cfg(feature = "orchard")]
         let shielded_only_request = UnifiedAddressRequest::unsafe_custom(Require, Require, Omit);
         #[cfg(not(feature = "orchard"))]
@@ -4422,8 +4446,6 @@ mod tests {
 
     #[test]
     pub(crate) fn ivk_only_account_upgrade_paths() {
-        use zcash_keys::keys::UnifiedIncomingViewingKey;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .build();
@@ -4536,8 +4558,6 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     pub(crate) fn ivk_over_ivk_additive_upgrade() {
-        use zcash_keys::keys::UnifiedIncomingViewingKey;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .build();
@@ -4612,13 +4632,6 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn transparent_receivers() {
-        use std::collections::BTreeSet;
-
-        use crate::{
-            GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests,
-        };
-        use zcash_client_backend::data_api::TransactionDataRequest;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
@@ -4706,11 +4719,6 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
-        use zcash_client_backend::data_api::testing::AddressType;
-        use zcash_protocol::{consensus::NetworkConstants, value::Zatoshis};
-
-        use crate::testing::FsBlockCache;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(FsBlockCache::new())
@@ -4759,8 +4767,6 @@ mod tests {
 
     #[test]
     fn find_account_for_address_returns_matching_account_for_own_ua() {
-        use zcash_keys::address::Address;
-
         // Create a test wallet with one account and expose one of its own UAs
         let mut state = create_test_wallet_with_one_account();
         let account = state.test_account().cloned().unwrap();
@@ -4782,8 +4788,6 @@ mod tests {
 
     #[test]
     fn find_account_for_address_returns_none_for_unknown_address() {
-        use zcash_keys::address::Address;
-
         // Create a test wallet with one account
         let st = create_test_wallet_with_one_account();
 
@@ -4803,7 +4807,6 @@ mod tests {
 
     #[test]
     fn find_account_for_address_returns_matching_account_for_receivers_of_own_ua() {
-        use zcash_keys::address::Address;
         // Create a test wallet with one account and expose one of its own UAs
         let mut state = create_test_wallet_with_one_account();
         let account = state.test_account().cloned().unwrap();
@@ -4831,12 +4834,6 @@ mod tests {
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     #[test]
     fn find_account_for_ua_finds_via_transparent_receiver_cache() {
-        use crate::AccountRef;
-        use crate::wallet::transparent;
-        use ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
-        use zcash_keys::address::{Address, UnifiedAddress};
-        use zcash_keys::keys::ReceiverRequirement::*;
-
         // Create a test wallet with one account
         let mut state = create_test_wallet_with_one_account();
         let account = state.test_account().cloned().unwrap();
@@ -4917,8 +4914,6 @@ mod tests {
 
     #[test]
     fn find_account_for_ua_finds_via_sapling() {
-        use zcash_keys::address::{Address, UnifiedAddress};
-
         // Create a test wallet with one account
         let mut state = create_test_wallet_with_one_account();
 
@@ -4972,8 +4967,6 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_ua_finds_via_orchard() {
-        use zcash_keys::address::{Address, UnifiedAddress};
-
         // Create a test wallet with one account
         let mut state = create_test_wallet_with_one_account();
 
@@ -5019,8 +5012,6 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn find_account_for_ua_errors_when_receivers_map_to_different_accounts() {
-        use zcash_keys::address::{Address, UnifiedAddress};
-
         // Create a test wallet with two different accounts
         let mut state = create_test_wallet_with_one_account();
 
@@ -5096,8 +5087,6 @@ mod tests {
         state: &mut TestState<(), TestDb, LocalNetwork>,
         account_id: AccountUuid,
     ) -> i64 {
-        use rusqlite::named_params;
-
         // Remove from the DB all the addresses associated to the account
         let account_rowid: i64 = state
             .wallet()

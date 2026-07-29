@@ -768,8 +768,16 @@ mod tests {
         zip32::DiversifierIndex,
     };
 
+    use regex::Regex;
+    #[cfg(feature = "transparent-inputs")]
+    use zcash_primitives::block::BlockHash;
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     use zcash_protocol::value::Zatoshis;
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        zcash_client_backend::data_api::AccountBirthday,
+        zcash_client_backend::data_api::AccountSource, zcash_client_backend::data_api::WalletRead,
+    };
 
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
         let result = conn
@@ -786,7 +794,6 @@ mod tests {
             .with_data_store_factory(TestDbFactory::default())
             .build();
 
-        use regex::Regex;
         let re = Regex::new(r"\s+").unwrap();
         let re_paren = Regex::new(r"([\(\)])").unwrap();
 
@@ -1458,9 +1465,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead};
-        use zcash_primitives::block::BlockHash;
-
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =

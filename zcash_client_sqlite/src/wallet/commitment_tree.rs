@@ -1646,6 +1646,20 @@ mod tests {
     // Used only by the orchard-gated `HistoricalWitnessGenerator` type alias below.
     #[cfg(feature = "orchard")]
     use crate::error::SqliteClientError;
+    #[cfg(feature = "orchard")]
+    use ::orchard::tree::MerkleHashOrchard;
+    #[cfg(feature = "orchard")]
+    use incrementalmerkletree::frontier::Frontier;
+    #[cfg(feature = "orchard")]
+    use rand::SeedableRng;
+    #[cfg(feature = "orchard")]
+    use rand_chacha::ChaChaRng;
+    use shardtree::error::ShardTreeError;
+    use shardtree::store::ShardStore;
+    use std::collections::BTreeSet;
+    #[cfg(feature = "orchard")]
+    use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+    use zcash_client_backend::data_api::WalletCommitmentTrees;
 
     fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(
         m: usize,
@@ -1670,9 +1684,6 @@ mod tests {
     fn check_retained_checkpoints(
         mut tree: ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3>,
     ) {
-        use shardtree::store::ShardStore;
-        use std::collections::BTreeSet;
-
         let h1 = BlockHeight::from(100);
         let h2 = BlockHeight::from(200);
 
@@ -1772,11 +1783,6 @@ mod tests {
 
     #[test]
     fn remove_retained_checkpoints_below() {
-        use std::collections::BTreeSet;
-
-        use shardtree::{error::ShardTreeError, store::ShardStore};
-        use zcash_client_backend::data_api::WalletCommitmentTrees;
-
         let data_file = NamedTempFile::new().unwrap();
         let mut db = WalletDb::for_path(
             data_file.path(),
@@ -2004,12 +2010,6 @@ mod tests {
         table_prefix: &'static str,
         generate_witnesses: HistoricalWitnessGenerator,
     ) {
-        use ::orchard::tree::MerkleHashOrchard;
-        use incrementalmerkletree::frontier::Frontier;
-        use rand::SeedableRng;
-        use rand_chacha::ChaChaRng;
-        use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
-
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(
             data_file.path(),
@@ -2122,12 +2122,6 @@ mod tests {
     /// `SqliteClientError::HistoricalWitnessUnavailable`.
     #[cfg(feature = "orchard")]
     fn witnesses_at_historical_height_with_many_wallet_checkpoints() {
-        use ::orchard::tree::MerkleHashOrchard;
-        use incrementalmerkletree::frontier::Frontier;
-        use rand::SeedableRng;
-        use rand_chacha::ChaChaRng;
-        use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
-
         // Wallet tree capacity << number of blocks we sync, so the historical
         // checkpoint is forcibly pruned from the wallet's own ShardTree before
         // we attempt to generate a witness at that height.

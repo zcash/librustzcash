@@ -84,6 +84,13 @@ use ::transparent::keys::TransparentKeyScope;
 use zcash_keys::encoding::AddressCodec;
 
 use crate::{AccountUuid, WalletDb, error::SqliteClientError, util::Clock};
+use ::zewif::MnemonicLanguage as L;
+use incrementalmerkletree::frontier::Frontier;
+use {
+    bip0039::ChineseSimplified, bip0039::ChineseTraditional, bip0039::Czech, bip0039::French,
+    bip0039::Italian, bip0039::Japanese, bip0039::Korean, bip0039::Portuguese, bip0039::Spanish,
+};
+use {zcash_script::script::Code, zcash_script::script::Redeem};
 
 /// The Bech32m human-readable part of the canonical ZIP 32 seed fingerprint
 /// encoding used by ZeWIF documents.
@@ -623,12 +630,6 @@ fn seed_entry_bytes<S>(
 /// Converts a BIP 39 mnemonic to its 64-byte seed, using the empty passphrase
 /// (as zcashd and zallet do).
 fn mnemonic_to_seed(m: &::zewif::Bip39Mnemonic) -> Result<Vec<u8>, bip0039::Error> {
-    use ::zewif::MnemonicLanguage as L;
-    use bip0039::{
-        ChineseSimplified, ChineseTraditional, Czech, French, Italian, Japanese, Korean,
-        Portuguese, Spanish,
-    };
-
     fn seed<L: bip0039::Language>(phrase: &str) -> Result<Vec<u8>, bip0039::Error> {
         Ok(Mnemonic::<L>::from_phrase(phrase)?.to_seed("").to_vec())
     }
@@ -662,7 +663,6 @@ fn convert_frontier<H, S, const DEPTH: u8>(
 where
     H: Clone,
 {
-    use incrementalmerkletree::frontier::Frontier;
     let invalid_node = || ZewifImportError::InvalidMerkleNode {
         account_name: account_name.to_owned(),
         pool,
@@ -1074,7 +1074,6 @@ where
     }
 
     for (account_uuid, script_bytes) in &taddrs.redeem_scripts {
-        use zcash_script::script::{Code, Redeem};
         let parsed = Redeem::parse(&Code(script_bytes.clone()));
         match parsed {
             Ok(redeem) => {
@@ -1627,7 +1626,7 @@ fn verify_hd_derivation<P: Parameters, S>(
 
 #[cfg(test)]
 mod tests {
-    use ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex};
+    use ::transparent::keys::NonHardenedChildIndex;
     use bip0039::{English, Mnemonic};
     use incrementalmerkletree::Hashable as _;
     use std::collections::BTreeMap;
@@ -1642,6 +1641,17 @@ mod tests {
     use super::*;
     use crate::testing::db::{test_clock, test_rng};
     use crate::wallet::init::WalletMigrator;
+    use ::transparent::address::Script;
+    use ::transparent::keys::IncomingViewingKey;
+    use zcash_client_backend::wallet::Exposure;
+    use zcash_protocol::value::Zatoshis;
+    use {
+        ::transparent::bundle as transparent, ::transparent::bundle::Authorized,
+        ::transparent::bundle::OutPoint, ::transparent::bundle::TxIn, ::transparent::bundle::TxOut,
+    };
+    use {
+        zcash_primitives::transaction::TransactionData, zcash_primitives::transaction::TxVersion,
+    };
 
     const TEST_NETWORK: consensus::Network = consensus::Network::TestNetwork;
 
@@ -2441,11 +2451,6 @@ mod tests {
         value: u64,
         height: u32,
     ) -> (zcash_protocol::TxId, Vec<u8>) {
-        use ::transparent::address::Script;
-        use ::transparent::bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut};
-        use zcash_primitives::transaction::{TransactionData, TxVersion};
-        use zcash_protocol::value::Zatoshis;
-
         let height = consensus::BlockHeight::from(height);
         let tx = TransactionData::from_parts(
             TxVersion::V5,
@@ -2480,11 +2485,6 @@ mod tests {
         outputs: &[(&TransparentAddress, u64)],
         height: u32,
     ) -> (zcash_protocol::TxId, Vec<u8>) {
-        use ::transparent::address::Script;
-        use ::transparent::bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut};
-        use zcash_primitives::transaction::{TransactionData, TxVersion};
-        use zcash_protocol::value::Zatoshis;
-
         let height = consensus::BlockHeight::from(height);
         let tx = TransactionData::from_parts(
             TxVersion::V5,
@@ -2607,7 +2607,6 @@ mod tests {
         assert_eq!(report.addresses_never_exposed, 0);
         // ...and it is exposed (at the transaction's mined height) via the
         // transaction-import path.
-        use zcash_client_backend::wallet::Exposure;
         let receivers = wdb
             .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
             .unwrap();
@@ -2635,7 +2634,6 @@ mod tests {
             UnifiedSpendingKey::from_seed(&TEST_NETWORK, &seed, zip32::AccountId::ZERO).unwrap();
 
         // The account's internal (change) transparent address.
-        use ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex};
         let change_addr = usk
             .transparent()
             .to_account_pubkey()
@@ -2670,7 +2668,6 @@ mod tests {
 
         // The internal-scope change address is exposed at the transaction's
         // mined height.
-        use zcash_client_backend::wallet::Exposure;
         let receivers = wdb
             .get_transparent_receivers(report.imported_accounts[0].account_uuid, true, true)
             .unwrap();

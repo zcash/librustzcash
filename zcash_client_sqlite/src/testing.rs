@@ -18,6 +18,15 @@ use crate::{chain::init::init_cache_database, error::SqliteClientError};
 
 use super::BlockDb;
 
+#[cfg(feature = "orchard")]
+use shardtree::error::ShardTreeError;
+#[cfg(feature = "orchard")]
+use shardtree::store::ShardStore;
+#[cfg(all(test, feature = "unstable"))]
+#[cfg(all(test, feature = "unstable"))]
+use std::io::Write;
+#[cfg(feature = "orchard")]
+use zcash_client_backend::data_api::WalletCommitmentTrees;
 #[cfg(all(test, feature = "unstable"))]
 use {
     crate::{
@@ -124,10 +133,6 @@ pub fn highest_rooted_orchard_checkpoint<W>(db: &mut W, from: BlockHeight) -> Op
 where
     W: zcash_client_backend::data_api::WalletCommitmentTrees,
 {
-    use shardtree::error::ShardTreeError;
-    use shardtree::store::ShardStore;
-    use zcash_client_backend::data_api::WalletCommitmentTrees;
-
     db.with_orchard_tree_mut::<_, _, ShardTreeError<<W as WalletCommitmentTrees>::Error>>(|tree| {
         // Take the highest checkpoint id at or below `from` directly from the checkpoint set,
         // rather than probing the tree at every height down from `from`.
@@ -194,8 +199,6 @@ impl TestCache for FsBlockCache {
     }
 
     fn insert(&mut self, cb: &CompactBlock) -> Self::InsertResult {
-        use std::io::Write;
-
         let txids = cb.vtx.iter().map(|tx| tx.txid()).collect();
         let block_meta = BlockMeta {
             height: cb.height(),

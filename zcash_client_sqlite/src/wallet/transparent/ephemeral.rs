@@ -43,6 +43,10 @@ use crate::AccountUuid;
 use rusqlite::OptionalExtension;
 
 use super::next_check_time;
+#[cfg(any(test, feature = "test-dependencies"))]
+use crate::wallet::transparent::find_gap_start;
+#[cfg(any(test, feature = "test-dependencies"))]
+use zcash_client_backend::wallet::GapMetadata;
 
 // Returns `TransparentAddressMetadata` in the ephemeral scope for the
 // given address index.
@@ -74,8 +78,6 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     account_id: AccountRef,
     index_range: Option<Range<NonHardenedChildIndex>>,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
-    use crate::wallet::transparent::find_gap_start;
-
     let gap_start = find_gap_start(
         conn,
         account_id,
@@ -106,7 +108,6 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
                 ":key_scope": KeyScope::Ephemeral.encode()
             },
             |row| {
-                use zcash_client_backend::wallet::GapMetadata;
 
                 let addr_str: String = row.get("cached_transparent_receiver_address")?;
 

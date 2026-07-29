@@ -25,6 +25,8 @@ use {
     transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::TransparentKeyOrigin,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use std::time::Duration;
 #[cfg(feature = "zcashd-compat")]
 use zcash_keys::keys::zcashd;
 
@@ -105,8 +107,6 @@ pub(crate) fn epoch_seconds(t: SystemTime) -> Result<i64, SchedulingError> {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn decode_epoch_seconds(i: i64) -> Result<SystemTime, SchedulingError> {
-    use std::time::Duration;
-
     Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(u64::try_from(i)?))
 }
 

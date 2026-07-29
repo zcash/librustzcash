@@ -105,6 +105,9 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+    use zcash_client_backend::data_api::scanning::ScanPriority;
+    use zcash_protocol::ShieldedPool;
+    use {crate::wallet::scanning::mark_stabilized_notes, crate::wallet::scanning::priority_code};
 
     #[test]
     fn migrate() {
@@ -435,11 +438,6 @@ mod tests {
     /// the per-shard view-based check in `mark_stabilized_notes`.
     #[test]
     fn gap_in_scanned_coverage_prevents_stabilization() {
-        use zcash_client_backend::data_api::scanning::ScanPriority;
-        use zcash_protocol::ShieldedPool;
-
-        use crate::wallet::scanning::{mark_stabilized_notes, priority_code};
-
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =
