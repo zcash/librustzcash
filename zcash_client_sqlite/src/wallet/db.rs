@@ -609,7 +609,13 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 /// `anchor_bucket_interval` records the anchor retention grid the migration was committed against,
 /// in blocks. Every transfer's `anchor_boundary` lies on that grid, and it is provable only while
 /// the wallet still retains those checkpoints, so a mismatch against the wallet's current interval
-/// is reported as an error rather than left to surface as a missing checkpoint at proving time.
+/// is reported as an error rather than left to surface as a missing checkpoint at proving time. Its
+/// `DEFAULT` is [`AnchorBucketInterval::ZIP_318`] (144 blocks), present only so that a table created
+/// by the `orchard_ironwood_migration_tables` DDL and one repaired by the
+/// `orchard_ironwood_migration_anchor_interval` `ADD COLUMN` share this schema text; the store
+/// always writes the column explicitly.
+///
+/// [`AnchorBucketInterval::ZIP_318`]: zcash_protocol::zip318::AnchorBucketInterval::ZIP_318
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
 CREATE TABLE orchard_ironwood_migrations (
     id INTEGER PRIMARY KEY,
@@ -620,7 +626,7 @@ CREATE TABLE orchard_ironwood_migrations (
     note_split_prep_fees INTEGER NOT NULL,
     note_split_total_input INTEGER NOT NULL,
     note_split_total_migratable INTEGER NOT NULL,
-    anchor_bucket_interval INTEGER NOT NULL
+    anchor_bucket_interval INTEGER NOT NULL DEFAULT 144
 )";
 /// The denomination crossing values (an ordered list of zatoshi amounts). The funding-note values
 /// have no table of their own: each is its crossing value plus the denomination fee buffer.
