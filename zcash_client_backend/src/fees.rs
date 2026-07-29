@@ -5,8 +5,6 @@ use std::{
 };
 
 use ::transparent::bundle::OutPoint;
-#[cfg(feature = "orchard")]
-use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::fees::{
     FeeRule,
     transparent::{self, InputSize},
@@ -262,12 +260,54 @@ pub struct TransactionBalance {
     // cache the resulting value.
     total: Zatoshis,
 
-    // The Ironwood bundle padding this fee was computed for. RECORDED rather than re-derived: the
-    // transaction builder must produce exactly the action count the fee was charged against, and
-    // deriving the same answer twice from the same inputs is an invariant that has to be
-    // maintained, whereas carrying it is one that cannot be broken.
+    // The exact number of dummy outputs in each shielded bundle this balance was costed for.
+    // `None` is retained for compatibility with callers and serialized proposals that predate
+    // explicit transaction-shape modelling.
+    dummy_outputs: Option<DummyOutputCounts>,
+}
+
+/// The number of dummy outputs in each shielded value pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DummyOutputCounts {
+    sapling: usize,
     #[cfg(feature = "orchard")]
-    ironwood_bundle_padding: BundlePadding,
+    orchard: usize,
+    #[cfg(feature = "orchard")]
+    ironwood: usize,
+}
+
+impl DummyOutputCounts {
+    /// Constructs per-pool dummy-output counts.
+    pub fn new(
+        sapling: usize,
+        #[cfg(feature = "orchard")] orchard: usize,
+        #[cfg(feature = "orchard")] ironwood: usize,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            #[cfg(feature = "orchard")]
+            ironwood,
+        }
+    }
+
+    /// Returns the number of Sapling dummy outputs.
+    pub fn sapling(&self) -> usize {
+        self.sapling
+    }
+
+    /// Returns the number of Orchard dummy outputs.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(&self) -> usize {
+        self.orchard
+    }
+
+    /// Returns the number of Ironwood dummy outputs.
+    #[cfg(feature = "orchard")]
+    pub fn ironwood(&self) -> usize {
+        self.ironwood
+    }
 }
 
 impl TransactionBalance {
@@ -287,29 +327,19 @@ impl TransactionBalance {
             proposed_change,
             fee_required,
             total,
-            #[cfg(feature = "orchard")]
-            ironwood_bundle_padding: BundlePadding::DEFAULT,
+            dummy_outputs: None,
         })
     }
 
-    /// Records the Ironwood bundle padding this fee was computed for.
-    ///
-    /// A [`ChangeStrategy`] that costs a transaction's Ironwood bundle as unpadded MUST record it
-    /// here, so that the builder produces the same action count the fee was charged against. The
-    /// default is [`BundlePadding::DEFAULT`].
-    #[cfg(feature = "orchard")]
-    pub fn with_ironwood_bundle_padding(mut self, padding: BundlePadding) -> Self {
-        self.ironwood_bundle_padding = padding;
+    /// Records the exact dummy-output counts this balance was computed for.
+    pub fn with_dummy_outputs(mut self, dummy_outputs: DummyOutputCounts) -> Self {
+        self.dummy_outputs = Some(dummy_outputs);
         self
     }
 
-    /// The Ironwood bundle padding this fee was computed for.
-    ///
-    /// The transaction builder takes its padding from here rather than deciding for itself; see
-    /// [`Self::with_ironwood_bundle_padding`].
-    #[cfg(feature = "orchard")]
-    pub fn ironwood_bundle_padding(&self) -> BundlePadding {
-        self.ironwood_bundle_padding
+    /// Returns the exact dummy-output counts this balance was computed for, when recorded.
+    pub fn dummy_outputs(&self) -> Option<DummyOutputCounts> {
+        self.dummy_outputs
     }
 
     /// The change values proposed by the [`ChangeStrategy`] that computed this balance.

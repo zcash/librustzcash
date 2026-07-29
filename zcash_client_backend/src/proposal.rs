@@ -997,7 +997,23 @@ impl<NoteRef> Step<NoteRef> {
     /// [`ChangeStrategy`]: crate::fees::ChangeStrategy
     #[cfg(feature = "orchard")]
     pub fn ironwood_bundle_padding(&self) -> BundlePadding {
-        self.balance().ironwood_bundle_padding()
+        let Some(dummy_outputs) = self.balance().dummy_outputs() else {
+            return BundlePadding::DEFAULT;
+        };
+
+        let real_outputs = self.output_count_in_pool(PoolType::IRONWOOD)
+            + self.change_count_in_pool(PoolType::IRONWOOD);
+        let target_actions = real_outputs + dummy_outputs.ironwood();
+
+        // `pad_to_minimum` is only an 8-bit floor. If the requested transaction is larger than
+        // that, its real spends and outputs already force the required action count, so no floor
+        // is needed.
+        u8::try_from(target_actions).map_or(BundlePadding::UNPADDED, |minimum| BundlePadding {
+            bundle_required: target_actions > 0
+                && self.input_count_in_pool(PoolType::IRONWOOD) == 0
+                && real_outputs == 0,
+            pad_to_minimum: Some(minimum.max(1)),
+        })
     }
 
     #[cfg(feature = "orchard")]
@@ -1124,7 +1140,7 @@ mod tests {
     use super::{Proposal, ProposalError, ShieldedInputs, Step};
     use crate::{
         data_api::wallet::{ConfirmationsPolicy, TargetHeight},
-        fees::{ChangeValue, TransactionBalance},
+        fees::{ChangeValue, DummyOutputCounts, TransactionBalance},
         wallet::Note,
     };
 
@@ -1254,7 +1270,7 @@ mod tests {
             prior_step_inputs: vec![],
             balance: TransactionBalance::new(change, canonical_fee())
                 .unwrap()
-                .with_ironwood_bundle_padding(BundlePadding::UNPADDED),
+                .with_dummy_outputs(DummyOutputCounts::new(0, 0, 0)),
             is_shielding: false,
         }
     }

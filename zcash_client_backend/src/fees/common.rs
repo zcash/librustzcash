@@ -10,10 +10,8 @@ use zcash_primitives::transaction::fees::{
 use zcash_protocol::zip318::PoolMigrationConstants;
 
 use crate::data_api::anchor_retention::PoolMigrationParams;
-#[cfg(feature = "orchard")]
-use zcash_protocol::PoolType;
 use zcash_protocol::{
-    ShieldedPool,
+    PoolType, ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
@@ -22,8 +20,8 @@ use zcash_protocol::{
 use crate::data_api::{AccountMeta, wallet::TargetHeight};
 
 use super::{
-    ChangeError, ChangeValue, DustAction, DustOutputPolicy, EphemeralBalance, SplitPolicy,
-    TransactionBalance, sapling as sapling_fees,
+    ChangeError, ChangeValue, DummyOutputCounts, DustAction, DustOutputPolicy, EphemeralBalance,
+    SplitPolicy, TransactionBalance, sapling as sapling_fees,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -432,8 +430,8 @@ where
     // output whose value is a canonical ZIP 318 denomination, which is exactly the shape of a
     // ZIP 318 migration transfer. Building it unpadded puts an ordinary turnstile-crossing
     // payment into that anonymity set rather than leaving it distinguishable by action count.
-    // `Step::ironwood_bundle_padding` decides the same question from the finished proposal, and
-    // the two must agree or the builder's exact-balance check will reject the transaction.
+    // The resulting dummy-output count is recorded below. `Step::ironwood_bundle_padding`
+    // reconstructs the builder's action target from that finished transaction shape.
     //
     // The value is only known here when the sole output is a PAYMENT, i.e. `change_count == 0`;
     // an Ironwood change value is what this function is in the middle of solving for. That costs
@@ -833,40 +831,51 @@ where
             .map(ChangeValue::ephemeral_transparent),
     );
 
-    // Record the padding the fee above was actually charged against, derived from the change set
-    // finally chosen rather than from any candidate considered along the way. The builder reads
-    // this back instead of re-deciding, so the two cannot disagree.
-    #[cfg(feature = "orchard")]
-    let ironwood_padding = {
-        let final_change = OutputManifest {
-            transparent: change
-                .iter()
-                .filter(|c| c.output_pool() == PoolType::TRANSPARENT)
-                .count(),
-            sapling: change
-                .iter()
-                .filter(|c| c.output_pool() == PoolType::SAPLING)
-                .count(),
-            orchard: change
-                .iter()
-                .filter(|c| c.output_pool() == PoolType::ORCHARD)
-                .count(),
-            ironwood: change
-                .iter()
-                .filter(|c| c.output_pool() == PoolType::IRONWOOD)
-                .count(),
-        };
-        if ironwood_is_canonical_crossing(final_change) {
-            BundlePadding::UNPADDED
-        } else {
-            BundlePadding::DEFAULT
-        }
+    // Record the exact number of dummy outputs in each shielded bundle. This is transaction
+    // shape, rather than a builder policy; it can therefore be serialized in a proposal and
+    // reproduced by every construction path without re-running the fee model.
+    let final_change = OutputManifest {
+        transparent: change
+            .iter()
+            .filter(|c| c.output_pool() == PoolType::TRANSPARENT)
+            .count(),
+        sapling: change
+            .iter()
+            .filter(|c| c.output_pool() == PoolType::SAPLING)
+            .count(),
+        orchard: change
+            .iter()
+            .filter(|c| c.output_pool() == PoolType::ORCHARD)
+            .count(),
+        ironwood: change
+            .iter()
+            .filter(|c| c.output_pool() == PoolType::IRONWOOD)
+            .count(),
     };
-
-    let balance = TransactionBalance::new(change, fee).map_err(|_| overflow())?;
+    let sapling_real_outputs = sapling.outputs().len() + final_change.sapling();
+    let sapling_dummy_outputs = sapling_output_count(final_change.sapling())?
+        .checked_sub(sapling_real_outputs)
+        .expect("the Sapling action count includes every real output");
     #[cfg(feature = "orchard")]
-    let balance = balance.with_ironwood_bundle_padding(ironwood_padding);
-    Ok(balance)
+    let orchard_dummy_outputs = orchard_action_count(final_change.orchard())?
+        .checked_sub(orchard.outputs().len() + final_change.orchard())
+        .expect("the Orchard action count includes every real output");
+    #[cfg(feature = "orchard")]
+    let ironwood_dummy_outputs = ironwood_action_count(final_change)?
+        .checked_sub(ironwood.outputs().len() + final_change.ironwood())
+        .expect("the Ironwood action count includes every real output");
+
+    TransactionBalance::new(change, fee)
+        .map(|balance| {
+            balance.with_dummy_outputs(DummyOutputCounts::new(
+                sapling_dummy_outputs,
+                #[cfg(feature = "orchard")]
+                orchard_dummy_outputs,
+                #[cfg(feature = "orchard")]
+                ironwood_dummy_outputs,
+            ))
+        })
+        .map_err(|_| overflow())
 }
 
 /// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided

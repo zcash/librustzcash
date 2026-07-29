@@ -8666,23 +8666,56 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     // comparison above must be proposed while funds remain. The built transaction takes the ZIP 318
     // rolling expiry rather than the builder's per-transaction one — every crossing in the same
     // modulus period shares it, so it identifies nothing.
-    // ROUND TRIP. The change strategy records the padding it charged the fee against; the builder
-    // reads that back rather than deciding again. Assert both ends and the transaction between
-    // them, so that a future change breaking the link fails here rather than at the builder's
-    // exact-balance check, or worse, silently on-chain.
+    // ROUND TRIP. The proposal records the exact dummy outputs costed by the fee model; the
+    // builder reads that transaction shape back rather than deciding again.
     assert_eq!(
         canonical
             .steps()
             .first()
             .balance()
-            .ironwood_bundle_padding(),
-        BundlePadding::UNPADDED,
-        "the fee model must record the unpadded shape it costed"
+            .dummy_outputs()
+            .expect("the fee model records dummy outputs")
+            .ironwood(),
+        0,
+        "a canonical crossing has no Ironwood dummy output"
     );
     assert_eq!(
         canonical.steps().first().ironwood_bundle_padding(),
         BundlePadding::UNPADDED,
         "and the step must report the recorded value to the builder"
+    );
+
+    // The proposal crosses the FFI boundary before it is built as a PCZT. Preserve all per-pool
+    // dummy-output counts through that serialization round-trip.
+    let proto = crate::proto::proposal::Proposal::from_standard_proposal(&canonical);
+    let serialized_dummy_outputs = proto.steps[0]
+        .balance
+        .as_ref()
+        .expect("a proposal step carries a balance")
+        .dummy_outputs
+        .as_ref()
+        .expect("new proposals serialize their dummy outputs");
+    assert_eq!(
+        (
+            serialized_dummy_outputs.sapling,
+            serialized_dummy_outputs.orchard,
+            serialized_dummy_outputs.ironwood,
+        ),
+        (0, 1, 0)
+    );
+    let canonical = proto
+        .try_into_standard_proposal(st.network(), st.wallet())
+        .expect("the canonical proposal must deserialize");
+    assert_eq!(
+        canonical
+            .steps()
+            .first()
+            .balance()
+            .dummy_outputs()
+            .expect("dummy outputs survive proposal decoding")
+            .ironwood(),
+        0,
+        "the PCZT proposal round-trip must preserve the Ironwood dummy-output count"
     );
 
     let txids = st.create_proposed_expecting(&canonical, 1);
