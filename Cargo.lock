@@ -7111,7 +7111,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.24.0-rc.4"
+version = "0.24.0-rc.5"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -7186,7 +7186,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.22.0-rc.4"
+version = "0.22.0-rc.5"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -7280,7 +7280,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -7332,7 +7332,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_pool_migration"
-version = "0.1.0-rc.3"
+version = "0.1.0-rc.4"
 dependencies = [
  "corez",
  "getset",
@@ -7428,7 +7428,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.10.1"
+version = "0.10.2"
 dependencies = [
  "corez",
  "document-features",

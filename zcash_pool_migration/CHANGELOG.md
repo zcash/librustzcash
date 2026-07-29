@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.4] - 2026-07-28
+
 ### Added
 - `zcash_pool_migration::build::AccountDerivation`, the ZIP 32 account whose
   spending key authorizes a migration's Orchard spends. Behind the `orchard`
@@ -19,6 +21,7 @@ and this library adheres to Rust's notion of
   committed migration's transfers that still need proofs.
 
 ### Changed
+- Migrated to `zcash_client_backend 0.24.0-rc.5`.
 - The ZIP 318 constants this crate defined are now defined by `zcash_protocol::zip318`
   and re-exported from their existing paths. `denomination::MIGRATION_MAX_DENOMINATION_ZEC`
   is renamed to `denomination::DENOM_CAP` and `denomination::RESIDUAL_MIGRATION_MIN` to

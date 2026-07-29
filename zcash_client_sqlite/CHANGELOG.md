@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.22.0-rc.5] - 2026-07-28
+
 ### Added
 - `zcash_client_sqlite::wallet::init::migrations::V_0_20_0`, `V_0_22_0_RC1` and
   `V_0_22_0_RC2`, the leaf migration sets for the releases published since
@@ -36,6 +38,8 @@ workspace.
   compilation failure.
 
 ### Changed
+- Migrated to `zcash_client_backend 0.24.0-rc.5`,
+  `zcash_pool_migration 0.1.0-rc.4`.
 - Every public error enum in this crate is now `#[non_exhaustive]`, so that
   future variants can be added without a breaking release. A `match` over any
   of them must now include a wildcard arm: `error::SqliteClientError`,
