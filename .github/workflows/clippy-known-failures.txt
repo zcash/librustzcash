@@ -32,8 +32,6 @@ pczt zcp-builder
 pczt zip-233
 zcash_address <none>
 zcash_address std
-zcash_client_backend pczt
-zcash_client_backend tor
 zcash_client_sqlite <none>
 zcash_client_sqlite expensive-tests
 zcash_client_sqlite multicore

@@ -13,8 +13,6 @@ use proptest::prelude::{Just, Strategy, prop_oneof};
 use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::Zatoshis};
 use zip321::Payment;
 
-#[cfg(feature = "transparent-inputs")]
-use crate::data_api::WalletWrite;
 use crate::{
     data_api::{
         self, Account as _, InputSource, OutputLockStore, WalletRead, WalletTest,

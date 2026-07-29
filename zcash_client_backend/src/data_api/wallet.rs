@@ -3184,21 +3184,19 @@ where
                     .iter()
                     .enumerate()
                     .filter_map(|(index, input)| {
-                        build_state
-                            .transparent_input_addresses
-                            .get(
-                                &TransparentAddress::from_script_from_chain(input.script_pubkey())
-                                    .expect("we created this with a supported transparent address"),
-                            )
-                            .and_then(|address_metadata| match address_metadata.source() {
-                                TransparentAddressSource::Derived {
-                                    scope,
-                                    address_index,
-                                } => Some((index, *scope, *address_index)),
-                                #[cfg(feature = "transparent-key-import")]
-                                TransparentAddressSource::StandalonePubkey(_)
-                                | TransparentAddressSource::StandaloneScript(_) => None,
-                            })
+                        let address_metadata = build_state.transparent_input_addresses.get(
+                            &TransparentAddress::from_script_from_chain(input.script_pubkey())
+                                .expect("we created this with a supported transparent address"),
+                        )?;
+                        match address_metadata.source() {
+                            TransparentAddressSource::Derived {
+                                scope,
+                                address_index,
+                            } => Some((index, *scope, *address_index)),
+                            #[cfg(feature = "transparent-key-import")]
+                            TransparentAddressSource::StandalonePubkey(_)
+                            | TransparentAddressSource::StandaloneScript(_) => None,
+                        }
                     })
                     .collect::<Vec<_>>();
 
