@@ -59,6 +59,9 @@ use crate::{
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 
+#[cfg(feature = "orchard")]
+use super::orchard::OrchardPoolTester;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
@@ -7771,7 +7774,6 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use super::orchard::OrchardPoolTester;
     use crate::data_api::TransactionStatus;
     use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
@@ -7920,7 +7922,6 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    use super::orchard::OrchardPoolTester;
     use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
     use crate::proposal::ProposalError;
     use zcash_primitives::transaction::TxVersion;
@@ -7995,8 +7996,6 @@ where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: serde::Serialize,
 {
-    use super::orchard::OrchardPoolTester;
-
     // A network on which NU6.3 — the version 6 transaction format — is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
@@ -8467,8 +8466,6 @@ pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    use super::orchard::OrchardPoolTester;
-
     // A network on which NU6.3 — the version 6 transaction format — is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
@@ -8613,8 +8610,6 @@ pub fn orchard_to_ironwood_self_migration_reports_fee_only_delta<Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    use super::orchard::OrchardPoolTester;
-
     // A network on which NU6.3 — the version 6 transaction format — is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
@@ -8763,7 +8758,6 @@ pub fn proposal_records_and_serializes_proposed_version<Dsf>(ds_factory: Dsf, ca
 where
     Dsf: DataStoreFactory,
 {
-    use super::orchard::OrchardPoolTester;
     use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
     use zcash_primitives::transaction::TxVersion;
 
