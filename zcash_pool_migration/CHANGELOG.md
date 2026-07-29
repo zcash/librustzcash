@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.4] - 2026-07-28
+
 ### Added
 - `zcash_pool_migration::build::AccountDerivation`, the ZIP 32 account whose
   spending key authorizes a migration's Orchard spends. Behind the `orchard`

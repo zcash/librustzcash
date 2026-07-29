@@ -9,6 +9,10 @@ audited_as = "0.24.0-rc.4"
 version = "0.16.1"
 audited_as = "0.16.0"
 
+[[unpublished.zcash_pool_migration]]
+version = "0.1.0-rc.4"
+audited_as = "0.1.0-rc.3"
+
 [[unpublished.zcash_protocol]]
 version = "0.10.2"
 audited_as = "0.10.1"
