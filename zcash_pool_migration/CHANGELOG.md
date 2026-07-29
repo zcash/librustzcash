@@ -7,6 +7,22 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `scheduling::SchedulingParams::ZIP_318` adopts the revised ZIP 318 timing:
+  transfer delays now have a mean of 66 blocks (previously 144) and
+  preparation delays a mean of 16 blocks (previously a provisional 24), with
+  both caps unchanged; the preparation delay is now defined by
+  `zcash_protocol::zip318::{PREP_DELAY_MEAN, PREP_DELAY_CAP}`. The re-exported
+  `scheduling::ANCHOR_AGE_CAP` is now 4 boundaries (previously 16).
+- `scheduling::SchedulingParams::new_with_default_distributions` now scales
+  each ZIP 318 delay mean and cap by the ratio of the given interval to the
+  ZIP 318 one, instead of deriving the delays from fixed cap/mean ratios.
+
+### Removed
+- `scheduling::DELAY_CAP_RATIO` and `scheduling::PREP_MEAN_DIVISOR`; the
+  revised ZIP 318 delay parameters are no longer related by fixed ratios. Read
+  the means and caps from a `SchedulingParams` instead.
+
 ## [0.1.0-rc.4] - 2026-07-28
 
 ### Added

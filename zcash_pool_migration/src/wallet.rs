@@ -138,7 +138,7 @@ where
     /// derived from that interval by the ZIP 318 ratios. A wallet on the standard grid therefore
     /// gets exactly the ZIP 318 delays, and a wallet configured with a shortened grid gets the same
     /// schedule shape compressed by the same factor, rather than a short grid crossed with
-    /// three-hour delays. Override the delays with [`Self::with_scheduling_delays`].
+    /// ninety-minute delays. Override the delays with [`Self::with_scheduling_delays`].
     pub fn new(
         wallet: &'a W,
         account: <W as InputSource>::AccountId,

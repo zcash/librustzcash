@@ -10,6 +10,21 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::zip318::{PREP_DELAY_MEAN, PREP_DELAY_CAP}`, the ZIP 318
+  preparation inter-arrival delay distribution.
+- `zcash_protocol::zip318::PoolMigrationConstants::preparation_delay`
+
+### Changed
+- `zcash_protocol::zip318::TRANSFER_DELAY_MEAN` is now 66 blocks (previously
+  144) and `zcash_protocol::zip318::ANCHOR_AGE_CAP` is now 4 boundaries
+  (previously 16), adopting the revised ZIP 318 migration timing.
+
+### Removed
+- `zcash_protocol::zip318::DELAY_CAP_RATIO`. ZIP 318 no longer relates each
+  delay cap to its mean by a shared ratio; use `TRANSFER_DELAY_CAP` and
+  `PREP_DELAY_CAP` directly.
+
 ## [0.10.2] - 2026-07-28
 
 ### Added

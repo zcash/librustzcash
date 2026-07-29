@@ -161,23 +161,6 @@ impl DelayDistribution {
     }
 }
 
-/// The ratio a [ZIP 318] delay distribution's cap bears to its mean: a draw more than four times
-/// the mean is discarded and redrawn, truncating the exponential's heavy tail. It is the same for
-/// the transfer and preparation delays. See [`SchedulingParams::new_with_default_distributions`].
-///
-/// Re-exported from [`zcash_protocol::zip318`], which owns the ZIP's specified values.
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
-pub use zcash_protocol::zip318::DELAY_CAP_RATIO;
-
-/// The ratio the anchor bucket interval bears to the PREPARATION delay mean: at the [ZIP 318]
-/// values, 144 blocks per bucket against 24 blocks between preparations. Preparations need only
-/// temporal decoupling from one another, not anchor bucketing, so they are spaced this much more
-/// tightly than the transfers. See [`SchedulingParams::new_with_default_distributions`].
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const PREP_MEAN_DIVISOR: NonZeroU32 = NonZeroU32::new(6).expect("6 is nonzero");
-
 /// The scheduling parameters a migration runs under: the anchor bucket grid and the two
 /// inter-arrival delay distributions.
 ///
@@ -193,15 +176,14 @@ pub struct SchedulingParams {
 }
 
 impl SchedulingParams {
-    /// The parameters specified by [ZIP 318] (with the provisional preparation spacing): a 144-block
-    /// anchor bucket interval, transfer delays of mean 144 blocks capped at 576 (`4 * mean`, about
-    /// twelve hours), and preparation delays of mean 24 blocks capped at 96.
+    /// The parameters specified by [ZIP 318]: a 144-block anchor bucket interval, transfer delays
+    /// of mean 66 blocks capped at 576 (about twelve hours), and preparation delays of mean 16
+    /// blocks capped at 96 (about two hours).
     ///
     /// Preparation transactions are fully shielded self-sends: they need TEMPORAL decoupling from
     /// one another (a burst of identically shaped transactions from one wallet is a linkable
     /// cluster), but no anchor bucketing — only the pool-crossing transfers anchor to boundaries —
-    /// so their spacing is much tighter than the transfers'. That spacing is provisional; it is not
-    /// yet specified by ZIP 318.
+    /// so their spacing is much tighter than the transfers'.
     ///
     /// [ZIP 318]: https://zips.z.cash/zip-0318
     pub const ZIP_318: Self = Self {
@@ -210,11 +192,9 @@ impl SchedulingParams {
             mean: zcash_protocol::zip318::TRANSFER_DELAY_MEAN,
             cap: zcash_protocol::zip318::TRANSFER_DELAY_CAP,
         },
-        // Provisional: the preparation spacing is not yet specified by ZIP 318, so it stays here
-        // rather than moving to `zcash_protocol::zip318` with the specified values.
         preparation_delay: DelayDistribution {
-            mean: NonZeroU32::new(24).expect("24 is nonzero"),
-            cap: NonZeroU32::new(96).expect("96 is nonzero"),
+            mean: zcash_protocol::zip318::PREP_DELAY_MEAN,
+            cap: zcash_protocol::zip318::PREP_DELAY_CAP,
         },
     };
 
@@ -231,10 +211,10 @@ impl SchedulingParams {
         }
     }
 
-    /// Constructs scheduling parameters for `anchor_bucket_interval`, deriving both delay
-    /// distributions from it by the ratios [`Self::ZIP_318`] uses: the transfer delay has a mean of
-    /// one bucket interval, the preparation delay a mean of a
-    /// [`PREP_MEAN_DIVISOR`]th of one, and each is capped at [`DELAY_CAP_RATIO`] times its own mean.
+    /// Constructs scheduling parameters for `anchor_bucket_interval`, scaling every delay
+    /// parameter of [`Self::ZIP_318`] by the ratio the interval bears to
+    /// [`AnchorBucketInterval::ZIP_318`]: each mean and cap is its ZIP 318 value multiplied by
+    /// `interval / 144`, truncated.
     ///
     /// At [`AnchorBucketInterval::ZIP_318`] this reproduces [`Self::ZIP_318`] exactly. It is the
     /// constructor to reach for on a test network: shortening the bucket interval alone would leave
@@ -242,29 +222,31 @@ impl SchedulingParams {
     /// the whole schedule by the same factor compresses it while preserving the shape ZIP 318
     /// specifies.
     ///
-    /// The preparation mean is clamped up to one block for bucket intervals below
-    /// [`PREP_MEAN_DIVISOR`], and the caps saturate at [`u32::MAX`], so every interval yields a
-    /// usable distribution.
+    /// A scaled value that truncates to zero is clamped up to one block, and one that exceeds
+    /// `u32::MAX` saturates, so every interval yields a usable pair of distributions.
     pub fn new_with_default_distributions(anchor_bucket_interval: AnchorBucketInterval) -> Self {
-        let transfer_mean = anchor_bucket_interval.block_count();
-        // Integer division truncates, and a mean of zero is not a distribution, so clamp up.
-        let preparation_mean = match NonZeroU32::new(transfer_mean.get() / PREP_MEAN_DIVISOR.get())
-        {
-            Some(mean) => mean,
-            None => NonZeroU32::MIN,
+        let scale = |value: NonZeroU32| -> NonZeroU32 {
+            let scaled = u64::from(value.get())
+                * u64::from(anchor_bucket_interval.block_count().get())
+                / u64::from(AnchorBucketInterval::ZIP_318.block_count().get());
+            match u32::try_from(scaled) {
+                Ok(v) => NonZeroU32::new(v).unwrap_or(NonZeroU32::MIN),
+                Err(_) => NonZeroU32::MAX,
+            }
         };
-        // Built directly rather than through `DelayDistribution::new`: each cap is its own mean
-        // multiplied by `DELAY_CAP_RATIO` under saturating arithmetic, so it is never below that
-        // mean and the validated constructor's failure case is unreachable here.
+        // Built directly rather than through `DelayDistribution::new`: scaling is monotone
+        // (truncation, the clamp, and the saturation all preserve order), so each scaled cap is
+        // never below its scaled mean and the validated constructor's failure case is unreachable
+        // here.
         Self {
             anchor_bucket_interval,
             transfer_delay: DelayDistribution {
-                mean: transfer_mean,
-                cap: transfer_mean.saturating_mul(DELAY_CAP_RATIO),
+                mean: scale(zcash_protocol::zip318::TRANSFER_DELAY_MEAN),
+                cap: scale(zcash_protocol::zip318::TRANSFER_DELAY_CAP),
             },
             preparation_delay: DelayDistribution {
-                mean: preparation_mean,
-                cap: preparation_mean.saturating_mul(DELAY_CAP_RATIO),
+                mean: scale(zcash_protocol::zip318::PREP_DELAY_MEAN),
+                cap: scale(zcash_protocol::zip318::PREP_DELAY_CAP),
             },
         }
     }
@@ -736,6 +718,13 @@ pub fn schedule<R: RngCore + CryptoRng>(
 /// number of failed fair-coin flips plus one (ZIP 318 ANCHOR-AGE-DRAW MUST). So `P(a = 1) = 1/2`,
 /// `P(a = 2) = 1/4`, ...; the modal age is 1, the mean age is 2, and age 0 (the most recent
 /// boundary) is NEVER produced. Each bit of a fresh `u64` is one fair coin flip.
+///
+/// Age 0 is excluded DELIBERATELY, declining a proposed ZIP 318 revision that would admit it: a
+/// transfer anchored to the most recent boundary must have been proved in the interval since that
+/// boundary, so when its broadcast falls close to the boundary, a light wallet server that also
+/// saw the wallet sync inside that narrow window can correlate the two by IP address. Ages `>= 1`
+/// keep the proving window at least one full boundary interval wide. See
+/// <https://github.com/zcash/zips/pull/1343#issuecomment-5124302101>.
 fn draw_anchor_age<R: RngCore>(rng: &mut R) -> u32 {
     let mut age: u32 = 1;
     loop {
@@ -992,21 +981,23 @@ mod tests {
     /// the ZIP 318 shape compressed rather than a distorted one.
     #[test]
     fn default_distributions_scale_with_the_interval() {
-        // A twelfth of the ZIP 318 interval: 12 blocks per bucket.
+        // A twelfth of the ZIP 318 interval: 12 blocks per bucket, so every delay parameter is a
+        // twelfth of its ZIP 318 value, truncated.
         let p = SchedulingParams::new_with_default_distributions(interval(12));
-        assert_eq!(p.transfer_delay().mean().get(), 12);
-        assert_eq!(p.transfer_delay().cap().get(), 48);
-        assert_eq!(p.preparation_delay().mean().get(), 2);
-        assert_eq!(p.preparation_delay().cap().get(), 8);
+        assert_eq!(p.transfer_delay().mean().get(), 5); // floor(66 / 12)
+        assert_eq!(p.transfer_delay().cap().get(), 48); // 576 / 12
+        assert_eq!(p.preparation_delay().mean().get(), 1); // floor(16 / 12)
+        assert_eq!(p.preparation_delay().cap().get(), 8); // 96 / 12
     }
 
     /// Every bucket interval yields a usable pair of distributions, including the degenerate ends:
-    /// an interval below the preparation divisor would truncate that mean to zero, and a very large
-    /// one would overflow the caps.
+    /// a short enough interval would truncate the preparation mean to zero, and a very large one
+    /// would overflow the caps.
     #[test]
     fn default_distributions_are_usable_at_the_extremes() {
-        // Below `PREP_MEAN_DIVISOR` the preparation mean truncates to zero, and is clamped up.
-        for blocks in 1..=PREP_MEAN_DIVISOR.get() {
+        // Up to 8 blocks per bucket the scaled preparation mean (16 * blocks / 144) truncates to
+        // zero, and is clamped up.
+        for blocks in 1..=8 {
             let p = SchedulingParams::new_with_default_distributions(interval(blocks));
             assert_eq!(p.preparation_delay().mean(), NonZeroU32::MIN, "{blocks}");
             assert!(p.preparation_delay().cap() >= p.preparation_delay().mean());
@@ -1073,9 +1064,10 @@ mod tests {
             sum += u64::from(P.transfer_delay().draw(&mut r));
         }
         let mean = sum as f64 / n as f64;
-        // Analytic truncated mean is ~124 blocks; allow a wide band.
+        // The cap sits at more than eight means, so truncation barely bites: the analytic
+        // truncated mean is ~65.9 blocks. Allow a wide band.
         assert!(
-            (100.0..150.0).contains(&mean),
+            (60.0..72.0).contains(&mean),
             "empirical mean {mean} out of expected band"
         );
     }
@@ -1096,12 +1088,12 @@ mod tests {
 
     /// Golden vectors for the ZIP 318 transfer delay over several seeds. These are the captured deterministic
     /// draws; the `seed=1` sequence matches the per-step gaps pinned in
-    /// [`schedule_broadcast_heights_golden`] (74, 12, 131, 36, 48, ...).
+    /// [`schedule_broadcast_heights_golden`] (34, 6, 60, 16, 22, ...).
     #[test]
     fn draw_delay_golden() {
-        let exp_seed1 = [74, 12, 131, 36, 48, 179, 89, 24];
-        let exp_seed42 = [165, 432, 80, 142, 49, 23, 53, 235];
-        let exp_seed7 = [25, 26, 175, 187, 132, 64, 12, 273];
+        let exp_seed1 = [34, 6, 60, 16, 22, 82, 41, 11];
+        let exp_seed42 = [76, 198, 37, 65, 22, 11, 24, 108];
+        let exp_seed7 = [11, 12, 80, 86, 61, 29, 6, 125];
         check_delay_golden(1, &exp_seed1);
         check_delay_golden(42, &exp_seed42);
         check_delay_golden(7, &exp_seed7);
@@ -1608,33 +1600,33 @@ mod tests {
 
     /// Golden vectors for the cumulative broadcast schedule: fixed `(commit, n, seed)` triples pinned
     /// to their exact height sequences (a regression guard on the delay sampling), with the per-step
-    /// gaps noted so the drawn delays are visible. The ZIP 318 transfer delay has mean 144 blocks
+    /// gaps noted so the drawn delays are visible. The ZIP 318 transfer delay has mean 66 blocks
     /// and cap 576.
     #[test]
     fn schedule_broadcast_heights_golden() {
         // n = 0 schedules nothing, whatever the seed.
         check_schedule_golden(1_000_000, 0, 1, &[]);
-        // gaps: 74, 12, 131, 36, 48
+        // gaps: 34, 6, 60, 16, 22
         check_schedule_golden(
             1_000_000,
             5,
             1,
-            &[1_000_074, 1_000_086, 1_000_217, 1_000_253, 1_000_301],
+            &[1_000_034, 1_000_040, 1_000_100, 1_000_116, 1_000_138],
         );
-        // gaps: 165, 432, 80, 142, 49, 23, 53, 235
+        // gaps: 76, 198, 37, 65, 22, 11, 24, 108
         check_schedule_golden(
             2_000_000,
             8,
             42,
             &[
-                2_000_165, 2_000_597, 2_000_677, 2_000_819, 2_000_868, 2_000_891, 2_000_944,
-                2_001_179,
+                2_000_076, 2_000_274, 2_000_311, 2_000_376, 2_000_398, 2_000_409, 2_000_433,
+                2_000_541,
             ],
         );
-        // gaps: 25, 26, 175
-        check_schedule_golden(500_000, 3, 7, &[500_025, 500_051, 500_226]);
-        // commit height 0; gaps: 11, 6, 225, 58, 13, 28
-        check_schedule_golden(0, 6, 12_345, &[11, 17, 242, 300, 313, 341]);
+        // gaps: 11, 12, 80
+        check_schedule_golden(500_000, 3, 7, &[500_011, 500_023, 500_103]);
+        // commit height 0; gaps: 5, 3, 103, 27, 6, 13
+        check_schedule_golden(0, 6, 12_345, &[5, 8, 111, 138, 144, 157]);
     }
 
     proptest! {
@@ -1659,8 +1651,8 @@ mod tests {
     /// Golden vectors for the ZIP 318 preparation delay: the exact deterministic draws for fixed
     /// seeds, pinning the tighter preparation spacing as a regression guard, with every delay within
     /// its cap. Derivable from the transfer goldens in [`draw_delay_golden`] by the scale law: the
-    /// same unit draws scaled by the mean ratio `144 / 24 = 6` (for example seed 1's 74, 12, 131,
-    /// ... become 12, 2, 22, ...).
+    /// same unit draws scaled by the mean ratio `16 / 66` (for example seed 1's 34, 6, 60, ...
+    /// become 8, 1, 15, ...).
     #[test]
     fn draw_prep_delay_golden() {
         fn check(seed: u64, expected: &[u32]) {
@@ -1673,8 +1665,8 @@ mod tests {
                 assert!(d <= PREP_MAX_DELAY, "delay {d} exceeds the preparation cap");
             }
         }
-        let exp_seed1 = [12, 2, 22, 6, 8, 30, 15, 4];
-        let exp_seed42 = [27, 72, 13, 24, 8, 4, 9, 39];
+        let exp_seed1 = [8, 1, 15, 4, 5, 20, 10, 3];
+        let exp_seed42 = [18, 48, 9, 16, 5, 3, 6, 26];
         check(1, &exp_seed1);
         check(42, &exp_seed42);
     }
@@ -1906,18 +1898,19 @@ mod tests {
     }
 
     /// Golden vectors for [`draw_anchor_boundary`]. The candidate set spans boundaries `288..=2736`
-    /// (`act = 144`, `funding = 288`, chain tip `2880`); each pinned sequence is the exact
-    /// recency-weighted draw, and every entry is checked against the candidate-set invariants. The
-    /// modal pick is the highest candidate 2736 (age 1), as the `Geometric(1/2)` age draw expects.
-    /// A tip in the middle of the same boundary interval derives the same boundary and must
-    /// reproduce the same vectors.
+    /// (`act = 144`, `funding = 288`, chain tip `2880`), of which the `ANCHOR_AGE_CAP` of 4
+    /// boundaries admits only `2304..=2736`; each pinned sequence is the exact recency-weighted
+    /// draw, and every entry is checked against the candidate-set invariants. The modal pick is the
+    /// highest candidate 2736 (age 1), as the `Geometric(1/2)` age draw expects. A tip in the
+    /// middle of the same boundary interval derives the same boundary and must reproduce the same
+    /// vectors.
     #[test]
     fn draw_anchor_boundary_golden() {
         let (act, funding, tip) = (MODULUS, 2 * MODULUS, 20 * MODULUS);
         let exp_seed1 = [2736, 2736, 2736, 2592, 2736, 2304];
-        let exp_seed42 = [2736, 2304, 2448, 2592, 2160, 2592];
+        let exp_seed42 = [2736, 2304, 2448, 2592, 2592, 2448];
         let exp_seed7 = [2736, 2592, 2736, 2736, 2304, 2592];
-        let exp_seed100 = [2592, 2736, 2736, 2592, 2016, 2736];
+        let exp_seed100 = [2592, 2736, 2736, 2592, 2736, 2736];
         check_anchor_golden(act, funding, tip, 1, &exp_seed1);
         check_anchor_golden(act, funding, tip, 42, &exp_seed42);
         check_anchor_golden(act, funding, tip, 7, &exp_seed7);
@@ -2047,7 +2040,7 @@ mod tests {
         check_schedule_golden_pairs(1_000_000, 0, 1, &exp_broadcast_empty, &exp_expiry_empty);
 
         // commit = 1_000_000, n = 5, seed = 1: broadcast heights and their shared expiry.
-        let exp_broadcast_c1m_seed1 = [1_000_074, 1_000_086, 1_000_217, 1_000_253, 1_000_301];
+        let exp_broadcast_c1m_seed1 = [1_000_034, 1_000_040, 1_000_100, 1_000_116, 1_000_138];
         let exp_expiry_c1m_seed1 = [1_036_800; 5];
         check_schedule_golden_pairs(
             1_000_000,
@@ -2058,7 +2051,7 @@ mod tests {
         );
 
         // commit = 0, n = 6, seed = 12_345.
-        let exp_broadcast_c0_seed12345 = [11, 17, 242, 300, 313, 341];
+        let exp_broadcast_c0_seed12345 = [5, 8, 111, 138, 144, 157];
         let exp_expiry_c0_seed12345 = [69_120; 6];
         check_schedule_golden_pairs(
             0,
