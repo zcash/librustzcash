@@ -43,7 +43,8 @@ workspace.
   Ironwood action instead of two; it therefore pays one fewer ZIP 317 marginal-fee
   action and requires up to two bucket intervals of additional confirmations on its
   inputs. When the wallet cannot fund it that way, an ordinary transaction is proposed
-  instead. Supplying an explicit `expiry_height` for such a transaction is rejected with
+  instead. Supplying an explicit `expiry_height` for such a transaction, to either
+  `create_proposed_transactions` or `create_pczt_from_proposal`, is rejected with
   `Error::ExpiryHeightConflictsWithCanonicalCrossing`.
 - `zcash_client_backend::fees::ChangeStrategy::compute_balance` takes two additional
   arguments after `target_height`: `anchor_height: BlockHeight` and

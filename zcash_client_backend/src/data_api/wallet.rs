@@ -954,6 +954,27 @@ fn canonical_crossing_candidate<ParamsT: consensus::Parameters>(
         }
 }
 
+/// Returns whether `step` will be built as a canonical ZIP 318 crossing, under the ZIP 318
+/// parameters `wallet_db` reports and the fee the canonical shape costs at `target_height`.
+///
+/// Shared by every path that builds a proposal, so that each asks the same question of the same
+/// data. `create_pczt_from_proposal` in particular applies its expiry override after the builder
+/// has run, and so cannot rely on the check inside `build_proposed_transaction`.
+#[cfg(feature = "orchard")]
+fn step_is_canonical_crossing<DbT, ParamsT, N>(
+    wallet_db: &DbT,
+    params: &ParamsT,
+    step: &Step<N>,
+    target_height: TargetHeight,
+) -> bool
+where
+    DbT: WalletRead,
+    ParamsT: consensus::Parameters,
+{
+    crate::fees::canonical_crossing_fee(params, target_height.into())
+        .is_ok_and(|fee| step.is_canonical_crossing(&wallet_db.pool_migration_params(), fee))
+}
+
 /// Proposes making a payment to the specified address from the given account.
 ///
 /// Returns the proposal, which may then be executed using [`create_proposed_transactions`].
@@ -1884,11 +1905,7 @@ where
     // would emit a transaction that is canonical in every respect but one.
     #[cfg(feature = "orchard")]
     let expiry_height = {
-        let canonical_fee =
-            crate::fees::canonical_crossing_fee(params, min_target_height.into()).ok();
-        if canonical_fee.is_some_and(|fee| {
-            proposal_step.is_canonical_crossing(&wallet_db.pool_migration_params(), fee)
-        }) {
+        if step_is_canonical_crossing(wallet_db, params, proposal_step, min_target_height) {
             match expiry_height {
                 Some(requested) => {
                     return Err(Error::ExpiryHeightConflictsWithCanonicalCrossing { requested });
@@ -2872,6 +2889,18 @@ where
         // since overriding it via the builder would be redundant with that existing mechanism.
         None,
     )?;
+
+    // This path applies its expiry AFTER the builder has run, so the refusal inside
+    // `build_proposed_transaction` — which saw `None` above — cannot see the caller's argument.
+    // Without this, an override would silently overwrite the ZIP 318 rolling expiry that
+    // `build_proposed_transaction` set, leaving a transaction canonical in every respect but the
+    // one that is committed and publicly visible.
+    #[cfg(feature = "orchard")]
+    if let Some(requested) = expiry_height
+        && step_is_canonical_crossing(wallet_db, params, proposal_step, min_target_height)
+    {
+        return Err(Error::ExpiryHeightConflictsWithCanonicalCrossing { requested });
+    }
 
     // Build the transaction with the specified fee rule
     let mut build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
