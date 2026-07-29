@@ -899,6 +899,80 @@ mod tests {
         );
     }
 
+    /// The change strategy RECORDS the Ironwood padding it charged the fee against, so the builder
+    /// can reproduce that action count instead of deriving it a second time. A canonical crossing
+    /// is costed unpadded; a payment one zatoshi off a canonical denomination, identical in every
+    /// other respect, is costed padded.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn the_change_strategy_records_the_padding_it_costed() {
+        use zcash_primitives::transaction::builder::BundlePadding;
+        use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
+
+        use crate::fees::tests::TestOrchardInput;
+
+        let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedPool::Orchard,
+            DustOutputPolicy::default(),
+        );
+        let zip318 = PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318);
+        let interval = AnchorBucketInterval::ZIP_318;
+
+        // An anchor ON the grid, as a canonical crossing requires.
+        let anchor = interval.boundary_at_or_below(BlockHeight::from_u32(2_000_000));
+        let height = TargetHeight::from(BlockHeight::from_u32(u32::from(anchor) + 10));
+
+        // One Orchard input, large enough that its change stays in Orchard rather than being
+        // promoted to Ironwood by the turnstile rule.
+        let orchard_inputs = [TestOrchardInput {
+            note_id: 0,
+            value: Zatoshis::const_from_u64(10_000_000),
+        }];
+        let orchard_view = (
+            ::orchard::bundle::BundleVersion::orchard_v3(),
+            &orchard_inputs[..],
+            &[] as &[Infallible],
+        );
+        let sapling_view = (
+            sapling::builder::BundleType::DEFAULT,
+            &[] as &[Infallible],
+            &[] as &[Infallible],
+        );
+
+        let recorded_for = |value: Zatoshis| {
+            let ironwood_outputs = [OrchardPayment::new(value)];
+            let ironwood_view = (
+                ::orchard::bundle::BundleVersion::ironwood_v3(),
+                &[] as &[Infallible],
+                &ironwood_outputs[..],
+            );
+            change_strategy
+                .compute_balance::<_, u32>(
+                    &Network::TestNetwork,
+                    height,
+                    anchor,
+                    &zip318,
+                    &[] as &[TestTransparentInput],
+                    &[] as &[TxOut],
+                    &sapling_view,
+                    &orchard_view,
+                    &ironwood_view,
+                    None,
+                    &(),
+                )
+                .expect("the input covers the payment and its fee")
+                .ironwood_bundle_padding()
+        };
+
+        assert_eq!(recorded_for(MAX_RESIDUAL_VALUE), BundlePadding::UNPADDED);
+        assert_eq!(
+            recorded_for((MAX_RESIDUAL_VALUE + Zatoshis::const_from_u64(1)).unwrap()),
+            BundlePadding::DEFAULT
+        );
+    }
+
     #[test]
     #[cfg(feature = "orchard")]
     fn ironwood_outputs_are_charged_actions() {

@@ -8471,6 +8471,7 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
+    use zcash_primitives::transaction::builder::BundlePadding;
     use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
 
     use crate::data_api::testing::orchard::OrchardPoolTester;
@@ -8598,7 +8599,41 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     // comparison above must be proposed while funds remain. The built transaction takes the ZIP 318
     // rolling expiry rather than the builder's per-transaction one — every crossing in the same
     // modulus period shares it, so it identifies nothing.
+    // ROUND TRIP. The change strategy records the padding it charged the fee against; the builder
+    // reads that back rather than deciding again. Assert both ends and the transaction between
+    // them, so that a future change breaking the link fails here rather than at the builder's
+    // exact-balance check, or worse, silently on-chain.
+    assert_eq!(
+        canonical
+            .steps()
+            .first()
+            .balance()
+            .ironwood_bundle_padding(),
+        BundlePadding::UNPADDED,
+        "the fee model must record the unpadded shape it costed"
+    );
+    assert_eq!(
+        canonical.steps().first().ironwood_bundle_padding(),
+        BundlePadding::UNPADDED,
+        "and the step must report the recorded value to the builder"
+    );
+
     let txids = st.create_proposed_expecting(&canonical, 1);
+    let built = st
+        .wallet()
+        .get_transaction(txids[0])
+        .unwrap()
+        .expect("the transaction was stored");
+    assert_eq!(
+        built
+            .ironwood_bundle()
+            .expect("a crossing carries an Ironwood bundle")
+            .actions()
+            .len(),
+        1,
+        "the BUILT Ironwood bundle must have the single action the fee was charged for"
+    );
+
     let tx = st.get_tx_from_history(txids[0]).unwrap().unwrap();
     assert_eq!(
         tx.expiry_height(),
@@ -8606,6 +8641,11 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
             canonical.min_target_height()
         ))),
         "a canonical crossing must carry the ZIP 318 rolling expiry"
+    );
+    assert_eq!(
+        tx.fee_paid(),
+        Some(canonical_fee),
+        "and the canonical ZIP 317 fee that shape costs"
     );
 }
 
