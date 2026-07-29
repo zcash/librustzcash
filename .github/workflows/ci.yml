@@ -7,6 +7,36 @@ on:
   push:
     branches: main
   merge_group:
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: >-
+    ${{
+      format(
+        'ci-{0}-{1}-{2}',
+        github.workflow,
+        github.event_name,
+        github.event.pull_request.number || github.ref
+      )
+    }}
+  cancel-in-progress: >-
+    ${{
+      github.event_name == 'pull_request'
+      || (
+        github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      )
+    }}
+
+env:
+  # Full debug information substantially increases optimized test linking time and
+  # cache size, particularly on Windows. Line tables retain useful CI backtraces.
+  CARGO_PROFILE_TEST_DEBUG: 1
+  # Proving code uses Rayon internally. Capping both layers prevents each
+  # concurrent libtest case from trying to occupy the whole runner.
+  RAYON_NUM_THREADS: 2
 
 jobs:
   required-test:
@@ -19,40 +49,26 @@ jobs:
       matrix:
         target:
           - Linux
-        state:
-          - transparent
-          - transparent-inputs-only
-          - transparent-key-encoding-only
-          - Sapling-only
-          - Orchard
-          - all-pools
-          - all-features
-          - NU6.3
-          - NU7
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'schedule'
+              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NU7"]'
+              || (
+                github.event_name == 'pull_request'
+                && '["all-features"]'
+                || '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features"]'
+              )
+            )
+          }}
 
         include:
           - target: Linux
             os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
-          - state: transparent
-            transparent-pool: true
-          - state: transparent-inputs-only
-            extra_flags: transparent-inputs
-          - state: transparent-key-encoding-only
-            extra_flags: transparent-key-encoding
-          - state: Orchard
-            orchard-pool: true
-          - state: all-pools
-            all-pools: true
-          - state: all-features
-            all-features: true
-          - state: NU7
-            all-features: true
-            rustflags: '--cfg zcash_unstable="nu7"'
-
     env:
-      RUSTFLAGS: ${{ matrix.rustflags }}
-      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+      RUSTFLAGS: ${{ matrix.state == 'NU7' && '--cfg zcash_unstable="nu7"' || '' }}
+      RUSTDOCFLAGS: ${{ matrix.state == 'NU7' && '--cfg zcash_unstable="nu7"' || '' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,15 +77,25 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          transparent-pool: ${{ matrix.transparent-pool || false }}
-          orchard-pool: ${{ matrix.orchard-pool || false }}
-          all-pools: ${{ matrix.all-pools || false }}
-          all-features: ${{ matrix.all-features || false }}
-          extra-features: ${{ matrix.extra_flags || '' }}
+          transparent-pool: ${{ matrix.state == 'transparent' }}
+          orchard-pool: ${{ matrix.state == 'Orchard' }}
+          all-pools: ${{ matrix.state == 'all-pools' }}
+          all-features: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' }}
+          extra-features: >-
+            ${{
+              matrix.state == 'transparent-inputs-only'
+              && 'transparent-inputs'
+              || (
+                matrix.state == 'transparent-key-encoding-only'
+                && 'transparent-key-encoding'
+                || ''
+              )
+            }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: msrv
-          save-if: ${{ matrix.state == 'all-features' }}
+          # NU7 has a distinct RUSTFLAGS-derived cache key.
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' }}
       - name: Run tests
         shell: bash
         env:
@@ -82,12 +108,70 @@ jobs:
           elif [[ -n "$FEATURES" ]]; then
             feature_flags+=(--features "$FEATURES")
           fi
-          cargo test --workspace "${feature_flags[@]}"
+          cargo test --workspace "${feature_flags[@]}" -- --test-threads=2
       - name: Verify working directory is clean
         run: git diff --exit-code
 
+  feature-check:
+    name: Check ${{ matrix.state }} test targets
+    runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'pull_request'
+              && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools"]'
+              || '["covered-by-runtime-matrix"]'
+            )
+          }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: prepare
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: ./.github/actions/prepare
+        with:
+          transparent-pool: ${{ matrix.state == 'transparent' }}
+          orchard-pool: ${{ matrix.state == 'Orchard' }}
+          all-pools: ${{ matrix.state == 'all-pools' }}
+          extra-features: >-
+            ${{
+              matrix.state == 'transparent-inputs-only'
+              && 'transparent-inputs'
+              || (
+                matrix.state == 'transparent-key-encoding-only'
+                && 'transparent-key-encoding'
+                || ''
+              )
+            }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          shared-key: msrv
+          save-if: "false"
+      - name: Check all test targets
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo check --workspace --all-targets "${feature_flags[@]}"
+      - name: Feature configuration runtime coverage
+        if: ${{ github.event_name != 'pull_request' }}
+        run: echo "The full feature matrix runs tests for this event."
+
   test:
     name: Test ${{ matrix.state }} on ${{ matrix.target }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     strategy:
@@ -95,14 +179,14 @@ jobs:
         target:
           - macOS
           - Windows
-        state:
-          - transparent
-          - Sapling-only
-          - Orchard
-          - all-pools
-          - all-features
-          - NU6.3
-          - NU7
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'schedule'
+              && '["all-features", "NU7"]'
+              || '["all-features"]'
+            )
+          }}
 
         include:
           - target: macOS
@@ -110,29 +194,13 @@ jobs:
           - target: Windows
             os: ${{ vars.WINDOWS_LARGE_RUNNER || 'windows-latest' }}
 
-          - state: transparent
-            transparent-pool: true
-          - state: Orchard
-            orchard-pool: true
-          - state: all-pools
-            all-pools: true
-          - state: all-features
-            all-features: true
-          - state: NU7
-            all-features: true
-            rustflags: '--cfg zcash_unstable="nu7"'
-
         exclude:
-          - target: macOS
-            state: all-features
-          - target: macOS
-            state: NU6.3
           - target: macOS
             state: NU7
 
     env:
-      RUSTFLAGS: ${{ matrix.rustflags }}
-      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+      RUSTFLAGS: ${{ matrix.state == 'NU7' && '--cfg zcash_unstable="nu7"' || '' }}
+      RUSTDOCFLAGS: ${{ matrix.state == 'NU7' && '--cfg zcash_unstable="nu7"' || '' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -141,15 +209,11 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          transparent-pool: ${{ matrix.transparent-pool || false }}
-          orchard-pool: ${{ matrix.orchard-pool || false }}
-          all-pools: ${{ matrix.all-pools || false }}
-          all-features: ${{ matrix.all-features || false }}
-          extra-features: ${{ matrix.extra_flags || '' }}
+          all-features: true
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: msrv
-          save-if: ${{ matrix.state == 'all-features' && matrix.target != 'Windows' }}
+          save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' }}
       - name: Run tests
         shell: bash
         env:
@@ -162,38 +226,32 @@ jobs:
           elif [[ -n "$FEATURES" ]]; then
             feature_flags+=(--features "$FEATURES")
           fi
-          cargo test --workspace "${feature_flags[@]}"
+          cargo test --workspace "${feature_flags[@]}" -- --test-threads=2
       - name: Verify working directory is clean
         run: git diff --exit-code
 
   test-slow:
-    name: Slow Test ${{ matrix.state }} on ${{ matrix.target }}
+    name: Expensive Test ${{ matrix.state }} on ${{ matrix.target }}
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       matrix:
         target:
           - Linux
-        state: # all-pools intentionally omitted
-          - transparent
-          - Sapling-only
-          - Orchard
-          - all-features
-          - NU6.3
-          - NU7
+        state: >-
+          ${{
+            fromJSON(
+              github.event_name == 'schedule'
+              && '["all-pools", "NU7"]'
+              || '["all-pools"]'
+            )
+          }}
 
         include:
           - target: Linux
             os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
 
-          - state: transparent
-            transparent-pool: true
-          - state: Orchard
-            orchard-pool: true
-          - state: all-features
-            all-features: true
           - state: NU7
-            all-features: true
             rustflags: '--cfg zcash_unstable="nu7"'
 
     env:
@@ -207,11 +265,8 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          transparent-pool: ${{ matrix.transparent-pool || false }}
-          orchard-pool: ${{ matrix.orchard-pool || false }}
-          all-pools: false
-          all-features: ${{ matrix.all-features || false }}
-          extra-features: ${{ matrix.extra_flags || '' }}
+          all-pools: true
+          extra-features: pczt-tests
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: msrv
@@ -228,9 +283,35 @@ jobs:
           elif [[ -n "$FEATURES" ]]; then
             feature_flags+=(--features "$FEATURES")
           fi
-          cargo test --workspace "${feature_flags[@]}" --features expensive-tests
+          cargo test \
+            --workspace \
+            "${feature_flags[@]}" \
+            --features expensive-tests \
+            -- \
+            --test-threads=2
       - name: Verify working directory is clean
         run: git diff --exit-code
+
+  notify-nightly-failure:
+    name: Notify Slack of nightly test failure
+    needs: test-slow
+    if: ${{ always() && github.event_name == 'schedule' && needs.test-slow.result != 'success' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TEST_RESULT: ${{ needs.test-slow.result }}
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
+        with:
+          errors: true
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: >-
+              librustzcash nightly expensive tests ended with
+              ${{ env.TEST_RESULT }}: ${{ env.RUN_URL }}
 
   build-latest:
     name: Latest build on ${{ matrix.os }}
@@ -600,6 +681,7 @@ jobs:
     name: Required status checks have passed
     needs:
       - required-test
+      - feature-check
       - build-latest
       - build-nodefault
       - build-nostd

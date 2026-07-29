@@ -3471,6 +3471,11 @@ impl BlockDb {
     pub fn for_path<P: AsRef<Path>>(path: P) -> Result<Self, rusqlite::Error> {
         rusqlite::Connection::open(path).map(BlockDb)
     }
+
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub(crate) fn from_connection(conn: rusqlite::Connection) -> Self {
+        Self(conn)
+    }
 }
 
 impl BlockSource for BlockDb {
