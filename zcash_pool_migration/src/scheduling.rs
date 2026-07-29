@@ -573,11 +573,7 @@ pub fn schedule_prep_broadcast_heights<R: RngCore + CryptoRng>(
 /// and two [`EXPIRY_MODULUS`] periods (about 1 to 2 months) of remaining validity: the result is
 /// always strictly greater than `current_height` and at most `EXPIRY_WINDOW` above it. Saturates at
 /// `u32::MAX`.
-pub fn expiry_height(current_height: BlockHeight) -> BlockHeight {
-    let h = u32::from(current_height);
-    // `BlockHeight`'s delta addition saturates at `u32::MAX`.
-    BlockHeight::from_u32(h - (h % EXPIRY_MODULUS)) + EXPIRY_WINDOW
-}
+pub use zcash_protocol::zip318::expiry_height;
 
 /// Compute the MINIMAL schedule of sync/proving wake-ups covering `transfers`, each given as
 /// `(id, anchor_boundary, broadcast_height)` — for a committed migration, a transfer's drawn

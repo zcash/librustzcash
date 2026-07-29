@@ -932,7 +932,9 @@ impl<NoteRef> Step<NoteRef> {
     /// pool, and is proved against a boundary of the anchor bucket grid. Every one of those is
     /// required here:
     ///
-    /// - exactly one Orchard input, so that the Orchard bundle is two actions;
+    /// - exactly one Orchard input and at most one Orchard change output, so that the Orchard
+    ///   bundle is exactly two actions;
+    /// - no change in any other pool;
     /// - no Ironwood spends, a step funded from Ironwood crossing nothing;
     /// - no Ironwood change, leaving a single Ironwood output;
     /// - that output's value is a canonical denomination under `params`;
@@ -949,6 +951,14 @@ impl<NoteRef> Step<NoteRef> {
         self.input_count_in_pool(PoolType::ORCHARD) == 1
             && self.input_count_in_pool(PoolType::IRONWOOD) == 0
             && self.change_count_in_pool(PoolType::IRONWOOD) == 0
+            // At most ONE Orchard change output. The Orchard bundle must be exactly two actions,
+            // and from NU6.3 a spend and an output no longer share one, so its count is
+            // `spends + outputs`: a second change output makes three. A multi-output change
+            // strategy produces exactly that from a single large note.
+            && self.change_count_in_pool(PoolType::ORCHARD) <= 1
+            // Change anywhere else adds a bundle no migration transfer carries.
+            && self.change_count_in_pool(PoolType::SAPLING) == 0
+            && self.change_count_in_pool(PoolType::TRANSPARENT) == 0
             && self
                 .sole_ironwood_payment_value()
                 .is_some_and(|value| params.is_canonical_denomination(value))

@@ -24,7 +24,7 @@ and this library adheres to Rust's notion of
   is renamed to `denomination::DENOM_CAP` and `denomination::RESIDUAL_MIGRATION_MIN` to
   `denomination::MAX_RESIDUAL_VALUE`; `scheduling::{AnchorBucketInterval, DELAY_CAP_RATIO,
   ANCHOR_AGE_CAP, EXPIRY_MODULUS, EXPIRY_WINDOW}` and `preparation::PREP_TX_ACTIONS` keep
-  their paths and values.
+  their paths and values, as does `scheduling::expiry_height`.
 - `denomination::DENOM_CAP` is a `Zatoshis` rather than a count of whole ZEC, and
   `CanonicalOneTwoFive::new` takes its maximum denomination as a `Zatoshis`. Pass the
   `Zatoshis` directly and drop any `* COIN`.

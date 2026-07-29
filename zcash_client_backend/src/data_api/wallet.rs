@@ -598,23 +598,41 @@ impl ConfirmationsPolicy {
     /// The untrusted requirement is raised to match when it would otherwise fall below the trusted
     /// one, preserving this type's `trusted <= untrusted` invariant.
     ///
-    /// Returns `None` when no usable boundary is reachable: when the ordinary anchor lies below
-    /// the interval's first boundary above genesis, or where the required confirmations would
-    /// reach back past the genesis block.
+    /// The boundary chosen is one interval BELOW the most recent one — an anchor age of 1, the
+    /// smallest ZIP 318 admits. Anchoring to the most recent boundary would be an age of 0, which
+    /// no migration transfer uses.
     ///
-    /// Height zero is rejected even though it is arithmetically a boundary of every interval: the
-    /// note commitment tree is empty there, so a policy anchored to it could never fund anything.
-    /// Reporting that as "unable to bucket" is what lets a caller fall back, rather than build a
-    /// proposal that is bound to fail.
+    /// `activation_height` is the activation of the pool being crossed into; the chosen boundary
+    /// must lie strictly above it.
+    ///
+    /// Returns `None` when no usable boundary is reachable: when the ordinary anchor lies below the
+    /// first boundary after `activation_height`, or where the required confirmations would reach
+    /// back past the genesis block. Reporting that as "unable to bucket" is what lets a caller fall
+    /// back, rather than build a proposal that is bound to fail.
     ///
     /// [ZIP 318]: https://zips.z.cash/zip-0318
     pub fn bucketed(
         &self,
         interval: AnchorBucketInterval,
         target_height: TargetHeight,
+        activation_height: BlockHeight,
     ) -> Option<Self> {
-        let boundary = interval.boundary_at_or_below(self.anchor_height(target_height));
-        if boundary == BlockHeight::from_u32(0) {
+        // ZIP 318 draws an anchor of AGE `a` in `[1, ANCHOR_AGE_CAP]` boundaries behind the most
+        // recent one, so the chosen boundary is always strictly below it. Age 1 is taken here: the
+        // newest admissible boundary, and the modal age under the migration's `Geometric(1/2)`
+        // draw. Anchoring to the most recent boundary instead would be an age of 0, which no
+        // migration transfer ever uses.
+        let most_recent = interval.boundary_at_or_below(self.anchor_height(target_height));
+        let boundary = BlockHeight::from_u32(
+            u32::from(most_recent).checked_sub(interval.block_count().get())?,
+        );
+
+        // The boundary must lie strictly above the activation of the pool being crossed into.
+        // Rounding down can otherwise land on a PRE-ACTIVATION boundary in the window between
+        // activation and the first boundary after it, and ZIP 318's candidate set contains no such
+        // height — anchoring there would be distinguishable rather than shared. Height zero is
+        // excluded by the same bound, its note commitment tree being empty.
+        if boundary <= activation_height {
             return None;
         }
         let bucketed = u32::from(target_height).checked_sub(u32::from(boundary))?;
@@ -819,8 +837,15 @@ where
     // into, so there is no canonical crossing to construct.
     #[cfg(feature = "orchard")]
     let canonical_proposal = canonical_crossing_candidate(params, &zip318, &request, target_height)
-        .then(|| confirmations_policy.bucketed(zip318.anchor_bucket_interval(), target_height))
+        .then(|| params.activation_height(NetworkUpgrade::Nu6_3))
         .flatten()
+        .and_then(|activation| {
+            confirmations_policy.bucketed(
+                zip318.anchor_bucket_interval(),
+                target_height,
+                activation,
+            )
+        })
         // A canonical crossing spends an Orchard note; if the caller forbids that, there is no
         // canonical path to attempt.
         .filter(|_| spend_policy.permits_shielded(ShieldedPool::Orchard))
@@ -1831,6 +1856,26 @@ where
             ironwood_padding,
         },
     );
+    // A canonical crossing takes the ZIP 318 rolling expiry, which every crossing in the same
+    // modulus period shares. The builder's ordinary per-transaction expiry (target height plus a
+    // small delta) would single it out immediately, undoing the shape the unpadded bundle and the
+    // bucketed anchor were chosen to produce. A caller-supplied expiry is refused rather than
+    // silently overridden: the padding and anchor are already fixed by this point, so honouring it
+    // would emit a transaction that is canonical in every respect but one.
+    #[cfg(feature = "orchard")]
+    let expiry_height = if proposal_step.is_canonical_crossing(&wallet_db.pool_migration_params()) {
+        match expiry_height {
+            Some(requested) => {
+                return Err(Error::ExpiryHeightConflictsWithCanonicalCrossing { requested });
+            }
+            None => Some(zcash_protocol::zip318::expiry_height(
+                min_target_height.into(),
+            )),
+        }
+    } else {
+        expiry_height
+    };
+
     if let Some(expiry_height) = expiry_height {
         builder = builder.with_expiry_height(expiry_height);
     }
@@ -3883,7 +3928,7 @@ mod tests {
         for height in [2_000_000u32, 2_000_143, 2_000_144, 1_000_000] {
             let target = target(height);
             let bucketed = policy
-                .bucketed(interval, target)
+                .bucketed(interval, target, BlockHeight::from_u32(1))
                 .expect("a boundary is reachable well above the grid's origin");
             let anchor = bucketed.anchor_height(target);
 
@@ -3891,34 +3936,43 @@ mod tests {
                 interval.is_boundary(anchor),
                 "anchor {anchor:?} off the grid"
             );
+            // Age 1: one interval BELOW the most recent boundary, never the most recent itself.
+            let most_recent = interval.boundary_at_or_below(policy.anchor_height(target));
             assert_eq!(
-                anchor,
-                interval.boundary_at_or_below(policy.anchor_height(target)),
-                "bucketing must round the ordinary anchor DOWN, never up"
+                u32::from(anchor),
+                u32::from(most_recent) - interval.block_count().get(),
+                "the chosen boundary must be exactly one interval below the most recent"
             );
+            assert!(anchor < most_recent, "an age of 0 is not admissible");
             // Never fewer confirmations than asked for, and the invariant is preserved.
             assert!(bucketed.trusted() >= policy.trusted());
             assert!(bucketed.untrusted() >= bucketed.trusted());
-            // The extra wait is bounded by one interval.
+            // The extra wait is bounded by two intervals: up to one to reach the most recent
+            // boundary, plus the one that age 1 steps back.
             assert!(
                 u32::from(bucketed.trusted()) - u32::from(policy.trusted())
-                    < interval.block_count().get()
+                    < 2 * interval.block_count().get()
             );
         }
     }
 
-    /// An anchor already on a boundary is left where it is, costing no extra confirmations.
+    /// Even an anchor already sitting on a boundary steps back one interval: that boundary is the
+    /// most recent, and ZIP 318 admits only ages of 1 or more.
     #[test]
-    fn bucketing_an_aligned_anchor_is_a_no_op() {
+    fn bucketing_never_chooses_the_most_recent_boundary() {
         let interval = AnchorBucketInterval::ZIP_318;
         let policy = policy(10);
-        // 2_000_010 - 10 = 2_000_000, which is not a multiple of 144; pick one that is.
         let aligned_anchor = interval.boundary_at_or_below(BlockHeight::from_u32(2_000_000));
         let target = target(u32::from(aligned_anchor) + 10);
 
-        let bucketed = policy.bucketed(interval, target).expect("reachable");
-        assert_eq!(bucketed.trusted(), policy.trusted());
-        assert_eq!(bucketed.anchor_height(target), aligned_anchor);
+        let bucketed = policy
+            .bucketed(interval, target, BlockHeight::from_u32(1))
+            .expect("reachable");
+        assert_eq!(
+            u32::from(bucketed.anchor_height(target)),
+            u32::from(aligned_anchor) - interval.block_count().get()
+        );
+        assert!(bucketed.trusted() > policy.trusted());
     }
 
     /// Below the first boundary there is no grid to bucket to, and the policy declines rather than
@@ -3927,9 +3981,13 @@ mod tests {
     fn bucketing_declines_below_the_first_boundary() {
         let interval = AnchorBucketInterval::ZIP_318;
         let policy = policy(10);
-        // The ordinary anchor is 90, whose boundary-at-or-below is 0; requiring 100 confirmations
-        // to reach height 0 is not a usable policy.
-        assert!(policy.bucketed(interval, target(100)).is_none());
+        // The ordinary anchor is 90, whose boundary-at-or-below is 0; there is no boundary an
+        // interval below that, so no admissible anchor exists.
+        assert!(
+            policy
+                .bucketed(interval, target(100), BlockHeight::from_u32(1))
+                .is_none()
+        );
     }
 
     /// A shorter test-network interval buckets on its own grid.
@@ -3939,9 +3997,12 @@ mod tests {
         let policy = policy(3);
         let target = target(1_000);
 
-        let bucketed = policy.bucketed(interval, target).expect("reachable");
+        let bucketed = policy
+            .bucketed(interval, target, BlockHeight::from_u32(1))
+            .expect("reachable");
         let anchor = bucketed.anchor_height(target);
         assert!(interval.is_boundary(anchor));
-        assert_eq!(u32::from(anchor), 996);
+        // Most recent boundary at or below 997 is 996; age 1 steps back to 984.
+        assert_eq!(u32::from(anchor), 984);
     }
 }

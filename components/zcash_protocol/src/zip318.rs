@@ -142,6 +142,23 @@ pub fn is_canonical_denomination(value: Zatoshis) -> bool {
     is_canonical_within(value, MAX_RESIDUAL_VALUE, DENOM_CAP)
 }
 
+/// The canonical rolling EXPIRY height for a transaction targeting `target_height` ([ZIP 318]'s
+/// EXPIRY MUST): the most recent multiple of [`EXPIRY_MODULUS`] at or below `target_height`, plus
+/// [`EXPIRY_WINDOW`] (`2 * EXPIRY_MODULUS`).
+///
+/// This is a pure function of the height, so it reveals nothing per-wallet: every transaction in the
+/// same modulus period shares one expiry, whereas an ordinary per-transaction expiry would single a
+/// pool crossing out immediately. It guarantees between one and two [`EXPIRY_MODULUS`] periods
+/// (about one to two months) of remaining validity — the result is always strictly greater than
+/// `target_height` and at most [`EXPIRY_WINDOW`] above it. Saturates at `u32::MAX`.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub fn expiry_height(target_height: BlockHeight) -> BlockHeight {
+    let h = u32::from(target_height);
+    // `BlockHeight`'s delta addition saturates at `u32::MAX`.
+    BlockHeight::from_u32(h - (h % EXPIRY_MODULUS)) + EXPIRY_WINDOW
+}
+
 /// The interval, in blocks, between the durable anchor checkpoints a wallet retains, and equally the
 /// grid a [ZIP 318] pool-crossing transfer anchors to.
 ///
@@ -383,6 +400,34 @@ mod tests {
         }
         assert!(i.is_boundary(BlockHeight::from_u32(288)));
         assert!(!i.is_boundary(BlockHeight::from_u32(289)));
+    }
+
+    /// Every height in one modulus period shares an expiry, and that expiry always leaves between
+    /// one and two periods of validity. Sharing is the point: a per-transaction expiry would single
+    /// a pool crossing out.
+    #[test]
+    fn expiry_is_shared_across_a_modulus_period() {
+        let period_start = 3 * EXPIRY_MODULUS;
+        let expected = BlockHeight::from_u32(period_start + EXPIRY_WINDOW);
+
+        for offset in [0u32, 1, EXPIRY_MODULUS / 2, EXPIRY_MODULUS - 1] {
+            let h = BlockHeight::from_u32(period_start + offset);
+            assert_eq!(
+                expiry_height(h),
+                expected,
+                "offset {offset} must share the expiry"
+            );
+            // Strictly in the future, and never more than a whole window ahead.
+            assert!(expiry_height(h) > h);
+            assert!(u32::from(expiry_height(h)) - u32::from(h) <= EXPIRY_WINDOW);
+        }
+
+        // The next period moves to the next shared expiry.
+        let next = BlockHeight::from_u32(period_start + EXPIRY_MODULUS);
+        assert_eq!(
+            expiry_height(next),
+            BlockHeight::from_u32(period_start + EXPIRY_MODULUS + EXPIRY_WINDOW)
+        );
     }
 
     #[test]

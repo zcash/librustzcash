@@ -8587,6 +8587,20 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
         !interval.is_boundary(step.anchor_height().unwrap()),
         "a non-canonical payment must not pay for a bucketed anchor"
     );
+
+    // Building the canonical proposal is left until last: it spends the wallet's only note, so the
+    // comparison above must be proposed while funds remain. The built transaction takes the ZIP 318
+    // rolling expiry rather than the builder's per-transaction one — every crossing in the same
+    // modulus period shares it, so it identifies nothing.
+    let txids = st.create_proposed_expecting(&canonical, 1);
+    let tx = st.get_tx_from_history(txids[0]).unwrap().unwrap();
+    assert_eq!(
+        tx.expiry_height(),
+        Some(zcash_protocol::zip318::expiry_height(BlockHeight::from(
+            canonical.min_target_height()
+        ))),
+        "a canonical crossing must carry the ZIP 318 rolling expiry"
+    );
 }
 
 /// A canonical amount that cannot be funded from a single Orchard note is NOT a canonical

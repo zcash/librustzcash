@@ -18,6 +18,7 @@ workspace.
 - `zcash_client_backend::data_api::WalletRead::pool_migration_params`, defaulting to
   the above.
 - `zcash_client_backend::data_api::wallet::ConfirmationsPolicy::bucketed`
+- `zcash_client_backend::data_api::error::Error::ExpiryHeightConflictsWithCanonicalCrossing`
 - `impl Debug for zcash_client_backend::data_api::ll::wallet::PutBlocksError`
 - `zcash_client_backend::data_api::BirthdayError` now implements `Debug`,
   `Display` and `std::error::Error`.
@@ -33,10 +34,12 @@ workspace.
 - A payment across the Orchard turnstile whose value is a canonical ZIP 318
   denomination (a `{1, 2, 5} * 10^k` amount between 0.01 ZEC and 10,000 ZEC) is now
   proposed against an anchor on the wallet's ZIP 318 bucket grid, funded from a single
-  Orchard note, and built with one unpadded Ironwood action instead of two; it
-  therefore pays one fewer ZIP 317 marginal-fee action and requires up to one bucket
-  interval of additional confirmations on its inputs. When the wallet cannot fund it
-  that way, an ordinary transaction is proposed instead.
+  Orchard note, given the ZIP 318 rolling expiry height, and built with one unpadded
+  Ironwood action instead of two; it therefore pays one fewer ZIP 317 marginal-fee
+  action and requires up to two bucket intervals of additional confirmations on its
+  inputs. When the wallet cannot fund it that way, an ordinary transaction is proposed
+  instead. Supplying an explicit `expiry_height` for such a transaction is rejected with
+  `Error::ExpiryHeightConflictsWithCanonicalCrossing`.
 - `zcash_client_backend::fees::ChangeStrategy::compute_balance` takes two additional
   arguments after `target_height`: `anchor_height: BlockHeight` and
   `zip318: &PoolMigrationParams`. The same applies to

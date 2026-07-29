@@ -238,8 +238,35 @@ impl OutputManifest {
         self.ironwood
     }
 
+    #[cfg(feature = "orchard")]
+    pub(crate) fn transparent(&self) -> usize {
+        self.transparent
+    }
+
     pub(crate) fn total_shielded(&self) -> usize {
         self.sapling + self.orchard + self.ironwood
+    }
+
+    /// A manifest placing `count` change outputs in `pool` and none elsewhere.
+    fn for_pool(pool: ShieldedPool, count: usize) -> Self {
+        Self {
+            transparent: 0,
+            sapling: if pool == ShieldedPool::Sapling {
+                count
+            } else {
+                0
+            },
+            orchard: if pool == ShieldedPool::Orchard {
+                count
+            } else {
+                0
+            },
+            ironwood: if pool == ShieldedPool::Ironwood {
+                count
+            } else {
+                0
+            },
+        }
     }
 }
 
@@ -411,11 +438,19 @@ where
     // nothing: with a change output there are two real Ironwood outputs, so the bundle is at or
     // above the default floor and the padding is irrelevant.
     #[cfg(feature = "orchard")]
-    let ironwood_is_canonical_crossing = |change_count: usize| {
+    let ironwood_is_canonical_crossing = |change: OutputManifest| {
         let constants = _zip318;
         orchard.inputs().len() == 1
             && ironwood.inputs().is_empty()
-            && change_count == 0
+            && change.ironwood() == 0
+            // The Orchard bundle must be exactly two actions, and from NU6.3 a spend and an output
+            // no longer share one; a second Orchard change output would make three. Change in any
+            // other pool adds a bundle no migration transfer carries. `Step::is_canonical_crossing`
+            // applies the identical bounds, and the two must agree or the builder's exact-balance
+            // check rejects the transaction.
+            && change.orchard() <= 1
+            && change.sapling() == 0
+            && change.transparent() == 0
             && match ironwood.outputs() {
                 [output] => constants.is_canonical_denomination(output.value()),
                 _ => false,
@@ -425,10 +460,10 @@ where
                 .is_boundary(_anchor_height)
     };
     #[cfg(feature = "orchard")]
-    let ironwood_action_count = |change_count| {
+    let ironwood_action_count = |change: OutputManifest| {
         // The Ironwood bundle drops its padding exactly when doing so makes the transaction look
         // like a migration transfer, and is padded otherwise. This is not the caller's to choose.
-        let padding = if ironwood_is_canonical_crossing(change_count) {
+        let padding = if ironwood_is_canonical_crossing(change) {
             BundlePadding::UNPADDED
         } else {
             BundlePadding::DEFAULT
@@ -437,20 +472,21 @@ where
             padding.bundle_type(),
             ironwood.bundle_version(),
             ironwood.inputs().len(),
-            ironwood.outputs().len() + change_count,
+            ironwood.outputs().len() + change.ironwood(),
         )
         .map_err(ChangeError::BundleError)
     };
     #[cfg(not(feature = "orchard"))]
-    let ironwood_action_count = |change_count: usize| -> Result<usize, ChangeError<E, NoteRefT>> {
-        if change_count != 0 {
-            Err(ChangeError::BundleError(
-                "Nonzero Ironwood change requested but the `orchard` feature is not enabled.",
-            ))
-        } else {
-            Ok(0)
-        }
-    };
+    let ironwood_action_count =
+        |change: OutputManifest| -> Result<usize, ChangeError<E, NoteRefT>> {
+            if change.ironwood() != 0 {
+                Err(ChangeError::BundleError(
+                    "Nonzero Ironwood change requested but the `orchard` feature is not enabled.",
+                ))
+            } else {
+                Ok(0)
+            }
+        };
 
     let transparent_input_sizes = transparent_inputs
         .iter()
@@ -499,7 +535,7 @@ where
             sapling_input_count,
             sapling_output_count(0)?,
             orchard_action_count(0)?,
-            ironwood_action_count(0)?,
+            ironwood_action_count(OutputManifest::ZERO)?,
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
@@ -628,7 +664,7 @@ where
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
-                        ironwood_action_count(target_change_counts.ironwood())?,
+                        ironwood_action_count(target_change_counts)?,
                     )
                     .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
             );
@@ -673,11 +709,7 @@ where
                         } else {
                             0
                         })?,
-                        ironwood_action_count(if change_pool == ShieldedPool::Ironwood {
-                            split_count
-                        } else {
-                            0
-                        })?,
+                        ironwood_action_count(OutputManifest::for_pool(change_pool, split_count))?,
                     )
                     .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?
             } else {
