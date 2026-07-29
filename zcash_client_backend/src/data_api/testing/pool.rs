@@ -59,31 +59,66 @@ use crate::{
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 
+use crate::data_api::ll::wallet::PRUNING_DEPTH;
+use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
+use crate::{
+    data_api::BlockMetadata,
+    scanning::{
+        Nullifiers, ScanningKeys,
+        full::{decrypt_block, scan_block},
+    },
+};
+use incrementalmerkletree::Retention;
+use nonempty::NonEmpty;
+use shardtree::{ShardTree, store::ShardStore};
+use std::collections::BTreeSet;
+use zcash_primitives::block::{Block, BlockHeaderData};
+use zcash_protocol::PoolType;
+
 #[cfg(feature = "orchard")]
-use super::orchard::OrchardPoolTester;
+use {
+    super::orchard::OrchardPoolTester,
+    crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer},
+    std::collections::BTreeMap,
+    zcash_primitives::transaction::{TxVersion, builder::BundlePadding},
+    zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
+};
+
+#[cfg(not(feature = "orchard"))]
+use zcash_address::{
+    ZcashAddress,
+    unified::{self, Encoding as _, Receiver},
+};
+
+// `ProposalError` also reaches this module through the `transparent-inputs` group below,
+// so this arm covers only the configuration in which that group is absent.
+#[cfg(all(feature = "orchard", not(feature = "transparent-inputs")))]
+use crate::proposal::ProposalError;
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{CoinbaseFilter, TransactionDataRequest},
+        data_api::{CoinbaseFilter, OutputOfSentTx, TransactionDataRequest, TransactionStatus},
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
-        wallet::WalletTransparentOutput,
+        wallet::{Exposure, TransparentAddressSource, WalletTransparentOutput},
     },
-    nonempty::NonEmpty,
+    secrecy::ExposeSecret,
     std::str::FromStr,
     transparent::{
         bundle::{OutPoint, TxOut},
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
-    zcash_primitives::transaction::fees::zip317,
-    zcash_protocol::value::ZatBalance,
+    zcash_keys::keys::{UnifiedAddressRequest, transparent::gap_limits::GapLimits},
+    zcash_primitives::transaction::{
+        builder::DEFAULT_TX_EXPIRY_DELTA,
+        fees::{FeeRule, transparent::InputSize, zip317},
+    },
+    zcash_protocol::{
+        TxId,
+        value::{BalanceError, MAX_MONEY, ZatBalance},
+    },
 };
-
-#[cfg(feature = "orchard")]
-use zcash_protocol::PoolType;
-#[cfg(feature = "transparent-inputs")]
-use zcash_protocol::TxId;
 
 #[cfg(feature = "pczt")]
 use {
@@ -93,7 +128,14 @@ use {
     transparent::builder::TransparentSigningSet,
     zcash_primitives::transaction::builder::{BuildConfig, Builder},
     zcash_proofs::prover::LocalTxProver,
+    zcash_protocol::consensus::ZIP212_GRACE_PERIOD,
     zcash_script::opcode::PushValue,
+};
+
+#[cfg(all(feature = "pczt", feature = "transparent-inputs"))]
+use {
+    crate::data_api::wallet::input_selection::LockedInputPolicy,
+    zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS,
 };
 
 pub mod dsl;
@@ -363,18 +405,6 @@ pub fn scan_full_block_detects_outputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use incrementalmerkletree::Retention;
-    use nonempty::NonEmpty;
-    use zcash_primitives::block::{Block, BlockHeaderData};
-
-    use crate::{
-        data_api::BlockMetadata,
-        scanning::{
-            Nullifiers, ScanningKeys,
-            full::{decrypt_block, scan_block},
-        },
-    };
-
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Add funds to the wallet in a single note.
@@ -936,8 +966,6 @@ pub fn fails_to_send_max_spendable_to_transparent_with_memo<T: ShieldedPoolTeste
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use crate::data_api::MaxSpendMode;
-
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Add funds to the wallet in a single note
@@ -982,8 +1010,6 @@ pub fn send_max_spendable_to_transparent<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use zcash_protocol::PoolType;
-
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Add funds to the wallet in a single note
@@ -1035,11 +1061,6 @@ pub fn send_max_fee_overflow_is_an_error<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use zcash_primitives::transaction::fees::{FeeRule, transparent::InputSize};
-    use zcash_protocol::value::{BalanceError, MAX_MONEY};
-
-    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
-
     /// A fee rule that requires the maximum monetary amount for every transaction.
     #[derive(Clone, Debug)]
     struct MaxMoneyFeeRule;
@@ -1104,8 +1125,6 @@ pub fn send_max_spends_inputs_across_pools<P0: ShieldedPoolTester, P1: ShieldedP
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use std::collections::{BTreeMap, BTreeSet};
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<P0>();
     let account = st.test_account().cloned().unwrap();
 
@@ -1193,8 +1212,6 @@ pub fn send_max_to_tex_fails_without_transparent_inputs<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
-
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Add funds to the wallet in a single note
@@ -1228,12 +1245,6 @@ pub fn send_max_delivers_via_sapling_when_orchard_is_unavailable<T: ShieldedPool
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use zcash_address::{
-        ZcashAddress,
-        unified::{self, Encoding as _, Receiver},
-    };
-    use zcash_protocol::PoolType;
-
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Add funds to the wallet in a single note
@@ -1297,12 +1308,6 @@ pub fn send_max_to_orchard_only_ua_fails_without_orchard<T: ShieldedPoolTester>(
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use crate::data_api::wallet::input_selection::GreedyInputSelectorError;
-    use zcash_address::{
-        ZcashAddress,
-        unified::{self, Encoding as _, Receiver},
-    };
-
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Add funds to the wallet in a single note
@@ -1587,9 +1592,6 @@ pub fn spend_everything_multi_step_single_note_proposed_transfer<T: ShieldedPool
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{MaxSpendMode, OutputOfSentTx};
-    use zcash_keys::keys::transparent::gap_limits::GapLimits;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build::<T>();
@@ -1739,9 +1741,6 @@ pub fn spend_everything_multi_step_many_notes_proposed_transfer<T: ShieldedPoolT
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::OutputOfSentTx;
-    use zcash_keys::keys::transparent::gap_limits::GapLimits;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build::<T>();
@@ -1888,9 +1887,6 @@ pub fn spend_everything_multi_step_with_marginal_notes_proposed_transfer<
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::{MaxSpendMode, OutputOfSentTx};
-    use zcash_keys::keys::transparent::gap_limits::GapLimits;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build::<T>();
@@ -2198,12 +2194,6 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    use crate::{
-        data_api::{OutputOfSentTx, TransactionStatus},
-        wallet::{Exposure, TransparentAddressSource},
-    };
-    use zcash_keys::keys::transparent::gap_limits::GapLimits;
-
     let gap_limits = GapLimits::new(10, 5, 3);
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(gap_limits))
@@ -2688,9 +2678,6 @@ pub fn spend_all_funds_multi_step_proposed_transfer<T: ShieldedPoolTester, Dsf>(
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: std::fmt::Debug,
 {
-    use crate::data_api::OutputOfSentTx;
-    use zcash_keys::keys::transparent::gap_limits::GapLimits;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache)
         .map(|builder| builder.with_gap_limits(GapLimits::new(10, 5, 3)))
         .build::<T>();
@@ -3726,9 +3713,6 @@ where
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use zcash_keys::keys::UnifiedAddressRequest;
-    use zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
     let account = st.test_account().cloned().unwrap();
@@ -4105,12 +4089,6 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
     cache: impl TestCache,
     interval: AnchorRetentionInterval,
 ) {
-    use std::collections::BTreeSet;
-
-    use shardtree::{ShardTree, store::ShardStore};
-
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
-
     let interval_blocks = interval.block_count().get();
 
     // Reads, from any pool's note commitment tree, the set of surviving checkpoint heights, the
@@ -4885,8 +4863,6 @@ where
     // 6. Test that truncate_to_chain_state succeeds using the captured chain state
     // 7. Verify wallet state after truncation
 
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
     let sapling_activation = st
@@ -5005,8 +4981,6 @@ pub fn truncate_to_chain_state_below_birthday<T: ShieldedPoolTester, Dsf>(
     // this would fail with RequestedRewindInvalid because select_truncation_height requires
     // the target height to have an entry in the blocks table.
 
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
@@ -5114,8 +5088,6 @@ pub fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester, Dsf>(
     // a subtree root discontinuity) but the scan queue must still be trimmed. Without the
     // fix, inserting a frontier in shard 2 when the wallet only has shard 0 fails because
     // shard 1's subtree root is unknown.
-
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
 
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
@@ -5245,8 +5217,6 @@ pub fn rewind_to_chain_state_deep<T: ShieldedPoolTester, Dsf>(
     //    - blocks, transactions, tx_locator_map entries, and note commitment trees are
     //      only rewound to `tip - (PRUNING_DEPTH - 1)` (the oldest retained checkpoint).
 
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
     let sapling_activation = st
@@ -5366,8 +5336,6 @@ pub fn rewind_to_chain_state_shallow<T: ShieldedPoolTester, Dsf>(
     // 5. Call `rewind_to_chain_state(target)` and verify all wallet data is rewound to the
     //    target: data at the target is preserved, anything above is removed.
 
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
     let sapling_activation = st
@@ -5475,8 +5443,6 @@ pub fn rewind_after_non_contiguous_scan<T: ShieldedPoolTester, Dsf>(
     // `truncate_to_checkpoint`; clamping forward to the lowest checkpoint inside the
     // prune window keeps us aligned with a real checkpoint.
 
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
     let sapling_activation = st
@@ -5576,8 +5542,6 @@ where
     // 7. Call `update_chain_tip(pre_rewind_tip)` and re-verify the balance.
     // 8. Build and sign an actual spend — exercising the full note-selection and
     //    witness-construction path — and assert it produces exactly one tx.
-
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
 
     const SHARD_HEIGHT: u32 = 16;
     const SHARD_POSITIONS: u32 = 1 << SHARD_HEIGHT; // 65536
@@ -5825,8 +5789,6 @@ where
     //    spendable after this rewind, they *must* have been flagged
     //    `witness_stabilized` during the re-scan of step 4. Assert that both
     //    A's and B's full totals are spendable.
-
-    use crate::data_api::ll::wallet::PRUNING_DEPTH;
 
     const SHARD_HEIGHT: u32 = 16;
     const SHARD_POSITIONS: u32 = 1 << SHARD_HEIGHT; // 65536
@@ -6467,8 +6429,6 @@ pub fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester, Dsf>(
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: serde::Serialize + serde::de::DeserializeOwned,
 {
-    use zcash_protocol::consensus::ZIP212_GRACE_PERIOD;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(ds_factory)
         .with_block_cache(cache)
@@ -6773,8 +6733,6 @@ pub fn wallet_recovery_computes_fees<T: ShieldedPoolTester, DsF: DataStoreFactor
     cache: impl TestCache,
     mut intervene: impl FnMut(&mut DsF::DataStore, TxId) -> Result<(), DsF::DsError>,
 ) {
-    use secrecy::ExposeSecret;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
     let seed = Secret::new(st.test_seed().unwrap().expose_secret().clone());
@@ -7009,8 +6967,6 @@ pub fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoo
     dsf: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use crate::data_api::wallet::input_selection::LockedInputPolicy;
-
     let mut st = TestDsl::with_sapling_birthday_account(dsf, cache).build::<T>();
 
     // Get the default transparent address
@@ -7107,9 +7063,6 @@ where
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use crate::data_api::wallet::input_selection::LockedInputPolicy;
-    use std::collections::BTreeSet;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
     let (t_addr, _) = st.get_account().usk().default_transparent_address();
     let account = st.get_account().id();
@@ -7709,8 +7662,6 @@ pub fn propose_and_build_shielding_coinbase_succeeds<T: ShieldedPoolTester, Dsf>
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
     let account = st.get_account();
     let (t_addr, _) = account.usk().default_transparent_address();
@@ -7774,9 +7725,6 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use crate::data_api::TransactionStatus;
-    use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
-
     // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
@@ -7922,10 +7870,6 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
-    use crate::proposal::ProposalError;
-    use zcash_primitives::transaction::TxVersion;
-
     // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
@@ -8758,9 +8702,6 @@ pub fn proposal_records_and_serializes_proposed_version<Dsf>(ds_factory: Dsf, ca
 where
     Dsf: DataStoreFactory,
 {
-    use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
-    use zcash_primitives::transaction::TxVersion;
-
     let mut st = TestDsl::from(
         TestBuilder::new()
             .with_data_store_factory(ds_factory)
@@ -8830,11 +8771,6 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
-    use zcash_primitives::transaction::builder::BundlePadding;
-    use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
-
-    use crate::data_api::testing::orchard::OrchardPoolTester;
-
     // A short grid, so the test need not mine 144 blocks to cross a boundary.
     let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
@@ -9020,10 +8956,6 @@ pub fn multi_note_crossing_is_not_bucketed<Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
-    use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
-
-    use crate::data_api::testing::orchard::OrchardPoolTester;
-
     let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
     let network = LocalNetwork {
@@ -9123,10 +9055,6 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
     ds_factory: Dsf,
     cache: impl TestCache,
 ) {
-    use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
-
-    use crate::data_api::testing::orchard::OrchardPoolTester;
-
     let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
     let activation = BlockHeight::from_u32(100_000);
     let network = LocalNetwork {
