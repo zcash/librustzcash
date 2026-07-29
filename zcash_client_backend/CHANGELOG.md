@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::anchor_retention::AnchorRetention::retained_in_range`
+
+### Fixed
+- `zcash_client_backend::data_api::ll::wallet::put_blocks` now creates (and retains) a
+  checkpoint at every anchor-retention grid height in the scanned range, including
+  heights whose blocks contain no note commitments in any pool. Previously such
+  boundaries were never checkpointed, and a ZIP 318 crossing anchored to one would
+  fail with `ProposalError::AnchorNotFound`.
+
 ## [0.24.0-rc.5] - 2026-07-28
 
 ### Added

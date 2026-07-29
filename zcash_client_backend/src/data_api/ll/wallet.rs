@@ -624,7 +624,11 @@ where
 /// - `anchor_retention`: If `Some(retention)`, the checkpoints the policy
 ///   [retains](AnchorRetention::retains) — those at or above its floor that fall on its interval —
 ///   are kept as durable anchors, exempting them from automatic pruning of excess checkpoints.
-///   `None` disables anchor retention.
+///   A checkpoint is CREATED at every retained height in the scanned range that would not
+///   otherwise receive one: scanning only checkpoints a block at its last note commitment, so a
+///   boundary block containing no shielded outputs in any pool would otherwise leave a permanent
+///   hole in the retained grid, and the anchor there could never be proved against. `None`
+///   disables anchor retention.
 pub fn put_blocks<DbT, SE, TE>(
     wallet_db: &mut DbT,
     #[cfg(feature = "transparent-inputs")] gap_limits: GapLimits,
@@ -682,6 +686,14 @@ where
         // Ensure that we have the same set of checkpoints across all trees. Each tree must gain a
         // checkpoint at every height that is checkpointed in any of the other trees, so the set of
         // heights to ensure for a given tree is the union of the checkpoint heights of the others.
+        //
+        // The heights the anchor-retention policy retains within this batch are added to every
+        // pool's ensure set. Scanning checkpoints a block only at its last note commitment, so a
+        // grid boundary landing on a block with no shielded outputs in ANY pool would otherwise
+        // never be checkpointed at all — and a retention policy can only keep alive a checkpoint
+        // that exists. The ensured checkpoint carries the tree state as of the last commitment at
+        // or before the boundary, which is exactly the state a ZIP 318 anchor at that height
+        // commits to.
         #[cfg(feature = "orchard")]
         let (
             missing_sapling_checkpoints,
@@ -692,11 +704,19 @@ where
             let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
             let ironwood_checkpoint_positions = checkpoint_positions(&ironwood_subtrees);
 
-            let [ensure_sapling, ensure_orchard, ensure_ironwood] = cross_pool_ensure_heights(
-                &sapling_checkpoint_positions.keys().copied().collect(),
-                &orchard_checkpoint_positions.keys().copied().collect(),
-                &ironwood_checkpoint_positions.keys().copied().collect(),
-            );
+            let retained_heights = anchor_retention.map_or_else(BTreeSet::new, |retention| {
+                retention.retained_in_range(from_state.block_height() + 1..=last_scanned_height)
+            });
+
+            let [mut ensure_sapling, mut ensure_orchard, mut ensure_ironwood] =
+                cross_pool_ensure_heights(
+                    &sapling_checkpoint_positions.keys().copied().collect(),
+                    &orchard_checkpoint_positions.keys().copied().collect(),
+                    &ironwood_checkpoint_positions.keys().copied().collect(),
+                );
+            ensure_sapling.extend(retained_heights.iter().copied());
+            ensure_orchard.extend(retained_heights.iter().copied());
+            ensure_ironwood.extend(retained_heights.iter().copied());
 
             (
                 ensure_checkpoints(

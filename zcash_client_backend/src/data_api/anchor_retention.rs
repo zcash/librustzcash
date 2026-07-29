@@ -92,6 +92,40 @@ impl AnchorRetention {
     pub fn retains(&self, height: BlockHeight) -> bool {
         height >= self.from_height && self.intervals.iter().any(|i| i.is_boundary(height))
     }
+
+    /// Returns every height in `range` whose checkpoint this policy retains, ascending.
+    ///
+    /// This is the enumeration form of [`Self::retains`]: a height is in the result exactly when
+    /// `range` contains it and [`Self::retains`] holds for it. It exists so that a caller adding a
+    /// scanned range of blocks can CREATE the checkpoints the policy will need retained — a
+    /// boundary block containing no note commitments produces no checkpoint of its own, and a
+    /// policy can only keep alive a checkpoint that exists.
+    pub fn retained_in_range(
+        &self,
+        range: core::ops::RangeInclusive<BlockHeight>,
+    ) -> BTreeSet<BlockHeight> {
+        let start = u64::from(u32::from(core::cmp::max(*range.start(), self.from_height)));
+        let end = u64::from(u32::from(*range.end()));
+        self.intervals
+            .iter()
+            .flat_map(|interval| {
+                // A height is a boundary of an interval exactly when it is a multiple of it, so
+                // the boundaries in range are the multiples of `step` from the first at or above
+                // `start`. The arithmetic is in `u64` so that neither the round-up nor the
+                // iterator's one-past-the-end probe can overflow near the top of the height range.
+                let step = u64::from(interval.block_count().get());
+                let first = start.div_ceil(step) * step;
+                (0u64..)
+                    .map(move |k| first + k * step)
+                    .take_while(move |boundary| *boundary <= end)
+                    .map(|boundary| {
+                        BlockHeight::from_u32(
+                            u32::try_from(boundary).expect("bounded by a u32 height"),
+                        )
+                    })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -150,6 +184,34 @@ mod tests {
         assert!(!i.is_boundary(BlockHeight::from_u32(289)));
     }
 
+    /// The enumeration clamps to the policy's floor, includes both endpoints of the range, and
+    /// yields the union of every constituent grid's boundaries.
+    #[test]
+    fn retained_in_range_examples() {
+        let h = BlockHeight::from_u32;
+        let heights = |policy: &AnchorRetention, lo: u32, hi: u32| {
+            policy
+                .retained_in_range(h(lo)..=h(hi))
+                .into_iter()
+                .map(u32::from)
+                .collect::<Vec<_>>()
+        };
+
+        let single = AnchorRetention::new(h(25), interval(10));
+        // The floor excludes 20 even though it is a boundary within the range.
+        assert_eq!(heights(&single, 15, 55), vec![30, 40, 50]);
+        // Both endpoints are inclusive.
+        assert_eq!(heights(&single, 30, 50), vec![30, 40, 50]);
+        // An inverted range is empty rather than an error.
+        assert_eq!(heights(&single, 50, 30), Vec::<u32>::new());
+        // A range wholly below the floor is empty.
+        assert_eq!(heights(&single, 0, 24), Vec::<u32>::new());
+
+        let union = AnchorRetention::union(h(0), [interval(10), interval(15)]).expect("non-empty");
+        // Multiples of 10 and 15, deduplicated at the common multiple 30.
+        assert_eq!(heights(&union, 1, 45), vec![10, 15, 20, 30, 40, 45]);
+    }
+
     proptest! {
         /// Rounding down yields a boundary that does not exceed the height and is within one
         /// interval of it; rounding up yields a boundary that is not below it, likewise within one
@@ -190,6 +252,35 @@ mod tests {
             let policy = AnchorRetention::new(BlockHeight::from_u32(floor), i);
             let h = BlockHeight::from_u32(floor.saturating_sub(1_000).saturating_add(offset));
             prop_assert_eq!(policy.retains(h), h >= BlockHeight::from_u32(floor) && i.is_boundary(h));
+        }
+
+        /// Membership in the enumerated range agrees exactly with the predicate: `h` is in
+        /// `retained_in_range(lo..=hi)` iff `lo <= h <= hi` and `retains(h)`.
+        #[test]
+        fn retained_in_range_agrees_with_retains(
+            floor in 0u32..100_000,
+            lo in 0u32..200_000,
+            len in 0u32..2_000,
+            a in 1u32..500,
+            b in 1u32..500,
+        ) {
+            let f = BlockHeight::from_u32(floor);
+            let policy = AnchorRetention::union(f, [interval(a), interval(b)]).expect("non-empty");
+            let (lo, hi) = (BlockHeight::from_u32(lo), BlockHeight::from_u32(lo + len));
+            let enumerated = policy.retained_in_range(lo..=hi);
+
+            for h in u32::from(lo)..=u32::from(hi) {
+                let h = BlockHeight::from_u32(h);
+                prop_assert_eq!(
+                    enumerated.contains(&h),
+                    policy.retains(h),
+                    "height {:?}", h
+                );
+            }
+            // Nothing outside the range is ever emitted.
+            for h in &enumerated {
+                prop_assert!((lo..=hi).contains(h));
+            }
         }
 
         /// A union policy retains a height iff ANY of its grids does, so adding a grid only ever
