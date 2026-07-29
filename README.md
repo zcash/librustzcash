@@ -110,6 +110,7 @@ graph TB
     %% zcash_keys --> zcash_encoding
     %% zcash_primitives --> zcash_encoding
     %% zcash_address --> zcash_encoding
+    %% zcash_pool_migration --> zcash_encoding
     zcash_history --> zcash_encoding
     zcash_protocol --> zcash_encoding
 

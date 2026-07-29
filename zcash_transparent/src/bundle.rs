@@ -17,6 +17,8 @@ use zcash_protocol::{
     value::{BalanceError, ZatBalance, Zatoshis},
 };
 
+use zcash_encoding::{Decodable, Encodable};
+
 use crate::{
     address::{Script, TransparentAddress},
     builder, coinbase,
@@ -156,6 +158,42 @@ pub struct OutPoint {
     pub(crate) n: u32,
 }
 
+/// The encoded size of an [`OutPoint`]: a 32-byte txid followed by a little-endian `u32`.
+const OUTPOINT_SIZE: usize = 32 + 4;
+
+/// The encoded size of a [`TxIn`] sequence number.
+const SEQUENCE_SIZE: usize = 4;
+
+/// The encoded size of a [`TxOut`] value: a little-endian `i64` of zatoshis.
+const VALUE_SIZE: usize = 8;
+
+impl Encodable for OutPoint {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        writer.write_all(self.hash.as_ref())?;
+        writer.write_all(&self.n.to_le_bytes())
+    }
+
+    fn serialized_size(&self) -> usize {
+        OUTPOINT_SIZE
+    }
+}
+
+impl Decodable<()> for OutPoint {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
+        let mut hash = [0u8; 32];
+        reader.read_exact(&mut hash)?;
+        let mut n = [0; 4];
+        reader.read_exact(&mut n)?;
+        Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
+    }
+}
+
 impl OutPoint {
     /// Returns the null [`OutPoint`] in the Bitcoin sense:
     /// - [`TxId`] is set to all-zeroes, and
@@ -185,19 +223,14 @@ impl OutPoint {
 
     /// Reads an `OutPoint` from its canonical binary encoding: a 32-byte txid
     /// followed by the output index as a little-endian `u32`.
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut hash = [0u8; 32];
-        reader.read_exact(&mut hash)?;
-        let mut n = [0; 4];
-        reader.read_exact(&mut n)?;
-        Ok(OutPoint::new(hash, u32::from_le_bytes(n)))
+    pub fn read<R: Read>(reader: R) -> io::Result<Self> {
+        <Self as Decodable<()>>::read(reader, ())
     }
 
     /// Writes this `OutPoint` in its canonical binary encoding: a 32-byte txid
     /// followed by the output index as a little-endian `u32`.
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.hash.as_ref())?;
-        writer.write_all(&self.n.to_le_bytes())
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
     }
 
     /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it has txid set to
@@ -260,9 +293,37 @@ impl<A: Authorization> TxIn<A> {
 }
 
 impl TxIn<Authorized> {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let prevout = OutPoint::read(&mut reader)?;
-        let script_sig = Script::read(&mut reader)?;
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        <Self as Decodable<()>>::read(reader, ())
+    }
+
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
+    }
+}
+
+impl Encodable for TxIn<Authorized> {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        Encodable::write(self.prevout(), &mut writer)?;
+        Encodable::write(self.script_sig(), &mut writer)?;
+        writer.write_all(&self.sequence().to_le_bytes())
+    }
+
+    fn serialized_size(&self) -> usize {
+        OUTPOINT_SIZE + self.script_sig().serialized_size() + SEQUENCE_SIZE
+    }
+}
+
+impl Decodable<()> for TxIn<Authorized> {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
+        let prevout = <OutPoint as Decodable<()>>::read(&mut reader, ())?;
+        let script_sig = <Script as Decodable<()>>::read(&mut reader, ())?;
         let sequence = {
             let mut sequence = [0; 4];
             reader.read_exact(&mut sequence)?;
@@ -270,12 +331,6 @@ impl TxIn<Authorized> {
         };
 
         Ok(TxIn::from_parts(prevout, script_sig, sequence))
-    }
-
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.prevout().write(&mut writer)?;
-        self.script_sig().write(&mut writer)?;
-        writer.write_all(&self.sequence().to_le_bytes())
     }
 }
 
@@ -382,24 +437,12 @@ impl TxOut {
         }
     }
 
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let value = {
-            let mut tmp = [0u8; 8];
-            reader.read_exact(&mut tmp)?;
-            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
-        }
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
-        let script_pubkey = Script::read(&mut reader)?;
-
-        Ok(TxOut {
-            value,
-            script_pubkey,
-        })
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        <Self as Decodable<()>>::read(reader, ())
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.value.to_i64_le_bytes())?;
-        self.script_pubkey.write(&mut writer)
+    pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+        Encodable::write(self, writer)
     }
 
     /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
@@ -423,6 +466,37 @@ impl TxOut {
             .ok()
             .as_ref()
             .and_then(solver::standard)
+    }
+}
+
+impl Encodable for TxOut {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        writer.write_all(&self.value().to_i64_le_bytes())?;
+        Encodable::write(self.script_pubkey(), &mut writer)
+    }
+
+    fn serialized_size(&self) -> usize {
+        VALUE_SIZE + self.script_pubkey().serialized_size()
+    }
+}
+
+impl Decodable<()> for TxOut {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
+        let value = {
+            let mut tmp = [0u8; 8];
+            reader.read_exact(&mut tmp)?;
+            Zatoshis::from_nonnegative_i64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
+        let script_pubkey = <Script as Decodable<()>>::read(&mut reader, ())?;
+
+        Ok(TxOut::new(value, script_pubkey))
     }
 }
 
@@ -494,5 +568,176 @@ pub mod testing {
                 Some(Bundle { vin, vout, authorization: Authorized })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use alloc::vec::Vec;
+    use proptest::prelude::*;
+    use zcash_encoding::{
+        Decodable, Encodable,
+        testing::{check_canonical, check_codec_roundtrip},
+    };
+
+    use super::{
+        Authorized, OutPoint, TxIn, TxOut,
+        testing::{arb_outpoint, arb_script_pubkey, arb_txin, arb_txout},
+    };
+    use crate::address::Script;
+
+    proptest! {
+        #[test]
+        fn outpoint_roundtrips(v in arb_outpoint()) {
+            check_codec_roundtrip(&v);
+        }
+
+        #[test]
+        fn txout_roundtrips(v in arb_txout()) {
+            check_codec_roundtrip(&v);
+        }
+
+        #[test]
+        fn txin_roundtrips(v in arb_txin()) {
+            check_codec_roundtrip(&v);
+        }
+
+        #[test]
+        fn script_roundtrips(v in arb_script_pubkey()) {
+            check_codec_roundtrip(&v);
+        }
+
+        /// Containers come for free once the element implements the traits, and this is the
+        /// encoding `Vector` already produced for a `Vec<TxOut>`.
+        #[test]
+        fn txout_vec_roundtrips(v in prop::collection::vec(arb_txout(), 0..8)) {
+            check_codec_roundtrip(&v);
+        }
+
+        #[test]
+        fn outpoint_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
+            check_canonical::<OutPoint, _>(&bytes, ());
+        }
+
+        #[test]
+        fn script_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
+            check_canonical::<Script, _>(&bytes, ());
+        }
+
+        #[test]
+        fn txout_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
+            check_canonical::<TxOut, _>(&bytes, ());
+        }
+
+        /// The inherent methods that callers already use must stay byte-identical to the trait
+        /// implementation they now delegate to.
+        #[test]
+        fn inherent_methods_agree_with_the_traits(v in arb_txin()) {
+            let mut via_inherent = Vec::new();
+            TxIn::<Authorized>::write(&v, &mut via_inherent).unwrap();
+
+            let mut via_trait = Vec::new();
+            Encodable::write(&v, &mut via_trait).unwrap();
+            prop_assert_eq!(&via_inherent, &via_trait);
+
+            let a = TxIn::<Authorized>::read(&mut &via_inherent[..]).unwrap();
+            let b = <TxIn<Authorized> as Decodable<()>>::read(&via_inherent[..], ()).unwrap();
+            let (mut ba, mut bb) = (Vec::new(), Vec::new());
+            Encodable::write(&a, &mut ba).unwrap();
+            Encodable::write(&b, &mut bb).unwrap();
+            prop_assert_eq!(ba, bb);
+        }
+
+        /// `serialized_size` must agree with what `write` emits, for every type here.
+        #[test]
+        fn serialized_size_agrees(
+            o in arb_outpoint(),
+            t in arb_txout(),
+            i in arb_txin(),
+            s in arb_script_pubkey(),
+        ) {
+            for (got, want) in [
+                (Encodable::serialized_size(&o), encoded_len(&o)),
+                (Encodable::serialized_size(&t), encoded_len(&t)),
+                (Encodable::serialized_size(&i), encoded_len(&i)),
+                (Encodable::serialized_size(&s), encoded_len(&s)),
+            ] {
+                prop_assert_eq!(got, want);
+            }
+        }
+    }
+
+    /// Golden vectors. The expected bytes are written out from the encoding's definition rather
+    /// than captured from a run of the code under test: the round-trip and canonicity properties
+    /// above are self-referential, and a change altering the encoding consistently in both
+    /// directions would satisfy all of them.
+    mod golden {
+        use alloc::vec;
+        use alloc::vec::Vec;
+        use zcash_encoding::{Decodable, Encodable};
+        use zcash_protocol::value::Zatoshis;
+
+        use crate::address::Script;
+        use crate::bundle::{OutPoint, TxOut};
+
+        fn encode<T: Encodable>(value: &T) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            value.write(&mut bytes).unwrap();
+            assert_eq!(bytes.len(), value.serialized_size());
+            bytes
+        }
+
+        /// A script is a `CompactSize` length followed by the raw opcodes.
+        #[test]
+        fn script_is_length_prefixed() {
+            let empty = <Script as Decodable<()>>::read(&[0x00][..], ()).unwrap();
+            assert_eq!(encode(&empty), vec![0x00]);
+
+            // OP_1 (0x51) alone.
+            let one = <Script as Decodable<()>>::read(&[0x01, 0x51][..], ()).unwrap();
+            assert_eq!(encode(&one), vec![0x01, 0x51]);
+        }
+
+        /// An outpoint is a 32-byte txid followed by the index as a little-endian u32.
+        #[test]
+        fn outpoint_is_txid_then_le_index() {
+            let mut expected = [0u8; 36];
+            expected[..32].copy_from_slice(&[0xABu8; 32]);
+            expected[32..].copy_from_slice(&0x0102_0304u32.to_le_bytes());
+
+            let op = OutPoint::new([0xABu8; 32], 0x0102_0304);
+            assert_eq!(encode(&op), expected.to_vec());
+            assert_eq!(
+                <OutPoint as Decodable<()>>::read(&expected[..], ()).unwrap(),
+                op
+            );
+
+            // The null outpoint: all-zero txid and an index of u32::MAX.
+            let mut null = [0u8; 36];
+            null[32..].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert_eq!(encode(&OutPoint::NULL), null.to_vec());
+        }
+
+        /// A TxOut is the value as a little-endian i64 followed by the script.
+        #[test]
+        fn txout_is_value_then_script() {
+            let script = <Script as Decodable<()>>::read(&[0x01, 0x51][..], ()).unwrap();
+            let out = TxOut::new(Zatoshis::const_from_u64(1_0000_0000), script);
+
+            let mut expected = Vec::new();
+            expected.extend_from_slice(&1_0000_0000i64.to_le_bytes());
+            expected.extend_from_slice(&[0x01, 0x51]);
+            assert_eq!(encode(&out), expected);
+            assert_eq!(
+                <TxOut as Decodable<()>>::read(&expected[..], ()).unwrap(),
+                out
+            );
+        }
+    }
+
+    fn encoded_len<T: Encodable>(value: &T) -> usize {
+        let mut bytes = Vec::new();
+        Encodable::write(value, &mut bytes).unwrap();
+        bytes.len()
     }
 }

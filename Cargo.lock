@@ -7105,7 +7105,7 @@ dependencies = [
  "corez",
  "f4jumble",
  "proptest",
- "zcash_encoding 0.4.0",
+ "zcash_encoding",
  "zcash_protocol",
 ]
 
@@ -7172,7 +7172,7 @@ dependencies = [
  "webpki-roots 1.0.3",
  "which",
  "zcash_address",
- "zcash_encoding 0.4.0",
+ "zcash_encoding",
  "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
@@ -7231,7 +7231,7 @@ dependencies = [
  "uuid",
  "zcash_address",
  "zcash_client_backend",
- "zcash_encoding 0.4.0",
+ "zcash_encoding",
  "zcash_keys",
  "zcash_note_encryption",
  "zcash_pool_migration",
@@ -7243,17 +7243,6 @@ dependencies = [
  "zewif",
  "zip32",
  "zip321",
-]
-
-[[package]]
-name = "zcash_encoding"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1440921903cdb86133fb9e2fe800be488015db2939a30bedb413078a1acb0306"
-dependencies = [
- "corez",
- "hex",
- "nonempty",
 ]
 
 [[package]]
@@ -7275,7 +7264,7 @@ dependencies = [
  "corez",
  "primitive-types",
  "proptest",
- "zcash_encoding 0.5.0",
+ "zcash_encoding",
 ]
 
 [[package]]
@@ -7309,7 +7298,7 @@ dependencies = [
  "subtle",
  "tracing",
  "zcash_address",
- "zcash_encoding 0.4.0",
+ "zcash_encoding",
  "zcash_protocol",
  "zcash_script",
  "zcash_transparent",
@@ -7345,6 +7334,7 @@ dependencies = [
  "rand_core 0.6.4",
  "shardtree",
  "zcash_client_backend",
+ "zcash_encoding",
  "zcash_keys",
  "zcash_pool_migration_memory",
  "zcash_primitives",
@@ -7395,7 +7385,7 @@ dependencies = [
  "sapling-crypto",
  "secp256k1",
  "sha2 0.10.8",
- "zcash_encoding 0.4.0",
+ "zcash_encoding",
  "zcash_note_encryption",
  "zcash_protocol",
  "zcash_script",
@@ -7431,13 +7421,15 @@ name = "zcash_protocol"
 version = "0.10.2"
 dependencies = [
  "corez",
+ "criterion 0.5.1",
  "document-features",
  "hex",
  "incrementalmerkletree",
  "incrementalmerkletree-testing",
  "memuse",
+ "nonempty",
  "proptest",
- "zcash_encoding 0.4.0",
+ "zcash_encoding",
 ]
 
 [[package]]
@@ -7483,7 +7475,7 @@ dependencies = [
  "sha2 0.10.8",
  "subtle",
  "zcash_address",
- "zcash_encoding 0.4.0",
+ "zcash_encoding",
  "zcash_protocol",
  "zcash_script",
  "zcash_spec",

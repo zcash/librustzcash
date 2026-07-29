@@ -19,6 +19,9 @@ use corez::io::{self, Read, Write};
 
 use nonempty::NonEmpty;
 
+pub mod codec;
+pub use codec::{Codec, Decodable, Encodable};
+
 #[cfg(feature = "test-dependencies")]
 pub mod testing;
 

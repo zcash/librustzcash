@@ -10,6 +10,12 @@ and this library adheres to Rust's notion of
 ## [0.1.0-rc.4] - 2026-07-28
 
 ### Added
+- `zcash_pool_migration::engine::MigrationTransferId` now implements
+  `zcash_encoding::Encodable` and `zcash_encoding::Decodable`. The encoding is
+  unchanged and the inherent `read`/`write` methods remain, now delegating to
+  the trait implementations.
+
+### Added
 - `zcash_pool_migration::build::AccountDerivation`, the ZIP 32 account whose
   spending key authorizes a migration's Orchard spends. Behind the `orchard`
   feature; convertible from `zcash_client_backend`'s `Zip32Derivation` behind

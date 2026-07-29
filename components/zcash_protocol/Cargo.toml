@@ -39,7 +39,10 @@ incrementalmerkletree = { workspace = true, optional = true }
 incrementalmerkletree-testing = { workspace = true, optional = true }
 
 [dev-dependencies]
+criterion.workspace = true
+nonempty.workspace = true
 proptest.workspace = true
+zcash_encoding = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 default = ["std"]
@@ -58,3 +61,7 @@ local-consensus = []
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "codec"
+harness = false

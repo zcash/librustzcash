@@ -13,6 +13,15 @@ use orchard::tree::MerkleHashOrchard;
 use zcash_encoding::{Optional, Vector};
 
 /// A hashable node within a Merkle tree.
+///
+/// This is the same shape as [`zcash_encoding::Encodable`] + [`zcash_encoding::Decodable`], and
+/// predates them. It cannot be replaced by them, and the reason is the orphan rule rather than
+/// anything about Merkle trees: the implementors here are types owned by other crates
+/// (`sapling::Node`, `orchard::tree::MerkleHashOrchard`), so this crate may only implement a
+/// trait for them if the trait is its own. A codec trait defined in `zcash_encoding` is not.
+///
+/// [`zcash_encoding::Encodable`]: zcash_encoding::Encodable
+/// [`zcash_encoding::Decodable`]: zcash_encoding::Decodable
 pub trait HashSer {
     /// Parses a node from the given byte source.
     fn read<R: Read>(reader: R) -> io::Result<Self>

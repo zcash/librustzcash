@@ -360,7 +360,10 @@ impl Zatoshis {
     }
 
     /// Writes this Zatoshis as an unsigned 64-bit little-endian integer.
-    pub fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+    pub fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
         writer.write_all(&self.to_u64_le_bytes())
     }
 
@@ -392,6 +395,31 @@ impl Zatoshis {
             quotient: Zatoshis(self.0 / divisor),
             remainder: Zatoshis(self.0 % divisor),
         }
+    }
+}
+
+impl zcash_encoding::Encodable for Zatoshis {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: io::Write,
+    {
+        writer.write_all(&self.to_u64_le_bytes())
+    }
+
+    fn serialized_size(&self) -> usize {
+        8
+    }
+}
+
+impl zcash_encoding::Decodable<()> for Zatoshis {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: io::Read,
+    {
+        let mut bytes = [0u8; 8];
+        reader.read_exact(&mut bytes)?;
+        Self::from_u64_le_bytes(bytes)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "amount out of range"))
     }
 }
 

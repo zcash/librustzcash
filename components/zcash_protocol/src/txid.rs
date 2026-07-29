@@ -2,7 +2,7 @@ use alloc::string::ToString;
 use core::fmt;
 use corez::io::{self, Read, Write};
 
-use zcash_encoding::ReverseHex;
+use zcash_encoding::{Decodable, Encodable, ReverseHex};
 
 #[cfg(feature = "std")]
 use memuse::DynamicUsage;
@@ -74,6 +74,30 @@ impl TxId {
     /// to a coinbase transaction.
     pub fn is_null(&self) -> bool {
         *self == Self::NULL
+    }
+}
+
+impl Encodable for TxId {
+    fn write<W>(&self, mut writer: W) -> io::Result<()>
+    where
+        W: Write,
+    {
+        writer.write_all(&self.0)
+    }
+
+    fn serialized_size(&self) -> usize {
+        32
+    }
+}
+
+impl Decodable<()> for TxId {
+    fn read<R>(mut reader: R, _args: ()) -> io::Result<Self>
+    where
+        R: Read,
+    {
+        let mut hash = [0u8; 32];
+        reader.read_exact(&mut hash)?;
+        Ok(TxId::from_bytes(hash))
     }
 }
 

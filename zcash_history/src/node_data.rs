@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use primitive_types::U256;
-use zcash_encoding::CompactSize;
+use zcash_encoding::{CompactSize, Decodable, Encodable};
 
 use crate::Version;
 
@@ -85,6 +85,51 @@ impl NodeData {
 
     /// Write to the byte representation.
     pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
+        Encodable::write(self, w)
+    }
+
+    /// Read from the byte representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
+    /// uses a non-canonical encoding, or if the encoded height range is
+    /// descending or contains more blocks than can be represented by a `u64`.
+    pub fn read<R: corez::io::Read>(
+        consensus_branch_id: u32,
+        r: &mut R,
+    ) -> corez::io::Result<Self> {
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
+    }
+
+    /// Convert to byte representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        crate::V1::to_bytes(self)
+    }
+
+    /// Convert from byte representation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
+    /// uses a non-canonical encoding, or if the encoded height range is
+    /// descending or contains more blocks than can be represented by a `u64`.
+    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
+        crate::V1::from_bytes(consensus_branch_id, buf)
+    }
+
+    /// Hash node metadata
+    pub fn hash(&self) -> [u8; 32] {
+        crate::V1::hash(self)
+    }
+}
+
+impl Encodable for NodeData {
+    fn write<W>(&self, mut writer: W) -> corez::io::Result<()>
+    where
+        W: corez::io::Write,
+    {
+        let w = &mut writer;
         w.write_all(&self.subtree_commitment)?;
         w.write_all(&self.start_time.to_le_bytes())?;
         w.write_all(&self.end_time.to_le_bytes())?;
@@ -102,18 +147,22 @@ impl NodeData {
         CompactSize::write_unbounded(&mut *w, self.sapling_tx)?;
         Ok(())
     }
+}
 
-    /// Read from the byte representation.
+impl Decodable<u32> for NodeData {
+    /// `consensus_branch_id` is the consensus branch ID in force for the node, which the
+    /// encoding does not carry.
     ///
     /// # Errors
     ///
     /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
     /// uses a non-canonical encoding, or if the encoded height range is
     /// descending or contains more blocks than can be represented by a `u64`.
-    pub fn read<R: corez::io::Read>(
-        consensus_branch_id: u32,
-        r: &mut R,
-    ) -> corez::io::Result<Self> {
+    fn read<R>(mut reader: R, consensus_branch_id: u32) -> corez::io::Result<Self>
+    where
+        R: corez::io::Read,
+    {
+        let r = &mut reader;
         let mut data = NodeData {
             consensus_branch_id,
             ..Default::default()
@@ -152,27 +201,6 @@ impl NodeData {
 
         Ok(data)
     }
-
-    /// Convert to byte representation.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        crate::V1::to_bytes(self)
-    }
-
-    /// Convert from byte representation.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`corez::io::ErrorKind::InvalidData`] if a compact-encoded field
-    /// uses a non-canonical encoding, or if the encoded height range is
-    /// descending or contains more blocks than can be represented by a `u64`.
-    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
-        crate::V1::from_bytes(consensus_branch_id, buf)
-    }
-
-    /// Hash node metadata
-    pub fn hash(&self) -> [u8; 32] {
-        crate::V1::hash(self)
-    }
 }
 
 /// V2 node metadata.
@@ -201,11 +229,7 @@ impl V2 {
 
     /// Write to the byte representation.
     pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
-        self.v1.write(w)?;
-        w.write_all(&self.start_orchard_root)?;
-        w.write_all(&self.end_orchard_root)?;
-        CompactSize::write_unbounded(&mut *w, self.orchard_tx)?;
-        Ok(())
+        Encodable::write(self, w)
     }
 
     /// Read from the byte representation.
@@ -213,8 +237,34 @@ impl V2 {
         consensus_branch_id: u32,
         r: &mut R,
     ) -> corez::io::Result<Self> {
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
+    }
+}
+
+impl Encodable for V2 {
+    fn write<W>(&self, mut writer: W) -> corez::io::Result<()>
+    where
+        W: corez::io::Write,
+    {
+        let w = &mut writer;
+        Encodable::write(&self.v1, &mut *w)?;
+        w.write_all(&self.start_orchard_root)?;
+        w.write_all(&self.end_orchard_root)?;
+        CompactSize::write_unbounded(&mut *w, self.orchard_tx)?;
+        Ok(())
+    }
+}
+
+impl Decodable<u32> for V2 {
+    /// `consensus_branch_id` is the consensus branch ID in force for the node, which the
+    /// encoding does not carry.
+    fn read<R>(mut reader: R, consensus_branch_id: u32) -> corez::io::Result<Self>
+    where
+        R: corez::io::Read,
+    {
+        let r = &mut reader;
         let mut data = V2 {
-            v1: NodeData::read(consensus_branch_id, r)?,
+            v1: <NodeData as Decodable<u32>>::read(&mut *r, consensus_branch_id)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_orchard_root)?;
@@ -263,11 +313,7 @@ impl V3 {
 
     /// Write to the byte representation.
     pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
-        self.v2.write(w)?;
-        w.write_all(&self.start_ironwood_root)?;
-        w.write_all(&self.end_ironwood_root)?;
-        CompactSize::write_unbounded(&mut *w, self.ironwood_tx)?;
-        Ok(())
+        Encodable::write(self, w)
     }
 
     /// Read from the byte representation.
@@ -275,8 +321,34 @@ impl V3 {
         consensus_branch_id: u32,
         r: &mut R,
     ) -> corez::io::Result<Self> {
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
+    }
+}
+
+impl Encodable for V3 {
+    fn write<W>(&self, mut writer: W) -> corez::io::Result<()>
+    where
+        W: corez::io::Write,
+    {
+        let w = &mut writer;
+        Encodable::write(&self.v2, &mut *w)?;
+        w.write_all(&self.start_ironwood_root)?;
+        w.write_all(&self.end_ironwood_root)?;
+        CompactSize::write_unbounded(&mut *w, self.ironwood_tx)?;
+        Ok(())
+    }
+}
+
+impl Decodable<u32> for V3 {
+    /// `consensus_branch_id` is the consensus branch ID in force for the node, which the
+    /// encoding does not carry.
+    fn read<R>(mut reader: R, consensus_branch_id: u32) -> corez::io::Result<Self>
+    where
+        R: corez::io::Read,
+    {
+        let r = &mut reader;
         let mut data = V3 {
-            v2: V2::read(consensus_branch_id, r)?,
+            v2: <V2 as Decodable<u32>>::read(&mut *r, consensus_branch_id)?,
             ..Default::default()
         };
         r.read_exact(&mut data.start_ironwood_root)?;
@@ -658,5 +730,89 @@ mod tests {
                 .subtree_commitment,
             base_hash
         );
+    }
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use alloc::vec::Vec;
+    use proptest::prelude::*;
+    use zcash_encoding::{
+        Decodable, Encodable,
+        testing::{check_canonical, check_codec_roundtrip_with},
+    };
+
+    use super::{NodeData, V2, V3, testing::arb_node_data};
+
+    /// Every one of these decoders needs the consensus branch ID, which the encoding does not
+    /// carry; that is what `Decodable::Args` exists for.
+    const BRANCH_ID: u32 = 0;
+
+    prop_compose! {
+        fn arb_v2()(v1 in arb_node_data(), start in any::<[u8; 32]>(), end in any::<[u8; 32]>(), tx in any::<u64>()) -> V2 {
+            V2 { v1, start_orchard_root: start, end_orchard_root: end, orchard_tx: tx }
+        }
+    }
+
+    prop_compose! {
+        fn arb_v3()(v2 in arb_v2(), start in any::<[u8; 32]>(), end in any::<[u8; 32]>(), tx in any::<u64>()) -> V3 {
+            V3 { v2, start_ironwood_root: start, end_ironwood_root: end, ironwood_tx: tx }
+        }
+    }
+
+    /// A height range that does not describe a representable number of blocks is rejected on
+    /// read, so those values have no round trip to check.
+    fn height_range_is_representable(data: &NodeData) -> bool {
+        data.end_height
+            .checked_sub(data.start_height)
+            .and_then(|diff| diff.checked_add(1))
+            .is_some()
+    }
+
+    proptest! {
+        #[test]
+        fn node_data_roundtrips(data in arb_node_data()) {
+            prop_assume!(height_range_is_representable(&data));
+            check_codec_roundtrip_with(&data, BRANCH_ID);
+        }
+
+        #[test]
+        fn v2_roundtrips(data in arb_v2()) {
+            prop_assume!(height_range_is_representable(&data.v1));
+            check_codec_roundtrip_with(&data, BRANCH_ID);
+        }
+
+        #[test]
+        fn v3_roundtrips(data in arb_v3()) {
+            prop_assume!(height_range_is_representable(&data.v2.v1));
+            check_codec_roundtrip_with(&data, BRANCH_ID);
+        }
+
+        #[test]
+        fn node_data_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..400)) {
+            check_canonical::<NodeData, _>(&bytes, BRANCH_ID);
+        }
+
+        #[test]
+        fn v3_is_canonical(bytes in prop::collection::vec(any::<u8>(), 0..400)) {
+            check_canonical::<V3, _>(&bytes, BRANCH_ID);
+        }
+
+        /// The inherent methods are what callers use today, and must stay byte-identical to the
+        /// trait implementations they now delegate to.
+        #[test]
+        fn inherent_methods_agree_with_the_traits(data in arb_node_data()) {
+            prop_assume!(height_range_is_representable(&data));
+
+            let mut via_inherent = Vec::new();
+            NodeData::write(&data, &mut via_inherent).unwrap();
+            let mut via_trait = Vec::new();
+            Encodable::write(&data, &mut via_trait).unwrap();
+            prop_assert_eq!(&via_inherent, &via_trait);
+
+            let a = NodeData::read(BRANCH_ID, &mut &via_inherent[..]).unwrap();
+            let b = <NodeData as Decodable<u32>>::read(&via_inherent[..], BRANCH_ID).unwrap();
+            prop_assert_eq!(a, b);
+        }
     }
 }

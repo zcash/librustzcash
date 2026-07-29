@@ -1,3 +1,5 @@
+use zcash_encoding::{Decodable, Encodable};
+
 use crate::{EntryKind, EntryLink, Error, MAX_NODE_DATA_SIZE, Version};
 
 /// Max serialized length of entry data.
@@ -77,6 +79,32 @@ impl<V: Version> Entry<V> {
         consensus_branch_id: u32,
         r: &mut R,
     ) -> corez::io::Result<Self> {
+        <Self as Decodable<u32>>::read(r, consensus_branch_id)
+    }
+
+    /// Write to byte representation.
+    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
+        Encodable::write(self, w)
+    }
+
+    /// Convert from byte representation.
+    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
+        let mut cursor = corez::io::Cursor::new(buf);
+        Self::read(consensus_branch_id, &mut cursor)
+    }
+}
+
+impl<V> Decodable<u32> for Entry<V>
+where
+    V: Version,
+{
+    /// `consensus_branch_id` is the consensus branch ID in force for the entry, which the
+    /// encoding does not carry.
+    fn read<R>(mut reader: R, consensus_branch_id: u32) -> corez::io::Result<Self>
+    where
+        R: corez::io::Read,
+    {
+        let r = &mut reader;
         let kind = {
             let mut byte = [0u8; 1];
             r.read_exact(&mut byte)?;
@@ -98,9 +126,17 @@ impl<V: Version> Entry<V> {
 
         Ok(Entry { kind, data })
     }
+}
 
-    /// Write to byte representation.
-    pub fn write<W: corez::io::Write>(&self, w: &mut W) -> corez::io::Result<()> {
+impl<V> Encodable for Entry<V>
+where
+    V: Version,
+{
+    fn write<W>(&self, mut writer: W) -> corez::io::Result<()>
+    where
+        W: corez::io::Write,
+    {
+        let w = &mut writer;
         match self.kind {
             EntryKind::Node(EntryLink::Stored(left), EntryLink::Stored(right)) => {
                 w.write_all(&[0])?;
@@ -118,12 +154,6 @@ impl<V: Version> Entry<V> {
         V::write(&self.data, w)?;
 
         Ok(())
-    }
-
-    /// Convert from byte representation.
-    pub fn from_bytes<T: AsRef<[u8]>>(consensus_branch_id: u32, buf: T) -> corez::io::Result<Self> {
-        let mut cursor = corez::io::Cursor::new(buf);
-        Self::read(consensus_branch_id, &mut cursor)
     }
 }
 
