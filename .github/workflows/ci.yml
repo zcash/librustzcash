@@ -71,10 +71,18 @@ jobs:
           shared-key: msrv
           save-if: ${{ matrix.state == 'all-features' }}
       - name: Run tests
-        run: >
-          cargo test
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo test --workspace "${feature_flags[@]}"
       - name: Verify working directory is clean
         run: git diff --exit-code
 
@@ -143,10 +151,18 @@ jobs:
           shared-key: msrv
           save-if: ${{ matrix.state == 'all-features' && matrix.target != 'Windows' }}
       - name: Run tests
-        run: >
-          cargo test
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo test --workspace "${feature_flags[@]}"
       - name: Verify working directory is clean
         run: git diff --exit-code
 
@@ -201,11 +217,18 @@ jobs:
           shared-key: msrv
           save-if: "false"
       - name: Run slow tests
-        run: >
-          cargo test
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
-          --features expensive-tests
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo test --workspace "${feature_flags[@]}" --features expensive-tests
       - name: Verify working directory is clean
         run: git diff --exit-code
 
@@ -234,8 +257,10 @@ jobs:
       - name: Ensure rustup proxies take precedence
         shell: bash
         run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
+        with:
+          toolchain: stable
       - run: rustup override set "${TOOLCHAIN}"
         shell: sh
         env:
@@ -243,12 +268,18 @@ jobs:
       - name: Remove lockfile to build with latest dependencies
         run: rm Cargo.lock
       - name: Build crates
-        run: >
-          cargo build
-          --workspace
-          --all-targets
-          ${{ steps.prepare.outputs.feature-flags }}
-          --verbose
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo build --workspace --all-targets "${feature_flags[@]}" --verbose
       - name: Verify working directory is clean (excluding lockfile)
         run: git diff --exit-code ':!Cargo.lock'
 
@@ -422,9 +453,10 @@ jobs:
       # We can't currently use only the common feature set (to exclude checking of
       # unstable in-progress code) because this action doesn't support spaces within CLI
       # arguments. Once it does, switch back to `prepare` instead of `--all-features`.
-      - uses: dtolnay/rust-toolchain@beta
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
         with:
+          toolchain: beta
           components: clippy
       - run: rustup override set "${TOOLCHAIN}"
         shell: sh
@@ -452,22 +484,29 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
+        with:
+          toolchain: nightly
       - run: rustup override set "${TOOLCHAIN}"
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
       - run: cargo fetch
       # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
       - name: Check intra-doc links
-        run: >
-          cargo doc
-          --no-deps
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
-          --document-private-items
+        shell: bash
         env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
           RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo doc --no-deps --workspace "${feature_flags[@]}" --document-private-items
 
   fmt:
     name: Rustfmt
@@ -506,10 +545,18 @@ jobs:
           version: '25.1'
           subPath: 'bin'
       - name: Trigger protobuf regeneration
-        run: >
-          cargo check
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
+        env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo check --workspace "${feature_flags[@]}"
       - name: run cargo-fmt to handle the case that regeneration sometimes produces unformatted output
         run: cargo fmt
       - name: Verify working directory is clean
