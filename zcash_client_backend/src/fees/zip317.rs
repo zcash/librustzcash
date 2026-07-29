@@ -355,6 +355,25 @@ where
 
 #[cfg(test)]
 mod tests {
+    // `sapling_fees` is named by both the orchard and the transparent-inputs tests.
+    #[cfg(any(feature = "orchard", feature = "transparent-inputs"))]
+    use crate::fees::sapling as sapling_fees;
+
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        crate::fees::TransparentChangePolicy,
+        ::transparent::{address::TransparentAddress, bundle::OutPoint},
+    };
+
+    #[cfg(feature = "orchard")]
+    use {
+        crate::data_api::wallet::TargetHeight,
+        crate::data_api::wallet::input_selection::OrchardPayment,
+        crate::fees::orchard as orchard_fees,
+        crate::fees::tests::TestOrchardInput,
+        zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
+    };
+
     use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
     use core::{convert::Infallible, num::NonZeroUsize};
     use zcash_protocol::consensus::BlockHeight;
@@ -378,15 +397,6 @@ mod tests {
             zip317::MultiOutputChangeStrategy,
         },
     };
-
-    #[cfg(feature = "orchard")]
-    use {
-        crate::data_api::wallet::input_selection::OrchardPayment,
-        crate::fees::orchard as orchard_fees,
-    };
-
-    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    use crate::data_api::wallet::TargetHeight;
 
     #[test]
     fn change_without_dust() {
@@ -729,8 +739,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn orchard_v3_change_counts_spends_and_outputs_separately() {
-        use crate::fees::{sapling as sapling_fees, tests::TestOrchardInput};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -777,9 +785,6 @@ mod tests {
     #[test]
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
     fn orchard_fallback_change_pool_is_promoted_to_ironwood_after_nu6_3() {
-        use crate::fees::sapling as sapling_fees;
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         // A caller that names Orchard as its fallback change pool.
         let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
@@ -905,11 +910,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn the_change_strategy_records_the_dummy_outputs_it_costed() {
-        use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
-
-        use crate::data_api::wallet::TargetHeight;
-        use crate::fees::tests::TestOrchardInput;
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1120,9 +1120,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_no_change() {
-        use crate::fees::sapling as sapling_fees;
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1170,9 +1167,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_change() {
-        use crate::fees::sapling as sapling_fees;
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1220,9 +1214,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_transparent_flows_with_shielded_dust_change() {
-        use crate::fees::sapling as sapling_fees;
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1276,9 +1267,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_with_transparent_change() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1330,9 +1318,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn change_fully_transparent_exact_match_with_transparent_change() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1382,8 +1367,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_policy_has_no_effect_on_shielded_flows() {
-        use crate::fees::TransparentChangePolicy;
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1431,9 +1414,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_is_not_split() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = MultiOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1488,9 +1468,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_rejects_dust() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1542,9 +1519,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_allows_dust() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
@@ -1598,9 +1572,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_change_dust_added_to_fee() {
-        use crate::fees::{TransparentChangePolicy, sapling as sapling_fees};
-        use ::transparent::{address::TransparentAddress, bundle::OutPoint};
-
         let change_strategy = SingleOutputChangeStrategy::<_, MockWalletDb>::new(
             Zip317FeeRule::standard(),
             None,
