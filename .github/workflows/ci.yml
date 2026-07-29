@@ -593,51 +593,11 @@ jobs:
         shell: sh
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
-      # `Clippy (MSRV)` lints `--all-features` and `Clippy (no default features)` lints the empty
-      # set: the two ENDPOINTS. Neither sees the configurations a downstream crate creates by
-      # taking one feature without another, which is how an import used only under `orchard` or
-      # `transparent-inputs` can sit in an ungated `use` block indefinitely.
-      #
-      # Lint each of the crate's features on its own, which is what catches that class. The full
-      # powerset is not an option (2^19 for zcash_client_backend) and pairwise interactions are
-      # deliberately out of scope. Deriving both the crate list and the feature list from `cargo
-      # metadata` means a new crate or feature is covered the day it lands.
-      #
-      # One job per crate, looping its features in-process: the dependency build is paid once and
-      # reused across every configuration, rather than once per runner.
-      #
-      # Configurations listed in clippy-known-failures.txt are pre-existing debt and may fail; see
-      # that file for what they are and how to burn them down. Anything else must lint clean.
+      # Lints each of the crate's features on its own, catching the configurations that the
+      # `--all-features` and `--no-default-features` endpoints both miss. The script carries the
+      # full rationale and can be run locally against one crate or the whole workspace.
       - name: Clippy each feature
-        run: |
-          set -u
-          allow=.github/workflows/clippy-known-failures.txt
-          features=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r --arg c "$CRATE" \
-                '.packages[] | select(.name == $c) | .features | keys[] | select(. != "default")')
-          failed=0
-          for f in "<none>" $features; do
-            if [ "$f" = "<none>" ]; then
-              set -- -p "$CRATE" --no-default-features --all-targets
-            else
-              set -- -p "$CRATE" --no-default-features --features "$f" --all-targets
-            fi
-            known=no
-            if grep -qxF "$CRATE $f" "$allow"; then known=yes; fi
-            echo "::group::$CRATE $f (known-failing: $known)"
-            if cargo clippy "$@" -- -D warnings; then
-              if [ "$known" = yes ]; then
-                echo "::notice::$CRATE $f now lints clean; remove it from $allow"
-              fi
-            elif [ "$known" = yes ]; then
-              echo "::notice::$CRATE $f failed, but is known-failing"
-            else
-              echo "::error::clippy failed for $CRATE $f"
-              failed=1
-            fi
-            echo "::endgroup::"
-          done
-          exit "$failed"
+        run: .github/helpers/clippy-each-feature.sh "$CRATE"
         env:
           CRATE: ${{ matrix.crate }}
 
