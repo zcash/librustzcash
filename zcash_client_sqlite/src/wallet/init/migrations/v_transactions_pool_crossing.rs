@@ -124,12 +124,15 @@ impl RusqliteMigration for Migration {
                      ON ros.pool = ro.pool
                      AND ros.received_output_id = ro.id_within_pool_table
             ),
-            -- The distinct pools from which each account spent notes in each transaction. An output
-            -- received in a pool that does not appear here for its transaction is value that crossed
-            -- into that pool from elsewhere.
-            spent_note_pools AS (
-                SELECT account_id, transaction_id, pool
-                FROM v_received_output_spends
+            -- What each account spent and received in each pool, per transaction. A pool the account
+            -- received value in but spent nothing from is a pool that value crossed into from
+            -- elsewhere, which is what `pool_crossings` below is built on.
+            notes_by_pool AS (
+                SELECT account_id, transaction_id, pool,
+                       SUM(spent_note_count)                   AS spent_note_count,
+                       SUM(received_count + change_note_count) AS received_note_count,
+                       SUM(received_value)                     AS received_value
+                FROM notes
                 GROUP BY account_id, transaction_id, pool
             ),
             -- Obtain a count of the notes that the wallet created in each transaction,
@@ -149,6 +152,35 @@ impl RusqliteMigration for Migration {
                 LEFT JOIN v_received_outputs ro ON sent_notes.id = ro.sent_note_id
                 WHERE COALESCE(ro.is_change, 0) = 0
                 GROUP BY account_id, sent_notes.transaction_id
+            ),
+            -- Identifies the transactions that are wallet-internal transfers moving an account's own
+            -- funds between shielded pools, and reports the value that crossed. `crossing_value` is
+            -- non-NULL exactly for such a transaction, so it carries both the classification and the
+            -- amount; see the `pool_crossing_value` column below.
+            pool_crossings AS (
+                SELECT notes_by_pool.account_id     AS account_id,
+                       notes_by_pool.transaction_id AS transaction_id,
+                       CASE WHEN (
+                            -- Every note spent and every output received by the wallet is shielded.
+                            SUM(CASE WHEN notes_by_pool.pool = 0 THEN notes_by_pool.spent_note_count + notes_by_pool.received_note_count ELSE 0 END) = 0
+                            -- The transaction spends at least one of the account's notes.
+                            AND SUM(notes_by_pool.spent_note_count) > 0
+                            -- At least one output was received in a pool the account spent nothing
+                            -- from, so value crossed between pools.
+                            AND SUM(CASE WHEN notes_by_pool.spent_note_count = 0 THEN notes_by_pool.received_note_count ELSE 0 END) > 0
+                            -- We do not know about any external outputs of the transaction.
+                            AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
+                       )
+                       -- The total value received in the pools the account did not spend from. The
+                       -- condition above guarantees at least one such output, so when this branch is
+                       -- taken the sum is never NULL.
+                       THEN SUM(CASE WHEN notes_by_pool.spent_note_count = 0 THEN notes_by_pool.received_value ELSE 0 END)
+                       END AS crossing_value
+                FROM notes_by_pool
+                LEFT JOIN sent_note_counts
+                     ON sent_note_counts.account_id = notes_by_pool.account_id
+                     AND sent_note_counts.transaction_id = notes_by_pool.transaction_id
+                GROUP BY notes_by_pool.account_id, notes_by_pool.transaction_id
             ),
             blocks_max_height AS (
                 SELECT MAX(blocks.height) AS max_height FROM blocks
@@ -187,22 +219,7 @@ impl RusqliteMigration for Migration {
                    -- The value that crossed pools, when this transaction is a wallet-internal transfer
                    -- between shielded pools; NULL when it is not such a transfer. A transaction is one
                    -- exactly when this column is non-NULL.
-                   CASE WHEN (
-                        -- Every note spent and every output received by the wallet in this transaction
-                        -- is shielded.
-                        SUM(CASE WHEN notes.pool = 0 THEN notes.spent_note_count + notes.received_count + notes.change_note_count ELSE 0 END) = 0
-                        -- The transaction spends at least one of the account's notes.
-                        AND SUM(notes.spent_note_count) > 0
-                        -- At least one output was received in a shielded pool from which the account
-                        -- spent nothing, so value crossed between pools.
-                        AND SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_count + notes.change_note_count ELSE 0 END) > 0
-                        -- We do not know about any external outputs of the transaction.
-                        AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
-                   )
-                   -- The total value received in pools the account did not spend from. The condition
-                   -- above guarantees at least one such output, so this sum is never NULL when selected.
-                   THEN SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_value ELSE 0 END)
-                   END AS pool_crossing_value,
+                   pool_crossings.crossing_value AS pool_crossing_value,
                    transactions.trust_status
             FROM notes
             JOIN accounts ON accounts.id = notes.account_id
@@ -212,10 +229,9 @@ impl RusqliteMigration for Migration {
             LEFT JOIN sent_note_counts
                  ON sent_note_counts.account_id = notes.account_id
                  AND sent_note_counts.transaction_id = notes.transaction_id
-            LEFT JOIN spent_note_pools
-                 ON spent_note_pools.account_id = notes.account_id
-                 AND spent_note_pools.transaction_id = notes.transaction_id
-                 AND spent_note_pools.pool = notes.pool
+            LEFT JOIN pool_crossings
+                 ON pool_crossings.account_id = notes.account_id
+                 AND pool_crossings.transaction_id = notes.transaction_id
             GROUP BY notes.account_id, notes.transaction_id;",
         )?;
 
