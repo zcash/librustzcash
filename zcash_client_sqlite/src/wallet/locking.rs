@@ -21,13 +21,11 @@ use zcash_client_backend::{
     data_api::wallet::{TargetHeight, input_selection::LockFilter},
     wallet::{LockOwner, OutputRef},
 };
-#[cfg(any(test, feature = "test-dependencies"))]
 use zcash_primitives::transaction::TxId;
 use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight};
 
 use crate::{AccountUuid, TxRef, error::SqliteClientError, wallet::chain_tip_height};
 
-#[cfg(any(test, feature = "test-dependencies"))]
 pub(crate) fn get_locked_outputs(
     conn: &rusqlite::Connection,
     account: AccountUuid,

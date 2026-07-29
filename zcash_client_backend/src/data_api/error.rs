@@ -112,6 +112,15 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, C
         min_target_height: BlockHeight,
     },
 
+    /// The caller requested an expiry height for a step that is a canonical ZIP 318 crossing.
+    ///
+    /// Such a step takes its expiry from the ZIP 318 rolling window, which every crossing in the
+    /// same period shares; a caller-chosen expiry would single it out and undo the shape the
+    /// unpadded bundle and bucketed anchor were chosen to produce. Those are already fixed by the
+    /// time the transaction is built, so the conflict is reported rather than silently resolved.
+    /// Pass `None` to accept the canonical expiry.
+    ExpiryHeightConflictsWithCanonicalCrossing { requested: BlockHeight },
+
     /// An error occurred while working with PCZTs.
     #[cfg(feature = "pczt")]
     Pczt(PcztError),
@@ -317,6 +326,11 @@ where
                     "The specified transparent address was not recognized as belonging to the wallet."
                 )
             }
+            Error::ExpiryHeightConflictsWithCanonicalCrossing { requested } => write!(
+                f,
+                "An expiry height of {requested} was requested for a canonical ZIP 318 crossing, \
+                 which takes the ZIP 318 rolling expiry; pass `None` to accept it."
+            ),
             Error::ExpiryHeightBelowTargetHeight {
                 expiry_height,
                 min_target_height,

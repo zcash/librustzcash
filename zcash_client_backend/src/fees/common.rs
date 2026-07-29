@@ -1,9 +1,17 @@
 use core::cmp::{Ordering, max, min};
 use std::num::{NonZeroU64, NonZeroUsize};
 
+#[cfg(feature = "orchard")]
+use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::fees::{
     FeeRule, transparent, zip317::MINIMUM_FEE, zip317::P2PKH_STANDARD_OUTPUT_SIZE,
 };
+#[cfg(feature = "orchard")]
+use zcash_protocol::zip318::PoolMigrationConstants;
+
+use crate::data_api::anchor_retention::PoolMigrationParams;
+#[cfg(feature = "orchard")]
+use zcash_protocol::PoolType;
 use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -21,7 +29,7 @@ use super::{
 #[cfg(feature = "transparent-inputs")]
 use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
-use super::orchard as orchard_fees;
+use super::orchard::{self as orchard_fees, OutputView as _};
 
 pub(crate) struct NetFlows {
     t_in: Zatoshis,
@@ -232,8 +240,35 @@ impl OutputManifest {
         self.ironwood
     }
 
+    #[cfg(feature = "orchard")]
+    pub(crate) fn transparent(&self) -> usize {
+        self.transparent
+    }
+
     pub(crate) fn total_shielded(&self) -> usize {
         self.sapling + self.orchard + self.ironwood
+    }
+
+    /// A manifest placing `count` change outputs in `pool` and none elsewhere.
+    fn for_pool(pool: ShieldedPool, count: usize) -> Self {
+        Self {
+            transparent: 0,
+            sapling: if pool == ShieldedPool::Sapling {
+                count
+            } else {
+                0
+            },
+            orchard: if pool == ShieldedPool::Orchard {
+                count
+            } else {
+                0
+            },
+            ironwood: if pool == ShieldedPool::Ironwood {
+                count
+            } else {
+                0
+            },
+        }
     }
 }
 
@@ -288,11 +323,25 @@ pub(crate) fn single_pool_output_balance<P: consensus::Parameters, NoteRefT: Clo
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
-    // The transactional bundle type the transaction builder will use for both the
-    // Orchard and Ironwood bundles; the action counts computed here must match it so
-    // the builder's exact-balance check succeeds (see
-    // `orchard_fees::transactional_action_count`).
-    #[cfg(feature = "orchard")] orchard_pool_bundle_type: ::orchard::builder::BundleType,
+    // The transactional bundle padding the transaction builder will use for the Orchard and
+    // Ironwood bundles respectively; the action counts computed here must match them so the
+    // builder's exact-balance check succeeds (see `orchard_fees::transactional_action_count`).
+    //
+    // This is `BundlePadding` rather than `BundleType` deliberately: coinbase construction is a
+    // property of the whole transaction, never of one pool, and a fee is never computed for a
+    // coinbase transaction at all. Carrying padding keeps a per-pool coinbase unrepresentable, as
+    // `BuildConfig::Standard` does for the builder.
+    //
+    // There is no matching Ironwood parameter. That bundle's padding is DERIVED from the
+    // transaction's shape (see `ironwood_is_canonical_crossing` below), not chosen by the caller.
+    #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
+    // The anchor the shielded bundles will be proved against, and the ZIP 318 parameters in force
+    // for the wallet proposing the transaction. A canonical crossing must be anchored to a
+    // boundary of the bucket grid, so the padding decision depends on both. The grid comes from
+    // the wallet rather than the network defaults: the wallet is the side that retains the
+    // checkpoints, so its grid is the only one a crossing can actually be proved against.
+    _anchor_height: BlockHeight,
+    _zip318: &PoolMigrationParams,
     change_memo: Option<&MemoBytes>,
     ephemeral_balance: Option<EphemeralBalance>,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
@@ -355,7 +404,7 @@ where
     #[cfg(feature = "orchard")]
     let orchard_action_count = |change_count| {
         orchard_fees::transactional_action_count(
-            orchard_pool_bundle_type,
+            orchard_padding.bundle_type(),
             orchard.bundle_version(),
             orchard.inputs().len(),
             orchard.outputs().len() + change_count,
@@ -378,26 +427,68 @@ where
     // action floor. Callers route Ironwood inputs/outputs into the `ironwood`
     // view; it is empty (contributing no actions) when nothing targets the
     // Ironwood pool.
+    //
+    // A CANONICAL CROSSING drops the default padding: no Ironwood spends and a single Ironwood
+    // output whose value is a canonical ZIP 318 denomination, which is exactly the shape of a
+    // ZIP 318 migration transfer. Building it unpadded puts an ordinary turnstile-crossing
+    // payment into that anonymity set rather than leaving it distinguishable by action count.
+    // `Step::ironwood_bundle_padding` decides the same question from the finished proposal, and
+    // the two must agree or the builder's exact-balance check will reject the transaction.
+    //
+    // The value is only known here when the sole output is a PAYMENT, i.e. `change_count == 0`;
+    // an Ironwood change value is what this function is in the middle of solving for. That costs
+    // nothing: with a change output there are two real Ironwood outputs, so the bundle is at or
+    // above the default floor and the padding is irrelevant.
     #[cfg(feature = "orchard")]
-    let ironwood_action_count = |change_count| {
+    let ironwood_is_canonical_crossing = |change: OutputManifest| {
+        let constants = _zip318;
+        orchard.inputs().len() == 1
+            && ironwood.inputs().is_empty()
+            && change.ironwood() == 0
+            // The Orchard bundle must be exactly two actions, and from NU6.3 a spend and an output
+            // no longer share one; a second Orchard change output would make three. Change in any
+            // other pool adds a bundle no migration transfer carries. `Step::is_canonical_crossing`
+            // applies the identical bounds, and the two must agree or the builder's exact-balance
+            // check rejects the transaction.
+            && change.orchard() <= 1
+            && change.sapling() == 0
+            && change.transparent() == 0
+            && match ironwood.outputs() {
+                [output] => constants.is_canonical_denomination(output.value()),
+                _ => false,
+            }
+            && constants
+                .anchor_bucket_interval()
+                .is_boundary(_anchor_height)
+    };
+    #[cfg(feature = "orchard")]
+    let ironwood_action_count = |change: OutputManifest| {
+        // The Ironwood bundle drops its padding exactly when doing so makes the transaction look
+        // like a migration transfer, and is padded otherwise. This is not the caller's to choose.
+        let padding = if ironwood_is_canonical_crossing(change) {
+            BundlePadding::UNPADDED
+        } else {
+            BundlePadding::DEFAULT
+        };
         orchard_fees::transactional_action_count(
-            orchard_pool_bundle_type,
+            padding.bundle_type(),
             ironwood.bundle_version(),
             ironwood.inputs().len(),
-            ironwood.outputs().len() + change_count,
+            ironwood.outputs().len() + change.ironwood(),
         )
         .map_err(ChangeError::BundleError)
     };
     #[cfg(not(feature = "orchard"))]
-    let ironwood_action_count = |change_count: usize| -> Result<usize, ChangeError<E, NoteRefT>> {
-        if change_count != 0 {
-            Err(ChangeError::BundleError(
-                "Nonzero Ironwood change requested but the `orchard` feature is not enabled.",
-            ))
-        } else {
-            Ok(0)
-        }
-    };
+    let ironwood_action_count =
+        |change: OutputManifest| -> Result<usize, ChangeError<E, NoteRefT>> {
+            if change.ironwood() != 0 {
+                Err(ChangeError::BundleError(
+                    "Nonzero Ironwood change requested but the `orchard` feature is not enabled.",
+                ))
+            } else {
+                Ok(0)
+            }
+        };
 
     let transparent_input_sizes = transparent_inputs
         .iter()
@@ -446,7 +537,7 @@ where
             sapling_input_count,
             sapling_output_count(0)?,
             orchard_action_count(0)?,
-            ironwood_action_count(0)?,
+            ironwood_action_count(OutputManifest::ZERO)?,
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
@@ -532,7 +623,11 @@ where
             #[cfg(feature = "orchard")]
             ironwood,
             #[cfg(feature = "orchard")]
-            orchard_pool_bundle_type,
+            orchard_padding,
+            #[cfg(feature = "orchard")]
+            _anchor_height,
+            #[cfg(feature = "orchard")]
+            _zip318,
             cfg.marginal_fee,
             cfg.grace_actions,
             &possible_change[..],
@@ -571,7 +666,7 @@ where
                         sapling_input_count,
                         sapling_output_count(target_change_counts.sapling())?,
                         orchard_action_count(target_change_counts.orchard())?,
-                        ironwood_action_count(target_change_counts.ironwood())?,
+                        ironwood_action_count(target_change_counts)?,
                     )
                     .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?,
             );
@@ -616,11 +711,7 @@ where
                         } else {
                             0
                         })?,
-                        ironwood_action_count(if change_pool == ShieldedPool::Ironwood {
-                            split_count
-                        } else {
-                            0
-                        })?,
+                        ironwood_action_count(OutputManifest::for_pool(change_pool, split_count))?,
                     )
                     .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?
             } else {
@@ -742,7 +833,40 @@ where
             .map(ChangeValue::ephemeral_transparent),
     );
 
-    TransactionBalance::new(change, fee).map_err(|_| overflow())
+    // Record the padding the fee above was actually charged against, derived from the change set
+    // finally chosen rather than from any candidate considered along the way. The builder reads
+    // this back instead of re-deciding, so the two cannot disagree.
+    #[cfg(feature = "orchard")]
+    let ironwood_padding = {
+        let final_change = OutputManifest {
+            transparent: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::TRANSPARENT)
+                .count(),
+            sapling: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::SAPLING)
+                .count(),
+            orchard: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::ORCHARD)
+                .count(),
+            ironwood: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::IRONWOOD)
+                .count(),
+        };
+        if ironwood_is_canonical_crossing(final_change) {
+            BundlePadding::UNPADDED
+        } else {
+            BundlePadding::DEFAULT
+        }
+    };
+
+    let balance = TransactionBalance::new(change, fee).map_err(|_| overflow())?;
+    #[cfg(feature = "orchard")]
+    let balance = balance.with_ironwood_bundle_padding(ironwood_padding);
+    Ok(balance)
 }
 
 /// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided
@@ -767,7 +891,9 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
     #[cfg(feature = "orchard")] ironwood: &impl orchard_fees::BundleView<NoteRefT>,
     // The Orchard-pool bundle type the builder will use; the action counts computed
     // for the grace-input check must match it (see `single_pool_output_balance`).
-    #[cfg(feature = "orchard")] orchard_pool_bundle_type: ::orchard::builder::BundleType,
+    #[cfg(feature = "orchard")] orchard_padding: BundlePadding,
+    #[cfg(feature = "orchard")] anchor_height: BlockHeight,
+    #[cfg(feature = "orchard")] zip318: &PoolMigrationParams,
     marginal_fee: Zatoshis,
     grace_actions: usize,
     possible_change: &[OutputManifest],
@@ -911,7 +1037,7 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
 
             #[cfg(feature = "orchard")]
             let o_action_count = orchard_fees::transactional_action_count(
-                orchard_pool_bundle_type,
+                orchard_padding.bundle_type(),
                 orchard.bundle_version(),
                 o_req_inputs + _o_extra,
                 o_outputs_len + change.orchard,
@@ -920,9 +1046,31 @@ pub(crate) fn check_for_uneconomic_inputs<NoteRefT: Clone, E>(
             #[cfg(not(feature = "orchard"))]
             let o_action_count = 0;
 
+            // The Ironwood padding is derived here on the same rule as in
+            // `single_pool_output_balance`, over this hypothetical change manifest rather than the
+            // chosen one, so that the two agree about what each candidate would cost.
+            #[cfg(feature = "orchard")]
+            let i_padding = {
+                let constants = zip318;
+                let canonical = o_req_inputs + _o_extra == 1
+                    && i_req_inputs + _i_extra == 0
+                    && change.ironwood == 0
+                    && match ironwood.outputs() {
+                        [output] => constants.is_canonical_denomination(output.value()),
+                        _ => false,
+                    }
+                    && constants
+                        .anchor_bucket_interval()
+                        .is_boundary(anchor_height);
+                if canonical {
+                    BundlePadding::UNPADDED
+                } else {
+                    BundlePadding::DEFAULT
+                }
+            };
             #[cfg(feature = "orchard")]
             let i_action_count = orchard_fees::transactional_action_count(
-                orchard_pool_bundle_type,
+                i_padding.bundle_type(),
                 ironwood.bundle_version(),
                 i_req_inputs + _i_extra,
                 i_outputs_len + change.ironwood,

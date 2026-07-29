@@ -878,6 +878,21 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn canonical_crossing_is_bucketed_and_unpadded() {
+        testing::pool::canonical_crossing_is_bucketed_and_unpadded()
+    }
+
+    #[test]
+    fn multi_note_crossing_is_not_bucketed() {
+        testing::pool::multi_note_crossing_is_not_bucketed()
+    }
+
+    #[test]
+    fn self_migration_keeps_spending_orchard() {
+        testing::pool::self_migration_keeps_spending_orchard()
+    }
+
+    #[test]
     fn pool_crossing_required() {
         testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
     }

@@ -11,14 +11,12 @@ use alloc::vec::Vec;
 
 use rand_core::{CryptoRng, RngCore};
 
-use zcash_protocol::value::COIN;
-
-use super::utils::largest_one_two_five;
 use zcash_protocol::value::Zatoshis;
+use zcash_protocol::zip318::largest_one_two_five;
 
 use super::{
-    DenominationPlan, DenominationStrategy, MIGRATION_MAX_DENOMINATION_ZEC,
-    MIGRATION_MAX_PREPARED_NOTES_PER_RUN, RESIDUAL_MIGRATION_MIN, zat,
+    DENOM_CAP, DenominationPlan, DenominationStrategy, MAX_RESIDUAL_VALUE,
+    MIGRATION_MAX_PREPARED_NOTES_PER_RUN, zat,
 };
 
 /// The canonical `{1, 2, 5} * 10^k` quantization of [ZIP 318]: at each step it takes the largest such
@@ -42,31 +40,31 @@ pub struct CanonicalOneTwoFive {
 }
 
 impl CanonicalOneTwoFive {
-    /// A strategy with an explicit note cap, maximum denomination (in whole ZEC), minimum denomination (in
-    /// zatoshi, which MUST be a power of ten), and per-note transfer-fee buffer (the ZIP-317 fee of
-    /// the canonical transfer shape, computed by the caller).
+    /// A strategy with an explicit note cap, maximum denomination, minimum denomination (which MUST
+    /// be a power of ten), and per-note transfer-fee buffer (the ZIP-317 fee of the canonical
+    /// transfer shape, computed by the caller).
     pub fn new(
         max_notes: usize,
-        max_denomination_zec: u64,
+        max_denomination: Zatoshis,
         min_denomination: Zatoshis,
         transfer_fee_buffer: Zatoshis,
     ) -> Self {
         Self {
             max_notes,
-            max_denomination_zatoshi: max_denomination_zec.saturating_mul(COIN),
+            max_denomination_zatoshi: u64::from(max_denomination),
             min_denomination_zatoshi: u64::from(min_denomination),
             buffer_zatoshi: u64::from(transfer_fee_buffer),
         }
     }
 
-    /// The recommended configuration: [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes,
-    /// [`MIGRATION_MAX_DENOMINATION_ZEC`] cap, [`RESIDUAL_MIGRATION_MIN`] minimum
-    /// denomination, and the caller-computed transfer-fee buffer.
+    /// The recommended configuration: [`MIGRATION_MAX_PREPARED_NOTES_PER_RUN`] notes, the
+    /// [`DENOM_CAP`] maximum denomination, the [`MAX_RESIDUAL_VALUE`] minimum denomination, and the
+    /// caller-computed transfer-fee buffer.
     pub fn recommended(transfer_fee_buffer: Zatoshis) -> Self {
         Self::new(
             MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
-            MIGRATION_MAX_DENOMINATION_ZEC,
-            RESIDUAL_MIGRATION_MIN,
+            DENOM_CAP,
+            MAX_RESIDUAL_VALUE,
             transfer_fee_buffer,
         )
     }
@@ -167,7 +165,7 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
-    use zcash_protocol::value::MAX_MONEY;
+    use zcash_protocol::value::{COIN, MAX_MONEY};
 
     use crate::denomination::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
     use crate::preparation::FUNDING_OUTPUTS_PER_TX;
@@ -207,24 +205,12 @@ mod tests {
         )
     }
 
-    /// Whether `zat` is a `{1, 2, 5} * 10^k` amount (in zatoshi), including sub-1-ZEC denominations.
-    fn is_one_two_five_zat(zat: u64) -> bool {
-        if zat == 0 {
-            return false;
-        }
-        let mut n = zat;
-        while n.is_multiple_of(10) {
-            n /= 10;
-        }
-        matches!(n, 1 | 2 | 5)
-    }
-
     /// The canonical strategy with the given note cap and the ZIP-317 transfer buffer.
     fn canonical(max_notes: usize) -> CanonicalOneTwoFive {
         CanonicalOneTwoFive::new(
             max_notes,
-            MIGRATION_MAX_DENOMINATION_ZEC,
-            RESIDUAL_MIGRATION_MIN,
+            DENOM_CAP,
+            MAX_RESIDUAL_VALUE,
             zat(zip317_buffer()),
         )
     }
@@ -232,12 +218,7 @@ mod tests {
     /// The exact fee-free crossing decomposition of `total` (no buffer, no preparation fee), for
     /// the golden vectors.
     fn crossings(total: u64) -> Vec<u64> {
-        let s = CanonicalOneTwoFive::new(
-            64,
-            MIGRATION_MAX_DENOMINATION_ZEC,
-            RESIDUAL_MIGRATION_MIN,
-            Zatoshis::ZERO,
-        );
+        let s = CanonicalOneTwoFive::new(64, DENOM_CAP, MAX_RESIDUAL_VALUE, Zatoshis::ZERO);
         let mut rng = ChaCha8Rng::seed_from_u64(0);
         crossings_u64(&s.plan(zat(total), Zatoshis::ZERO, &prep_tx_count_stub, &mut rng))
     }
@@ -251,8 +232,7 @@ mod tests {
         fn honours_the_contract((total, fee, max_notes) in arb_plan_input()) {
             let s = canonical(max_notes);
             let buffer = zip317_buffer();
-            let cap = MIGRATION_MAX_DENOMINATION_ZEC * COIN;
-            let floor = u64::from(RESIDUAL_MIGRATION_MIN);
+            let floor = u64::from(MAX_RESIDUAL_VALUE);
             let mut rng = ChaCha8Rng::seed_from_u64(0);
             let p = s.plan(zat(total), zat(fee), &prep_tx_count_stub, &mut rng);
 
@@ -281,8 +261,13 @@ mod tests {
             prop_assert_eq!(u64::from(p.total_migratable()), sum);
 
             for &cv in &cvs {
-                prop_assert!(is_one_two_five_zat(cv), "invalid denom {}", cv);
-                prop_assert!(cv >= floor && cv <= cap, "out of bounds {}", cv);
+                // One assertion, not two: being a canonical ZIP 318 denomination is exactly being
+                // on the `{1, 2, 5} * 10^k` series AND within the specified bounds.
+                prop_assert!(
+                    zcash_protocol::zip318::is_canonical_denomination(zat(cv)),
+                    "not a canonical denomination: {}",
+                    cv
+                );
             }
             for w in cvs.windows(2) {
                 prop_assert!(w[0] >= w[1], "crossings must be non-increasing");
@@ -311,8 +296,7 @@ mod tests {
             &prep_tx_count_stub,
             &mut rng,
         );
-        let per_run_cap =
-            MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * MIGRATION_MAX_DENOMINATION_ZEC * COIN;
+        let per_run_cap = MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * u64::from(DENOM_CAP);
         assert!(u64::from(p.total_migratable()) <= per_run_cap);
         assert!(
             p.change().map(u64::from).unwrap_or(0) > per_run_cap,
@@ -325,7 +309,7 @@ mod tests {
     fn below_min_note_migrates_nothing() {
         let s = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN);
         let buffer = zip317_buffer();
-        let below = u64::from(RESIDUAL_MIGRATION_MIN) + buffer - 1;
+        let below = u64::from(MAX_RESIDUAL_VALUE) + buffer - 1;
         let mut rng = ChaCha8Rng::seed_from_u64(0);
         let p = s.plan(zat(below), Zatoshis::ZERO, &prep_tx_count_stub, &mut rng);
         assert!(p.crossing_values().is_empty());
@@ -333,19 +317,19 @@ mod tests {
     }
 
     /// The largest reserved preparation fee the single-quantum tests sample. Kept below the smallest
-    /// gap between adjacent denominations (`RESIDUAL_MIGRATION_MIN`, the 0.01 -> 0.02 ZEC step) so
+    /// gap between adjacent denominations (`MAX_RESIDUAL_VALUE`, the 0.01 -> 0.02 ZEC step) so
     /// that `quantum + fee` never rounds up to the next `{1, 2, 5} * 10^k` denomination: the plan
     /// must then pick exactly the quantum. Realistic ZIP-317 preparation fees are far smaller (a
     /// handful of marginal fees).
     const MAX_SINGLE_QUANTUM_PREP_FEE_ZATOSHI: u64 = COIN / 200; // 0.005 ZEC, half the minimum denom
 
     /// Every `{1, 2, 5} * 10^k` denomination (a "quantum") within the valid range
-    /// `[RESIDUAL_MIGRATION_MIN, MIGRATION_MAX_DENOMINATION_ZEC]`, in zatoshi. These are exactly the
+    /// `[MAX_RESIDUAL_VALUE, DENOM_CAP]`, in zatoshi. These are exactly the
     /// crossing values the strategy can emit, so a balance of one of them plus its fees is the
     /// smallest input that migrates that denomination as a single note.
     fn all_quanta() -> Vec<u64> {
-        let min = u64::from(RESIDUAL_MIGRATION_MIN);
-        let cap = MIGRATION_MAX_DENOMINATION_ZEC * COIN;
+        let min = u64::from(MAX_RESIDUAL_VALUE);
+        let cap = u64::from(DENOM_CAP);
         let mut quanta = Vec::new();
         let mut pow = 1u64;
         while pow <= cap {
@@ -414,15 +398,15 @@ mod tests {
         // A realistic reserved preparation fee: the ZIP-317 marginal fee for a few actions.
         let prep_fee = 3 * MARGINAL_FEE.into_u64();
         let examples = [
-            u64::from(RESIDUAL_MIGRATION_MIN), // 0.01 ZEC, the minimum denomination
-            COIN / 50,                         // 0.02 ZEC
-            COIN / 20,                         // 0.05 ZEC
-            COIN / 10,                         // 0.1 ZEC
-            COIN,                              // 1 ZEC
-            2 * COIN,                          // 2 ZEC
-            5 * COIN,                          // 5 ZEC
-            100 * COIN,                        // 100 ZEC
-            MIGRATION_MAX_DENOMINATION_ZEC * COIN, // 10,000 ZEC, the cap
+            u64::from(MAX_RESIDUAL_VALUE), // 0.01 ZEC, the minimum denomination
+            COIN / 50,                     // 0.02 ZEC
+            COIN / 20,                     // 0.05 ZEC
+            COIN / 10,                     // 0.1 ZEC
+            COIN,                          // 1 ZEC
+            2 * COIN,                      // 2 ZEC
+            5 * COIN,                      // 5 ZEC
+            100 * COIN,                    // 100 ZEC
+            u64::from(DENOM_CAP),          // 10,000 ZEC, the cap
         ];
         for quantum in examples {
             assert_one_quantum_plus_fees(quantum, prep_fee);

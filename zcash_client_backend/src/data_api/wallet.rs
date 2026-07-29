@@ -46,6 +46,8 @@ use shardtree::error::{QueryError, ShardTreeError};
 use super::InputSource;
 use super::locking::lock_proposal_inputs;
 pub use super::locking::{LockRequest, unlock_proposal_inputs};
+#[cfg(feature = "orchard")]
+use crate::data_api::anchor_retention::PoolMigrationParams;
 use crate::{
     data_api::{
         Account, MaxSpendMode, NoteCommitmentTree, SentTransaction, SentTransactionOutput,
@@ -75,6 +77,9 @@ use zcash_primitives::transaction::{
     components::sapling::zip212_enforcement,
     fees::FeeRule,
 };
+use zcash_protocol::zip318::AnchorBucketInterval;
+#[cfg(feature = "orchard")]
+use zcash_protocol::zip318::PoolMigrationConstants;
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
@@ -577,6 +582,70 @@ impl ConfirmationsPolicy {
         target_height.saturating_sub(u32::from(self.trusted()))
     }
 
+    /// Returns this policy adjusted so that the shielded anchor for `target_height` lands on a
+    /// boundary of `interval`, or `None` if no boundary is reachable.
+    ///
+    /// A [ZIP 318] pool crossing is proved against a boundary block rather than the chain tip, so
+    /// that many wallets' crossings share a small set of anchors instead of each pinning a unique
+    /// recent block.
+    ///
+    /// Bucketing is expressed as a RAISED CONFIRMATION REQUIREMENT rather than as a separately
+    /// lowered anchor, because the anchor and the bound on which notes may be spent are the same
+    /// quantity: `target_height` less the required confirmations. Moving that one number moves
+    /// both together, which is what makes it impossible to select a note having no witness at the
+    /// bucketed anchor. Lowering the anchor on its own would leave two numbers free to drift.
+    ///
+    /// The untrusted requirement is raised to match when it would otherwise fall below the trusted
+    /// one, preserving this type's `trusted <= untrusted` invariant.
+    ///
+    /// The boundary chosen is one interval BELOW the most recent one — an anchor age of 1, the
+    /// smallest ZIP 318 admits. Anchoring to the most recent boundary would be an age of 0, which
+    /// no migration transfer uses.
+    ///
+    /// `activation_height` is the activation of the pool being crossed into; the chosen boundary
+    /// must lie strictly above it.
+    ///
+    /// Returns `None` when no usable boundary is reachable: when the ordinary anchor lies below the
+    /// first boundary after `activation_height`, or where the required confirmations would reach
+    /// back past the genesis block. Reporting that as "unable to bucket" is what lets a caller fall
+    /// back, rather than build a proposal that is bound to fail.
+    ///
+    /// [ZIP 318]: https://zips.z.cash/zip-0318
+    pub fn bucketed(
+        &self,
+        interval: AnchorBucketInterval,
+        target_height: TargetHeight,
+        activation_height: BlockHeight,
+    ) -> Option<Self> {
+        // ZIP 318 draws an anchor of AGE `a` in `[1, ANCHOR_AGE_CAP]` boundaries behind the most
+        // recent one, so the chosen boundary is always strictly below it. Age 1 is taken here: the
+        // newest admissible boundary, and the modal age under the migration's `Geometric(1/2)`
+        // draw. Anchoring to the most recent boundary instead would be an age of 0, which no
+        // migration transfer ever uses.
+        let most_recent = interval.boundary_at_or_below(self.anchor_height(target_height));
+        let boundary = BlockHeight::from_u32(
+            u32::from(most_recent).checked_sub(interval.block_count().get())?,
+        );
+
+        // The boundary must lie strictly above the activation of the pool being crossed into.
+        // Rounding down can otherwise land on a PRE-ACTIVATION boundary in the window between
+        // activation and the first boundary after it, and ZIP 318's candidate set contains no such
+        // height — anchoring there would be distinguishable rather than shared. Height zero is
+        // excluded by the same bound, its note commitment tree being empty.
+        if boundary <= activation_height {
+            return None;
+        }
+        let bucketed = u32::from(target_height).checked_sub(u32::from(boundary))?;
+        let trusted = NonZeroU32::new(bucketed)?;
+        Self::new(
+            trusted,
+            core::cmp::max(self.untrusted(), trusted),
+            #[cfg(feature = "transparent-inputs")]
+            self.allow_zero_conf_shielding(),
+        )
+        .ok()
+    }
+
     /// Returns whether or not transparent inputs may be spent with zero confirmations in shielding
     /// transactions.
     #[cfg(feature = "transparent-inputs")]
@@ -740,18 +809,116 @@ where
     let (target_height, anchor_height) =
         maybe_intial_heights.ok_or_else(|| InputSelectorError::SyncRequired)?;
 
-    let proposal = input_selector.propose_transaction(
-        params,
-        wallet_db,
-        target_height,
-        anchor_height,
-        confirmations_policy,
-        spend_from_account,
-        request,
-        change_strategy,
-        spend_policy,
-        proposed_version,
-    )?;
+    // The ZIP 318 parameters in force for THIS wallet. The anchor bucket grid must come from the
+    // wallet rather than the network defaults: the wallet is the side that retains the
+    // checkpoints, so its grid is the only one a crossing can actually be proved against, and
+    // every decision below that depends on the grid consults this one value.
+    let zip318 = wallet_db.pool_migration_params();
+
+    // A payment of a canonical ZIP 318 denomination across the Orchard turnstile is proposed
+    // against a BUCKETED anchor and funded from a single Orchard note, so that the resulting
+    // transaction is indistinguishable from a ZIP 318 migration transfer (see
+    // `Step::is_canonical_crossing`). Whether that is achievable is decided here, before any
+    // proposal is kept, rather than discovered by failure: the common miss is not insufficient
+    // funds but a SUCCESSFUL multi-note selection, which funds perfectly well yet is not a
+    // canonical crossing. Falling back only on insufficient funds would leave such a transaction
+    // carrying a bucketed anchor — up to one interval of extra confirmations on its inputs — while
+    // still being built padded, which is worse than never having tried.
+    //
+    // Selection is restricted to the Orchard pool for the attempt. That is not merely a
+    // preference: a canonical crossing admits no Ironwood spends, and the ordinary selector
+    // prefers to avoid crossing pools, so for an Ironwood-destined payment it reaches for Ironwood
+    // notes whenever the wallet holds them. Without the restriction, a user migrating their own
+    // funds by sending themselves canonical amounts would stall as soon as the first crossing
+    // produced Ironwood notes: every later payment would be funded from Ironwood, crossing
+    // nothing, and no further value would ever leave the Orchard pool.
+    //
+    // The canonical fee for the shape, under the parameters and target height this transaction
+    // will actually be built against. The STANDARD ZIP 317 rule is asked, not the caller's: a
+    // proposal built on a fixed non-standard rule would otherwise be compared against its own fee
+    // and always agree, which is precisely the case ZIP 318 forbids.
+    #[cfg(feature = "orchard")]
+    let canonical_fee = crate::fees::canonical_crossing_fee(params, target_height.into()).ok();
+
+    // The whole attempt is Orchard-gated: without that feature there is no Ironwood pool to cross
+    // into, so there is no canonical crossing to construct.
+    #[cfg(feature = "orchard")]
+    #[cfg(feature = "orchard")]
+    let canonical_attempt = canonical_crossing_candidate(params, &zip318, &request, target_height)
+        .then(|| params.activation_height(NetworkUpgrade::Nu6_3))
+        .flatten()
+        .and_then(|activation| {
+            confirmations_policy.bucketed(
+                zip318.anchor_bucket_interval(),
+                target_height,
+                activation,
+            )
+        })
+        // A canonical crossing spends an Orchard note; if the caller forbids that, there is no
+        // canonical path to attempt.
+        .filter(|_| spend_policy.permits_shielded(ShieldedPool::Orchard))
+        .map(|bucketed_policy| {
+            let orchard_only =
+                input_selection::SpendPolicy::shielded_pools([ShieldedPool::Orchard])
+                    .with_locked_input_policy(spend_policy.locked_input_policy().clone());
+
+            input_selector.propose_transaction(
+                params,
+                wallet_db,
+                target_height,
+                bucketed_policy.anchor_height(target_height),
+                &zip318,
+                bucketed_policy,
+                spend_from_account,
+                request.clone(),
+                change_strategy,
+                &orchard_only,
+                proposed_version,
+            )
+        });
+
+    // Only two outcomes justify falling back to an ordinary proposal: the wallet cannot fund the
+    // payment under the stricter policy, or it funded one that is not in fact canonical. Every
+    // other error — data source, selection, change computation, proposal construction, address
+    // parsing, sync state — describes a condition the ordinary attempt would meet just the same,
+    // so suppressing it here would replace a precise diagnosis with a silently different
+    // transaction, or with an identical failure reported from a second, wasted selection pass.
+    #[cfg(feature = "orchard")]
+    let canonical_proposal = match canonical_attempt {
+        Some(Ok(proposal)) => {
+            // The authoritative test is the one the builder will also apply, so that there is
+            // exactly one definition of "canonical" and the two cannot disagree. A proposal that
+            // funded successfully but not from a single Orchard note fails it here and is
+            // discarded, costing a selection pass but no extra confirmations.
+            let is_canonical = proposal.steps().len() == 1
+                && canonical_fee.is_some_and(|fee| {
+                    proposal.steps().first().is_canonical_crossing(&zip318, fee)
+                });
+            is_canonical.then_some(proposal)
+        }
+        Some(Err(InputSelectorError::InsufficientFunds { .. })) | None => None,
+        Some(Err(other)) => return Err(other.into()),
+    };
+
+    #[cfg(not(feature = "orchard"))]
+    let canonical_proposal = None;
+
+    let proposal = match canonical_proposal {
+        Some(proposal) => proposal,
+        None => input_selector.propose_transaction(
+            params,
+            wallet_db,
+            target_height,
+            anchor_height,
+            &zip318,
+            confirmations_policy,
+            spend_from_account,
+            request,
+            change_strategy,
+            spend_policy,
+            proposed_version,
+        )?,
+    };
     if let Some(request) = lock_inputs {
         let lock_expiry_height = target_height + request.for_blocks();
         lock_proposal_inputs(wallet_db, &proposal, request.owner(), lock_expiry_height)?;
@@ -760,6 +927,52 @@ where
     // Record the requested version on the proposal so that it is carried through to transaction
     // building; when `None`, building falls back to the version implied by the target height.
     Ok(proposal.with_proposed_version(proposed_version))
+}
+
+/// Returns whether `request` is worth attempting as a canonical ZIP 318 crossing: a single
+/// payment, of a canonical denomination, at a height where the Ironwood pool exists.
+///
+/// This is a cheap gate, not a decision. It deliberately does not resolve the recipient address to
+/// an output pool, nor consider which notes are available: those depend on input selection, which
+/// has not run yet. The authoritative test is [`Step::is_canonical_crossing`] applied to the
+/// resulting proposal, so a request that passes here but produces a non-canonical proposal is
+/// simply discarded. Keeping the gate loose avoids duplicating address-resolution logic that would
+/// then have to be kept in step with input selection.
+#[cfg(feature = "orchard")]
+fn canonical_crossing_candidate<ParamsT: consensus::Parameters>(
+    params: &ParamsT,
+    zip318: &PoolMigrationParams,
+    request: &zip321::TransactionRequest,
+    target_height: TargetHeight,
+) -> bool {
+    params.is_nu_active(NetworkUpgrade::Nu6_3, target_height.into())
+        && match request.payments().values().collect::<Vec<_>>()[..] {
+            [payment] => payment
+                .amount()
+                .is_some_and(|amount| zip318.is_canonical_denomination(amount)),
+            _ => false,
+        }
+}
+
+/// Returns whether `step` will be built as a canonical ZIP 318 crossing, under the ZIP 318
+/// parameters `wallet_db` reports and the fee the canonical shape costs at `target_height`.
+///
+/// Shared by every path that builds a proposal, so that each asks the same question of the same
+/// data. `create_pczt_from_proposal` in particular applies its expiry override after the builder
+/// has run, and so cannot rely on the check inside `build_proposed_transaction`.
+#[cfg(feature = "orchard")]
+fn step_is_canonical_crossing<DbT, ParamsT, N>(
+    wallet_db: &DbT,
+    params: &ParamsT,
+    step: &Step<N>,
+    target_height: TargetHeight,
+) -> bool
+where
+    DbT: WalletRead,
+    ParamsT: consensus::Parameters,
+{
+    crate::fees::canonical_crossing_fee(params, target_height.into())
+        .is_ok_and(|fee| step.is_canonical_crossing(&wallet_db.pool_migration_params(), fee))
 }
 
 /// Proposes making a payment to the specified address from the given account.
@@ -1011,6 +1224,7 @@ where
             to_account,
             target_height,
             anchor_height,
+            &wallet_db.pool_migration_params(),
             confirmations_policy,
             output_filter,
         )
@@ -1659,6 +1873,18 @@ where
     let ironwood_anchor = None;
 
     // Create the transaction. The type of the proposal ensures that there
+    // The Ironwood bundle's padding is DERIVED from the step, independently of the Orchard
+    // bundle's: it is unpadded for a canonical ZIP 318 crossing and padded otherwise. The two
+    // pools' padding is deliberately not coupled — an Orchard bundle is always padded, and the
+    // Ironwood bundle drops its padding only when doing so makes the transaction indistinguishable
+    // from a migration transfer. The fee model reaches the same conclusion from the same data (see
+    // `fees::common::single_pool_output_balance`), which is what keeps the computed fee and the
+    // built bundle in agreement.
+    #[cfg(feature = "orchard")]
+    let ironwood_padding = proposal_step.ironwood_bundle_padding();
+    #[cfg(not(feature = "orchard"))]
+    let ironwood_padding = orchard_pool_padding;
+
     // are no possible transparent inputs, so we ignore those here.
     let mut builder = Builder::new(
         params.clone(),
@@ -1668,9 +1894,31 @@ where
             orchard_anchor,
             ironwood_anchor,
             orchard_padding: orchard_pool_padding,
-            ironwood_padding: orchard_pool_padding,
+            ironwood_padding,
         },
     );
+    // A canonical crossing takes the ZIP 318 rolling expiry, which every crossing in the same
+    // modulus period shares. The builder's ordinary per-transaction expiry (target height plus a
+    // small delta) would single it out immediately, undoing the shape the unpadded bundle and the
+    // bucketed anchor were chosen to produce. A caller-supplied expiry is refused rather than
+    // silently overridden: the padding and anchor are already fixed by this point, so honouring it
+    // would emit a transaction that is canonical in every respect but one.
+    #[cfg(feature = "orchard")]
+    let expiry_height = {
+        if step_is_canonical_crossing(wallet_db, params, proposal_step, min_target_height) {
+            match expiry_height {
+                Some(requested) => {
+                    return Err(Error::ExpiryHeightConflictsWithCanonicalCrossing { requested });
+                }
+                None => Some(zcash_protocol::zip318::expiry_height(
+                    min_target_height.into(),
+                )),
+            }
+        } else {
+            expiry_height
+        }
+    };
+
     if let Some(expiry_height) = expiry_height {
         builder = builder.with_expiry_height(expiry_height);
     }
@@ -2567,11 +2815,11 @@ where
 /// which disables expiry, is exempt from this check.
 ///
 /// `orchard_pool_padding` selects the transactional bundle padding for the Orchard
-/// and Ironwood bundles, and must match the change strategy used to create
-/// `proposal` (see
-/// `zip317::SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`); pass
-/// [`BundlePadding::DEFAULT`](zcash_primitives::transaction::builder::BundlePadding)
-/// otherwise.
+/// bundle; pass
+/// [`BundlePadding::DEFAULT`](zcash_primitives::transaction::builder::BundlePadding).
+/// The Ironwood bundle's padding is not a caller's to choose: it is derived from the
+/// proposal by [`Step::ironwood_bundle_padding`](crate::proposal::Step::ironwood_bundle_padding),
+/// so that it matches the action count the fee was computed from.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[cfg(feature = "pczt")]
@@ -2641,6 +2889,18 @@ where
         // since overriding it via the builder would be redundant with that existing mechanism.
         None,
     )?;
+
+    // This path applies its expiry AFTER the builder has run, so the refusal inside
+    // `build_proposed_transaction` — which saw `None` above — cannot see the caller's argument.
+    // Without this, an override would silently overwrite the ZIP 318 rolling expiry that
+    // `build_proposed_transaction` set, leaving a transaction canonical in every respect but the
+    // one that is committed and publicly visible.
+    #[cfg(feature = "orchard")]
+    if let Some(requested) = expiry_height
+        && step_is_canonical_crossing(wallet_db, params, proposal_step, min_target_height)
+    {
+        return Err(Error::ExpiryHeightConflictsWithCanonicalCrossing { requested });
+    }
 
     // Build the transaction with the specified fee rule
     let mut build_result = build_state.builder.build_for_pczt(OsRng, fee_rule)?;
@@ -2736,27 +2996,25 @@ where
                     // for every spend that still requires a signature (real spends and
                     // wallet-controlled zero-value spends), so an external Signer can identify
                     // and sign it.
-                    if let Some(derivation) = account_derivation {
-                        if *needs_derivation {
-                            // All spent notes are from the same account.
-                            action_updater.set_spend_zip32_derivation(
-                                orchard::pczt::Zip32Derivation::parse(
-                                    derivation.seed_fingerprint().to_bytes(),
-                                    vec![
-                                        zip32::ChildIndex::hardened(32).index(),
-                                        zip32::ChildIndex::hardened(
-                                            params.network_type().coin_type(),
-                                        )
+                    if let Some(derivation) = account_derivation
+                        && *needs_derivation
+                    {
+                        // All spent notes are from the same account.
+                        action_updater.set_spend_zip32_derivation(
+                            orchard::pczt::Zip32Derivation::parse(
+                                derivation.seed_fingerprint().to_bytes(),
+                                vec![
+                                    zip32::ChildIndex::hardened(32).index(),
+                                    zip32::ChildIndex::hardened(params.network_type().coin_type())
                                         .index(),
-                                        zip32::ChildIndex::hardened(u32::from(
-                                            derivation.account_index(),
-                                        ))
-                                        .index(),
-                                    ],
-                                )
-                                .expect("valid"),
-                            );
-                        }
+                                    zip32::ChildIndex::hardened(u32::from(
+                                        derivation.account_index(),
+                                    ))
+                                    .index(),
+                                ],
+                            )
+                            .expect("valid"),
+                        );
                     }
 
                     if let Some((pczt_recipient, external_address)) = orchard_outputs.get(&index) {
@@ -2796,27 +3054,25 @@ where
                     // add it for every spend that still requires a signature (real spends and
                     // wallet-controlled zero-value spends), so an external Signer can identify
                     // and sign it.
-                    if let Some(derivation) = account_derivation {
-                        if *needs_derivation {
-                            // All spent notes are from the same account.
-                            action_updater.set_spend_zip32_derivation(
-                                orchard::pczt::Zip32Derivation::parse(
-                                    derivation.seed_fingerprint().to_bytes(),
-                                    vec![
-                                        zip32::ChildIndex::hardened(32).index(),
-                                        zip32::ChildIndex::hardened(
-                                            params.network_type().coin_type(),
-                                        )
+                    if let Some(derivation) = account_derivation
+                        && *needs_derivation
+                    {
+                        // All spent notes are from the same account.
+                        action_updater.set_spend_zip32_derivation(
+                            orchard::pczt::Zip32Derivation::parse(
+                                derivation.seed_fingerprint().to_bytes(),
+                                vec![
+                                    zip32::ChildIndex::hardened(32).index(),
+                                    zip32::ChildIndex::hardened(params.network_type().coin_type())
                                         .index(),
-                                        zip32::ChildIndex::hardened(u32::from(
-                                            derivation.account_index(),
-                                        ))
-                                        .index(),
-                                    ],
-                                )
-                                .expect("valid"),
-                            );
-                        }
+                                    zip32::ChildIndex::hardened(u32::from(
+                                        derivation.account_index(),
+                                    ))
+                                    .index(),
+                                ],
+                            )
+                            .expect("valid"),
+                        );
                     }
 
                     if let Some((pczt_recipient, external_address)) = ironwood_outputs.get(&index) {
@@ -3692,4 +3948,112 @@ where
         &proposal,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use zcash_protocol::zip318::AnchorBucketInterval;
+
+    fn policy(confirmations: u32) -> ConfirmationsPolicy {
+        ConfirmationsPolicy::new_symmetrical_unchecked(
+            confirmations,
+            #[cfg(feature = "transparent-inputs")]
+            false,
+        )
+    }
+
+    fn target(height: u32) -> TargetHeight {
+        TargetHeight::from(BlockHeight::from_u32(height))
+    }
+
+    /// Bucketing raises the confirmation requirement so that the resulting anchor lands exactly on
+    /// a grid boundary. Because the anchor and the note-eligibility bound are the same quantity,
+    /// this is what guarantees every selected note has a witness at that anchor.
+    #[test]
+    fn bucketed_policy_lands_the_anchor_on_a_boundary() {
+        let interval = AnchorBucketInterval::ZIP_318;
+        let policy = policy(10);
+
+        for height in [2_000_000u32, 2_000_143, 2_000_144, 1_000_000] {
+            let target = target(height);
+            let bucketed = policy
+                .bucketed(interval, target, BlockHeight::from_u32(1))
+                .expect("a boundary is reachable well above the grid's origin");
+            let anchor = bucketed.anchor_height(target);
+
+            assert!(
+                interval.is_boundary(anchor),
+                "anchor {anchor:?} off the grid"
+            );
+            // Age 1: one interval BELOW the most recent boundary, never the most recent itself.
+            let most_recent = interval.boundary_at_or_below(policy.anchor_height(target));
+            assert_eq!(
+                u32::from(anchor),
+                u32::from(most_recent) - interval.block_count().get(),
+                "the chosen boundary must be exactly one interval below the most recent"
+            );
+            assert!(anchor < most_recent, "an age of 0 is not admissible");
+            // Never fewer confirmations than asked for, and the invariant is preserved.
+            assert!(bucketed.trusted() >= policy.trusted());
+            assert!(bucketed.untrusted() >= bucketed.trusted());
+            // The extra wait is bounded by two intervals: up to one to reach the most recent
+            // boundary, plus the one that age 1 steps back.
+            assert!(
+                u32::from(bucketed.trusted()) - u32::from(policy.trusted())
+                    < 2 * interval.block_count().get()
+            );
+        }
+    }
+
+    /// Even an anchor already sitting on a boundary steps back one interval: that boundary is the
+    /// most recent, and ZIP 318 admits only ages of 1 or more.
+    #[test]
+    fn bucketing_never_chooses_the_most_recent_boundary() {
+        let interval = AnchorBucketInterval::ZIP_318;
+        let policy = policy(10);
+        let aligned_anchor = interval.boundary_at_or_below(BlockHeight::from_u32(2_000_000));
+        let target = target(u32::from(aligned_anchor) + 10);
+
+        let bucketed = policy
+            .bucketed(interval, target, BlockHeight::from_u32(1))
+            .expect("reachable");
+        assert_eq!(
+            u32::from(bucketed.anchor_height(target)),
+            u32::from(aligned_anchor) - interval.block_count().get()
+        );
+        assert!(bucketed.trusted() > policy.trusted());
+    }
+
+    /// Below the first boundary there is no grid to bucket to, and the policy declines rather than
+    /// producing a zero or negative confirmation count.
+    #[test]
+    fn bucketing_declines_below_the_first_boundary() {
+        let interval = AnchorBucketInterval::ZIP_318;
+        let policy = policy(10);
+        // The ordinary anchor is 90, whose boundary-at-or-below is 0; there is no boundary an
+        // interval below that, so no admissible anchor exists.
+        assert!(
+            policy
+                .bucketed(interval, target(100), BlockHeight::from_u32(1))
+                .is_none()
+        );
+    }
+
+    /// A shorter test-network interval buckets on its own grid.
+    #[test]
+    fn bucketing_honours_a_custom_interval() {
+        let interval = AnchorBucketInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+        let policy = policy(3);
+        let target = target(1_000);
+
+        let bucketed = policy
+            .bucketed(interval, target, BlockHeight::from_u32(1))
+            .expect("reachable");
+        let anchor = bucketed.anchor_height(target);
+        assert!(interval.is_boundary(anchor));
+        // Most recent boundary at or below 997 is 996; age 1 steps back to 984.
+        assert_eq!(u32::from(anchor), 984);
+    }
 }

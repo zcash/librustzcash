@@ -10,6 +10,20 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::zip318`, the ZIP 318 pool-migration protocol parameters:
+  - `DENOM_CAP`, `MAX_RESIDUAL_VALUE`, and `is_canonical_denomination`, the
+    canonical `{1, 2, 5} * 10^k` crossing denomination set and its bounds.
+  - `largest_one_two_five`, the greedy decomposition step over that set.
+  - `expiry_height`, the canonical rolling expiry window.
+  - `AnchorBucketInterval`, the grid that durable anchor checkpoints are retained
+    on and that pool-crossing transfers are anchored to.
+  - `PREP_TX_ACTIONS`, `TRANSFER_DELAY_MEAN`, `TRANSFER_DELAY_CAP`,
+    `DELAY_CAP_RATIO`, `ANCHOR_AGE_CAP`, `EXPIRY_MODULUS`, `EXPIRY_WINDOW`.
+  - `PoolMigrationConstants`, an unsealed trait carrying the above as overridable
+    parameters, every method defaulting to the ZIP 318 value. There is no
+    implementation for `NetworkType`; obtain one from the wallet.
+
 ## [0.10.1] - 2026-07-23
 
 ### Added

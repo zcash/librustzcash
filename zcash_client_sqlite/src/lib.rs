@@ -1624,7 +1624,6 @@ where
         self.transactionally(|wdb| wallet::locking::clear_locked_outputs(wdb.conn.0, account))
     }
 
-    #[cfg(any(test, feature = "test-dependencies"))]
     fn get_locked_outputs(&self, account: Self::AccountId) -> Result<Vec<OutputRef>, Self::Error> {
         wallet::locking::get_locked_outputs(self.conn.borrow(), account)
     }
@@ -1926,7 +1925,6 @@ where
         wallet::locking::clear_locked_outputs(self.conn.0, account)
     }
 
-    #[cfg(any(test, feature = "test-dependencies"))]
     fn get_locked_outputs(&self, account: Self::AccountId) -> Result<Vec<OutputRef>, Self::Error> {
         wallet::locking::get_locked_outputs(self.conn.0, account)
     }

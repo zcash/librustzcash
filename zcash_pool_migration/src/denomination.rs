@@ -121,32 +121,32 @@ use alloc::vec::Vec;
 
 use rand_core::{CryptoRng, RngCore};
 
-use zcash_protocol::value::{BalanceError, COIN, Zatoshis};
+use zcash_protocol::value::{BalanceError, Zatoshis};
 
 pub mod strategies;
-mod utils;
 
 pub use strategies::CanonicalOneTwoFive;
+
+/// The ZIP 318 denomination bounds, re-exported from the crate that defines them. [`DENOM_CAP`] is
+/// the largest denomination a single crossing may carry; [`MAX_RESIDUAL_VALUE`] is the smallest, and
+/// equally the sub-threshold below which a leftover source-pool balance is never migrated at all —
+/// it is left untouched in the wallet, preserving privacy.
+///
+/// Once the main migration completes, a leftover at or above [`MAX_RESIDUAL_VALUE`] (but too small
+/// to form a whole self-funding note) is surfaced to the user as an opt-in choice: migrate the
+/// remainder too (which can compromise privacy, so it is shown with a disclaimer) or lock it to keep
+/// that privacy.
+///
+/// Both are defaults: the cap and minimum actually used are chosen per run by the caller (the
+/// wallet) and passed to the strategy constructor.
+pub use zcash_protocol::zip318::{DENOM_CAP, MAX_RESIDUAL_VALUE};
 
 /// The default cap on how many notes one migration run prepares. Bounding the note count keeps the
 /// decomposition a bounded problem and bounds each run's transaction and proving cost; a larger
 /// balance migrates over several runs.
+///
+/// This is a policy default of this crate, not a ZIP 318 constant.
 pub const MIGRATION_MAX_PREPARED_NOTES_PER_RUN: usize = 50;
-
-/// The default largest denomination (in whole ZEC) the canonical `{1, 2, 5} * 10^k` strategy gives a
-/// single note: `1 * 10^4 = 10_000` ZEC, itself a `{1, 2, 5} * 10^k` value. This is ZIP 318's
-/// `DENOM_CAP`. Capping the top denomination keeps even a whale's crossings within the shared
-/// denomination set, so no single crossing is a near-unique fingerprint. This is only a default: the
-/// actual cap is chosen per run by the caller (the wallet) and passed to the strategy constructor.
-pub const MIGRATION_MAX_DENOMINATION_ZEC: u64 = 10_000;
-
-/// The sub-threshold (0.01 ZEC) below which a leftover source-pool balance is never migrated: it is
-/// left untouched in the wallet, preserving privacy. Once the main migration completes, a leftover
-/// at or above this threshold (but too small to form a whole self-funding note) is surfaced to the
-/// user as an opt-in choice: migrate the remainder too (which can compromise privacy, so it is shown
-/// with a disclaimer) or lock it to keep that privacy. Consumed by the context module in a later
-/// slice. Also the default minimum denomination of [`CanonicalOneTwoFive`] (ZIP 318's `MAX_RESIDUAL_VALUE`).
-pub const RESIDUAL_MIGRATION_MIN: Zatoshis = Zatoshis::const_from_u64(COIN / 100); // 0.01 ZEC
 
 /// Source-pool (Orchard) logical actions in a canonical migration transfer: the spend and its
 /// change. With [`DESTINATION_ACTIONS_PER_TRANSFER`], this is the canonical transfer shape whose

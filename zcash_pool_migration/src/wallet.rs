@@ -242,7 +242,7 @@ where
     /// the grid from the wallet rather than accepting it here is what makes it impossible for a
     /// migration to anchor to a boundary whose checkpoint the wallet has not retained.
     fn scheduling_params(&self) -> SchedulingParams {
-        let interval = self.wallet.anchor_retention_interval().into();
+        let interval = self.wallet.anchor_retention_interval();
         match self.scheduling_delays {
             Some((transfer_delay, preparation_delay)) => {
                 SchedulingParams::new(interval, transfer_delay, preparation_delay)
@@ -671,7 +671,7 @@ where
     /// checkpoints on, so a transfer committed against a different grid is rejected before its
     /// (by then pruned) checkpoint is looked up.
     fn anchor_bucket_interval(&self) -> AnchorBucketInterval {
-        self.wallet.anchor_retention_interval().into()
+        self.wallet.anchor_retention_interval()
     }
 }
 

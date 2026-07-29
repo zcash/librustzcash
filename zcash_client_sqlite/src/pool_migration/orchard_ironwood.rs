@@ -61,7 +61,7 @@ pub(crate) fn active_anchor_bucket_intervals(
         .map(|blocks| {
             blocks
                 .into_iter()
-                .map(AnchorRetentionInterval::from_stored_block_count)
+                .map(AnchorRetentionInterval::custom)
                 .collect()
         })
         .map_err(|e| match e {

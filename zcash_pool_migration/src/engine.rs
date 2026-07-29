@@ -2996,9 +2996,7 @@ mod tests {
     /// cap of 50 * 10,000 ZEC in 50 notes, and the aggregate crossings sum the per-run counts.
     #[test]
     fn whale_migrates_over_several_runs() {
-        use crate::denomination::{
-            MIGRATION_MAX_DENOMINATION_ZEC, MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
-        };
+        use crate::denomination::{DENOM_CAP, MIGRATION_MAX_PREPARED_NOTES_PER_RUN};
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let whale = MockBackend::new(vec![1_200_000 * COIN], 2_000_000);
         let est = estimate_migration_runs(&test_net(), &whale, &mut rng)
@@ -3009,8 +3007,7 @@ mod tests {
             "a whale migrates over several runs, got {}",
             est.run_count()
         );
-        let per_run_cap =
-            MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * MIGRATION_MAX_DENOMINATION_ZEC * COIN;
+        let per_run_cap = MIGRATION_MAX_PREPARED_NOTES_PER_RUN as u64 * u64::from(DENOM_CAP);
         assert_eq!(u64::from(est.runs()[0].migratable()), per_run_cap);
         assert_eq!(
             est.runs()[0].crossings(),

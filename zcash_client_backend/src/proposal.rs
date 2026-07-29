@@ -6,7 +6,11 @@ use std::{
 };
 
 use nonempty::NonEmpty;
+#[cfg(feature = "orchard")]
+use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::{TxId, TxVersion};
+#[cfg(feature = "orchard")]
+use zcash_protocol::zip318::PoolMigrationConstants;
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{BlockHeight, BranchId},
@@ -889,15 +893,122 @@ impl<NoteRef> Step<NoteRef> {
             .count()
     }
 
+    /// The value of this step's sole Ironwood PAYMENT output, or `None` when the step has any
+    /// number of Ironwood payment outputs other than exactly one, or when that output's value is
+    /// not determined (a ZIP 321 payment may carry no amount).
+    ///
+    /// Change is deliberately not considered. The fee model must reach the same verdict as
+    /// [`Step::is_canonical_crossing`] from the same data, and at the point it decides an Ironwood
+    /// change value is precisely the unknown it is solving for. That costs nothing: a step with
+    /// Ironwood change alongside an Ironwood payment has two real Ironwood outputs, so its bundle
+    /// already meets the default action floor and the padding makes no difference.
+    #[cfg(feature = "orchard")]
+    fn sole_ironwood_payment_value(&self) -> Option<Zatoshis> {
+        let mut payments = self
+            .payment_pools()
+            .iter()
+            .filter(|(_, pool)| **pool == PoolType::IRONWOOD)
+            .map(|(index, _)| {
+                self.transaction_request()
+                    .payments()
+                    .get(index)
+                    .and_then(|payment| payment.amount())
+            });
+
+        match (payments.next(), payments.next()) {
+            (Some(value), None) => value,
+            _ => None,
+        }
+    }
+
+    /// Returns whether this step is a *canonical crossing*: a step whose whole shape is
+    /// indistinguishable from a [ZIP 318] migration transfer, and which is therefore built with a
+    /// single unpadded Ironwood action so that it joins that anonymity set. See
+    /// [`Step::ironwood_bundle_padding`].
+    ///
+    /// A migration transfer spends one Orchard note, pads its Orchard bundle to the default
+    /// two-action floor (the spend plus its change, or a dummy when the note's value exactly
+    /// covers the crossing and its fee), outputs one canonical denomination into the Ironwood
+    /// pool, and is proved against a boundary of the anchor bucket grid. Every one of those is
+    /// required here:
+    ///
+    /// - exactly one Orchard input and at most one Orchard change output, so that the Orchard
+    ///   bundle is exactly two actions;
+    /// - no change in any other pool;
+    /// - no Ironwood spends, a step funded from Ironwood crossing nothing;
+    /// - no Ironwood change, leaving a single Ironwood output;
+    /// - that output's value is a canonical denomination under `params`;
+    /// - the step's anchor lies on `params`' anchor bucket grid;
+    /// - the fee equals `canonical_fee`, which the caller obtains from
+    ///   [`fees::canonical_crossing_fee`] for the consensus parameters and target height the
+    ///   transaction will actually be built against.
+    ///
+    /// [`fees::canonical_crossing_fee`]: crate::fees::canonical_crossing_fee
+    ///
+    /// Dropping the Ironwood padding without the rest would not buy anonymity but destroy it: an
+    /// unpadded Ironwood bundle beside an Orchard bundle of the wrong size, or against a
+    /// chain-tip anchor, is a shape nothing else on the network emits — a fingerprint rather than
+    /// a disguise.
+    ///
+    /// [ZIP 318]: https://zips.z.cash/zip-0318
+    #[cfg(feature = "orchard")]
+    pub fn is_canonical_crossing<P: PoolMigrationConstants>(
+        &self,
+        params: &P,
+        canonical_fee: Zatoshis,
+    ) -> bool {
+        self.input_count_in_pool(PoolType::ORCHARD) == 1
+            && self.input_count_in_pool(PoolType::IRONWOOD) == 0
+            && self.change_count_in_pool(PoolType::IRONWOOD) == 0
+            // At most ONE Orchard change output. The Orchard bundle must be exactly two actions,
+            // and from NU6.3 a spend and an output no longer share one, so its count is
+            // `spends + outputs`: a second change output makes three. A multi-output change
+            // strategy produces exactly that from a single large note.
+            && self.change_count_in_pool(PoolType::ORCHARD) <= 1
+            // Change anywhere else adds a bundle no migration transfer carries.
+            && self.change_count_in_pool(PoolType::SAPLING) == 0
+            && self.change_count_in_pool(PoolType::TRANSPARENT) == 0
+            && self
+                .sole_ironwood_payment_value()
+                .is_some_and(|value| params.is_canonical_denomination(value))
+            && self
+                .anchor_height()
+                .is_some_and(|anchor| params.anchor_bucket_interval().is_boundary(anchor))
+            // ZIP 318 forbids a non-standard fee, which would partition the anonymity set as
+            // surely as a non-standard shape. A `ChangeStrategy` may be built on any fee rule,
+            // including a fixed non-standard one, so a structurally perfect crossing can still
+            // carry a distinguishing fee.
+            //
+            // This condition is deliberately absent from `ironwood_bundle_padding`: the fee model
+            // decides that padding WHILE computing the fee, so it cannot test the result against a
+            // target. Keeping the fee here makes this predicate a gate on whether to keep a
+            // proposal at all, rather than an input the builder must reproduce.
+            && self.balance().fee_required() == canonical_fee
+    }
+
+    /// The transactional bundle padding the transaction builder must use for this step's Ironwood
+    /// bundle: the padding the [`ChangeStrategy`] recorded when it computed the fee.
+    ///
+    /// This is READ, not re-derived. The builder must produce exactly the action count the fee was
+    /// charged against, and a second derivation could disagree with the first — which is precisely
+    /// what happens for a condition only one of them can evaluate, such as whether the resulting
+    /// fee is itself canonical.
+    ///
+    /// [`ChangeStrategy`]: crate::fees::ChangeStrategy
+    #[cfg(feature = "orchard")]
+    pub fn ironwood_bundle_padding(&self) -> BundlePadding {
+        self.balance().ironwood_bundle_padding()
+    }
+
     #[cfg(feature = "orchard")]
     fn orchard_style_action_count(
         &self,
         pool_type: PoolType,
-        bundle_type: ::orchard::builder::BundleType,
+        padding: BundlePadding,
         bundle_version: ::orchard::bundle::BundleVersion,
     ) -> Result<usize, &'static str> {
         crate::fees::orchard::transactional_action_count(
-            bundle_type,
+            padding.bundle_type(),
             bundle_version,
             self.input_count_in_pool(pool_type),
             self.output_count_in_pool(pool_type) + self.change_count_in_pool(pool_type),
@@ -905,39 +1016,41 @@ impl<NoteRef> Step<NoteRef> {
     }
 
     /// Returns the number of actions the transaction builder will produce for this step's
-    /// Orchard-pool bundle, given the bundle type and version it will be configured with.
+    /// Orchard-pool bundle, given the bundle padding and version it will be configured with.
     ///
     /// The count depends upon the bundle version: prior to NU6.3, an action may carry both a
     /// spend and an output, so a bundle requires `max(spends, outputs)` actions; from NU6.3
     /// onwards the Orchard pool disables cross-address transfers, and each requested spend and
     /// output is instead paired with a fabricated zero-valued counterpart, so a bundle requires
-    /// `spends + outputs` actions. The bundle type determines the padding applied on top of
-    /// that count.
+    /// `spends + outputs` actions. The padding determines the floor applied on top of that count.
     ///
-    /// The caller must pass the same bundle type and version the transaction builder will be
+    /// The caller must pass the same padding and version the transaction builder will be
     /// configured with, otherwise the count will not match the bundle that is built.
     /// [`bundle_version_for_branch`] returns the version applicable to a given consensus branch
-    /// and pool; the bundle type is determined by the change strategy that produced the
-    /// proposal (see [`SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`]).
+    /// and pool. The Orchard bundle is always padded to the default floor; only the Ironwood
+    /// bundle's padding varies, and [`Step::ironwood_bundle_padding`] derives it.
+    ///
+    /// A step describes a wallet spend, which is never a coinbase transaction, so this takes a
+    /// [`BundlePadding`] rather than a full bundle type: coinbase construction is a property of the
+    /// whole transaction and is not representable here.
     ///
     /// # Errors
     ///
     /// Returns an error if this step's Orchard spend and output counts are incompatible with
-    /// the given bundle type and version.
+    /// the given padding and version.
     ///
     /// [`bundle_version_for_branch`]: zcash_primitives::transaction::components::orchard::bundle_version_for_branch
-    /// [`SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles`]: crate::fees::zip317::SingleOutputChangeStrategy::with_unpadded_orchard_pool_bundles
     #[cfg(feature = "orchard")]
     pub fn orchard_action_count(
         &self,
-        bundle_type: ::orchard::builder::BundleType,
+        padding: BundlePadding,
         bundle_version: ::orchard::bundle::BundleVersion,
     ) -> Result<usize, &'static str> {
-        self.orchard_style_action_count(PoolType::ORCHARD, bundle_type, bundle_version)
+        self.orchard_style_action_count(PoolType::ORCHARD, padding, bundle_version)
     }
 
     /// Returns the number of actions the transaction builder will produce for this step's
-    /// Ironwood-pool bundle, given the bundle type and version it will be configured with.
+    /// Ironwood-pool bundle, given the bundle padding and version it will be configured with.
     ///
     /// See [`Step::orchard_action_count`] for how the count is determined; the Ironwood pool
     /// permits cross-address transfers, so an Ironwood bundle requires
@@ -946,14 +1059,14 @@ impl<NoteRef> Step<NoteRef> {
     /// # Errors
     ///
     /// Returns an error if this step's Ironwood spend and output counts are incompatible with
-    /// the given bundle type and version.
+    /// the given padding and version.
     #[cfg(feature = "orchard")]
     pub fn ironwood_action_count(
         &self,
-        bundle_type: ::orchard::builder::BundleType,
+        padding: BundlePadding,
         bundle_version: ::orchard::bundle::BundleVersion,
     ) -> Result<usize, &'static str> {
-        self.orchard_style_action_count(PoolType::IRONWOOD, bundle_type, bundle_version)
+        self.orchard_style_action_count(PoolType::IRONWOOD, padding, bundle_version)
     }
 }
 
@@ -980,9 +1093,16 @@ mod tests {
 
     use incrementalmerkletree::Position;
     use nonempty::NonEmpty;
+    use zcash_address::ZcashAddress;
+    use zcash_primitives::transaction::builder::BundlePadding;
+
+    use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
+    use zcash_protocol::value::COIN;
+    use zcash_protocol::zip318::PoolMigrationConstants;
+    use zip321::Payment;
+
     use orchard::{
         ValuePool,
-        builder::BundleType,
         bundle::BundleVersion,
         keys::{FullViewingKey, SpendingKey},
         note::{Note as OrchardNote, NoteVersion, RandomSeed, Rho},
@@ -1087,8 +1207,163 @@ mod tests {
         )
     }
 
+    /// The canonical crossing fee under the mainnet parameters these tests use.
+    fn canonical_fee() -> Zatoshis {
+        crate::fees::canonical_crossing_fee(
+            &zcash_protocol::consensus::MAIN_NETWORK,
+            BlockHeight::from_u32(2_000_000),
+        )
+        .expect("the canonical shape is a valid input to the ZIP 317 rule")
+    }
+
+    /// The ZIP 318 parameters a wallet retaining the specified grid would report. Tests take their
+    /// parameters from a wallet-shaped value, as production code does; there is deliberately no
+    /// implementation of `PoolMigrationConstants` for a network type.
+    fn zip318() -> PoolMigrationParams {
+        PoolMigrationParams::new(AnchorRetentionInterval::ZIP_318)
+    }
+
     fn shielded_change(pool: ShieldedPool, value: u64) -> ChangeValue {
         ChangeValue::shielded(pool, Zatoshis::const_from_u64(value), None)
+    }
+
+    // A step paying `value` into the Ironwood pool: one payment, routed to Ironwood, funded by
+    // Orchard notes, with the given change. This is the shape of an ordinary post-NU6.3 payment
+    // to an Orchard receiver, which is delivered through the Ironwood bundle.
+    fn ironwood_payment_step(value: u64, change: Vec<ChangeValue>) -> Step<u32> {
+        let recipient: ZcashAddress =
+            "u1qpatys4zruk99pg59gcscrt7y6akvl9vrhcfyhm9yxvxz7h87q6n8cgrzzpe9zru68uq39uhmlpp5uefxu0su5uqyqfe5zp3tycn0ecl"
+                .parse()
+                .expect("a valid unified address");
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            recipient,
+            Zatoshis::const_from_u64(value),
+        )])
+        .expect("a valid transaction request");
+
+        Step {
+            transaction_request: request,
+            payment_pools: BTreeMap::from([(0usize, PoolType::IRONWOOD)]),
+            transparent_inputs: vec![],
+            shielded_inputs: shielded_inputs_for(orchard_and_ironwood_notes(
+                (1, value + 100_000),
+                (0, 0),
+            )),
+            // A boundary of the ZIP 318 grid: a canonical crossing must be anchored to one.
+            anchor_height: Some(BlockHeight::from_u32(144)),
+            prior_step_inputs: vec![],
+            balance: TransactionBalance::new(change, canonical_fee())
+                .unwrap()
+                .with_ironwood_bundle_padding(BundlePadding::UNPADDED),
+            is_shielding: false,
+        }
+    }
+
+    /// A crossing whose value is a canonical ZIP 318 denomination is built with a single unpadded
+    /// Ironwood action, matching the shape of a migration transfer.
+    #[test]
+    fn canonical_crossing_is_unpadded() {
+        for value in [COIN, COIN / 2, COIN / 100, 20 * COIN, 10_000 * COIN] {
+            let step = ironwood_payment_step(value, vec![]);
+            assert!(
+                step.is_canonical_crossing(&zip318(), canonical_fee()),
+                "{value} zatoshi should be a canonical crossing"
+            );
+            assert_eq!(step.ironwood_bundle_padding(), BundlePadding::UNPADDED);
+            assert_eq!(
+                step.ironwood_action_count(
+                    step.ironwood_bundle_padding(),
+                    BundleVersion::ironwood_v3()
+                ),
+                Ok(1)
+            );
+        }
+    }
+
+    /// One zatoshi off a canonical denomination, or outside the ZIP's bounds, is not a canonical
+    /// crossing: it stays padded, since it would join no migration anonymity set.
+    #[test]
+    fn near_canonical_crossing_stays_padded() {
+        for value in [COIN + 1, COIN - 1, 3 * COIN, 100_000, 20_000 * COIN] {
+            let step = ironwood_payment_step(value, vec![]);
+            assert!(
+                !step.is_canonical_crossing(&zip318(), canonical_fee()),
+                "{value} zatoshi should not be a canonical crossing"
+            );
+            assert_eq!(
+                step.ironwood_action_count(BundlePadding::DEFAULT, BundleVersion::ironwood_v3()),
+                Ok(2)
+            );
+        }
+    }
+
+    /// Ironwood change alongside a canonical payment is NOT a canonical crossing. The fee model
+    /// cannot see a change value at the point it decides padding — that value is what it is
+    /// solving for — so including change here would let the two disagree and break the builder's
+    /// exact-balance check. It costs nothing: two real outputs already meet the default floor.
+    #[test]
+    fn ironwood_change_is_not_a_canonical_crossing() {
+        let step = ironwood_payment_step(COIN, vec![shielded_change(ShieldedPool::Ironwood, 5000)]);
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
+    }
+
+    /// A payment funded from Ironwood notes crosses nothing, so it is never a canonical crossing
+    /// however canonical its value. Its bundle has two real actions regardless.
+    #[test]
+    fn ironwood_funded_payment_is_not_a_canonical_crossing() {
+        let mut step = ironwood_payment_step(COIN, vec![]);
+        step.shielded_inputs =
+            shielded_inputs_for(orchard_and_ironwood_notes((0, 0), (1, 2 * COIN)));
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
+    }
+
+    /// An anchor off the bucket grid is not a canonical crossing, however canonical the value and
+    /// however migration-shaped the bundles. Unpadding here would produce an "unpadded Ironwood
+    /// against a fresh anchor" shape that no migration transfer emits, which is a fingerprint
+    /// rather than a disguise.
+    #[test]
+    fn unbucketed_anchor_is_not_a_canonical_crossing() {
+        let mut step = ironwood_payment_step(COIN, vec![]);
+        for height in [143u32, 145, 1, 2_000_000] {
+            step.anchor_height = Some(BlockHeight::from_u32(height));
+            assert!(
+                !step.is_canonical_crossing(&zip318(), canonical_fee()),
+                "anchor {height} is not a grid boundary"
+            );
+        }
+        // The neighbouring boundaries are.
+        for height in [144u32, 288, 1_999_872] {
+            step.anchor_height = Some(BlockHeight::from_u32(height));
+            assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
+        }
+    }
+
+    /// A migration transfer spends exactly one Orchard note. A payment drawing on more leaves an
+    /// Orchard bundle of the wrong size, so unpadding its Ironwood bundle would not resemble a
+    /// migration transfer.
+    #[test]
+    fn multiple_orchard_inputs_are_not_a_canonical_crossing() {
+        let mut step = ironwood_payment_step(COIN, vec![]);
+        assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
+
+        step.shielded_inputs = shielded_inputs_for(orchard_and_ironwood_notes((3, COIN), (0, 0)));
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
+    }
+
+    /// Overridden ZIP 318 parameters narrow which crossings are canonical, and the padding follows.
+    #[test]
+    fn canonical_crossing_respects_overridden_parameters() {
+        #[derive(Clone)]
+        struct SmallCap;
+        impl PoolMigrationConstants for SmallCap {
+            fn denomination_cap(&self) -> Zatoshis {
+                Zatoshis::const_from_u64(COIN)
+            }
+        }
+
+        let step = ironwood_payment_step(2 * COIN, vec![]);
+        assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
+        assert!(!step.is_canonical_crossing(&SmallCap, canonical_fee()));
     }
 
     /// A step that produces any shielded bundle must bind a concrete anchor. Passing `None` (the
@@ -1426,7 +1701,7 @@ mod tests {
     #[test]
     fn uninvolved_pool_is_charged_nothing_unless_a_bundle_is_required() {
         let step = step_with_notes(vec![]);
-        for bundle_type in [BundleType::DEFAULT, BundleType::UNPADDED] {
+        for bundle_type in [BundlePadding::DEFAULT, BundlePadding::UNPADDED] {
             assert_eq!(
                 step.orchard_action_count(bundle_type, BundleVersion::orchard_v3()),
                 Ok(0)
@@ -1439,7 +1714,7 @@ mod tests {
 
         // `bundle_required` guarantees a bundle exists, padded to the type's minimum: two
         // all-dummy actions by default, or one when the type opts out of the default padding.
-        let required = BundleType::Transactional {
+        let required = BundlePadding {
             bundle_required: true,
             pad_to_minimum: None,
         };
@@ -1447,7 +1722,7 @@ mod tests {
             step.orchard_action_count(required, BundleVersion::orchard_v3()),
             Ok(2)
         );
-        let required_unpadded = BundleType::Transactional {
+        let required_unpadded = BundlePadding {
             bundle_required: true,
             pad_to_minimum: Some(1),
         };
@@ -1458,7 +1733,7 @@ mod tests {
 
         // A zero floor cannot suppress a required bundle: a bundle must contain at least one
         // action to exist at all, so the required-but-unpadded-to-zero case still yields one.
-        let required_zero_floor = BundleType::Transactional {
+        let required_zero_floor = BundlePadding {
             bundle_required: true,
             pad_to_minimum: Some(0),
         };
@@ -1468,7 +1743,7 @@ mod tests {
         );
 
         // Without `bundle_required`, a zero floor leaves an uninvolved pool with no bundle.
-        let zero_floor = BundleType::Transactional {
+        let zero_floor = BundlePadding {
             bundle_required: false,
             pad_to_minimum: Some(0),
         };
@@ -1478,34 +1753,11 @@ mod tests {
         );
     }
 
-    // The documented error path. A coinbase bundle has spends disabled, so every spend in it must
-    // be a dummy; a step that spends notes in a pool therefore cannot be built as a coinbase
-    // bundle of that pool, and the count is reported as an error rather than as a wrong number.
-    // This is the only error a step can currently provoke: `BundleVersion::default_flags` always
-    // enables both spends and outputs, so no transactional bundle type can reject a step's counts.
-    #[test]
-    fn spends_cannot_be_charged_to_a_coinbase_bundle() {
-        let step = step_with_notes(orchard_and_ironwood_notes((1, 10_000), (1, 20_000)));
-        assert_matches!(
-            step.orchard_action_count(BundleType::Coinbase, BundleVersion::orchard_v3()),
-            Err(_)
-        );
-        assert_matches!(
-            step.ironwood_action_count(BundleType::Coinbase, BundleVersion::ironwood_v3()),
-            Err(_)
-        );
-
-        // A step that spends nothing in the pool is accepted: coinbase bundles create outputs,
-        // and are never padded.
-        let step = step_with_notes_and_change(
-            vec![],
-            vec![shielded_change(ShieldedPool::Ironwood, 10_000)],
-        );
-        assert_eq!(
-            step.ironwood_action_count(BundleType::Coinbase, BundleVersion::ironwood_v3()),
-            Ok(1)
-        );
-    }
+    // `spends_cannot_be_charged_to_a_coinbase_bundle` used to live here, asserting that a step
+    // which spends notes is rejected when charged to a coinbase bundle of that pool. The action
+    // counters now take a `BundlePadding`, which has no coinbase variant, so that case is
+    // unrepresentable rather than merely rejected: a step describes a wallet spend, and a wallet
+    // spend is never a coinbase transaction.
 
     // What NU6.3 costs a large transaction depends on its shape, and a wallet estimating fees at
     // scale has to get the difference right.
@@ -1526,12 +1778,14 @@ mod tests {
         );
         // 2439 actions: the change output rides along in a spend's action, exactly filling a block.
         assert_eq!(
-            consolidation.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+            consolidation
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
             Ok(MAX_ACTIONS_PER_BUNDLE)
         );
         // 2440 from NU6.3: one action over the ceiling, so the same sweep no longer fits.
         assert_eq!(
-            consolidation.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            consolidation
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
             Ok(MAX_ACTIONS_PER_BUNDLE + 1)
         );
 
@@ -1541,18 +1795,19 @@ mod tests {
         let half = MAX_ACTIONS_PER_BUNDLE / 2;
         assert_eq!(
             balanced(MAX_ACTIONS_PER_BUNDLE)
-                .orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
             Ok(MAX_ACTIONS_PER_BUNDLE)
         );
         // 2438: the largest balanced step that still fits.
         assert_eq!(
-            balanced(half).orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            balanced(half)
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
             Ok(2 * half)
         );
         // 2440: one note more on each side and it does not.
         assert_eq!(
             balanced(half + 1)
-                .orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+                .orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
             Ok(2 * half + 2)
         );
     }
@@ -1578,20 +1833,20 @@ mod tests {
         // Roughly eight times what a block can hold, reported exactly.
         assert!(spends + change > 8 * MAX_ACTIONS_PER_BUNDLE - 1);
         assert_eq!(
-            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
             Ok(spends + change)
         );
 
         // Pre-NU6.3 the same step pairs, so it is charged half as much -- still far past the
         // ceiling, and still counted exactly.
         assert_eq!(
-            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
             Ok(spends.max(change))
         );
 
         // Padding a step this size cannot reduce it, and the ZIP 317 floor is irrelevant here.
         assert_eq!(
-            step.orchard_action_count(BundleType::DEFAULT, BundleVersion::orchard_v3()),
+            step.orchard_action_count(BundlePadding::DEFAULT, BundleVersion::orchard_v3()),
             Ok(spends + change)
         );
     }
@@ -1604,11 +1859,11 @@ mod tests {
         // an action, because the pre-NU6.3 Orchard bundle version permits cross-address transfers.
         let step = orchard_payment_step(PoolType::ORCHARD, false).unwrap();
         assert_eq!(
-            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v2()),
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v2()),
             Ok(1)
         );
         assert_eq!(
-            step.ironwood_action_count(BundleType::UNPADDED, BundleVersion::ironwood_v3()),
+            step.ironwood_action_count(BundlePadding::UNPADDED, BundleVersion::ironwood_v3()),
             Ok(0)
         );
 
@@ -1617,11 +1872,11 @@ mod tests {
         // pool can pair them into one action.
         let step = orchard_payment_step(PoolType::IRONWOOD, true).unwrap();
         assert_eq!(
-            step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+            step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
             Ok(1)
         );
         assert_eq!(
-            step.ironwood_action_count(BundleType::UNPADDED, BundleVersion::ironwood_v3()),
+            step.ironwood_action_count(BundlePadding::UNPADDED, BundleVersion::ironwood_v3()),
             Ok(1)
         );
     }
@@ -1656,16 +1911,16 @@ mod tests {
             // bundle its action count is exactly the number of requested actions.
             for version in [BundleVersion::orchard_insecure_v1(), BundleVersion::orchard_v2()] {
                 prop_assert_eq!(
-                    step.orchard_action_count(BundleType::UNPADDED, version),
+                    step.orchard_action_count(BundlePadding::UNPADDED, version),
                     Ok(orchard_spends.max(orchard_change))
                 );
             }
             prop_assert_eq!(
-                step.orchard_action_count(BundleType::UNPADDED, BundleVersion::orchard_v3()),
+                step.orchard_action_count(BundlePadding::UNPADDED, BundleVersion::orchard_v3()),
                 Ok(orchard_spends + orchard_change)
             );
             prop_assert_eq!(
-                step.ironwood_action_count(BundleType::UNPADDED, BundleVersion::ironwood_v3()),
+                step.ironwood_action_count(BundlePadding::UNPADDED, BundleVersion::ironwood_v3()),
                 Ok(ironwood_spends.max(ironwood_change))
             );
 
@@ -1674,11 +1929,11 @@ mod tests {
             // step requires no actions in that pool.
             let pad = |requested: usize| if requested == 0 { 0 } else { requested.max(2) };
             prop_assert_eq!(
-                step.orchard_action_count(BundleType::DEFAULT, BundleVersion::orchard_v3()),
+                step.orchard_action_count(BundlePadding::DEFAULT, BundleVersion::orchard_v3()),
                 Ok(pad(orchard_spends + orchard_change))
             );
             prop_assert_eq!(
-                step.ironwood_action_count(BundleType::DEFAULT, BundleVersion::ironwood_v3()),
+                step.ironwood_action_count(BundlePadding::DEFAULT, BundleVersion::ironwood_v3()),
                 Ok(pad(ironwood_spends.max(ironwood_change)))
             );
         }
@@ -1706,7 +1961,7 @@ mod tests {
             // Pre-NU6.3, each change output shares an action with a spend: max(spends, change).
             prop_assert_eq!(
                 orchard_step.orchard_action_count(
-                    BundleType::UNPADDED,
+                    BundlePadding::UNPADDED,
                     bundle_version_at(pre_nu6_3, ValuePool::Orchard),
                 ),
                 Ok(spends.max(change))
@@ -1718,7 +1973,7 @@ mod tests {
             // belonging to a different address. Hence spends + change actions.
             prop_assert_eq!(
                 orchard_step.orchard_action_count(
-                    BundleType::UNPADDED,
+                    BundlePadding::UNPADDED,
                     bundle_version_at(nu6_3_or_later, ValuePool::Orchard),
                 ),
                 Ok(spends + change)
@@ -1733,7 +1988,7 @@ mod tests {
             );
             prop_assert_eq!(
                 ironwood_step.ironwood_action_count(
-                    BundleType::UNPADDED,
+                    BundlePadding::UNPADDED,
                     bundle_version_at(nu6_3_or_later, ValuePool::Ironwood),
                 ),
                 Ok(spends.max(change))
@@ -1759,7 +2014,7 @@ mod tests {
                 std::iter::repeat_n(shielded_change(ShieldedPool::Orchard, change_value), change)
                     .collect(),
             );
-            let bundle_type = BundleType::Transactional {
+            let bundle_type = BundlePadding {
                 bundle_required: false,
                 pad_to_minimum: Some(pad_to_minimum),
             };

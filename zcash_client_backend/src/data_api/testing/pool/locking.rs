@@ -13,15 +13,20 @@ use proptest::prelude::{Just, Strategy, prop_oneof};
 use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::Zatoshis};
 use zip321::Payment;
 
+#[cfg(feature = "transparent-inputs")]
+use crate::data_api::{
+    InputSource, WalletRead, WalletWrite,
+    wallet::{
+        TargetHeight,
+        input_selection::{LockFilter, LockedInputPolicy},
+    },
+};
 use crate::{
     data_api::{
-        self, Account as _, InputSource, OutputLockStore, WalletRead, WalletTest, WalletWrite,
+        self, Account as _, OutputLockStore, WalletTest,
         error::LockError,
         testing::{DataStoreFactory, TestCache, single_output_change_strategy},
-        wallet::{
-            ConfirmationsPolicy, TargetHeight,
-            input_selection::{GreedyInputSelector, LockFilter, LockedInputPolicy},
-        },
+        wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
     },
     fees::StandardFeeRule,
     wallet::{LockOwner, OutputRef, OvkPolicy},

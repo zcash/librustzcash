@@ -67,8 +67,10 @@ use core::fmt;
 /// padded up to this count, so no preparation transaction is distinguishable from another by its
 /// action count, and one transaction handles at most this many notes in total (spends plus outputs).
 ///
+/// Re-exported from [`zcash_protocol::zip318`], which owns the ZIP's specified value.
+///
 /// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const PREP_TX_ACTIONS: usize = 16;
+pub use zcash_protocol::zip318::PREP_TX_ACTIONS;
 
 /// The most funding (or feeder) outputs one transaction produces from a single input: the action
 /// budget less that one input and one change/feeder slot (`16 - 1 - 1`).

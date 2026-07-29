@@ -551,7 +551,7 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
     // rather than crossing a 12-block grid with three-hour ZIP 318 delays.
     let sched_params = adapter.scheduling_params();
     let interval = sched_params.anchor_bucket_interval();
-    assert_eq!(interval, AnchorBucketInterval::from(retention));
+    assert_eq!(interval, retention);
     assert_ne!(interval, AnchorBucketInterval::ZIP_318);
     assert_eq!(
         sched_params,
