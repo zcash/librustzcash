@@ -1107,6 +1107,8 @@ impl<NoteRef> Debug for Step<NoteRef> {
 mod tests {
     use std::collections::BTreeMap;
 
+    use zcash_keys::address::{Address, UnifiedAddress};
+
     use incrementalmerkletree::Position;
     use nonempty::NonEmpty;
     use zcash_address::ZcashAddress;
@@ -1569,9 +1571,6 @@ mod tests {
         pool: PoolType,
         ironwood_active: bool,
     ) -> Result<Step<u32>, ProposalError> {
-        use zcash_keys::address::{Address, UnifiedAddress};
-        use zcash_protocol::consensus::Network;
-
         let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
         let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
         let ua = UnifiedAddress::from_receivers(Some(recipient), None, None).unwrap();

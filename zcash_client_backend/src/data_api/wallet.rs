@@ -120,8 +120,10 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
+    std::collections::BTreeMap,
     transparent::pczt::Bip32Derivation,
     zcash_note_encryption::try_output_recovery_with_pkd_esk,
+    zcash_note_encryption::{Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput},
     zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
 };
 
@@ -3489,9 +3491,6 @@ where
     DbT: WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: serde::de::DeserializeOwned,
 {
-    use std::collections::BTreeMap;
-    use zcash_note_encryption::{Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput};
-
     let finalized = SpendFinalizer::new(pczt).finalize_spends()?;
 
     let proposal_info = finalized

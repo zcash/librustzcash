@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use incrementalmerkletree::{Hashable, Level};
+use incrementalmerkletree::{Address as TreeAddress, Hashable, Level, Position};
 use sapling::{
     note_encryption::try_sapling_output_recovery,
     zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
@@ -93,9 +93,8 @@ impl ShieldedPoolTester for SaplingPoolTester {
         st: &mut TestState<Cache, DbT, P>,
         shard_index: u64,
     ) -> Result<Self::MerkleTreeHash, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>> {
-        use incrementalmerkletree::{Address, Position};
         let shard_height = crate::data_api::SAPLING_SHARD_HEIGHT;
-        let addr = Address::from_parts(Level::from(shard_height), shard_index);
+        let addr = TreeAddress::from_parts(Level::from(shard_height), shard_index);
         let end_position = Position::from((shard_index + 1) << shard_height);
         st.wallet_mut()
             .with_sapling_tree_mut(|tree| tree.root(addr, end_position))

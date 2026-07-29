@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::error;
-use std::fmt::{self, Debug, Display};
+use std::fmt::{self, Debug, Display, Write};
 use std::hash::Hash;
 
 use shardtree::error::ShardTreeError;
@@ -222,8 +222,6 @@ where
     N: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use fmt::Write;
-
         match self {
             Error::DataSource(e) => {
                 write!(

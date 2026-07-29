@@ -40,7 +40,8 @@ use {
     std::collections::HashSet,
     transparent::keys::TransparentKeyScope,
     zcash_keys::keys::{
-        ReceiverRequirement, UnifiedAddressRequest,
+        ReceiverRequirement::*,
+        UnifiedAddressRequest,
         transparent::gap_limits::{
             AddressStore, GapAddressesError, GapLimits, generate_gap_addresses,
         },
@@ -580,7 +581,6 @@ where
         .map_err(PutBlocksError::Storage)?
     {
         if let Some(t_key_scope) = key_scope {
-            use ReceiverRequirement::*;
             generate_transparent_gap_addresses(
                 wallet_db,
                 gap_limits,
@@ -1069,7 +1069,6 @@ where
     // Regenerate the gap limit addresses.
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in gap_update_set {
-        use ReceiverRequirement::*;
         generate_transparent_gap_addresses(
             wallet_db,
             gap_limits,

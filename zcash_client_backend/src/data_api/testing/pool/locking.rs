@@ -21,7 +21,7 @@ use crate::{
         wallet::{
             ConfirmationsPolicy, TargetHeight,
             input_selection::{
-                GreedyInputSelector, LockFilter, LockedInputPolicy, NonEmptyBTreeSet,
+                GreedyInputSelector, LockFilter, LockedInputPolicy, NonEmptyBTreeSet, SpendPolicy,
             },
         },
     },
@@ -34,14 +34,7 @@ use super::{ShieldedPoolTester, dsl::TestDsl};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{
-            CoinbaseFilter, InputSource, WalletRead, WalletWrite,
-            testing::TestBuilder,
-            wallet::{
-                TargetHeight,
-                input_selection::{LockFilter, LockedInputPolicy},
-            },
-        },
+        data_api::{CoinbaseFilter, WalletWrite, testing::TestBuilder},
         wallet::WalletTransparentOutput,
     },
     transparent::{
@@ -769,10 +762,6 @@ pub fn spend_policy_locked_input_policy_reaches_selection<T: ShieldedPoolTester>
     ds_factory: impl DataStoreFactory,
     cache: impl TestCache,
 ) {
-    use crate::data_api::wallet::input_selection::{
-        LockedInputPolicy, NonEmptyBTreeSet, SpendPolicy,
-    };
-
     let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
 
     let fee_rule = StandardFeeRule::Zip317;
