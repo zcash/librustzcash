@@ -23,7 +23,7 @@ use zcash_pool_migration::preparation::{
     FUNDING_OUTPUTS_PER_TX, PreparationPlan, plan_preparation,
 };
 use zcash_pool_migration::scheduling::{
-    AnchorBucketInterval, MinBlockGap, Placement, ScheduleConstraint,
+    AnchorBucketInterval, MinBlockGap, Placement, Predicate, ScheduleConstraint,
 };
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
@@ -75,50 +75,64 @@ fn plans_a_migration_from_a_balance() {
 fn plans_a_migration_under_a_caller_condition() {
     // Windows the UNCONSTRAINED draw for this seed lands in (asserted below), so the condition is
     // doing work rather than being satisfied by accident.
-    const BLACKOUTS: [core::ops::Range<u32>; 2] = [2_000_010..2_000_040, 2_000_400..2_000_500];
+    const BLACKOUTS: [core::ops::Range<u32>; 2] = [2_000_300..2_000_600, 2_000_800..2_001_000];
     let blacked_out = |h: u32| BLACKOUTS.iter().any(|w| w.contains(&h));
 
-    let backend = MockBackend::new(vec![100 * COIN, 40 * COIN], 2_000_000);
+    // A balance that splits into several crossings, so the transfer schedule is more than one
+    // height and the condition is exercised across a real sequence.
+    let backend = MockBackend::new(vec![78 * COIN], 2_000_000);
 
     // The baseline: without the condition, this seed schedules inside the windows.
-    let mut rng = ChaCha8Rng::seed_from_u64(1);
+    let mut rng = ChaCha8Rng::seed_from_u64(3);
     let unconstrained = plan_migration(&regtest_network(true), &backend, &mut rng)
         .expect("a fundable balance plans");
+    assert!(unconstrained.schedule().len() >= 4);
     assert!(
         plan_heights(&unconstrained).into_iter().any(blacked_out),
         "the baseline plan must hit a blackout window, or this test proves nothing"
     );
 
-    let condition = (MinBlockGap::DISTINCT_BLOCKS, |p: &Placement<'_>| {
-        !blacked_out(u32::from(p.height()))
-    });
-    let mut rng = ChaCha8Rng::seed_from_u64(1);
+    let condition = (
+        MinBlockGap::DISTINCT_BLOCKS,
+        Predicate(|p: &Placement<'_>| !blacked_out(u32::from(p.height()))),
+    );
+    let mut rng = ChaCha8Rng::seed_from_u64(3);
     let plan = plan_migration_with(&regtest_network(true), &backend, &condition, &mut rng)
         .expect("a fundable balance plans under this condition");
 
     let heights = plan_heights(&plan);
     assert!(!heights.is_empty());
-    for h in heights {
-        assert!(!blacked_out(h), "height {h} falls inside a blackout window");
+    for h in &heights {
+        assert!(
+            !blacked_out(*h),
+            "height {h} falls inside a blackout window"
+        );
     }
-    // No two of the wallet's transactions share a block, within each preparation layer and across
-    // the transfer schedule.
+    // No two of the wallet's transactions are scheduled in the same block. Note that this is a
+    // property of the heights as a SET: `ScheduleConstraint::is_valid` reads a sequence in DRAW
+    // order, and `MigrationPlan::schedule` is deliberately shuffled out of that order (the shuffle
+    // is what decouples the on-chain sequence of denominations from the balance), so it must not
+    // be handed to `is_valid` as it stands.
+    let mut sorted = heights.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        heights.len(),
+        "two transactions share a block"
+    );
+
+    // Each preparation LAYER is in draw order, so the condition applies to it as a sequence.
     let base = BlockHeight::from_u32(0);
     for layer in plan.prep_schedule() {
         assert!(MinBlockGap::DISTINCT_BLOCKS.is_valid(base, layer));
     }
-    let transfers: Vec<BlockHeight> = plan
-        .schedule()
-        .iter()
-        .map(|s| s.broadcast_height())
-        .collect();
-    assert!(MinBlockGap::DISTINCT_BLOCKS.is_valid(base, &transfers));
 }
 
 /// A condition no draw can satisfy yields no plan, rather than one that violates it.
 #[test]
 fn an_unsatisfiable_condition_yields_no_plan() {
-    let never = |_: &Placement<'_>| false;
+    let never = Predicate(|_: &Placement<'_>| false);
     let backend = MockBackend::new(vec![100 * COIN], 2_000_000);
     let mut rng = ChaCha8Rng::seed_from_u64(1);
     assert!(matches!(

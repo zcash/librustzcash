@@ -890,6 +890,11 @@ where
 /// A caller supplying its own condition is responsible for including the crate default
 /// ([`MinBlockGap::DISTINCT_BLOCKS`]) if it wants it, by conjoining the two:
 /// `(MinBlockGap::DISTINCT_BLOCKS, my_condition)`.
+///
+/// A condition beyond the default narrows this wallet's schedule distribution away from every
+/// other migrating wallet's, and a condition derived from one user's settings can be a near-unique
+/// signature of the schedules it produces. On the production network that is a deliberate trade of
+/// anonymity for availability, to make with the user's knowledge; see [`ScheduleConstraint`].
 pub fn plan_migration_with<P, B, C, R>(
     params: &P,
     backend: &B,

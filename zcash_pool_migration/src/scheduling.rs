@@ -50,6 +50,11 @@
 //! default ([`MinBlockGap::DISTINCT_BLOCKS`], the no-two-in-one-block condition) and a `_with` form
 //! taking the caller's own.
 //!
+//! A condition costs anonymity in proportion to how few wallets share it: the default is applied by
+//! every wallet and so costs nothing, while a condition derived from one user's settings can be a
+//! near-unique signature of the schedules it produces. See [`ScheduleConstraint`] before adding one
+//! on the production network.
+//!
 //! Beyond the ZIP 318 draws, [`schedule_sync_wakeups`] derives from a committed transfer schedule
 //! the MINIMAL set of sync/proving wake-ups a background-constrained wallet needs: every transfer
 //! is proved after its drawn anchor boundary settles and strictly before its broadcast height, and
@@ -604,17 +609,35 @@ impl<'a> Placement<'a> {
 /// that can only be evaluated once every LATER height is known cannot be expressed this way; state
 /// it as a bound on each placement instead.
 ///
-/// Implemented for closures `Fn(&Placement<'_>) -> bool`, for `()` (accepts everything), for
-/// slices, and for 2- and 3-tuples, which conjoin their members. So a caller can pass a bare
-/// closure, or compose the built-in [`MinBlockGap`] with its own conditions:
+/// # Anonymity cost of a non-default condition
+///
+/// The schedule draws exist to make one wallet's broadcasts indistinguishable from every other
+/// migrating wallet's, so the anonymity set is exactly the set of wallets drawing from the SAME
+/// distribution. A condition narrows that distribution, and a condition peculiar to one
+/// application — a maintenance window, a user's blocked-out hours — narrows it in a way peculiar
+/// to that application, which is itself a distinguisher: the schedules it produces are a signature
+/// of the wallet that produced them. That is the same partitioning the module exists to prevent,
+/// applied by the wallet to itself.
+///
+/// So on the production network, prefer the crate default ([`MinBlockGap::DISTINCT_BLOCKS`], which
+/// every wallet applies and which therefore costs nothing), and treat a custom condition as a
+/// deliberate trade of anonymity for availability, made with the user's knowledge. A condition
+/// shared by every wallet of a widely deployed application costs far less than one derived from an
+/// individual user's settings, which can be near-unique.
+///
+/// # Composing
+///
+/// Implemented for [`Predicate`] (which wraps a closure), for `()` (accepts everything), for
+/// references and boxes, for slices, and for 2- and 3-tuples, which conjoin their members. So a
+/// caller composes the built-in [`MinBlockGap`] with its own conditions:
 ///
 /// ```
 /// use zcash_protocol::consensus::BlockHeight;
-/// use zcash_pool_migration::scheduling::{MinBlockGap, Placement, ScheduleConstraint};
+/// use zcash_pool_migration::scheduling::{MinBlockGap, Placement, Predicate, ScheduleConstraint};
 ///
 /// // No broadcast inside a maintenance window the wallet's own UI has blocked out, and never two
 /// // broadcasts in one block.
-/// let blackout = |p: &Placement<'_>| !(1_000..1_500).contains(&u32::from(p.height()));
+/// let blackout = Predicate(|p: &Placement<'_>| !(1_000..1_500).contains(&u32::from(p.height())));
 /// let condition = (MinBlockGap::DISTINCT_BLOCKS, blackout);
 ///
 /// let heights = [BlockHeight::from_u32(900), BlockHeight::from_u32(1_600)];
@@ -622,6 +645,21 @@ impl<'a> Placement<'a> {
 ///
 /// let colliding = [BlockHeight::from_u32(900), BlockHeight::from_u32(900)];
 /// assert!(!condition.is_valid(BlockHeight::from_u32(800), &colliding));
+/// ```
+///
+/// A set assembled at runtime is a slice of boxed conditions, which may be of different kinds:
+///
+/// ```
+/// use zcash_protocol::consensus::BlockHeight;
+/// use zcash_pool_migration::scheduling::{
+///     MinBlockGap, Placement, Predicate, ScheduleConstraint,
+/// };
+///
+/// let mut set: Vec<Box<dyn ScheduleConstraint>> = vec![Box::new(MinBlockGap::DISTINCT_BLOCKS)];
+/// set.push(Box::new(Predicate(|p: &Placement<'_>| u32::from(p.height()) % 2 == 0)));
+///
+/// let heights = [BlockHeight::from_u32(4), BlockHeight::from_u32(8)];
+/// assert!(set.as_slice().is_valid(BlockHeight::from_u32(0), &heights));
 /// ```
 pub trait ScheduleConstraint {
     /// Whether `placement` may extend the partial schedule it carries.
@@ -640,13 +678,23 @@ pub trait ScheduleConstraint {
     }
 }
 
-/// A closure is a condition.
-impl<F> ScheduleConstraint for F
+/// A condition given as a closure: `Predicate(|p: &Placement<'_>| ...)`.
+///
+/// The wrapper is deliberate rather than a blanket `impl ScheduleConstraint for F: Fn(..)`. A
+/// blanket impl over `Fn` would cover `&C`, `Box<C>`, and `Arc<C>` whenever `C: Fn`, which forever
+/// forecloses the forwarding impls below — and those are what make a runtime-assembled set of
+/// `Box<dyn ScheduleConstraint>` usable. One wrapper at the call site buys that back.
+#[derive(Clone, Copy, Debug)]
+pub struct Predicate<F>(pub F)
+where
+    F: Fn(&Placement<'_>) -> bool;
+
+impl<F> ScheduleConstraint for Predicate<F>
 where
     F: Fn(&Placement<'_>) -> bool,
 {
     fn admits(&self, placement: &Placement<'_>) -> bool {
-        self(placement)
+        (self.0)(placement)
     }
 }
 
@@ -657,8 +705,30 @@ impl ScheduleConstraint for () {
     }
 }
 
+/// A reference to a condition is that condition; `?Sized` so `&dyn ScheduleConstraint` works.
+impl<C> ScheduleConstraint for &C
+where
+    C: ScheduleConstraint + ?Sized,
+{
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        (*self).admits(placement)
+    }
+}
+
+/// A boxed condition is that condition; `?Sized` so `Box<dyn ScheduleConstraint>` works, which is
+/// what lets a runtime-assembled set hold conditions of different kinds.
+impl<C> ScheduleConstraint for alloc::boxed::Box<C>
+where
+    C: ScheduleConstraint + ?Sized,
+{
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        (**self).admits(placement)
+    }
+}
+
 /// A slice of conditions is their conjunction (an empty slice accepts everything), for a set of
-/// conditions whose size is only known at runtime — a wallet assembling them from user settings.
+/// conditions assembled at runtime — a wallet building them from user settings. Hold them as
+/// `Box<dyn ScheduleConstraint>` (or `&dyn`) when they are of different kinds.
 impl<C> ScheduleConstraint for [C]
 where
     C: ScheduleConstraint,
@@ -869,6 +939,9 @@ where
 ///
 /// Fails with [`ConstraintUnsatisfied`] if the condition rejects [`CONSTRAINT_ATTEMPTS`]
 /// consecutive draws for one transfer: a schedule is returned only if it satisfies the condition.
+///
+/// A condition other than the crate default narrows this wallet's schedule distribution away from
+/// every other wallet's, which costs anonymity; see [`ScheduleConstraint`].
 pub fn schedule_broadcast_heights_with<R, C>(
     params: &SchedulingParams,
     commit_height: BlockHeight,
@@ -2162,8 +2235,8 @@ mod tests {
     fn conditions_compose_by_conjunction() {
         let start = bh(0);
         let heights = [bh(10), bh(20)];
-        let below_15 = |p: &Placement<'_>| u32::from(p.height()) < 15;
-        let even = |p: &Placement<'_>| u32::from(p.height()) % 2 == 0;
+        let below_15 = Predicate(|p: &Placement<'_>| u32::from(p.height()) < 15);
+        let even = Predicate(|p: &Placement<'_>| u32::from(p.height()) % 2 == 0);
 
         assert!(().is_valid(start, &heights));
         assert!(even.is_valid(start, &heights));
@@ -2186,6 +2259,31 @@ mod tests {
         assert!(none.is_valid(start, &heights));
     }
 
+    /// A set assembled at RUNTIME holds conditions of different kinds, so it must be a set of
+    /// boxed (or borrowed) trait objects. This is what the forwarding impls exist for, and the
+    /// reason a closure is wrapped in `Predicate` rather than blanket-implementing the trait: a
+    /// blanket impl over `Fn` would cover `Box<C>` and `&C` too, and forbid these.
+    #[test]
+    fn a_runtime_assembled_set_holds_mixed_conditions() {
+        let start = bh(0);
+        let mut set: Vec<alloc::boxed::Box<dyn ScheduleConstraint>> =
+            alloc::vec![alloc::boxed::Box::new(MinBlockGap::DISTINCT_BLOCKS)];
+        set.push(alloc::boxed::Box::new(Predicate(|p: &Placement<'_>| {
+            u32::from(p.height()) % 2 == 0
+        })));
+
+        assert!(set.as_slice().is_valid(start, &[bh(4), bh(8)]));
+        // Fails the parity condition.
+        assert!(!set.as_slice().is_valid(start, &[bh(4), bh(9)]));
+        // Fails the gap condition.
+        assert!(!set.as_slice().is_valid(start, &[bh(4), bh(4)]));
+
+        // A borrowed condition forwards the same way, so a caller can pass one it does not own.
+        let borrowed: &dyn ScheduleConstraint = &MinBlockGap::DISTINCT_BLOCKS;
+        assert!(borrowed.is_valid(start, &[bh(1), bh(2)]));
+        assert!(!borrowed.is_valid(start, &[bh(1), bh(1)]));
+    }
+
     proptest! {
         /// Whatever the caller's condition, a returned schedule satisfies it: the sampler redraws a
         /// rejected placement rather than returning a schedule that violates it. Drawn under the
@@ -2198,7 +2296,7 @@ mod tests {
             let params = collision_prone();
             let min_gap = MinBlockGap::new(NonZeroU32::new(gap).expect("nonzero"));
             // Also keep every broadcast off the multiples of 5, a condition unrelated to spacing.
-            let off_grid = |p: &Placement<'_>| u32::from(p.height()) % 5 != 0;
+            let off_grid = Predicate(|p: &Placement<'_>| u32::from(p.height()) % 5 != 0);
             let condition = (min_gap, off_grid);
 
             let mut r = rng(seed);
@@ -2230,7 +2328,7 @@ mod tests {
     /// minimum gap wider than the delay distribution's cap.
     #[test]
     fn unsatisfiable_conditions_return_no_schedule() {
-        let never = |_: &Placement<'_>| false;
+        let never = Predicate(|_: &Placement<'_>| false);
         let err = schedule_broadcast_heights_with(&P, bh(1_000), 3, &never, &mut rng(1))
             .expect_err("no height is admissible");
         assert_eq!(err.index(), 0);
@@ -2242,7 +2340,7 @@ mod tests {
         assert!(schedule_broadcast_heights_with(&P, bh(1_000), 1, &too_wide, &mut rng(1)).is_err());
 
         // A condition that only the SECOND placement fails is reported at that index.
-        let first_only = |p: &Placement<'_>| p.index() == 0;
+        let first_only = Predicate(|p: &Placement<'_>| p.index() == 0);
         let err = schedule_with(&P, bh(1_000), 2, &first_only, &mut rng(1))
             .expect_err("the second placement is inadmissible");
         assert_eq!(err.index(), 1);
@@ -2251,7 +2349,7 @@ mod tests {
     /// The error renders a diagnostic naming the entry and the height it could not get past.
     #[test]
     fn constraint_error_display() {
-        let never = |_: &Placement<'_>| false;
+        let never = Predicate(|_: &Placement<'_>| false);
         let err = schedule_prep_broadcast_heights_with(&P, bh(7), 1, &never, &mut rng(1))
             .expect_err("no height is admissible");
         assert_eq!(
