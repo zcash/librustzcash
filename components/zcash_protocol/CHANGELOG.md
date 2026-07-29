@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-28
+
 ### Added
 - `zcash_protocol::zip318`, the ZIP 318 pool-migration protocol parameters:
   - `DENOM_CAP`, `MAX_RESIDUAL_VALUE`, and `is_canonical_denomination`, the
