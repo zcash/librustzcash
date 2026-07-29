@@ -223,9 +223,18 @@ expensive-tests = []
 ## Marks expensive tests as ignored without removing them from compilation. Test-only.
 ignore-expensive-tests = []
 
-## A feature used to enable PCZT-specific tests without interfering with the
-## protocol-specific flags. Test-only.
-pczt-tests = ["serde", "zcash_client_backend/pczt"]
+## A feature used to enable PCZT-specific tests. Test-only.
+##
+## This enables this crate's `orchard` and `transparent-inputs` features, because
+## `zcash_client_backend/pczt` forces the backend's counterparts on, and the backend's storage
+## traits and this crate's impls must grow their pool-specific methods together or the impls stop
+## satisfying the traits.
+pczt-tests = [
+    "serde",
+    "orchard",
+    "transparent-inputs",
+    "zcash_client_backend/pczt",
+]
 
 [lib]
 bench = false
