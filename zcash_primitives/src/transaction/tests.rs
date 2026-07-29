@@ -13,6 +13,7 @@ use {
     alloc::vec::Vec,
     blake2b_simd::Hash as Blake2bHash,
     core::ops::Deref,
+    proptest::{strategy::ValueTree, test_runner::TestRunner},
     zcash_protocol::{consensus::BranchId, value::Zatoshis},
     zcash_script::script,
 };
@@ -166,8 +167,6 @@ fn v6_empty_orchard_txid_uses_v6_orchard_personalization() {
 #[cfg(all(test, not(zcash_unstable = "nu7")))]
 #[test]
 fn v6_branch_reconstruction_preserves_ironwood_bundle() {
-    use proptest::test_runner::TestRunner;
-
     let mut runner = TestRunner::default();
     let ironwood_bundle = test_ironwood_bundle(&mut runner);
     let tx = TransactionData::from_parts_v6(
@@ -232,8 +231,6 @@ fn test_anchor(byte: u8) -> orchard::Anchor {
 fn test_orchard_bundle(
     runner: &mut proptest::test_runner::TestRunner,
 ) -> orchard::Bundle<orchard::bundle::Authorized, ZatBalance> {
-    use proptest::strategy::ValueTree;
-
     let bundle = crate::transaction::components::orchard::testing::arb_bundle(1)
         .new_tree(runner)
         .unwrap()
@@ -248,8 +245,6 @@ fn test_orchard_bundle(
 fn test_ironwood_bundle(
     runner: &mut proptest::test_runner::TestRunner,
 ) -> orchard::Bundle<orchard::bundle::Authorized, ZatBalance> {
-    use proptest::strategy::ValueTree;
-
     let bundle = crate::transaction::components::orchard::testing::arb_bundle(1)
         .new_tree(runner)
         .unwrap()
@@ -285,8 +280,6 @@ fn test_sapling_anchor(byte: u8) -> bls12_381::Scalar {
 fn test_sapling_bundle(
     runner: &mut proptest::test_runner::TestRunner,
 ) -> sapling::Bundle<sapling::bundle::Authorized, ZatBalance> {
-    use proptest::strategy::ValueTree;
-
     let bundle_strategy =
         crate::transaction::components::sapling::testing::arb_bundle_for_version(TxVersion::V6);
 
@@ -305,8 +298,6 @@ fn test_sapling_bundle(
 fn test_sapling_output_only_bundle(
     runner: &mut proptest::test_runner::TestRunner,
 ) -> sapling::Bundle<sapling::bundle::Authorized, ZatBalance> {
-    use proptest::strategy::ValueTree;
-
     let bundle_strategy =
         crate::transaction::components::sapling::testing::arb_bundle_for_version(TxVersion::V6);
 
