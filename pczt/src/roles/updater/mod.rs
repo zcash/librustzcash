@@ -8,6 +8,12 @@ use alloc::vec::Vec;
 
 use crate::{Pczt, common::Global};
 
+#[cfg(any(feature = "sapling", feature = "orchard"))]
+use zcash_protocol::{
+    consensus::BranchId,
+    constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID},
+};
+
 #[cfg(feature = "orchard")]
 mod orchard;
 #[cfg(feature = "orchard")]
@@ -225,11 +231,6 @@ fn ensure_no_orchard_proof_for_witness(
 
 #[cfg(any(feature = "sapling", feature = "orchard"))]
 fn ensure_anchor_update_supported(global: &Global) -> Result<(), AnchorUpdateError> {
-    use zcash_protocol::{
-        consensus::BranchId,
-        constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID},
-    };
-
     if global.tx_version < V6_TX_VERSION
         || (global.tx_version == V6_TX_VERSION && global.version_group_id != V6_VERSION_GROUP_ID)
     {
