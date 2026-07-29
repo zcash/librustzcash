@@ -899,14 +899,12 @@ mod tests {
         );
     }
 
-    /// The change strategy RECORDS the Ironwood padding it charged the fee against, so the builder
-    /// can reproduce that action count instead of deriving it a second time. A canonical crossing
-    /// is costed unpadded; a payment one zatoshi off a canonical denomination, identical in every
-    /// other respect, is costed padded.
+    /// The change strategy records the exact dummy outputs it charged the fee against, so the
+    /// builder can reproduce that action count. A canonical crossing has no Ironwood dummy output;
+    /// a payment one zatoshi off the denomination grid has one.
     #[test]
     #[cfg(feature = "orchard")]
-    fn the_change_strategy_records_the_padding_it_costed() {
-        use zcash_primitives::transaction::builder::BundlePadding;
+    fn the_change_strategy_records_the_dummy_outputs_it_costed() {
         use zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE};
 
         use crate::data_api::wallet::TargetHeight;
@@ -964,13 +962,15 @@ mod tests {
                     &(),
                 )
                 .expect("the input covers the payment and its fee")
-                .ironwood_bundle_padding()
+                .dummy_outputs()
+                .expect("the change strategy records dummy outputs")
+                .ironwood()
         };
 
-        assert_eq!(recorded_for(MAX_RESIDUAL_VALUE), BundlePadding::UNPADDED);
+        assert_eq!(recorded_for(MAX_RESIDUAL_VALUE), 0);
         assert_eq!(
             recorded_for((MAX_RESIDUAL_VALUE + Zatoshis::const_from_u64(1)).unwrap()),
-            BundlePadding::DEFAULT
+            1
         );
     }
 

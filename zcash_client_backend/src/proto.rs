@@ -32,7 +32,7 @@ use crate::{
         chain::ChainState,
         wallet::{ConfirmationsPolicy, TargetHeight, input_selection::LockFilter},
     },
-    fees::{ChangeValue, StandardFeeRule, TransactionBalance},
+    fees::{ChangeValue, DummyOutputCounts, StandardFeeRule, TransactionBalance},
     proposal::{
         Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex,
         produces_shielded_bundle,
@@ -751,6 +751,28 @@ impl proposal::Proposal {
                         })
                         .collect(),
                     fee_required: step.balance().fee_required().into(),
+                    dummy_outputs: step.balance().dummy_outputs().map(|counts| {
+                        proposal::DummyOutputs {
+                            sapling: counts
+                                .sapling()
+                                .try_into()
+                                .expect("Sapling dummy-output count fits into u32"),
+                            #[cfg(feature = "orchard")]
+                            orchard: counts
+                                .orchard()
+                                .try_into()
+                                .expect("Orchard dummy-output count fits into u32"),
+                            #[cfg(not(feature = "orchard"))]
+                            orchard: 0,
+                            #[cfg(feature = "orchard")]
+                            ironwood: counts
+                                .ironwood()
+                                .try_into()
+                                .expect("Ironwood dummy-output count fits into u32"),
+                            #[cfg(not(feature = "orchard"))]
+                            ironwood: 0,
+                        }
+                    }),
                 });
 
                 proposal::ProposalStep {
@@ -1013,6 +1035,21 @@ impl proposal::Proposal {
                             .map_err(|_| ProposalDecodingError::BalanceInvalid)?,
                     )
                     .map_err(|_| ProposalDecodingError::BalanceInvalid)?;
+                    let balance = match proto_balance.dummy_outputs.as_ref() {
+                        Some(counts) => {
+                            #[cfg(feature = "orchard")]
+                            let dummy_outputs = DummyOutputCounts::new(
+                                counts.sapling as usize,
+                                counts.orchard as usize,
+                                counts.ironwood as usize,
+                            );
+                            #[cfg(not(feature = "orchard"))]
+                            let dummy_outputs = DummyOutputCounts::new(counts.sapling as usize);
+                            balance.with_dummy_outputs(dummy_outputs)
+                        }
+                        // Older proposals did not explicitly model their dummy outputs.
+                        None => balance,
+                    };
 
                     // The `anchorHeight` field's zero value is the wire sentinel for a step that
                     // carries no anchor. Only a purely transparent step may lack one: any step that

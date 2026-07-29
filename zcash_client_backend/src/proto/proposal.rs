@@ -137,6 +137,20 @@ pub struct TransactionBalance {
     /// The fee to be paid by the proposed transaction, in zatoshis.
     #[prost(uint64, tag = "2")]
     pub fee_required: u64,
+    /// The exact number of dummy outputs in each shielded bundle. Omitted by
+    /// proposals created before transaction shape was modelled explicitly.
+    #[prost(message, optional, tag = "3")]
+    pub dummy_outputs: ::core::option::Option<DummyOutputs>,
+}
+/// Exact per-pool dummy-output counts for the proposed transaction.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DummyOutputs {
+    #[prost(uint32, tag = "1")]
+    pub sapling: u32,
+    #[prost(uint32, tag = "2")]
+    pub orchard: u32,
+    #[prost(uint32, tag = "3")]
+    pub ironwood: u32,
 }
 /// A proposed change or ephemeral output. If the transparent value pool is
 /// selected, the `memo` field must be null.
