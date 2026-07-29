@@ -17,8 +17,6 @@
 #
 # To burn one down: fix the configuration, delete the line. The job prints a notice when a listed
 # configuration starts passing, so the list cannot rot silently.
-zcash_address <none>
-zcash_address std
 zcash_client_sqlite <none>
 zcash_client_sqlite expensive-tests
 zcash_client_sqlite multicore

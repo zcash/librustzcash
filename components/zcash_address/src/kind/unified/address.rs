@@ -253,7 +253,7 @@ pub mod testing {
     }
 }
 
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(feature = "test-dependencies")]
 pub mod test_vectors;
 
 #[cfg(test)]
