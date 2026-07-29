@@ -8,13 +8,15 @@
 //! or `total_received`, both of which overstate the crossing whenever the transaction also
 //! returns change to a pool it spent from.
 //!
-//! This migration recreates `v_transactions` with two new columns, mirroring the shape of the
-//! existing `is_shielding` classification:
-//! - `is_pool_crossing`: true when every wallet-spent note and wallet-received output in the
-//!   transaction is shielded, the account spent at least one note, at least one output was
-//!   received in a pool the account spent nothing from, and no external outputs are known.
-//! - `pool_crossing_value`: the total value received in pools the account did not spend from,
-//!   when `is_pool_crossing` is true; NULL otherwise.
+//! This migration recreates `v_transactions` with a new `pool_crossing_value` column: the total
+//! value received in pools the account did not spend from, when every wallet-spent note and
+//! wallet-received output in the transaction is shielded, the account spent at least one note, at
+//! least one output was received in a pool the account spent nothing from, and no external outputs
+//! are known; NULL otherwise.
+//!
+//! The classification and the amount are carried by that single column rather than by a separate
+//! boolean mirroring `is_shielding`: a transaction is a pool crossing exactly when the column is
+//! non-NULL, so a boolean would restate the same predicate in a second place that could drift.
 //!
 //! A payment that returns value to one of the wallet's own addresses is classified once the
 //! wallet has observed the returned output: the scanner marks an output received by an account
@@ -40,6 +42,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x835d61e1_5b88_4f44_92b3_746fb91
 /// recreates; `ironwood_pool_code_views` supplies the Ironwood arms of `v_received_outputs` and
 /// `v_received_output_spends` that the crossing classification aggregates over.
 const DEPENDENCIES: &[Uuid] = &[
+    account_delete_cascade::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
 ];
 
@@ -55,7 +58,7 @@ impl schemerz::Migration<Uuid> for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Adds pool-crossing classification (`is_pool_crossing`, `pool_crossing_value`) to v_transactions."
+        "Adds the `pool_crossing_value` classification column to v_transactions."
     }
 }
 
@@ -181,7 +184,10 @@ impl RusqliteMigration for Migration {
                         -- We do not know about any external outputs of the transaction.
                         AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
                    ) AS is_shielding,
-                   (
+                   -- The value that crossed pools, when this transaction is a wallet-internal transfer
+                   -- between shielded pools; NULL when it is not such a transfer. A transaction is one
+                   -- exactly when this column is non-NULL.
+                   CASE WHEN (
                         -- Every note spent and every output received by the wallet in this transaction
                         -- is shielded.
                         SUM(CASE WHEN notes.pool = 0 THEN notes.spent_note_count + notes.received_count + notes.change_note_count ELSE 0 END) = 0
@@ -192,15 +198,9 @@ impl RusqliteMigration for Migration {
                         AND SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_count + notes.change_note_count ELSE 0 END) > 0
                         -- We do not know about any external outputs of the transaction.
                         AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
-                   ) AS is_pool_crossing,
-                   -- The value received in pools the account did not spend from, when the transaction
-                   -- is a pool crossing; NULL otherwise.
-                   CASE WHEN (
-                        SUM(CASE WHEN notes.pool = 0 THEN notes.spent_note_count + notes.received_count + notes.change_note_count ELSE 0 END) = 0
-                        AND SUM(notes.spent_note_count) > 0
-                        AND SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_count + notes.change_note_count ELSE 0 END) > 0
-                        AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
                    )
+                   -- The total value received in pools the account did not spend from. The condition
+                   -- above guarantees at least one such output, so this sum is never NULL when selected.
                    THEN SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_value ELSE 0 END)
                    END AS pool_crossing_value,
                    transactions.trust_status

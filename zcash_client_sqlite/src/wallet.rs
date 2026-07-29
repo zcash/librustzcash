@@ -26,18 +26,21 @@
 //!   transaction, this fee amount will be repeated for each such row. Therefore, if more than one
 //!   of the wallet's accounts is involved with the transaction, this fee should be considered only
 //!   once in determining the total value sent from the wallet as a whole.
-//! - `is_pool_crossing`: a boolean flag indicating whether the transaction is a wallet-internal
-//!   transfer that moves the account's own funds between shielded pools (for example, a ZIP 318
+//! - `pool_crossing_value`: non-NULL exactly when the transaction is a wallet-internal transfer
+//!   that moves the account's own funds between shielded pools (for example, a ZIP 318
 //!   Orchard → Ironwood migration transfer): every wallet-spent note and wallet-received output
-//!   is shielded, at least one output was received in a pool the account spent nothing from, and
-//!   no external outputs of the transaction are known. For such a transaction
-//!   `account_balance_delta` is just the negated fee, so the amount to present to a user is
-//!   `pool_crossing_value`, not the balance delta. A payment that returns value to one of the
-//!   wallet's own addresses is classified once the wallet has observed the returned output
-//!   (which the scanner marks as change); while such a transaction is unmined it is treated as
-//!   an ordinary payment.
-//! - `pool_crossing_value`: when `is_pool_crossing` is true, the total value received in pools
-//!   the account did not spend from — the amount that crossed pools; NULL otherwise.
+//!   is shielded, the account spent at least one note, at least one output was received in a pool
+//!   the account spent nothing from, and no external outputs of the transaction are known. Its
+//!   value is the total received in the pools the account did not spend from — the amount that
+//!   crossed. For such a transaction `account_balance_delta` is just the negated fee, so this is
+//!   the amount to present to a user rather than the balance delta; deriving one from
+//!   `total_spent` or `total_received` instead overstates the crossing whenever the transaction
+//!   also returns change to a pool it spent from. Use `pool_crossing_value IS NOT NULL` as the
+//!   classification predicate; there is deliberately no separate boolean column, since it would
+//!   restate the same condition in a second place that could drift. A payment that returns value
+//!   to one of the wallet's own addresses is classified once the wallet has observed the returned
+//!   output (which the scanner marks as change); while such a transaction is unmined it is
+//!   treated as an ordinary payment.
 //!
 //! ### Seed Phrase with Single Account
 //!
@@ -5828,7 +5831,6 @@ pub mod testing {
                     row.get("memo_count")?,
                     row.get("expired_unmined")?,
                     row.get("is_shielding")?,
-                    row.get("is_pool_crossing")?,
                     row.get::<_, Option<i64>>("pool_crossing_value")?
                         .map(Zatoshis::from_nonnegative_i64)
                         .transpose()?,

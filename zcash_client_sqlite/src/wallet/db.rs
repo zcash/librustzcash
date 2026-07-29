@@ -1435,7 +1435,10 @@ SELECT accounts.uuid                AS account_uuid,
             -- We do not know about any external outputs of the transaction.
             AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
        ) AS is_shielding,
-       (
+       -- The value that crossed pools, when this transaction is a wallet-internal transfer
+       -- between shielded pools; NULL when it is not such a transfer. A transaction is one
+       -- exactly when this column is non-NULL.
+       CASE WHEN (
             -- Every note spent and every output received by the wallet in this transaction
             -- is shielded.
             SUM(CASE WHEN notes.pool = 0 THEN notes.spent_note_count + notes.received_count + notes.change_note_count ELSE 0 END) = 0
@@ -1446,15 +1449,9 @@ SELECT accounts.uuid                AS account_uuid,
             AND SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_count + notes.change_note_count ELSE 0 END) > 0
             -- We do not know about any external outputs of the transaction.
             AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
-       ) AS is_pool_crossing,
-       -- The value received in pools the account did not spend from, when the transaction
-       -- is a pool crossing; NULL otherwise.
-       CASE WHEN (
-            SUM(CASE WHEN notes.pool = 0 THEN notes.spent_note_count + notes.received_count + notes.change_note_count ELSE 0 END) = 0
-            AND SUM(notes.spent_note_count) > 0
-            AND SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_count + notes.change_note_count ELSE 0 END) > 0
-            AND MAX(COALESCE(sent_note_counts.sent_notes, 0)) = 0
        )
+       -- The total value received in pools the account did not spend from. The condition
+       -- above guarantees at least one such output, so this sum is never NULL when selected.
        THEN SUM(CASE WHEN spent_note_pools.pool IS NULL THEN notes.received_value ELSE 0 END)
        END AS pool_crossing_value,
        transactions.trust_status

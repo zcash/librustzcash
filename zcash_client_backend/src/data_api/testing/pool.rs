@@ -8570,12 +8570,12 @@ pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
             assert!(tx.has_change(), "the transaction has change ({})", $phase);
             // The payment has an external recipient, so it is not a pool crossing even though
             // its value moves from the Orchard pool into the Ironwood pool.
-            assert!(
-                !tx.is_pool_crossing(),
+            assert_eq!(
+                tx.pool_crossing_value(),
+                None,
                 "a payment to an external recipient is not a pool crossing ({})",
                 $phase,
             );
-            assert_eq!(tx.pool_crossing_value(), None);
         }};
     }
 

@@ -126,7 +126,6 @@ pub struct TransactionSummary<AccountId> {
     memo_count: usize,
     expired_unmined: bool,
     is_shielding: bool,
-    is_pool_crossing: bool,
     pool_crossing_value: Option<Zatoshis>,
 }
 
@@ -152,7 +151,6 @@ impl<AccountId> TransactionSummary<AccountId> {
         memo_count: usize,
         expired_unmined: bool,
         is_shielding: bool,
-        is_pool_crossing: bool,
         pool_crossing_value: Option<Zatoshis>,
     ) -> Self {
         Self {
@@ -171,7 +169,6 @@ impl<AccountId> TransactionSummary<AccountId> {
             memo_count,
             expired_unmined,
             is_shielding,
-            is_pool_crossing,
             pool_crossing_value,
         }
     }
@@ -288,13 +285,16 @@ impl<AccountId> TransactionSummary<AccountId> {
     /// A payment that returns value to one of the wallet's own addresses is classified
     /// once the wallet has observed the returned output (which the scanner marks as
     /// change); while such a transaction is unmined it is treated as an ordinary payment.
+    ///
+    /// This is exactly the condition that [`Self::pool_crossing_value`] is `Some`; the
+    /// crossed amount is what identifies the transaction, so it is the only thing stored.
     pub fn is_pool_crossing(&self) -> bool {
-        self.is_pool_crossing
+        self.pool_crossing_value.is_some()
     }
 
     /// Returns the total value received in pools the account did not spend from — the
-    /// amount that crossed pools — when [`Self::is_pool_crossing`] is `true`, or `None`
-    /// otherwise.
+    /// amount that crossed pools — when this is a pool-crossing transaction as described
+    /// by [`Self::is_pool_crossing`], or `None` otherwise.
     pub fn pool_crossing_value(&self) -> Option<Zatoshis> {
         self.pool_crossing_value
     }
