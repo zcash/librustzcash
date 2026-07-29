@@ -283,6 +283,25 @@ cargo test --workspace --all-features --features expensive-tests
 RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --workspace --all-features
 ```
 
+### Run only the tests your change affects
+
+Because the suite is this expensive, **do not run the whole test suite** while iterating.
+Run only the tests the change adds or touches, and name them explicitly:
+
+```sh
+# Only the tests this patch adds or affects
+cargo test --release -p <crate_name> --all-features -- <test_name> <other_test_name>
+```
+
+CI runs the full workspace across the feature matrix; that is what a green PR rests on, so
+reproducing it locally buys little and costs a great deal of wall-clock time. Reach for a
+broader run only when there is a specific reason to expect wider fallout — for example, a
+change to a shared SQL view, trait signature, or serialization format — and then still
+scope it to the affected crate rather than the workspace.
+
+Report which tests were actually run. Never describe a change as "tests pass" on the
+strength of a narrower run than that phrase implies.
+
 ## Lint & Format
 
 ```sh
