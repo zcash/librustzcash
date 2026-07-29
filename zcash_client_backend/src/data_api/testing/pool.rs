@@ -59,6 +59,9 @@ use crate::{
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 
+#[cfg(feature = "orchard")]
+use super::orchard::OrchardPoolTester;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
@@ -7771,7 +7774,6 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
     Dsf: DataStoreFactory,
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use super::orchard::OrchardPoolTester;
     use crate::data_api::TransactionStatus;
     use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
@@ -7920,7 +7922,6 @@ pub fn propose_v5_payment_to_orchard_receiver_is_rejected<Dsf>(
 ) where
     Dsf: DataStoreFactory,
 {
-    use super::orchard::OrchardPoolTester;
     use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
     use crate::proposal::ProposalError;
     use zcash_primitives::transaction::TxVersion;
@@ -7995,8 +7996,6 @@ where
     Dsf: DataStoreFactory,
     <Dsf as DataStoreFactory>::AccountId: serde::Serialize,
 {
-    use super::orchard::OrchardPoolTester;
-
     // A network on which NU6.3 — the version 6 transaction format — is active from height 100_000.
     let ironwood_active_network = {
         let activation = BlockHeight::from_u32(100_000);
@@ -8456,6 +8455,300 @@ where
     }
 }
 
+/// The transaction history entry for a payment funded from the Orchard pool and delivered
+/// through the Ironwood pool reports the amount that left the account (payment plus fee) as
+/// its balance delta, not the total value of the notes spent, which would ignore the change
+/// returned to the wallet.
+#[cfg(feature = "orchard")]
+pub fn orchard_to_ironwood_payment_reports_net_value_delta<Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+{
+    // A network on which NU6.3, the version 6 transaction format, is active from height 100_000.
+    let ironwood_active_network = {
+        let activation = BlockHeight::from_u32(100_000);
+        LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    // Fund the wallet with a single spendable Orchard note.
+    let note_value = Zatoshis::const_from_u64(60_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    // The destination has an Orchard receiver controlled by a separate spending key; post-NU6.3 the
+    // payment is routed through the Ironwood pool.
+    let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+    let to = OrchardPoolTester::sk_default_address(&to_extsk);
+    let transfer_amount = Zatoshis::const_from_u64(10_000);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+    let input_selector = GreedyInputSelector::new();
+
+    let account = st.get_account();
+    let account_id = account.id();
+    let usk = account.usk().clone();
+    let proposal = st
+        .propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("proposal construction succeeds; the Orchard-receiver payment routes to Ironwood");
+
+    // The payment crosses from the Orchard pool into the Ironwood pool.
+    assert_eq!(
+        proposal.steps().head.payment_pools().get(&0),
+        Some(&PoolType::IRONWOOD),
+    );
+    let fee = proposal.steps().head.balance().fee_required();
+    let expected_change = (note_value - transfer_amount - fee).unwrap();
+
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            &usk,
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .expect("an Ironwood-routed payment builds successfully");
+    let txid = *txids.first();
+
+    // The amount that left the account is the payment plus the fee; the value of the change
+    // note returned to the wallet must not be counted as spent.
+    let expected_delta = -zcash_protocol::value::ZatBalance::from((transfer_amount + fee).unwrap());
+    macro_rules! check_history {
+        ($phase:literal) => {{
+            let tx_history = st.wallet().get_tx_history().unwrap();
+            let tx = tx_history
+                .iter()
+                .find(|tx| tx.txid() == txid)
+                .expect("the created transaction appears in the transaction history");
+            assert_eq!(
+                tx.account_value_delta(),
+                expected_delta,
+                "account_value_delta ({}) reflects the payment plus fee",
+                $phase,
+            );
+            assert_eq!(
+                tx.total_spent(),
+                note_value,
+                "total_spent ({}) is the total value of the notes spent",
+                $phase,
+            );
+            assert_eq!(
+                tx.total_received(),
+                expected_change,
+                "total_received ({}) is the change returned to the wallet",
+                $phase,
+            );
+            assert!(tx.has_change(), "the transaction has change ({})", $phase);
+            // The payment has an external recipient, so it is not a pool crossing even though
+            // its value moves from the Orchard pool into the Ironwood pool.
+            assert_eq!(
+                tx.pool_crossing_value(),
+                None,
+                "a payment to an external recipient is not a pool crossing ({})",
+                $phase,
+            );
+        }};
+    }
+
+    // The history entry is correct as soon as the transaction is stored...
+    check_history!("before mining");
+
+    // ...and remains correct once the transaction is mined and scanned...
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
+    check_history!("after mining");
+
+    // ...and remains correct after transaction enhancement, in which the wallet retrieves the
+    // full transaction and re-stores it via `decrypt_and_store_transaction` (as the mobile
+    // SDKs do to recover memos and fee information).
+    let tx = st
+        .wallet()
+        .get_transaction(txid)
+        .unwrap()
+        .expect("the created transaction can be retrieved");
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(h)).unwrap();
+    check_history!("after enhancement");
+}
+
+/// A migration of the wallet's own funds from the Orchard pool to the Ironwood pool, namely a
+/// payment to the wallet's own external Orchard receiver delivered through the Ironwood pool, leaves
+/// the account balance unchanged except for the fee. The payment output returned to the wallet
+/// is not recorded at transaction-creation time (it is an address payment, which the wallet
+/// expects to detect by scanning), so this exercises detection of the wallet's own Ironwood
+/// outputs in the scanning path.
+#[cfg(feature = "orchard")]
+pub fn orchard_to_ironwood_self_migration_reports_fee_only_delta<Dsf>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) where
+    Dsf: DataStoreFactory,
+{
+    // A network on which NU6.3, the version 6 transaction format, is active from height 100_000.
+    let ironwood_active_network = {
+        let activation = BlockHeight::from_u32(100_000);
+        LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        }
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    // Fund the wallet with a single spendable Orchard note.
+    let note_value = Zatoshis::const_from_u64(60_000);
+    st.add_a_single_note_checking_balance(note_value);
+
+    // The payment destination is the wallet's own external Orchard receiver; post-NU6.3 the
+    // payment is routed through the Ironwood pool.
+    let own_fvk = OrchardPoolTester::test_account_fvk(&st);
+    let own_address = OrchardPoolTester::fvk_default_address(&own_fvk);
+    let transfer_amount = Zatoshis::const_from_u64(40_000);
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        own_address.to_zcash_address(st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+    let input_selector = GreedyInputSelector::new();
+
+    let account = st.get_account();
+    let account_id = account.id();
+    let usk = account.usk().clone();
+    let proposal = st
+        .propose_transfer(
+            account_id,
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("proposal construction succeeds; the Orchard-receiver payment routes to Ironwood");
+
+    // The payment crosses from the Orchard pool into the Ironwood pool.
+    assert_eq!(
+        proposal.steps().head.payment_pools().get(&0),
+        Some(&PoolType::IRONWOOD),
+    );
+    let fee = proposal.steps().head.balance().fee_required();
+
+    let txids = st
+        .create_proposed_transactions::<Infallible, _, Infallible, _>(
+            &usk,
+            OvkPolicy::Sender,
+            &proposal,
+        )
+        .expect("an Ironwood-routed payment builds successfully");
+    let txid = *txids.first();
+
+    // Once the transaction is mined and scanned, every non-fee output has returned to the
+    // wallet: the payment output via scanning, and the change output. The account has lost
+    // only the fee.
+    let (h, _) = st.generate_next_block_including(txid);
+    st.scan_cached_blocks(h, 1);
+
+    macro_rules! check_history {
+        ($phase:literal) => {{
+            let tx_history = st.wallet().get_tx_history().unwrap();
+            let tx = tx_history
+                .iter()
+                .find(|tx| tx.txid() == txid)
+                .expect("the created transaction appears in the transaction history");
+            assert_eq!(
+                tx.total_spent(),
+                note_value,
+                "total_spent ({}) is the total value of the notes spent",
+                $phase,
+            );
+            assert_eq!(
+                tx.total_received(),
+                (note_value - fee).unwrap(),
+                "total_received ({}) covers both the migrated value and the change",
+                $phase,
+            );
+            assert_eq!(
+                tx.account_value_delta(),
+                -zcash_protocol::value::ZatBalance::from(fee),
+                "the migration ({}) reduces the account balance only by the fee",
+                $phase,
+            );
+            // Once the wallet has observed the payment output returning to its own account
+            // (the scanner marks such outputs as change), the transaction presents as a
+            // wallet-internal transfer between pools, and is classified as a pool crossing
+            // whose crossing value is the migrated payment amount, the quantity a wallet
+            // should display for it.
+            assert!(
+                tx.is_pool_crossing(),
+                "a mined payment to the wallet's own address is a pool crossing ({})",
+                $phase,
+            );
+            assert_eq!(
+                tx.pool_crossing_value(),
+                Some(transfer_amount),
+                "pool_crossing_value ({}) is the migrated payment amount",
+                $phase,
+            );
+        }};
+    }
+
+    check_history!("after mining");
+    assert_eq!(
+        st.get_total_balance(account_id),
+        (note_value - fee).unwrap(),
+        "the account retains all funds except the fee",
+    );
+
+    // The history entry remains correct after transaction enhancement, in which the wallet
+    // retrieves the full transaction and re-stores it via `decrypt_and_store_transaction`
+    // (as the mobile SDKs do to recover memos and fee information).
+    let tx = st
+        .wallet()
+        .get_transaction(txid)
+        .unwrap()
+        .expect("the created transaction can be retrieved");
+    let network = *st.network();
+    decrypt_and_store_transaction(&network, st.wallet_mut(), &tx, Some(h)).unwrap();
+    check_history!("after enhancement");
+}
+
 /// The transaction version requested at proposal time is recorded on the proposal and preserved
 /// across serialization, so that transaction building honors it. A proposal serialized without a
 /// version request (as older serializers produced) decodes with no requested version and falls
@@ -8465,7 +8758,6 @@ pub fn proposal_records_and_serializes_proposed_version<Dsf>(ds_factory: Dsf, ca
 where
     Dsf: DataStoreFactory,
 {
-    use super::orchard::OrchardPoolTester;
     use crate::data_api::wallet::{input_selection::SpendPolicy, propose_transfer};
     use zcash_primitives::transaction::TxVersion;
 

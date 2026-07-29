@@ -10,6 +10,30 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- The `v_transactions` view has a new `pool_crossing_value` column, which
+  classifies wallet-internal transfers that move an account's own funds between
+  shielded pools (for example, ZIP 318 Orchard -> Ironwood migration transfers)
+  and reports the amount that crossed. It is non-NULL exactly when every
+  wallet-spent note and wallet-received output in the transaction is shielded,
+  the account spent at least one note, at least one output was received in a
+  pool the account spent nothing from, and no external outputs of the
+  transaction are known; its value is then the total received in the pools the
+  account did not spend from. Use `pool_crossing_value IS NOT NULL` as the
+  classification predicate; a separate boolean column would restate that same
+  condition in a second place that could drift.
+
+  For such a transaction `account_balance_delta` is just the negated fee, which
+  is not a useful display quantity; clients should present `pool_crossing_value`
+  as the migrated amount instead of deriving an amount from `total_spent` or
+  `total_received`, both of which overstate the crossing whenever the
+  transaction also returns change to a pool it spent from.
+
+  A payment that returns value to one of the wallet's own addresses is
+  classified once the wallet has observed the returned output (which the
+  scanner marks as change); while such a transaction is unmined it is treated
+  as an ordinary payment.
+
 ## [0.22.0-rc.5] - 2026-07-28
 
 ### Added

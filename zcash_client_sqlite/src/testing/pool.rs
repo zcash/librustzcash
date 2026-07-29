@@ -934,6 +934,22 @@ pub(crate) fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood() {
 }
 
 #[cfg(feature = "orchard")]
+pub(crate) fn orchard_to_ironwood_payment_reports_net_value_delta() {
+    zcash_client_backend::data_api::testing::pool::orchard_to_ironwood_payment_reports_net_value_delta(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn orchard_to_ironwood_self_migration_reports_fee_only_delta() {
+    zcash_client_backend::data_api::testing::pool::orchard_to_ironwood_self_migration_reports_fee_only_delta(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    );
+}
+
+#[cfg(feature = "orchard")]
 pub(crate) fn propose_v5_payment_to_orchard_receiver_is_rejected() {
     zcash_client_backend::data_api::testing::pool::propose_v5_payment_to_orchard_receiver_is_rejected(
         TestDbFactory::default(),

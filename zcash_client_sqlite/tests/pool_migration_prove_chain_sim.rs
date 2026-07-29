@@ -37,7 +37,7 @@ use pczt::roles::tx_extractor::TransactionExtractor;
 use zcash_client_backend::data_api::testing::{
     AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
 };
-use zcash_client_backend::data_api::{Account, WalletRead};
+use zcash_client_backend::data_api::{Account, WalletRead, WalletTest};
 // The wallet, block cache, DB factory, and Orchard-checkpoint helper come from this crate's own
 // test harness, exposed under its `test-dependencies` feature.
 use zcash_client_sqlite::testing::db::{TestDb, TestDbFactory};
@@ -48,7 +48,7 @@ use zcash_primitives::block::BlockHash;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::testing::zats;
-use zcash_protocol::value::{COIN, Zatoshis};
+use zcash_protocol::value::{COIN, ZatBalance, Zatoshis};
 
 use zcash_pool_migration::engine::{
     self, MigrationState, MigrationTransferId, MigrationTxKind, MigrationTxState,
@@ -439,11 +439,84 @@ impl Run {
                 "{}: Ironwood outputs per transfer",
                 scenario.label
             );
-            ironwood_notes.push(
+            let crossing_value =
                 Zatoshis::from_u64(i64::from(ironwood.value_balance()).unsigned_abs())
-                    .expect("a valid Ironwood note value"),
+                    .expect("a valid Ironwood note value");
+            ironwood_notes.push(crossing_value);
+
+            // The transfer's Orchard bundle is spend-only, so its value balance is the spent
+            // funding note's value; the Ironwood bundle is output-only, so its value balance
+            // magnitude is the crossing value. Their difference is the transfer's fee.
+            let funding_value = Zatoshis::from_u64(
+                i64::from(
+                    *tx.orchard_bundle()
+                        .expect("the transfer has an Orchard bundle")
+                        .value_balance(),
+                )
+                .unsigned_abs(),
+            )
+            .expect("a valid funding note value");
+            let transfer_fee =
+                (funding_value - crossing_value).expect("the funding note covers the crossing");
+
+            // Mine and scan the transfer, then check the wallet's view of it: the history entry
+            // must report the funding note as spent, the crossing note as received, and a balance
+            // change of only the fee, not the whole value of the notes spent.
+            let (h, _) = self.st.generate_next_block_from_tx(1, &tx);
+            self.st.scan_cached_blocks(h, 1);
+
+            let history = self
+                .st
+                .wallet()
+                .get_tx_history()
+                .expect("reads the transaction history");
+            let entry = history
+                .iter()
+                .find(|t| t.txid() == tx.txid())
+                .expect("the mined transfer appears in the transaction history");
+            assert_eq!(
+                entry.total_spent(),
+                funding_value,
+                "{}: transfer total_spent",
+                scenario.label
+            );
+            assert_eq!(
+                entry.total_received(),
+                crossing_value,
+                "{}: transfer total_received",
+                scenario.label
+            );
+            assert_eq!(
+                entry.account_value_delta(),
+                -ZatBalance::from(transfer_fee),
+                "{}: transfer balance delta is only the fee",
+                scenario.label
+            );
+            // The transfer is classified as a pool crossing carrying the crossing value, which
+            // is the amount a wallet should display for it (the balance delta is only the fee).
+            assert!(
+                entry.is_pool_crossing(),
+                "{}: the transfer is a pool crossing",
+                scenario.label
+            );
+            assert_eq!(
+                entry.pool_crossing_value(),
+                Some(crossing_value),
+                "{}: transfer pool_crossing_value",
+                scenario.label
             );
         }
+
+        // After every transfer is mined and scanned, the wallet holds the migrated value (now in
+        // the Ironwood pool) plus the plan's change.
+        assert_eq!(
+            self.st.get_total_balance(self.account_id),
+            (scenario.expected_migrated
+                + Zatoshis::from_u64(committed.change).expect("a valid change amount"))
+            .expect("a valid final balance"),
+            "{}: balance after transfers",
+            scenario.label
+        );
 
         // The destination pool holds exactly one Ironwood note per crossing, together carrying the
         // whole migrated value.
