@@ -59,10 +59,12 @@ use crate::{
 
 use super::{DataStoreFactory, Reset, TestCache, TestFvk, TestState};
 
+use crate::data_api::TransactionDataRequest;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::{
-        data_api::{CoinbaseFilter, TransactionDataRequest},
+        data_api::CoinbaseFilter,
         fees::ChangeValue,
         proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex},
         wallet::WalletTransparentOutput,

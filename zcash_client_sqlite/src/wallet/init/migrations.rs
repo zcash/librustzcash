@@ -146,6 +146,7 @@ pub mod ids {
     pub use super::tx_observation_height::MIGRATION_ID as TX_OBSERVATION_HEIGHT;
     pub use super::tx_retrieval_queue::MIGRATION_ID as TX_RETRIEVAL_QUEUE;
     pub use super::tx_retrieval_queue_expiry::MIGRATION_ID as TX_RETRIEVAL_QUEUE_EXPIRY;
+    pub use super::tx_status_queue_scoping::MIGRATION_ID as TX_STATUS_QUEUE_SCOPING;
     pub use super::ufvk_support::MIGRATION_ID as UFVK_SUPPORT;
     pub use super::utxos_table::MIGRATION_ID as UTXOS_TABLE;
     pub use super::utxos_to_txos::MIGRATION_ID as UTXOS_TO_TXOS;
@@ -699,6 +700,7 @@ pub(crate) mod tests {
             ids::TX_OBSERVATION_HEIGHT,
             ids::TX_RETRIEVAL_QUEUE,
             ids::TX_RETRIEVAL_QUEUE_EXPIRY,
+            ids::TX_STATUS_QUEUE_SCOPING,
             ids::UFVK_SUPPORT,
             ids::UTXOS_TABLE,
             ids::UTXOS_TO_TXOS,

@@ -13,7 +13,9 @@ use crate::wallet::{TxQueryType, chain_tip_height, init::WalletMigrationError};
 
 use super::{account_delete_cascade, tx_retrieval_queue};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x2c4d3ff6_9e19_4fbf_ae08_9d1263a3a455);
+/// Removes out-of-scope status requests for transactions with shielded components from the
+/// transaction retrieval queue.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x2c4d3ff6_9e19_4fbf_ae08_9d1263a3a455);
 
 const DEPENDENCIES: &[Uuid] = &[
     tx_retrieval_queue::MIGRATION_ID,
