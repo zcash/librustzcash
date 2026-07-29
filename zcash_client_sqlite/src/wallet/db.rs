@@ -898,10 +898,11 @@ CREATE INDEX idx_sent_notes_transaction_id ON sent_notes (
 ///   to blockchain scanning.
 pub(super) const TABLE_TX_RETRIEVAL_QUEUE: &str = r#"
 CREATE TABLE "tx_retrieval_queue" (
-    txid BLOB NOT NULL UNIQUE,
+    txid BLOB NOT NULL,
     query_type INTEGER NOT NULL,
     dependent_transaction_id INTEGER
-        REFERENCES transactions(id_tx) ON DELETE CASCADE
+        REFERENCES transactions(id_tx) ON DELETE CASCADE,
+    CONSTRAINT tx_retrieval_intent UNIQUE (txid, query_type)
 )"#;
 pub(super) const INDEX_TX_RETIREVAL_QUEUE_DEPENDENT_TX: &str = r#"
 CREATE INDEX idx_tx_retrieval_queue_dependent_tx ON tx_retrieval_queue (

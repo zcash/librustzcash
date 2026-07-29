@@ -3776,8 +3776,17 @@ where
         )
         .unwrap();
     assert_eq!(txids.len(), 1);
+    let shielding_txid = *txids.first();
 
-    let tx_summary = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    assert!(
+        !st.wallet()
+            .transaction_data_requests()
+            .unwrap()
+            .contains(&TransactionDataRequest::GetStatus(shielding_txid)),
+        "a wallet-owned shielded output makes the transaction observable by scanning",
+    );
+
+    let tx_summary = st.get_tx_from_history(shielding_txid).unwrap().unwrap();
     assert_eq!(tx_summary.spent_note_count(), 1);
     assert!(tx_summary.has_change());
     assert_eq!(tx_summary.received_note_count(), 0);
@@ -3785,11 +3794,11 @@ where
     assert!(tx_summary.is_shielding());
 
     // Generate and scan the block including the transaction
-    let (h, _) = st.generate_next_block_including(*txids.first());
+    let (h, _) = st.generate_next_block_including(shielding_txid);
     let scan_result = st.scan_cached_blocks(h, 1);
 
     // Ensure that the transaction metadata is still correct after the update produced by scanning.
-    let tx_summary = st.get_tx_from_history(*txids.first()).unwrap().unwrap();
+    let tx_summary = st.get_tx_from_history(shielding_txid).unwrap().unwrap();
     assert_eq!(tx_summary.spent_note_count(), 1);
     assert!(tx_summary.has_change());
     assert_eq!(tx_summary.received_note_count(), 0);
@@ -7763,6 +7772,7 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
     <<Dsf as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
     use super::orchard::OrchardPoolTester;
+    use crate::data_api::TransactionStatus;
     use zcash_protocol::consensus::COINBASE_MATURITY_BLOCKS;
 
     // A network on which Ironwood (NU6.3) is active from the Sapling activation height.
@@ -7838,6 +7848,63 @@ pub fn shielding_coinbase_to_orchard_receiver_delivers_via_ironwood<Dsf>(
         Ok(txids) if txids.len() == 1,
         "create_proposed_transactions must succeed for proposal {:?}",
         proposal,
+    );
+    let sent_txid = build_result.unwrap().head;
+
+    // This transaction has a shielded bundle, but it is not observable by this wallet through
+    // compact-block scanning: it has only transparent wallet inputs, its shielded output belongs
+    // to another wallet, and it has no change. The sender therefore requires a txid-based status
+    // request to learn its outcome.
+    assert!(
+        st.wallet()
+            .transaction_data_requests()
+            .unwrap()
+            .contains(&TransactionDataRequest::GetStatus(sent_txid))
+    );
+
+    let (mined_height, _) = st.generate_next_block_including(sent_txid);
+    st.scan_cached_blocks(mined_height, 1);
+    assert_eq!(
+        st.get_tx_from_history(sent_txid)
+            .unwrap()
+            .expect("sent transaction is in history")
+            .mined_height(),
+        None,
+        "compact scanning cannot detect an external shielding transaction",
+    );
+
+    st.wallet_mut()
+        .set_transaction_status(sent_txid, TransactionStatus::Mined(mined_height))
+        .unwrap();
+    assert_eq!(
+        st.get_tx_from_history(sent_txid)
+            .unwrap()
+            .expect("sent transaction is in history")
+            .mined_height(),
+        Some(mined_height),
+    );
+    assert!(
+        !st.wallet()
+            .transaction_data_requests()
+            .unwrap()
+            .contains(&TransactionDataRequest::GetStatus(sent_txid)),
+        "status intent is dormant while the transaction is mined",
+    );
+
+    st.truncate_to_height(mined_height - 1);
+    assert_eq!(
+        st.get_tx_from_history(sent_txid)
+            .unwrap()
+            .expect("sent transaction is retained across the rewind")
+            .mined_height(),
+        None,
+    );
+    assert!(
+        st.wallet()
+            .transaction_data_requests()
+            .unwrap()
+            .contains(&TransactionDataRequest::GetStatus(sent_txid)),
+        "rewinding the mined block reactivates the durable status intent",
     );
 }
 

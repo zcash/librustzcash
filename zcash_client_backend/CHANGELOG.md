@@ -78,6 +78,9 @@ workspace.
   `proto::{CompactFormatError, ProposalDecodingError}`, `scanning::ScanError`,
   `sync::Error`, `sync::decryptor::TryQueueError`, `tor::Error`,
   `tor::grpc::GrpcError`, and `tor::http::HttpError`.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite` has added method
+  `queue_tx_status`, which records durable status-observation intent for
+  transactions whose mined status cannot be learned by compact-block scanning.
 
 ### Removed
 - `zcash_client_backend::fees::zip317::{SingleOutputChangeStrategy, MultiOutputChangeStrategy}::with_unpadded_orchard_pool_bundles`.
@@ -85,6 +88,9 @@ workspace.
   bundle's padding is derived from the transaction's shape.
 
 ### Fixed
+- `data_api::ll::wallet::store_decrypted_tx` now distinguishes a wallet-observable
+  shielded spend or output from mere shielded bundle presence when deciding
+  whether txid-based status observation is required.
 - The Tor HTTP and gRPC transports now reject a URL whose scheme is neither
   `http` nor `https` (for example `ftp` or `ws`) with `tor::http::HttpError::NonHttpUrl`.
   Previously such a URL was silently treated as plaintext HTTP, contradicting the

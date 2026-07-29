@@ -2888,6 +2888,10 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         wallet::queue_tx_retrieval(self.conn.borrow(), txids, dependent_tx_ref)
     }
 
+    fn queue_tx_status(&mut self, txid: TxId) -> Result<(), Self::Error> {
+        wallet::queue_tx_status(self.conn.borrow(), txid)
+    }
+
     fn delete_retrieval_queue_entries(&mut self, txid: TxId) -> Result<(), Self::Error> {
         wallet::delete_retrieval_queue_entries(self.conn.borrow(), txid)
     }
