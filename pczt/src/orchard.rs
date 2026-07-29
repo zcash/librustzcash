@@ -176,11 +176,12 @@ impl Parsed {
 /// Shared fixtures for hand-crafting Orchard-protocol PCZT test data.
 #[cfg(all(test, feature = "orchard"))]
 pub(crate) mod testing {
-    use alloc::collections::BTreeMap;
-
-    use pasta_curves::pallas;
-
-    use super::{Action, EncCiphertext, Output, Spend};
+    #[cfg(any(feature = "prover", all(feature = "signer", feature = "io-finalizer")))]
+    use {
+        super::{Action, EncCiphertext, Output, Spend},
+        alloc::collections::BTreeMap,
+        pasta_curves::pallas,
+    };
 
     /// Derives a valid Orchard value commitment encoding for the given value and
     /// trapdoor, so that hand-crafted `Action`s pass the structural validity check
@@ -197,6 +198,7 @@ pub(crate) mod testing {
     /// Derives a valid, randomized `rk` encoding (a curve point, unlike an arbitrary
     /// byte string) so that hand-crafted `Spend`s pass the structural validity check
     /// applied when parsing.
+    #[cfg(any(feature = "prover", all(feature = "signer", feature = "io-finalizer")))]
     pub(crate) fn randomized_verification_key() -> [u8; 32] {
         use ff::Field;
 
@@ -211,6 +213,7 @@ pub(crate) mod testing {
 
     /// A structurally valid dummy Orchard action with no witness (so it is exempt
     /// from anchor-consistency checks), for use as a base in hand-crafted test PCZTs.
+    #[cfg(any(feature = "prover", all(feature = "signer", feature = "io-finalizer")))]
     pub(crate) fn dummy_action() -> Action {
         Action {
             cv_net: Some(value_commitment(0, [3; 32])),

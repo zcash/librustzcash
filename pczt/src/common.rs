@@ -17,6 +17,13 @@ pub(crate) const FLAG_SHIELDED_MODIFIABLE: u8 = 0b1000_0000;
 /// A placeholder anchor used internally when parsing a shielded bundle for an
 /// operation that does not read the anchor's value. Zero is always a valid anchor
 /// encoding for the Sapling, Orchard, and Ironwood note commitment trees.
+#[cfg(any(
+    feature = "io-finalizer",
+    feature = "orchard",
+    feature = "sapling",
+    feature = "signer",
+    feature = "tx-extractor"
+))]
 pub(crate) const PLACEHOLDER_ANCHOR: [u8; 32] = [0; 32];
 
 /// Governs whether a non-empty shielded bundle's `anchor` must be set in order to parse
@@ -26,6 +33,13 @@ pub(crate) const PLACEHOLDER_ANCHOR: [u8; 32] = [0; 32];
 /// shielded bundles deferrable until proving, so operations that do not depend on the
 /// anchor's value (for example computing a v6 sighash, which excludes anchors, or
 /// updating unrelated fields) can proceed with it absent.
+#[cfg(any(
+    feature = "io-finalizer",
+    feature = "orchard",
+    feature = "sapling",
+    feature = "signer",
+    feature = "tx-extractor"
+))]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum AnchorRequirement {
     /// The operation does not read the anchor, so an absent anchor is parsed using a
@@ -33,13 +47,19 @@ pub(crate) enum AnchorRequirement {
     ///
     /// Only constructed when the `orchard` or `sapling` feature is enabled, as those
     /// are the only operations lenient enough to use it.
-    #[cfg_attr(not(any(feature = "orchard", feature = "sapling")), allow(dead_code))]
     NotRequired,
     /// The operation requires the anchor's real value; parsing fails if it is absent
     /// from a non-empty bundle.
     Required,
 }
 
+#[cfg(any(
+    feature = "io-finalizer",
+    feature = "orchard",
+    feature = "sapling",
+    feature = "signer",
+    feature = "tx-extractor"
+))]
 impl AnchorRequirement {
     /// Returns the requirement for operations that do not themselves consume the
     /// anchor, but still parse bundles through the protocol crates.

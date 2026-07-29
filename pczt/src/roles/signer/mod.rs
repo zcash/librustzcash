@@ -565,7 +565,7 @@ impl From<crate::ExtractError> for Error {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "io-finalizer", feature = "orchard"))]
 mod tests {
     use ff::{Field, PrimeField};
     use pasta_curves::pallas;

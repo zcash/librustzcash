@@ -17,19 +17,6 @@
 #
 # To burn one down: fix the configuration, delete the line. The job prints a notice when a listed
 # configuration starts passing, so the list cannot rot silently.
-pczt <none>
-pczt document-features
-pczt internal-tests
-pczt io-finalizer
-pczt orchard
-pczt prover
-pczt signer
-pczt spend-finalizer
-pczt std
-pczt transparent
-pczt tx-extractor
-pczt zcp-builder
-pczt zip-233
 zcash_address <none>
 zcash_address std
 zcash_client_sqlite <none>
