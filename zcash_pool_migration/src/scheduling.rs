@@ -37,6 +37,19 @@
 //!    validity as a pure function of the current height, so the expiry height itself carries no
 //!    per-wallet information.
 //!
+//! # Conditions on a drawn schedule
+//!
+//! The draws above are unconditioned, and a wallet needs some conditions on their outcome: a drawn
+//! delay may be zero, which would broadcast two of the wallet's transactions in one block and
+//! correlate them, and an application may have conditions of its own (a maintenance window it will
+//! not be online for, a height range its user has blocked out). A [`ScheduleConstraint`] is such a
+//! condition, stated as a predicate on one [`Placement`] — a candidate height plus the partial
+//! schedule it extends — and the samplers redraw a placement it rejects, so a schedule is returned
+//! only if the condition holds on it ([`ScheduleConstraint::is_valid`]) and otherwise fails with
+//! [`ConstraintUnsatisfied`]. Every scheduling function comes in a plain form applying the crate
+//! default ([`MinBlockGap::DISTINCT_BLOCKS`], the no-two-in-one-block condition) and a `_with` form
+//! taking the caller's own.
+//!
 //! Beyond the ZIP 318 draws, [`schedule_sync_wakeups`] derives from a committed transfer schedule
 //! the MINIMAL set of sync/proving wake-ups a background-constrained wallet needs: every transfer
 //! is proved after its drawn anchor boundary settles and strictly before its broadcast height, and
@@ -108,6 +121,11 @@ fn boundary_at_or_above_u32(interval: &AnchorBucketInterval, height: u32) -> u32
 /// A truncated exponential inter-arrival delay distribution, in blocks: draws have mean
 /// [`Self::mean`], and a draw exceeding [`Self::cap`] is discarded and redrawn (truncating the
 /// exponential's heavy tail, so nothing is starved for an unbounded time).
+///
+/// A draw may be zero (the exponential is continuous and rounds to whole blocks), which would put
+/// two broadcasts in one block; that is not this type's concern. Conditions on the resulting
+/// schedule — including the distinct-block one — are expressed as a [`ScheduleConstraint`] and
+/// enforced by the scheduling functions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DelayDistribution {
     mean: NonZeroU32,
@@ -514,55 +532,403 @@ fn gen_index<R: RngCore>(rng: &mut R, bound: usize) -> usize {
     }
 }
 
+/// One proposed PLACEMENT offered to a [`ScheduleConstraint`]: a candidate broadcast height,
+/// together with the partial schedule it would extend. This is the whole input a condition sees,
+/// so it is the extension point: today a condition can read the candidate height, its index, the
+/// schedule's start, and every height already fixed; anything further a condition needs (a
+/// wall-clock estimate, the transfer's value, the wallet's other schedules) is added here as
+/// another accessor, without touching the trait or the samplers.
+#[derive(Clone, Copy, Debug)]
+pub struct Placement<'a> {
+    start: BlockHeight,
+    preceding: &'a [BlockHeight],
+    height: BlockHeight,
+}
+
+impl<'a> Placement<'a> {
+    /// Constructs the placement of `height` at the end of the already-fixed `preceding` heights of
+    /// a schedule that starts at `start`. Exposed so a caller can evaluate a condition against a
+    /// schedule it assembled itself; the samplers build these internally.
+    pub fn new(start: BlockHeight, preceding: &'a [BlockHeight], height: BlockHeight) -> Self {
+        Self {
+            start,
+            preceding,
+            height,
+        }
+    }
+
+    /// The candidate broadcast height being judged.
+    pub fn height(&self) -> BlockHeight {
+        self.height
+    }
+
+    /// The height the schedule starts from (the commit height, or a preparation layer's base).
+    /// This is the reference point for the FIRST placement, which has no predecessor.
+    pub fn start(&self) -> BlockHeight {
+        self.start
+    }
+
+    /// The heights already fixed in this schedule, in ascending draw order.
+    pub fn preceding(&self) -> &[BlockHeight] {
+        self.preceding
+    }
+
+    /// The index this placement would take in the schedule (equivalently, how many heights precede
+    /// it).
+    pub fn index(&self) -> usize {
+        self.preceding.len()
+    }
+
+    /// The immediately preceding scheduled height, or `None` for the first placement.
+    pub fn previous(&self) -> Option<BlockHeight> {
+        self.preceding.last().copied()
+    }
+
+    /// The gap in blocks from the previous scheduled height (from [`Self::start`] for the first
+    /// placement) to this candidate — the drawn inter-arrival delay. Saturates at zero rather than
+    /// underflowing, so a condition sees `0` for a candidate at or below its predecessor.
+    pub fn gap(&self) -> u32 {
+        u32::from(self.height).saturating_sub(u32::from(self.previous().unwrap_or(self.start)))
+    }
+}
+
+/// A condition a drawn broadcast schedule must satisfy. The samplers redraw a placement the
+/// condition rejects, so a returned schedule is one on which [`Self::is_valid`] holds; if no draw
+/// satisfies it within [`CONSTRAINT_ATTEMPTS`] tries they fail with [`ConstraintUnsatisfied`]
+/// rather than returning a schedule that violates it.
+///
+/// A condition is a predicate on a PREFIX plus one candidate ([`Placement`]), not on a finished
+/// schedule, and that is what makes it enforceable: each placement is accepted or redrawn as it is
+/// drawn, so the sampler pays one redraw per rejection instead of redrawing whole schedules (and
+/// the drawn delays keep their distribution, conditioned on the condition holding). A predicate
+/// that can only be evaluated once every LATER height is known cannot be expressed this way; state
+/// it as a bound on each placement instead.
+///
+/// Implemented for closures `Fn(&Placement<'_>) -> bool`, for `()` (accepts everything), for
+/// slices, and for 2- and 3-tuples, which conjoin their members. So a caller can pass a bare
+/// closure, or compose the built-in [`MinBlockGap`] with its own conditions:
+///
+/// ```
+/// use zcash_protocol::consensus::BlockHeight;
+/// use zcash_pool_migration::scheduling::{MinBlockGap, Placement, ScheduleConstraint};
+///
+/// // No broadcast inside a maintenance window the wallet's own UI has blocked out, and never two
+/// // broadcasts in one block.
+/// let blackout = |p: &Placement<'_>| !(1_000..1_500).contains(&u32::from(p.height()));
+/// let condition = (MinBlockGap::DISTINCT_BLOCKS, blackout);
+///
+/// let heights = [BlockHeight::from_u32(900), BlockHeight::from_u32(1_600)];
+/// assert!(condition.is_valid(BlockHeight::from_u32(800), &heights));
+///
+/// let colliding = [BlockHeight::from_u32(900), BlockHeight::from_u32(900)];
+/// assert!(!condition.is_valid(BlockHeight::from_u32(800), &colliding));
+/// ```
+pub trait ScheduleConstraint {
+    /// Whether `placement` may extend the partial schedule it carries.
+    fn admits(&self, placement: &Placement<'_>) -> bool;
+
+    /// Whether a COMPLETE schedule of `heights` (in draw order, starting from `start`) satisfies
+    /// this condition: the conjunction of [`Self::admits`] over every prefix. This is the
+    /// after-the-fact check corresponding to what the samplers enforce as they draw, so it holds
+    /// on every schedule they return; use it to validate a schedule from elsewhere (a persisted
+    /// plan, a hand-assembled one) against the same condition.
+    ///
+    /// Do not override: the sampler enforces the per-placement form, so an overridden whole-schedule
+    /// form would state something the sampler does not guarantee.
+    fn is_valid(&self, start: BlockHeight, heights: &[BlockHeight]) -> bool {
+        (0..heights.len()).all(|i| self.admits(&Placement::new(start, &heights[..i], heights[i])))
+    }
+}
+
+/// A closure is a condition.
+impl<F> ScheduleConstraint for F
+where
+    F: Fn(&Placement<'_>) -> bool,
+{
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        self(placement)
+    }
+}
+
+/// The empty condition: every schedule is valid.
+impl ScheduleConstraint for () {
+    fn admits(&self, _placement: &Placement<'_>) -> bool {
+        true
+    }
+}
+
+/// A slice of conditions is their conjunction (an empty slice accepts everything), for a set of
+/// conditions whose size is only known at runtime — a wallet assembling them from user settings.
+impl<C> ScheduleConstraint for [C]
+where
+    C: ScheduleConstraint,
+{
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        self.iter().all(|c| c.admits(placement))
+    }
+}
+
+/// A pair of conditions is their conjunction.
+impl<A, B> ScheduleConstraint for (A, B)
+where
+    A: ScheduleConstraint,
+    B: ScheduleConstraint,
+{
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        self.0.admits(placement) && self.1.admits(placement)
+    }
+}
+
+/// A triple of conditions is their conjunction.
+impl<A, B, C> ScheduleConstraint for (A, B, C)
+where
+    A: ScheduleConstraint,
+    B: ScheduleConstraint,
+    C: ScheduleConstraint,
+{
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        self.0.admits(placement) && self.1.admits(placement) && self.2.admits(placement)
+    }
+}
+
+/// The condition that successive broadcasts are at least a given number of blocks apart.
+/// [`Self::DISTINCT_BLOCKS`] — a gap of one — is the crate default, applied by every scheduling
+/// function that does not take an explicit condition.
+///
+/// A drawn delay may be zero (the delay distribution is a continuous exponential rounded to whole
+/// blocks), with probability `1 - exp(-1 / (2 * mean))`: about one draw in 288 at the [ZIP 318]
+/// transfer mean of 144 blocks, and one in 48 at the tighter preparation mean of 24. A zero gap
+/// puts two of the wallet's transactions in one block, which is exactly the correlation the drawn
+/// delays exist to prevent: migration transactions have a distinctive, near-identical shape, so two
+/// of them mined together are far more plausibly one wallet's pair than two unrelated wallets'
+/// coincidence — and for the pool-crossing transfers a shared block additionally reveals that their
+/// (individually unremarkable, quantized) values sum to one balance.
+///
+/// Enforcing this by REDRAW rather than by rounding a zero gap up to one block is deliberate:
+/// clamping would move the zero mass onto a gap of exactly one, making one-block gaps roughly twice
+/// as likely as the exponential predicts, whereas redrawing leaves the shape of the retained
+/// support untouched (it raises the mean by well under a block). ZIP 318 specifies the exponential
+/// and its `MAX_DELAY` rejection but is silent on collisions, so this lower bound is an addition to
+/// it, not a reading of it.
+///
+/// A gap wider than the delay distribution's cap can never be drawn, so a schedule under such a
+/// condition always fails with [`ConstraintUnsatisfied`].
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MinBlockGap(NonZeroU32);
+
+impl MinBlockGap {
+    /// A gap of one block: no two broadcasts of one wallet share a block.
+    pub const DISTINCT_BLOCKS: Self = Self(NonZeroU32::MIN);
+
+    /// The condition that successive broadcasts are at least `blocks` blocks apart.
+    pub const fn new(blocks: NonZeroU32) -> Self {
+        Self(blocks)
+    }
+
+    /// The minimum gap in blocks.
+    pub fn blocks(&self) -> NonZeroU32 {
+        self.0
+    }
+}
+
+impl Default for MinBlockGap {
+    fn default() -> Self {
+        Self::DISTINCT_BLOCKS
+    }
+}
+
+impl ScheduleConstraint for MinBlockGap {
+    fn admits(&self, placement: &Placement<'_>) -> bool {
+        placement.gap() >= self.0.get()
+    }
+}
+
+/// The number of times a scheduling function redraws one placement before giving up on the
+/// condition and returning [`ConstraintUnsatisfied`].
+///
+/// The budget is per placement, and generous: under the default [`MinBlockGap::DISTINCT_BLOCKS`]
+/// the worst per-draw rejection probability over any admissible distribution is about 0.4 (at a
+/// mean of one block), so exhausting it has probability below `0.4^1024`. A condition that
+/// exhausts it in practice is one the delay distribution can essentially never satisfy, which is a
+/// caller error worth reporting rather than a loop worth continuing.
+pub const CONSTRAINT_ATTEMPTS: NonZeroU32 = NonZeroU32::new(1024).expect("1024 is nonzero");
+
+/// The error returned when no drawn placement satisfies the [`ScheduleConstraint`] within
+/// [`CONSTRAINT_ATTEMPTS`] tries, so the requested schedule could not be produced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConstraintUnsatisfied {
+    index: usize,
+    after: BlockHeight,
+    attempts: NonZeroU32,
+}
+
+impl ConstraintUnsatisfied {
+    /// The index in the schedule at which no admissible height could be drawn.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// The height the rejected placements were drawn from: the previously scheduled height, or the
+    /// schedule's start for the first placement.
+    pub fn after(&self) -> BlockHeight {
+        self.after
+    }
+
+    /// How many draws were rejected before giving up.
+    pub fn attempts(&self) -> NonZeroU32 {
+        self.attempts
+    }
+}
+
+impl fmt::Display for ConstraintUnsatisfied {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "no broadcast height after {} satisfied the schedule condition for entry {} in {} draws",
+            u32::from(self.after),
+            self.index,
+            self.attempts,
+        )
+    }
+}
+
+impl core::error::Error for ConstraintUnsatisfied {}
+
 /// The cumulative-heights core shared by [`schedule_broadcast_heights`] and
 /// [`schedule_prep_broadcast_heights`]: starting at `start`, advance a running height by an
-/// independently drawn delay for each of the `n` entries. The returned vector has length `n`, is
-/// non-decreasing, and every entry is `>= start`; heights saturate at `u32::MAX` rather than
+/// independently drawn delay for each of the `n` entries, redrawing any placement `constraint`
+/// rejects. The returned vector has length `n`, every entry is `>= start`, and
+/// `constraint.is_valid(start, &heights)` holds; heights saturate at `u32::MAX` rather than
 /// overflowing (`BlockHeight`'s delta addition saturates).
-fn cumulative_broadcast_heights<R: RngCore>(
+///
+/// Fails with [`ConstraintUnsatisfied`] if some placement is rejected [`CONSTRAINT_ATTEMPTS`] times
+/// in a row. Note that the saturation above is one way this happens: at a height near `u32::MAX`
+/// every draw saturates to the same value, which no positive [`MinBlockGap`] admits.
+fn cumulative_broadcast_heights<R, C>(
     start: BlockHeight,
     n: usize,
     draw: impl Fn(&mut R) -> u32,
+    constraint: &C,
     rng: &mut R,
-) -> Vec<BlockHeight> {
+) -> Result<Vec<BlockHeight>, ConstraintUnsatisfied>
+where
+    R: RngCore,
+    C: ScheduleConstraint + ?Sized,
+{
     let mut heights = Vec::with_capacity(n);
     let mut height = start;
-    for _ in 0..n {
-        height = height + draw(rng);
+    for index in 0..n {
+        let mut next = None;
+        for _ in 0..CONSTRAINT_ATTEMPTS.get() {
+            let candidate = height + draw(rng);
+            if constraint.admits(&Placement::new(start, &heights, candidate)) {
+                next = Some(candidate);
+                break;
+            }
+        }
+        height = next.ok_or(ConstraintUnsatisfied {
+            index,
+            after: height,
+            attempts: CONSTRAINT_ATTEMPTS,
+        })?;
         heights.push(height);
     }
-    heights
+    Ok(heights)
 }
 
-/// Compute the per-part scheduled broadcast heights: starting at `commit_height`, advance a running
-/// height by an independently drawn `params.transfer_delay()` for each of the `n_parts` transfers
-/// (ZIP 318 CUMULATIVE MUST). The returned vector has length `n_parts`, is non-decreasing, and every
-/// entry is `>= commit_height`. Heights saturate at `u32::MAX` rather than overflowing.
-pub fn schedule_broadcast_heights<R: RngCore + CryptoRng>(
+/// Compute the per-part scheduled broadcast heights under the default condition
+/// ([`MinBlockGap::DISTINCT_BLOCKS`], so no two transfers share a block); see
+/// [`schedule_broadcast_heights_with`] for the general form.
+pub fn schedule_broadcast_heights<R>(
     params: &SchedulingParams,
     commit_height: BlockHeight,
     n_parts: usize,
     rng: &mut R,
-) -> Vec<BlockHeight> {
-    let delay = params.transfer_delay();
-    cumulative_broadcast_heights(commit_height, n_parts, |rng| delay.draw_inner(rng), rng)
+) -> Result<Vec<BlockHeight>, ConstraintUnsatisfied>
+where
+    R: RngCore + CryptoRng,
+{
+    schedule_broadcast_heights_with(
+        params,
+        commit_height,
+        n_parts,
+        &MinBlockGap::DISTINCT_BLOCKS,
+        rng,
+    )
 }
 
-/// Compute per-transaction scheduled broadcast heights for one PREPARATION layer: starting at
-/// `start`, advance a running height by an independently drawn `params.preparation_delay()` for
-/// each of the `n_txs` transactions. The returned vector has length `n_txs`, is non-decreasing, and
-/// every entry is `>= start`; heights saturate at `u32::MAX`. The caller (the engine) bases each
-/// later layer's `start` past the previous layer's last scheduled height plus a mining margin, so
-/// layers stay serialized while the transactions within and across layers remain temporally
-/// decoupled.
-pub fn schedule_prep_broadcast_heights<R: RngCore + CryptoRng>(
+/// Compute the per-part scheduled broadcast heights: starting at `commit_height`, advance a running
+/// height by an independently drawn `params.transfer_delay()` for each of the `n_parts` transfers
+/// (ZIP 318 CUMULATIVE MUST), redrawing any placement `constraint` rejects. The returned vector has
+/// length `n_parts`, is non-decreasing, every entry is `>= commit_height`, and
+/// `constraint.is_valid(commit_height, &heights)` holds — so under a condition including
+/// [`MinBlockGap::DISTINCT_BLOCKS`] the heights are strictly increasing and no two transfers are
+/// scheduled in the same block. Heights saturate at `u32::MAX` rather than overflowing.
+///
+/// Fails with [`ConstraintUnsatisfied`] if the condition rejects [`CONSTRAINT_ATTEMPTS`]
+/// consecutive draws for one transfer: a schedule is returned only if it satisfies the condition.
+pub fn schedule_broadcast_heights_with<R, C>(
+    params: &SchedulingParams,
+    commit_height: BlockHeight,
+    n_parts: usize,
+    constraint: &C,
+    rng: &mut R,
+) -> Result<Vec<BlockHeight>, ConstraintUnsatisfied>
+where
+    R: RngCore + CryptoRng,
+    C: ScheduleConstraint + ?Sized,
+{
+    let delay = params.transfer_delay();
+    cumulative_broadcast_heights(
+        commit_height,
+        n_parts,
+        |rng| delay.draw_inner(rng),
+        constraint,
+        rng,
+    )
+}
+
+/// Compute per-transaction scheduled broadcast heights for one PREPARATION layer under the default
+/// condition ([`MinBlockGap::DISTINCT_BLOCKS`]); see [`schedule_prep_broadcast_heights_with`] for
+/// the general form.
+pub fn schedule_prep_broadcast_heights<R>(
     params: &SchedulingParams,
     start: BlockHeight,
     n_txs: usize,
     rng: &mut R,
-) -> Vec<BlockHeight> {
+) -> Result<Vec<BlockHeight>, ConstraintUnsatisfied>
+where
+    R: RngCore + CryptoRng,
+{
+    schedule_prep_broadcast_heights_with(params, start, n_txs, &MinBlockGap::DISTINCT_BLOCKS, rng)
+}
+
+/// Compute per-transaction scheduled broadcast heights for one PREPARATION layer: starting at
+/// `start`, advance a running height by an independently drawn `params.preparation_delay()` for
+/// each of the `n_txs` transactions, redrawing any placement `constraint` rejects. The returned
+/// vector has length `n_txs`, every entry is `>= start`, and `constraint.is_valid(start, &heights)`
+/// holds; heights saturate at `u32::MAX`. The caller (the engine) bases each
+/// later layer's `start` past the previous layer's last scheduled height plus a mining margin, so
+/// layers stay serialized while the transactions within and across layers remain temporally
+/// decoupled.
+///
+/// Fails with [`ConstraintUnsatisfied`] under the same conditions as
+/// [`schedule_broadcast_heights_with`].
+pub fn schedule_prep_broadcast_heights_with<R, C>(
+    params: &SchedulingParams,
+    start: BlockHeight,
+    n_txs: usize,
+    constraint: &C,
+    rng: &mut R,
+) -> Result<Vec<BlockHeight>, ConstraintUnsatisfied>
+where
+    R: RngCore + CryptoRng,
+    C: ScheduleConstraint + ?Sized,
+{
     let delay = params.preparation_delay();
-    cumulative_broadcast_heights(start, n_txs, |rng| delay.draw_inner(rng), rng)
+    cumulative_broadcast_heights(start, n_txs, |rng| delay.draw_inner(rng), constraint, rng)
 }
 
 /// The canonical rolling EXPIRY height for a transfer at `current_height` (ZIP 318 EXPIRY MUST):
@@ -714,22 +1080,54 @@ pub fn schedule_sync_wakeups<T: Copy, R: RngCore + CryptoRng>(
     Ok(wakeups)
 }
 
-/// Assemble a [`Schedule`] for each part: draw the cumulative broadcast heights from `commit_height`
-/// (see [`schedule_broadcast_heights`]) and pair each with its canonical [`expiry_height`]. Returns
-/// one [`Schedule`] per part, in the (already shuffled) part order the caller passes.
-pub fn schedule<R: RngCore + CryptoRng>(
+/// Assemble a [`Schedule`] for each part under the default condition
+/// ([`MinBlockGap::DISTINCT_BLOCKS`]); see [`schedule_with`] for the general form.
+pub fn schedule<R>(
     params: &SchedulingParams,
     commit_height: BlockHeight,
     n_parts: usize,
     rng: &mut R,
-) -> Vec<Schedule> {
-    schedule_broadcast_heights(params, commit_height, n_parts, rng)
-        .into_iter()
-        .map(|broadcast_height| Schedule {
-            broadcast_height,
-            expiry_height: expiry_height(broadcast_height),
-        })
-        .collect()
+) -> Result<Vec<Schedule>, ConstraintUnsatisfied>
+where
+    R: RngCore + CryptoRng,
+{
+    schedule_with(
+        params,
+        commit_height,
+        n_parts,
+        &MinBlockGap::DISTINCT_BLOCKS,
+        rng,
+    )
+}
+
+/// Assemble a [`Schedule`] for each part: draw the cumulative broadcast heights from `commit_height`
+/// subject to `constraint` (see [`schedule_broadcast_heights_with`]) and pair each with its
+/// canonical [`expiry_height`]. Returns one [`Schedule`] per part, in the (already shuffled) part
+/// order the caller passes, or [`ConstraintUnsatisfied`] if the condition could not be met.
+///
+/// The condition governs the BROADCAST heights only; the expiry of each is the canonical rolling
+/// window of its broadcast height, which carries no per-wallet information and so is not a free
+/// choice.
+pub fn schedule_with<R, C>(
+    params: &SchedulingParams,
+    commit_height: BlockHeight,
+    n_parts: usize,
+    constraint: &C,
+    rng: &mut R,
+) -> Result<Vec<Schedule>, ConstraintUnsatisfied>
+where
+    R: RngCore + CryptoRng,
+    C: ScheduleConstraint + ?Sized,
+{
+    Ok(
+        schedule_broadcast_heights_with(params, commit_height, n_parts, constraint, rng)?
+            .into_iter()
+            .map(|broadcast_height| Schedule {
+                broadcast_height,
+                expiry_height: expiry_height(broadcast_height),
+            })
+            .collect(),
+    )
 }
 
 /// Draw an anchor AGE `a >= 1` from the recency-weighted `Geometric(1/2)` distribution: `a` is the
@@ -962,7 +1360,8 @@ mod tests {
 
     proptest! {
         /// Every drawn delay is in the closed range `[0, cap]`, whatever the configured
-        /// distribution (DELAYS MUST).
+        /// distribution (DELAYS MUST). The distribution itself does not exclude a zero delay; that
+        /// is a schedule CONDITION (see the `MinBlockGap` tests), not a property of the draw.
         #[test]
         fn delay_within_bounds(seed in any::<u64>(), mean in 1u32..1_000, extra in 0u32..2_000) {
             let dist = DelayDistribution::new(
@@ -974,6 +1373,24 @@ mod tests {
                 prop_assert!(dist.draw(&mut r) <= dist.cap().get());
             }
         }
+    }
+
+    /// A zero delay is a real outcome of the draw, at a rate near `1 - exp(-1 / (2 * mean))`. This
+    /// is what makes the distinct-blocks condition necessary rather than theoretical: at the ZIP 318
+    /// preparation mean of 24 blocks it is about one draw in 48.
+    #[test]
+    fn zero_delays_are_drawn() {
+        let mut r = rng(1);
+        let n = 10_000;
+        let zeros = (0..n)
+            .filter(|_| P.preparation_delay().draw(&mut r) == 0)
+            .count();
+        // Expectation is ~207 in 10_000; a wide band keeps this a statement about the rate, not
+        // about this particular seed.
+        assert!(
+            (100..400).contains(&zeros),
+            "{zeros} zero delays in {n} draws is outside the expected band"
+        );
     }
 
     /// The ratio-derived constructor reproduces the ZIP 318 parameters exactly at the ZIP 318
@@ -1565,20 +1982,24 @@ mod tests {
     // --- schedule_broadcast_heights -----------------------------------------------------------
 
     proptest! {
-        /// Broadcast heights are non-decreasing and start at or above the commit height
-        /// (CUMULATIVE MUST).
+        /// Broadcast heights are STRICTLY increasing from the commit height (CUMULATIVE MUST plus
+        /// the default distinct-blocks condition), so no two transfers of one wallet are scheduled
+        /// in the same block.
         #[test]
-        fn broadcast_heights_monotone(commit in 0u32..5_000_000,
-                                      n in 0usize..40,
-                                      seed in any::<u64>()) {
+        fn broadcast_heights_strictly_increase(commit in 0u32..5_000_000,
+                                               n in 0usize..40,
+                                               seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_broadcast_heights(&P, bh(commit), n, &mut r);
+            let hs = schedule_broadcast_heights(&P, bh(commit), n, &mut r)
+                .expect("the default condition is satisfiable");
             prop_assert_eq!(hs.len(), n);
             let mut prev = bh(commit);
-            for h in hs {
-                prop_assert!(h >= prev);
+            for &h in &hs {
+                prop_assert!(h > prev, "two transfers scheduled at height {}", h);
                 prev = h;
             }
+            // The same property, stated through the condition the sampler enforced.
+            prop_assert!(MinBlockGap::DISTINCT_BLOCKS.is_valid(bh(commit), &hs));
         }
     }
 
@@ -1586,9 +2007,11 @@ mod tests {
     /// `(commit, n, seed)`, plus the structural invariants they must satisfy. The heights are captured
     /// from the deterministic [`ChaCha8Rng`], so they pin the exact delay draws as a regression guard;
     /// the invariant checks keep each vector auditable by eye, since each per-step GAP is the drawn
-    /// inter-arrival delay and must be a valid `[0, MAX_DELAY]` value.
+    /// inter-arrival delay and must be a valid `[1, MAX_DELAY]` value (at least one block, since
+    /// the default condition redraws a collision).
     fn check_schedule_golden(commit: u32, n: usize, seed: u64, expected: &[u32]) {
         let hs: Vec<u32> = schedule_broadcast_heights(&P, bh(commit), n, &mut rng(seed))
+            .expect("the default condition is satisfiable")
             .into_iter()
             .map(u32::from)
             .collect();
@@ -1596,10 +2019,7 @@ mod tests {
         assert_eq!(hs.len(), n);
         let mut prev = commit;
         for &h in &hs {
-            assert!(
-                h >= prev,
-                "heights must be non-decreasing (commit {commit})"
-            );
+            assert!(h > prev, "heights must strictly increase (commit {commit})");
             let gap = h - prev;
             assert!(gap <= MAX_DELAY, "delay {gap} exceeds the cap {MAX_DELAY}");
             prev = h;
@@ -1638,19 +2058,22 @@ mod tests {
     }
 
     proptest! {
-        /// Preparation delays respect their own (tighter) bounds, and the per-layer schedule is
-        /// non-decreasing from its start.
+        /// Preparation delays respect their own (tighter) bounds, and the per-layer schedule
+        /// strictly increases from its start — one preparation transaction per block at most, as
+        /// for the transfers.
         #[test]
-        fn prep_schedule_bounds_and_monotone(start in 0u32..5_000_000,
-                                            n in 0usize..40,
-                                            seed in any::<u64>()) {
+        fn prep_schedule_bounds_and_strictly_increases(start in 0u32..5_000_000,
+                                                       n in 0usize..40,
+                                                       seed in any::<u64>()) {
             let mut r = rng(seed);
-            let hs = schedule_prep_broadcast_heights(&P, bh(start), n, &mut r);
+            let hs = schedule_prep_broadcast_heights(&P, bh(start), n, &mut r)
+                .expect("the default condition is satisfiable");
             prop_assert_eq!(hs.len(), n);
             let mut prev = bh(start);
             for h in hs {
-                prop_assert!(h >= prev);
-                prop_assert!(u32::from(h) - u32::from(prev) <= PREP_MAX_DELAY);
+                let gap = u32::from(h) - u32::from(prev);
+                prop_assert!(gap >= 1, "two preparations scheduled at height {}", h);
+                prop_assert!(gap <= PREP_MAX_DELAY);
                 prev = h;
             }
         }
@@ -1677,6 +2100,184 @@ mod tests {
         let exp_seed42 = [27, 72, 13, 24, 8, 4, 9, 39];
         check(1, &exp_seed1);
         check(42, &exp_seed42);
+    }
+
+    // --- schedule constraints -----------------------------------------------------------------
+
+    /// A distribution whose mean is one block, so a zero delay is drawn about two times in five.
+    /// Scheduling under it is what actually exercises the redraw path: at the ZIP 318 means a
+    /// collision is rare enough that a passing test would prove nothing.
+    fn collision_prone() -> SchedulingParams {
+        SchedulingParams::new_with_default_distributions(interval(1))
+    }
+
+    /// A [`Placement`] reports the candidate, its index, and the gap it makes with what precedes
+    /// it — from the schedule's START for the first placement, which has no predecessor.
+    #[test]
+    fn placement_reports_its_context() {
+        let start = bh(100);
+        let preceding = [bh(110), bh(140)];
+
+        let first = Placement::new(start, &[], bh(107));
+        assert_eq!(first.index(), 0);
+        assert_eq!(first.previous(), None);
+        assert_eq!(first.gap(), 7);
+        assert_eq!(first.start(), start);
+        assert_eq!(first.height(), bh(107));
+
+        let third = Placement::new(start, &preceding, bh(140));
+        assert_eq!(third.index(), 2);
+        assert_eq!(third.previous(), Some(bh(140)));
+        assert_eq!(third.preceding(), &preceding);
+        // A candidate at (or below) its predecessor makes a zero gap rather than underflowing.
+        assert_eq!(third.gap(), 0);
+        assert_eq!(Placement::new(start, &preceding, bh(120)).gap(), 0);
+    }
+
+    /// `is_valid` is the conjunction of `admits` over every prefix, so it accepts exactly the
+    /// schedules the sampler is allowed to return.
+    #[test]
+    fn min_block_gap_validates_whole_schedules() {
+        let gap3 = MinBlockGap::new(NonZeroU32::new(3).expect("nonzero"));
+        let start = bh(1_000);
+
+        assert!(gap3.is_valid(start, &[bh(1_003), bh(1_006), bh(1_020)]));
+        // The first entry is measured from the start height.
+        assert!(!gap3.is_valid(start, &[bh(1_002), bh(1_006)]));
+        // A gap of two blocks between entries is below the required three.
+        assert!(!gap3.is_valid(start, &[bh(1_003), bh(1_005)]));
+        // The empty schedule satisfies every condition.
+        assert!(gap3.is_valid(start, &[]));
+
+        // The default is the distinct-blocks condition: one block is enough, zero is not.
+        assert_eq!(MinBlockGap::default(), MinBlockGap::DISTINCT_BLOCKS);
+        assert_eq!(MinBlockGap::DISTINCT_BLOCKS.blocks().get(), 1);
+        assert!(MinBlockGap::DISTINCT_BLOCKS.is_valid(start, &[bh(1_001), bh(1_002)]));
+        assert!(!MinBlockGap::DISTINCT_BLOCKS.is_valid(start, &[bh(1_001), bh(1_001)]));
+    }
+
+    /// The composition impls conjoin their members, and `()` accepts everything, so a caller can
+    /// build a condition set out of the built-ins and its own closures.
+    #[test]
+    fn conditions_compose_by_conjunction() {
+        let start = bh(0);
+        let heights = [bh(10), bh(20)];
+        let below_15 = |p: &Placement<'_>| u32::from(p.height()) < 15;
+        let even = |p: &Placement<'_>| u32::from(p.height()) % 2 == 0;
+
+        assert!(().is_valid(start, &heights));
+        assert!(even.is_valid(start, &heights));
+        assert!(!below_15.is_valid(start, &heights));
+
+        // A pair, a triple, and a slice all fail as soon as one member fails.
+        assert!((MinBlockGap::DISTINCT_BLOCKS, even).is_valid(start, &heights));
+        assert!(!(MinBlockGap::DISTINCT_BLOCKS, below_15).is_valid(start, &heights));
+        assert!(!(MinBlockGap::DISTINCT_BLOCKS, even, below_15).is_valid(start, &heights));
+
+        let set: &[MinBlockGap] = &[
+            MinBlockGap::DISTINCT_BLOCKS,
+            MinBlockGap::new(NonZeroU32::new(10).expect("nonzero")),
+        ];
+        assert!(set.is_valid(start, &heights));
+        let stricter: &[MinBlockGap] = &[MinBlockGap::new(NonZeroU32::new(11).expect("nonzero"))];
+        assert!(!stricter.is_valid(start, &heights));
+        // An empty set of conditions constrains nothing.
+        let none: &[MinBlockGap] = &[];
+        assert!(none.is_valid(start, &heights));
+    }
+
+    proptest! {
+        /// Whatever the caller's condition, a returned schedule satisfies it: the sampler redraws a
+        /// rejected placement rather than returning a schedule that violates it. Drawn under the
+        /// collision-prone distribution, where the conditions bite constantly.
+        #[test]
+        fn returned_schedules_satisfy_their_condition(start in 0u32..1_000_000,
+                                                      n in 0usize..24,
+                                                      gap in 1u32..4,
+                                                      seed in any::<u64>()) {
+            let params = collision_prone();
+            let min_gap = MinBlockGap::new(NonZeroU32::new(gap).expect("nonzero"));
+            // Also keep every broadcast off the multiples of 5, a condition unrelated to spacing.
+            let off_grid = |p: &Placement<'_>| u32::from(p.height()) % 5 != 0;
+            let condition = (min_gap, off_grid);
+
+            let mut r = rng(seed);
+            let hs = schedule_broadcast_heights_with(&params, bh(start), n, &condition, &mut r)
+                .expect("a one-block minimum gap is satisfiable at this mean");
+            prop_assert_eq!(hs.len(), n);
+            prop_assert!(condition.is_valid(bh(start), &hs));
+        }
+    }
+
+    /// The redraw path is real, not incidental: under a distribution whose delays are frequently
+    /// zero, the default condition still yields a schedule with no two entries in one block.
+    #[test]
+    fn collisions_are_redrawn_away() {
+        let params = collision_prone();
+        for seed in 0..64 {
+            let hs = schedule_broadcast_heights(&params, bh(500), 32, &mut rng(seed))
+                .expect("the default condition is satisfiable");
+            let mut prev = bh(500);
+            for &h in &hs {
+                assert!(h > prev, "two transfers at height {h} (seed {seed})");
+                prev = h;
+            }
+        }
+    }
+
+    /// An unsatisfiable condition yields no schedule at all, naming where it gave up, rather than a
+    /// schedule that violates it. Two ways to be unsatisfiable: a condition nothing can meet, and a
+    /// minimum gap wider than the delay distribution's cap.
+    #[test]
+    fn unsatisfiable_conditions_return_no_schedule() {
+        let never = |_: &Placement<'_>| false;
+        let err = schedule_broadcast_heights_with(&P, bh(1_000), 3, &never, &mut rng(1))
+            .expect_err("no height is admissible");
+        assert_eq!(err.index(), 0);
+        assert_eq!(err.after(), bh(1_000));
+        assert_eq!(err.attempts(), CONSTRAINT_ATTEMPTS);
+
+        // The ZIP 318 transfer delay is capped at 576 blocks, so a wider gap can never be drawn.
+        let too_wide = MinBlockGap::new(NonZeroU32::new(MAX_DELAY + 1).expect("nonzero"));
+        assert!(schedule_broadcast_heights_with(&P, bh(1_000), 1, &too_wide, &mut rng(1)).is_err());
+
+        // A condition that only the SECOND placement fails is reported at that index.
+        let first_only = |p: &Placement<'_>| p.index() == 0;
+        let err = schedule_with(&P, bh(1_000), 2, &first_only, &mut rng(1))
+            .expect_err("the second placement is inadmissible");
+        assert_eq!(err.index(), 1);
+    }
+
+    /// The error renders a diagnostic naming the entry and the height it could not get past.
+    #[test]
+    fn constraint_error_display() {
+        let never = |_: &Placement<'_>| false;
+        let err = schedule_prep_broadcast_heights_with(&P, bh(7), 1, &never, &mut rng(1))
+            .expect_err("no height is admissible");
+        assert_eq!(
+            alloc::format!("{err}"),
+            "no broadcast height after 7 satisfied the schedule condition for entry 0 in 1024 draws"
+        );
+    }
+
+    /// The plain forms are exactly their `_with` forms under the default condition, drawing
+    /// identically from the same seed. This is what keeps the default from drifting away from the
+    /// documented [`MinBlockGap::DISTINCT_BLOCKS`].
+    #[test]
+    fn plain_forms_apply_the_default_condition() {
+        let d = &MinBlockGap::DISTINCT_BLOCKS;
+        assert_eq!(
+            schedule_broadcast_heights(&P, bh(900), 6, &mut rng(3)),
+            schedule_broadcast_heights_with(&P, bh(900), 6, d, &mut rng(3)),
+        );
+        assert_eq!(
+            schedule_prep_broadcast_heights(&P, bh(900), 6, &mut rng(3)),
+            schedule_prep_broadcast_heights_with(&P, bh(900), 6, d, &mut rng(3)),
+        );
+        assert_eq!(
+            schedule(&P, bh(900), 6, &mut rng(3)),
+            schedule_with(&P, bh(900), 6, d, &mut rng(3)),
+        );
     }
 
     // --- expiry_height ------------------------------------------------------------------------
@@ -1998,7 +2599,8 @@ mod tests {
         expected_broadcast: &[u32],
         expected_expiry: &[u32],
     ) {
-        let schedules = schedule(&P, bh(commit), n, &mut rng(seed));
+        let schedules = schedule(&P, bh(commit), n, &mut rng(seed))
+            .expect("the default condition is satisfiable");
         let broadcast: Vec<u32> = schedules
             .iter()
             .map(|s| u32::from(s.broadcast_height()))
@@ -2019,6 +2621,7 @@ mod tests {
         assert_eq!(
             broadcast,
             schedule_broadcast_heights(&P, bh(commit), n, &mut rng(seed))
+                .expect("the default condition is satisfiable")
                 .into_iter()
                 .map(u32::from)
                 .collect::<Vec<u32>>(),
@@ -2079,7 +2682,8 @@ mod tests {
                                                n in 0usize..24,
                                                seed in any::<u64>()) {
             let mut r = rng(seed);
-            let schedules = schedule(&P, bh(commit), n, &mut r);
+            let schedules = schedule(&P, bh(commit), n, &mut r)
+                .expect("the default condition is satisfiable");
             prop_assert_eq!(schedules.len(), n);
             // Broadcast heights follow the cumulative delay rule (same RNG => same heights).
             let broadcast: Vec<BlockHeight> =
@@ -2087,10 +2691,11 @@ mod tests {
             prop_assert_eq!(
                 &broadcast,
                 &schedule_broadcast_heights(&P, bh(commit), n, &mut rng(seed))
+                    .expect("the default condition is satisfiable")
             );
             let mut prev = bh(commit);
             for s in &schedules {
-                prop_assert!(s.broadcast_height() >= prev, "broadcast heights must be non-decreasing");
+                prop_assert!(s.broadcast_height() > prev, "broadcast heights must strictly increase");
                 prev = s.broadcast_height();
                 prop_assert_eq!(s.expiry_height(), expiry_height(s.broadcast_height()));
             }

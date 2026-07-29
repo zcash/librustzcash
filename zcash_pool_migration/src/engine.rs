@@ -60,7 +60,7 @@ use zcash_primitives::transaction::fees::{transparent, zip317};
 use crate::build::AccountDerivation;
 use crate::denomination::{DenominationPlan, plan_denominations};
 use crate::preparation::{PrepError, PrepInput, PreparationPlan, plan_preparation};
-use crate::scheduling::{self, Schedule};
+use crate::scheduling::{self, ConstraintUnsatisfied, MinBlockGap, Schedule, ScheduleConstraint};
 use crate::signing_rounds::{
     MinRounds, PlannedSigningRound, PlannedTx, SigningRoundBudget, SigningRoundStrategy,
     min_budget_for_rounds, min_signing_rounds,
@@ -778,6 +778,9 @@ pub enum MigrationError<E> {
     /// NU6.3 is not active on this network, so there is no destination pool to migrate into (and
     /// no anchor bucket above its activation to schedule against).
     Nu63NotActive,
+    /// No drawn broadcast schedule satisfied the [`ScheduleConstraint`] the plan was asked for, so
+    /// no plan is returned rather than one violating the condition (see [`plan_migration_with`]).
+    Unschedulable(ConstraintUnsatisfied),
 }
 
 impl<E: fmt::Display> fmt::Display for MigrationError<E> {
@@ -789,6 +792,7 @@ impl<E: fmt::Display> fmt::Display for MigrationError<E> {
             MigrationError::InvalidBalance(e) => write!(f, "invalid balance: {e}"),
             MigrationError::Fee(e) => write!(f, "fee computation failed: {e}"),
             MigrationError::Nu63NotActive => f.write_str("NU6.3 is not active on this network"),
+            MigrationError::Unschedulable(e) => write!(f, "cannot schedule the migration: {e}"),
         }
     }
 }
@@ -804,6 +808,7 @@ impl<E: core::error::Error + 'static> core::error::Error for MigrationError<E> {
             MigrationError::InvalidBalance(_) => None,
             MigrationError::Fee(_) => None,
             MigrationError::Nu63NotActive => None,
+            MigrationError::Unschedulable(e) => Some(e),
         }
     }
 }
@@ -856,6 +861,10 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
 /// This is pure orchestration of the denomination, preparation, and scheduling planners: no cryptography,
 /// and nothing is built, signed, or persisted. The result is the [`MigrationPlan`] preview to present
 /// for user consent before committing the migration.
+///
+/// The drawn broadcast heights satisfy the default schedule condition
+/// ([`MinBlockGap::DISTINCT_BLOCKS`], so no two of this wallet's transactions are scheduled in one
+/// block). Use [`plan_migration_with`] to add conditions of the application's own.
 pub fn plan_migration<P, B, R>(
     params: &P,
     backend: &B,
@@ -864,6 +873,33 @@ pub fn plan_migration<P, B, R>(
 where
     P: zcash_protocol::consensus::Parameters,
     B: MigrationBackend,
+    R: RngCore + rand_core::CryptoRng,
+{
+    plan_migration_with(params, backend, &MinBlockGap::DISTINCT_BLOCKS, rng)
+}
+
+/// [`plan_migration`], with the schedule drawn subject to `constraint` rather than the default
+/// condition: every preparation and transfer broadcast height this plan carries satisfies it (see
+/// [`ScheduleConstraint`]).
+///
+/// The condition applies to each preparation LAYER and to the transfer schedule separately, since
+/// those are drawn as separate sequences; it does not see one from the other. It is checked per
+/// placement as the schedule is drawn, so a plan is returned only if its schedule satisfies the
+/// condition, and [`MigrationError::Unschedulable`] is returned when no draw does.
+///
+/// A caller supplying its own condition is responsible for including the crate default
+/// ([`MinBlockGap::DISTINCT_BLOCKS`]) if it wants it, by conjoining the two:
+/// `(MinBlockGap::DISTINCT_BLOCKS, my_condition)`.
+pub fn plan_migration_with<P, B, C, R>(
+    params: &P,
+    backend: &B,
+    constraint: &C,
+    rng: &mut R,
+) -> Result<MigrationPlan, MigrationError<B::Error>>
+where
+    P: zcash_protocol::consensus::Parameters,
+    B: MigrationBackend,
+    C: ScheduleConstraint + ?Sized,
     R: RngCore + rand_core::CryptoRng,
 {
     let notes = backend
@@ -923,12 +959,14 @@ where
     let mut prep_schedule: Vec<Vec<BlockHeight>> = Vec::with_capacity(preparation.layer_count());
     let mut layer_base = commit_height;
     for layer in preparation.layers() {
-        let heights = scheduling::schedule_prep_broadcast_heights(
+        let heights = scheduling::schedule_prep_broadcast_heights_with(
             &sched_params,
             layer_base,
             layer.len(),
+            constraint,
             rng,
-        );
+        )
+        .map_err(MigrationError::Unschedulable)?;
         layer_base = heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS;
         prep_schedule.push(heights);
     }
@@ -956,7 +994,14 @@ where
     // temporal sequence an observer could read the balance back out of. Drawing a uniform
     // permutation and assigning the i-th drawn slot to the permuted crossing makes the
     // broadcast order of denominations independent of the balance.
-    let slots = scheduling::schedule(&sched_params, schedule_base, funding_notes.len(), rng);
+    let slots = scheduling::schedule_with(
+        &sched_params,
+        schedule_base,
+        funding_notes.len(),
+        constraint,
+        rng,
+    )
+    .map_err(MigrationError::Unschedulable)?;
     let mut schedule = slots.clone();
     for (slot, &crossing) in scheduling::shuffle_indices(funding_notes.len(), rng)
         .iter()
@@ -3896,7 +3941,8 @@ mod commit_tests {
                 layer_base,
                 layer.len(),
                 &mut rng,
-            );
+            )
+            .expect("the default condition is satisfiable");
             layer_base =
                 heights.last().copied().unwrap_or(layer_base) + EST_PREP_LAYER_MINING_BLOCKS;
             prep_schedule.push(heights);
@@ -3919,7 +3965,8 @@ mod commit_tests {
             schedule_base,
             funding.len(),
             &mut rng,
-        );
+        )
+        .expect("the default condition is satisfiable");
         let plan = MigrationPlan {
             denominations,
             preparation,
