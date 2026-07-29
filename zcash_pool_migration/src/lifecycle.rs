@@ -23,7 +23,7 @@ use rand_core::{CryptoRng, RngCore};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
-use crate::engine::{
+use crate::model::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
     MigrationTxState,
 };
@@ -254,7 +254,7 @@ impl MigrationState {
     }
 
     /// The id of the next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor
-    /// is resolvable now (see [`Self::prove_ready`]). Proving is decoupled from broadcasting so a
+    /// is resolvable now. Proving is decoupled from broadcasting so a
     /// transfer is proved while its anchor boundary checkpoint is still within the wallet's pruning
     /// window, then broadcast later at its scheduled height.
     pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
@@ -541,7 +541,7 @@ impl MigrationState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::MigrationTransaction;
+    use crate::model::MigrationTransaction;
     use zcash_protocol::value::Zatoshis;
 
     use crate::denomination::DenominationPlan;

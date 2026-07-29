@@ -45,11 +45,11 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::num::{NonZeroU32, NonZeroUsize};
 
-use corez::io;
-
+// The only remaining `getset` derive in this module is on the orchard-gated
+// `UnsignedMigrationTx`, so the import carries the same gate.
+#[cfg(feature = "orchard")]
 use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
-use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{BalanceError, Zatoshis};
 
@@ -77,519 +77,21 @@ use crate::signing_rounds::{
 /// an over-estimate merely delays the follow-on schedule.
 const EST_PREP_LAYER_MINING_BLOCKS: u32 = 10;
 
-/// What the migration engine needs from a wallet to PLAN a migration: the account's spendable notes and
-/// the chain state. Following the `zcash_client_backend` pattern, a later slice replaces this with the
-/// wallet's own note-source and chain-view traits (`WalletRead` / `InputSource`), so any such wallet is a
-/// migration wallet; for now a backend implements it directly over its note store and chain view.
-pub trait MigrationBackend {
-    /// The backend's own error type (a store or chain-access failure).
-    type Error;
+pub use crate::backend::{MigrationBackend, PoolMigrationRead, PoolMigrationWrite};
+/// The wallet-facing trait seams, defined in [`backend`](crate::backend) and re-exported here so
+/// the paths they have always had keep resolving. The operations in this module are their only
+/// consumer: each takes the capabilities it needs as bounds on these traits.
+#[cfg(feature = "orchard")]
+pub use crate::backend::{MigrationCrypto, MigrationProver};
 
-    /// The values of the account's spendable source-pool (Orchard) notes. The migration decomposes
-    /// their total into denominations; the same notes are later spent by the preparation
-    /// transactions, so the values must line up with what the build step will resolve to witnesses.
-    fn spendable_orchard_note_values(&self) -> Result<Vec<Zatoshis>, Self::Error>;
-
-    /// The current chain-tip height, from which the transfer schedule's delays accumulate.
-    fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error>;
-
-    /// The parameters this backend's migrations are scheduled under: the anchor bucket grid and the
-    /// transfer and preparation inter-arrival delays.
-    ///
-    /// The engine never takes these as its own argument; it asks the backend, because the anchor
-    /// bucket interval is not free to choose. A transfer proves against the note commitment tree
-    /// state at the boundary it anchored to, which requires the wallet to have RETAINED that
-    /// boundary's checkpoint. Sourcing the interval from the same backend that performs the
-    /// retention is what makes the two grids incapable of disagreeing; a backend that returns an
-    /// interval it does not retain on will produce transfers it cannot prove.
-    ///
-    /// A backend on the production network must return [`SchedulingParams::ZIP_318`].
-    ///
-    /// [`SchedulingParams::ZIP_318`]: crate::scheduling::SchedulingParams::ZIP_318
-    fn scheduling_params(&self) -> crate::scheduling::SchedulingParams;
-}
-
-/// Read access to a persisted pool migration: the store side of the migration interface, mirroring
-/// `zcash_client_backend`'s `WalletRead`. A store implements this over its own tables
-/// (`zcash_client_sqlite`'s `pool_migration` module does so over tables registered into its
-/// `WalletDb` schema). The committed migration is a set of pre-signed PCZTs plus their schedule and
-/// lifecycle state, so a wallet resumes a migration entirely from the store after being closed or
-/// restarted.
-pub trait PoolMigrationRead {
-    /// The store's own error type.
-    type Error;
-
-    /// The migration currently in progress, if any.
-    fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error>;
-}
-
-/// Write access to a persisted pool migration, mirroring `zcash_client_backend`'s `WalletWrite`.
-pub trait PoolMigrationWrite: PoolMigrationRead {
-    /// Persist a committed migration: every transaction as its pre-signed PCZT plus the metadata the
-    /// application needs to prove, schedule, and broadcast it. Storing the pre-signed transactions, not
-    /// just the plan, is what lets a wallet resume a migration after being closed or restarted.
-    fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error>;
-
-    /// Advance one stored transaction's lifecycle state (for example after the application broadcasts
-    /// it, or the chain mines it).
-    fn update_transaction(
-        &mut self,
-        id: MigrationTransferId,
-        state: MigrationTxState,
-    ) -> Result<(), Self::Error>;
-}
-
-/// A stable ordinal identifier for a migration transaction within a migration. This is a ROW KEY
-/// into the persisted migration (usable before a transaction is built, when no [`TxId`] exists yet:
-/// deferred preparation layers and transfers are recorded as unbuilt placeholders); it is NOT a
-/// Zcash transaction id. The real [`TxId`] becomes available once a transaction is built and signed
-/// (it commits only effecting data), and is carried by [`MigrationTxState::Broadcast`].
-///
-/// The two identities are not interchangeable, and this one is the one to key on. A [`TxId`]
-/// identifies a single broadcast ATTEMPT: [`rebuild_expired_transfer`] keeps this id while
-/// producing a new transaction with a new [`TxId`], so a consumer that keyed its own records on
-/// the [`TxId`] loses track of the transfer exactly when it most needs to follow it. Use the
-/// [`TxId`] to talk to the network about a transaction, and this id to talk about the transfer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MigrationTransferId(pub(crate) u32);
-
-impl MigrationTransferId {
-    /// Wrap a stored ordinal as a migration-transaction row key (for a store reading a persisted
-    /// migration back).
-    pub const fn new(index: u32) -> Self {
-        MigrationTransferId(index)
-    }
-
-    /// Writes this id as an unsigned 32-bit little-endian integer.
-    pub fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.0.to_le_bytes())
-    }
-
-    /// Reads an id written by [`write`](Self::write).
-    pub fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
-        let mut bytes = [0u8; 4];
-        reader.read_exact(&mut bytes)?;
-        Ok(MigrationTransferId::new(u32::from_le_bytes(bytes)))
-    }
-}
-
-impl From<MigrationTransferId> for u32 {
-    fn from(id: MigrationTransferId) -> u32 {
-        id.0
-    }
-}
-
-/// What a migration transaction does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MigrationTxKind {
-    /// A note-preparation transaction: the `index`-th transaction of preparation `layer`.
-    Preparation { layer: usize, index: usize },
-    /// A phase-2 pool-crossing transfer of the `crossing`-th funding note.
-    Transfer { crossing: usize },
-}
-
-impl AsRef<str> for MigrationTxKind {
-    /// The stable lowercase wire name of this kind, as a store persists it (the queryable
-    /// discriminant); the per-variant indices are stored alongside and reattached by
-    /// [`from_stored`](Self::from_stored).
-    fn as_ref(&self) -> &str {
-        match self {
-            MigrationTxKind::Preparation { .. } => "preparation",
-            MigrationTxKind::Transfer { .. } => "transfer",
-        }
-    }
-}
-
-impl MigrationTxKind {
-    /// The `(layer, index)` of a [`Preparation`](Self::Preparation) kind (its stored indices), or
-    /// `None` for a [`Transfer`](Self::Transfer).
-    pub fn preparation_indices(&self) -> Option<(usize, usize)> {
-        match self {
-            MigrationTxKind::Preparation { layer, index } => Some((*layer, *index)),
-            MigrationTxKind::Transfer { .. } => None,
-        }
-    }
-
-    /// The `crossing` of a [`Transfer`](Self::Transfer) kind (its stored index), or `None` for a
-    /// [`Preparation`](Self::Preparation).
-    pub fn transfer_crossing(&self) -> Option<usize> {
-        match self {
-            MigrationTxKind::Transfer { crossing } => Some(*crossing),
-            MigrationTxKind::Preparation { .. } => None,
-        }
-    }
-
-    /// Reconstruct a kind from the stored discriminant (the [`AsRef<str>`](AsRef) value) and the
-    /// per-variant index columns (each `None` for the variant that does not carry it). Errors on an
-    /// unrecognized discriminant, or a discriminant whose index columns are absent.
-    pub fn from_stored(
-        kind: &str,
-        layer: Option<usize>,
-        index: Option<usize>,
-        crossing: Option<usize>,
-    ) -> Result<Self, ParseMigrationTxKindError> {
-        Ok(match kind {
-            "preparation" => MigrationTxKind::Preparation {
-                layer: layer.ok_or(ParseMigrationTxKindError)?,
-                index: index.ok_or(ParseMigrationTxKindError)?,
-            },
-            "transfer" => MigrationTxKind::Transfer {
-                crossing: crossing.ok_or(ParseMigrationTxKindError)?,
-            },
-            _ => return Err(ParseMigrationTxKindError),
-        })
-    }
-}
-
-/// The error returned when a stored `(kind, layer, index, crossing)` tuple does not reconstruct a
-/// [`MigrationTxKind`] (its [`from_stored`](MigrationTxKind::from_stored) constructor): an
-/// unrecognized discriminant, or a variant missing its index columns.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ParseMigrationTxKindError;
-
-impl fmt::Display for ParseMigrationTxKindError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("unrecognized or incomplete migration transaction kind")
-    }
-}
-
-/// Where a migration transaction is in its lifecycle.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MigrationTxState {
-    /// Built and awaiting an EXTERNAL signature: its UNSIGNED PCZT is held in
-    /// [`pczt`](MigrationTransaction::pczt), exported for a hardware or offline signer.
-    /// [`apply_signature`](MigrationState::apply_signature) moves it to [`Signed`](Self::Signed) once the
-    /// signed PCZT is returned. Only the external-signing path
-    /// ([`build_preparation_unsigned`]) produces this state; the in-process commit function signs
-    /// immediately and goes straight to [`Signed`](Self::Signed).
-    AwaitingSignature,
-    /// Pre-signed (the account's spend authorization is attached), not yet proved.
-    Signed,
-    /// Proved against a real anchor, ready to broadcast.
-    Proved,
-    /// Broadcast to the network, with its transaction id.
-    Broadcast { txid: TxId },
-    /// Mined at the given height.
-    Mined { height: BlockHeight },
-}
-
-/// One transaction of a committed migration: its pre-signed PCZT plus the metadata the consuming
-/// application needs to prove it against a fresh anchor, wait for its dependencies, broadcast it at
-/// its scheduled height, and track its state.
-#[derive(Clone, Debug, PartialEq, Eq, Getters, CopyGetters)]
-pub struct MigrationTransaction {
-    /// This transaction's stable id.
-    #[getset(get_copy = "pub")]
-    pub(crate) id: MigrationTransferId,
-    /// What it does (a preparation transaction or a transfer).
-    #[getset(get_copy = "pub")]
-    pub(crate) kind: MigrationTxKind,
-    /// The unproven PCZT, serialized (`pczt::Pczt::serialize`): pre-signed, except while the
-    /// transaction awaits an external signature
-    /// ([`AwaitingSignature`](MigrationTxState::AwaitingSignature)), when these are the unsigned
-    /// bytes the signed PCZT replaces. Every transaction is built when the migration is
-    /// committed — one signing phase — so this is always present: the durable artifact the
-    /// application proves (installing its anchor and witnesses at that point; ZIP 374) and
-    /// broadcasts.
-    #[getset(get = "pub")]
-    pub(crate) pczt: Vec<u8>,
-    /// The transactions that must be mined before this one may be broadcast (the preparation layer
-    /// dependency graph; empty for an independent transaction).
-    #[getset(get = "pub")]
-    pub(crate) depends_on: Vec<MigrationTransferId>,
-    /// The height at which to broadcast (for a transfer; a preparation transaction waits for its
-    /// dependencies to mine and a boundary to pass rather than a fixed height).
-    #[getset(get_copy = "pub")]
-    pub(crate) scheduled_height: BlockHeight,
-    /// The height after which the transaction can no longer be mined (ZIP 203) and its part must
-    /// be carried by an entirely new, freshly signed transaction: a transfer via
-    /// [`rebuild_expired_transfer`] / [`rebuild_expired_transfer_unsigned`] (detection via
-    /// [`MigrationState::expired_transactions`]); an expired preparation awaits its own
-    /// remediation slice.
-    #[getset(get_copy = "pub")]
-    pub(crate) expiry_height: BlockHeight,
-    /// The boundary height whose tree state the transaction proves against. For a transfer this is
-    /// always present, drawn at SCHEDULING time: `plan_migration` floors the schedule so a
-    /// candidate boundary exists for every transfer. `None` only for a preparation transaction
-    /// (which waits on its dependencies rather than anchoring to a drawn boundary).
-    #[getset(get_copy = "pub")]
-    pub(crate) anchor_boundary: Option<BlockHeight>,
-    /// The transaction's lifecycle state.
-    #[getset(get_copy = "pub")]
-    pub(crate) state: MigrationTxState,
-    /// The opaque lock-owner token under which this transaction's input notes are locked, or
-    /// `None` if it holds no lock. These are the raw bytes of a wallet's
-    /// `zcash_client_backend::wallet::LockOwner` (its `LockOwner::as_bytes()` /
-    /// `LockOwner::new()` round-trip) — carried here as an opaque `[u8; 32]` rather than the typed
-    /// `LockOwner` because this `orchard`-gated engine module must not depend on
-    /// `zcash_client_backend` (only `wallet`-feature code does); the conversion to/from `LockOwner`
-    /// happens at that boundary, not here. The migration flow does not yet acquire locks, so every
-    /// transaction the engine itself builds carries `None`; a store still round-trips whatever a
-    /// caller sets.
-    #[getset(get_copy = "pub")]
-    pub(crate) lock_owner: Option<[u8; 32]>,
-}
-
-impl MigrationTransaction {
-    /// Reassemble a stored migration transaction from its persisted parts, exactly as a store read
-    /// them back (the inverse of the accessors). The caller is responsible for having persisted a
-    /// consistent row.
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_parts(
-        id: MigrationTransferId,
-        kind: MigrationTxKind,
-        pczt: Vec<u8>,
-        depends_on: Vec<MigrationTransferId>,
-        scheduled_height: BlockHeight,
-        expiry_height: BlockHeight,
-        anchor_boundary: Option<BlockHeight>,
-        state: MigrationTxState,
-        lock_owner: Option<[u8; 32]>,
-    ) -> Self {
-        Self {
-            id,
-            kind,
-            pczt,
-            depends_on,
-            scheduled_height,
-            expiry_height,
-            anchor_boundary,
-            state,
-            lock_owner,
-        }
-    }
-}
-
-/// The overall status of a migration.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MigrationStatus {
-    /// Planned and previewed, not yet committed (nothing built or signed).
-    Planning,
-    /// Built, pre-signed, and persisted; ready for the application to prove and broadcast.
-    Committed,
-    /// Some transactions have been broadcast or mined.
-    InProgress,
-    /// Every crossing has been mined.
-    Complete,
-    /// The migration failed and needs attention.
-    Failed,
-}
-
-impl AsRef<str> for MigrationStatus {
-    /// The stable lowercase wire name of the status, as stored by a backend and parsed back with
-    /// [`TryFrom<&str>`](Self). Borrow-free: it returns a `&'static str`, so encoding a status
-    /// allocates nothing.
-    fn as_ref(&self) -> &str {
-        match self {
-            MigrationStatus::Planning => "planning",
-            MigrationStatus::Committed => "committed",
-            MigrationStatus::InProgress => "in_progress",
-            MigrationStatus::Complete => "complete",
-            MigrationStatus::Failed => "failed",
-        }
-    }
-}
-
-/// The error returned when a string does not name a [`MigrationStatus`] (its [`TryFrom<&str>`] impl).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ParseMigrationStatusError;
-
-impl fmt::Display for ParseMigrationStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("unrecognized migration status")
-    }
-}
-
-impl TryFrom<&str> for MigrationStatus {
-    type Error = ParseMigrationStatusError;
-
-    /// Parses the lowercase wire name produced by [`AsRef<str>`](AsRef).
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Ok(match s {
-            "planning" => MigrationStatus::Planning,
-            "committed" => MigrationStatus::Committed,
-            "in_progress" => MigrationStatus::InProgress,
-            "complete" => MigrationStatus::Complete,
-            "failed" => MigrationStatus::Failed,
-            _ => return Err(ParseMigrationStatusError),
-        })
-    }
-}
-
-impl AsRef<str> for MigrationTxState {
-    /// The stable lowercase wire name of the lifecycle state, as a store persists it (the queryable
-    /// discriminant); the `Broadcast` txid and `Mined` height are stored alongside and reattached by
-    /// [`from_stored`](Self::from_stored).
-    fn as_ref(&self) -> &str {
-        match self {
-            MigrationTxState::AwaitingSignature => "awaiting_signature",
-            MigrationTxState::Signed => "signed",
-            MigrationTxState::Proved => "proved",
-            MigrationTxState::Broadcast { .. } => "broadcast",
-            MigrationTxState::Mined { .. } => "mined",
-        }
-    }
-}
-
-/// The error returned when a stored `(state, txid, mined_height)` triple does not reconstruct a
-/// [`MigrationTxState`] (its [`from_stored`](MigrationTxState::from_stored) constructor): an
-/// unrecognized discriminant, or a `broadcast`/`mined` row missing its txid/height payload.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ParseMigrationTxStateError;
-
-impl fmt::Display for ParseMigrationTxStateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("unrecognized or incomplete migration transaction state")
-    }
-}
-
-impl MigrationTxState {
-    /// The transaction id of a [`Broadcast`](Self::Broadcast) state (its stored payload), or `None`
-    /// for any other state.
-    pub fn broadcast_txid(&self) -> Option<[u8; 32]> {
-        match self {
-            MigrationTxState::Broadcast { txid } => Some(*txid.as_ref()),
-            _ => None,
-        }
-    }
-
-    /// The block height of a [`Mined`](Self::Mined) state (its stored payload), or `None` for any
-    /// other state.
-    pub fn mined_height(&self) -> Option<BlockHeight> {
-        match self {
-            MigrationTxState::Mined { height } => Some(*height),
-            _ => None,
-        }
-    }
-
-    /// Reconstruct a state from a store: the lowercase discriminant produced by
-    /// [`AsRef<str>`](AsRef), plus the `broadcast` txid and `mined` height columns (each `None` for a
-    /// state that does not carry it). Errors on an unrecognized discriminant, or a `broadcast`/`mined`
-    /// discriminant whose payload column is absent.
-    pub fn from_stored(
-        state: &str,
-        txid: Option<[u8; 32]>,
-        mined_height: Option<BlockHeight>,
-    ) -> Result<Self, ParseMigrationTxStateError> {
-        Ok(match state {
-            "awaiting_signature" => MigrationTxState::AwaitingSignature,
-            "signed" => MigrationTxState::Signed,
-            "proved" => MigrationTxState::Proved,
-            "broadcast" => MigrationTxState::Broadcast {
-                txid: TxId::from_bytes(txid.ok_or(ParseMigrationTxStateError)?),
-            },
-            "mined" => MigrationTxState::Mined {
-                height: mined_height.ok_or(ParseMigrationTxStateError)?,
-            },
-            _ => return Err(ParseMigrationTxStateError),
-        })
-    }
-}
-
-/// The persisted state of a migration: the denomination plan (for the preview and residual accounting) and
-/// every transaction, each as its pre-signed PCZT and metadata. A wallet resumes a migration entirely
-/// from this state after being closed or restarted; this is what a [`MigrationBackend`] stores.
-#[derive(Clone, Debug, PartialEq, Eq, Getters, CopyGetters)]
-pub struct MigrationState {
-    /// The overall status.
-    #[getset(get_copy = "pub")]
-    pub(crate) status: MigrationStatus,
-    /// The denomination decomposition (the denominations and residual).
-    #[getset(get = "pub")]
-    pub(crate) denominations: DenominationPlan,
-    /// The preparation plan (its layers and direct-funding notes), retained for auditability and
-    /// for rebuilding expired PREPARATION transactions (a follow-on slice). A
-    /// `Preparation { layer, index }` transaction's spends resolve against
-    /// `preparation.layers()[layer][index]`.
-    #[getset(get = "pub")]
-    pub(crate) preparation: PreparationPlan,
-    /// Every migration transaction, in dependency order.
-    #[getset(get = "pub")]
-    pub(crate) transactions: Vec<MigrationTransaction>,
-    /// The anchor bucket grid this migration was COMMITTED under, recorded so a later change to the
-    /// wallet's anchor retention interval is caught as a typed error rather than surfacing as an
-    /// unexplained missing checkpoint.
-    ///
-    /// Every transfer's [`anchor_boundary`](MigrationTransaction::anchor_boundary) lies on this
-    /// grid. If the wallet is subsequently reconfigured, it stops retaining these boundaries'
-    /// checkpoints and they are pruned, at which point the committed transfers become unprovable —
-    /// so [`prove_transfer`] and the rebuild path reject the mismatch up front.
-    #[getset(get_copy = "pub")]
-    pub(crate) anchor_bucket_interval: crate::scheduling::AnchorBucketInterval,
-}
-
-impl MigrationState {
-    /// Reassemble a persisted migration from its stored parts, exactly as a store read them back
-    /// (the inverse of the accessors).
-    pub fn from_parts(
-        status: MigrationStatus,
-        denominations: DenominationPlan,
-        preparation: PreparationPlan,
-        transactions: Vec<MigrationTransaction>,
-        anchor_bucket_interval: crate::scheduling::AnchorBucketInterval,
-    ) -> Self {
-        Self {
-            status,
-            denominations,
-            preparation,
-            transactions,
-            anchor_bucket_interval,
-        }
-    }
-
-    /// The self-funding note values (in zatoshi), one per crossing: a `Transfer { crossing }`
-    /// transaction SPENDS `funding_notes()[crossing]`, of which the fee buffer pays that
-    /// transaction's own fee and the remainder crosses into the destination pool. Derived from the
-    /// denomination plan (each crossing value plus the fee buffer), so a store persists only that
-    /// plan.
-    ///
-    /// This is a SPEND-side value: it is neither what arrives in the destination pool nor the round
-    /// denomination the user consented to. To report what a transfer moves, use
-    /// [`crossing_values`](Self::crossing_values), or
-    /// [`transfer_crossing_value`](Self::transfer_crossing_value) for a single transaction.
-    pub fn funding_notes(&self) -> Vec<Zatoshis> {
-        self.denominations.migration_outputs()
-    }
-
-    /// The values (in zatoshi) that cross into the destination pool, one per crossing and
-    /// index-aligned with [`funding_notes`](Self::funding_notes): each is its funding note less the
-    /// fee buffer that funds the transfer's own fee, and so is one of the round denominations the
-    /// user was shown at proposal time.
-    ///
-    /// This is the value to display for a transfer, and the one the receiving wallet's own
-    /// accounting will agree with once the transfer mines.
-    pub fn crossing_values(&self) -> &[Zatoshis] {
-        self.denominations.crossing_values()
-    }
-
-    /// The value transaction `tx` crosses into the destination pool, or `None` when `tx` is not a
-    /// transfer (a preparation transaction crosses nothing).
-    ///
-    /// Equivalent to indexing [`crossing_values`](Self::crossing_values) by the transaction's
-    /// [`transfer_crossing`](MigrationTxKind::transfer_crossing) — the accessor to reach for when
-    /// marshaling one stored transaction into a user-facing amount, so consumers do not re-derive
-    /// the funding-note-minus-buffer arithmetic and get it wrong by a fee.
-    pub fn transfer_crossing_value(&self, tx: &MigrationTransaction) -> Option<Zatoshis> {
-        tx.kind()
-            .transfer_crossing()
-            .and_then(|crossing| self.crossing_values().get(crossing).copied())
-    }
-
-    /// Replace transfer `id`'s stored PCZT with its proven bytes and move it to
-    /// [`Proved`](MigrationTxState::Proved). Called after [`prove_transfer`] installs the drawn
-    /// anchor and witnesses and proves the transaction, so the durable artifact becomes the proven,
-    /// ready-to-broadcast PCZT.
-    #[cfg(feature = "orchard")]
-    pub fn set_transaction_proved(&mut self, id: MigrationTransferId, proven_pczt: Vec<u8>) {
-        for tx in &mut self.transactions {
-            if tx.id() == id {
-                tx.pczt = proven_pczt;
-                tx.state = MigrationTxState::Proved;
-                break;
-            }
-        }
-    }
-}
+/// The persisted migration vocabulary, defined in [`model`](crate::model) and re-exported here so
+/// the paths these types have always had keep resolving. The engine is their principal consumer:
+/// it produces a [`MigrationState`] and drives the transactions inside it.
+pub use crate::model::{
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
+    MigrationTxState, ParseMigrationStatusError, ParseMigrationTxKindError,
+    ParseMigrationTxStateError,
+};
 
 /// A planned migration, before anything is built, signed, or broadcast: the denomination split, the
 /// preparation transactions that mint the funding notes, and the phase-2 transfer schedule. This is the
@@ -1269,108 +771,6 @@ fn source_pool_notes_after_run(
     remaining
 }
 
-/// The Orchard-specific wallet operations the engine needs to BUILD and PRE-SIGN a migration: the
-/// account's viewing key, its spendable notes' plaintexts, and spend-authorization signing. Kept
-/// separate from [`MigrationBackend`] so the planning and persistence parts stay pure; one wallet
-/// implements both over the same account. Behind the `orchard` feature.
-///
-/// No anchors and no witnesses appear here: every migration transaction is built and signed with
-/// its anchor and witnesses DEFERRED to proving time ([ZIP 374]) — a spent note's plaintext fully
-/// determines the signed data, and its tree position matters only to the proof, which the consumer
-/// creates through the PCZT `Updater` role once the note is mined.
-///
-/// [ZIP 374]: https://zips.z.cash/zip-0374
-#[cfg(feature = "orchard")]
-pub trait MigrationCrypto {
-    /// The backend's error type (shared with its [`MigrationBackend`] impl).
-    type Error;
-
-    /// The account's Orchard full viewing key.
-    fn orchard_fvk(&self) -> Result<orchard::keys::FullViewingKey, Self::Error>;
-
-    /// The ZIP 32 account the migration's notes belong to, or `None` if the account has no known
-    /// derivation (an imported viewing key, say).
-    ///
-    /// The builders stamp this onto every spend a migration transaction still needs a signature
-    /// for, which is how an EXTERNAL Signer recognizes those spends as the account's. A backend
-    /// that returns `None` while signing is delegated (see [`Signing::External`]) produces
-    /// transactions no derivation-matching Signer can authorize, so return the derivation whenever
-    /// the wallet knows it, even if it currently signs in process.
-    fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error>;
-
-    /// The plaintext of the spendable wallet note at `index` (into
-    /// `spendable_orchard_note_values`).
-    fn resolve_wallet_note(&self, index: usize) -> Result<orchard::note::Note, Self::Error>;
-
-    /// Add the account's Orchard spend-authorization signatures to a finalized, unproven PCZT.
-    fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
-}
-
-/// The proving seam for a migration transfer: install a transfer's deferred anchors and witnesses
-/// (ZIP 374) against the boundary its schedule drew, then prove it.
-///
-/// This is deliberately SEPARATE from [`MigrationCrypto`]. Signing needs only the account's spend
-/// authority and is a cheap, read-only (`&self`) operation; proving needs MUTABLE access to the
-/// wallet's Orchard commitment tree at a historical checkpoint (resolving a witness caches into the
-/// tree) plus the Orchard and Ironwood proving keys, a heavier capability with a different lifetime.
-/// Keeping proving in its own trait lets a wallet expose signing without dragging commitment-tree
-/// access and proving parameters into the same type, and lets a consumer supply a prover
-/// independently of the signer.
-#[cfg(feature = "orchard")]
-pub trait MigrationProver {
-    /// The prover's error type.
-    type Error;
-
-    /// Prove a pre-signed transfer against the boundary its schedule drew.
-    ///
-    /// This is where a transfer's DEFERRED anchors and witnesses (ZIP 374) are finally resolved and
-    /// installed: the implementation reads the Orchard source-tree root at the `anchor_boundary`
-    /// checkpoint (the source anchor) and the funding note's Merkle witness against it, installs both
-    /// through the PCZT `Updater` role (`set_anchor` / `set_spend_witness`), installs the Ironwood
-    /// destination anchor for the output bundle, then proves both bundles and returns the proven
-    /// PCZT, ready to broadcast. The `anchor_boundary` is the boundary height drawn at SCHEDULING
-    /// time and persisted on the transaction ([`MigrationTransaction::anchor_boundary`]); passing it
-    /// here is what makes the drawn boundary, not the tip, the tree state the transfer proves
-    /// against.
-    ///
-    /// Resolving the funding note's witness requires the boundary checkpoint to still exist in the
-    /// wallet's commitment tree at proving time; a wallet backend keeps it alive through migration
-    /// anchor-checkpoint retention (see issue #2700).
-    fn prove_transfer(
-        &mut self,
-        pczt: pczt::Pczt,
-        anchor_boundary: BlockHeight,
-    ) -> Result<pczt::Pczt, Self::Error>;
-
-    /// Prove a pre-signed PREPARATION transaction against a checkpoint at which its spent notes are
-    /// witnessable.
-    ///
-    /// Like a transfer, a preparation transaction defers its Orchard anchor and its spends'
-    /// witnesses to proving time (ZIP 374), but it carries NO drawn
-    /// [`anchor_boundary`](MigrationTransaction::anchor_boundary) (it anchors to its already-mined
-    /// dependencies, not to a bucketed boundary), so the `anchor` height is passed in: the caller
-    /// proves a preparation once its inputs are mined and picks a checkpoint at or after that (for
-    /// example the current chain tip). A preparation spends the wallet's own notes (layer 0) or
-    /// feeder notes minted by an earlier layer — one or MANY, unlike a transfer's single funding
-    /// note — and produces only an Orchard bundle (no Ironwood output), so the implementation
-    /// installs the anchor and every real spend's witness through the PCZT `Updater` role and proves
-    /// the single Orchard bundle.
-    fn prove_preparation(
-        &mut self,
-        pczt: pczt::Pczt,
-        anchor: BlockHeight,
-    ) -> Result<pczt::Pczt, Self::Error>;
-
-    /// The anchor bucket grid the wallet backing this prover currently retains its durable anchor
-    /// checkpoints on.
-    ///
-    /// [`prove_transfer`] compares this against the grid the migration was committed under and
-    /// refuses to prove a transfer whose boundary is no longer retained, so a reconfiguration
-    /// mid-migration surfaces as [`ProveError::AnchorIntervalMismatch`] rather than as a bare
-    /// missing checkpoint at witness-resolution time.
-    fn anchor_bucket_interval(&self) -> crate::scheduling::AnchorBucketInterval;
-}
-
 /// Why committing a migration's preparation failed.
 #[cfg(feature = "orchard")]
 #[derive(Debug)]
@@ -1383,7 +783,7 @@ pub enum CommitError<E> {
     Serialize(pczt::EncodingError),
     /// NU6.3 is not active on this network, so there is no destination pool to migrate into. The
     /// planning side models the same recoverable condition as
-    /// [`MigrationError::Nu63NotActive`](MigrationError::Nu63NotActive).
+    /// [`MigrationError::Nu63NotActive`].
     Nu63NotActive,
     /// No committed migration was found to build the transfers for (nothing was loaded from storage).
     NoMigrationInProgress,
@@ -1743,7 +1143,7 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 /// A transfer can only be included in a block at or below its expiry height (ZIP 203); once the
 /// chain passes it, the pre-signed transaction is dead and
 /// [`next_step`](MigrationState::next_step) surfaces it as
-/// [`AdvanceStep::Rebuild`](crate::state::AdvanceStep::Rebuild). NOTHING of the expired artifact is
+/// [`AdvanceStep::Rebuild`](crate::lifecycle::AdvanceStep::Rebuild). NOTHING of the expired artifact is
 /// reusable — the signature hash covers the expiry height, so its signatures cannot authorize any
 /// rescheduled copy. This is ZIP 318's expired-transaction handling: "a new transaction with a
 /// fresh anchor and expiry is constructed for the affected part, with its denomination unchanged".
@@ -3988,8 +3388,8 @@ mod commit_tests {
             .max()
             .expect("the committed migration has transactions");
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
             }
             other => panic!("expected a broadcast step, got {other:?}"),
@@ -4004,8 +3404,8 @@ mod commit_tests {
             .map(|t| t.id)
             .collect();
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 assert!(
                     layer1_ids.contains(&id),
                     "layer 1 broadcasts once layer 0 mines"
@@ -4017,8 +3417,8 @@ mod commit_tests {
             state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
         }
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 let tx = state
                     .transactions
                     .iter()
@@ -4171,8 +3571,8 @@ mod commit_tests {
         for layer in 0..layer_count {
             let ids = layer_ids(&state, layer);
             match state.next_step(target) {
-                crate::state::AdvanceStep::Prove { id }
-                | crate::state::AdvanceStep::Broadcast { id } => assert!(
+                crate::lifecycle::AdvanceStep::Prove { id }
+                | crate::lifecycle::AdvanceStep::Broadcast { id } => assert!(
                     ids.contains(&id),
                     "layer {layer} is proved or broadcast once its predecessor has mined"
                 ),
@@ -4201,8 +3601,8 @@ mod commit_tests {
             }
         }
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::lifecycle::AdvanceStep::Prove { id }
+            | crate::lifecycle::AdvanceStep::Broadcast { id } => {
                 let tx = state.transactions.iter().find(|t| t.id == id).unwrap();
                 assert!(
                     matches!(tx.kind, MigrationTxKind::Transfer { .. }),

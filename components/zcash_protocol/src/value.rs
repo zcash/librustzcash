@@ -551,7 +551,7 @@ pub mod testing {
     ///
     /// # Panics
     ///
-    /// Panics if `amount` exceeds [`MAX_MONEY`](super::MAX_MONEY).
+    /// Panics if `amount` exceeds [`super::MAX_MONEY`].
     pub fn zats(amount: u64) -> Zatoshis {
         Zatoshis::const_from_u64(amount)
     }

@@ -19,6 +19,19 @@ and this library adheres to Rust's notion of
   transfer schedule's drawn anchor boundaries and broadcast heights.
 - `zcash_pool_migration::engine::MigrationState::sync_wakeup_schedule`, the above computed over a
   committed migration's transfers that still need proofs.
+- `zcash_pool_migration::model`, the persisted migration vocabulary
+  (`MigrationTransferId`, `MigrationTxKind`, `MigrationTxState`,
+  `MigrationStatus`, `MigrationTransaction`, `MigrationState`, and their parse
+  errors), moved out of `engine` so the crate's module graph is acyclic. Every
+  type is re-exported from `engine`, so existing paths are unaffected.
+- `zcash_pool_migration::backend`, the five wallet trait seams
+  (`MigrationBackend`, `PoolMigrationRead`, `PoolMigrationWrite`, and behind the
+  `orchard` feature `MigrationCrypto` and `MigrationProver`), gathered from
+  `engine`. All five are re-exported from `engine`, so existing paths are
+  unaffected.
+- `zcash_pool_migration::lifecycle`, the new name of the `state` module.
+  `zcash_pool_migration::state` remains as an alias, so existing paths are
+  unaffected.
 
 ### Changed
 - Migrated to `zcash_client_backend 0.24.0-rc.5`.
