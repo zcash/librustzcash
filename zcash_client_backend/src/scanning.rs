@@ -337,7 +337,8 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     /// Returns the Ironwood keys to be used for incoming note detection.
     ///
     /// Ironwood outputs are trial-decrypted with the account's Orchard viewing keys (see
-    /// [`IronwoodDomain`]), but are tracked as a separate pool from Orchard.
+    /// [`orchard::note_encryption::IronwoodDomain`]), but are tracked as a separate pool from
+    /// Orchard.
     #[cfg(feature = "orchard")]
     pub fn ironwood(
         &self,

@@ -1293,7 +1293,7 @@ pub trait MigrationCrypto {
     ///
     /// The builders stamp this onto every spend a migration transaction still needs a signature
     /// for, which is how an EXTERNAL Signer recognizes those spends as the account's. A backend
-    /// that returns `None` while signing is delegated (see [`Signing::External`]) produces
+    /// that returns `None` while signing is delegated to an external signer produces
     /// transactions no derivation-matching Signer can authorize, so return the derivation whenever
     /// the wallet knows it, even if it currently signs in process.
     fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error>;
@@ -1383,7 +1383,7 @@ pub enum CommitError<E> {
     Serialize(pczt::EncodingError),
     /// NU6.3 is not active on this network, so there is no destination pool to migrate into. The
     /// planning side models the same recoverable condition as
-    /// [`MigrationError::Nu63NotActive`](MigrationError::Nu63NotActive).
+    /// [`MigrationError::Nu63NotActive`].
     Nu63NotActive,
     /// No committed migration was found to build the transfers for (nothing was loaded from storage).
     NoMigrationInProgress,
