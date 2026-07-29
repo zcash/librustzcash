@@ -457,23 +457,41 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "expensive-tests")]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
     fn stabilized_note_spendable_after_deep_rewind_sapling() {
         testing::pool::stabilized_note_spendable_after_deep_rewind::<SaplingPoolTester>()
     }
 
     #[test]
-    #[cfg(feature = "orchard")]
+    #[cfg(all(feature = "orchard", feature = "expensive-tests"))]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
     fn stabilized_note_spendable_after_deep_rewind_orchard() {
         testing::pool::stabilized_note_spendable_after_deep_rewind::<OrchardPoolTester>()
     }
 
     #[test]
+    #[cfg(feature = "expensive-tests")]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
     fn newly_discovered_notes_become_stabilized_sapling() {
         testing::pool::newly_discovered_notes_become_stabilized::<SaplingPoolTester>()
     }
 
     #[test]
-    #[cfg(feature = "orchard")]
+    #[cfg(all(feature = "orchard", feature = "expensive-tests"))]
+    #[cfg_attr(
+        feature = "ignore-expensive-tests",
+        ignore = "covered by the expensive-test CI matrix"
+    )]
     fn newly_discovered_notes_become_stabilized_orchard() {
         testing::pool::newly_discovered_notes_become_stabilized::<OrchardPoolTester>()
     }

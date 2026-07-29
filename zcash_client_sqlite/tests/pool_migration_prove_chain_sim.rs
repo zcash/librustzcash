@@ -24,7 +24,8 @@
 #![cfg(all(
     feature = "orchard",
     feature = "pczt-tests",
-    feature = "test-dependencies"
+    feature = "test-dependencies",
+    feature = "expensive-tests"
 ))]
 
 use std::convert::Infallible;
@@ -556,6 +557,10 @@ fn scenarios() -> Vec<Scenario> {
 }
 
 #[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
 fn migration_proves_end_to_end_against_a_funded_wallet() {
     // Proving dominates this test's cost: each preparation proves an Orchard bundle, and each
     // transfer proves both an Orchard AND an Ironwood bundle, so proving every scenario in
@@ -581,6 +586,10 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
 /// configured on the migration side, so a wallet configured with a non-default retention interval
 /// automatically schedules its migration against the boundaries it actually retains.
 #[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
 fn migration_anchors_to_the_wallets_configured_retention_grid() {
     use core::num::NonZeroU32;
     use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;

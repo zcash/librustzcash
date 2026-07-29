@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- The additive `ignore-expensive-tests` feature, which compiles expensive tests
+  but marks them as ignored for broad `--all-features` test runs.
+- `zcash_client_sqlite::testing::db::TestDbFactory::file_backed`, for tests
+  that require database reopening or multiple connections.
 - The `v_transactions` view has a new `pool_crossing_value` column, which
   classifies wallet-internal transfers that move an account's own funds between
   shielded pools (for example, ZIP 318 Orchard -> Ironwood migration transfers)
@@ -33,6 +37,11 @@ workspace.
   classified once the wallet has observed the returned output (which the
   scanner marks as change); while such a transaction is unmined it is treated
   as an ordinary payment.
+
+### Changed
+- `zcash_client_sqlite::testing::db::TestDbFactory::default` and
+  `zcash_client_sqlite::testing::BlockCache::default` now use isolated
+  in-memory SQLite databases.
 
 ### Fixed
 - Note selection now draws the oldest eligible notes first, ordering by note

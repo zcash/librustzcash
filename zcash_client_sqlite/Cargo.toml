@@ -220,6 +220,9 @@ unstable = ["zcash_client_backend/unstable"]
 ## A feature used to isolate tests that are expensive to run. Test-only.
 expensive-tests = []
 
+## Marks expensive tests as ignored without removing them from compilation. Test-only.
+ignore-expensive-tests = []
+
 ## A feature used to enable PCZT-specific tests without interfering with the
 ## protocol-specific flags. Test-only.
 pczt-tests = ["serde", "zcash_client_backend/pczt"]

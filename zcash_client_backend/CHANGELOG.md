@@ -57,6 +57,9 @@ workspace.
 - `zcash_client_backend::tor::http::HttpError::Timeout`
 
 ### Changed
+- Transaction-construction helpers exposed by `test-dependencies` use the
+  Sapling mock provers. Tests that need cryptographically valid proofs must call
+  the production transaction-construction APIs with a real prover.
 - `zcash_client_backend::data_api::OutputLockStore::get_locked_outputs` is no longer
   gated behind `test-dependencies`; every implementor must now provide it
   unconditionally.
