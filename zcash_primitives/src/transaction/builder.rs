@@ -1924,7 +1924,7 @@ mod tests {
         },
     };
 
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     use {
         crate::transaction::{OutPoint, TxOut, TxVersion, builder::DEFAULT_TX_EXPIRY_DELTA},
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
@@ -2578,7 +2578,7 @@ mod tests {
     // This test only works with the transparent_inputs feature because we have to
     // be able to create a tx with a valid balance, without using Sapling inputs.
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
         use crate::transaction::builder::{self, TransparentBuilder};
         use ::transparent::{builder::TransparentSigningSet, keys::NonHardenedChildIndex};
