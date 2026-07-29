@@ -377,6 +377,7 @@ where
             params,
             account,
             zats,
+            ValueSelection::Accumulate,
             target_height,
             anchor_height,
             confirmations_policy,
@@ -387,6 +388,54 @@ where
         ),
     }
 }
+
+/// Selects the single OLDEST spendable note of the given protocol whose value alone is at least
+/// `value`, or `None` when no single eligible note covers it. Age is the note's commitment tree
+/// position, which is assigned in strict chain order.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_single_spendable_note<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedPool,
+    to_spendable_note: F,
+    lock_filter: LockFilter<'_>,
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
+where
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    let Some(anchor_height) =
+        get_anchor_height(conn, target_height, confirmations_policy.trusted())?
+    else {
+        return Ok(None);
+    };
+
+    Ok(select_spendable_notes_matching_value(
+        conn,
+        params,
+        account,
+        value,
+        ValueSelection::SingleCovering,
+        target_height,
+        anchor_height,
+        confirmations_policy,
+        exclude,
+        protocol,
+        &to_spendable_note,
+        lock_filter,
+    )?
+    .into_iter()
+    .next())
+}
+
 /// Selects all the unspent notes with value greater than [`zip317::MARGINAL_FEE`] and for the
 /// specified shielded protocols from a given account, excepting any explicitly excluded note
 /// identifiers.
@@ -562,9 +611,23 @@ where
         .collect()
 }
 
+/// The shape of a value-targeted note selection: accumulate the oldest notes toward the target,
+/// or draw only the single oldest note that covers it alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ValueSelection {
+    /// Accumulate the oldest eligible notes until the target value is covered.
+    Accumulate,
+    /// Select only the oldest eligible notes whose individual values cover the target alone,
+    /// oldest first.
+    SingleCovering,
+}
+
 /// Selects the set of spendable notes whose sum will be equal or greater that the
 /// specified ``target_value`` in Zatoshis from the specified shielded protocols excluding
 /// the ones present in the ``exclude`` slice.
+///
+/// Under [`ValueSelection::SingleCovering`], instead returns the notes whose individual value
+/// covers ``target_value`` alone, oldest first; callers take the head.
 ///
 /// - Implementation details
 ///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
@@ -575,6 +638,7 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     params: &P,
     account: AccountUuid,
     target_value: Zatoshis,
+    selection: ValueSelection,
     target_height: TargetHeight,
     anchor_height: BlockHeight,
     confirmations_policy: ConfirmationsPolicy,
@@ -638,6 +702,32 @@ where
     };
     let crossing_note_subquery =
         "SELECT * from eligible WHERE so_far >= :target_value ORDER BY so_far LIMIT 1";
+    let result_columns = format!(
+        "id, txid, {output_index_col},
+                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
+                ufvk, recipient_key_scope,
+                mined_height, witness_stabilized, trust_status,
+                max_shielding_input_height, min_shielding_input_trust"
+    );
+    // The `eligible` CTE is shared; only the selection over it differs by shape. Accumulation
+    // takes every note below the running-sum threshold plus the threshold-crossing note;
+    // single-covering takes the individually sufficient notes, oldest first, and relies on the
+    // caller to take the head (the Rust-side confirmations filter below may drop leading rows,
+    // so the limit cannot be applied in SQL).
+    let selection_tail = match selection {
+        ValueSelection::Accumulate => format!(
+            "SELECT {result_columns}
+         FROM eligible WHERE so_far < :target_value
+         UNION
+         SELECT {result_columns}
+         FROM ({crossing_note_subquery})"
+        ),
+        ValueSelection::SingleCovering => format!(
+            "SELECT {result_columns}
+         FROM eligible WHERE value >= :target_value
+         ORDER BY commitment_tree_position"
+        ),
+    };
     let eligible_condition = output_eligible_condition(lock_filter, "rn");
     let mut stmt_select_notes = conn.prepare_cached(&format!(
         "WITH eligible AS (
@@ -687,19 +777,7 @@ where
              AND ({eligible_condition}) -- the note is eligible under the lock filter
              GROUP BY rn.id
          )
-         SELECT id, txid, {output_index_col},
-                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                ufvk, recipient_key_scope,
-                mined_height, witness_stabilized, trust_status,
-                max_shielding_input_height, min_shielding_input_trust
-         FROM eligible WHERE so_far < :target_value
-         UNION
-         SELECT id, txid, {output_index_col},
-                diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                ufvk, recipient_key_scope,
-                mined_height, witness_stabilized, trust_status,
-                max_shielding_input_height, min_shielding_input_trust
-         FROM ({crossing_note_subquery})",
+         {selection_tail}",
         spent_notes_clause(table_prefix),
     ))?;
 

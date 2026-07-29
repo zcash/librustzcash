@@ -358,6 +358,14 @@ pub(crate) fn canonical_crossing_builds_at_empty_boundary_block() {
 }
 
 #[cfg(feature = "orchard")]
+pub(crate) fn canonical_crossing_prefers_single_note() {
+    zcash_client_backend::data_api::testing::pool::canonical_crossing_prefers_single_note(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
 pub(crate) fn multi_note_crossing_is_not_bucketed() {
     zcash_client_backend::data_api::testing::pool::multi_note_crossing_is_not_bucketed(
         TestDbFactory::default(),

@@ -12,6 +12,18 @@ workspace.
 
 ### Added
 - `zcash_client_backend::data_api::anchor_retention::AnchorRetention::retained_in_range`
+- `zcash_client_backend::data_api::wallet::input_selection::NoteSelection`
+- `zcash_client_backend::data_api::wallet::input_selection::SpendPolicy::{with_note_selection, note_selection}`
+- `zcash_client_backend::data_api::InputSource::select_single_spendable_note`, with a
+  best-effort default implementation
+- `zcash_client_backend::data_api::ReceivedNotes::{is_empty, into_single_covering}`
+
+### Changed
+- `zcash_client_backend::data_api::wallet::propose_transfer` now funds a canonical
+  ZIP 318 crossing attempt from the single oldest Orchard note that covers the
+  payment and its fee, falling back to ordinary accumulation when no such note
+  exists. Payments of canonical denominations that previously lost the canonical
+  shape to multi-note funding now take it whenever a single covering note exists.
 
 ### Fixed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks` now creates (and retains) a

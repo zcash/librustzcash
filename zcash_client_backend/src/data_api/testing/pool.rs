@@ -9357,6 +9357,125 @@ pub fn multi_note_crossing_is_not_bucketed<Dsf: DataStoreFactory>(
     );
 }
 
+/// A canonical payment is funded from the single oldest covering note even when accumulation
+/// would have reached the target through several smaller notes first.
+///
+/// Oldest-first accumulation crosses the target through small notes whenever the oldest notes
+/// are small, funding the payment while losing the single-input canonical shape. The canonical
+/// attempt therefore PREFERS single-note funding ([`NoteSelection::PreferSingle`]): when any
+/// single eligible note covers the payment and its fee, that note is chosen and the transaction
+/// takes the migration shape. Ordinary (non-canonical) payments keep accumulating.
+///
+/// [`NoteSelection::PreferSingle`]:
+///     crate::data_api::wallet::input_selection::NoteSelection::PreferSingle
+#[cfg(feature = "orchard")]
+pub fn canonical_crossing_prefers_single_note<Dsf: DataStoreFactory>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) {
+    let interval = AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+    let activation = BlockHeight::from_u32(100_000);
+    let network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    let account = st.test_account().cloned().unwrap();
+    let fvk = OrchardPoolTester::test_account_fvk(&st);
+    let recipient = OrchardPoolTester::fvk_default_address(&fvk).to_zcash_address(st.network());
+
+    // Two OLDER notes that together cover the payment, then one LARGER note that covers it
+    // alone. Accumulation reaches the target at the second note and never touches the third,
+    // so which shape the proposal takes distinguishes the two selection behaviors.
+    let small_value = Zatoshis::const_from_u64(600_000);
+    let large_value = Zatoshis::const_from_u64(1_200_000);
+    let (first_height, _, _) = st.add_a_single_note_checking_balance(small_value);
+    st.generate_next_block(&fvk, AddressType::DefaultExternal, small_value);
+    st.generate_next_block(&fvk, AddressType::DefaultExternal, large_value);
+    st.scan_cached_blocks(first_height + 1, 2);
+
+    let interval_blocks = interval.block_count().get();
+    let tip = u32::from(interval.boundary_at_or_above(first_height)) + 3 * interval_blocks + 5;
+    let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let filler_count = tip - u32::from(first_height) - 2;
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+    }
+    st.scan_cached_blocks(first_height + 3, filler_count as usize);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+    let propose = |st: &mut TestState<_, _, _>, amount: Zatoshis| {
+        let request =
+            TransactionRequest::new(vec![Payment::without_memo(recipient.clone(), amount)])
+                .unwrap();
+        st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+    };
+
+    // The canonical payment takes the single-note shape, spending the LARGE note.
+    let canonical = propose(&mut st, MAX_RESIDUAL_VALUE).expect("the wallet can fund this");
+    let step = canonical.steps().first();
+    let zip318 = st.wallet().pool_migration_params();
+    let canonical_fee = crate::fees::canonical_crossing_fee(
+        st.network(),
+        BlockHeight::from(canonical.min_target_height()),
+    )
+    .expect("the canonical shape is a valid input to the ZIP 317 rule");
+    assert_eq!(
+        step.input_count_in_pool(PoolType::ORCHARD),
+        1,
+        "the canonical payment must be funded from a single note"
+    );
+    assert!(step.is_canonical_crossing(&zip318, canonical_fee));
+    let spent = step
+        .shielded_inputs()
+        .expect("a shielded step spends notes")
+        .notes()
+        .first()
+        .note()
+        .value();
+    assert_eq!(
+        spent, large_value,
+        "the single covering note funds the payment, not the older small notes"
+    );
+
+    // An ordinary payment of a NON-canonical amount still accumulates the oldest notes.
+    let ordinary = propose(
+        &mut st,
+        (MAX_RESIDUAL_VALUE + Zatoshis::const_from_u64(1)).unwrap(),
+    )
+    .expect("the wallet can fund this too");
+    let step = ordinary.steps().first();
+    assert!(
+        step.input_count_in_pool(PoolType::ORCHARD) > 1,
+        "single-note preference must not leak into ordinary selection"
+    );
+}
+
 /// Self-migration does not stall once the wallet holds Ironwood notes.
 ///
 /// A user moving their own funds across the turnstile sends themselves canonical amounts

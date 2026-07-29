@@ -858,9 +858,17 @@ where
         // canonical path to attempt.
         .filter(|_| spend_policy.permits_shielded(ShieldedPool::Orchard))
         .map(|bucketed_policy| {
+            // Single-note funding is PREFERRED, not merely hoped for: a migration transfer
+            // spends exactly one note, and accumulation reaches the target through several
+            // small notes whenever the oldest notes are small — funding perfectly well while
+            // losing the canonical shape. Preferring the oldest single covering note makes the
+            // canonical outcome the common one; when no single note covers the payment, the
+            // fallback accumulation funds it and the shape check below discards the attempt,
+            // exactly as before.
             let orchard_only =
                 input_selection::SpendPolicy::shielded_pools([ShieldedPool::Orchard])
-                    .with_locked_input_policy(spend_policy.locked_input_policy().clone());
+                    .with_locked_input_policy(spend_policy.locked_input_policy().clone())
+                    .with_note_selection(input_selection::NoteSelection::PreferSingle);
 
             input_selector.propose_transaction(
                 params,
