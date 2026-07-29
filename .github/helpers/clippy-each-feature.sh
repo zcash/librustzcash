@@ -16,30 +16,24 @@
 # dependency build is paid once and reused across every configuration rather than once per
 # runner.
 #
-# Configurations listed in clippy-known-failures.txt are pre-existing debt and may fail; see
-# that file for what they are and how to burn them down. Anything else must lint clean.
-#
 # Usage:
 #   .github/helpers/clippy-each-feature.sh                       # every workspace crate
 #   .github/helpers/clippy-each-feature.sh zcash_client_backend  # one crate
 #
-# Exits non-zero if any configuration that is not known-failing fails to lint.
+# Exits non-zero if any configuration fails to lint.
 
 set -uo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
-allow="$repo_root/.github/workflows/clippy-known-failures.txt"
 
 # GitHub's log-annotation commands are noise outside Actions, so emit them only there.
 if [ -n "${GITHUB_ACTIONS:-}" ]; then
     group_start() { echo "::group::$1"; }
     group_end() { echo "::endgroup::"; }
-    notice() { echo "::notice::$1"; }
     error() { echo "::error::$1"; }
 else
     group_start() { echo "=== $1"; }
     group_end() { :; }
-    notice() { echo "note: $1"; }
     error() { echo "error: $1" >&2; }
 fi
 
@@ -65,17 +59,8 @@ for crate in $crates; do
             set -- -p "$crate" --no-default-features --features "$f" --all-targets
         fi
 
-        known=no
-        if grep -qxF "$crate $f" "$allow"; then known=yes; fi
-
-        group_start "$crate $f (known-failing: $known)"
-        if (cd "$repo_root" && cargo clippy "$@" -- -D warnings); then
-            if [ "$known" = yes ]; then
-                notice "$crate $f now lints clean; remove it from $allow"
-            fi
-        elif [ "$known" = yes ]; then
-            notice "$crate $f failed, but is known-failing"
-        else
+        group_start "$crate $f"
+        if ! (cd "$repo_root" && cargo clippy "$@" -- -D warnings); then
             error "clippy failed for $crate $f"
             failed=1
         fi
