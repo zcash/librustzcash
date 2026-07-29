@@ -1,5 +1,8 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
 
+// The `ScanError` accessors below match on its variants bare.
+use ScanError::*;
+
 use core::convert::TryFrom;
 use core::fmt::{self, Debug};
 use std::collections::{HashMap, HashSet};
@@ -659,7 +662,6 @@ pub enum ScanError {
 impl ScanError {
     /// Returns whether this error is the result of a failed continuity check
     pub fn is_continuity_error(&self) -> bool {
-        use ScanError::*;
         match self {
             EncodingInvalid { .. } => false,
             PrevHashMismatch { .. } => true,
@@ -673,7 +675,6 @@ impl ScanError {
 
     /// Returns the block height at which the scan error occurred
     pub fn at_height(&self) -> BlockHeight {
-        use ScanError::*;
         match self {
             EncodingInvalid { at_height, .. } => *at_height,
             PrevHashMismatch { at_height } => *at_height,
@@ -688,7 +689,6 @@ impl ScanError {
 
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use ScanError::*;
         match &self {
             EncodingInvalid {
                 txid,

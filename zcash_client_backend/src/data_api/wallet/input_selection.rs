@@ -1,4 +1,7 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
+#[cfg(feature = "transparent-inputs")]
+use {transparent::keys::TransparentKeyScope, zcash_protocol::constants::MAX_BLOCK_BYTES};
+
 use core::marker::PhantomData;
 use nonempty::NonEmpty;
 use std::{
@@ -846,8 +849,6 @@ impl<DbT> GreedyInputSelector<DbT> {
 /// for general (non-shielding) transfers.
 #[cfg(feature = "transparent-inputs")]
 fn shielding_max_inputs(block_space_percent: u32) -> usize {
-    use zcash_protocol::constants::MAX_BLOCK_BYTES;
-
     (MAX_BLOCK_BYTES.saturating_mul(block_space_percent as usize) / 100) / P2PKH_STANDARD_INPUT_SIZE
 }
 
@@ -2297,8 +2298,6 @@ fn gather_shielding_inputs<DbT, ChangeErrT>(
 where
     DbT: InputSource,
 {
-    use transparent::keys::TransparentKeyScope;
-
     // Gather the spendable UTXOs for every source address in a single query. This avoids issuing
     // one query per address (including for the many addresses that have no spendable outputs),
     // which is prohibitively expensive for wallets that hold large numbers of transparent
@@ -2550,6 +2549,8 @@ mod tests {
 #[cfg(test)]
 mod spend_policy_tests {
     use super::*;
+    #[cfg(feature = "transparent-inputs")]
+    use crate::data_api::CoinbaseFilter;
     use crate::wallet::LockOwner;
 
     // The default spend policy preserves the historical `ShieldedOnly` behavior: notes may be
@@ -2581,7 +2582,6 @@ mod spend_policy_tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn coinbase_policy_maps_to_filter() {
-        use crate::data_api::CoinbaseFilter;
         assert_eq!(
             CoinbaseFilter::from(CoinbasePolicy::OnlyCoinbase),
             CoinbaseFilter::CoinbaseOnly

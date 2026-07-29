@@ -232,11 +232,7 @@ pub fn canonical_crossing_fee<P: consensus::Parameters>(
     params: &P,
     target_height: BlockHeight,
 ) -> Result<Zatoshis, zcash_primitives::transaction::fees::zip317::FeeError> {
-    use zcash_primitives::transaction::fees::{
-        FeeRule as _, transparent::InputSize, zip317::FeeRule,
-    };
-
-    FeeRule::standard().fee_required(
+    prim_zip317::FeeRule::standard().fee_required(
         params,
         target_height,
         std::iter::empty::<InputSize>(),
@@ -757,6 +753,12 @@ pub trait ChangeStrategy {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[cfg(feature = "orchard")]
+    use {
+        zcash_primitives::transaction::fees::zip317::MARGINAL_FEE,
+        zcash_protocol::consensus::{BlockHeight, MAIN_NETWORK},
+    };
+
     use ::transparent::bundle::{OutPoint, TxOut};
     use zcash_primitives::transaction::fees::transparent;
     use zcash_protocol::value::Zatoshis;
@@ -768,9 +770,6 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn canonical_crossing_fee_is_three_marginal_fees() {
-        use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
-        use zcash_protocol::consensus::{BlockHeight, MAIN_NETWORK};
-
         let fee = super::canonical_crossing_fee(&MAIN_NETWORK, BlockHeight::from_u32(2_000_000))
             .expect("the canonical shape is a valid input to the ZIP 317 rule");
         assert_eq!(fee, (MARGINAL_FEE * 3u64).expect("a valid amount"));

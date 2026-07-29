@@ -11,6 +11,11 @@ use std::{
 };
 use zcash_address::unified::{self, Encoding};
 
+use self::proposal::proposed_input;
+// `parse_standard_proposal` matches the input value's variants bare.
+use self::proposal::proposed_input::Value::*;
+use self::proposal::{PriorStepChange, PriorStepOutput, ReceivedOutput};
+
 use sapling::{self, Node, note::ExtractedNoteCommitment};
 use zcash_note_encryption::{COMPACT_NOTE_SIZE, EphemeralKeyBytes};
 use zcash_primitives::{
@@ -662,8 +667,6 @@ impl proposal::Proposal {
     /// Serializes a [`Proposal`] based upon a supported [`StandardFeeRule`] to its protobuf
     /// representation.
     pub fn from_standard_proposal<NoteRef>(value: &Proposal<StandardFeeRule, NoteRef>) -> Self {
-        use proposal::proposed_input;
-        use proposal::{PriorStepChange, PriorStepOutput, ReceivedOutput};
         let steps = value
             .steps()
             .iter()
@@ -818,7 +821,6 @@ impl proposal::Proposal {
         ParamsT: consensus::Parameters,
         DbT: InputSource<Error = DbError>,
     {
-        use self::proposal::proposed_input::Value::*;
         match self.proto_version {
             PROPOSAL_SER_V1 => {
                 let fee_rule = match self.fee_rule() {
