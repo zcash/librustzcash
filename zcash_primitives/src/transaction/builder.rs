@@ -1909,18 +1909,6 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "circuits")]
-    use zcash_protocol::consensus::BlockHeight;
-
-    #[cfg(all(feature = "circuits", feature = "transparent-inputs"))]
-    use {
-        crate::transaction::builder::{self, TransparentBuilder},
-        ::transparent::keys::NonHardenedChildIndex,
-    };
-
-    #[cfg(feature = "circuits")]
-    use crate::transaction::fees::zip317::MINIMUM_FEE;
-
     #[cfg(all(feature = "circuits", feature = "std"))]
     use {super::cached_orchard_proving_key, core::ptr, orchard::circuit::OrchardCircuitVersion};
 
@@ -1928,6 +1916,7 @@ mod tests {
     use {
         super::{Builder, Error},
         crate::transaction::builder::{BuildConfig, BundlePadding},
+        crate::transaction::fees::zip317::MINIMUM_FEE,
         ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey},
         ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
         assert_matches::assert_matches,
@@ -1936,7 +1925,7 @@ mod tests {
         incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness},
         rand_core::OsRng,
         zcash_protocol::{
-            consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+            consensus::{BlockHeight, NetworkUpgrade, Parameters, TEST_NETWORK},
             memo::MemoBytes,
             value::{BalanceError, ZatBalance, Zatoshis},
         },
@@ -1944,8 +1933,9 @@ mod tests {
 
     #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     use {
+        crate::transaction::builder::{self, TransparentBuilder},
         crate::transaction::{OutPoint, TxOut, TxVersion, builder::DEFAULT_TX_EXPIRY_DELTA},
-        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
         zcash_protocol::consensus::BranchId,
         zip32::AccountId,
     };
