@@ -75,6 +75,11 @@ pub(crate) struct Tables {
 // ---------------------------------------------------------------------------
 
 fn create_migrations_sql(t: &Tables) -> String {
+    // `anchor_bucket_interval` carries a `DEFAULT` only so that this DDL and the `ADD COLUMN` in
+    // the `orchard_ironwood_migration_anchor_interval` schema migration produce the same stored
+    // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
+    // column explicitly, so no insert ever falls back to it.
+    //
     // `account_id` is a foreign key into the wallet's `accounts` table: the pool-migration tables
     // live in the wallet database alongside `accounts`, so an account's migration is owned by its
     // account row and removed with it. Deleting an account cascades to its migration here, whose
@@ -90,9 +95,10 @@ fn create_migrations_sql(t: &Tables) -> String {
             note_split_prep_fees INTEGER NOT NULL,
             note_split_total_input INTEGER NOT NULL,
             note_split_total_migratable INTEGER NOT NULL,
-            anchor_bucket_interval INTEGER NOT NULL
+            anchor_bucket_interval INTEGER NOT NULL DEFAULT {}
         )",
-        t.migrations
+        t.migrations,
+        AnchorBucketInterval::ZIP_318.block_count()
     )
 }
 
