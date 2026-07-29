@@ -10,6 +10,8 @@ use zcash_primitives::transaction::fees::{
 use zcash_protocol::zip318::PoolMigrationConstants;
 
 use crate::data_api::anchor_retention::PoolMigrationParams;
+#[cfg(feature = "orchard")]
+use zcash_protocol::PoolType;
 use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -831,7 +833,40 @@ where
             .map(ChangeValue::ephemeral_transparent),
     );
 
-    TransactionBalance::new(change, fee).map_err(|_| overflow())
+    // Record the padding the fee above was actually charged against, derived from the change set
+    // finally chosen rather than from any candidate considered along the way. The builder reads
+    // this back instead of re-deciding, so the two cannot disagree.
+    #[cfg(feature = "orchard")]
+    let ironwood_padding = {
+        let final_change = OutputManifest {
+            transparent: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::TRANSPARENT)
+                .count(),
+            sapling: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::SAPLING)
+                .count(),
+            orchard: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::ORCHARD)
+                .count(),
+            ironwood: change
+                .iter()
+                .filter(|c| c.output_pool() == PoolType::IRONWOOD)
+                .count(),
+        };
+        if ironwood_is_canonical_crossing(final_change) {
+            BundlePadding::UNPADDED
+        } else {
+            BundlePadding::DEFAULT
+        }
+    };
+
+    let balance = TransactionBalance::new(change, fee).map_err(|_| overflow())?;
+    #[cfg(feature = "orchard")]
+    let balance = balance.with_ironwood_bundle_padding(ironwood_padding);
+    Ok(balance)
 }
 
 /// Returns a `[ChangeStrategy::DustInputs]` error if some of the inputs provided

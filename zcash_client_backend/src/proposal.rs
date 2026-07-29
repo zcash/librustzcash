@@ -938,7 +938,12 @@ impl<NoteRef> Step<NoteRef> {
     /// - no Ironwood spends, a step funded from Ironwood crossing nothing;
     /// - no Ironwood change, leaving a single Ironwood output;
     /// - that output's value is a canonical denomination under `params`;
-    /// - the step's anchor lies on `params`' anchor bucket grid.
+    /// - the step's anchor lies on `params`' anchor bucket grid;
+    /// - the fee equals `canonical_fee`, which the caller obtains from
+    ///   [`fees::canonical_crossing_fee`] for the consensus parameters and target height the
+    ///   transaction will actually be built against.
+    ///
+    /// [`fees::canonical_crossing_fee`]: crate::fees::canonical_crossing_fee
     ///
     /// Dropping the Ironwood padding without the rest would not buy anonymity but destroy it: an
     /// unpadded Ironwood bundle beside an Orchard bundle of the wrong size, or against a
@@ -947,7 +952,11 @@ impl<NoteRef> Step<NoteRef> {
     ///
     /// [ZIP 318]: https://zips.z.cash/zip-0318
     #[cfg(feature = "orchard")]
-    pub fn is_canonical_crossing<P: PoolMigrationConstants>(&self, params: &P) -> bool {
+    pub fn is_canonical_crossing<P: PoolMigrationConstants>(
+        &self,
+        params: &P,
+        canonical_fee: Zatoshis,
+    ) -> bool {
         self.input_count_in_pool(PoolType::ORCHARD) == 1
             && self.input_count_in_pool(PoolType::IRONWOOD) == 0
             && self.change_count_in_pool(PoolType::IRONWOOD) == 0
@@ -965,21 +974,30 @@ impl<NoteRef> Step<NoteRef> {
             && self
                 .anchor_height()
                 .is_some_and(|anchor| params.anchor_bucket_interval().is_boundary(anchor))
+            // ZIP 318 forbids a non-standard fee, which would partition the anonymity set as
+            // surely as a non-standard shape. A `ChangeStrategy` may be built on any fee rule,
+            // including a fixed non-standard one, so a structurally perfect crossing can still
+            // carry a distinguishing fee.
+            //
+            // This condition is deliberately absent from `ironwood_bundle_padding`: the fee model
+            // decides that padding WHILE computing the fee, so it cannot test the result against a
+            // target. Keeping the fee here makes this predicate a gate on whether to keep a
+            // proposal at all, rather than an input the builder must reproduce.
+            && self.balance().fee_required() == canonical_fee
     }
 
     /// The transactional bundle padding the transaction builder must use for this step's Ironwood
-    /// bundle: unpadded for a canonical crossing (see [`Step::is_canonical_crossing`]), and the
-    /// default two-action floor otherwise.
+    /// bundle: the padding the [`ChangeStrategy`] recorded when it computed the fee.
     ///
-    /// This is derived from the step rather than configured by the caller, so that the fee model
-    /// and the builder cannot disagree about the resulting action count.
+    /// This is READ, not re-derived. The builder must produce exactly the action count the fee was
+    /// charged against, and a second derivation could disagree with the first — which is precisely
+    /// what happens for a condition only one of them can evaluate, such as whether the resulting
+    /// fee is itself canonical.
+    ///
+    /// [`ChangeStrategy`]: crate::fees::ChangeStrategy
     #[cfg(feature = "orchard")]
-    pub fn ironwood_bundle_padding<P: PoolMigrationConstants>(&self, params: &P) -> BundlePadding {
-        if self.is_canonical_crossing(params) {
-            BundlePadding::UNPADDED
-        } else {
-            BundlePadding::DEFAULT
-        }
+    pub fn ironwood_bundle_padding(&self) -> BundlePadding {
+        self.balance().ironwood_bundle_padding()
     }
 
     #[cfg(feature = "orchard")]
@@ -1189,6 +1207,15 @@ mod tests {
         )
     }
 
+    /// The canonical crossing fee under the mainnet parameters these tests use.
+    fn canonical_fee() -> Zatoshis {
+        crate::fees::canonical_crossing_fee(
+            &zcash_protocol::consensus::MAIN_NETWORK,
+            BlockHeight::from_u32(2_000_000),
+        )
+        .expect("the canonical shape is a valid input to the ZIP 317 rule")
+    }
+
     /// The ZIP 318 parameters a wallet retaining the specified grid would report. Tests take their
     /// parameters from a wallet-shaped value, as production code does; there is deliberately no
     /// implementation of `PoolMigrationConstants` for a network type.
@@ -1225,7 +1252,9 @@ mod tests {
             // A boundary of the ZIP 318 grid: a canonical crossing must be anchored to one.
             anchor_height: Some(BlockHeight::from_u32(144)),
             prior_step_inputs: vec![],
-            balance: TransactionBalance::new(change, Zatoshis::ZERO).unwrap(),
+            balance: TransactionBalance::new(change, canonical_fee())
+                .unwrap()
+                .with_ironwood_bundle_padding(BundlePadding::UNPADDED),
             is_shielding: false,
         }
     }
@@ -1237,16 +1266,13 @@ mod tests {
         for value in [COIN, COIN / 2, COIN / 100, 20 * COIN, 10_000 * COIN] {
             let step = ironwood_payment_step(value, vec![]);
             assert!(
-                step.is_canonical_crossing(&zip318()),
+                step.is_canonical_crossing(&zip318(), canonical_fee()),
                 "{value} zatoshi should be a canonical crossing"
             );
-            assert_eq!(
-                step.ironwood_bundle_padding(&zip318()),
-                BundlePadding::UNPADDED
-            );
+            assert_eq!(step.ironwood_bundle_padding(), BundlePadding::UNPADDED);
             assert_eq!(
                 step.ironwood_action_count(
-                    step.ironwood_bundle_padding(&zip318()),
+                    step.ironwood_bundle_padding(),
                     BundleVersion::ironwood_v3()
                 ),
                 Ok(1)
@@ -1261,18 +1287,11 @@ mod tests {
         for value in [COIN + 1, COIN - 1, 3 * COIN, 100_000, 20_000 * COIN] {
             let step = ironwood_payment_step(value, vec![]);
             assert!(
-                !step.is_canonical_crossing(&zip318()),
+                !step.is_canonical_crossing(&zip318(), canonical_fee()),
                 "{value} zatoshi should not be a canonical crossing"
             );
             assert_eq!(
-                step.ironwood_bundle_padding(&zip318()),
-                BundlePadding::DEFAULT
-            );
-            assert_eq!(
-                step.ironwood_action_count(
-                    step.ironwood_bundle_padding(&zip318()),
-                    BundleVersion::ironwood_v3()
-                ),
+                step.ironwood_action_count(BundlePadding::DEFAULT, BundleVersion::ironwood_v3()),
                 Ok(2)
             );
         }
@@ -1285,11 +1304,7 @@ mod tests {
     #[test]
     fn ironwood_change_is_not_a_canonical_crossing() {
         let step = ironwood_payment_step(COIN, vec![shielded_change(ShieldedPool::Ironwood, 5000)]);
-        assert!(!step.is_canonical_crossing(&zip318()));
-        assert_eq!(
-            step.ironwood_bundle_padding(&zip318()),
-            BundlePadding::DEFAULT
-        );
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
     }
 
     /// A payment funded from Ironwood notes crosses nothing, so it is never a canonical crossing
@@ -1299,11 +1314,7 @@ mod tests {
         let mut step = ironwood_payment_step(COIN, vec![]);
         step.shielded_inputs =
             shielded_inputs_for(orchard_and_ironwood_notes((0, 0), (1, 2 * COIN)));
-        assert!(!step.is_canonical_crossing(&zip318()));
-        assert_eq!(
-            step.ironwood_bundle_padding(&zip318()),
-            BundlePadding::DEFAULT
-        );
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
     }
 
     /// An anchor off the bucket grid is not a canonical crossing, however canonical the value and
@@ -1316,18 +1327,14 @@ mod tests {
         for height in [143u32, 145, 1, 2_000_000] {
             step.anchor_height = Some(BlockHeight::from_u32(height));
             assert!(
-                !step.is_canonical_crossing(&zip318()),
+                !step.is_canonical_crossing(&zip318(), canonical_fee()),
                 "anchor {height} is not a grid boundary"
-            );
-            assert_eq!(
-                step.ironwood_bundle_padding(&zip318()),
-                BundlePadding::DEFAULT
             );
         }
         // The neighbouring boundaries are.
         for height in [144u32, 288, 1_999_872] {
             step.anchor_height = Some(BlockHeight::from_u32(height));
-            assert!(step.is_canonical_crossing(&zip318()));
+            assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
         }
     }
 
@@ -1337,14 +1344,10 @@ mod tests {
     #[test]
     fn multiple_orchard_inputs_are_not_a_canonical_crossing() {
         let mut step = ironwood_payment_step(COIN, vec![]);
-        assert!(step.is_canonical_crossing(&zip318()));
+        assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
 
         step.shielded_inputs = shielded_inputs_for(orchard_and_ironwood_notes((3, COIN), (0, 0)));
-        assert!(!step.is_canonical_crossing(&zip318()));
-        assert_eq!(
-            step.ironwood_bundle_padding(&zip318()),
-            BundlePadding::DEFAULT
-        );
+        assert!(!step.is_canonical_crossing(&zip318(), canonical_fee()));
     }
 
     /// Overridden ZIP 318 parameters narrow which crossings are canonical, and the padding follows.
@@ -1359,12 +1362,8 @@ mod tests {
         }
 
         let step = ironwood_payment_step(2 * COIN, vec![]);
-        assert!(step.is_canonical_crossing(&zip318()));
-        assert!(!step.is_canonical_crossing(&SmallCap));
-        assert_eq!(
-            step.ironwood_bundle_padding(&SmallCap),
-            BundlePadding::DEFAULT
-        );
+        assert!(step.is_canonical_crossing(&zip318(), canonical_fee()));
+        assert!(!step.is_canonical_crossing(&SmallCap, canonical_fee()));
     }
 
     /// A step that produces any shielded bundle must bind a concrete anchor. Passing `None` (the

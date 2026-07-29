@@ -12,6 +12,11 @@ workspace.
 
 ### Added
 - `zcash_client_backend::proposal::Step::{is_canonical_crossing, ironwood_bundle_padding}`
+- `zcash_client_backend::fees::canonical_crossing_fee`
+- `zcash_client_backend::fees::TransactionBalance::{with_ironwood_bundle_padding, ironwood_bundle_padding}`,
+  recording the Ironwood bundle padding a fee was computed for. A `ChangeStrategy` that costs an
+  Ironwood bundle as unpadded must record it, or the builder will not reproduce the action count
+  the fee was charged against.
 - `zcash_client_backend::data_api::anchor_retention::PoolMigrationParams`, the ZIP 318
   parameters in force for a wallet: the specified values, with the anchor bucket grid
   taken from `WalletRead::anchor_retention_interval`.

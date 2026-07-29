@@ -833,6 +833,13 @@ where
     // produced Ironwood notes: every later payment would be funded from Ironwood, crossing
     // nothing, and no further value would ever leave the Orchard pool.
     //
+    // The canonical fee for the shape, under the parameters and target height this transaction
+    // will actually be built against. The STANDARD ZIP 317 rule is asked, not the caller's: a
+    // proposal built on a fixed non-standard rule would otherwise be compared against its own fee
+    // and always agree, which is precisely the case ZIP 318 forbids.
+    #[cfg(feature = "orchard")]
+    let canonical_fee = crate::fees::canonical_crossing_fee(params, target_height.into()).ok();
+
     // The whole attempt is Orchard-gated: without that feature there is no Ironwood pool to cross
     // into, so there is no canonical crossing to construct.
     #[cfg(feature = "orchard")]
@@ -875,7 +882,9 @@ where
                 // discarded, costing a selection pass but no extra confirmations.
                 .filter(|proposal| {
                     proposal.steps().len() == 1
-                        && proposal.steps().first().is_canonical_crossing(&zip318)
+                        && canonical_fee.is_some_and(|fee| {
+                            proposal.steps().first().is_canonical_crossing(&zip318, fee)
+                        })
                 })
         });
 
@@ -1839,8 +1848,7 @@ where
     // `fees::common::single_pool_output_balance`), which is what keeps the computed fee and the
     // built bundle in agreement.
     #[cfg(feature = "orchard")]
-    let ironwood_padding =
-        proposal_step.ironwood_bundle_padding(&wallet_db.pool_migration_params());
+    let ironwood_padding = proposal_step.ironwood_bundle_padding();
     #[cfg(not(feature = "orchard"))]
     let ironwood_padding = orchard_pool_padding;
 
@@ -1863,17 +1871,23 @@ where
     // silently overridden: the padding and anchor are already fixed by this point, so honouring it
     // would emit a transaction that is canonical in every respect but one.
     #[cfg(feature = "orchard")]
-    let expiry_height = if proposal_step.is_canonical_crossing(&wallet_db.pool_migration_params()) {
-        match expiry_height {
-            Some(requested) => {
-                return Err(Error::ExpiryHeightConflictsWithCanonicalCrossing { requested });
+    let expiry_height = {
+        let canonical_fee =
+            crate::fees::canonical_crossing_fee(params, min_target_height.into()).ok();
+        if canonical_fee.is_some_and(|fee| {
+            proposal_step.is_canonical_crossing(&wallet_db.pool_migration_params(), fee)
+        }) {
+            match expiry_height {
+                Some(requested) => {
+                    return Err(Error::ExpiryHeightConflictsWithCanonicalCrossing { requested });
+                }
+                None => Some(zcash_protocol::zip318::expiry_height(
+                    min_target_height.into(),
+                )),
             }
-            None => Some(zcash_protocol::zip318::expiry_height(
-                min_target_height.into(),
-            )),
+        } else {
+            expiry_height
         }
-    } else {
-        expiry_height
     };
 
     if let Some(expiry_height) = expiry_height {

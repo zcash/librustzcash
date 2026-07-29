@@ -8548,6 +8548,12 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     // (1) A canonical denomination: bucketed anchor, one Orchard input, one Ironwood action.
     let canonical = propose(&mut st, MAX_RESIDUAL_VALUE).expect("the wallet can fund this");
     assert_eq!(canonical.steps().len(), 1);
+    let canonical_fee = crate::fees::canonical_crossing_fee(
+        st.network(),
+        BlockHeight::from(canonical.min_target_height()),
+    )
+    .expect("the canonical shape is a valid input to the ZIP 317 rule");
+
     let step = canonical.steps().first();
     let anchor = step
         .anchor_height()
@@ -8558,10 +8564,10 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     );
     assert_eq!(step.input_count_in_pool(PoolType::ORCHARD), 1);
     assert_eq!(step.input_count_in_pool(PoolType::IRONWOOD), 0);
-    assert!(step.is_canonical_crossing(&st.wallet().pool_migration_params()));
+    assert!(step.is_canonical_crossing(&st.wallet().pool_migration_params(), canonical_fee));
     assert_eq!(
         step.ironwood_action_count(
-            step.ironwood_bundle_padding(&st.wallet().pool_migration_params()),
+            step.ironwood_bundle_padding(),
             ::orchard::bundle::BundleVersion::ironwood_v3()
         ),
         Ok(1),
@@ -8575,10 +8581,10 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
     )
     .unwrap();
     let step = off_by_one.steps().first();
-    assert!(!step.is_canonical_crossing(&st.wallet().pool_migration_params()));
+    assert!(!step.is_canonical_crossing(&st.wallet().pool_migration_params(), canonical_fee));
     assert_eq!(
         step.ironwood_action_count(
-            step.ironwood_bundle_padding(&st.wallet().pool_migration_params()),
+            step.ironwood_bundle_padding(),
             ::orchard::bundle::BundleVersion::ironwood_v3()
         ),
         Ok(2)
@@ -8683,18 +8689,23 @@ pub fn multi_note_crossing_is_not_bucketed<Dsf: DataStoreFactory>(
 
     let step = proposal.steps().first();
     let zip318 = st.wallet().pool_migration_params();
+    let canonical_fee = crate::fees::canonical_crossing_fee(
+        st.network(),
+        BlockHeight::from(proposal.min_target_height()),
+    )
+    .expect("the canonical shape is a valid input to the ZIP 317 rule");
     assert!(
         step.input_count_in_pool(PoolType::ORCHARD) > 1,
         "this scenario is only meaningful if funding needs several notes"
     );
-    assert!(!step.is_canonical_crossing(&zip318));
+    assert!(!step.is_canonical_crossing(&zip318, canonical_fee));
     assert!(
         !interval.is_boundary(step.anchor_height().unwrap()),
         "a multi-input transaction must not pay for a bucketed anchor"
     );
     assert_eq!(
         step.ironwood_action_count(
-            step.ironwood_bundle_padding(&zip318),
+            step.ironwood_bundle_padding(),
             ::orchard::bundle::BundleVersion::ironwood_v3()
         ),
         Ok(2)
@@ -8784,7 +8795,17 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
             ConfirmationsPolicy::MIN,
         )
         .expect("the wallet can fund the first crossing");
-    assert!(first.steps().first().is_canonical_crossing(&zip318));
+    let canonical_fee = crate::fees::canonical_crossing_fee(
+        st.network(),
+        BlockHeight::from(first.min_target_height()),
+    )
+    .expect("the canonical shape is a valid input to the ZIP 317 rule");
+    assert!(
+        first
+            .steps()
+            .first()
+            .is_canonical_crossing(&zip318, canonical_fee)
+    );
 
     // Mine it, so the wallet now holds an Ironwood note alongside its Orchard change.
     let txids = st.create_proposed_expecting(&first, 1);
@@ -8834,7 +8855,7 @@ pub fn self_migration_keeps_spending_orchard<Dsf: DataStoreFactory>(
     );
     assert_eq!(step.input_count_in_pool(PoolType::ORCHARD), 1);
     assert!(
-        step.is_canonical_crossing(&zip318),
+        step.is_canonical_crossing(&zip318, canonical_fee),
         "the second crossing must still be canonical"
     );
 }
