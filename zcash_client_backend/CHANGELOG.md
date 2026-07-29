@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0-rc.5] - 2026-07-28
+
 ### Added
 - `zcash_client_backend::proposal::Step::{is_canonical_crossing, ironwood_bundle_padding}`
 - `zcash_client_backend::fees::canonical_crossing_fee`

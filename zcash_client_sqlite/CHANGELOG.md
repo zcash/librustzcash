@@ -36,6 +36,7 @@ workspace.
   compilation failure.
 
 ### Changed
+- Migrated to `zcash_client_backend 0.24.0-rc.5`.
 - Every public error enum in this crate is now `#[non_exhaustive]`, so that
   future variants can be added without a breaking release. A `match` over any
   of them must now include a wildcard arm: `error::SqliteClientError`,
