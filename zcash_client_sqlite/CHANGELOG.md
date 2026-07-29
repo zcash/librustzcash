@@ -44,6 +44,14 @@ workspace.
   `zewif::ZewifImportError`.
 
 ### Fixed
+- Transaction status requests are now generated from explicit, durable
+  observation intent. A sent transaction is queried by txid when this wallet
+  cannot observe one of its shielded spends or outputs, including transactions
+  funded entirely by transparent inputs whose shielded outputs all belong to
+  another wallet. Status intent remains dormant while a transaction is mined
+  and becomes active again after a chain rewind. Redundant status requests
+  previously synthesized for wallet-observable shielded transactions are no
+  longer produced.
 - An Ironwood note received on an account's internal address is now classified as
   change once the wallet learns that the same account funded the transaction.
   This was previously applied to Sapling and Orchard notes only, so an Ironwood

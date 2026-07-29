@@ -618,6 +618,15 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         dependent_tx_ref: Option<Self::TxRef>,
     ) -> Result<(), Self::Error>;
 
+    /// Adds a [`TransactionDataRequest::GetStatus`] request for a transaction whose mined status
+    /// cannot be learned through ordinary compact-block scanning.
+    ///
+    /// The request intent must remain durable while the transaction is mined, so that it becomes
+    /// active again if a chain rewind un-mines the transaction.
+    ///
+    /// [`TransactionDataRequest::GetStatus`]: super::TransactionDataRequest
+    fn queue_tx_status(&mut self, txid: TxId) -> Result<(), Self::Error>;
+
     /// Adds a [`TransactionDataRequest::TransactionsInvolvingAddress`] request to the transaction
     /// data request queue. When the transparent output of `tx_ref` at output index `output_index`
     /// (which must have been received at `receiving_address`) is detected as having been spent,
@@ -650,8 +659,9 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         d_tx: &super::DecryptedTransaction<Transaction, Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// Deletes all [`TransactionDataRequest::Enhancement`] requests for the given transaction ID
-    /// from the transaction data request queue.
+    /// Deletes the [`TransactionDataRequest::Enhancement`] request for the given transaction ID
+    /// from the transaction data request queue, without removing any durable status-observation
+    /// intent for the transaction.
     ///
     /// [`TransactionDataRequest::Enhancement`]: super::TransactionDataRequest
     fn delete_retrieval_queue_entries(&mut self, txid: TxId) -> Result<(), Self::Error>;
