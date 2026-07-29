@@ -7,7 +7,7 @@ use std::{
 };
 
 use assert_matches::assert_matches;
-use incrementalmerkletree::{Level, Position, frontier::Frontier};
+use incrementalmerkletree::{Hashable, Level, Position, frontier::Frontier};
 use rand::{Rng, RngCore};
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
@@ -4058,6 +4058,40 @@ pub fn checkpoint_gaps<T: ShieldedPoolTester, Dsf: DataStoreFactory>(
     );
 }
 
+/// Reads, from any pool's note commitment tree, whether a witness for `note_position` as of
+/// `anchor_height` is still constructible, the set of surviving checkpoint heights, and the set
+/// of retained-anchor heights.
+#[allow(clippy::type_complexity)]
+fn tree_anchor_state<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
+    tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
+    note_position: Position,
+    anchor_height: BlockHeight,
+) -> Result<(bool, BTreeSet<BlockHeight>, BTreeSet<BlockHeight>), ShardTreeError<S::Error>>
+where
+    S: ShardStore<CheckpointId = BlockHeight>,
+    S::H: Hashable + Clone + PartialEq,
+{
+    let witness_computable = tree
+        .witness_at_checkpoint_id(note_position, &anchor_height)?
+        .is_some();
+    let retained = tree
+        .store()
+        .retained_checkpoints()
+        .map_err(ShardTreeError::Storage)?;
+    let checkpoint_count = tree
+        .store()
+        .checkpoint_count()
+        .map_err(ShardTreeError::Storage)?;
+    let mut survivors = BTreeSet::new();
+    tree.store()
+        .for_each_checkpoint(checkpoint_count, |cid, _| {
+            survivors.insert(*cid);
+            Ok(())
+        })
+        .map_err(ShardTreeError::Storage)?;
+    Ok((witness_computable, survivors, retained))
+}
+
 /// A wallet-level test for note-commitment-tree *anchor retention*: once NU6.3 (Ironwood) is
 /// active, checkpoints on the anchor-retention interval are retained as durable anchors, exempt
 /// from the ordinary `PRUNING_DEPTH`-checkpoint pruning budget, so that their roots and the
@@ -4090,40 +4124,6 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
     interval: AnchorRetentionInterval,
 ) {
     let interval_blocks = interval.block_count().get();
-
-    // Reads, from any pool's note commitment tree, the set of surviving checkpoint heights, the
-    // set of retained-anchor heights, and whether a witness for `note_position` as of
-    // `anchor_height` is still constructible.
-    #[allow(clippy::type_complexity)]
-    fn tree_anchor_state<S, const DEPTH: u8, const SHARD_HEIGHT: u8>(
-        tree: &mut ShardTree<S, DEPTH, SHARD_HEIGHT>,
-        note_position: Position,
-        anchor_height: BlockHeight,
-    ) -> Result<(bool, BTreeSet<BlockHeight>, BTreeSet<BlockHeight>), ShardTreeError<S::Error>>
-    where
-        S: ShardStore<CheckpointId = BlockHeight>,
-        S::H: incrementalmerkletree::Hashable + Clone + PartialEq,
-    {
-        let witness_computable = tree
-            .witness_at_checkpoint_id(note_position, &anchor_height)?
-            .is_some();
-        let retained = tree
-            .store()
-            .retained_checkpoints()
-            .map_err(ShardTreeError::Storage)?;
-        let checkpoint_count = tree
-            .store()
-            .checkpoint_count()
-            .map_err(ShardTreeError::Storage)?;
-        let mut survivors = BTreeSet::new();
-        tree.store()
-            .for_each_checkpoint(checkpoint_count, |cid, _| {
-                survivors.insert(*cid);
-                Ok(())
-            })
-            .map_err(ShardTreeError::Storage)?;
-        Ok((witness_computable, survivors, retained))
-    }
 
     // A network on which NU6.3 (Ironwood) is active from the Sapling activation height, so anchor
     // retention is live with its floor at the account birthday.
@@ -4243,6 +4243,153 @@ pub fn anchor_checkpoints_retained_across_deep_scan<
         assert!(
             survivors.contains(&BlockHeight::from(h)),
             "checkpoint at tip-window height {h} must be retained",
+        );
+    }
+}
+
+/// A grid boundary that lands on a block containing no note commitments in ANY pool must still be
+/// checkpointed and retained. Scanning checkpoints a block only at its last note commitment, so
+/// such a block produces no checkpoint of its own in any tree and the cross-pool ensure step has
+/// nothing to copy; unless the retained heights are ensured explicitly, the retained grid gains a
+/// permanent hole there — on mainnet a sizeable fraction of blocks carry no shielded outputs —
+/// and a ZIP 318 crossing anchored to the hole can never be proved.
+///
+/// The scan must cover the boundaries in a SINGLE batch: scanning block-by-block masks the gap,
+/// because every batch checkpoints its starting frontier, so each height gets a checkpoint as the
+/// next block's batch begins.
+#[cfg(feature = "orchard")]
+pub fn empty_boundary_blocks_are_checkpointed_and_retained<
+    T: ShieldedPoolTester,
+    Dsf: DataStoreFactory,
+>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+    interval: AnchorRetentionInterval,
+) {
+    let interval_blocks = interval.block_count().get();
+
+    // A network on which NU6.3 (Ironwood) is active from the Sapling activation height, so anchor
+    // retention is live with its floor at the account birthday.
+    let activation = BlockHeight::from_u32(100_000);
+    let ironwood_active_network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<T>();
+
+    // Receive a single note; its position is captured after the batch scan, below.
+    let (received_height, _, _) =
+        st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(500_000));
+    let received = u32::from(received_height);
+
+    // The first two boundaries strictly above the received note, plus slack so neither boundary
+    // is the final block of the batch.
+    let first_boundary = {
+        let mut b = u32::from(interval.boundary_at_or_above(activation));
+        while b <= received {
+            b += interval_blocks;
+        }
+        b
+    };
+    let boundaries = [first_boundary, first_boundary + interval_blocks];
+    let tip = boundaries[1] + 2;
+
+    // Fillers pay a non-wallet key so that ordinary blocks each carry a commitment, but every
+    // BOUNDARY block is generated empty: no note commitments in any pool, and so no checkpoint
+    // of its own.
+    let not_our_fvk = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    for height in (received + 1)..=tip {
+        let generated = if interval.is_boundary(BlockHeight::from_u32(height)) {
+            st.generate_empty_block().0
+        } else {
+            st.generate_next_block(
+                &not_our_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            )
+            .0
+        };
+        assert_eq!(u32::from(generated), height, "cache height must track");
+    }
+    // One batch, covering both boundaries.
+    st.scan_cached_blocks(received_height + 1, (tip - received) as usize);
+
+    // Capture the received note's commitment-tree position.
+    let account_id = st.get_account().id();
+    let spendable = T::select_spendable_notes(
+        &st,
+        account_id,
+        TargetValue::AtLeast(Zatoshis::const_from_u64(1)),
+        TargetHeight::from(BlockHeight::from_u32(tip + 1)),
+        ConfirmationsPolicy::MIN,
+        &[],
+    )
+    .unwrap();
+    let note_position = spendable
+        .first()
+        .expect("the received note is spendable")
+        .note_commitment_tree_position();
+
+    for boundary in boundaries {
+        let anchor_height = BlockHeight::from_u32(boundary);
+        let (witness_computable, survivors, retained) = match T::SHIELDED_PROTOCOL {
+            ShieldedPool::Sapling => st
+                .wallet_mut()
+                .with_sapling_tree_mut(|tree| tree_anchor_state(tree, note_position, anchor_height))
+                .unwrap(),
+            ShieldedPool::Orchard => st
+                .wallet_mut()
+                .with_orchard_tree_mut(|tree| tree_anchor_state(tree, note_position, anchor_height))
+                .unwrap(),
+            other => {
+                unreachable!("this test covers only Sapling and Orchard, got {other:?}")
+            }
+        };
+
+        assert!(
+            survivors.contains(&anchor_height),
+            "the empty boundary block at height {boundary} must be checkpointed",
+        );
+        assert!(
+            retained.contains(&anchor_height),
+            "the checkpoint at the empty boundary height {boundary} must be retained",
+        );
+        // The checkpoint must be USABLE as an anchor: it commits to the tree state as of the last
+        // note commitment at or before the boundary, so the received note has a witness there.
+        assert!(
+            witness_computable,
+            "a witness for the received note as of the empty boundary at height {boundary} \
+             must be constructible",
+        );
+    }
+
+    // The pool-crossing destination tree gains the same retained checkpoints even though it holds
+    // no commitments at all, keeping the cross-pool checkpoint sets consistent.
+    let ironwood_retained = st
+        .wallet_mut()
+        .with_ironwood_tree_mut(|tree| {
+            tree.store()
+                .retained_checkpoints()
+                .map_err(ShardTreeError::Storage)
+        })
+        .unwrap()
+        .expect("the data store maintains an Ironwood tree");
+    for boundary in boundaries {
+        assert!(
+            ironwood_retained.contains(&BlockHeight::from_u32(boundary)),
+            "the Ironwood tree must retain the empty boundary at height {boundary}",
         );
     }
 }
@@ -8941,6 +9088,126 @@ pub fn canonical_crossing_is_bucketed_and_unpadded<Dsf: DataStoreFactory>(
         tx.fee_paid(),
         Some(canonical_fee),
         "and the canonical ZIP 317 fee that shape costs"
+    );
+}
+
+/// A canonical crossing whose bucketed anchor falls on a block with no shielded outputs must
+/// still build. Note eligibility at the bucketed anchor is a height comparison, so the proposal
+/// selects and anchors there regardless; unless the boundary checkpoint was ensured at scan time
+/// — the boundary block itself contributed no note commitment to create one — building would
+/// fail attempting to construct witnesses at a checkpoint that does not exist.
+#[cfg(feature = "orchard")]
+pub fn canonical_crossing_builds_at_empty_boundary_block<Dsf: DataStoreFactory>(
+    ds_factory: Dsf,
+    cache: impl TestCache,
+) {
+    // A short grid, so the test need not mine 144 blocks to cross a boundary.
+    let interval = AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+    let activation = BlockHeight::from_u32(100_000);
+    let ironwood_active_network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(ironwood_active_network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    let account = st.test_account().cloned().unwrap();
+    let fvk = OrchardPoolTester::test_account_fvk(&st);
+    let recipient = OrchardPoolTester::fvk_default_address(&fvk).to_zcash_address(st.network());
+
+    // One Orchard note, comfortably larger than a canonical denomination plus fees.
+    let note_value = Zatoshis::const_from_u64(10_000_000);
+    let (received_height, _, _) = st.add_a_single_note_checking_balance(note_value);
+    let received = u32::from(received_height);
+    let interval_blocks = interval.block_count().get();
+
+    // Mine well past the next boundary, deliberately ending OFF a boundary, exactly as in
+    // `canonical_crossing_is_bucketed_and_unpadded` — but here every BOUNDARY block is generated
+    // empty, while the other fillers pay a non-wallet key. The bucketed anchor the proposal picks
+    // is a boundary, and every boundary in the range is an empty block, so the anchor necessarily
+    // lands on one.
+    let tip = u32::from(interval.boundary_at_or_above(received_height)) + 3 * interval_blocks + 5;
+    let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let mut empty_heights = Vec::new();
+    for height in (received + 1)..=tip {
+        if interval.is_boundary(BlockHeight::from_u32(height)) {
+            let (h, _) = st.generate_empty_block();
+            empty_heights.push(h);
+        } else {
+            st.generate_next_block(
+                &not_our_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+        }
+    }
+    // One batch: block-by-block scanning would checkpoint every height via batch frontiers,
+    // masking the missing-boundary-checkpoint condition this test exercises.
+    st.scan_cached_blocks(received_height + 1, (tip - received) as usize);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+    let request = TransactionRequest::new(vec![Payment::without_memo(
+        recipient.clone(),
+        MAX_RESIDUAL_VALUE,
+    )])
+    .unwrap();
+    let canonical = st
+        .propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("the wallet can fund this");
+
+    let canonical_fee = crate::fees::canonical_crossing_fee(
+        st.network(),
+        BlockHeight::from(canonical.min_target_height()),
+    )
+    .expect("the canonical shape is a valid input to the ZIP 317 rule");
+    let step = canonical.steps().first();
+    let anchor = step
+        .anchor_height()
+        .expect("a shielded step binds an anchor");
+    assert!(
+        step.is_canonical_crossing(&st.wallet().pool_migration_params(), canonical_fee),
+        "the payment must be recognized as a canonical crossing"
+    );
+    assert!(
+        empty_heights.contains(&anchor),
+        "the bucketed anchor {anchor:?} must be one of the empty boundary blocks {empty_heights:?}"
+    );
+
+    // Building must succeed: the anchor's checkpoint was ensured when the batch was scanned, even
+    // though the boundary block itself contributed no commitment.
+    let txids = st.create_proposed_expecting(&canonical, 1);
+    let built = st
+        .wallet()
+        .get_transaction(txids[0])
+        .unwrap()
+        .expect("the transaction was stored");
+    assert_eq!(
+        built
+            .ironwood_bundle()
+            .expect("a crossing carries an Ironwood bundle")
+            .actions()
+            .len(),
+        1,
+        "the BUILT Ironwood bundle must have the single action of the canonical shape"
     );
 }
 

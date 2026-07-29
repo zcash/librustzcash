@@ -631,6 +631,12 @@ pub(crate) mod tests {
         testing::pool::anchor_checkpoints_retained_across_deep_scan::<SaplingPoolTester>()
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn empty_boundary_blocks_are_checkpointed_and_retained() {
+        testing::pool::empty_boundary_blocks_are_checkpointed_and_retained::<SaplingPoolTester>()
+    }
+
     #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()

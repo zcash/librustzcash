@@ -868,6 +868,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn empty_boundary_blocks_are_checkpointed_and_retained() {
+        testing::pool::empty_boundary_blocks_are_checkpointed_and_retained::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
     }
@@ -880,6 +885,11 @@ pub(crate) mod tests {
     #[test]
     fn canonical_crossing_is_bucketed_and_unpadded() {
         testing::pool::canonical_crossing_is_bucketed_and_unpadded()
+    }
+
+    #[test]
+    fn canonical_crossing_builds_at_empty_boundary_block() {
+        testing::pool::canonical_crossing_builds_at_empty_boundary_block()
     }
 
     #[test]
