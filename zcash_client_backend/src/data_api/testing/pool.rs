@@ -9476,6 +9476,141 @@ pub fn canonical_crossing_prefers_single_note<Dsf: DataStoreFactory>(
     );
 }
 
+/// A canonical payment whose bucketed anchor checkpoint is MISSING from the wallet falls back to
+/// an ordinary crossing instead of failing at build time.
+///
+/// A wallet that scanned past NU6.3 activation before boundary checkpointing was repaired is
+/// permanently missing the grid boundaries whose blocks carried no shielded outputs, and the
+/// holes cannot be backfilled from local state: the tree prunes node data that no retained
+/// checkpoint references, so reconstruction would require refetching subtree data from a light
+/// wallet server. Note eligibility at the bucketed anchor is a height comparison, so without a
+/// checkpoint-existence gate the canonical proposal is kept and the BUILD fails with
+/// `ProposalError::AnchorNotFound` — a hard send failure where every other miss in the canonical
+/// path degrades gracefully.
+///
+/// `remove_checkpoint` deletes the wallet's checkpoint records at the given height, simulating
+/// the legacy wallet state; it is supplied by the backend-specific caller because corrupting
+/// stored state is necessarily a backend-level operation.
+#[cfg(feature = "orchard")]
+pub fn canonical_crossing_abandoned_without_anchor_checkpoint<Dsf, TC>(
+    ds_factory: Dsf,
+    cache: TC,
+    remove_checkpoint: impl FnOnce(&mut TestState<TC, Dsf::DataStore, LocalNetwork>, BlockHeight),
+) where
+    Dsf: DataStoreFactory,
+    TC: TestCache,
+{
+    let interval = AnchorRetentionInterval::custom(NonZeroU32::new(12).expect("nonzero"));
+    let activation = BlockHeight::from_u32(100_000);
+    let network = LocalNetwork {
+        nu6: Some(activation),
+        nu6_1: Some(activation),
+        nu6_2: Some(activation),
+        nu6_3: Some(activation),
+        ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+    };
+
+    let mut st = TestDsl::from(
+        TestBuilder::new()
+            .with_network(network)
+            .with_data_store_factory(ds_factory)
+            .with_block_cache(cache)
+            .with_anchor_retention_interval(interval)
+            .with_account_from_sapling_activation(BlockHash([0; 32])),
+    )
+    .build::<OrchardPoolTester>();
+
+    let account = st.test_account().cloned().unwrap();
+    let fvk = OrchardPoolTester::test_account_fvk(&st);
+    let recipient = OrchardPoolTester::fvk_default_address(&fvk).to_zcash_address(st.network());
+
+    // One Orchard note, comfortably larger than a canonical denomination plus fees, mined well
+    // before the bucketed anchor.
+    let (received_height, _, _) =
+        st.add_a_single_note_checking_balance(Zatoshis::const_from_u64(10_000_000));
+    let received = u32::from(received_height);
+    let interval_blocks = interval.block_count().get();
+    let tip = u32::from(interval.boundary_at_or_above(received_height)) + 3 * interval_blocks + 5;
+    let not_our_fvk = OrchardPoolTester::sk_to_fvk(&OrchardPoolTester::sk(&[0xf5; 32]));
+    let filler_count = tip - received;
+    for _ in 0..filler_count {
+        st.generate_next_block(
+            &not_our_fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(10_000),
+        );
+    }
+    st.scan_cached_blocks(received_height + 1, filler_count as usize);
+
+    let input_selector = GreedyInputSelector::new();
+    let change_strategy =
+        single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+    let propose = |st: &mut TestState<_, _, _>| {
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            recipient.clone(),
+            MAX_RESIDUAL_VALUE,
+        )])
+        .unwrap();
+        st.propose_transfer(
+            account.id(),
+            &input_selector,
+            &change_strategy,
+            request,
+            ConfirmationsPolicy::MIN,
+        )
+        .expect("the wallet can fund this")
+    };
+
+    // With the checkpoint intact the payment is canonical; the anchor it binds is the boundary
+    // whose checkpoint the second half of the test removes. Reading it off the proposal keeps
+    // the test's idea of "the bucketed anchor" identical to production's, rather than
+    // reimplementing the arithmetic.
+    let canonical = propose(&mut st);
+    let step = canonical.steps().first();
+    let zip318 = st.wallet().pool_migration_params();
+    let canonical_fee = crate::fees::canonical_crossing_fee(
+        st.network(),
+        BlockHeight::from(canonical.min_target_height()),
+    )
+    .expect("the canonical shape is a valid input to the ZIP 317 rule");
+    assert!(step.is_canonical_crossing(&zip318, canonical_fee));
+    let boundary = step
+        .anchor_height()
+        .expect("a shielded step binds an anchor");
+    assert!(
+        st.wallet()
+            .anchor_computable(ShieldedPool::Orchard, boundary)
+            .unwrap(),
+        "an anchor is computable at the boundary before removal"
+    );
+
+    // Simulate the legacy wallet: the boundary's checkpoint records are gone.
+    remove_checkpoint(&mut st, boundary);
+    assert!(
+        !st.wallet()
+            .anchor_computable(ShieldedPool::Orchard, boundary)
+            .unwrap(),
+        "no anchor is computable at the boundary after removal"
+    );
+
+    // The payment now falls back to an ordinary crossing: proposed against the ordinary anchor,
+    // padded, and — decisively — BUILDABLE. Without the gate the canonical proposal would be
+    // kept and building would fail with `AnchorNotFound`.
+    let fallback = propose(&mut st);
+    let step = fallback.steps().first();
+    assert!(
+        !step.is_canonical_crossing(&zip318, canonical_fee),
+        "the attempt must be abandoned when its anchor cannot be proved"
+    );
+    assert_ne!(
+        step.anchor_height()
+            .expect("a shielded step binds an anchor"),
+        boundary,
+        "the fallback anchors at the ordinary height, not the unprovable boundary"
+    );
+    st.create_proposed_expecting(&fallback, 1);
+}
+
 /// Self-migration does not stall once the wallet holds Ironwood notes.
 ///
 /// A user moving their own funds across the turnstile sends themselves canonical amounts

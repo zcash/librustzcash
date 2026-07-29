@@ -843,8 +843,7 @@ where
     // The whole attempt is Orchard-gated: without that feature there is no Ironwood pool to cross
     // into, so there is no canonical crossing to construct.
     #[cfg(feature = "orchard")]
-    #[cfg(feature = "orchard")]
-    let canonical_attempt = canonical_crossing_candidate(params, &zip318, &request, target_height)
+    let bucketed_policy = canonical_crossing_candidate(params, &zip318, &request, target_height)
         .then(|| params.activation_height(NetworkUpgrade::Nu6_3))
         .flatten()
         .and_then(|activation| {
@@ -856,34 +855,53 @@ where
         })
         // A canonical crossing spends an Orchard note; if the caller forbids that, there is no
         // canonical path to attempt.
-        .filter(|_| spend_policy.permits_shielded(ShieldedPool::Orchard))
-        .map(|bucketed_policy| {
-            // Single-note funding is PREFERRED, not merely hoped for: a migration transfer
-            // spends exactly one note, and accumulation reaches the target through several
-            // small notes whenever the oldest notes are small — funding perfectly well while
-            // losing the canonical shape. Preferring the oldest single covering note makes the
-            // canonical outcome the common one; when no single note covers the payment, the
-            // fallback accumulation funds it and the shape check below discards the attempt,
-            // exactly as before.
-            let orchard_only =
-                input_selection::SpendPolicy::shielded_pools([ShieldedPool::Orchard])
-                    .with_locked_input_policy(spend_policy.locked_input_policy().clone())
-                    .with_note_selection(input_selection::NoteSelection::PreferSingle);
+        .filter(|_| spend_policy.permits_shielded(ShieldedPool::Orchard));
 
-            input_selector.propose_transaction(
-                params,
-                wallet_db,
-                target_height,
-                bucketed_policy.anchor_height(target_height),
-                &zip318,
-                bucketed_policy,
-                spend_from_account,
-                request.clone(),
-                change_strategy,
-                &orchard_only,
-                proposed_version,
-            )
-        });
+    // An anchor must be COMPUTABLE at the chosen boundary, not merely arithmetically valid: the
+    // data source must be able to produce the Orchard tree root there. A wallet that scanned
+    // past NU6.3 activation before boundary checkpointing was repaired is permanently missing
+    // the boundaries whose blocks carried no shielded outputs, and the hole cannot be backfilled
+    // from local state. Abandoning the attempt here degrades to an ordinary crossing — the same
+    // fallback taken when no sufficiently-old note exists — rather than proposing a transaction
+    // whose build must fail with `AnchorNotFound`. Under repaired retention the miss is
+    // temporary: freshly scanned boundaries rotate into the age-1 position within about a grid
+    // interval of upgrading.
+    #[cfg(feature = "orchard")]
+    let bucketed_policy = match bucketed_policy {
+        Some(policy) => wallet_db
+            .anchor_computable(ShieldedPool::Orchard, policy.anchor_height(target_height))
+            .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+            .then_some(policy),
+        None => None,
+    };
+
+    #[cfg(feature = "orchard")]
+    let canonical_attempt = bucketed_policy.map(|bucketed_policy| {
+        // Single-note funding is PREFERRED, not merely hoped for: a migration transfer
+        // spends exactly one note, and accumulation reaches the target through several
+        // small notes whenever the oldest notes are small — funding perfectly well while
+        // losing the canonical shape. Preferring the oldest single covering note makes the
+        // canonical outcome the common one; when no single note covers the payment, the
+        // fallback accumulation funds it and the shape check below discards the attempt,
+        // exactly as before.
+        let orchard_only = input_selection::SpendPolicy::shielded_pools([ShieldedPool::Orchard])
+            .with_locked_input_policy(spend_policy.locked_input_policy().clone())
+            .with_note_selection(input_selection::NoteSelection::PreferSingle);
+
+        input_selector.propose_transaction(
+            params,
+            wallet_db,
+            target_height,
+            bucketed_policy.anchor_height(target_height),
+            &zip318,
+            bucketed_policy,
+            spend_from_account,
+            request.clone(),
+            change_strategy,
+            &orchard_only,
+            proposed_version,
+        )
+    });
 
     // Only two outcomes justify falling back to an ordinary proposal: the wallet cannot fund the
     // payment under the stricter policy, or it funded one that is not in fact canonical. Every

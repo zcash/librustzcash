@@ -17,6 +17,7 @@ workspace.
 - `zcash_client_backend::data_api::InputSource::select_single_spendable_note`, with a
   best-effort default implementation
 - `zcash_client_backend::data_api::ReceivedNotes::{is_empty, into_single_covering}`
+- `zcash_client_backend::data_api::InputSource::anchor_computable`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::propose_transfer` now funds a canonical
@@ -24,6 +25,11 @@ workspace.
   payment and its fee, falling back to ordinary accumulation when no such note
   exists. Payments of canonical denominations that previously lost the canonical
   shape to multi-note funding now take it whenever a single covering note exists.
+- `zcash_client_backend::data_api::wallet::propose_transfer` abandons the canonical
+  ZIP 318 crossing attempt when no anchor is computable at the bucketed boundary
+  height (per `InputSource::anchor_computable`), proposing an ordinary crossing
+  instead of a canonical proposal whose build would fail with
+  `ProposalError::AnchorNotFound`.
 
 ### Fixed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks` now creates (and retains) a

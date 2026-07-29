@@ -767,6 +767,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
         }
     }
 
+    fn anchor_computable(
+        &self,
+        protocol: ShieldedPool,
+        height: BlockHeight,
+    ) -> Result<bool, Self::Error> {
+        wallet::anchor_computable(self.conn.borrow(), protocol, height)
+    }
+
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,

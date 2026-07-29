@@ -954,6 +954,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn canonical_crossing_abandoned_without_anchor_checkpoint() {
+        testing::pool::canonical_crossing_abandoned_without_anchor_checkpoint()
+    }
+
+    #[test]
     fn multi_note_crossing_is_not_bucketed() {
         testing::pool::multi_note_crossing_is_not_bucketed()
     }
