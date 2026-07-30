@@ -41,10 +41,9 @@ pub enum AdvanceStep {
     /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses and
     /// store the proven PCZT), WITHOUT broadcasting: its dependencies are mined and, for a transfer,
     /// its drawn anchor boundary has settled (the boundary block is strictly below the chain tip, so
-    /// its checkpoint exists in the wallet's commitment tree). Broadcast is a separate later step,
-    /// once the privacy broadcast schedule is due — ideally in a different waking session, since
-    /// proving needs the wallet synced while a broadcast session should involve no sync at all (see
-    /// [`MigrationState::next_step`]).
+    /// its checkpoint exists in the wallet's commitment tree). Broadcast is a separate later step;
+    /// whether it belongs in the same waking session depends on the transaction's `kind` (see that
+    /// field, and [`MigrationState::next_step`]).
     ///
     /// Proving is not time-critical: the wallet durably retains the boundary checkpoints its
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
@@ -55,6 +54,14 @@ pub enum AdvanceStep {
     Prove {
         /// The transaction to prove.
         id: MigrationTransferId,
+        /// What the transaction is, surfaced because the two kinds want different session
+        /// handling. A PREPARATION becomes provable only once its broadcast schedule is due, so
+        /// when it is surfaced here it is by construction ready to broadcast the moment it is
+        /// proved: prove it against a fresh checkpoint at the tip and broadcast it at the same
+        /// wake-up, like an ordinary transaction. A TRANSFER is surfaced as soon as its drawn
+        /// anchor boundary settles, typically well before its scheduled broadcast height: prove it
+        /// now and leave the broadcast to its own (later) session.
+        kind: MigrationTxKind,
     },
     /// Broadcast this already-proven transaction: it is `Proved`, its dependencies are mined, and its
     /// scheduled broadcast height has arrived.
@@ -267,17 +274,20 @@ impl MigrationState {
         }
     }
 
+    /// The next pre-signed transaction ready to PROVE, as [`Self::next_provable`] selects it, with
+    /// the whole transaction visible so [`Self::next_step`] can also surface its kind.
+    fn next_provable_tx(&self, target_height: BlockHeight) -> Option<&MigrationTransaction> {
+        self.transactions.iter().find(|t| {
+            matches!(t.state, MigrationTxState::Signed) && self.prove_ready(t, target_height)
+        })
+    }
+
     /// The id of the next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor
     /// is resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
     /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
     /// broadcast in separate waking sessions.
     pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
-        self.transactions
-            .iter()
-            .find(|t| {
-                matches!(t.state, MigrationTxState::Signed) && self.prove_ready(t, target_height)
-            })
-            .map(|t| t.id)
+        self.next_provable_tx(target_height).map(|t| t.id)
     }
 
     /// The id of the next transaction ready to BROADCAST: already `Proved`, its dependencies mined,
@@ -445,7 +455,9 @@ impl MigrationState {
     ///   the proven PCZT — [`prove_transfer`](crate::engine::prove_transfer) /
     ///   [`prove_preparation`](crate::engine::prove_preparation), which also record the
     ///   `Signed -> Proved` transition. Proving needs a SYNCED wallet and mutable access to its
-    ///   commitment trees, but only the account's viewing key.
+    ///   commitment trees, but only the account's viewing key. The step carries the transaction's
+    ///   kind so the consumer can tell, without a lookup, whether the broadcast follows in the
+    ///   same session (a preparation) or in its own later one (a transfer); see below.
     /// - [`AdvanceStep::Broadcast`]: submit the stored proven transaction to the network, then
     ///   record it with [`Self::mark_broadcast`]. Its mining is later detected through the
     ///   consumer's own chain view and recorded with [`Self::mark_mined`], which is what unblocks
@@ -515,9 +527,14 @@ impl MigrationState {
             return AdvanceStep::Broadcast { id };
         }
         // A wallet should not broadcast and sync in the same waking session unless necessary.
-        // At this point we know we're not broadcasting, so we can sync and prove.
-        if let Some(id) = self.next_provable(target_height) {
-            return AdvanceStep::Prove { id };
+        // At this point we know we're not broadcasting, so we can sync and prove. The kind rides
+        // along because it decides the session handling: a preparation is broadcast as soon as it
+        // is proved, a transfer's broadcast waits for its own (later) session.
+        if let Some(t) = self.next_provable_tx(target_height) {
+            return AdvanceStep::Prove {
+                id: t.id,
+                kind: t.kind,
+            };
         }
         // If we have not been able to make progress on still-valid transactions, then surface any
         // expired transfer for rebuild. Reporting Rebuild in preference to Waiting is what stops
@@ -933,7 +950,8 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Prove {
-                id: MigrationTransferId(0)
+                id: MigrationTransferId(0),
+                kind: prep(0, 0),
             }
         );
         s.transactions[0].state = MigrationTxState::Proved;
@@ -958,7 +976,8 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1)
+                id: MigrationTransferId(1),
+                kind: prep(1, 0),
             }
         );
         s.transactions[1].state = MigrationTxState::Proved;
@@ -974,7 +993,8 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100)),
             AdvanceStep::Prove {
-                id: MigrationTransferId(2)
+                id: MigrationTransferId(2),
+                kind: transfer(0),
             }
         );
         s.transactions[2].state = MigrationTxState::Proved;
@@ -1005,7 +1025,8 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(50)),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1)
+                id: MigrationTransferId(1),
+                kind: transfer(0),
             }
         );
     }
@@ -1131,7 +1152,8 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(42)),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1)
+                id: MigrationTransferId(1),
+                kind: transfer(0),
             }
         );
 
@@ -1251,7 +1273,8 @@ mod tests {
         assert_eq!(
             s.next_step(BlockHeight::from_u32(51)),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1)
+                id: MigrationTransferId(1),
+                kind: transfer(0),
             }
         );
         // Once the valid transfer is proved and broadcast, the expired one is surfaced for rebuild.

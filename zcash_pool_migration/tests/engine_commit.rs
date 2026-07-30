@@ -165,7 +165,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .max()
         .expect("the committed migration has transactions");
     match state.next_step(target) {
-        AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
         }
         other => panic!("expected a broadcast step, got {other:?}"),
@@ -180,7 +180,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .map(|t| t.id())
         .collect();
     match state.next_step(target) {
-        AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(
                 layer1_ids.contains(&id),
                 "layer 1 broadcasts once layer 0 mines"
@@ -192,7 +192,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
     }
     match state.next_step(target) {
-        AdvanceStep::Prove { id } | AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             let tx = state
                 .transactions()
                 .iter()
