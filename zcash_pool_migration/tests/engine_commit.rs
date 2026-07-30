@@ -12,6 +12,7 @@
 use orchard::keys::SpendAuthorizingKey;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::COIN;
 
@@ -171,7 +172,11 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         other => panic!("expected a broadcast step, got {other:?}"),
     }
     for id in &layer0_ids {
-        state.mark_mined(*id, BlockHeight::from_u32(2_000_010));
+        state.mark_mined(
+            *id,
+            TxId::from_bytes([0; 32]),
+            BlockHeight::from_u32(2_000_010),
+        );
     }
     let layer1_ids: Vec<_> = state
         .transactions()
@@ -189,7 +194,11 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         other => panic!("expected a broadcast step, got {other:?}"),
     }
     for id in &layer1_ids {
-        state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
+        state.mark_mined(
+            *id,
+            TxId::from_bytes([0; 32]),
+            BlockHeight::from_u32(2_000_020),
+        );
     }
     match state.next_step(target) {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {

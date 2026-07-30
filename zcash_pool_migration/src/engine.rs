@@ -283,8 +283,8 @@ pub enum MigrationTxState {
     Proved,
     /// Broadcast to the network, with its transaction id.
     Broadcast { txid: TxId },
-    /// Mined at the given height.
-    Mined { height: BlockHeight },
+    /// Mined at the given height, with the transaction id it was broadcast under.
+    Mined { txid: TxId, height: BlockHeight },
 }
 
 /// One transaction of a committed migration: its pre-signed PCZT plus the metadata the consuming
@@ -458,11 +458,13 @@ impl fmt::Display for ParseMigrationTxStateError {
 }
 
 impl MigrationTxState {
-    /// The transaction id of a [`Broadcast`](Self::Broadcast) state (its stored payload), or `None`
-    /// for any other state.
+    /// The transaction id of a [`Broadcast`](Self::Broadcast) or [`Mined`](Self::Mined) state (its
+    /// stored payload), or `None` for any other state.
     pub fn broadcast_txid(&self) -> Option<[u8; 32]> {
         match self {
-            MigrationTxState::Broadcast { txid } => Some(*txid.as_ref()),
+            MigrationTxState::Broadcast { txid } | MigrationTxState::Mined { txid, .. } => {
+                Some(*txid.as_ref())
+            }
             _ => None,
         }
     }
@@ -471,15 +473,16 @@ impl MigrationTxState {
     /// other state.
     pub fn mined_height(&self) -> Option<BlockHeight> {
         match self {
-            MigrationTxState::Mined { height } => Some(*height),
+            MigrationTxState::Mined { height, .. } => Some(*height),
             _ => None,
         }
     }
 
     /// Reconstruct a state from a store: the lowercase discriminant produced by
-    /// [`AsRef<str>`](AsRef), plus the `broadcast` txid and `mined` height columns (each `None` for a
-    /// state that does not carry it). Errors on an unrecognized discriminant, or a `broadcast`/`mined`
-    /// discriminant whose payload column is absent.
+    /// [`AsRef<str>`](AsRef), plus the `broadcast`/`mined` txid and `mined` height columns (each
+    /// `None` for a state that does not carry it). Errors on an unrecognized discriminant, a
+    /// `broadcast` discriminant missing its txid, or a `mined` discriminant missing either payload
+    /// (a mined transaction is always broadcast under a txid first, so both are required together).
     pub fn from_stored(
         state: &str,
         txid: Option<[u8; 32]>,
@@ -493,6 +496,7 @@ impl MigrationTxState {
                 txid: TxId::from_bytes(txid.ok_or(ParseMigrationTxStateError)?),
             },
             "mined" => MigrationTxState::Mined {
+                txid: TxId::from_bytes(txid.ok_or(ParseMigrationTxStateError)?),
                 height: mined_height.ok_or(ParseMigrationTxStateError)?,
             },
             _ => return Err(ParseMigrationTxStateError),
@@ -1894,7 +1898,7 @@ where
         .iter()
         .filter_map(|dep| state.transactions.iter().find(|t| t.id == *dep))
         .filter_map(|producer| match producer.state {
-            MigrationTxState::Mined { height } => Some(height),
+            MigrationTxState::Mined { height, .. } => Some(height),
             _ => None,
         })
         .max()
@@ -2771,6 +2775,27 @@ mod tests {
     use rand_core::SeedableRng;
     use zcash_protocol::{local_consensus::LocalNetwork, value::COIN};
 
+    /// A `Mined` state's txid round-trips through `from_stored` alongside its height, and a stored
+    /// `mined` row missing the txid payload is rejected rather than silently reconstructed
+    /// without it.
+    #[test]
+    fn mined_state_round_trips_with_txid() {
+        let txid = TxId::from_bytes([7; 32]);
+        let s = MigrationTxState::Mined {
+            txid,
+            height: BlockHeight::from_u32(10),
+        };
+        assert_eq!(s.as_ref(), "mined");
+        assert_eq!(
+            MigrationTxState::from_stored("mined", s.broadcast_txid(), s.mined_height()),
+            Ok(s)
+        );
+        // A mined row missing its txid does not reconstruct.
+        assert!(
+            MigrationTxState::from_stored("mined", None, Some(BlockHeight::from_u32(10))).is_err()
+        );
+    }
+
     /// A local network with NU6.3 active at a low height, matching the build test network, so the
     /// canonical fees and activation checks compute in planning tests.
     fn test_net() -> LocalNetwork {
@@ -3132,6 +3157,7 @@ mod tests {
             .update_transaction(
                 MigrationTransferId(0),
                 MigrationTxState::Mined {
+                    txid: TxId::from_bytes([0; 32]),
                     height: BlockHeight::from_u32(2_000_105),
                 },
             )
@@ -3140,6 +3166,7 @@ mod tests {
         assert_eq!(
             loaded.transactions[0].state,
             MigrationTxState::Mined {
+                txid: TxId::from_bytes([0; 32]),
                 height: BlockHeight::from_u32(2_000_105)
             }
         );
@@ -4002,7 +4029,11 @@ mod commit_tests {
             other => panic!("expected a broadcast step, got {other:?}"),
         }
         for id in &layer0_ids {
-            state.mark_mined(*id, BlockHeight::from_u32(2_000_010));
+            state.mark_mined(
+                *id,
+                TxId::from_bytes([0; 32]),
+                BlockHeight::from_u32(2_000_010),
+            );
         }
         let layer1_ids: Vec<MigrationTransferId> = state
             .transactions
@@ -4021,7 +4052,11 @@ mod commit_tests {
             other => panic!("expected a broadcast step, got {other:?}"),
         }
         for id in &layer1_ids {
-            state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
+            state.mark_mined(
+                *id,
+                TxId::from_bytes([0; 32]),
+                BlockHeight::from_u32(2_000_020),
+            );
         }
         match state.next_step(target) {
             crate::state::AdvanceStep::Prove { id, .. }
@@ -4095,7 +4130,11 @@ mod commit_tests {
         assert!(!state.deps_mined(&[p2]));
 
         // Mine ONLY the first producer.
-        state.mark_mined(p1, BlockHeight::from_u32(2_000_000));
+        state.mark_mined(
+            p1,
+            TxId::from_bytes([0; 32]),
+            BlockHeight::from_u32(2_000_000),
+        );
 
         // Crossings funded by p1 are releasable; crossings funded by the still-unmined p2 stay
         // blocked — a crossing does NOT wait for the whole preparation.
@@ -4204,7 +4243,11 @@ mod commit_tests {
             }
             height += 10;
             for id in &ids {
-                state.mark_mined(*id, BlockHeight::from_u32(height));
+                state.mark_mined(
+                    *id,
+                    TxId::from_bytes([0; 32]),
+                    BlockHeight::from_u32(height),
+                );
             }
         }
         match state.next_step(target) {

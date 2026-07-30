@@ -403,12 +403,16 @@ impl MigrationState {
         self.recompute_status();
     }
 
-    /// Records that the transaction `id` was mined at `height`, then recomputes the overall status. The
-    /// consumer detects mining through its own chain view (matching a broadcast transaction's txid) and
-    /// calls this, which is what lets a later preparation layer or the transfers become actionable.
-    pub fn mark_mined(&mut self, id: MigrationTransferId, height: BlockHeight) {
+    /// Records that the transaction `id` was mined under `txid` at `height`, then recomputes the
+    /// overall status. The consumer detects mining through its own chain view by matching a
+    /// broadcast transaction's txid, so it always has the txid to hand here; recording it on
+    /// `Mined` (rather than dropping it once broadcast is superseded) is what lets reorg handling
+    /// demote a rolled-back mined transaction back to `Broadcast` without losing the id it was
+    /// mined under. This is also what lets a later preparation layer or the transfers become
+    /// actionable.
+    pub fn mark_mined(&mut self, id: MigrationTransferId, txid: TxId, height: BlockHeight) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
-            tx.state = MigrationTxState::Mined { height };
+            tx.state = MigrationTxState::Mined { txid, height };
         }
         self.recompute_status();
     }
@@ -621,7 +625,7 @@ impl MigrationState {
                     _ => None,
                 };
                 let mined_height = match t.state {
-                    MigrationTxState::Mined { height } => Some(height),
+                    MigrationTxState::Mined { height, .. } => Some(height),
                     _ => None,
                 };
                 TransactionStatus {
@@ -700,6 +704,7 @@ mod tests {
 
     fn mined(height: u32) -> MigrationTxState {
         MigrationTxState::Mined {
+            txid: TxId::from_bytes([0; 32]),
             height: BlockHeight::from_u32(height),
         }
     }
@@ -1047,8 +1052,16 @@ mod tests {
         assert_eq!(s.status, MigrationStatus::InProgress);
         assert!(!s.is_terminal());
 
-        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(10));
-        s.mark_mined(MigrationTransferId(1), BlockHeight::from_u32(11));
+        s.mark_mined(
+            MigrationTransferId(0),
+            TxId::from_bytes([7; 32]),
+            BlockHeight::from_u32(10),
+        );
+        s.mark_mined(
+            MigrationTransferId(1),
+            TxId::from_bytes([8; 32]),
+            BlockHeight::from_u32(11),
+        );
         assert_eq!(s.status, MigrationStatus::Complete);
         assert!(s.is_terminal());
     }
@@ -1085,7 +1098,11 @@ mod tests {
         );
 
         // Detecting a mined transaction still does not resurrect it.
-        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(10));
+        s.mark_mined(
+            MigrationTransferId(0),
+            TxId::from_bytes([1; 32]),
+            BlockHeight::from_u32(10),
+        );
         assert_eq!(s.status, MigrationStatus::Failed);
     }
 
