@@ -39,7 +39,7 @@ workspace.
   as an ordinary payment.
 
 ### Changed
-- Migrated to `zcash_client_backend 0.24.0-rc.6`.
+- Migrated to `zcash_client_backend 0.24.0-rc.6`, `zcash_pool_migration 0.1.0-rc.5`.
 - `zcash_client_sqlite::testing::db::TestDbFactory::default` and
   `zcash_client_sqlite::testing::BlockCache::default` now use isolated
   in-memory SQLite databases.

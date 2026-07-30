@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.5] - 2026-07-29
+
 ### Changed
 - Migrated to `zcash_client_backend 0.24.0-rc.6`.
 - `scheduling::SchedulingParams::ZIP_318` adopts the revised ZIP 318 timing:
