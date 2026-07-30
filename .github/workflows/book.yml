@@ -23,20 +23,28 @@ jobs:
         uses: ./.github/actions/prepare
         with:
           all-features: true
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         id: toolchain
+        with:
+          toolchain: nightly
       - run: rustup override set "${TOOLCHAIN}"
         env:
           TOOLCHAIN: ${{steps.toolchain.outputs.name}}
 
       - name: Build latest rustdocs
-        run: >
-          cargo doc
-          --no-deps
-          --workspace
-          ${{ steps.prepare.outputs.feature-flags }}
+        shell: bash
         env:
+          ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
+          FEATURES: ${{ steps.prepare.outputs.feature-list }}
           RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
+        run: |
+          feature_flags=()
+          if [[ "$ALL_FEATURES" == true ]]; then
+            feature_flags+=(--all-features)
+          elif [[ -n "$FEATURES" ]]; then
+            feature_flags+=(--features "$FEATURES")
+          fi
+          cargo doc --no-deps --workspace "${feature_flags[@]}"
 
       - name: Move latest rustdocs into book
         run: |

@@ -26,9 +26,12 @@ inputs:
     required: false
     default: true
 outputs:
-  feature-flags:
-    description: 'Feature flags'
-    value: ${{ steps.prepare.outputs.flags || steps.prepare-all.outputs.flags }}
+  feature-list:
+    description: 'Space-separated feature names, empty when all features are enabled'
+    value: ${{ steps.prepare.outputs.features }}
+  all-features:
+    description: 'Whether all features are enabled'
+    value: ${{ inputs.all-features }}
 runs:
   using: 'composite'
   steps:
@@ -47,32 +50,32 @@ runs:
       run: echo "feature=test-dependencies" >> $GITHUB_OUTPUT
       if: inputs.test-dependencies == 'true'
 
-    # `steps.pools.outputs.features` and `steps.test.outputs.feature` cannot
-    # expand into attacker-controllable code because the previous steps only
-    # enable them to have one of two fixed values.
-    - name: Prepare feature flags # zizmor: ignore[template-injection]
+    - name: Prepare feature flags
       id: prepare
       shell: bash
-      run: >
-        echo "flags=--features '
-        bundled-prover
-        download-params
-        lightwalletd-tonic
-        sync
-        temporary-zcashd
-        unstable
-        unstable-serialization
-        unstable-spanning-tree
-        ${EXTRA_FEATURES}
-        ${{ steps.transparent-pool.outputs.features }}
-        ${{ steps.orchard-pool.outputs.features }}
-        ${{ steps.test.outputs.feature }}
-        '" >> $GITHUB_OUTPUT
+      run: |
+        read -ra extra_features <<< "$EXTRA_FEATURES"
+        read -ra transparent_features <<< "$TRANSPARENT_FEATURES"
+        read -ra orchard_features <<< "$ORCHARD_FEATURES"
+        read -ra test_features <<< "$TEST_FEATURES"
+        features=(
+          bundled-prover
+          download-params
+          lightwalletd-tonic
+          sync
+          temporary-zcashd
+          unstable
+          unstable-serialization
+          unstable-spanning-tree
+          "${extra_features[@]}"
+          "${transparent_features[@]}"
+          "${orchard_features[@]}"
+          "${test_features[@]}"
+        )
+        echo "features=${features[*]}" >> "$GITHUB_OUTPUT"
       env:
         EXTRA_FEATURES: ${{ inputs.extra-features }}
+        ORCHARD_FEATURES: ${{ steps.orchard-pool.outputs.features }}
+        TEST_FEATURES: ${{ steps.test.outputs.feature }}
+        TRANSPARENT_FEATURES: ${{ steps.transparent-pool.outputs.features }}
       if: inputs.all-features == 'false'
-
-    - id: prepare-all
-      shell: bash
-      run: echo "flags=--all-features" >> $GITHUB_OUTPUT
-      if: inputs.all-features == 'true'
