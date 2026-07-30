@@ -7197,6 +7197,7 @@ dependencies = [
  "bls12_381",
  "bs58",
  "byteorder",
+ "criterion 0.5.1",
  "document-features",
  "group",
  "hex",
