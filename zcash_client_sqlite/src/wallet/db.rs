@@ -1534,7 +1534,8 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   or `NULL` for wallet-internal outputs.
 /// - `diversifier_index_be`: The big-endian representation of the diversifier index (or, for
 ///   transparent addresses, the BIP 44 change-level index of the derivation path) of the receiving
-///   address. This will be `NULL` for outgoing transaction outputs.
+///   address. This will be `NULL` for outputs that were not received at one of the wallet's
+///   diversified addresses (in particular, for outputs sent to external recipients).
 /// - `value`: The value of the output, in zatoshis.
 /// - `is_change`: `0` for outgoing outputs and outputs received at external-facing addresses, `1`
 ///   for outputs received at wallet-internal addresses. This represents a best-effort judgement
@@ -1622,6 +1623,7 @@ SELECT
         MAX(CASE WHEN is_sent_row THEN to_address END),
         MAX(CASE WHEN NOT is_sent_row THEN to_address END)
     )                           AS to_address,
+    MAX(diversifier_index_be)   AS diversifier_index_be,
     MAX(value)                  AS value,
     MAX(is_change)              AS is_change,
     MAX(memo)                   AS memo,

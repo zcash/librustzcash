@@ -3120,6 +3120,121 @@ mod tests {
         );
     }
 
+    /// `v_tx_outputs` must emit the `diversifier_index_be` of the receiving address for
+    /// outputs received by the wallet, as its documentation has promised since the column
+    /// was introduced. The outer merge projection previously dropped it, so the documented
+    /// column did not exist in the view's output at all. See zcash/librustzcash#2863.
+    #[test]
+    fn v_tx_outputs_exposes_diversifier_index() {
+        use transparent::bundle::{OutPoint, TxOut};
+        use zcash_client_backend::{
+            data_api::WalletRead as _,
+            wallet::{Recipient, WalletTransparentOutput},
+        };
+        use zcash_keys::{encoding::AddressCodec as _, keys::UnifiedAddressRequest};
+        use zcash_protocol::value::Zatoshis;
+
+        use crate::{TxRef, wallet::put_sent_output};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let birthday = st.test_account().unwrap().birthday().height();
+        let params = st.wallet().db().params;
+        let taddr = *st
+            .wallet()
+            .get_last_generated_address_matching(
+                account_id,
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .unwrap()
+            .transparent()
+            .unwrap();
+        let taddr_str = taddr.encode(&params);
+
+        let mined_at = birthday + 100;
+        st.wallet_mut().update_chain_tip(mined_at + 10).unwrap();
+
+        let outpoint = OutPoint::fake();
+        let value = Zatoshis::const_from_u64(100_000);
+        let utxo = WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            TxOut::new(value, taddr.script().into()),
+            Some(mined_at),
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+
+        let expected: Vec<u8> = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT diversifier_index_be FROM addresses
+                 WHERE cached_transparent_receiver_address = :addr",
+                rusqlite::named_params! { ":addr": taddr_str },
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let div_idx = |conn: &rusqlite::Connection| -> Option<Vec<u8>> {
+            conn.query_row(
+                "SELECT diversifier_index_be FROM v_tx_outputs WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(
+            div_idx(st.wallet().conn()),
+            Some(expected.clone()),
+            "a received output must carry the diversifier index of its receiving address",
+        );
+
+        // Recording the send side of the same output must not displace the index: the
+        // received arm's non-NULL value survives the merge.
+        let id_tx: i64 = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT id_tx FROM transactions WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap();
+        let conn_tx = st.wallet_mut().conn_mut().transaction().unwrap();
+        put_sent_output(
+            &conn_tx,
+            &params,
+            account_id,
+            TxRef(id_tx),
+            outpoint.n() as usize,
+            &Recipient::InternalTransparent {
+                receiving_account: account_id,
+                recipient_address: taddr,
+            },
+            value,
+            None,
+        )
+        .unwrap();
+        conn_tx.commit().unwrap();
+
+        assert_eq!(
+            div_idx(st.wallet().conn()),
+            Some(expected),
+            "the receiving address's diversifier index must survive the sent/received merge",
+        );
+    }
+
     #[test]
     fn transparent_balance_across_shielding() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_across_shielding(
