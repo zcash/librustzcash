@@ -50,30 +50,43 @@ pub const MAX_RESIDUAL_VALUE: Zatoshis = Zatoshis::const_from_u64(COIN / 100);
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 pub const PREP_TX_ACTIONS: usize = 16;
 
-/// The mean of the [ZIP 318] transfer inter-arrival delay distribution, in blocks.
+/// The mean of the [ZIP 318] preparation inter-arrival delay distribution, in blocks: 16, about
+/// twenty minutes at the 75-second target block spacing.
+///
+/// Preparation transactions are fully shielded self-sends: they need temporal decoupling from one
+/// another (a burst of identically shaped transactions from one wallet is a linkable cluster), but
+/// no anchor bucketing — only the pool-crossing transfers anchor to boundaries — so they are spaced
+/// much more tightly than the transfers.
 ///
 /// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const TRANSFER_DELAY_MEAN: NonZeroU32 = NonZeroU32::new(144).expect("144 is nonzero");
+pub const PREP_DELAY_MEAN: NonZeroU32 = NonZeroU32::new(16).expect("16 is nonzero");
 
-/// The inclusive cap on a single [ZIP 318] transfer delay draw, in blocks
-/// (`DELAY_CAP_RATIO * TRANSFER_DELAY_MEAN`, about twelve hours).
+/// The inclusive cap on a single [ZIP 318] preparation delay draw, in blocks: 96, about two hours.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub const PREP_DELAY_CAP: NonZeroU32 = NonZeroU32::new(96).expect("96 is nonzero");
+
+/// The mean of the [ZIP 318] transfer inter-arrival delay distribution, in blocks: 66, about ninety
+/// minutes at the 75-second target block spacing.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub const TRANSFER_DELAY_MEAN: NonZeroU32 = NonZeroU32::new(66).expect("66 is nonzero");
+
+/// The inclusive cap on a single [ZIP 318] transfer delay draw, in blocks: 576, about twelve hours.
+///
+/// At more than eight mean delays, the cap preserves nearly all of the exponential's variance;
+/// discarding and redrawing above it removes only the far tail, so that nothing is starved for an
+/// unbounded time.
 ///
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 pub const TRANSFER_DELAY_CAP: NonZeroU32 = NonZeroU32::new(576).expect("576 is nonzero");
-
-/// The ratio a [ZIP 318] delay distribution's cap bears to its mean: a draw more than four times the
-/// mean is discarded and redrawn, truncating the exponential's heavy tail so that nothing is starved
-/// for an unbounded time.
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const DELAY_CAP_RATIO: NonZeroU32 = NonZeroU32::new(4).expect("4 is nonzero");
 
 /// Maximum anchor AGE, in boundaries, that a recency-weighted anchor draw will accept.
 ///
 /// Age `a` counts boundaries strictly before the most recent boundary observed at proving time; a
 /// draw exceeding this cap (a very old anchor) is discarded and redrawn. This bounds how stale a
-/// proof's anchor can be — 16 boundaries is about two days.
-pub const ANCHOR_AGE_CAP: u32 = 16;
+/// proof's anchor can be — 4 boundaries is about twelve hours.
+pub const ANCHOR_AGE_CAP: u32 = 4;
 
 /// Block-height modulus of the canonical rolling EXPIRY window, in blocks. 34,560 blocks is about 30
 /// days at the target block spacing. An expiry height is anchored to the most recent multiple of
@@ -288,6 +301,11 @@ pub trait PoolMigrationConstants {
         (TRANSFER_DELAY_MEAN, TRANSFER_DELAY_CAP)
     }
 
+    /// The mean and inclusive cap, in blocks, of the preparation inter-arrival delay distribution.
+    fn preparation_delay(&self) -> (NonZeroU32, NonZeroU32) {
+        (PREP_DELAY_MEAN, PREP_DELAY_CAP)
+    }
+
     /// The maximum anchor age, in boundaries, that a recency-weighted anchor draw will accept.
     fn anchor_age_cap(&self) -> u32 {
         ANCHOR_AGE_CAP
@@ -433,13 +451,11 @@ mod tests {
     #[test]
     fn scheduling_constants_carry_the_zip_318_values() {
         assert_eq!(PREP_TX_ACTIONS, 16);
-        assert_eq!(TRANSFER_DELAY_MEAN.get(), 144);
+        assert_eq!(PREP_DELAY_MEAN.get(), 16);
+        assert_eq!(PREP_DELAY_CAP.get(), 96);
+        assert_eq!(TRANSFER_DELAY_MEAN.get(), 66);
         assert_eq!(TRANSFER_DELAY_CAP.get(), 576);
-        assert_eq!(
-            TRANSFER_DELAY_CAP.get(),
-            TRANSFER_DELAY_MEAN.get() * DELAY_CAP_RATIO.get()
-        );
-        assert_eq!(ANCHOR_AGE_CAP, 16);
+        assert_eq!(ANCHOR_AGE_CAP, 4);
         assert_eq!(EXPIRY_MODULUS, 34_560);
         assert_eq!(EXPIRY_WINDOW, 2 * EXPIRY_MODULUS);
     }
@@ -461,6 +477,10 @@ mod tests {
         assert_eq!(
             Specified.transfer_delay(),
             (TRANSFER_DELAY_MEAN, TRANSFER_DELAY_CAP)
+        );
+        assert_eq!(
+            Specified.preparation_delay(),
+            (PREP_DELAY_MEAN, PREP_DELAY_CAP)
         );
         assert_eq!(Specified.anchor_age_cap(), ANCHOR_AGE_CAP);
         assert_eq!(Specified.expiry_window(), (EXPIRY_MODULUS, EXPIRY_WINDOW));
