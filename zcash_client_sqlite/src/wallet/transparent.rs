@@ -82,7 +82,7 @@ use crate::{
 };
 // Used only by the value-target transparent selection, which is gated on transparent inputs.
 #[cfg(feature = "transparent-inputs")]
-use crate::wallet::locking::locked_tier_order_key;
+use crate::wallet::locking::locked_tier_expr;
 
 pub(crate) mod ephemeral;
 
@@ -1597,8 +1597,10 @@ pub(crate) fn select_spendable_transparent_outputs<P: consensus::Parameters>(
     // `LockFilter::Policy` that prefers one lock tier prefixes the value ordering with a lock-tier
     // key (Part B): the preferred tier is drawn upon first, with value-descending order retained as
     // a secondary key within each tier. For `Exclude`/`Unfiltered` the ordering is unchanged.
-    let order_by_sql = match locked_tier_order_key(lock_filter, "u") {
-        Some(tier_key) => format!("{tier_key}, u.value_zat DESC, u.output_index"),
+    let order_by_sql = match locked_tier_expr(lock_filter, "u") {
+        Some((expr, direction)) => {
+            format!("{expr} {direction}, u.value_zat DESC, u.output_index")
+        }
         None => "u.value_zat DESC, u.output_index".to_string(),
     };
 

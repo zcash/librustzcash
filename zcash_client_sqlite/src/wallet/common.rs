@@ -25,7 +25,7 @@ use crate::{
     wallet::{
         get_anchor_height,
         locking::{
-            locked_tier_order_key, output_eligible_condition, overridable_owners_rarray,
+            locked_tier_expr, output_eligible_condition, overridable_owners_rarray,
             push_lock_params,
         },
         pool_code,
@@ -693,13 +693,21 @@ where
     // window order need not match the CTE's physical output order, the threshold-crossing
     // note is chosen as the note with the smallest running sum at or above the target
     // (`ORDER BY so_far`).
-    let tier_key = locked_tier_order_key(lock_filter, "rn");
-    let window_frame = match &tier_key {
-        Some(tier_key) => {
-            format!("ORDER BY {tier_key}, rn.commitment_tree_position ROWS UNBOUNDED PRECEDING")
-        }
+    let tier = locked_tier_expr(lock_filter, "rn");
+    let window_frame = match &tier {
+        Some((expr, direction)) => format!(
+            "ORDER BY {expr} {direction}, rn.commitment_tree_position ROWS UNBOUNDED PRECEDING"
+        ),
         None => "ORDER BY rn.commitment_tree_position ROWS UNBOUNDED PRECEDING".to_string(),
     };
+    // The single-covering tail selects FROM the CTE, where `rn` is out of scope, so the tier
+    // expression is materialized as a CTE column with the direction applied at the ordering
+    // site; a constant stands in when the lock filter admits only one tier and no preference
+    // applies.
+    let (tier_column, tier_direction) = tier
+        .as_ref()
+        .map(|(expr, direction)| (expr.as_str(), *direction))
+        .unwrap_or(("0", "ASC"));
     let crossing_note_subquery =
         "SELECT * from eligible WHERE so_far >= :target_value ORDER BY so_far LIMIT 1";
     let result_columns = format!(
@@ -711,9 +719,11 @@ where
     );
     // The `eligible` CTE is shared; only the selection over it differs by shape. Accumulation
     // takes every note below the running-sum threshold plus the threshold-crossing note;
-    // single-covering takes the individually sufficient notes, oldest first, and relies on the
-    // caller to take the head (the Rust-side confirmations filter below may drop leading rows,
-    // so the limit cannot be applied in SQL).
+    // single-covering takes the individually sufficient notes ordered by lock tier first and
+    // age second — the same key order the accumulation window uses, so a `PreferUnlocked` or
+    // `PreferLocked` caller draws its preferred tier before an older note of the other tier —
+    // and relies on the caller to take the head (the Rust-side confirmations filter below may
+    // drop leading rows, so the limit cannot be applied in SQL).
     let selection_tail = match selection {
         ValueSelection::Accumulate => format!(
             "SELECT {result_columns}
@@ -725,7 +735,7 @@ where
         ValueSelection::SingleCovering => format!(
             "SELECT {result_columns}
          FROM eligible WHERE value >= :target_value
-         ORDER BY commitment_tree_position"
+         ORDER BY lock_tier {tier_direction}, commitment_tree_position"
         ),
     };
     let eligible_condition = output_eligible_condition(lock_filter, "rn");
@@ -735,6 +745,7 @@ where
                  rn.id AS id, t.txid, rn.{output_index_col},
                  rn.diversifier, rn.value,
                  {note_reconstruction_cols}, rn.commitment_tree_position,
+                 {tier_column} AS lock_tier,
                  SUM(value) OVER ({window_frame}) AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,

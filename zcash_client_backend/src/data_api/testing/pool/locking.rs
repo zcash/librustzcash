@@ -14,19 +14,18 @@ use zcash_protocol::{PoolType, TxId, consensus::BlockHeight, value::Zatoshis};
 use zip321::Payment;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::data_api::{
-    InputSource, WalletRead, WalletWrite,
-    wallet::{
-        TargetHeight,
-        input_selection::{LockFilter, LockedInputPolicy},
-    },
-};
+use crate::data_api::WalletWrite;
 use crate::{
     data_api::{
-        self, Account as _, OutputLockStore, WalletTest,
+        self, Account as _, InputSource, OutputLockStore, WalletRead, WalletTest,
         error::LockError,
         testing::{DataStoreFactory, TestCache, single_output_change_strategy},
-        wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
+        wallet::{
+            ConfirmationsPolicy, TargetHeight,
+            input_selection::{
+                GreedyInputSelector, LockFilter, LockedInputPolicy, NonEmptyBTreeSet,
+            },
+        },
     },
     fees::StandardFeeRule,
     wallet::{LockOwner, OutputRef, OvkPolicy},
@@ -1260,4 +1259,80 @@ where
         .get(taddr)
         .expect("the address has a balance entry");
     assert_eq!(bal.spendable_value(), value);
+}
+
+/// Single-note selection preserves the caller's lock-tier preference: the lock tier is the
+/// primary sort key and chain age the secondary, matching the accumulation path's window order.
+/// Without this, when `PreferUnlocked` or `PreferLocked` admits both tiers, the single oldest
+/// covering note can come from the NON-preferred tier — in particular, `PreferUnlocked` could
+/// reuse an acknowledged in-flight locked input merely because it is older than an unlocked
+/// alternative.
+pub fn single_note_selection_honors_lock_tier_preference<T: ShieldedPoolTester>(
+    ds_factory: impl DataStoreFactory,
+    cache: impl TestCache,
+) {
+    let mut st = TestDsl::with_sapling_birthday_account(ds_factory, cache).build::<T>();
+
+    // Two notes in successive blocks, each singly covering the target below. The OLDER note is
+    // then locked, so tier preference and age preference disagree about which note to pick.
+    let older_locked_value = Zatoshis::const_from_u64(50_000);
+    let newer_unlocked_value = Zatoshis::const_from_u64(40_000);
+    st.add_notes_checking_balance([[older_locked_value], [newer_unlocked_value]]);
+
+    let account_id = st.test_account().unwrap().id();
+    let older_ref = st.note_ref_by_value(older_locked_value);
+    let owner = LockOwner::new([0xA1; 32]);
+    assert_eq!(
+        st.wallet_mut()
+            .lock_outputs(&[older_ref], owner, BlockHeight::from(u32::MAX))
+            .unwrap(),
+        1
+    );
+
+    let target_height = TargetHeight::from(
+        st.wallet()
+            .chain_height()
+            .unwrap()
+            .expect("the chain has been scanned")
+            + 1,
+    );
+    // Below either note's value, so both are covering candidates.
+    let value = Zatoshis::const_from_u64(30_000);
+    let select = |policy: &LockedInputPolicy| {
+        st.wallet()
+            .select_single_spendable_note(
+                account_id,
+                value,
+                &[T::SHIELDED_PROTOCOL],
+                target_height,
+                ConfirmationsPolicy::MIN,
+                &[],
+                LockFilter::Policy(policy),
+            )
+            .unwrap()
+    };
+
+    // `PreferUnlocked` admits both tiers, but must draw the unlocked tier first even though the
+    // locked note is older.
+    let unlocked_pref = LockedInputPolicy::PreferUnlocked(NonEmptyBTreeSet::singleton(owner));
+    assert_eq!(
+        select(&unlocked_pref).total_value().unwrap(),
+        newer_unlocked_value,
+        "PreferUnlocked must not reach for an older locked note past an unlocked alternative"
+    );
+
+    // `PreferLocked` draws the locked tier first.
+    let locked_pref = LockedInputPolicy::PreferLocked(NonEmptyBTreeSet::singleton(owner));
+    assert_eq!(
+        select(&locked_pref).total_value().unwrap(),
+        older_locked_value,
+        "PreferLocked must draw the locked tier first"
+    );
+
+    // `Exclude` admits only the unlocked note at all.
+    assert_eq!(
+        select(&LockedInputPolicy::Exclude).total_value().unwrap(),
+        newer_unlocked_value,
+        "Exclude must never surface a locked note"
+    );
 }
