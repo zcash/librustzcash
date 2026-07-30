@@ -21,6 +21,7 @@ use zcash_primitives::transaction::TxId;
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
+    value::Zatoshis,
 };
 use zip32::Scope;
 
@@ -235,6 +236,56 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
         confirmations_policy,
         exclude,
         ShieldedPool::Orchard,
+        to_received_note,
+        lock_filter,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_single_spendable_orchard_note<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    super::common::select_single_spendable_note(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Orchard,
+        to_received_note,
+        lock_filter,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_single_spendable_ironwood_note<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+    super::common::select_single_spendable_note(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Ironwood,
         to_received_note,
         lock_filter,
     )
@@ -878,6 +929,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn oldest_note_is_selected_first() {
+        testing::pool::oldest_note_is_selected_first::<OrchardPoolTester>()
+    }
+
+    #[test]
     fn metadata_queries_exclude_unwanted_notes() {
         testing::pool::metadata_queries_exclude_unwanted_notes::<OrchardPoolTester>()
     }
@@ -890,6 +946,11 @@ pub(crate) mod tests {
     #[test]
     fn canonical_crossing_builds_at_empty_boundary_block() {
         testing::pool::canonical_crossing_builds_at_empty_boundary_block()
+    }
+
+    #[test]
+    fn canonical_crossing_prefers_single_note() {
+        testing::pool::canonical_crossing_prefers_single_note()
     }
 
     #[test]

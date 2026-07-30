@@ -492,6 +492,22 @@ pub struct SpendPolicy {
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<TransparentSpendPolicy>,
     locked_input_policy: LockedInputPolicy,
+    note_selection: NoteSelection,
+}
+
+/// How an [`InputSelector`] chooses among eligible notes when funding a payment.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NoteSelection {
+    /// Accumulate the oldest eligible notes until the target value is covered.
+    #[default]
+    Accumulate,
+    /// Prefer funding from a SINGLE note — the oldest eligible note whose value alone covers the
+    /// target — falling back to accumulation when no such note exists.
+    ///
+    /// A ZIP 318 migration transfer spends exactly one note, so a canonical pool crossing is
+    /// achievable only under single-note funding; multi-note funding is not an error, but the
+    /// resulting proposal does not have the canonical shape.
+    PreferSingle,
 }
 
 impl Default for SpendPolicy {
@@ -515,6 +531,7 @@ impl SpendPolicy {
             #[cfg(feature = "transparent-inputs")]
             transparent: None,
             locked_input_policy: LockedInputPolicy::Exclude,
+            note_selection: NoteSelection::Accumulate,
         }
     }
 
@@ -550,6 +567,18 @@ impl SpendPolicy {
     /// Returns the policy governing selection of locked outputs.
     pub fn locked_input_policy(&self) -> &LockedInputPolicy {
         &self.locked_input_policy
+    }
+
+    /// Sets how the selector chooses among eligible notes (default:
+    /// [`NoteSelection::Accumulate`]).
+    pub fn with_note_selection(mut self, note_selection: NoteSelection) -> Self {
+        self.note_selection = note_selection;
+        self
+    }
+
+    /// Returns how the selector chooses among eligible notes.
+    pub fn note_selection(&self) -> NoteSelection {
+        self.note_selection
     }
 }
 
@@ -1417,17 +1446,42 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // in-flight proposal and spending it would recreate the conflict that locking exists
             // to prevent; the `PreferUnlocked`/`PreferLocked` overrides let a caller draw through
             // a lock it recognizes (e.g. its own pool-migration PCZTs).
-            shielded_inputs = wallet_db
-                .select_spendable_notes(
-                    account,
-                    TargetValue::AtLeast(amount_required),
-                    &pool_preference,
-                    target_height,
-                    confirmations_policy,
-                    &exclude,
-                    LockFilter::Policy(spend_policy.locked_input_policy()),
+            //
+            // Under `NoteSelection::PreferSingle`, the single oldest note covering the required
+            // amount alone is tried first; when no pool holds one, selection falls back to
+            // ordinary accumulation, which still funds the payment but cannot produce the
+            // single-input shape the caller preferred.
+            let single_note = match spend_policy.note_selection() {
+                NoteSelection::PreferSingle => Some(
+                    wallet_db
+                        .select_single_spendable_note(
+                            account,
+                            amount_required,
+                            &pool_preference,
+                            target_height,
+                            confirmations_policy,
+                            &exclude,
+                            LockFilter::Policy(spend_policy.locked_input_policy()),
+                        )
+                        .map_err(InputSelectorError::DataSource)?,
                 )
-                .map_err(InputSelectorError::DataSource)?;
+                .filter(|notes| !notes.is_empty()),
+                NoteSelection::Accumulate => None,
+            };
+            shielded_inputs = match single_note {
+                Some(single) => single,
+                None => wallet_db
+                    .select_spendable_notes(
+                        account,
+                        TargetValue::AtLeast(amount_required),
+                        &pool_preference,
+                        target_height,
+                        confirmations_policy,
+                        &exclude,
+                        LockFilter::Policy(spend_policy.locked_input_policy()),
+                    )
+                    .map_err(InputSelectorError::DataSource)?,
+            };
 
             let new_available = shielded_inputs.total_value()?;
             if new_available <= prior_available && !transparent_inputs_changed {

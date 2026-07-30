@@ -320,6 +320,13 @@ pub(crate) fn anchor_checkpoints_retained_across_deep_scan<T: ShieldedPoolTester
     }
 }
 
+pub(crate) fn oldest_note_is_selected_first<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::oldest_note_is_selected_first::<T, _>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 /// Runs the empty-boundary retention check at a short interval, so a handful of filler blocks
 /// crosses two boundaries.
 #[cfg(feature = "orchard")]
@@ -345,6 +352,14 @@ pub(crate) fn canonical_crossing_is_bucketed_and_unpadded() {
 #[cfg(feature = "orchard")]
 pub(crate) fn canonical_crossing_builds_at_empty_boundary_block() {
     zcash_client_backend::data_api::testing::pool::canonical_crossing_builds_at_empty_boundary_block(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn canonical_crossing_prefers_single_note() {
+    zcash_client_backend::data_api::testing::pool::canonical_crossing_prefers_single_note(
         TestDbFactory::default(),
         BlockCache::new(),
     )

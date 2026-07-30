@@ -86,6 +86,7 @@ use zcash_protocol::{
     ShieldedPool,
     consensus::{self, BlockHeight, TxIndex},
     memo::Memo,
+    value::Zatoshis,
 };
 use zip32::{DiversifierIndex, fingerprint::SeedFingerprint};
 
@@ -822,6 +823,77 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
         ))
+    }
+
+    fn select_single_spendable_note(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        sources: &[ShieldedPool],
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+    ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error> {
+        // Pools are tried in the caller's preference order; the first pool holding a covering
+        // note supplies it.
+        for pool in sources {
+            match pool {
+                ShieldedPool::Sapling => {
+                    if let Some(note) = wallet::sapling::select_single_spendable_sapling_note(
+                        self.conn.borrow(),
+                        &self.params,
+                        account,
+                        value,
+                        target_height,
+                        confirmations_policy,
+                        exclude,
+                        lock_filter,
+                    )? {
+                        return Ok(ReceivedNotes::new(
+                            vec![note],
+                            #[cfg(feature = "orchard")]
+                            vec![],
+                            #[cfg(feature = "orchard")]
+                            vec![],
+                        ));
+                    }
+                }
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Orchard => {
+                    if let Some(note) = wallet::orchard::select_single_spendable_orchard_note(
+                        self.conn.borrow(),
+                        &self.params,
+                        account,
+                        value,
+                        target_height,
+                        confirmations_policy,
+                        exclude,
+                        lock_filter,
+                    )? {
+                        return Ok(ReceivedNotes::new(vec![], vec![note], vec![]));
+                    }
+                }
+                #[cfg(feature = "orchard")]
+                ShieldedPool::Ironwood => {
+                    if let Some(note) = wallet::orchard::select_single_spendable_ironwood_note(
+                        self.conn.borrow(),
+                        &self.params,
+                        account,
+                        value,
+                        target_height,
+                        confirmations_policy,
+                        exclude,
+                        lock_filter,
+                    )? {
+                        return Ok(ReceivedNotes::new(vec![], vec![], vec![note]));
+                    }
+                }
+                #[cfg(not(feature = "orchard"))]
+                ShieldedPool::Orchard | ShieldedPool::Ironwood => {}
+            }
+        }
+        Ok(ReceivedNotes::empty())
     }
 
     fn select_unspent_notes(
