@@ -178,6 +178,7 @@ migration_modules!(
     v_transactions_transparent_history,
     v_migration_transactions,
     v_transactions_zip318_kind,
+    v_tx_outputs_diversifier_index,
     v_tx_outputs_key_scopes,
     v_tx_outputs_return_addrs,
     v_tx_outputs_transparent_addresses,
@@ -282,6 +283,8 @@ pub(super) fn all_migrations<
     //                             |                             |            \
     //                             |              v_transactions_pool_crossing \
     //                             `------------------------------------------- v_tx_outputs_transparent_addresses
+    //                                                                                       |
+    //                                                                         v_tx_outputs_diversifier_index
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -396,6 +399,7 @@ pub(super) fn all_migrations<
         Box::new(tx_status_observation_intent::Migration),
         Box::new(orchard_ironwood_migration_anchor_interval::Migration),
         Box::new(v_tx_outputs_transparent_addresses::Migration),
+        Box::new(v_tx_outputs_diversifier_index::Migration),
         Box::new(orchard_ironwood_migration_unsatisfiability::Migration),
         Box::new(orchard_ironwood_migration_history::Migration),
         Box::new(orchard_ironwood_broadcast_binding::Migration),

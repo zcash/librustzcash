@@ -22,6 +22,12 @@ workspace.
   [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
   use this to avoid the `subtree_scan_progress` aggregates.
   `WalletRead::get_wallet_summary` is unchanged and still computes progress.
+- The `v_tx_outputs` view now emits the `diversifier_index_be` column that its
+  documentation has described since the receiving-address columns were added:
+  the big-endian diversifier index of the receiving address, `NULL` for outputs
+  not received at one of the wallet's diversified addresses. The column was
+  previously computed internally but omitted from the view's output, so any
+  query naming it failed with "no such column".
 
 ### Changed
 - The types in `zcash_client_sqlite::util` (`Clock`, `SystemClock`, and
