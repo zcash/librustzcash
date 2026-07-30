@@ -1,0 +1,366 @@
+//! Adds the `unsatisfiable_at` and `spend_nullifiers` columns to
+//! `orchard_ironwood_migration_transactions` where they are missing, and backfills the
+//! nullifier cache for existing rows.
+//!
+//! `unsatisfiable_at` records the height of the chain state a spent-input observation rests on,
+//! when a migration transaction has been determined UNSATISFIABLE — its inputs can never again
+//! all exist unspent on chain — and is `NULL` while no such determination stands. Recording the
+//! backing height rather than the observation time gives reorg truncation exact semantics: a
+//! rewind below this height invalidates the observation itself.
+//!
+//! `spend_nullifiers` caches the nullifiers of each transaction's REAL spends — the
+//! deferred-witness actions; the padded dummy spends carry their own witnesses (ZIP 374) — as a
+//! concatenation of 32-byte values in action order. The cache is derivable from the stored PCZT
+//! bytes, but the pool-migration state machine reads it through the store precisely so it never
+//! has to parse a PCZT (in the engine crate, `pczt` parsing is `orchard`-gated while the state
+//! machine is feature-free). Existing rows therefore must satisfy the same invariant the store's
+//! write path maintains, so this migration derives the cache for them by parsing each row's
+//! stored PCZT — using the base `pczt` data model, which needs no protocol feature. A stored
+//! PCZT that does not parse is corrupt state and fails the migration, matching how the store's
+//! read paths reject data they cannot reconstruct.
+
+use std::collections::HashSet;
+
+use rusqlite::named_params;
+use schemerz_rusqlite::RusqliteMigration;
+use uuid::Uuid;
+
+use super::orchard_ironwood_migration_anchor_interval;
+use crate::wallet::init::WalletMigrationError;
+
+/// Adds the `unsatisfiable_at` and `spend_nullifiers` columns to
+/// `orchard_ironwood_migration_transactions` where they are missing.
+pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd334a9fa_b9dc_46bd_9b31_1fba6aa47f55);
+
+const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_migration_anchor_interval::MIGRATION_ID];
+
+pub(super) struct Migration;
+
+impl schemerz::Migration<Uuid> for Migration {
+    fn id(&self) -> Uuid {
+        MIGRATION_ID
+    }
+
+    fn dependencies(&self) -> HashSet<Uuid> {
+        DEPENDENCIES.iter().copied().collect()
+    }
+
+    fn description(&self) -> &'static str {
+        "Adds the unsatisfiable_at and spend_nullifiers columns to \
+         orchard_ironwood_migration_transactions where missing."
+    }
+}
+
+/// The concatenated nullifiers of the REAL spends of the PCZT serialized in `pczt_bytes`: the
+/// Orchard actions whose spend carries no Merkle witness (ZIP 374 defers the real spends'
+/// witnesses to proving time, while the padding dummies keep their arbitrary witnesses), in
+/// action order. A PCZT that does not parse is corrupt state and yields
+/// [`WalletMigrationError::CorruptedData`].
+fn real_spend_nullifiers(pczt_bytes: &[u8]) -> Result<Vec<u8>, WalletMigrationError> {
+    let pczt = pczt::Pczt::parse(pczt_bytes).map_err(|e| {
+        WalletMigrationError::CorruptedData(format!(
+            "stored pool-migration PCZT does not parse: {e:?}"
+        ))
+    })?;
+    Ok(pczt
+        .orchard()
+        .actions()
+        .iter()
+        .filter(|action| action.spend().witness().is_none())
+        .flat_map(|action| *action.spend().nullifier())
+        .collect())
+}
+
+impl RusqliteMigration for Migration {
+    type Error = WalletMigrationError;
+
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
+        // A wallet whose table was created from the current DDL already has the columns; adding
+        // them again is an error rather than a no-op, so the presence check is load-bearing. The
+        // two columns are introduced together (by this migration or by the current `CREATE
+        // TABLE`), so one check governs both — and on the fresh path the store itself wrote
+        // `spend_nullifiers`, so there is nothing to backfill either.
+        let has_columns = transaction.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM pragma_table_info('orchard_ironwood_migration_transactions')
+                WHERE name = :column_name
+             )",
+            named_params![":column_name": "spend_nullifiers"],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if has_columns {
+            return Ok(());
+        }
+
+        // The `DEFAULT` matches the one carried by the current `CREATE TABLE`, so the two paths
+        // agree on the stored schema text (SQLite cannot add a `NOT NULL` column without one);
+        // the store always binds the column explicitly, so no insert ever falls back to it.
+        transaction.execute_batch(
+            "ALTER TABLE orchard_ironwood_migration_transactions
+                ADD COLUMN unsatisfiable_at INTEGER;
+             ALTER TABLE orchard_ironwood_migration_transactions
+                ADD COLUMN spend_nullifiers BLOB NOT NULL DEFAULT X'';",
+        )?;
+
+        // Backfill the nullifier cache for every existing row from its stored PCZT. No row is
+        // left at the empty default: an empty cache on a transaction that HAS real spends would
+        // read as "no inputs to observe" to the unsatisfiability machinery, silently exempting
+        // the transaction from detection.
+        let rows: Vec<(i64, u32, Vec<u8>)> = {
+            let mut stmt = transaction.prepare(
+                "SELECT migration_id, tx_id, pczt FROM orchard_ironwood_migration_transactions",
+            )?;
+            let mapped = stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get::<_, Vec<u8>>(2)?))
+            })?;
+            mapped.collect::<Result<_, _>>()?
+        };
+        for (migration_id, tx_id, pczt_bytes) in rows {
+            let spend_nullifiers = real_spend_nullifiers(&pczt_bytes)?;
+            transaction.execute(
+                "UPDATE orchard_ironwood_migration_transactions
+                    SET spend_nullifiers = :spend_nullifiers
+                  WHERE migration_id = :migration_id AND tx_id = :tx_id",
+                named_params! {
+                    ":spend_nullifiers": spend_nullifiers,
+                    ":migration_id": migration_id,
+                    ":tx_id": tx_id,
+                },
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::{Connection, named_params};
+
+    use super::*;
+    use crate::wallet::init::migrations::tests::test_migrate;
+
+    #[test]
+    fn migrate() {
+        test_migrate(&[MIGRATION_ID]);
+    }
+
+    /// The pre-fix schema: `orchard_ironwood_migration_transactions` without `unsatisfiable_at`
+    /// and `spend_nullifiers`, which is what a wallet built before this migration has on disk.
+    fn create_pre_fix_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE orchard_ironwood_migration_transactions (
+                migration_id INTEGER NOT NULL,
+                tx_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                kind_layer INTEGER,
+                kind_index INTEGER,
+                kind_crossing INTEGER,
+                pczt BLOB NOT NULL,
+                scheduled_height INTEGER NOT NULL,
+                expiry_height INTEGER NOT NULL,
+                anchor_boundary INTEGER,
+                state TEXT NOT NULL,
+                txid TEXT,
+                mined_height INTEGER,
+                lock_owner BLOB,
+                PRIMARY KEY (migration_id, tx_id)
+            )",
+        )
+        .unwrap();
+    }
+
+    fn has_columns(conn: &Connection) -> bool {
+        conn.query_row(
+            "SELECT (
+                SELECT COUNT(*) FROM pragma_table_info('orchard_ironwood_migration_transactions')
+                WHERE name IN ('unsatisfiable_at', 'spend_nullifiers')
+             ) = 2",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    }
+
+    /// Insert a pre-fix transactions row carrying `pczt` (a transfer in the `signed` state; the
+    /// other columns are immaterial to the backfill).
+    fn insert_pre_fix_row(conn: &Connection, tx_id: u32, pczt: &[u8]) {
+        conn.execute(
+            "INSERT INTO orchard_ironwood_migration_transactions (
+                migration_id, tx_id, kind, kind_crossing, pczt, scheduled_height, expiry_height,
+                state
+             )
+             VALUES (1, :tx_id, 'transfer', 0, :pczt, 200, 240, 'signed')",
+            named_params![":tx_id": tx_id, ":pczt": pczt],
+        )
+        .unwrap();
+    }
+
+    /// The fresh path: the table already carries the columns, so `up` must leave it alone rather
+    /// than fail with "duplicate column name".
+    #[test]
+    fn is_a_no_op_when_the_columns_are_present() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::pool_migration::orchard_ironwood::init_migration_tables(&conn).unwrap();
+        assert!(has_columns(&conn));
+
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(&Migration, &tx).unwrap();
+        tx.commit().unwrap();
+
+        assert!(has_columns(&conn));
+    }
+
+    /// A stored PCZT that does not parse is corrupt state: the migration surfaces
+    /// [`WalletMigrationError::CorruptedData`] rather than leaving the row's nullifier cache
+    /// silently empty (which would exempt the transaction from unsatisfiability detection).
+    #[test]
+    fn an_unparseable_stored_pczt_fails_the_migration() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_pre_fix_table(&conn);
+        insert_pre_fix_row(&conn, 0, &[1, 2, 3]);
+
+        let tx = conn.transaction().unwrap();
+        let result = RusqliteMigration::up(&Migration, &tx);
+        assert!(matches!(
+            result,
+            Err(WalletMigrationError::CorruptedData(_))
+        ));
+    }
+
+    /// The upgrade path on an empty table: the columns are added and nothing needs backfilling.
+    #[test]
+    fn adds_columns_to_an_empty_pre_fix_table() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_pre_fix_table(&conn);
+        assert!(!has_columns(&conn));
+
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(&Migration, &tx).unwrap();
+        tx.commit().unwrap();
+
+        assert!(has_columns(&conn));
+    }
+
+    /// The upgrade path with data: a row whose `pczt` column holds a REAL serialized migration
+    /// transfer is backfilled with exactly its real spend's nullifier — the padding dummy spend
+    /// (which carries its own witness) contributes nothing — and `unsatisfiable_at` starts out
+    /// `NULL` (no spent-input observation stands).
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn backfills_real_spend_nullifiers_from_the_stored_pczt() {
+        use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+        use orchard::note::{Note, NoteVersion, RandomSeed, Rho};
+        use orchard::value::NoteValue;
+        use rand_chacha::ChaCha8Rng;
+        use rand_core::{RngCore, SeedableRng};
+        use zcash_client_backend::data_api::testing::TestBuilder;
+        use zcash_pool_migration::build::build_transfer_pczt;
+        use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+        use zcash_protocol::consensus::BlockHeight;
+        use zcash_protocol::local_consensus::LocalNetwork;
+        use zcash_protocol::value::Zatoshis;
+
+        /// A deterministic Orchard full viewing key (drawing bytes until they form a valid
+        /// spending key).
+        fn test_fvk() -> FullViewingKey {
+            let mut rng = ChaCha8Rng::seed_from_u64(11);
+            loop {
+                let mut bytes = [0u8; 32];
+                rng.fill_bytes(&mut bytes);
+                if let Some(sk) = SpendingKey::from_bytes(bytes).into_option() {
+                    return FullViewingKey::from(&sk);
+                }
+            }
+        }
+
+        /// An Orchard note of `value` owned by `fvk`, with deterministic randomness (drawing
+        /// bytes until they form a valid `rho`/`rseed` pair).
+        fn note_owned_by(fvk: &FullViewingKey, value: u64) -> Note {
+            let mut rng = ChaCha8Rng::seed_from_u64(7);
+            loop {
+                let mut rho_bytes = [0u8; 32];
+                rng.fill_bytes(&mut rho_bytes);
+                let Some(rho) = Rho::from_bytes(&rho_bytes).into_option() else {
+                    continue;
+                };
+                let mut rseed_bytes = [0u8; 32];
+                rng.fill_bytes(&mut rseed_bytes);
+                let Some(rseed) = RandomSeed::from_bytes(rseed_bytes, &rho).into_option() else {
+                    continue;
+                };
+                if let Some(note) = Note::from_parts(
+                    fvk.address_at(0u32, Scope::External),
+                    NoteValue::from_raw(value),
+                    rho,
+                    rseed,
+                    NoteVersion::V2,
+                )
+                .into_option()
+                {
+                    return note;
+                }
+            }
+        }
+
+        // A network with NU6.3 active below the transfer's target height, so the V6 format that
+        // permits deferred anchors is available.
+        let activation = BlockHeight::from_u32(100);
+        let network = LocalNetwork {
+            nu6: Some(activation),
+            nu6_1: Some(activation),
+            nu6_2: Some(activation),
+            nu6_3: Some(activation),
+            ..TestBuilder::<(), ()>::DEFAULT_NETWORK
+        };
+
+        // A self-funding note: the crossing value plus the transfer's exact ZIP 317 fee (three
+        // actions: the real spend, its Orchard padding dummy, and the Ironwood output).
+        let fvk = test_fvk();
+        let crossing = 100_000_000u64;
+        let fee = 3 * MARGINAL_FEE.into_u64();
+        let note = note_owned_by(&fvk, crossing + fee);
+        let expected_nullifier = note.nullifier(&fvk).to_bytes();
+
+        let pczt = build_transfer_pczt(
+            &network,
+            200,
+            240,
+            &fvk,
+            note,
+            Zatoshis::const_from_u64(crossing),
+            None,
+            ChaCha8Rng::seed_from_u64(13),
+        )
+        .expect("the self-funding note builds a balanced transfer");
+        let pczt_bytes = pczt.serialize().expect("a built PCZT serializes");
+
+        // The bundle carries more spends than the one real one (the padding dummy at least), so
+        // the exact-32-byte assertion below is load-bearing for the witness filter.
+        let parsed = pczt::Pczt::parse(&pczt_bytes).expect("the serialized PCZT parses back");
+        assert!(parsed.orchard().actions().len() >= 2);
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_pre_fix_table(&conn);
+        insert_pre_fix_row(&conn, 0, &pczt_bytes);
+
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(&Migration, &tx).unwrap();
+        tx.commit().unwrap();
+
+        let (unsatisfiable_at, spend_nullifiers) = conn
+            .query_row(
+                "SELECT unsatisfiable_at, spend_nullifiers
+                   FROM orchard_ironwood_migration_transactions",
+                [],
+                |row| Ok((row.get::<_, Option<u32>>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unsatisfiable_at, None);
+        assert_eq!(spend_nullifiers, expected_nullifier.to_vec());
+    }
+}

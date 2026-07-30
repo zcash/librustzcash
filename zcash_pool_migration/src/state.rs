@@ -687,6 +687,8 @@ mod tests {
             anchor_boundary: None,
             state,
             lock_owner: None,
+            unsatisfiable_at: None,
+            spend_nullifiers: Vec::new(),
         }
     }
 

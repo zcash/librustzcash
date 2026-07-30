@@ -91,6 +91,12 @@ regex = { workspace = true }
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
 maybe-rayon.workspace = true
+# The base (protocol-feature-free) `pczt` data model, used by the schema migration that
+# backfills the pool-migration nullifier cache from stored PCZT bytes. Schema migrations run
+# regardless of this crate's feature set, and reading the raw nullifier and witness fields
+# needs no protocol feature, so this is unconditional; the `orchard`-featured `pczt` used by
+# tests remains a dev-dependency.
+pczt.workspace = true
 rand_core.workspace = true
 rand_distr.workspace = true
 rand.workspace = true

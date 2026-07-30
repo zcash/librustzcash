@@ -244,6 +244,8 @@ fn set_transaction_state(
                     t.anchor_boundary(),
                     state,
                     t.lock_owner(),
+                    t.unsatisfiable_at(),
+                    t.spend_nullifiers().clone(),
                 )
             } else {
                 t.clone()

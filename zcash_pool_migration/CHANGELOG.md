@@ -29,6 +29,11 @@ and this library adheres to Rust's notion of
   alongside its height, and `engine::MigrationState::mark_mined` takes it;
   `MigrationTxState::from_stored` requires the txid payload for `"mined"` rows,
   and `broadcast_txid` also answers for mined transactions.
+- `engine::MigrationTransaction::from_parts` takes two further parameters,
+  `unsatisfiable_at` (the chain height backing a spent-input observation, when
+  the transaction has been determined unsatisfiable) and `spend_nullifiers`
+  (the transaction's real-spend nullifiers, cached from the built PCZT); both
+  have accessors.
 
 ## [0.1.0-rc.5] - 2026-07-29
 

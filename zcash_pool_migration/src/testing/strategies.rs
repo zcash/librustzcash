@@ -10,6 +10,7 @@ use core::num::NonZeroU32;
 use proptest::prelude::*;
 
 use zcash_primitives::transaction::testing::arb_txid;
+use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::consensus::testing::arb_block_height;
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::value::testing::arb_zatoshis;
@@ -184,6 +185,8 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         prop::option::of(arb_block_height()),
         arb_migration_tx_state(),
         arb_lock_owner(),
+        prop::option::of((0u32..2_000_000u32).prop_map(BlockHeight::from_u32)),
+        prop::collection::vec(prop::array::uniform32(any::<u8>()), 0..3),
     )
         .prop_map(
             |(
@@ -196,6 +199,8 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 anchor_boundary,
                 state,
                 lock_owner,
+                unsatisfiable_at,
+                spend_nullifiers,
             )| {
                 MigrationTransaction::from_parts(
                     id,
@@ -207,6 +212,8 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     anchor_boundary,
                     state,
                     lock_owner,
+                    unsatisfiable_at,
+                    spend_nullifiers,
                 )
             },
         )
@@ -254,6 +261,8 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                             tx.anchor_boundary(),
                             tx.state(),
                             tx.lock_owner(),
+                            tx.unsatisfiable_at(),
+                            tx.spend_nullifiers().clone(),
                         )
                     })
                     .collect();
