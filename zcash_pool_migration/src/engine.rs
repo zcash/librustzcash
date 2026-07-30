@@ -1533,8 +1533,10 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// `Updater` role), then proves both bundles. The proven PCZT replaces the stored one and the
 /// transaction becomes [`Proved`](MigrationTxState::Proved), ready to broadcast.
 ///
-/// The CALLER decides WHEN to prove each transfer (once its funding note is mined and witnessable
-/// and its scheduled height reached); this function performs the proof for the one transfer `id`. It
+/// The CALLER decides WHEN to prove each transfer (once its funding note is mined and its drawn
+/// anchor boundary has settled — [`MigrationState::next_step`] surfaces this as
+/// [`AdvanceStep::Prove`](crate::state::AdvanceStep::Prove), typically at a sync wake-up well
+/// before the broadcast height); this function performs the proof for the one transfer `id`. It
 /// is idempotent only in the sense that a transaction not in [`Signed`](MigrationTxState::Signed)
 /// is rejected with [`ProveError::NotReady`] rather than re-proved.
 #[cfg(feature = "orchard")]

@@ -12,9 +12,12 @@
 //!
 //! Every transaction is built and pre-signed when the migration is committed (one signing phase;
 //! anchors and witnesses are deferred to proving time per ZIP 374), so the state machine's only
-//! job is to ORDER the broadcasts: a transaction becomes broadcastable once its dependencies (the
-//! preparation layers that mint its inputs) have mined and its scheduled height has arrived, and
-//! the consumer proves it — installing its anchor and witnesses — just before broadcasting.
+//! job is to ORDER the remaining work: a transaction is proved — installing its anchor and
+//! witnesses — once its anchor is resolvable (for a transfer, once its drawn boundary settles),
+//! and becomes broadcastable once it is proved, its dependencies (the preparation layers that
+//! mint its inputs) have mined, and its scheduled height has arrived. See
+//! [`MigrationState::next_step`] for how the two are ordered and the sync/broadcast session
+//! separation that ordering is designed around.
 
 use alloc::vec::Vec;
 
@@ -37,11 +40,18 @@ use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 pub enum AdvanceStep {
     /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses and
     /// store the proven PCZT), WITHOUT broadcasting: its dependencies are mined and, for a transfer,
-    /// its drawn anchor boundary has settled (the boundary block is below the tip, so its checkpoint
-    /// exists and is still within the wallet's checkpoint-pruning window). Broadcast is a separate
-    /// later step once the privacy broadcast schedule is due. Proving is time-critical: the boundary
-    /// checkpoint is pruned once the tip advances past it by the wallet's pruning depth, so a transfer
-    /// must be proved while its boundary is fresh, not deferred to its (later) broadcast height.
+    /// its drawn anchor boundary has settled (the boundary block is strictly below the chain tip, so
+    /// its checkpoint exists in the wallet's commitment tree). Broadcast is a separate later step,
+    /// once the privacy broadcast schedule is due — ideally in a different waking session, since
+    /// proving needs the wallet synced while a broadcast session should involve no sync at all (see
+    /// [`MigrationState::next_step`]).
+    ///
+    /// Proving is not time-critical: the wallet durably retains the boundary checkpoints its
+    /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
+    /// [`MigrationBackend::scheduling_params`](crate::engine::MigrationBackend::scheduling_params)),
+    /// so a transfer remains provable from the moment its boundary settles until it is broadcast.
+    /// Proving EARLY — at a sync wake-up well before the broadcast height — is what keeps the
+    /// sync-heavy work out of the broadcast session.
     Prove {
         /// The transaction to prove.
         id: MigrationTransferId,
@@ -73,7 +83,9 @@ pub enum AdvanceStep {
     /// Nothing to do now: waiting for one or more transactions to mine, for an anchor boundary to
     /// settle, or for a scheduled height to arrive.
     Waiting,
-    /// Every transaction is mined; the migration is complete.
+    /// Nothing will ever be actionable again: every transaction is mined, or the migration has
+    /// reached a terminal status (complete, or failed/cancelled — see
+    /// [`MigrationState::is_terminal`]), so a driver can stop polling it.
     Complete,
 }
 
@@ -81,8 +93,8 @@ pub enum AdvanceStep {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NextAction {
     /// Prove this pre-signed transaction now (install its deferred anchor and witnesses and store the
-    /// proven PCZT): its dependencies are mined and, for a transfer, its anchor boundary has settled
-    /// within the wallet's checkpoint-pruning window. It is not broadcast yet.
+    /// proven PCZT): its dependencies are mined and, for a transfer, its anchor boundary has
+    /// settled. It is not broadcast yet.
     Prove,
     /// Broadcast this already-proven transaction now: it is `Proved` and its scheduled broadcast
     /// height has arrived.
@@ -102,7 +114,7 @@ pub enum Blocker {
     Schedule,
     /// A transfer whose drawn anchor boundary has not yet settled: waiting for the chain tip to move
     /// strictly past the boundary block, so the boundary checkpoint exists and the transfer can be
-    /// proved against it (while it is still within the wallet's checkpoint-pruning window).
+    /// proved against it.
     AnchorBoundary,
     /// Built but awaiting an EXTERNAL signature: its unsigned PCZT was exported to a hardware or offline
     /// signer, and this transaction cannot advance until
@@ -228,12 +240,13 @@ impl MigrationState {
     ///
     /// A TRANSFER anchors to a drawn boundary ([`anchor_boundary`](MigrationTransaction::anchor_boundary)),
     /// which must have SETTLED: the boundary block must be strictly below the chain tip so its
-    /// checkpoint exists in the tree. Proving is due as soon as that holds, decoupled from the (later)
-    /// broadcast schedule, because the boundary checkpoint is pruned once the tip advances past it by
-    /// the wallet's pruning depth; a transfer must therefore be proved while its boundary is still
-    /// fresh, not deferred to its broadcast height. A PREPARATION carries no drawn boundary and
-    /// anchors to a fresh checkpoint at the tip when proved, so it is prove-ready once its
-    /// dependencies are mined and its scheduled height has arrived.
+    /// checkpoint exists in the tree. Proving becomes available as soon as that holds, decoupled
+    /// from the (later) broadcast schedule: the wallet durably retains the boundary checkpoint, so
+    /// nothing forces the proof to happen promptly, but making it available early lets the
+    /// sync-heavy proving work happen at a sync wake-up in a different waking session from the
+    /// broadcast (see [`Self::next_step`]). A PREPARATION carries no drawn boundary and anchors to
+    /// a fresh checkpoint at the tip when proved, so it is prove-ready once its dependencies are
+    /// mined and its scheduled height has arrived.
     fn prove_ready(&self, t: &MigrationTransaction, target_height: BlockHeight) -> bool {
         // An expired transaction can never be mined, so proving it is wasted work: it must be rebuilt
         // (with a fresh anchor and expiry) first. Guarding here keeps `next_provable` from ever
@@ -254,9 +267,9 @@ impl MigrationState {
     }
 
     /// The id of the next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor
-    /// is resolvable now. Proving is decoupled from broadcasting so a
-    /// transfer is proved while its anchor boundary checkpoint is still within the wallet's pruning
-    /// window, then broadcast later at its scheduled height.
+    /// is resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
+    /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
+    /// broadcast in separate waking sessions.
     pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
         self.transactions
             .iter()
@@ -414,28 +427,100 @@ impl MigrationState {
         true
     }
 
-    /// Decides the next step to advance the migration, from state alone: prove and broadcast the
-    /// next due, dependency-satisfied transaction; else report `Complete` when everything is
-    /// mined, or `Waiting` otherwise. This is made once, here, so it is never duplicated per
-    /// consumer.
+    /// Decides the next step to advance the migration, purely from the persisted state: the single
+    /// highest-priority action available at `target_height` (`chain_tip + 1`, the height of the
+    /// next block a transaction could be mined in). The decision is made once, here, so every
+    /// consumer (a mobile wallet using these crates directly, or a server like Zallet) advances
+    /// the same state the same way.
+    ///
+    /// # The drive loop
+    ///
+    /// One call returns ONE step. The consumer performs that step's I/O, records the outcome in
+    /// the state, persists it, and calls this again; a call is pure, so until the state records
+    /// the step's completion, the same step is returned. The steps map onto the crate's
+    /// operations as follows:
+    ///
+    /// - [`AdvanceStep::Prove`]: install the transaction's deferred anchor and witnesses and store
+    ///   the proven PCZT — [`prove_transfer`](crate::engine::prove_transfer) /
+    ///   [`prove_preparation`](crate::engine::prove_preparation), which also record the
+    ///   `Signed -> Proved` transition. Proving needs a SYNCED wallet and mutable access to its
+    ///   commitment trees, but only the account's viewing key.
+    /// - [`AdvanceStep::Broadcast`]: submit the stored proven transaction to the network, then
+    ///   record it with [`Self::mark_broadcast`]. Its mining is later detected through the
+    ///   consumer's own chain view and recorded with [`Self::mark_mined`], which is what unblocks
+    ///   the transactions depending on it.
+    /// - [`AdvanceStep::Rebuild`]: construct and sign a replacement for an expired transfer —
+    ///   [`rebuild_expired_transfer`](crate::engine::rebuild_expired_transfer) or its unsigned
+    ///   (external-signer) variant. The only step that needs the account's SPEND AUTHORITY.
+    /// - [`AdvanceStep::Waiting`]: nothing is actionable at this height. Consult
+    ///   [`Self::transaction_statuses`] for what each transaction is blocked on, and register the
+    ///   heights at which to wake and re-check: [`Self::sync_wakeup_schedule`] for the proving
+    ///   wake-ups, plus each transaction's own scheduled broadcast height.
+    /// - [`AdvanceStep::Complete`]: the migration is terminal (every transaction mined, or the
+    ///   migration failed/cancelled); nothing will ever be actionable again, so stop polling.
+    ///
+    /// # Ordering, and what it implies for wallet construction
+    ///
+    /// When several actions are available at once the priority is BROADCAST, then PROVE, then
+    /// REBUILD.
+    ///
+    /// Broadcast precedes prove because the two kinds of work want to be in DIFFERENT WAKING
+    /// SESSIONS. ZIP 318 requires that a background wake window be used either to sync the wallet
+    /// or to broadcast a due transfer, never both, so a network observer cannot correlate a
+    /// wallet's sync traffic with the transactions it broadcasts. Broadcasting a stored proven
+    /// transaction requires no sync at all; proving is inherently sync-bound (it resolves anchors
+    /// and witnesses from the synced commitment tree). Surfacing every due broadcast before any
+    /// proving work is what makes a broadcast-only session possible: a wallet that wakes to find
+    /// transactions due submits them immediately, without first initiating sync operations (unless
+    /// the user independently needs to sync, e.g. to spend funds manually). Note that this method
+    /// has no notion of a session — once every due broadcast is dispatched it will offer proving
+    /// work in the same loop, and enforcing the session separation is the CONSUMER's runtime
+    /// policy (see the "Out of scope" notes in [`crate::scheduling`]): a wallet honoring it stops
+    /// driving the migration after broadcasting and leaves the offered proving work to its next
+    /// sync wake-up.
+    ///
+    /// Proving is in turn DECOUPLED from the broadcast schedule: a transfer is provable as soon
+    /// as its drawn anchor boundary settles (strictly below the chain tip), typically long before
+    /// its scheduled broadcast height. There is no deadline pressure — the wallet durably retains
+    /// the boundary checkpoints its committed transfers anchor to (see
+    /// [`MigrationBackend::scheduling_params`](crate::engine::MigrationBackend::scheduling_params)),
+    /// so a transfer remains provable until it is broadcast — but proving at an early sync
+    /// wake-up is what leaves nothing but the bare submission for the broadcast session. A
+    /// PREPARATION transaction instead becomes provable only when its schedule is due, and is
+    /// expected to be proved and broadcast at the same wake-up: it anchors to a fresh checkpoint
+    /// at the tip, like an ordinary transaction.
+    ///
+    /// Rebuild is surfaced only when no still-valid transaction can be proved or broadcast, so
+    /// progress on live transactions is never delayed by remediation; reporting it in preference
+    /// to `Waiting` is what stops the migration stalling forever on an expired transfer, which
+    /// nothing else will ever make broadcastable again. Only a TRANSFER is offered (see
+    /// [`AdvanceStep::Rebuild`]); an expired preparation is reported through [`Blocker::Expired`]
+    /// and [`Self::expired_transactions`] instead.
+    ///
+    /// A missed schedule degrades gracefully rather than requiring reconciliation: a wallet that
+    /// slept through a transfer's proving wake-ups and its broadcast height is simply offered
+    /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
+    /// has expired.
     pub fn next_step(&self, target_height: BlockHeight) -> AdvanceStep {
         // A terminal migration (complete, or failed/cancelled) has no next action: never build or
         // broadcast for it, so a cancelled migration cannot be driven further.
         if self.is_terminal() {
             return AdvanceStep::Complete;
         }
-        // Prove before broadcasting: a transfer's anchor boundary checkpoint is only briefly within
-        // the wallet's pruning window, so proving is time-critical, whereas broadcasting a proven
-        // transaction can wait for its (later) schedule.
-        if let Some(id) = self.next_provable(target_height) {
-            return AdvanceStep::Prove { id };
-        }
+        // If the wallet has a transaction available for broadcast, it should immediately
+        // do that and *not* initiate any sync operations unless the user specifically needs
+        // to sync (e.g. if they need to manually spend some of their funds).
         if let Some(id) = self.next_broadcastable(target_height) {
             return AdvanceStep::Broadcast { id };
         }
-        // Make progress on still-valid transactions first (above), then surface any expired
-        // transfer for rebuild. Reporting Rebuild in preference to Waiting is what stops the
-        // migration stalling forever on a transfer whose broadcast window lapsed: nothing else
+        // A wallet should not broadcast and sync in the same waking session unless necessary.
+        // At this point we know we're not broadcasting, so we can sync and prove.
+        if let Some(id) = self.next_provable(target_height) {
+            return AdvanceStep::Prove { id };
+        }
+        // If we have not been able to make progress on still-valid transactions, then surface any
+        // expired transfer for rebuild. Reporting Rebuild in preference to Waiting is what stops
+        // the migration stalling forever on a transfer whose broadcast window lapsed: nothing else
         // will ever make it broadcastable again.
         if let Some(id) = self.next_rebuildable(target_height) {
             return AdvanceStep::Rebuild { id };
@@ -455,10 +540,11 @@ impl MigrationState {
     /// render progress and decide, deterministically and from persisted state alone, the next
     /// transaction to sign or broadcast.
     ///
-    /// A `Signed` (or `Proved`) transaction whose dependencies are mined and whose scheduled
-    /// height has arrived is ready to prove and broadcast. Otherwise a waiting transaction reports
-    /// what it is blocked on: its dependencies (a preparation still to mine), the broadcast
-    /// schedule, or an external signature.
+    /// A `Signed` transaction whose dependencies are mined and whose anchor is resolvable (a
+    /// transfer's drawn boundary has settled; a preparation is due on its schedule) is ready to
+    /// prove; a `Proved` one whose scheduled height has arrived is ready to broadcast. Otherwise a
+    /// waiting transaction reports what it is blocked on: its dependencies (a preparation still to
+    /// mine), an anchor boundary yet to settle, the broadcast schedule, or an external signature.
     pub fn transaction_statuses(&self, target_height: BlockHeight) -> Vec<TransactionStatus> {
         self.transactions
             .iter()

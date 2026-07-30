@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
+  in preference to `AdvanceStep::Prove` (previously the reverse), so a wallet
+  that wakes to find a transaction ready to broadcast can submit it and end the
+  session without syncing; proving work is surfaced only once no broadcast is
+  due.
+
 ## [0.1.0-rc.5] - 2026-07-29
 
 ### Changed
