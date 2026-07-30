@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.22.0-rc.6] - 2026-07-29
+
 ### Added
 - The additive `ignore-expensive-tests` feature, which compiles expensive tests
   but marks them as ignored for broad `--all-features` test runs.
@@ -39,11 +41,28 @@ workspace.
   as an ordinary payment.
 
 ### Changed
+- Migrated to `zcash_client_backend 0.24.0-rc.6`, `zcash_pool_migration 0.1.0-rc.5`.
+- The `pczt-tests` feature flag now also enables this crate's `orchard` and
+  `transparent-inputs` features, which `zcash_client_backend/pczt` forces on in the
+  backend; enabling `pczt-tests` alone no longer fails to compile.
 - `zcash_client_sqlite::testing::db::TestDbFactory::default` and
   `zcash_client_sqlite::testing::BlockCache::default` now use isolated
   in-memory SQLite databases.
 
 ### Fixed
+- A wallet created by a build that predates the addition of the
+  `anchor_bucket_interval` column to `orchard_ironwood_migrations` no longer
+  fails every scan. The column was added to the `orchard_ironwood_migration_tables`
+  DDL in place; a wallet that had already applied that migration never acquired
+  the column, and the committed-grid query issued by `put_blocks` then failed at
+  prepare time with `no such column: anchor_bucket_interval`, regardless of
+  whether a pool migration was in progress. Because that query runs on every
+  scan, no block could be written and no transaction acquired a mined height. A
+  new `orchard_ironwood_migration_anchor_interval` migration adds the column
+  where it is missing. An existing row is backfilled with the ZIP 318 grid,
+  which is exact on the production network but a reconstruction on a test
+  network, where a migration planned under a custom grid will be reported as
+  `AnchorIntervalMismatch` and must be re-planned.
 - Note selection now draws the oldest eligible notes first, ordering by note
   commitment tree position (chain order). Previously notes were drawn in
   scan-discovery order, which for a restored wallet prefers its most recently
@@ -94,19 +113,6 @@ workspace.
   `zewif::ZewifImportError`.
 
 ### Fixed
-- A wallet created by a build that predates the addition of the
-  `anchor_bucket_interval` column to `orchard_ironwood_migrations` no longer
-  fails every scan. The column was added to the `orchard_ironwood_migration_tables`
-  DDL in place; a wallet that had already applied that migration never acquired
-  the column, and the committed-grid query issued by `put_blocks` then failed at
-  prepare time with `no such column: anchor_bucket_interval`, regardless of
-  whether a pool migration was in progress. Because that query runs on every
-  scan, no block could be written and no transaction acquired a mined height. A
-  new `orchard_ironwood_migration_anchor_interval` migration adds the column
-  where it is missing. An existing row is backfilled with the ZIP 318 grid,
-  which is exact on the production network but a reconstruction on a test
-  network, where a migration planned under a custom grid will be reported as
-  `AnchorIntervalMismatch` and must be re-planned.
 - Transaction status requests are now generated from explicit, durable
   observation intent. A sent transaction is queried by txid when this wallet
   cannot observe one of its shielded spends or outputs, including transactions

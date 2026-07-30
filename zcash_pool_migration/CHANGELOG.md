@@ -7,7 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.5] - 2026-07-29
+
 ### Changed
+- Migrated to `zcash_client_backend 0.24.0-rc.6`.
 - `scheduling::SchedulingParams::ZIP_318` adopts the revised ZIP 318 timing:
   transfer delays now have a mean of 66 blocks (previously 144) and
   preparation delays a mean of 16 blocks (previously a provisional 24), with

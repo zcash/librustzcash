@@ -66,6 +66,17 @@ pub const PREP_DELAY_MEAN: NonZeroU32 = NonZeroU32::new(16).expect("16 is nonzer
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 pub const PREP_DELAY_CAP: NonZeroU32 = NonZeroU32::new(96).expect("96 is nonzero");
 
+/// The ratio a [ZIP 318] delay distribution's cap bears to its mean: a draw more than four times the
+/// mean is discarded and redrawn, truncating the exponential's heavy tail so that nothing is starved
+/// for an unbounded time.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+#[deprecated(note = "DO NOT USE; 
+`zcash_protocol::zip318::DELAY_CAP_RATIO`. ZIP 318 no longer relates each
+delay cap to its mean by a shared ratio; use `TRANSFER_DELAY_CAP` and
+`PREP_DELAY_CAP` directly.")]
+pub const DELAY_CAP_RATIO: NonZeroU32 = NonZeroU32::new(4).expect("4 is nonzero");
+
 /// The mean of the [ZIP 318] transfer inter-arrival delay distribution, in blocks: 66, about ninety
 /// minutes at the 75-second target block spacing.
 ///

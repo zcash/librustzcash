@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0-rc.6] - 2026-07-29
+
 ### Added
 - `zcash_client_backend::data_api::anchor_retention::AnchorRetention::retained_in_range`
 - `zcash_client_backend::data_api::wallet::input_selection::NoteSelection`
@@ -17,7 +19,12 @@ workspace.
 - `zcash_client_backend::data_api::InputSource::select_single_spendable_note`, with a
   best-effort default implementation
 - `zcash_client_backend::data_api::ReceivedNotes::{is_empty, into_single_covering}`
-- `zcash_client_backend::data_api::InputSource::anchor_computable`
+- `zcash_client_backend::fees::DummyOutputCounts`, the number of dummy outputs in
+  each shielded value pool.
+- `zcash_client_backend::fees::TransactionBalance::{with_dummy_outputs, dummy_outputs}`
+- `zcash_client_backend::proto::proposal::DummyOutputs`, so that the dummy-output
+  counts a fee was computed against survive serialization. A proposal serialized
+  before this field existed parses back with no counts recorded.
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::propose_transfer` now funds a canonical
@@ -30,6 +37,14 @@ workspace.
   height (per `InputSource::anchor_computable`), proposing an ordinary crossing
   instead of a canonical proposal whose build would fail with
   `ProposalError::AnchorNotFound`.
+- `zcash_client_backend::data_api::InputSource` has added method `anchor_computable`
+
+### Removed
+- `zcash_client_backend::fees::TransactionBalance::{with_ironwood_bundle_padding, ironwood_bundle_padding}`.
+  A `ChangeStrategy` records the exact dummy-output count of every shielded bundle it
+  costed, via `with_dummy_outputs`, instead of an Ironwood-specific padding policy;
+  `zcash_client_backend::proposal::Step::ironwood_bundle_padding` derives the builder's
+  padding from those counts and the step's transaction shape.
 
 ### Fixed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks` now creates (and retains) a
