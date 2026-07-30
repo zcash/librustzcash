@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- The `v_tx_outputs` view now emits the `diversifier_index_be` column that its
+  documentation has described since the receiving-address columns were added:
+  the big-endian diversifier index of the receiving address, `NULL` for outputs
+  not received at one of the wallet's diversified addresses. The column was
+  previously computed internally but omitted from the view's output, so any
+  query naming it failed with "no such column".
+
 ## [0.22.0-rc.6] - 2026-07-29
 
 ### Added
