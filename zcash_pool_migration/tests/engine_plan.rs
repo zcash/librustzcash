@@ -17,17 +17,30 @@ use zcash_pool_migration::denomination::{DenominationPlan, plan_denominations};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationError, MigrationState, MigrationStatus, MigrationTransaction,
     MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
-    plan_migration,
+    plan_migration, plan_migration_with,
 };
 use zcash_pool_migration::preparation::{
     FUNDING_OUTPUTS_PER_TX, PreparationPlan, plan_preparation,
 };
-use zcash_pool_migration::scheduling::AnchorBucketInterval;
+use zcash_pool_migration::scheduling::{
+    AnchorBucketInterval, MinBlockGap, Placement, Predicate, ScheduleConstraint,
+};
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
 /// Wrap a raw zatoshi amount as [`Zatoshis`] for the tests.
 fn zat(n: u64) -> Zatoshis {
     Zatoshis::from_u64(n).expect("valid amount")
+}
+
+/// Every broadcast height a plan schedules: its preparation transactions, then its transfers.
+fn plan_heights(plan: &zcash_pool_migration::engine::MigrationPlan) -> Vec<u32> {
+    plan.prep_schedule()
+        .iter()
+        .flatten()
+        .copied()
+        .chain(plan.schedule().iter().map(|s| s.broadcast_height()))
+        .map(u32::from)
+        .collect()
 }
 
 /// A count-only preparation-layout stub for the reconciliation baseline: one padded transaction per
@@ -52,6 +65,80 @@ fn plans_a_migration_from_a_balance() {
         plan.funding_notes().len()
     );
     assert!(plan.funding_notes().len() <= plan.denominations().migration_outputs().len());
+}
+
+/// An application's own condition on the schedule reaches every drawn broadcast height, and a plan
+/// is returned only if it holds: here two blackout windows the wallet's user has excluded,
+/// conjoined with the crate default. Both the preparation heights and the transfer heights must
+/// respect them.
+#[test]
+fn plans_a_migration_under_a_caller_condition() {
+    // Windows the UNCONSTRAINED draw for this seed lands in (asserted below), so the condition is
+    // doing work rather than being satisfied by accident.
+    const BLACKOUTS: [core::ops::Range<u32>; 2] = [2_000_300..2_000_600, 2_000_800..2_001_000];
+    let blacked_out = |h: u32| BLACKOUTS.iter().any(|w| w.contains(&h));
+
+    // A balance that splits into several crossings, so the transfer schedule is more than one
+    // height and the condition is exercised across a real sequence.
+    let backend = MockBackend::new(vec![78 * COIN], 2_000_000);
+
+    // The baseline: without the condition, this seed schedules inside the windows.
+    let mut rng = ChaCha8Rng::seed_from_u64(3);
+    let unconstrained = plan_migration(&regtest_network(true), &backend, &mut rng)
+        .expect("a fundable balance plans");
+    assert!(unconstrained.schedule().len() >= 4);
+    assert!(
+        plan_heights(&unconstrained).into_iter().any(blacked_out),
+        "the baseline plan must hit a blackout window, or this test proves nothing"
+    );
+
+    let condition = (
+        MinBlockGap::DISTINCT_BLOCKS,
+        Predicate(|p: &Placement<'_>| !blacked_out(u32::from(p.height()))),
+    );
+    let mut rng = ChaCha8Rng::seed_from_u64(3);
+    let plan = plan_migration_with(&regtest_network(true), &backend, &condition, &mut rng)
+        .expect("a fundable balance plans under this condition");
+
+    let heights = plan_heights(&plan);
+    assert!(!heights.is_empty());
+    for h in &heights {
+        assert!(
+            !blacked_out(*h),
+            "height {h} falls inside a blackout window"
+        );
+    }
+    // No two of the wallet's transactions are scheduled in the same block. Note that this is a
+    // property of the heights as a SET: `ScheduleConstraint::is_valid` reads a sequence in DRAW
+    // order, and `MigrationPlan::schedule` is deliberately shuffled out of that order (the shuffle
+    // is what decouples the on-chain sequence of denominations from the balance), so it must not
+    // be handed to `is_valid` as it stands.
+    let mut sorted = heights.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        heights.len(),
+        "two transactions share a block"
+    );
+
+    // Each preparation LAYER is in draw order, so the condition applies to it as a sequence.
+    let base = BlockHeight::from_u32(0);
+    for layer in plan.prep_schedule() {
+        assert!(MinBlockGap::DISTINCT_BLOCKS.is_valid(base, layer));
+    }
+}
+
+/// A condition no draw can satisfy yields no plan, rather than one that violates it.
+#[test]
+fn an_unsatisfiable_condition_yields_no_plan() {
+    let never = Predicate(|_: &Placement<'_>| false);
+    let backend = MockBackend::new(vec![100 * COIN], 2_000_000);
+    let mut rng = ChaCha8Rng::seed_from_u64(1);
+    assert!(matches!(
+        plan_migration_with(&regtest_network(true), &backend, &never, &mut rng),
+        Err(MigrationError::Unschedulable(_))
+    ));
 }
 
 #[test]

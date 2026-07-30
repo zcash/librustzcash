@@ -7,6 +7,31 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_pool_migration::scheduling::{ScheduleConstraint, Placement, Predicate, MinBlockGap,
+  ConstraintUnsatisfied, CONSTRAINT_ATTEMPTS}`, conditions a drawn broadcast schedule must satisfy.
+  A condition is a predicate on one candidate height plus the partial schedule it extends; the
+  samplers redraw a rejected placement, so a schedule is returned only if the condition holds on it
+  (`ScheduleConstraint::is_valid`) and otherwise fails with `ConstraintUnsatisfied`. Conditions
+  compose by conjunction (tuples, slices), forward through references and boxes (so a set assembled
+  at runtime can hold `Box<dyn ScheduleConstraint>`), and a closure becomes one via `Predicate`.
+  Note that a condition beyond the default narrows this wallet's schedule distribution away from
+  other wallets', which costs anonymity.
+- `zcash_pool_migration::scheduling::{schedule_with, schedule_broadcast_heights_with,
+  schedule_prep_broadcast_heights_with}` and `zcash_pool_migration::engine::plan_migration_with`,
+  which draw a schedule subject to a caller-supplied condition. The existing forms apply the crate
+  default, `MinBlockGap::DISTINCT_BLOCKS`.
+- `zcash_pool_migration::engine::MigrationError::Unschedulable`, returned when no drawn schedule
+  satisfies the requested condition.
+
+### Changed
+- `zcash_pool_migration::scheduling::{schedule, schedule_broadcast_heights,
+  schedule_prep_broadcast_heights}` return `Result<_, ConstraintUnsatisfied>`, and apply the default
+  `MinBlockGap::DISTINCT_BLOCKS` condition: a drawn inter-arrival delay may be zero (the exponential
+  is rounded to whole blocks), which would broadcast two of the wallet's transactions in the same
+  block and correlate them, so such a placement is now redrawn. Broadcast heights are consequently
+  strictly increasing rather than merely non-decreasing.
+
 ## [0.1.0-rc.4] - 2026-07-28
 
 ### Added
