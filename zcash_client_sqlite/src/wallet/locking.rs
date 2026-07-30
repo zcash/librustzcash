@@ -959,7 +959,7 @@ mod tests {
         fn concurrent_handles_resolve_lock_conflict() {
             let mut st = TestBuilder::new()
                 .with_block_cache(BlockCache::new())
-                .with_data_store_factory(TestDbFactory::default())
+                .with_data_store_factory(TestDbFactory::file_backed())
                 .with_account_from_sapling_activation(BlockHash([0; 32]))
                 .build();
 

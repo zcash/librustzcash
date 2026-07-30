@@ -20,6 +20,7 @@ use subtle::ConditionallySelectable;
 
 use ::sapling::{
     note_encryption::{SaplingDomain, sapling_note_encryption},
+    prover::mock::{MockOutputProver, MockSpendProver},
     util::generate_random_rseed,
     zip32::DiversifiableFullViewingKey,
 };
@@ -64,6 +65,13 @@ use super::{
         propose_send_max_transfer, propose_standard_transfer_to_address, propose_transfer,
     },
 };
+
+fn real_test_prover() -> &'static LocalTxProver {
+    use std::sync::OnceLock;
+
+    static PROVER: OnceLock<LocalTxProver> = OnceLock::new();
+    PROVER.get_or_init(LocalTxProver::bundled)
+}
 use crate::{
     data_api::{
         MaxSpendMode, OutputLockStore, TargetValue,
@@ -1078,7 +1086,6 @@ where
         InputsT: InputSelector<InputSource = DbT>,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
-        let prover = LocalTxProver::bundled();
         let network = self.network().clone();
 
         let account = self
@@ -1103,8 +1110,8 @@ where
         create_proposed_transactions(
             self.wallet_mut(),
             &network,
-            &prover,
-            &prover,
+            &MockSpendProver,
+            &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             &proposal,
@@ -1354,13 +1361,12 @@ where
     where
         FeeRuleT: FeeRule,
     {
-        let prover = LocalTxProver::bundled();
         let network = self.network().clone();
         create_proposed_transactions(
             self.wallet_mut(),
             &network,
-            &prover,
-            &prover,
+            &MockSpendProver,
+            &MockOutputProver,
             &SpendingKeys::from_unified_spending_key(usk.clone()),
             ovk_policy,
             proposal,
@@ -1416,7 +1422,7 @@ where
     {
         use super::wallet::extract_and_store_transaction_from_pczt;
 
-        let prover = LocalTxProver::bundled();
+        let prover = real_test_prover();
         let (spend_vk, output_vk) = prover.verifying_keys();
 
         extract_and_store_transaction_from_pczt(
@@ -1449,13 +1455,12 @@ where
     {
         use crate::data_api::wallet::shield_transparent_funds;
 
-        let prover = LocalTxProver::bundled();
         let network = self.network().clone();
         shield_transparent_funds(
             self.wallet_mut(),
             &network,
-            &prover,
-            &prover,
+            &MockSpendProver,
+            &MockOutputProver,
             input_selector,
             change_strategy,
             shielding_threshold,
