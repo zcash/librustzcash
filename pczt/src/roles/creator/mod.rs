@@ -23,9 +23,9 @@ use {
 #[cfg(feature = "orchard")]
 use crate::orchard::bundle_version_for_revision;
 
-use zcash_protocol::consensus::BranchId;
-use zcash_protocol::constants::{
-    V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID,
+use zcash_protocol::{
+    consensus::BranchId,
+    constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID},
 };
 
 /// Initial flags allowing any modification.
@@ -341,9 +341,9 @@ impl Creator {
 
 #[cfg(test)]
 mod tests {
-    use zcash_protocol::consensus::BranchId;
-    use zcash_protocol::constants::{
-        V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID,
+    use zcash_protocol::{
+        consensus::BranchId,
+        constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID},
     };
 
     use super::{Creator, Error};

@@ -1,6 +1,4 @@
-use std::convert::Infallible;
-use std::num::NonZeroU8;
-use std::sync::OnceLock;
+use std::{convert::Infallible, num::NonZeroU8, sync::OnceLock};
 
 use ::transparent::{
     address::{Script, TransparentAddress},
@@ -9,8 +7,10 @@ use ::transparent::{
     sighash::SighashType,
     zip48,
 };
-use orchard::primitives::redpallas::{self, SpendAuth};
-use orchard::tree::MerkleHashOrchard;
+use orchard::{
+    primitives::redpallas::{self, SpendAuth},
+    tree::MerkleHashOrchard,
+};
 use pczt::{
     Pczt,
     roles::{
@@ -32,17 +32,16 @@ use rand_chacha::ChaCha20Rng;
 use rand_core::{OsRng, SeedableRng};
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
-use zcash_primitives::transaction::builder::DeferredPcztBuilder;
 use zcash_primitives::transaction::{
-    builder::{BuildConfig, Builder, BundlePadding, PcztResult},
+    builder::{BuildConfig, Builder, BundlePadding, DeferredPcztBuilder, PcztResult},
     fees::zip317,
     sighash::SignableInput,
     sighash_v5::v5_signature_hash,
     txid::TxIdDigester,
 };
 use zcash_proofs::prover::LocalTxProver;
-use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::{
+    consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
 };

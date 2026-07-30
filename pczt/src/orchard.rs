@@ -1,10 +1,7 @@
 //! The Orchard fields of a PCZT.
 
-use alloc::collections::BTreeMap;
-use alloc::string::String;
-use alloc::vec::Vec;
-use core::cmp::Ordering;
-use core::fmt;
+use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use core::{cmp::Ordering, fmt};
 
 use getset::Getters;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -681,9 +678,7 @@ pub struct Output {
 
 /// Types for the v1 Orchard PCZT encoding.
 pub mod v1 {
-    use alloc::collections::BTreeMap;
-    use alloc::string::String;
-    use alloc::vec::Vec;
+    use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
     use serde::{Deserialize, Serialize};
     use serde_with::serde_as;
