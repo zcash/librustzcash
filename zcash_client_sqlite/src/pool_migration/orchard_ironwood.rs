@@ -403,6 +403,8 @@ mod tests {
             None,
             MigrationTxState::Signed,
             Some(owner_bytes),
+            None,
+            Vec::new(),
         );
         let unlocked = MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
@@ -414,6 +416,8 @@ mod tests {
             None,
             MigrationTxState::Signed,
             None,
+            None,
+            Vec::new(),
         );
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -482,6 +486,8 @@ mod tests {
                 None,
                 MigrationTxState::Signed,
                 lock_owner,
+                None,
+                Vec::new(),
             )
         };
 

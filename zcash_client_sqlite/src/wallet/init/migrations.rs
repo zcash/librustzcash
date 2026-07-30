@@ -34,6 +34,7 @@ mod note_locking;
 mod nullifier_map;
 mod orchard_ironwood_migration_anchor_interval;
 mod orchard_ironwood_migration_tables;
+mod orchard_ironwood_migration_unsatisfiability;
 mod orchard_note_version;
 mod orchard_received_notes;
 mod orchard_shardtree;
@@ -133,6 +134,7 @@ pub mod ids {
         nullifier_map::MIGRATION_ID as NULLIFIER_MAP,
         orchard_ironwood_migration_anchor_interval::MIGRATION_ID as ORCHARD_IRONWOOD_MIGRATION_ANCHOR_INTERVAL,
         orchard_ironwood_migration_tables::MIGRATION_ID as ORCHARD_IRONWOOD_MIGRATION_TABLES,
+        orchard_ironwood_migration_unsatisfiability::MIGRATION_ID as ORCHARD_IRONWOOD_MIGRATION_UNSATISFIABILITY,
         orchard_note_version::MIGRATION_ID as ORCHARD_NOTE_VERSION,
         orchard_received_notes::MIGRATION_ID as ORCHARD_RECEIVED_NOTES,
         orchard_shardtree::MIGRATION_ID as ORCHARD_SHARDTREE,
@@ -364,6 +366,7 @@ pub(super) fn all_migrations<
         Box::new(tx_status_observation_intent::Migration),
         Box::new(orchard_ironwood_migration_anchor_interval::Migration),
         Box::new(v_tx_outputs_transparent_addresses::Migration),
+        Box::new(orchard_ironwood_migration_unsatisfiability::Migration),
     ]
 }
 
@@ -562,7 +565,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     fix_bad_ironwood_change_flagging::MIGRATION_ID,
     v_address_uses_ironwood::MIGRATION_ID,
     v_transactions_pool_crossing::MIGRATION_ID,
-    orchard_ironwood_migration_anchor_interval::MIGRATION_ID,
+    orchard_ironwood_migration_unsatisfiability::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     tx_status_observation_intent::MIGRATION_ID,
 ];
@@ -687,6 +690,7 @@ pub(crate) mod tests {
             ids::NULLIFIER_MAP,
             ids::ORCHARD_IRONWOOD_MIGRATION_ANCHOR_INTERVAL,
             ids::ORCHARD_IRONWOOD_MIGRATION_TABLES,
+            ids::ORCHARD_IRONWOOD_MIGRATION_UNSATISFIABILITY,
             ids::ORCHARD_NOTE_VERSION,
             ids::ORCHARD_RECEIVED_NOTES,
             ids::ORCHARD_SHARDTREE,

@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- The database schema now includes the `unsatisfiable_at` and
+  `spend_nullifiers` columns on `orchard_ironwood_migration_transactions`,
+  recording the chain height backing a spent-input observation when a
+  pool-migration transaction has been determined unsatisfiable, and caching
+  each transaction's real-spend nullifiers. The migration that adds the
+  columns backfills `spend_nullifiers` for existing rows from their stored
+  PCZTs.
+
 ## [0.22.0-rc.6] - 2026-07-29
 
 ### Added

@@ -5,10 +5,13 @@
 //! [`PoolMigrationWrite`] SQL logic), parameterized over the table names in [`Tables`]. The schema is
 //! fully NORMALIZED: every structured value is stored in typed columns and child-table rows, so the
 //! store maps the engine types to and from columns directly. The `BLOB` columns are the pre-signed
-//! transaction (`pczt`), which is genuinely unstructured, already-versioned bytes, and each
+//! transaction (`pczt`), which is genuinely unstructured, already-versioned bytes; each
 //! transaction's `lock_owner`, an opaque fixed-size token read and written directly as
 //! `Option<[u8; 32]>` (no codec: `rusqlite`'s fixed-size-array `FromSql`/`ToSql` impls handle it,
-//! and reject a non-NULL blob that is not exactly 32 bytes). All amounts are
+//! and reject a non-NULL blob that is not exactly 32 bytes); and each transaction's
+//! `spend_nullifiers`, the concatenation of its real-spend 32-byte nullifiers in action order
+//! (a fixed-stride list, so a child table would add a join for no structure; a length not
+//! divisible by 32 is rejected as corrupt). All amounts are
 //! zatoshi `INTEGER` columns; the broadcast `txid` is stored as hex `TEXT`.
 //!
 //! The preparation plan's layers/transactions grid has no tables of its own: each input and output
@@ -162,6 +165,10 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
 }
 
 fn create_transactions_sql(t: &Tables) -> String {
+    // `spend_nullifiers` carries a `DEFAULT` only so that this DDL and the `ADD COLUMN` in the
+    // `orchard_ironwood_migration_unsatisfiability` schema migration produce the same stored
+    // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
+    // column explicitly, so no insert ever falls back to it.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
@@ -178,6 +185,8 @@ fn create_transactions_sql(t: &Tables) -> String {
             txid TEXT,
             mined_height INTEGER,
             lock_owner BLOB,
+            unsatisfiable_at INTEGER,
+            spend_nullifiers BLOB NOT NULL DEFAULT X'',
             PRIMARY KEY (migration_id, tx_id)
         )",
         t.transactions, t.migrations
@@ -600,7 +609,7 @@ fn read_transactions(
         let mut stmt = conn.prepare(&format!(
             "SELECT tx_id, kind, kind_layer, kind_index, kind_crossing, pczt,
                     scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
-                    lock_owner
+                    lock_owner, unsatisfiable_at, spend_nullifiers
                FROM {}
               WHERE migration_id = ?
               ORDER BY tx_id",
@@ -621,6 +630,8 @@ fn read_transactions(
                 txid: row.get(10)?,
                 mined_height: row.get(11)?,
                 lock_owner: row.get(12)?,
+                unsatisfiable_at: row.get(13)?,
+                spend_nullifiers: row.get(14)?,
             })
         })?;
         mapped.collect::<Result<_, _>>()?
@@ -653,6 +664,17 @@ fn read_transactions(
         .map_err(|_| Error::Corrupt("state"))?;
         let depends_on = read_deps(conn, t, migration_id, r.tx_id)?;
 
+        // The stored blob is a fixed-stride concatenation of 32-byte nullifiers; any other
+        // length cannot have been written by this store.
+        if r.spend_nullifiers.len() % 32 != 0 {
+            return Err(Error::Corrupt("spend_nullifiers"));
+        }
+        let spend_nullifiers = r
+            .spend_nullifiers
+            .chunks_exact(32)
+            .map(|chunk| <[u8; 32]>::try_from(chunk).expect("chunks_exact yields 32-byte chunks"))
+            .collect();
+
         out.push(MigrationTransaction::from_parts(
             id,
             kind,
@@ -663,6 +685,8 @@ fn read_transactions(
             r.anchor_boundary.map(BlockHeight::from_u32),
             state,
             r.lock_owner,
+            r.unsatisfiable_at.map(BlockHeight::from_u32),
+            spend_nullifiers,
         ));
     }
     Ok(out)
@@ -711,6 +735,10 @@ struct TxRow {
     /// `FromSql` impl errors cleanly (`InvalidBlobSize`) if a non-NULL blob is not exactly 32
     /// bytes, so a corrupt row is rejected rather than silently truncated or panicking.
     lock_owner: Option<[u8; 32]>,
+    unsatisfiable_at: Option<u32>,
+    /// The concatenated real-spend nullifiers, still one undivided blob here; the decode step
+    /// splits it at its fixed 32-byte stride and rejects any other length as corrupt.
+    spend_nullifiers: Vec<u8>,
 }
 
 fn read_deps(
@@ -900,10 +928,10 @@ fn replace_migration(
             &format!(
                 "INSERT INTO {} (migration_id, tx_id, kind, kind_layer, kind_index, kind_crossing,
                                  pczt, scheduled_height, expiry_height, anchor_boundary, state, txid,
-                                 mined_height, lock_owner)
+                                 mined_height, lock_owner, unsatisfiable_at, spend_nullifiers)
                  VALUES (:migration_id, :tx_id, :kind, :kind_layer, :kind_index, :kind_crossing,
                          :pczt, :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
-                         :mined_height, :lock_owner)",
+                         :mined_height, :lock_owner, :unsatisfiable_at, :spend_nullifiers)",
                 t.transactions
             ),
             named_params! {
@@ -921,6 +949,8 @@ fn replace_migration(
                 ":txid": tx_state.broadcast_txid().map(hex::encode),
                 ":mined_height": tx_state.mined_height().map(u32::from),
                 ":lock_owner": mtx.lock_owner(),
+                ":unsatisfiable_at": mtx.unsatisfiable_at().map(u32::from),
+                ":spend_nullifiers": mtx.spend_nullifiers().concat(),
             },
         )?;
         for (ordinal, dep) in mtx.depends_on().iter().enumerate() {

@@ -328,6 +328,22 @@ pub struct MigrationTransaction {
     /// (which waits on its dependencies rather than anchoring to a drawn boundary).
     #[getset(get_copy = "pub")]
     pub(crate) anchor_boundary: Option<BlockHeight>,
+    /// The height of the chain state a spent-input observation rests on, when this transaction
+    /// has been determined UNSATISFIABLE — its inputs can never again all exist unspent on
+    /// chain — or `None` while no such determination stands. Orthogonal to the lifecycle state
+    /// (a `Proved` transfer keeps its proof and renders as "proved, inputs spent"), mirroring how
+    /// expiry is orthogonal to lifecycle. Recording the backing height rather than the
+    /// observation time is what gives reorg truncation exact semantics: a rewind below this
+    /// height invalidates the observation itself.
+    #[getset(get_copy = "pub")]
+    pub(crate) unsatisfiable_at: Option<BlockHeight>,
+    /// The nullifiers of this transaction's REAL spends — the deferred-witness actions; the
+    /// padded dummy spends carry their own witnesses (ZIP 374) — extracted from the built PCZT
+    /// when the migration is committed. A cache of data derivable from the stored PCZT, kept
+    /// because the PCZT bytes are immutable once signed and `pczt` parsing is `orchard`-gated
+    /// while the state machine must remain feature-free.
+    #[getset(get = "pub")]
+    pub(crate) spend_nullifiers: Vec<[u8; 32]>,
     /// The transaction's lifecycle state.
     #[getset(get_copy = "pub")]
     pub(crate) state: MigrationTxState,
@@ -359,6 +375,8 @@ impl MigrationTransaction {
         anchor_boundary: Option<BlockHeight>,
         state: MigrationTxState,
         lock_owner: Option<[u8; 32]>,
+        unsatisfiable_at: Option<BlockHeight>,
+        spend_nullifiers: Vec<[u8; 32]>,
     ) -> Self {
         Self {
             id,
@@ -370,6 +388,8 @@ impl MigrationTransaction {
             anchor_boundary,
             state,
             lock_owner,
+            unsatisfiable_at,
+            spend_nullifiers,
         }
     }
 }
@@ -2572,6 +2592,11 @@ where
                     // The engine does not yet acquire locks; a later slice that draws a
                     // `LockOwner` for the commit would set this here.
                     lock_owner: None,
+                    // A freshly committed transaction carries no spent-input observation.
+                    unsatisfiable_at: None,
+                    // The nullifier cache is not yet populated at commit; a later slice extracts
+                    // the real-spend nullifiers from the built PCZT here.
+                    spend_nullifiers: Vec::new(),
                 });
             }
             self.layer_ids.push(this_layer_ids);
@@ -2728,6 +2753,11 @@ where
                 // The engine does not yet acquire locks; a later slice that draws a
                 // `LockOwner` for the commit would set this here.
                 lock_owner: None,
+                // A freshly committed transaction carries no spent-input observation.
+                unsatisfiable_at: None,
+                // The nullifier cache is not yet populated at commit; a later slice extracts
+                // the real-spend nullifiers from the built PCZT here.
+                spend_nullifiers: Vec::new(),
             });
             self.transfer_funding.push((id, note));
         }
@@ -3171,6 +3201,8 @@ mod tests {
             anchor_boundary: None,
             state: MigrationTxState::Signed,
             lock_owner: None,
+            unsatisfiable_at: None,
+            spend_nullifiers: Vec::new(),
         };
         let state = MigrationState {
             status: MigrationStatus::Committed,

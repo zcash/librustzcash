@@ -679,8 +679,12 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
 /// One row per migration transaction. `kind` is `preparation` or `transfer`; `pczt` is the pre-signed
 /// transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle discriminant, with the
 /// hex broadcast `txid` and `mined_height`. `lock_owner` records the `LockOwner` under which this
-/// transaction's notes are locked, if any. Dependencies are edges in
-/// `orchard_ironwood_migration_transaction_deps`.
+/// transaction's notes are locked, if any. `unsatisfiable_at` is the height of the chain state a
+/// spent-input observation rests on, when the transaction has been determined unsatisfiable;
+/// `spend_nullifiers` is the concatenation of its real-spend 32-byte nullifiers in action order,
+/// cached from the stored PCZT (its `DEFAULT` exists only so this DDL and the `ADD COLUMN` in the
+/// `orchard_ironwood_migration_unsatisfiability` schema migration produce the same stored schema
+/// text). Dependencies are edges in `orchard_ironwood_migration_transaction_deps`.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
 CREATE TABLE orchard_ironwood_migration_transactions (
     migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
@@ -697,6 +701,8 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     txid TEXT,
     mined_height INTEGER,
     lock_owner BLOB,
+    unsatisfiable_at INTEGER,
+    spend_nullifiers BLOB NOT NULL DEFAULT X'',
     PRIMARY KEY (migration_id, tx_id)
 )";
 /// The dependency edges between migration transactions.

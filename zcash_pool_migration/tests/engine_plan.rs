@@ -240,6 +240,8 @@ fn stores_loads_and_updates_a_migration() {
         None,
         MigrationTxState::Signed,
         None,
+        None,
+        Vec::new(),
     );
     let state = MigrationState::from_parts(
         MigrationStatus::Committed,
