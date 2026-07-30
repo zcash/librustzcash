@@ -20,7 +20,7 @@ workspace.
   144) and `zcash_protocol::zip318::ANCHOR_AGE_CAP` is now 4 boundaries
   (previously 16), adopting the revised ZIP 318 migration timing.
 
-### Removed
+### Deprecated
 - `zcash_protocol::zip318::DELAY_CAP_RATIO`. ZIP 318 no longer relates each
   delay cap to its mean by a shared ratio; use `TRANSFER_DELAY_CAP` and
   `PREP_DELAY_CAP` directly.
