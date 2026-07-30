@@ -15,6 +15,12 @@ workspace.
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
   previously conflated with `transactions_without_wallet_relevance`.
+- The `v_tx_outputs` view now emits the `diversifier_index_be` column that its
+  documentation has described since the receiving-address columns were added:
+  the big-endian diversifier index of the receiving address, `NULL` for outputs
+  not received at one of the wallet's diversified addresses. The column was
+  previously computed internally but omitted from the view's output, so any
+  query naming it failed with "no such column".
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration
