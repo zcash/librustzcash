@@ -10,8 +10,6 @@ use std::{
 
 #[cfg(feature = "pczt")]
 use super::wallet::{create_pczt_from_proposal, extract_and_store_transaction_from_pczt};
-#[cfg(feature = "transparent-inputs")]
-use super::wallet::{propose_shielding, propose_shielding_coinbase, shield_transparent_funds};
 use assert_matches::assert_matches;
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Retention};
@@ -25,12 +23,20 @@ use shardtree::{
     store::{ShardStore as _, memory::MemoryShardStore},
 };
 use subtle::ConditionallySelectable;
-
-#[cfg(feature = "orchard")]
-use ::orchard::{
-    note::{ExtractedNoteCommitment, Note as OrchardNote, NoteVersion, RandomSeed, Rho},
-    note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
+#[cfg(feature = "transparent-inputs")]
+use {
+    super::{
+        CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
+        wallet::{
+            input_selection::ShieldingSelector, propose_shielding, propose_shielding_coinbase,
+            shield_transparent_funds,
+        },
+    },
+    crate::wallet::TransparentAddressMetadata,
+    ::transparent::address::TransparentAddress,
+    zcash_keys::keys::transparent::gap_limits::GapLimits,
 };
+
 use ::sapling::{
     note_encryption::{SaplingDomain, sapling_note_encryption},
     prover::mock::{MockOutputProver, MockSpendProver},
@@ -43,8 +49,6 @@ use zcash_keys::{
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_note_encryption::Domain;
-#[cfg(feature = "orchard")]
-use zcash_note_encryption::ShieldedOutput;
 use zcash_primitives::{
     block::BlockHash,
     transaction::{Transaction, TxId, components::sapling::zip212_enforcement, fees::FeeRule},
@@ -62,6 +66,19 @@ use zcash_protocol::{
 use zcash_script::script;
 use zip32::DiversifierIndex;
 use zip321::Payment;
+#[cfg(feature = "orchard")]
+use {
+    super::ORCHARD_SHARD_HEIGHT,
+    crate::proto::compact_formats::CompactOrchardAction,
+    ::orchard::{
+        note::{ExtractedNoteCommitment, Note as OrchardNote, NoteVersion, RandomSeed, Rho},
+        note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
+        tree::MerkleHashOrchard,
+    },
+    group::ff::PrimeField,
+    pasta_curves::pallas,
+    zcash_note_encryption::ShieldedOutput,
+};
 
 use super::{
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
@@ -106,23 +123,6 @@ use crate::{
     wallet::{
         LockOwner, Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput,
     },
-};
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    super::{
-        CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
-        wallet::input_selection::ShieldingSelector,
-    },
-    crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress,
-    zcash_keys::keys::transparent::gap_limits::GapLimits,
-};
-
-#[cfg(feature = "orchard")]
-use {
-    super::ORCHARD_SHARD_HEIGHT, crate::proto::compact_formats::CompactOrchardAction,
-    ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
 pub mod pool;
