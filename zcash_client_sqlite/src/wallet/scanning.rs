@@ -1,9 +1,11 @@
 use incrementalmerkletree::{Address, Position};
 use rusqlite::{self, OptionalExtension, named_params, types::Value};
-use std::cmp::{max, min};
-use std::collections::BTreeSet;
-use std::ops::Range;
-use std::rc::Rc;
+use std::{
+    cmp::{max, min},
+    collections::BTreeSet,
+    ops::Range,
+    rc::Rc,
+};
 use tracing::{debug, trace};
 
 use zcash_client_backend::data_api::{
@@ -15,15 +17,13 @@ use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
 };
 
-use crate::TableConstants;
 use crate::{
-    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+    PRUNING_DEPTH, TableConstants, VERIFY_LOOKAHEAD,
     error::SqliteClientError,
     wallet::{block_height_extrema, init::WalletMigrationError},
 };
 
-use super::common::table_constants;
-use super::{block_max_scanned, wallet_birthday};
+use super::{block_max_scanned, common::table_constants, wallet_birthday};
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
@@ -837,27 +837,20 @@ pub(crate) mod tests {
 
     use ScanPriority::*;
     #[cfg(feature = "orchard")]
-    use rusqlite::Connection;
-    #[cfg(feature = "orchard")]
-    use std::collections::BTreeSet;
-    #[cfg(feature = "orchard")]
-    use zcash_client_backend::data_api::Account as _;
-    #[cfg(feature = "orchard")]
-    use zcash_protocol::ShieldedPool;
-    #[cfg(feature = "orchard")]
     use {
         incrementalmerkletree::Level,
         orchard::tree::MerkleHashOrchard,
-        std::convert::Infallible,
+        rusqlite::Connection,
+        std::{collections::BTreeSet, convert::Infallible},
         zcash_client_backend::{
             data_api::{
-                WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
+                Account as _, WalletCommitmentTrees, testing::orchard::OrchardPoolTester,
                 wallet::input_selection::GreedyInputSelector,
             },
             fees::{DustOutputPolicy, StandardFeeRule, standard},
             wallet::OvkPolicy,
         },
-        zcash_protocol::memo::Memo,
+        zcash_protocol::{ShieldedPool, memo::Memo},
     };
 
     #[test]

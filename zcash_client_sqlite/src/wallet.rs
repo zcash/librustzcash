@@ -159,29 +159,25 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
     },
+    ReceiverRequirement::*,
+    rusqlite::types::Value,
+    std::rc::Rc,
     zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
 };
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
 
-#[cfg(feature = "transparent-key-import")]
-use ::transparent::address::TransparentAddress;
 use FindAccountForAddressError as E;
-#[cfg(feature = "transparent-inputs")]
-use ReceiverRequirement::*;
-#[cfg(feature = "transparent-inputs")]
-use rusqlite::types::Value;
-#[cfg(feature = "transparent-inputs")]
-use std::rc::Rc;
-#[cfg(feature = "transparent-key-import")]
-use zcash_script::descriptor::sh;
-#[cfg(feature = "transparent-key-import")]
-use zcash_script::script::Evaluable;
 #[cfg(feature = "zcashd-compat")]
 use {
     crate::wallet::encoding::{decode_legacy_account_index, encode_legacy_account_index},
     zcash_keys::keys::zcashd,
+};
+#[cfg(feature = "transparent-key-import")]
+use {
+    ::transparent::address::TransparentAddress,
+    zcash_script::{descriptor::sh, script::Evaluable},
 };
 
 pub mod commitment_tree;
@@ -5888,7 +5884,10 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
+    use std::{
+        collections::HashSet,
+        num::{NonZeroU8, NonZeroU32},
+    };
 
     use rusqlite::{Connection, named_params};
     use sapling::zip32::ExtendedSpendingKey;
@@ -5897,7 +5896,12 @@ mod tests {
     use zcash_client_backend::data_api::{
         Account as _, AccountSource, TransactionDataRequest, TransactionStatus, WalletRead,
         WalletWrite,
-        testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
+        chain::{ChainState, CommitmentTreeRoot},
+        error::RewindError,
+        testing::{
+            AddressType, DataStoreFactory, FakeCompactOutput, InitialChainState, TestBuilder,
+            TestState, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+        },
         wallet::ConfirmationsPolicy,
     };
     use zcash_keys::keys::UnifiedAddressRequest;
@@ -5920,26 +5924,13 @@ mod tests {
         select_truncation_height,
     };
 
-    #[cfg(feature = "orchard")]
-    use ::orchard::tree::MerkleHashOrchard;
-    #[cfg(feature = "orchard")]
-    use incrementalmerkletree::Hashable as _;
     use incrementalmerkletree::frontier::Frontier;
     #[cfg(feature = "orchard")]
-    use shardtree::error::ShardTreeError;
-    use std::collections::HashSet;
-    use std::num::NonZeroU8;
-    #[cfg(feature = "orchard")]
-    use zcash_client_backend::data_api::WalletCommitmentTrees;
-    use zcash_client_backend::data_api::error::RewindError;
-    #[cfg(feature = "orchard")]
-    use {crate::testing::db::TestDb, zcash_protocol::local_consensus::LocalNetwork};
     use {
-        zcash_client_backend::data_api::chain::ChainState,
-        zcash_client_backend::data_api::chain::CommitmentTreeRoot,
-        zcash_client_backend::data_api::testing::InitialChainState,
-        zcash_client_backend::data_api::testing::pool::ShieldedPoolTester,
-        zcash_client_backend::data_api::testing::sapling::SaplingPoolTester,
+        crate::testing::db::TestDb, ::orchard::tree::MerkleHashOrchard,
+        incrementalmerkletree::Hashable as _, shardtree::error::ShardTreeError,
+        zcash_client_backend::data_api::WalletCommitmentTrees,
+        zcash_protocol::local_consensus::LocalNetwork,
     };
 
     fn connection_with_checkpoint_tables() -> Connection {

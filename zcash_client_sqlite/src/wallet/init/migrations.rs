@@ -106,69 +106,69 @@ use super::WalletMigrationError;
 /// [`WalletMigrator::with_external_migrations`]: super::WalletMigrator::with_external_migrations
 #[cfg(feature = "unstable")]
 pub mod ids {
-    pub use super::account_delete_cascade::MIGRATION_ID as ACCOUNT_DELETE_CASCADE;
-    pub use super::add_account_birthdays::MIGRATION_ID as ADD_ACCOUNT_BIRTHDAYS;
-    pub use super::add_account_uuids::MIGRATION_ID as ADD_ACCOUNT_UUIDS;
-    pub use super::add_transaction_trust_marker::MIGRATION_ID as ADD_TRANSACTION_TRUST_MARKER;
-    pub use super::add_transaction_views::MIGRATION_ID as ADD_TRANSACTION_VIEWS;
-    pub use super::add_transparent_receiver_address_index::MIGRATION_ID as ADD_TRANSPARENT_RECEIVER_ADDRESS_INDEX;
-    pub use super::add_transparent_value_index::MIGRATION_ID as ADD_TRANSPARENT_VALUE_INDEX;
-    pub use super::add_utxo_account::MIGRATION_ID as ADD_UTXO_ACCOUNT;
-    pub use super::addresses_table::MIGRATION_ID as ADDRESSES_TABLE;
-    pub use super::ensure_default_transparent_address::MIGRATION_ID as ENSURE_DEFAULT_TRANSPARENT_ADDRESS;
-    pub use super::ensure_orchard_ua_receiver::MIGRATION_ID as ENSURE_ORCHARD_UA_RECEIVER;
-    pub use super::ephemeral_addresses::MIGRATION_ID as EPHEMERAL_ADDRESSES;
-    pub use super::fix_bad_change_flagging::MIGRATION_ID as FIX_BAD_CHANGE_FLAGGING;
-    pub use super::fix_bad_ironwood_change_flagging::MIGRATION_ID as FIX_BAD_IRONWOOD_CHANGE_FLAGGING;
-    pub use super::fix_broken_commitment_trees::MIGRATION_ID as FIX_BROKEN_COMMITMENT_TREES;
-    pub use super::fix_transparent_received_outputs::MIGRATION_ID as FIX_TRANSPARENT_RECEIVED_OUTPUTS;
-    pub use super::fix_v_transactions_expired_unmined::MIGRATION_ID as FIX_V_TRANSACTIONS_EXPIRED_UNMINED;
-    pub use super::full_account_ids::MIGRATION_ID as FULL_ACCOUNT_IDS;
-    pub use super::initial_setup::MIGRATION_ID as INITIAL_SETUP;
-    pub use super::ironwood_pool_code_views::MIGRATION_ID as IRONWOOD_POOL_CODE_VIEWS;
-    pub use super::ironwood_received_notes::MIGRATION_ID as IRONWOOD_RECEIVED_NOTES;
-    pub use super::ironwood_shardtree::MIGRATION_ID as IRONWOOD_SHARDTREE;
-    pub use super::ivk_item_cache::MIGRATION_ID as IVK_ITEM_CACHE;
-    pub use super::note_locking::MIGRATION_ID as NOTE_LOCKING;
-    pub use super::nullifier_map::MIGRATION_ID as NULLIFIER_MAP;
-    pub use super::orchard_ironwood_migration_anchor_interval::MIGRATION_ID as ORCHARD_IRONWOOD_MIGRATION_ANCHOR_INTERVAL;
-    pub use super::orchard_ironwood_migration_tables::MIGRATION_ID as ORCHARD_IRONWOOD_MIGRATION_TABLES;
-    pub use super::orchard_note_version::MIGRATION_ID as ORCHARD_NOTE_VERSION;
-    pub use super::orchard_received_notes::MIGRATION_ID as ORCHARD_RECEIVED_NOTES;
-    pub use super::orchard_shardtree::MIGRATION_ID as ORCHARD_SHARDTREE;
-    pub use super::received_notes_nullable_nf::MIGRATION_ID as RECEIVED_NOTES_NULLABLE_NF;
-    pub use super::receiving_key_scopes::MIGRATION_ID as RECEIVING_KEY_SCOPES;
-    pub use super::sapling_memo_consistency::MIGRATION_ID as SAPLING_MEMO_CONSISTENCY;
-    pub use super::sent_notes_to_internal::MIGRATION_ID as SENT_NOTES_TO_INTERNAL;
-    pub use super::shardtree_support::MIGRATION_ID as SHARDTREE_SUPPORT;
-    pub use super::spend_key_available::MIGRATION_ID as SPEND_KEY_AVAILABLE;
-    pub use super::standalone_p2sh::MIGRATION_ID as STANDALONE_P2SH;
-    pub use super::support_legacy_sqlite::MIGRATION_ID as SUPPORT_LEGACY_SQLITE;
-    pub use super::support_zcashd_wallet_import::MIGRATION_ID as SUPPORT_ZCASHD_WALLET_IMPORT;
-    pub use super::transparent_gap_limit_handling::MIGRATION_ID as TRANSPARENT_GAP_LIMIT_HANDLING;
-    pub use super::tree_retained_checkpoints::MIGRATION_ID as TREE_RETAINED_CHECKPOINTS;
-    pub use super::tx_observation_height::MIGRATION_ID as TX_OBSERVATION_HEIGHT;
-    pub use super::tx_retrieval_queue::MIGRATION_ID as TX_RETRIEVAL_QUEUE;
-    pub use super::tx_retrieval_queue_expiry::MIGRATION_ID as TX_RETRIEVAL_QUEUE_EXPIRY;
-    pub use super::tx_status_observation_intent::MIGRATION_ID as TX_STATUS_OBSERVATION_INTENT;
-    pub use super::ufvk_support::MIGRATION_ID as UFVK_SUPPORT;
-    pub use super::utxos_table::MIGRATION_ID as UTXOS_TABLE;
-    pub use super::utxos_to_txos::MIGRATION_ID as UTXOS_TO_TXOS;
-    pub use super::v_address_uses_ironwood::MIGRATION_ID as V_ADDRESS_USES_IRONWOOD;
-    pub use super::v_received_output_spends_account::MIGRATION_ID as V_RECEIVED_OUTPUT_SPENDS_ACCOUNT;
-    pub use super::v_sapling_shard_unscanned_ranges::MIGRATION_ID as V_SAPLING_SHARD_UNSCANNED_RANGES;
-    pub use super::v_transactions_additional_totals::MIGRATION_ID as V_TRANSACTIONS_ADDITIONAL_TOTALS;
-    pub use super::v_transactions_net::MIGRATION_ID as V_TRANSACTIONS_NET;
-    pub use super::v_transactions_note_uniqueness::MIGRATION_ID as V_TRANSACTIONS_NOTE_UNIQUENESS;
-    pub use super::v_transactions_pool_crossing::MIGRATION_ID as V_TRANSACTIONS_POOL_CROSSING;
-    pub use super::v_transactions_shielding_balance::MIGRATION_ID as V_TRANSACTIONS_SHIELDING_BALANCE;
-    pub use super::v_transactions_transparent_history::MIGRATION_ID as V_TRANSACTIONS_TRANSPARENT_HISTORY;
-    pub use super::v_tx_outputs_key_scopes::MIGRATION_ID as V_TX_OUTPUTS_KEY_SCOPES;
-    pub use super::v_tx_outputs_return_addrs::MIGRATION_ID as V_TX_OUTPUTS_RETURN_ADDRS;
-    pub use super::v_tx_outputs_transparent_addresses::MIGRATION_ID as V_TX_OUTPUTS_TRANSPARENT_ADDRESSES;
-    pub use super::v_tx_outputs_use_legacy_false::MIGRATION_ID as V_TX_OUTPUTS_USE_LEGACY_FALSE;
-    pub use super::wallet_summaries::MIGRATION_ID as WALLET_SUMMARIES;
-    pub use super::witness_stabilized_notes::MIGRATION_ID as WITNESS_STABILIZED_NOTES;
+    pub use super::{
+        account_delete_cascade::MIGRATION_ID as ACCOUNT_DELETE_CASCADE,
+        add_account_birthdays::MIGRATION_ID as ADD_ACCOUNT_BIRTHDAYS,
+        add_account_uuids::MIGRATION_ID as ADD_ACCOUNT_UUIDS,
+        add_transaction_trust_marker::MIGRATION_ID as ADD_TRANSACTION_TRUST_MARKER,
+        add_transaction_views::MIGRATION_ID as ADD_TRANSACTION_VIEWS,
+        add_transparent_receiver_address_index::MIGRATION_ID as ADD_TRANSPARENT_RECEIVER_ADDRESS_INDEX,
+        add_transparent_value_index::MIGRATION_ID as ADD_TRANSPARENT_VALUE_INDEX,
+        add_utxo_account::MIGRATION_ID as ADD_UTXO_ACCOUNT,
+        addresses_table::MIGRATION_ID as ADDRESSES_TABLE,
+        ensure_default_transparent_address::MIGRATION_ID as ENSURE_DEFAULT_TRANSPARENT_ADDRESS,
+        ensure_orchard_ua_receiver::MIGRATION_ID as ENSURE_ORCHARD_UA_RECEIVER,
+        ephemeral_addresses::MIGRATION_ID as EPHEMERAL_ADDRESSES,
+        fix_bad_change_flagging::MIGRATION_ID as FIX_BAD_CHANGE_FLAGGING,
+        fix_bad_ironwood_change_flagging::MIGRATION_ID as FIX_BAD_IRONWOOD_CHANGE_FLAGGING,
+        fix_broken_commitment_trees::MIGRATION_ID as FIX_BROKEN_COMMITMENT_TREES,
+        fix_transparent_received_outputs::MIGRATION_ID as FIX_TRANSPARENT_RECEIVED_OUTPUTS,
+        fix_v_transactions_expired_unmined::MIGRATION_ID as FIX_V_TRANSACTIONS_EXPIRED_UNMINED,
+        full_account_ids::MIGRATION_ID as FULL_ACCOUNT_IDS,
+        initial_setup::MIGRATION_ID as INITIAL_SETUP,
+        ironwood_pool_code_views::MIGRATION_ID as IRONWOOD_POOL_CODE_VIEWS,
+        ironwood_received_notes::MIGRATION_ID as IRONWOOD_RECEIVED_NOTES,
+        ironwood_shardtree::MIGRATION_ID as IRONWOOD_SHARDTREE,
+        ivk_item_cache::MIGRATION_ID as IVK_ITEM_CACHE, note_locking::MIGRATION_ID as NOTE_LOCKING,
+        nullifier_map::MIGRATION_ID as NULLIFIER_MAP,
+        orchard_ironwood_migration_anchor_interval::MIGRATION_ID as ORCHARD_IRONWOOD_MIGRATION_ANCHOR_INTERVAL,
+        orchard_ironwood_migration_tables::MIGRATION_ID as ORCHARD_IRONWOOD_MIGRATION_TABLES,
+        orchard_note_version::MIGRATION_ID as ORCHARD_NOTE_VERSION,
+        orchard_received_notes::MIGRATION_ID as ORCHARD_RECEIVED_NOTES,
+        orchard_shardtree::MIGRATION_ID as ORCHARD_SHARDTREE,
+        received_notes_nullable_nf::MIGRATION_ID as RECEIVED_NOTES_NULLABLE_NF,
+        receiving_key_scopes::MIGRATION_ID as RECEIVING_KEY_SCOPES,
+        sapling_memo_consistency::MIGRATION_ID as SAPLING_MEMO_CONSISTENCY,
+        sent_notes_to_internal::MIGRATION_ID as SENT_NOTES_TO_INTERNAL,
+        shardtree_support::MIGRATION_ID as SHARDTREE_SUPPORT,
+        spend_key_available::MIGRATION_ID as SPEND_KEY_AVAILABLE,
+        standalone_p2sh::MIGRATION_ID as STANDALONE_P2SH,
+        support_legacy_sqlite::MIGRATION_ID as SUPPORT_LEGACY_SQLITE,
+        support_zcashd_wallet_import::MIGRATION_ID as SUPPORT_ZCASHD_WALLET_IMPORT,
+        transparent_gap_limit_handling::MIGRATION_ID as TRANSPARENT_GAP_LIMIT_HANDLING,
+        tree_retained_checkpoints::MIGRATION_ID as TREE_RETAINED_CHECKPOINTS,
+        tx_observation_height::MIGRATION_ID as TX_OBSERVATION_HEIGHT,
+        tx_retrieval_queue::MIGRATION_ID as TX_RETRIEVAL_QUEUE,
+        tx_retrieval_queue_expiry::MIGRATION_ID as TX_RETRIEVAL_QUEUE_EXPIRY,
+        tx_status_observation_intent::MIGRATION_ID as TX_STATUS_OBSERVATION_INTENT,
+        ufvk_support::MIGRATION_ID as UFVK_SUPPORT, utxos_table::MIGRATION_ID as UTXOS_TABLE,
+        utxos_to_txos::MIGRATION_ID as UTXOS_TO_TXOS,
+        v_address_uses_ironwood::MIGRATION_ID as V_ADDRESS_USES_IRONWOOD,
+        v_received_output_spends_account::MIGRATION_ID as V_RECEIVED_OUTPUT_SPENDS_ACCOUNT,
+        v_sapling_shard_unscanned_ranges::MIGRATION_ID as V_SAPLING_SHARD_UNSCANNED_RANGES,
+        v_transactions_additional_totals::MIGRATION_ID as V_TRANSACTIONS_ADDITIONAL_TOTALS,
+        v_transactions_net::MIGRATION_ID as V_TRANSACTIONS_NET,
+        v_transactions_note_uniqueness::MIGRATION_ID as V_TRANSACTIONS_NOTE_UNIQUENESS,
+        v_transactions_pool_crossing::MIGRATION_ID as V_TRANSACTIONS_POOL_CROSSING,
+        v_transactions_shielding_balance::MIGRATION_ID as V_TRANSACTIONS_SHIELDING_BALANCE,
+        v_transactions_transparent_history::MIGRATION_ID as V_TRANSACTIONS_TRANSPARENT_HISTORY,
+        v_tx_outputs_key_scopes::MIGRATION_ID as V_TX_OUTPUTS_KEY_SCOPES,
+        v_tx_outputs_return_addrs::MIGRATION_ID as V_TX_OUTPUTS_RETURN_ADDRS,
+        v_tx_outputs_transparent_addresses::MIGRATION_ID as V_TX_OUTPUTS_TRANSPARENT_ADDRESSES,
+        v_tx_outputs_use_legacy_false::MIGRATION_ID as V_TX_OUTPUTS_USE_LEGACY_FALSE,
+        wallet_summaries::MIGRATION_ID as WALLET_SUMMARIES,
+        witness_stabilized_notes::MIGRATION_ID as WITNESS_STABILIZED_NOTES,
+    };
 }
 
 pub(super) fn all_migrations<
@@ -619,9 +619,7 @@ pub(crate) mod tests {
 
     // Used only by the orchard-gated note-generation strategies below.
     #[cfg(feature = "orchard")]
-    use proptest::prelude::any;
-    #[cfg(feature = "orchard")]
-    use proptest::prop_compose;
+    use proptest::{prelude::any, prop_compose};
     use rusqlite::Connection;
     use secrecy::Secret;
     use tempfile::NamedTempFile;

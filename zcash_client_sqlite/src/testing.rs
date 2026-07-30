@@ -12,21 +12,19 @@ use zcash_client_backend::{
 };
 use zcash_protocol::TxId;
 #[cfg(feature = "orchard")]
-use zcash_protocol::consensus::BlockHeight;
+use {
+    shardtree::{error::ShardTreeError, store::ShardStore},
+    zcash_client_backend::data_api::WalletCommitmentTrees,
+    zcash_protocol::consensus::BlockHeight,
+};
 
 use crate::{chain::init::init_cache_database, error::SqliteClientError};
 
 use super::BlockDb;
 
-#[cfg(feature = "orchard")]
-use shardtree::error::ShardTreeError;
-#[cfg(feature = "orchard")]
-use shardtree::store::ShardStore;
 #[cfg(all(test, feature = "unstable"))]
 #[cfg(all(test, feature = "unstable"))]
 use std::io::Write;
-#[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::WalletCommitmentTrees;
 #[cfg(all(test, feature = "unstable"))]
 use {
     crate::{

@@ -9,21 +9,16 @@ use super::{addresses_table, utxos_table};
 use crate::wallet::init::WalletMigrationError;
 
 #[cfg(feature = "transparent-inputs")]
-use crate::wallet::encoding::decode_diversifier_index_be;
-#[cfg(feature = "transparent-inputs")]
-use transparent::keys::TransparentKeyScope;
-#[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::wallet::Exposure;
-#[cfg(feature = "transparent-inputs")]
 use {
-    crate::error::SqliteClientError,
+    crate::{error::SqliteClientError, wallet::encoding::decode_diversifier_index_be},
     ::transparent::{
         address::TransparentAddress,
         keys::{IncomingViewingKey, NonHardenedChildIndex},
     },
     rusqlite::{OptionalExtension, named_params},
     std::collections::HashMap,
-    zcash_client_backend::wallet::TransparentAddressMetadata,
+    transparent::keys::TransparentKeyScope,
+    zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata},
     zcash_keys::{address::Address, encoding::AddressCodec, keys::UnifiedFullViewingKey},
     zip32::{AccountId, Scope},
 };

@@ -1,17 +1,17 @@
 //! Functions for transparent input support in the wallet.
 use core::ops::Range;
-use std::collections::{HashMap, HashSet};
-use std::num::TryFromIntError;
-use std::ops::DerefMut;
-use std::rc::Rc;
-use std::time::{Duration, SystemTime, SystemTimeError};
+use std::{
+    collections::{HashMap, HashSet},
+    num::TryFromIntError,
+    ops::DerefMut,
+    rc::Rc,
+    time::{Duration, SystemTime, SystemTimeError},
+};
 
 use nonempty::NonEmpty;
 use rand::RngCore;
 use rand_distr::Distribution;
-use rusqlite::OptionalExtension;
-use rusqlite::types::Value;
-use rusqlite::{Connection, Row, ToSql, named_params};
+use rusqlite::{Connection, OptionalExtension, Row, ToSql, named_params, types::Value};
 use tracing::{debug, warn};
 
 use transparent::{
@@ -54,12 +54,12 @@ use zcash_protocol::{
     value::{ZatBalance, Zatoshis},
 };
 use zcash_script::script;
-#[cfg(feature = "transparent-key-import")]
-use zcash_script::script::Code;
 use zip32::Scope;
-
 #[cfg(feature = "transparent-key-import")]
-use bip32::{PublicKey, PublicKeyBytes};
+use {
+    bip32::{PublicKey, PublicKeyBytes},
+    zcash_script::script::Code,
+};
 
 use super::{
     KeyScope, account_birthday_internal, chain_tip_height,
@@ -2888,48 +2888,40 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use secrecy::Secret;
-    use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
+    use transparent::{
+        bundle::{OutPoint, TxOut},
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    };
     use zcash_client_backend::{
-        data_api::{Account as _, WalletWrite, testing::TestBuilder},
-        wallet::{Exposure, TransparentAddressMetadata},
+        data_api::{Account as _, WalletRead, WalletWrite, testing::TestBuilder},
+        wallet::{Exposure, TransparentAddressMetadata, WalletTransparentOutput},
     };
     use zcash_primitives::block::BlockHash;
 
-    use crate::wallet::encoding::{KeyScope, ReceiverFlags};
     use crate::{
         GapLimits, WalletDb,
         error::SqliteClientError,
         testing::{BlockCache, db::TestDbFactory},
         wallet::{
+            encoding::{KeyScope, ReceiverFlags, encode_diversifier_index_be},
             get_account_ref,
             transparent::{ephemeral, find_gap_start, reserve_next_n_addresses},
+            upsert_address,
         },
     };
-    #[cfg(feature = "transparent-key-import")]
-    use proptest::prelude::*;
     use rusqlite::named_params;
-    #[cfg(feature = "transparent-key-import")]
-    use std::collections::HashSet;
-    #[cfg(feature = "transparent-key-import")]
-    use transparent::address::TransparentAddress;
-    use zcash_client_backend::data_api::WalletRead;
-    use zcash_client_backend::wallet::WalletTransparentOutput;
-    use zcash_keys::keys::ReceiverRequirement;
-    use zcash_keys::keys::UnifiedAddressRequest;
+    use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest};
     use zcash_protocol::value::Zatoshis;
-    use {crate::wallet::encoding::encode_diversifier_index_be, crate::wallet::upsert_address};
-    #[cfg(feature = "transparent-key-import")]
-    use {secp256k1::PublicKey, secp256k1::Secp256k1, secp256k1::SecretKey};
-    use {transparent::bundle::OutPoint, transparent::bundle::TxOut};
     #[cfg(feature = "transparent-key-import")]
     use {
-        zcash_client_backend::data_api::AccountBirthday,
-        zcash_client_backend::data_api::chain::ChainState,
+        proptest::prelude::*,
+        secp256k1::{PublicKey, Secp256k1, SecretKey},
+        std::collections::HashSet,
+        transparent::address::TransparentAddress,
+        zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
+        zcash_keys::{address::Address, encoding::AddressCodec},
+        zcash_protocol::consensus::{NetworkUpgrade, Parameters},
     };
-    #[cfg(feature = "transparent-key-import")]
-    use {zcash_keys::address::Address, zcash_keys::encoding::AddressCodec};
-    #[cfg(feature = "transparent-key-import")]
-    use {zcash_protocol::consensus::NetworkUpgrade, zcash_protocol::consensus::Parameters};
 
     #[test]
     fn put_received_transparent_utxo() {

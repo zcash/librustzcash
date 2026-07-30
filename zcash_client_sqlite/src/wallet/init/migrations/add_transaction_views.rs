@@ -280,29 +280,24 @@ mod tests {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use crate::UA_TRANSPARENT;
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::keys::UnifiedAddressRequest;
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_keys::keys::ReceiverRequirement::*;
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_protocol::value::Zatoshis;
-    #[cfg(feature = "transparent-inputs")]
     use {
-        crate::wallet::init::migrations::{ufvk_support, utxos_table},
-        ::transparent::{
-            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
-            keys::IncomingViewingKey,
+        crate::{
+            UA_TRANSPARENT,
+            wallet::init::migrations::{ufvk_support, utxos_table},
         },
-        zcash_keys::encoding::AddressCodec,
+        ::transparent::{
+            address::Script,
+            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
+            keys::{IncomingViewingKey, NonHardenedChildIndex},
+        },
+        zcash_client_backend::keys::UnifiedAddressRequest,
+        zcash_keys::{encoding::AddressCodec, keys::ReceiverRequirement::*},
         zcash_primitives::transaction::{TransactionData, TxVersion},
         zcash_protocol::{
             consensus::{BlockHeight, BranchId},
-            value::ZatBalance,
+            value::{ZatBalance, Zatoshis},
         },
     };
-    #[cfg(feature = "transparent-inputs")]
-    use {::transparent::address::Script, ::transparent::keys::NonHardenedChildIndex};
 
     #[test]
     fn transaction_views() {

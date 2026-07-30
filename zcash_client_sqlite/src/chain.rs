@@ -10,16 +10,14 @@ use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats
 use crate::{BlockDb, error::SqliteClientError};
 
 #[cfg(feature = "unstable")]
-use rusqlite::OptionalExtension;
-#[cfg(feature = "unstable")]
-use rusqlite::named_params;
-#[cfg(feature = "unstable")]
 use {
     crate::{BlockHash, FsBlockDb, FsBlockDbError},
-    rusqlite::Connection,
-    std::fs::File,
-    std::io::Read,
-    std::path::{Path, PathBuf},
+    rusqlite::{Connection, OptionalExtension, named_params},
+    std::{
+        fs::File,
+        io::Read,
+        path::{Path, PathBuf},
+    },
 };
 
 pub mod init;

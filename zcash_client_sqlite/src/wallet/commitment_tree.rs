@@ -28,14 +28,12 @@ use zcash_protocol::{ShieldedPool, consensus::BlockHeight};
 use crate::{error::SqliteClientError, sapling_tree};
 
 #[cfg(feature = "orchard")]
-use incrementalmerkletree::Marking;
-#[cfg(feature = "orchard")]
-use shardtree::{ShardTree, store::memory::MemoryShardStore};
-#[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
-
-#[cfg(feature = "orchard")]
-use crate::{IRONWOOD_TABLES_PREFIX, ORCHARD_TABLES_PREFIX, ironwood_tree, orchard_tree};
+use {
+    crate::{IRONWOOD_TABLES_PREFIX, ORCHARD_TABLES_PREFIX, ironwood_tree, orchard_tree},
+    incrementalmerkletree::Marking,
+    shardtree::{ShardTree, store::memory::MemoryShardStore},
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+};
 
 use super::common::{TableConstants, table_constants};
 
@@ -1627,8 +1625,9 @@ mod tests {
         check_append, check_checkpoint_rewind, check_remove_mark, check_rewind_remove_mark,
         check_root_hashes, check_witness_consistency, check_witnesses,
     };
-    use shardtree::ShardTree;
+    use shardtree::{ShardTree, error::ShardTreeError, store::ShardStore};
     use zcash_client_backend::data_api::{
+        WalletCommitmentTrees,
         chain::CommitmentTreeRoot,
         testing::{pool::ShieldedPoolTester, sapling::SaplingPoolTester},
     };
@@ -1644,22 +1643,13 @@ mod tests {
         wallet::init::WalletMigrator,
     };
     // Used only by the orchard-gated `HistoricalWitnessGenerator` type alias below.
-    #[cfg(feature = "orchard")]
-    use crate::error::SqliteClientError;
-    #[cfg(feature = "orchard")]
-    use ::orchard::tree::MerkleHashOrchard;
-    #[cfg(feature = "orchard")]
-    use incrementalmerkletree::frontier::Frontier;
-    #[cfg(feature = "orchard")]
-    use rand::SeedableRng;
-    #[cfg(feature = "orchard")]
-    use rand_chacha::ChaChaRng;
-    use shardtree::error::ShardTreeError;
-    use shardtree::store::ShardStore;
     use std::collections::BTreeSet;
     #[cfg(feature = "orchard")]
-    use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
-    use zcash_client_backend::data_api::WalletCommitmentTrees;
+    use {
+        crate::error::SqliteClientError, ::orchard::tree::MerkleHashOrchard,
+        incrementalmerkletree::frontier::Frontier, rand::SeedableRng, rand_chacha::ChaChaRng,
+        zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+    };
 
     fn new_tree<T: ShieldedPoolTester + ShieldedPoolPersistence>(
         m: usize,

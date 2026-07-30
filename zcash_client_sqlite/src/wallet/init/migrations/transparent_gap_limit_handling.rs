@@ -2,9 +2,11 @@
 //! `ephemeral_addresses` tables.
 
 use rand_core::RngCore;
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
-use std::sync::Mutex;
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::Mutex,
+};
 use uuid::Uuid;
 
 use rusqlite::{Transaction, named_params};
@@ -31,12 +33,12 @@ use {
         },
     },
     ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
+    ReceiverRequirement::*,
+    transparent::keys::TransparentKeyScope,
     zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
     zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,
 };
-#[cfg(feature = "transparent-inputs")]
-use {ReceiverRequirement::*, transparent::keys::TransparentKeyScope};
 
 /// Add support for general transparent gap limit handling, and unify the `addresses` and
 /// `ephemeral_addresses` tables.

@@ -6,20 +6,21 @@
 //! [`PoolMigrationRead`] / [`PoolMigrationWrite`], and the `init_migration_tables` DDL its schema
 //! migration runs. The generic store type never leaks into this API.
 
-use std::borrow::{Borrow, BorrowMut};
-use std::collections::BTreeSet;
+use std::{
+    borrow::{Borrow, BorrowMut},
+    collections::BTreeSet,
+};
 
 use rusqlite::{Connection, OptionalExtension};
 
-use zcash_client_backend::wallet::LockOwner;
+use zcash_client_backend::{
+    data_api::anchor_retention::AnchorRetentionInterval, wallet::LockOwner,
+};
 use zcash_pool_migration::engine::{
     MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 
-use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
-
-use crate::error::SqliteClientError;
-use crate::{AccountRef, AccountUuid};
+use crate::{AccountRef, AccountUuid, error::SqliteClientError};
 
 use super::store::{self, Store, Tables};
 
@@ -157,17 +158,17 @@ mod retention_follows_the_committed_migration {
     use std::collections::BTreeSet;
 
     use shardtree::store::ShardStore;
-    use zcash_client_backend::data_api::anchor_retention::AnchorRetentionInterval;
-    use zcash_client_backend::data_api::testing::{
-        TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+    use zcash_client_backend::data_api::{
+        Account as _, WalletCommitmentTrees, WalletRead,
+        anchor_retention::AnchorRetentionInterval,
+        testing::{TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester},
     };
-    use zcash_client_backend::data_api::{Account as _, WalletCommitmentTrees, WalletRead};
-    use zcash_pool_migration::denomination::DenominationPlan;
-    use zcash_pool_migration::engine::{
-        MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite,
+    use zcash_pool_migration::{
+        denomination::DenominationPlan,
+        engine::{MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite},
+        preparation::PreparationPlan,
+        scheduling::AnchorBucketInterval,
     };
-    use zcash_pool_migration::preparation::PreparationPlan;
-    use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::value::Zatoshis;
 
@@ -303,37 +304,32 @@ mod retention_follows_the_committed_migration {
 
 #[cfg(test)]
 mod tests {
-    use super::{PoolMigrations, init_migration_tables};
+    use super::{Error, PoolMigrations, init_migration_tables};
 
     use proptest::prelude::*;
     use rusqlite::Connection;
     use uuid::Uuid;
 
-    use zcash_pool_migration::engine::{
-        MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
-    };
-    use zcash_pool_migration::scheduling::AnchorBucketInterval;
-    use zcash_pool_migration::testing::{
-        arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
-        assert_put_get_roundtrip, assert_put_replaces, assert_update_transaction,
-        first_transaction_id,
+    use zcash_pool_migration::{
+        denomination::DenominationPlan,
+        engine::{
+            MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+            MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+        },
+        preparation::PreparationPlan,
+        scheduling::AnchorBucketInterval,
+        testing::{
+            arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
+            assert_put_get_roundtrip, assert_put_replaces, assert_update_transaction,
+            first_transaction_id,
+        },
     };
 
     use crate::AccountUuid;
 
-    use super::Error;
     use std::collections::BTreeSet;
     use zcash_client_backend::wallet::LockOwner;
-    use zcash_pool_migration::denomination::DenominationPlan;
-    use zcash_pool_migration::preparation::PreparationPlan;
-    use zcash_protocol::consensus::BlockHeight;
-    use zcash_protocol::value::Zatoshis;
-    use {
-        zcash_pool_migration::engine::MigrationState,
-        zcash_pool_migration::engine::MigrationStatus,
-        zcash_pool_migration::engine::MigrationTransaction,
-        zcash_pool_migration::engine::MigrationTxKind,
-    };
+    use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
     /// A fresh in-memory database with a minimal `accounts` table (the `account_id` foreign-key
     /// target) and the migration tables created, but not yet wrapped as a store for any particular

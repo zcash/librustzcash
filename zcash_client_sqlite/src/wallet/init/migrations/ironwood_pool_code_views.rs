@@ -160,28 +160,23 @@ impl RusqliteMigration for Migration {
 mod tests {
     use crate::wallet::init::migrations::tests::test_migrate;
     #[cfg(feature = "orchard")]
-    use rusqlite::named_params;
-    #[cfg(feature = "orchard")]
-    use secrecy::Secret;
-    #[cfg(feature = "orchard")]
-    use tempfile::NamedTempFile;
-    #[cfg(feature = "orchard")]
-    use zcash_keys::keys::UnifiedSpendingKey;
-    #[cfg(feature = "orchard")]
-    use zcash_protocol::consensus::Network;
-    #[cfg(feature = "orchard")]
     use {
-        crate::WalletDb, crate::testing::db::test_clock, crate::testing::db::test_rng,
-        crate::wallet::init::WalletMigrator,
-        crate::wallet::init::migrations::tests::ArbIronwoodNote,
-        crate::wallet::init::migrations::tests::ArbOrchardNote,
-        crate::wallet::init::migrations::tests::arb_ironwood_note,
-        crate::wallet::init::migrations::tests::arb_orchard_note,
-    };
-    #[cfg(feature = "orchard")]
-    use {
-        proptest::prelude::ProptestConfig, proptest::prop_assert_eq,
-        proptest::test_runner::TestRunner,
+        crate::{
+            WalletDb,
+            testing::db::{test_clock, test_rng},
+            wallet::init::{
+                WalletMigrator,
+                migrations::tests::{
+                    ArbIronwoodNote, ArbOrchardNote, arb_ironwood_note, arb_orchard_note,
+                },
+            },
+        },
+        proptest::{prelude::ProptestConfig, prop_assert_eq, test_runner::TestRunner},
+        rusqlite::named_params,
+        secrecy::Secret,
+        tempfile::NamedTempFile,
+        zcash_keys::keys::UnifiedSpendingKey,
+        zcash_protocol::consensus::Network,
     };
 
     #[test]

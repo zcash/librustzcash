@@ -8,25 +8,23 @@ use zcash_address::{
     unified::{Container, Receiver},
 };
 use zcash_client_backend::data_api::AccountSource;
-#[cfg(feature = "transparent-inputs")]
-use zcash_keys::keys::AddressGenerationError;
 use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, ReceiverRequirements},
 };
 use zcash_protocol::{PoolType, ShieldedPool, consensus::NetworkType, memo::MemoBytes};
 use zip32::DiversifierIndex;
+#[cfg(feature = "transparent-inputs")]
+use {
+    super::transparent::SchedulingError,
+    std::time::{Duration, SystemTime},
+    transparent::keys::TransparentKeyScope,
+    zcash_client_backend::data_api::TransparentKeyOrigin,
+    zcash_keys::keys::AddressGenerationError,
+};
 
 use crate::error::SqliteClientError;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    super::transparent::SchedulingError, std::time::SystemTime,
-    transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::TransparentKeyOrigin,
-};
-
-#[cfg(feature = "transparent-inputs")]
-use std::time::Duration;
 #[cfg(feature = "zcashd-compat")]
 use zcash_keys::keys::zcashd;
 

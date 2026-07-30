@@ -29,11 +29,12 @@ use zcash_protocol::consensus;
 use super::standalone_p2sh;
 use crate::wallet::{encoding::KeyScope, init::WalletMigrationError};
 #[cfg(feature = "transparent-inputs")]
-use {transparent::keys::IncomingViewingKey as _, transparent::keys::NonHardenedChildIndex};
-#[cfg(feature = "transparent-inputs")]
 use {
-    zcash_keys::encoding::AddressCodec as _, zcash_keys::keys::UnifiedFullViewingKey,
-    zcash_keys::keys::UnifiedIncomingViewingKey,
+    transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
+    zcash_keys::{
+        encoding::AddressCodec as _,
+        keys::{UnifiedFullViewingKey, UnifiedIncomingViewingKey},
+    },
 };
 
 /// Adds a `UNIQUE` index on `addresses.cached_transparent_receiver_address`.
@@ -333,9 +334,10 @@ mod tests {
 
     use super::{DEPENDENCIES, MIGRATION_ID};
     #[cfg(feature = "transparent-inputs")]
-    use zcash_keys::encoding::AddressCodec as _;
-    #[cfg(feature = "transparent-inputs")]
-    use {transparent::keys::IncomingViewingKey as _, transparent::keys::NonHardenedChildIndex};
+    use {
+        transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
+        zcash_keys::encoding::AddressCodec as _,
+    };
 
     #[test]
     fn migrate() {

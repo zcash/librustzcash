@@ -729,55 +729,45 @@ fn mark_note_spent(
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use zcash_client_backend::data_api::testing::{
-        orchard::OrchardPoolTester, sapling::SaplingPoolTester,
+    use zcash_client_backend::{
+        DecryptedOutput, TransferType,
+        data_api::testing::{TestBuilder, orchard::OrchardPoolTester, sapling::SaplingPoolTester},
     };
 
-    #[cfg(feature = "orchard")]
-    use crate::testing::BlockCache;
-    use crate::testing::{self};
+    use crate::{
+        TxRef,
+        testing::{self, db::TestDbFactory},
+    };
+    use orchard::{
+        ValuePool,
+        keys::{FullViewingKey, SpendingKey},
+        note::{Note, NoteVersion, RandomSeed, Rho},
+        value::NoteValue,
+    };
     use rusqlite::named_params;
-    #[cfg(feature = "orchard")]
-    use std::collections::HashMap;
-    #[cfg(feature = "orchard")]
-    use std::convert::Infallible;
-    #[cfg(feature = "orchard")]
-    use zcash_client_backend::decrypt_transaction;
-    #[cfg(feature = "orchard")]
-    use zcash_keys::address::Address;
     use zcash_primitives::block::BlockHash;
-    #[cfg(feature = "orchard")]
-    use zcash_protocol::value::Zatoshis;
-    use {crate::TxRef, crate::testing::db::TestDbFactory};
-    use {
-        orchard::ValuePool, orchard::keys::FullViewingKey, orchard::keys::SpendingKey,
-        orchard::note::Note, orchard::note::NoteVersion, orchard::note::RandomSeed,
-        orchard::note::Rho, orchard::value::NoteValue,
-    };
-    use {
-        zcash_client_backend::DecryptedOutput, zcash_client_backend::TransferType,
-        zcash_client_backend::data_api::testing::TestBuilder,
-    };
+    use zcash_protocol::{ShieldedPool, memo::MemoBytes};
     #[cfg(feature = "orchard")]
     use {
-        zcash_client_backend::data_api::Account,
-        zcash_client_backend::data_api::testing::AddressType,
-        zcash_client_backend::data_api::testing::IronwoodFvk,
-        zcash_client_backend::data_api::testing::pool::ShieldedPoolTester,
+        crate::testing::BlockCache,
+        std::{collections::HashMap, convert::Infallible},
+        zcash_client_backend::{
+            data_api::{
+                Account, WalletRead,
+                testing::{
+                    AddressType, IronwoodFvk, pool::ShieldedPoolTester,
+                    single_output_change_strategy,
+                },
+                wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
+            },
+            decrypt_transaction,
+            fees::StandardFeeRule,
+            wallet::OvkPolicy,
+        },
+        zcash_keys::address::Address,
+        zcash_protocol::{consensus::BlockHeight, local_consensus::LocalNetwork, value::Zatoshis},
+        zip321::{Payment, TransactionRequest},
     };
-    #[cfg(feature = "orchard")]
-    use {
-        zcash_client_backend::data_api::WalletRead,
-        zcash_client_backend::data_api::testing::single_output_change_strategy,
-        zcash_client_backend::data_api::wallet::ConfirmationsPolicy,
-        zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelector,
-        zcash_client_backend::fees::StandardFeeRule, zcash_client_backend::wallet::OvkPolicy,
-    };
-    use {zcash_protocol::ShieldedPool, zcash_protocol::memo::MemoBytes};
-    #[cfg(feature = "orchard")]
-    use {zcash_protocol::consensus::BlockHeight, zcash_protocol::local_consensus::LocalNetwork};
-    #[cfg(feature = "orchard")]
-    use {zip321::Payment, zip321::TransactionRequest};
 
     #[test]
     fn send_single_step_proposed_transfer() {
@@ -1725,69 +1715,58 @@ pub(crate) mod tests {
     ///    that pool than the transaction's Orchard inputs remove from it.
     #[cfg(feature = "orchard")]
     mod ironwood_privacy_invariants {
-        use std::convert::Infallible;
+        use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
 
         use proptest::prelude::*;
 
         use zcash_client_backend::{
+            TransferType,
             data_api::{
-                Account, WalletRead,
+                Account, TargetValue, WalletCommitmentTrees, WalletRead, WalletWrite,
                 testing::{
                     AddressType, IronwoodFvk, TestBuilder, orchard::OrchardPoolTester,
                     pool::ShieldedPoolTester, sapling::SaplingPoolTester,
                 },
-                wallet::{ConfirmationsPolicy, input_selection::GreedyInputSelector},
+                wallet::{
+                    ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
+                    input_selection::{
+                        GreedyInputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+                    },
+                },
             },
+            decrypt_transaction,
             fees::{DustOutputPolicy, StandardFeeRule, standard},
+            proto::{ProposalDecodingError, proposal},
             wallet::OvkPolicy,
         };
         use zcash_keys::address::Address;
-        use zcash_primitives::block::BlockHash;
+        use zcash_primitives::{
+            block::BlockHash,
+            transaction::{
+                builder::{BuildConfig, Builder, BundlePadding},
+                fees::zip317,
+            },
+        };
         use zcash_protocol::{
             PoolType, ShieldedPool,
             consensus::BlockHeight,
             local_consensus::LocalNetwork,
+            memo::MemoBytes,
             value::{ZatBalance, Zatoshis},
         };
         use zip321::{Payment, TransactionRequest};
 
-        use crate::error::SqliteClientError;
-        use crate::testing::{
-            BlockCache,
-            db::{TestDb, TestDbFactory},
+        use crate::{
+            error::SqliteClientError,
+            testing::{
+                BlockCache,
+                db::{TestDb, TestDbFactory},
+            },
+            wallet::orchard::select_spendable_ironwood_notes,
         };
-        use crate::wallet::orchard::select_spendable_ironwood_notes;
+        use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey};
         use rand_core::OsRng;
-        use std::collections::HashMap;
-        use std::num::NonZeroU32;
         use transparent::builder::TransparentSigningSet;
-        use zcash_client_backend::data_api::TargetValue;
-        use zcash_client_backend::data_api::WalletWrite;
-        use zcash_client_backend::data_api::wallet::input_selection::SpendPolicy;
-        use zcash_protocol::memo::MemoBytes;
-        use {
-            orchard::keys::FullViewingKey, orchard::keys::Scope, orchard::keys::SpendAuthorizingKey,
-        };
-        use {zcash_client_backend::TransferType, zcash_client_backend::decrypt_transaction};
-        use {
-            zcash_client_backend::data_api::WalletCommitmentTrees,
-            zcash_client_backend::data_api::wallet::TargetHeight,
-            zcash_client_backend::data_api::wallet::decrypt_and_store_transaction,
-        };
-        use {
-            zcash_client_backend::data_api::wallet::input_selection::LockFilter,
-            zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy,
-        };
-        use {
-            zcash_client_backend::proto::ProposalDecodingError,
-            zcash_client_backend::proto::proposal,
-        };
-        use {
-            zcash_primitives::transaction::builder::BuildConfig,
-            zcash_primitives::transaction::builder::Builder,
-            zcash_primitives::transaction::builder::BundlePadding,
-            zcash_primitives::transaction::fees::zip317,
-        };
 
         // A network on which Ironwood (NU6.3) is active from the Sapling activation height, so
         // received Ironwood notes are offered by input selection (which gates on NU6.3 activation).

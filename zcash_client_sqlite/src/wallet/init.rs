@@ -1,8 +1,6 @@
 //! Functions for initializing the various databases.
 
-use std::borrow::BorrowMut;
-use std::fmt;
-use std::rc::Rc;
+use std::{borrow::BorrowMut, fmt, rc::Rc};
 
 use rand_core::RngCore;
 use regex::Regex;
@@ -764,20 +762,14 @@ mod tests {
         super::WalletMigrationError,
         crate::wallet::{self, PoolType, pool_code},
         zcash_address::test_vectors,
-        zcash_client_backend::data_api::WalletWrite,
+        zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead, WalletWrite},
+        zcash_primitives::block::BlockHash,
         zip32::DiversifierIndex,
     };
 
     use regex::Regex;
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_primitives::block::BlockHash;
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     use zcash_protocol::value::Zatoshis;
-    #[cfg(feature = "transparent-inputs")]
-    use {
-        zcash_client_backend::data_api::AccountBirthday,
-        zcash_client_backend::data_api::AccountSource, zcash_client_backend::data_api::WalletRead,
-    };
 
     pub(crate) fn describe_tables(conn: &Connection) -> Result<Vec<String>, rusqlite::Error> {
         let result = conn

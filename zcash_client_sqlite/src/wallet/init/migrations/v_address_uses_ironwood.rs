@@ -105,6 +105,8 @@ mod tests {
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_protocol::consensus::Network;
 
+    #[cfg(feature = "transparent-inputs")]
+    use crate::{TxRef, wallet::involved_accounts};
     use crate::{
         WalletDb,
         testing::db::{test_clock, test_rng},
@@ -114,8 +116,6 @@ mod tests {
             init::{WalletMigrator, migrations::tests::test_migrate},
         },
     };
-    #[cfg(feature = "transparent-inputs")]
-    use {crate::TxRef, crate::wallet::involved_accounts};
 
     /// The wallet type the scenarios operate on: a file-backed database with the deterministic
     /// clock and RNG the crate's other tests use.

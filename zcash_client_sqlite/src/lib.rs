@@ -76,7 +76,10 @@ use zcash_client_backend::{
 };
 use zcash_keys::{
     address::UnifiedAddress,
-    keys::{ReceiverRequirement, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        AddressGenerationError::*, ReceiverRequirement, UnifiedAddressRequest,
+        UnifiedFullViewingKey, UnifiedSpendingKey,
+    },
 };
 use zcash_primitives::{
     block::BlockHash,
@@ -103,9 +106,8 @@ use wallet::{
 };
 
 #[cfg(feature = "orchard")]
-use {
-    zcash_client_backend::data_api::ll::ReceivedOrchardOutput,
-    zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT},
+use zcash_client_backend::data_api::{
+    IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT, ll::ReceivedOrchardOutput,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -116,6 +118,7 @@ use {
         bundle::OutPoint,
         keys::{NonHardenedChildIndex, TransparentKeyScope},
     },
+    ReceiverRequirement::*,
     std::time::SystemTime,
     zcash_client_backend::{
         data_api::{
@@ -138,6 +141,7 @@ use zcash_keys::encoding::AddressCodec;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 use {
+    crate::wallet::encoding::pool_code,
     rusqlite::named_params,
     zcash_client_backend::data_api::{OutputOfSentTx, WalletTest, testing::TransactionSummary},
 };
@@ -148,18 +152,12 @@ use {crate::wallet::encoding::KeyScope, zcash_keys::address::Address};
 #[cfg(any(test, feature = "test-dependencies", not(feature = "orchard")))]
 use zcash_protocol::PoolType;
 
-#[cfg(any(test, feature = "test-dependencies"))]
-use crate::wallet::encoding::pool_code;
-#[cfg(feature = "transparent-inputs")]
-use ReceiverRequirement::*;
-use zcash_keys::keys::AddressGenerationError::*;
+use rusqlite::hooks::{AuthAction, Authorization};
 #[cfg(feature = "unstable")]
 use {
     crate::chain::{BlockMeta, fsblockdb_with_blocks},
-    std::path::PathBuf,
-    std::{fs, io},
+    std::{fs, io, path::PathBuf},
 };
-use {rusqlite::hooks::AuthAction, rusqlite::hooks::Authorization};
 
 pub mod chain;
 pub mod error;
@@ -3823,58 +3821,50 @@ mod tests {
     #[cfg(feature = "orchard")]
     use zcash_client_backend::data_api::error::FindAccountForAddressError;
     use zcash_client_backend::data_api::{
-        Account, AccountBirthday, AccountPurpose, AccountSource, WalletRead, WalletTest,
-        WalletWrite,
-        chain::ChainState,
+        Account, AccountBirthday, AccountPurpose, AccountSource, SAPLING_SHARD_HEIGHT,
+        WalletCommitmentTrees, WalletRead, WalletTest, WalletWrite,
+        chain::{ChainState, CommitmentTreeRoot},
         testing::{TestBuilder, TestState},
     };
-    use zcash_keys::address::UnifiedAddress;
-    use zcash_keys::keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey};
+    use zcash_keys::{
+        address::{Address, UnifiedAddress},
+        keys::{
+            ReceiverRequirement::*, UnifiedAddressRequest, UnifiedFullViewingKey,
+            UnifiedIncomingViewingKey, UnifiedSpendingKey,
+        },
+    };
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::consensus;
+    use zcash_protocol::{consensus, local_consensus::LocalNetwork};
     use zip32::DiversifierIndex;
 
     use crate::{
-        AccountUuid, error::SqliteClientError, testing::db::TestDbFactory, util::Clock as _,
+        AccountUuid,
+        error::SqliteClientError,
+        testing::db::{TestDb, TestDbFactory},
+        util::Clock as _,
         wallet::MIN_SHIELDED_DIVERSIFIER_OFFSET,
     };
 
-    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    use crate::AccountRef;
-    #[cfg(feature = "unstable")]
-    use crate::testing::FsBlockCache;
-    use crate::testing::db::TestDb;
-    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    use crate::wallet::transparent;
     use incrementalmerkletree::Hashable as _;
-    #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    use rusqlite::named_params;
-    #[cfg(feature = "transparent-inputs")]
-    use std::collections::BTreeSet;
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_client_backend::data_api::TransactionDataRequest;
     #[cfg(feature = "unstable")]
-    use zcash_client_backend::data_api::testing::AddressType;
-    use zcash_keys::address::Address;
-    use zcash_keys::keys::ReceiverRequirement::*;
-    use zcash_keys::keys::UnifiedIncomingViewingKey;
-    #[cfg(feature = "unstable")]
-    use zcash_keys::keys::sapling;
-    use zcash_protocol::local_consensus::LocalNetwork;
-    #[cfg(feature = "transparent-inputs")]
     use {
-        crate::GapLimits, crate::testing::BlockCache,
-        crate::wallet::transparent::transaction_data_requests,
+        crate::testing::FsBlockCache,
+        zcash_client_backend::data_api::testing::AddressType,
+        zcash_keys::keys::sapling,
+        zcash_protocol::{consensus::NetworkConstants, value::Zatoshis},
     };
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    use {::transparent::keys::NonHardenedChildIndex, ::transparent::keys::TransparentKeyScope};
     use {
-        zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT,
-        zcash_client_backend::data_api::WalletCommitmentTrees,
-        zcash_client_backend::data_api::chain::CommitmentTreeRoot,
+        crate::{AccountRef, wallet::transparent},
+        ::transparent::keys::{NonHardenedChildIndex, TransparentKeyScope},
+        rusqlite::named_params,
     };
-    #[cfg(feature = "unstable")]
-    use {zcash_protocol::consensus::NetworkConstants, zcash_protocol::value::Zatoshis};
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        crate::{GapLimits, testing::BlockCache, wallet::transparent::transaction_data_requests},
+        std::collections::BTreeSet,
+        zcash_client_backend::data_api::TransactionDataRequest,
+    };
 
     #[test]
     fn get_wallet_recover_until_is_max_across_accounts() {

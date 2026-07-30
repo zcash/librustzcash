@@ -6,35 +6,31 @@ use core::num::NonZeroU32;
 
 use crate::{
     SAPLING_TABLES_PREFIX,
+    error::SqliteClientError,
     testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::{
+    WalletWrite,
     anchor_retention::AnchorRetentionInterval,
+    chain::{ChainState, error::Error},
     testing::{
-        pool::{InputTrust, ShieldedPoolTester},
+        AddressType,
+        pool::{InputTrust, ShieldedPoolTester, dsl::TestDsl},
         sapling::SaplingPoolTester,
     },
 };
 
-use crate::error::SqliteClientError;
 #[cfg(feature = "transparent-inputs")]
 use rusqlite::named_params;
-use zcash_client_backend::data_api::chain::error::Error;
-#[cfg(feature = "orchard")]
-use zcash_protocol::ShieldedPool;
+use zcash_protocol::{
+    consensus::{NetworkUpgrade, Parameters},
+    value::Zatoshis,
+};
 #[cfg(feature = "orchard")]
 use {
     crate::ORCHARD_TABLES_PREFIX,
     zcash_client_backend::data_api::testing::orchard::OrchardPoolTester,
-};
-use {
-    zcash_client_backend::data_api::WalletWrite, zcash_client_backend::data_api::chain::ChainState,
-    zcash_client_backend::data_api::testing::AddressType,
-    zcash_client_backend::data_api::testing::pool::dsl::TestDsl,
-};
-use {
-    zcash_protocol::consensus::NetworkUpgrade, zcash_protocol::consensus::Parameters,
-    zcash_protocol::value::Zatoshis,
+    zcash_protocol::ShieldedPool,
 };
 
 pub(crate) trait ShieldedPoolPersistence {

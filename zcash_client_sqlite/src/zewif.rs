@@ -56,41 +56,44 @@
 //! * Encrypted secret stores must be decrypted by the caller (using the `zewif`
 //!   crate's decryption support) before import.
 
-use std::collections::{BTreeMap, HashMap};
-use std::fmt;
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+};
 
 use bech32::primitives::decode::CheckedHrpstring;
-use bip0039::{English, Mnemonic};
+use bip0039::{
+    ChineseSimplified, ChineseTraditional, Czech, English, French, Italian, Japanese, Korean,
+    Mnemonic, Portuguese, Spanish,
+};
 use rand::RngCore;
 use secrecy::{ExposeSecret, SecretVec};
-use zcash_client_backend::data_api::wallet::decrypt_and_store_transaction;
-use zcash_client_backend::data_api::{
-    Account as _, AccountBirthday, AccountPurpose, WalletRead, WalletWrite, Zip32Derivation,
-    chain::ChainState,
+use zcash_client_backend::{
+    data_api::{
+        Account as _, AccountBirthday, AccountPurpose, WalletRead, WalletWrite, Zip32Derivation,
+        chain::ChainState, wallet::decrypt_and_store_transaction,
+    },
+    wallet::{Exposure, TransparentAddressMetadata},
 };
-use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
-use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
-use zcash_primitives::block::BlockHash;
-use zcash_primitives::transaction::Transaction;
-use zcash_protocol::consensus::BranchId;
-use zcash_protocol::consensus::{
-    self, BlockHeight, NetworkConstants as _, NetworkType, NetworkUpgrade, Parameters,
+use zcash_keys::{
+    encoding::AddressCodec,
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
-use zcash_protocol::{PoolType, ShieldedPool};
+use zcash_primitives::{block::BlockHash, transaction::Transaction};
+use zcash_protocol::{
+    PoolType, ShieldedPool,
+    consensus::{
+        self, BlockHeight, BranchId, NetworkConstants as _, NetworkType, NetworkUpgrade, Parameters,
+    },
+};
 use zip32::fingerprint::SeedFingerprint;
 
-use ::transparent::address::TransparentAddress;
-use ::transparent::keys::TransparentKeyScope;
-use zcash_keys::encoding::AddressCodec;
+use ::transparent::{address::TransparentAddress, keys::TransparentKeyScope};
 
 use crate::{AccountUuid, WalletDb, error::SqliteClientError, util::Clock};
 use ::zewif::MnemonicLanguage as L;
 use incrementalmerkletree::frontier::Frontier;
-use {
-    bip0039::ChineseSimplified, bip0039::ChineseTraditional, bip0039::Czech, bip0039::French,
-    bip0039::Italian, bip0039::Japanese, bip0039::Korean, bip0039::Portuguese, bip0039::Spanish,
-};
-use {zcash_script::script::Code, zcash_script::script::Redeem};
+use zcash_script::script::{Code, Redeem};
 
 /// The Bech32m human-readable part of the canonical ZIP 32 seed fingerprint
 /// encoding used by ZeWIF documents.
@@ -1626,32 +1629,33 @@ fn verify_hd_derivation<P: Parameters, S>(
 
 #[cfg(test)]
 mod tests {
-    use ::transparent::keys::NonHardenedChildIndex;
+    use ::transparent::{
+        address::Script,
+        bundle as transparent,
+        bundle::{Authorized, OutPoint, TxIn, TxOut},
+        keys::{IncomingViewingKey, NonHardenedChildIndex},
+    };
     use bip0039::{English, Mnemonic};
     use incrementalmerkletree::Hashable as _;
     use std::collections::BTreeMap;
     use tempfile::NamedTempFile;
-    use zcash_client_backend::data_api::{Account as _, AccountPurpose, AccountSource, WalletRead};
-    use zcash_keys::encoding::AddressCodec;
-    use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
-    use zcash_protocol::consensus;
-    use zcash_protocol::local_consensus::LocalNetwork;
+    use zcash_client_backend::{
+        data_api::{Account as _, AccountPurpose, AccountSource, WalletRead},
+        wallet::Exposure,
+    };
+    use zcash_keys::{
+        encoding::AddressCodec,
+        keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+    };
+    use zcash_protocol::{consensus, local_consensus::LocalNetwork, value::Zatoshis};
     use zip32::fingerprint::SeedFingerprint;
 
     use super::*;
-    use crate::testing::db::{test_clock, test_rng};
-    use crate::wallet::init::WalletMigrator;
-    use ::transparent::address::Script;
-    use ::transparent::keys::IncomingViewingKey;
-    use zcash_client_backend::wallet::Exposure;
-    use zcash_protocol::value::Zatoshis;
-    use {
-        ::transparent::bundle as transparent, ::transparent::bundle::Authorized,
-        ::transparent::bundle::OutPoint, ::transparent::bundle::TxIn, ::transparent::bundle::TxOut,
+    use crate::{
+        testing::db::{test_clock, test_rng},
+        wallet::init::WalletMigrator,
     };
-    use {
-        zcash_primitives::transaction::TransactionData, zcash_primitives::transaction::TxVersion,
-    };
+    use zcash_primitives::transaction::{TransactionData, TxVersion};
 
     const TEST_NETWORK: consensus::Network = consensus::Network::TestNetwork;
 
