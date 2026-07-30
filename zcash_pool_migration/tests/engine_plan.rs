@@ -10,6 +10,7 @@
 
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{COIN, Zatoshis};
 
@@ -261,6 +262,7 @@ fn stores_loads_and_updates_a_migration() {
         .update_transaction(
             MigrationTransferId::new(0),
             MigrationTxState::Mined {
+                txid: TxId::from_bytes([0; 32]),
                 height: BlockHeight::from_u32(2_000_105),
             },
         )
@@ -269,6 +271,7 @@ fn stores_loads_and_updates_a_migration() {
     assert_eq!(
         loaded.transactions()[0].state(),
         MigrationTxState::Mined {
+            txid: TxId::from_bytes([0; 32]),
             height: BlockHeight::from_u32(2_000_105)
         }
     );

@@ -19,6 +19,10 @@ and this library adheres to Rust's notion of
   schedule, so broadcastable at the same wake-up once proved — or a transfer,
   whose broadcast follows at its own scheduled height. Match with
   `AdvanceStep::Prove { id, kind }`.
+- `engine::MigrationTxState::Mined` now carries the mined transaction's txid
+  alongside its height, and `engine::MigrationState::mark_mined` takes it;
+  `MigrationTxState::from_stored` requires the txid payload for `"mined"` rows,
+  and `broadcast_txid` also answers for mined transactions.
 
 ## [0.1.0-rc.5] - 2026-07-29
 

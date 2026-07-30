@@ -138,15 +138,16 @@ pub fn arb_migration_tx_kind() -> impl Strategy<Value = MigrationTxKind> {
 }
 
 /// An arbitrary [`MigrationTxState`], covering every variant (including the
-/// [`Broadcast`](MigrationTxState::Broadcast) txid and [`Mined`](MigrationTxState::Mined) height
-/// payloads).
+/// [`Broadcast`](MigrationTxState::Broadcast) txid and the [`Mined`](MigrationTxState::Mined) txid
+/// and height payloads).
 pub fn arb_migration_tx_state() -> impl Strategy<Value = MigrationTxState> {
     prop_oneof![
         Just(MigrationTxState::AwaitingSignature),
         Just(MigrationTxState::Signed),
         Just(MigrationTxState::Proved),
         arb_txid().prop_map(|txid| MigrationTxState::Broadcast { txid }),
-        arb_block_height().prop_map(|height| MigrationTxState::Mined { height }),
+        (arb_txid(), arb_block_height())
+            .prop_map(|(txid, height)| MigrationTxState::Mined { txid, height }),
     ]
 }
 
