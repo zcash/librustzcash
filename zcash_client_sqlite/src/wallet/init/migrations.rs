@@ -66,6 +66,7 @@ mod v_transactions_shielding_balance;
 mod v_transactions_transparent_history;
 mod v_tx_outputs_key_scopes;
 mod v_tx_outputs_return_addrs;
+mod v_tx_outputs_transparent_addresses;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 mod witness_stabilized_notes;
@@ -164,6 +165,7 @@ pub mod ids {
     pub use super::v_transactions_transparent_history::MIGRATION_ID as V_TRANSACTIONS_TRANSPARENT_HISTORY;
     pub use super::v_tx_outputs_key_scopes::MIGRATION_ID as V_TX_OUTPUTS_KEY_SCOPES;
     pub use super::v_tx_outputs_return_addrs::MIGRATION_ID as V_TX_OUTPUTS_RETURN_ADDRS;
+    pub use super::v_tx_outputs_transparent_addresses::MIGRATION_ID as V_TX_OUTPUTS_TRANSPARENT_ADDRESSES;
     pub use super::v_tx_outputs_use_legacy_false::MIGRATION_ID as V_TX_OUTPUTS_USE_LEGACY_FALSE;
     pub use super::wallet_summaries::MIGRATION_ID as WALLET_SUMMARIES;
     pub use super::witness_stabilized_notes::MIGRATION_ID as WITNESS_STABILIZED_NOTES;
@@ -237,18 +239,19 @@ pub(super) fn all_migrations<
     //                       `------------------- account_delete_cascade ---------------------------------'
     //                              /               /                  |              \
     //     add_transparent_value_index  v_tx_outputs_key_scopes  standalone_p2sh    witness_stabilized_notes
-    //                                     /                      /            \
-    //                               ivk_item_cache              /           orchard_note_version
-    //                                                          /                  \
-    //                                add_transparent_receiver_address_index        \
-    //                                                                               \
-    //                                                                      ironwood_received_notes ----------------
-    //                                                                      /         |          \                  \
-    //                                                   ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging
-    //                                                           |                    |
-    //                                                           |             v_address_uses_ironwood
-    //                                                           |
-    //                                                v_transactions_pool_crossing
+    //                                     /        |             /            \
+    //                               ivk_item_cache |            /           orchard_note_version
+    //                             .----------------'           /                  \
+    //                             |  add_transparent_receiver_address_index        \
+    //                             |                                                 \
+    //                             |                                        ironwood_received_notes ----------------
+    //                             |                                        /         |          \                  \
+    //                             |                     ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging
+    //                             |                             |          \         |
+    //                             |                             |           \ v_address_uses_ironwood
+    //                             |                             |            \
+    //                             |              v_transactions_pool_crossing \
+    //                             `------------------------------------------- v_tx_outputs_transparent_addresses
     //
     let rng = Rc::new(Mutex::new(rng));
     vec![
@@ -360,6 +363,7 @@ pub(super) fn all_migrations<
         Box::new(note_locking::Migration),
         Box::new(tx_status_observation_intent::Migration),
         Box::new(orchard_ironwood_migration_anchor_interval::Migration),
+        Box::new(v_tx_outputs_transparent_addresses::Migration),
     ]
 }
 
@@ -551,7 +555,7 @@ pub const V_0_22_0_RC2: &[Uuid] = &[
 
 /// Leaf migrations as of the current repository state.
 pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
-    v_tx_outputs_key_scopes::MIGRATION_ID,
+    v_tx_outputs_transparent_addresses::MIGRATION_ID,
     ivk_item_cache::MIGRATION_ID,
     add_transparent_receiver_address_index::MIGRATION_ID,
     add_transparent_value_index::MIGRATION_ID,
@@ -719,6 +723,7 @@ pub(crate) mod tests {
             ids::V_TRANSACTIONS_TRANSPARENT_HISTORY,
             ids::V_TX_OUTPUTS_KEY_SCOPES,
             ids::V_TX_OUTPUTS_RETURN_ADDRS,
+            ids::V_TX_OUTPUTS_TRANSPARENT_ADDRESSES,
             ids::V_TX_OUTPUTS_USE_LEGACY_FALSE,
             ids::WALLET_SUMMARIES,
             ids::WITNESS_STABILIZED_NOTES,

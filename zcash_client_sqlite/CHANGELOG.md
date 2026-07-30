@@ -48,6 +48,13 @@ workspace.
   commitment tree position (chain order). Previously notes were drawn in
   scan-discovery order, which for a restored wallet prefers its most recently
   discovered — typically newest — notes.
+- The `to_address` column of the `v_tx_outputs` view now reports transparent
+  outputs received by the wallet at the transparent receiver address itself,
+  rather than at a unified address containing that receiver, and for outputs
+  the wallet created, the recipient address recorded at transaction
+  construction time now takes precedence over the receiving address.
+  Previously, a payment to one of the wallet's own transparent addresses was
+  reported with the receiving account's unified address as its `to_address`.
 
 ## [0.22.0-rc.5] - 2026-07-28
 
