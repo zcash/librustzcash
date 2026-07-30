@@ -1781,6 +1781,23 @@ pub trait InputSource {
         lock_filter: LockFilter<'_>,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
+    /// Returns whether an anchor is COMPUTABLE at `height` for spends from the given pool: whether
+    /// this data source can produce the note commitment tree root, and witnesses to it, as of the
+    /// end of that block.
+    ///
+    /// A height inside the wallet's scanned range need not qualify: tree states are only
+    /// materialized at the heights the wallet chose to retain, and a wallet that scanned past
+    /// NU6.3 activation before boundary checkpointing was repaired is permanently missing the
+    /// anchor-retention boundaries whose blocks carried no shielded outputs. Such a hole cannot be
+    /// backfilled from local state, so a caller deciding whether to anchor at a retained boundary
+    /// should consult this before committing to it, and fall back rather than propose a
+    /// transaction that cannot be built.
+    fn anchor_computable(
+        &self,
+        protocol: ShieldedPool,
+        height: BlockHeight,
+    ) -> Result<bool, Self::Error>;
+
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
     /// be included. Locked outputs are selected according to `lock_filter` (see [`LockFilter`];

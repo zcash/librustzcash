@@ -357,6 +357,34 @@ pub(crate) fn canonical_crossing_builds_at_empty_boundary_block() {
     )
 }
 
+/// Deletes every checkpoint record at `height`, simulating a wallet that scanned past NU6.3
+/// activation before boundary checkpointing was repaired and so is permanently missing the
+/// boundary.
+#[cfg(feature = "orchard")]
+pub(crate) fn canonical_crossing_abandoned_without_anchor_checkpoint() {
+    zcash_client_backend::data_api::testing::pool::canonical_crossing_abandoned_without_anchor_checkpoint(
+        TestDbFactory::default(),
+        BlockCache::new(),
+        |st, height| {
+            let conn = st.wallet().conn();
+            for table in [
+                "sapling_tree_checkpoints",
+                "orchard_tree_checkpoints",
+                "ironwood_tree_checkpoints",
+                "sapling_tree_retained_checkpoints",
+                "orchard_tree_retained_checkpoints",
+                "ironwood_tree_retained_checkpoints",
+            ] {
+                conn.execute(
+                    &format!("DELETE FROM {table} WHERE checkpoint_id = :height"),
+                    rusqlite::named_params![":height": u32::from(height)],
+                )
+                .expect("checkpoint records can be deleted");
+            }
+        },
+    )
+}
+
 #[cfg(feature = "orchard")]
 pub(crate) fn canonical_crossing_prefers_single_note() {
     zcash_client_backend::data_api::testing::pool::canonical_crossing_prefers_single_note(
