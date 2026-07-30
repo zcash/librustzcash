@@ -1,7 +1,6 @@
 //! Structs for building transactions.
 
-use core::cmp::Ordering;
-use core::fmt;
+use core::{cmp::Ordering, fmt};
 
 use rand_core::{CryptoRng, RngCore};
 
@@ -1915,8 +1914,10 @@ mod tests {
     #[cfg(feature = "circuits")]
     use {
         super::{Builder, Error},
-        crate::transaction::builder::{BuildConfig, BundlePadding},
-        crate::transaction::fees::zip317::MINIMUM_FEE,
+        crate::transaction::{
+            builder::{BuildConfig, BundlePadding},
+            fees::zip317::MINIMUM_FEE,
+        },
         ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey},
         ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
         assert_matches::assert_matches,
@@ -1933,8 +1934,10 @@ mod tests {
 
     #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     use {
-        crate::transaction::builder::{self, TransparentBuilder},
-        crate::transaction::{OutPoint, TxOut, TxVersion, builder::DEFAULT_TX_EXPIRY_DELTA},
+        crate::transaction::{
+            OutPoint, TxOut, TxVersion,
+            builder::{self, DEFAULT_TX_EXPIRY_DELTA, TransparentBuilder},
+        },
         ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
         zcash_protocol::consensus::BranchId,
         zip32::AccountId,
