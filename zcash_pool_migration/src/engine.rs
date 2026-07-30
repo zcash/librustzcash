@@ -1533,8 +1533,10 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// `Updater` role), then proves both bundles. The proven PCZT replaces the stored one and the
 /// transaction becomes [`Proved`](MigrationTxState::Proved), ready to broadcast.
 ///
-/// The CALLER decides WHEN to prove each transfer (once its funding note is mined and witnessable
-/// and its scheduled height reached); this function performs the proof for the one transfer `id`. It
+/// The CALLER decides WHEN to prove each transfer (once its funding note is mined and its drawn
+/// anchor boundary has settled — [`MigrationState::next_step`] surfaces this as
+/// [`AdvanceStep::Prove`](crate::state::AdvanceStep::Prove), typically at a sync wake-up well
+/// before the broadcast height); this function performs the proof for the one transfer `id`. It
 /// is idempotent only in the sense that a transaction not in [`Signed`](MigrationTxState::Signed)
 /// is rejected with [`ProveError::NotReady`] rather than re-proved.
 #[cfg(feature = "orchard")]
@@ -3988,7 +3990,7 @@ mod commit_tests {
             .max()
             .expect("the committed migration has transactions");
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
+            crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
             }
@@ -4004,7 +4006,7 @@ mod commit_tests {
             .map(|t| t.id)
             .collect();
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
+            crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 assert!(
                     layer1_ids.contains(&id),
@@ -4017,7 +4019,7 @@ mod commit_tests {
             state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
         }
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
+            crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 let tx = state
                     .transactions
@@ -4171,7 +4173,7 @@ mod commit_tests {
         for layer in 0..layer_count {
             let ids = layer_ids(&state, layer);
             match state.next_step(target) {
-                crate::state::AdvanceStep::Prove { id }
+                crate::state::AdvanceStep::Prove { id, .. }
                 | crate::state::AdvanceStep::Broadcast { id } => assert!(
                     ids.contains(&id),
                     "layer {layer} is proved or broadcast once its predecessor has mined"
@@ -4201,7 +4203,7 @@ mod commit_tests {
             }
         }
         match state.next_step(target) {
-            crate::state::AdvanceStep::Prove { id }
+            crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 let tx = state.transactions.iter().find(|t| t.id == id).unwrap();
                 assert!(

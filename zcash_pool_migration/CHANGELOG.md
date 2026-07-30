@@ -7,6 +7,19 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
+  in preference to `AdvanceStep::Prove` (previously the reverse), so a wallet
+  that wakes to find a transaction ready to broadcast can submit it and end the
+  session without syncing; proving work is surfaced only once no broadcast is
+  due.
+- `state::AdvanceStep::Prove` now also carries the transaction's
+  `engine::MigrationTxKind`, so a consumer can tell without a lookup whether it
+  is proving a preparation transaction — by construction due on its broadcast
+  schedule, so broadcastable at the same wake-up once proved — or a transfer,
+  whose broadcast follows at its own scheduled height. Match with
+  `AdvanceStep::Prove { id, kind }`.
+
 ## [0.1.0-rc.5] - 2026-07-29
 
 ### Changed

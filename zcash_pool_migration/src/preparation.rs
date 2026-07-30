@@ -22,9 +22,10 @@
 //! needs **layers**. A layer is a set of
 //! transactions with no dependencies between them (buildable, provable, and broadcastable in
 //! parallel); a later layer may spend the outputs of an earlier one, but only after they are mined
-//! and a boundary passes, so each extra layer extends the preparation phase by roughly one anchor
-//! bucket. The planner therefore prefers fewer layers (which dominate the wall-clock) over fewer
-//! transactions.
+//! and witnessable, so each extra layer extends the preparation phase by the mining latency plus
+//! the wallet's witness-sync turnaround (only the pool-crossing transfers wait on anchor-bucket
+//! boundaries). The planner therefore prefers fewer layers (which dominate the wall-clock) over
+//! fewer transactions.
 //!
 //! # The strategy
 //!
