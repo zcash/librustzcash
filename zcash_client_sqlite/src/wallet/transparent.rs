@@ -3004,6 +3004,122 @@ mod tests {
         assert_eq!(mined_height, Some(u32::from(mined_at)));
     }
 
+    /// `v_tx_outputs.to_address` must report the transparent receiver at which a transparent
+    /// output was received — not the unified address that contains that receiver — and for an
+    /// output the wallet itself created, the recipient address recorded at transaction
+    /// construction time is authoritative.
+    ///
+    /// Both properties regressed when the view began resolving received outputs through
+    /// `addresses.address`, which holds the unified encoding for external-scope rows: a
+    /// payment to one of the wallet's own transparent addresses was reported with the
+    /// receiving account's unified address as its recipient, because the received-output row
+    /// carried the unified encoding and the `MAX(to_address)` merge preferred it to the
+    /// transparent encoding recorded in `sent_notes` (`'u' > 't'` in byte order). See
+    /// zcash/librustzcash#2845.
+    #[test]
+    fn v_tx_outputs_reports_transparent_receiver_for_transparent_outputs() {
+        use transparent::bundle::{OutPoint, TxOut};
+        use zcash_client_backend::{
+            data_api::WalletRead as _,
+            wallet::{Recipient, WalletTransparentOutput},
+        };
+        use zcash_keys::{encoding::AddressCodec as _, keys::UnifiedAddressRequest};
+        use zcash_protocol::value::Zatoshis;
+
+        use crate::{TxRef, wallet::put_sent_output};
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let birthday = st.test_account().unwrap().birthday().height();
+        let params = st.wallet().db().params;
+        let taddr = *st
+            .wallet()
+            .get_last_generated_address_matching(
+                account_id,
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .unwrap()
+            .transparent()
+            .unwrap();
+        let taddr_str = taddr.encode(&params);
+
+        let mined_at = birthday + 100;
+        st.wallet_mut().update_chain_tip(mined_at + 10).unwrap();
+
+        // Receive an output at the transparent receiver of the account's unified address.
+        let outpoint = OutPoint::fake();
+        let value = Zatoshis::const_from_u64(100_000);
+        let utxo = WalletTransparentOutput::from_parts(
+            outpoint.clone(),
+            TxOut::new(value, taddr.script().into()),
+            Some(mined_at),
+            Some(account_id),
+            Some(TransparentKeyScope::EXTERNAL),
+            None,
+        )
+        .unwrap();
+        st.wallet_mut()
+            .put_received_transparent_utxo(&utxo)
+            .unwrap();
+
+        let to_address = |conn: &rusqlite::Connection| -> Option<String> {
+            conn.query_row(
+                "SELECT to_address FROM v_tx_outputs WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(
+            to_address(st.wallet().conn()).as_deref(),
+            Some(taddr_str.as_str()),
+            "a received transparent output must be reported at its transparent receiver, \
+             not at the unified address containing it",
+        );
+
+        // Record the send side of the same output, as transaction-data processing does when
+        // the wallet discovers that it funded a transaction paying its own transparent
+        // address.
+        let id_tx: i64 = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT id_tx FROM transactions WHERE txid = :txid",
+                rusqlite::named_params! { ":txid": outpoint.hash().to_vec() },
+                |row| row.get(0),
+            )
+            .unwrap();
+        let conn_tx = st.wallet_mut().conn_mut().transaction().unwrap();
+        put_sent_output(
+            &conn_tx,
+            &params,
+            account_id,
+            TxRef(id_tx),
+            outpoint.n() as usize,
+            &Recipient::InternalTransparent {
+                receiving_account: account_id,
+                recipient_address: taddr,
+            },
+            value,
+            None,
+        )
+        .unwrap();
+        conn_tx.commit().unwrap();
+
+        assert_eq!(
+            to_address(st.wallet().conn()).as_deref(),
+            Some(taddr_str.as_str()),
+            "the transparent address the wallet paid must not be shadowed by the unified \
+             address of the receiving account",
+        );
+    }
+
     #[test]
     fn transparent_balance_across_shielding() {
         zcash_client_backend::data_api::testing::transparent::transparent_balance_across_shielding(

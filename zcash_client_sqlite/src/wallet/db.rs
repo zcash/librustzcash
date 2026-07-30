@@ -1527,8 +1527,11 @@ GROUP BY notes.account_id, notes.transaction_id";
 ///   output of this view, one for each such account.
 /// - `to_account_uuid`: The UUID of the wallet account that received the output, if any; for
 ///   outgoing transaction outputs this will be `NULL`.
-/// - `address`: The address to which the output was sent; for received outputs, this is the
-///   address at which the output was received, or `NULL` for wallet-internal outputs.
+/// - `address`: The address to which the output was sent. For outputs created by the wallet,
+///   this is the recipient address recorded when the transaction was created. For other
+///   received outputs it is the address at which the output was received — for transparent
+///   outputs, the transparent receiver itself rather than a unified address containing it —
+///   or `NULL` for wallet-internal outputs.
 /// - `diversifier_index_be`: The big-endian representation of the diversifier index (or, for
 ///   transparent addresses, the BIP 44 change-level index of the derivation path) of the receiving
 ///   address. This will be `NULL` for outgoing transaction outputs.
@@ -1557,7 +1560,13 @@ WITH unioned AS (
            ro.output_index              AS output_index,
            from_account.uuid            AS from_account_uuid,
            to_account.uuid              AS to_account_uuid,
-           a.address                    AS to_address,
+           -- for a transparent output, the address at which it was received is
+           -- the transparent receiver itself, not a unified address containing it
+           CASE ro.pool
+                WHEN 0 THEN a.cached_transparent_receiver_address
+                ELSE a.address
+           END                          AS to_address,
+           0                            AS is_sent_row,
            a.diversifier_index_be       AS diversifier_index_be,
            ro.value                     AS value,
            ro.is_change                 AS is_change,
@@ -1573,7 +1582,7 @@ WITH unioned AS (
     LEFT JOIN accounts from_account ON from_account.id = sent_notes.from_account_id
     LEFT JOIN accounts to_account ON to_account.id = ro.account_id
     UNION ALL
-    -- select all outputs sent from the wallet to external recipients
+    -- select all outputs sent by the wallet
     SELECT t.id_tx                      AS transaction_id,
            t.txid                       AS txid,
            t.mined_height               AS mined_height,
@@ -1583,6 +1592,7 @@ WITH unioned AS (
            from_account.uuid            AS from_account_uuid,
            NULL                         AS to_account_uuid,
            sent_notes.to_address        AS to_address,
+           1                            AS is_sent_row,
            NULL                         AS diversifier_index_be,
            sent_notes.value             AS value,
            0                            AS is_change,
@@ -1605,7 +1615,13 @@ SELECT
     output_index,
     MAX(from_account_uuid)      AS from_account_uuid,
     MAX(to_account_uuid)        AS to_account_uuid,
-    MAX(to_address)             AS to_address,
+    -- the recipient address recorded when the wallet created the output is
+    -- authoritative; the receiving address is reported only for outputs the
+    -- wallet did not create
+    COALESCE(
+        MAX(CASE WHEN is_sent_row THEN to_address END),
+        MAX(CASE WHEN NOT is_sent_row THEN to_address END)
+    )                           AS to_address,
     MAX(value)                  AS value,
     MAX(is_change)              AS is_change,
     MAX(memo)                   AS memo,
