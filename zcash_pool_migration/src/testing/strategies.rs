@@ -159,6 +159,7 @@ pub fn arb_migration_status() -> impl Strategy<Value = MigrationStatus> {
         Just(MigrationStatus::InProgress),
         Just(MigrationStatus::Complete),
         Just(MigrationStatus::Failed),
+        Just(MigrationStatus::Superseded),
     ]
 }
 

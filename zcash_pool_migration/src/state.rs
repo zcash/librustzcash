@@ -91,7 +91,7 @@ pub enum AdvanceStep {
     /// settle, or for a scheduled height to arrive.
     Waiting,
     /// Nothing will ever be actionable again: every transaction is mined, or the migration has
-    /// reached a terminal status (complete, or failed/cancelled — see
+    /// reached a terminal status (complete, failed/cancelled, or superseded by a re-plan — see
     /// [`MigrationState::is_terminal`]), so a driver can stop polling it.
     Complete,
 }
@@ -359,9 +359,13 @@ impl MigrationState {
     /// uncommitted or freshly committed migration keeps its `Planning`/`Committed` status until work
     /// begins).
     pub fn recompute_status(&mut self) {
-        // A terminal status (Complete or Failed, the latter also used for a cancelled migration) is
-        // final: never move out of it. Otherwise a cancelled migration whose transactions were
-        // already broadcast would be resurrected to InProgress the next time the status is recomputed.
+        // Recomputation never leaves a terminal status: once Complete, Failed, or Superseded,
+        // further calls are no-ops. Failed and Superseded are POLICY determinations — nothing here
+        // or elsewhere revisits them. Complete is CHAIN-DERIVED, so it is exactly as revocable as
+        // the chain it was derived from; only a chain rewind that un-mines a transaction could
+        // revoke it, and doing so is not this function's concern. Without this guard, a cancelled
+        // migration whose transactions were already broadcast would be resurrected to InProgress
+        // the next time the status is recomputed.
         if self.is_terminal() {
             return;
         }
@@ -383,14 +387,24 @@ impl MigrationState {
         }
     }
 
-    /// Whether this migration has reached a terminal status (`Complete` or `Failed`), so a new
-    /// migration may replace it. A non-terminal migration is still in progress and must not be
-    /// overwritten.
+    /// Whether this migration has reached a terminal status (`Complete`, `Failed`, or
+    /// `Superseded`), so a new migration may replace it. A non-terminal migration is still in
+    /// progress and must not be overwritten.
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,
-            MigrationStatus::Complete | MigrationStatus::Failed
+            MigrationStatus::Complete | MigrationStatus::Failed | MigrationStatus::Superseded
         )
+    }
+
+    /// Moves a non-terminal migration to [`MigrationStatus::Superseded`], the consumer's response
+    /// to a migration whose remaining value must be re-planned: after this, the commit guard
+    /// accepts a replacement migration for the remaining balance. A no-op on an already-terminal
+    /// migration — terminality is never overwritten by policy.
+    pub fn mark_superseded(&mut self) {
+        if !self.is_terminal() {
+            self.status = MigrationStatus::Superseded;
+        }
     }
 
     /// Records that the transaction `id` was broadcast with the given `txid`, then recomputes the
@@ -519,8 +533,9 @@ impl MigrationState {
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
     /// has expired.
     pub fn next_step(&self, target_height: BlockHeight) -> AdvanceStep {
-        // A terminal migration (complete, or failed/cancelled) has no next action: never build or
-        // broadcast for it, so a cancelled migration cannot be driven further.
+        // A terminal migration (complete, failed/cancelled, or superseded by a re-plan) has no next
+        // action: never build or broadcast for it, so a cancelled migration cannot be driven
+        // further.
         if self.is_terminal() {
             return AdvanceStep::Complete;
         }
@@ -1104,6 +1119,30 @@ mod tests {
             BlockHeight::from_u32(10),
         );
         assert_eq!(s.status, MigrationStatus::Failed);
+    }
+
+    #[test]
+    fn mark_superseded_is_terminal_and_policy_stable() {
+        let mut s = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
+        s.mark_superseded();
+        assert_eq!(s.status, MigrationStatus::Superseded);
+        assert!(s.is_terminal());
+        // Terminality is never overwritten by policy: a second call and a recompute are no-ops.
+        s.mark_superseded();
+        s.recompute_status();
+        assert_eq!(s.status, MigrationStatus::Superseded);
+        // An already-terminal migration is not superseded over.
+        let mut done = state_with(vec![tx(0, transfer(0), mined(10))]);
+        done.recompute_status();
+        assert_eq!(done.status, MigrationStatus::Complete);
+        done.mark_superseded();
+        assert_eq!(done.status, MigrationStatus::Complete);
+        // Nor is a Failed migration: whichever terminal status got there first is the truthful
+        // history, and mark_superseded must not overwrite it.
+        let mut failed = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
+        failed.status = MigrationStatus::Failed;
+        failed.mark_superseded();
+        assert_eq!(failed.status, MigrationStatus::Failed);
     }
 
     #[test]

@@ -383,10 +383,16 @@ pub enum MigrationStatus {
     Committed,
     /// Some transactions have been broadcast or mined.
     InProgress,
-    /// Every crossing has been mined.
+    /// Every crossing has been mined. Chain-derived — exactly as revocable as the chain it was
+    /// derived from — unlike the policy determinations `Failed` and `Superseded`.
     Complete,
     /// The migration failed and needs attention.
     Failed,
+    /// Superseded by a re-plan of the remaining balance: terminal, set by
+    /// [`MigrationState::mark_superseded`] as the consumer's response to a migration whose
+    /// remaining value must be carried by a new plan. Like `Failed`, a POLICY determination —
+    /// never revisited by chain state.
+    Superseded,
 }
 
 impl AsRef<str> for MigrationStatus {
@@ -400,6 +406,7 @@ impl AsRef<str> for MigrationStatus {
             MigrationStatus::InProgress => "in_progress",
             MigrationStatus::Complete => "complete",
             MigrationStatus::Failed => "failed",
+            MigrationStatus::Superseded => "superseded",
         }
     }
 }
@@ -425,6 +432,7 @@ impl TryFrom<&str> for MigrationStatus {
             "in_progress" => MigrationStatus::InProgress,
             "complete" => MigrationStatus::Complete,
             "failed" => MigrationStatus::Failed,
+            "superseded" => MigrationStatus::Superseded,
             _ => return Err(ParseMigrationStatusError),
         })
     }
@@ -2774,6 +2782,34 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
     use zcash_protocol::{local_consensus::LocalNetwork, value::COIN};
+
+    /// Every `MigrationStatus` variant's wire name is pinned to its literal string, and
+    /// `TryFrom<&str>` recovers the variant from the name `AsRef<str>` produces for it. Pinning the
+    /// literal (rather than only round-tripping through the enum) is what catches a shared
+    /// writer/reader typo in the two impls, which a round trip generated from the enum itself
+    /// cannot. An unrecognized string is rejected.
+    #[test]
+    fn migration_status_wire_names_are_pinned() {
+        assert_eq!(MigrationStatus::Planning.as_ref(), "planning");
+        assert_eq!(MigrationStatus::Committed.as_ref(), "committed");
+        assert_eq!(MigrationStatus::InProgress.as_ref(), "in_progress");
+        assert_eq!(MigrationStatus::Complete.as_ref(), "complete");
+        assert_eq!(MigrationStatus::Failed.as_ref(), "failed");
+        assert_eq!(MigrationStatus::Superseded.as_ref(), "superseded");
+
+        for status in [
+            MigrationStatus::Planning,
+            MigrationStatus::Committed,
+            MigrationStatus::InProgress,
+            MigrationStatus::Complete,
+            MigrationStatus::Failed,
+            MigrationStatus::Superseded,
+        ] {
+            assert_eq!(MigrationStatus::try_from(status.as_ref()), Ok(status));
+        }
+
+        assert!(MigrationStatus::try_from("not_a_status").is_err());
+    }
 
     /// A `Mined` state's txid round-trips through `from_stored` alongside its height, and a stored
     /// `mined` row missing the txid payload is rejected rather than silently reconstructed

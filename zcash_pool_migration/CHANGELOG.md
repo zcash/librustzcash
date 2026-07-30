@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `engine::MigrationStatus::Superseded` (wire name `"superseded"`) and
+  `engine::MigrationState::mark_superseded`, the terminal status and transition
+  recording that a migration's remaining value is being re-planned; a superseded
+  migration is terminal, so the commit guard accepts a replacement.
+
 ### Changed
 - `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
   in preference to `AdvanceStep::Prove` (previously the reverse), so a wallet
