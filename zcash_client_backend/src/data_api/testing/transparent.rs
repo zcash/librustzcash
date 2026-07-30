@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
-use std::convert::Infallible;
+use std::{
+    collections::{BTreeMap, HashSet},
+    convert::Infallible,
+};
 
 use assert_matches::assert_matches;
 
@@ -26,12 +28,14 @@ use zip321::{Payment, TransactionRequest};
 
 #[cfg(feature = "transparent-key-import")]
 use {
-    crate::data_api::{
-        AccountBirthday,
-        chain::ChainState,
-        wallet::{self, SpendingKeys},
+    crate::{
+        data_api::{
+            AccountBirthday,
+            chain::ChainState,
+            wallet::{self, SpendingKeys},
+        },
+        wallet::TransparentAddressSource,
     },
-    crate::wallet::TransparentAddressSource,
     secp256k1::{Secp256k1, SecretKey},
     secrecy::Secret,
     std::collections::HashMap,

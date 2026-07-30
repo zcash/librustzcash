@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, hash::Hash, ops::Range};
 #[cfg(feature = "orchard")]
-use std::collections::BTreeSet;
-use std::hash::Hash;
-use std::ops::Range;
+use {
+    crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint, std::collections::BTreeSet,
+};
 
 use rayon::{
     iter::{IndexedParallelIterator as _, ParallelIterator},
@@ -47,9 +47,6 @@ use {
         },
     },
 };
-
-#[cfg(feature = "orchard")]
-use {crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint};
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
@@ -1755,15 +1752,13 @@ where
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "orchard")]
-    use std::collections::BTreeSet;
+    use {super::cross_pool_ensure_heights, std::collections::BTreeSet};
 
     use core::num::NonZeroU32;
 
     use proptest::prelude::*;
     use zcash_protocol::consensus::BlockHeight;
 
-    #[cfg(feature = "orchard")]
-    use super::cross_pool_ensure_heights;
     use super::{
         NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor, should_retain_anchor,
         should_track_nullifiers,

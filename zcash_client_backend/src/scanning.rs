@@ -3,10 +3,14 @@
 // The `ScanError` accessors below match on its variants bare.
 use ScanError::*;
 
-use core::convert::TryFrom;
-use core::fmt::{self, Debug};
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
+use core::{
+    convert::TryFrom,
+    fmt::{self, Debug},
+};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 use incrementalmerkletree::{Marking, Position, Retention};
 use sapling::{SaplingIvk, note_encryption::SaplingDomain};
@@ -1147,8 +1151,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::thread::spawn;
+    use std::{sync::Arc, thread::spawn};
 
     use super::ScanningKeys;
 

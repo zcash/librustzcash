@@ -1,6 +1,4 @@
-use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::hash::Hash;
+use std::{collections::HashSet, convert::TryFrom, hash::Hash};
 
 use incrementalmerkletree::Retention;
 use sapling::note_encryption::{CompactOutputDescription, SaplingDomain};
@@ -23,13 +21,13 @@ use crate::{
 };
 
 #[cfg(feature = "orchard")]
-use orchard::{
-    note_encryption::{CompactAction, OrchardDomain},
-    tree::MerkleHashOrchard,
+use {
+    super::IronwoodDomain,
+    orchard::{
+        note_encryption::{CompactAction, OrchardDomain},
+        tree::MerkleHashOrchard,
+    },
 };
-
-#[cfg(feature = "orchard")]
-use super::IronwoodDomain;
 
 #[cfg(not(feature = "orchard"))]
 use std::marker::PhantomData;
@@ -802,13 +800,6 @@ mod tests {
         crate::proto::compact_formats::{
             ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
         },
-        proptest::prelude::*,
-        rand_core::{OsRng, RngCore},
-        zcash_note_encryption::Domain,
-        zcash_protocol::ShieldedPool,
-    };
-    #[cfg(feature = "orchard")]
-    use {
         orchard::{
             keys::Scope,
             note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho},
@@ -819,6 +810,10 @@ mod tests {
             group::ff::{Field, PrimeField},
             pallas,
         },
+        proptest::prelude::*,
+        rand_core::{OsRng, RngCore},
+        zcash_note_encryption::Domain,
+        zcash_protocol::ShieldedPool,
     };
 
     use incrementalmerkletree::{Marking, Position, Retention};

@@ -106,8 +106,7 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::fees::StandardFeeRule,
-    crate::wallet::TransparentAddressMetadata,
+    crate::{fees::StandardFeeRule, wallet::TransparentAddressMetadata},
     getset::{CopyGetters, Getters},
     std::time::SystemTime,
     transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
@@ -4609,7 +4608,10 @@ mod tests {
         Address as TreeAddress, Hashable, Level, Marking, Position, Retention,
     };
     use shardtree::store::{Checkpoint, memory::MemoryShardStore};
-    use zcash_keys::keys::UnifiedAddressRequest;
+    use zcash_keys::{
+        address::{Address, UnifiedAddress},
+        keys::UnifiedAddressRequest,
+    };
 
     use super::*;
 
@@ -4620,7 +4622,6 @@ mod tests {
     };
 
     use transparent::address::TransparentAddress;
-    use zcash_keys::address::{Address, UnifiedAddress};
     use zip32::DiversifierIndex;
 
     #[test]

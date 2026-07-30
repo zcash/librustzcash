@@ -14,10 +14,10 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::anchor_retention::PoolMigrationParams;
 use crate::{
     data_api::{
         AccountMeta, InputSource, NoteFilter,
+        anchor_retention::PoolMigrationParams,
         wallet::{
             TargetHeight,
             input_selection::{LockFilter, LockedInputPolicy},
@@ -36,9 +36,7 @@ use super::{
 #[cfg(feature = "transparent-inputs")]
 use super::TransparentChangePolicy;
 #[cfg(feature = "orchard")]
-use super::orchard as orchard_fees;
-#[cfg(feature = "orchard")]
-use zcash_primitives::transaction::builder::BundlePadding;
+use {super::orchard as orchard_fees, zcash_primitives::transaction::builder::BundlePadding};
 
 /// An extension to the [`FeeRule`] trait that exposes methods required for
 /// ZIP 317 fee calculation.
@@ -367,29 +365,19 @@ mod tests {
 
     #[cfg(feature = "orchard")]
     use {
-        crate::data_api::wallet::TargetHeight,
-        crate::data_api::wallet::input_selection::OrchardPayment,
-        crate::fees::orchard as orchard_fees,
-        crate::fees::tests::TestOrchardInput,
+        crate::{
+            data_api::wallet::{TargetHeight, input_selection::OrchardPayment},
+            fees::{orchard as orchard_fees, tests::TestOrchardInput},
+        },
         zcash_protocol::zip318::{AnchorBucketInterval, MAX_RESIDUAL_VALUE},
     };
 
-    use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
-    use core::{convert::Infallible, num::NonZeroUsize};
-    use zcash_protocol::consensus::BlockHeight;
-
-    use ::transparent::{address::Script, bundle::TxOut};
-    use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
-    use zcash_protocol::{
-        ShieldedPool,
-        consensus::{Network, NetworkUpgrade, Parameters},
-        value::Zatoshis,
-    };
-
-    use super::SingleOutputChangeStrategy;
     use crate::{
         data_api::{
-            AccountMeta, PoolMeta, testing::MockWalletDb, wallet::input_selection::SaplingPayment,
+            AccountMeta, PoolMeta,
+            anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
+            testing::MockWalletDb,
+            wallet::input_selection::SaplingPayment,
         },
         fees::{
             ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, SplitPolicy,
@@ -397,6 +385,17 @@ mod tests {
             zip317::MultiOutputChangeStrategy,
         },
     };
+    use core::{convert::Infallible, num::NonZeroUsize};
+    use zcash_protocol::{
+        ShieldedPool,
+        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+        value::Zatoshis,
+    };
+
+    use ::transparent::{address::Script, bundle::TxOut};
+    use zcash_primitives::transaction::fees::zip317::FeeRule as Zip317FeeRule;
+
+    use super::SingleOutputChangeStrategy;
 
     #[test]
     fn change_without_dust() {

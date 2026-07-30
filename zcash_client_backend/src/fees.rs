@@ -8,7 +8,7 @@ use ::transparent::bundle::OutPoint;
 use zcash_primitives::transaction::fees::{
     FeeRule,
     transparent::{self, InputSize},
-    zip317::{self as prim_zip317},
+    zip317 as prim_zip317,
 };
 use zcash_protocol::{
     PoolType, ShieldedPool,
@@ -17,8 +17,7 @@ use zcash_protocol::{
     value::{BalanceError, Zatoshis},
 };
 
-use crate::data_api::anchor_retention::PoolMigrationParams;
-use crate::data_api::{InputSource, wallet::TargetHeight};
+use crate::data_api::{InputSource, anchor_retention::PoolMigrationParams, wallet::TargetHeight};
 
 pub mod common;
 #[cfg(feature = "non-standard-fees")]
