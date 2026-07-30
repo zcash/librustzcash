@@ -329,8 +329,9 @@ pub(crate) fn push_lock_params<'a>(
     }
 }
 
-/// Returns the tier-preference sort key `(<lock tier>) ASC|DESC` for a [`LockFilter`] that prefers
-/// one lock tier over the other, or `None` when no tier preference applies
+/// Returns the tier-preference sort key for a [`LockFilter`] that prefers one lock tier over the
+/// other, as its constituent parts — the tier EXPRESSION and the sort DIRECTION (`ASC`/`DESC`)
+/// realizing the preference — or `None` when no tier preference applies
 /// ([`LockedInputPolicy::Exclude`] and [`LockFilter::Unfiltered`], which draw on a single admitted
 /// tier or apply no lock filtering).
 ///
@@ -342,7 +343,10 @@ pub(crate) fn push_lock_params<'a>(
 ///
 /// This key is a *preference* over an eligible set: callers must combine it with the existing
 /// within-tier ordering (age or value) as a secondary key so that ordering is preserved within
-/// each tier.
+/// each tier. The parts are returned separately so that a query which must materialize the tier
+/// as a column (an `ORDER BY` over a CTE cannot reference the underlying table's alias) can apply
+/// the direction at the ordering site; callers ordering on the expression directly compose
+/// `"{expr} {direction}"`.
 ///
 /// # Usage requirements
 /// - `tbl` must be set to the SQL alias for the received notes/outputs table.
@@ -351,7 +355,10 @@ pub(crate) fn push_lock_params<'a>(
 /// [`LockedInputPolicy::Exclude`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::Exclude
 /// [`LockedInputPolicy::PreferUnlocked`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::PreferUnlocked
 /// [`LockedInputPolicy::PreferLocked`]: zcash_client_backend::data_api::wallet::input_selection::LockedInputPolicy::PreferLocked
-pub(crate) fn locked_tier_order_key(lock_filter: LockFilter<'_>, tbl: &str) -> Option<String> {
+pub(crate) fn locked_tier_expr(
+    lock_filter: LockFilter<'_>,
+    tbl: &str,
+) -> Option<(String, &'static str)> {
     match lock_filter {
         LockFilter::Policy(policy) if policy.admits_locked() => {
             let direction = if policy.prefers_locked() {
@@ -359,9 +366,12 @@ pub(crate) fn locked_tier_order_key(lock_filter: LockFilter<'_>, tbl: &str) -> O
             } else {
                 "ASC"
             };
-            Some(format!(
-                "(CASE WHEN {tbl}.lock_expiry_height IS NOT NULL \
-                  AND {tbl}.lock_expiry_height >= :target_height THEN 1 ELSE 0 END) {direction}"
+            Some((
+                format!(
+                    "(CASE WHEN {tbl}.lock_expiry_height IS NOT NULL \
+                      AND {tbl}.lock_expiry_height >= :target_height THEN 1 ELSE 0 END)"
+                ),
+                direction,
             ))
         }
         _ => None,
@@ -424,7 +434,7 @@ mod tests {
     ///   - `Policy(PreferUnlocked | PreferLocked)` additionally admits outputs whose `lock_owner` is
     ///     one of the policy's overridable owners, and never an output locked by any other owner.
     /// - Greedy value-target selection is TIERED under a preference policy
-    ///   (`locked_tier_order_key`): `PreferUnlocked` draws unlocked outputs before owned-locked
+    ///   (`locked_tier_expr`): `PreferUnlocked` draws unlocked outputs before owned-locked
     ///   ones and `PreferLocked` the reverse, each retaining age order within a tier; `Exclude` and
     ///   `Unfiltered` impose no tier preference.
     /// - A lock may be (re)acquired when no lock exists, when the existing lock has expired as of
@@ -443,7 +453,7 @@ mod tests {
         };
 
         use crate::wallet::locking::{
-            locked_tier_order_key, output_eligible_condition, output_lockable_condition,
+            locked_tier_expr, output_eligible_condition, output_lockable_condition,
             overridable_owners_rarray, push_lock_params,
         };
 
@@ -576,7 +586,8 @@ mod tests {
         ) -> Vec<i64> {
             let conn = candidates_db(candidates);
             let eligible_condition = output_eligible_condition(lock_filter, "t");
-            let tier_key = locked_tier_order_key(lock_filter, "t");
+            let tier_key = locked_tier_expr(lock_filter, "t")
+                .map(|(expr, direction)| format!("{expr} {direction}"));
             let window_frame = match &tier_key {
                 Some(k) => format!("ORDER BY {k}, t.id ROWS UNBOUNDED PRECEDING"),
                 None => "ROWS UNBOUNDED PRECEDING".to_string(),
@@ -1164,6 +1175,14 @@ mod tests {
             )
         }
 
+        #[test]
+        fn single_note_selection_honors_lock_tier_preference() {
+            pool::single_note_selection_honors_lock_tier_preference::<SaplingPoolTester>(
+                TestDbFactory::default(),
+                BlockCache::new(),
+            )
+        }
+
         proptest::proptest! {
             // Each case builds a fresh wallet and replays an operation sequence, so keep the
             // case count moderate; the sequences themselves explore the expiry boundaries.
@@ -1253,6 +1272,14 @@ mod tests {
         #[test]
         fn unlock_proposal_inputs_releases_locks() {
             pool::unlock_proposal_inputs_releases_locks::<OrchardPoolTester>(
+                TestDbFactory::default(),
+                BlockCache::new(),
+            )
+        }
+
+        #[test]
+        fn single_note_selection_honors_lock_tier_preference() {
+            pool::single_note_selection_honors_lock_tier_preference::<OrchardPoolTester>(
                 TestDbFactory::default(),
                 BlockCache::new(),
             )
