@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-29
+
 ### Added
 - `zcash_protocol::zip318::{PREP_DELAY_MEAN, PREP_DELAY_CAP}`, the ZIP 318
   preparation inter-arrival delay distribution.
