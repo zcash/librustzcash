@@ -2636,7 +2636,7 @@ where
 }
 
 /// Shared body of [`rebuild_expired_transfer`] (with [`Signing::InProcess`]) and
-/// [`rebuild_expired_transfer_unsigned`] (with [`Signing::External`]). Returns the
+/// [`rebuild_expired_transfer_unsigned`] (which defers signing to an external signer). Returns the
 /// [`UnsignedMigrationTx`] for the external path, `None` for the in-process path.
 #[cfg(feature = "orchard")]
 fn rebuild_expired_transfer_inner<P, B, R>(
