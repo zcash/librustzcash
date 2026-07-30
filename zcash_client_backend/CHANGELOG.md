@@ -17,7 +17,6 @@ workspace.
 - `zcash_client_backend::data_api::InputSource::select_single_spendable_note`, with a
   best-effort default implementation
 - `zcash_client_backend::data_api::ReceivedNotes::{is_empty, into_single_covering}`
-- `zcash_client_backend::data_api::InputSource::anchor_computable`
 
 ### Changed
 - `zcash_client_backend::data_api::wallet::propose_transfer` now funds a canonical
@@ -30,6 +29,7 @@ workspace.
   height (per `InputSource::anchor_computable`), proposing an ordinary crossing
   instead of a canonical proposal whose build would fail with
   `ProposalError::AnchorNotFound`.
+- `zcash_client_backend::data_api::InputSource` has added method `anchor_computable`
 
 ### Fixed
 - `zcash_client_backend::data_api::ll::wallet::put_blocks` now creates (and retains) a
