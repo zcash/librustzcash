@@ -1,11 +1,16 @@
 //! Helper functions for managing light client key material.
-#[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::TransparentKeyScope;
-use alloc::collections::BTreeSet;
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::{
+    collections::BTreeSet,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::fmt::{self, Display};
 use nonempty::NonEmpty;
+#[cfg(feature = "transparent-inputs")]
+use {
+    ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
+    core::convert::TryInto,
+};
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
 use zcash_protocol::{PoolType, consensus};
@@ -19,12 +24,6 @@ use ReceiverRequirement::*;
 
 #[cfg(any(feature = "sapling", feature = "orchard"))]
 use zcash_protocol::consensus::NetworkConstants;
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
-    core::convert::TryInto,
-};
 
 #[cfg(all(
     feature = "transparent-inputs",
@@ -1881,12 +1880,21 @@ mod tests {
         any(feature = "orchard", feature = "sapling")
     ))]
     use {
-        super::ReceiverRequirement::*, crate::address::UnifiedAddress,
-        crate::keys::UnifiedAddressRequest,
+        super::ReceiverRequirement::*,
+        crate::{
+            address::{Address, UnifiedAddress},
+            keys::UnifiedAddressRequest,
+        },
+        zcash_address::test_vectors,
+        zip32::DiversifierIndex,
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use ::transparent::keys::NonHardenedChildIndex;
+    use {
+        crate::encoding::AddressCodec,
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
+        alloc::{string::ToString, vec::Vec},
+    };
 
     #[cfg(any(feature = "orchard", feature = "sapling"))]
     use zcash_protocol::consensus::NetworkType;
@@ -1905,20 +1913,6 @@ mod tests {
 
     #[cfg(feature = "sapling")]
     use super::sapling;
-
-    #[cfg(feature = "transparent-inputs")]
-    use {
-        crate::encoding::AddressCodec,
-        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
-        alloc::string::ToString,
-        alloc::vec::Vec,
-    };
-
-    #[cfg(all(
-        feature = "transparent-inputs",
-        any(feature = "orchard", feature = "sapling")
-    ))]
-    use {crate::address::Address, zcash_address::test_vectors, zip32::DiversifierIndex};
 
     #[cfg(feature = "unstable")]
     use super::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};

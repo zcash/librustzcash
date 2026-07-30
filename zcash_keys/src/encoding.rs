@@ -4,17 +4,16 @@
 //! [zcash_protocol::constants] module.
 
 use crate::address::UnifiedAddress;
-use alloc::borrow::ToOwned;
-use alloc::string::{String, ToString};
+use alloc::{
+    borrow::ToOwned,
+    string::{String, ToString},
+};
 use bs58::{self, decode::Error as Bs58Error};
 use core::fmt;
 
 use transparent::address::TransparentAddress;
 use zcash_address::unified::{self, Encoding};
 use zcash_protocol::consensus::{self, NetworkConstants};
-#[cfg(feature = "sapling")]
-use zcash_protocol::constants::{mainnet, regtest, testnet};
-
 #[cfg(feature = "sapling")]
 use {
     alloc::vec::Vec,
@@ -24,7 +23,10 @@ use {
     },
     corez::io::{self, Write},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-    zcash_protocol::consensus::NetworkType,
+    zcash_protocol::{
+        consensus::NetworkType,
+        constants::{mainnet, regtest, testnet},
+    },
 };
 
 #[cfg(feature = "sapling")]

@@ -1,18 +1,22 @@
 //! Structs for handling supported address types.
 
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use transparent::address::TransparentAddress;
 use zcash_address::{
     ConversionError, ToAddress, TryFromAddress, ZcashAddress,
     unified::{self, Container, Encoding, Typecode},
 };
-use zcash_protocol::consensus::{self, NetworkType};
+use zcash_protocol::{
+    PoolType, ShieldedPool,
+    consensus::{self, NetworkType},
+};
 
 #[cfg(feature = "sapling")]
 use sapling::PaymentAddress;
-use zcash_protocol::{PoolType, ShieldedPool};
 
 /// A Unified Address.
 #[derive(Clone, Debug, PartialEq, Eq)]
