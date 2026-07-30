@@ -104,10 +104,12 @@ pub enum NextAction {
 /// Why a migration transaction is not yet actionable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Blocker {
-    /// Waiting for its dependency transactions (an earlier preparation layer, or the whole
-    /// preparation) to mine, so its input notes become witnessable in a new anchor bucket. A
-    /// multi-layer preparation signs and broadcasts each layer in a separate anchor bucket, so a later
-    /// layer cannot be built until its predecessor has mined.
+    /// Waiting for its dependency transactions (the earlier preparation layer that mints its input
+    /// notes, or for a transfer, the preparation transaction that mints its funding note) to mine,
+    /// so those notes exist in the commitment tree and their spends can be witnessed. Every
+    /// transaction is already pre-signed (witnesses are deferred to proving time per ZIP 374);
+    /// mining its dependencies is all a later layer waits for before it can be proved and
+    /// broadcast.
     Dependencies,
     /// Built and due only at a later height (the privacy broadcast schedule): waiting for the chain tip
     /// to reach its scheduled height.
@@ -134,10 +136,9 @@ pub enum Blocker {
 }
 
 /// The status of one migration transaction, as a wallet renders it and decides the next step. This is
-/// the machine-readable view a mobile wallet needs: it cannot pre-sign a multi-layer migration up
-/// front (later layers become witnessable only as earlier layers mine) and may be restarted between
-/// layers, so it decides which transaction to sign or broadcast next, and what the rest are waiting on,
-/// from this view of the persisted state alone.
+/// the machine-readable view a mobile wallet needs: it wakes intermittently, and may be killed and
+/// restarted between wake-ups, so it decides which transaction to prove or broadcast next, and what
+/// the rest are waiting on, from this view of the persisted state alone.
 #[derive(Clone, Debug, Getters, CopyGetters)]
 pub struct TransactionStatus {
     /// This transaction's stable id.
