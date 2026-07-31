@@ -32,8 +32,8 @@ use rusqlite::{Connection, OptionalExtension, named_params, params};
 use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState,
+    InvalidReason, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+    MigrationTxKind, MigrationTxState,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
@@ -162,6 +162,9 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
 }
 
 fn create_transactions_sql(t: &Tables) -> String {
+    // `invalid_reason` sits last among the columns so that a table created by this DDL and one
+    // repaired by the `orchard_ironwood_migration_invalid_reason` schema migration's `ADD COLUMN`
+    // (which SQLite appends after the existing columns) share the same stored schema text.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
@@ -178,6 +181,7 @@ fn create_transactions_sql(t: &Tables) -> String {
             txid TEXT,
             mined_height INTEGER,
             lock_owner BLOB,
+            invalid_reason TEXT,
             PRIMARY KEY (migration_id, tx_id)
         )",
         t.transactions, t.migrations
@@ -296,10 +300,14 @@ impl<C: BorrowMut<Connection>> Store<C> {
         let conn = self.conn.borrow_mut();
         let migration_id = resolve_migration_id(conn, tables, account_id)?
             .ok_or(Error::Corrupt("update_transaction: no such transaction"))?;
+        // Every payload column is (over)written on every update, so a state change never leaves a
+        // stale payload behind (a row moving `Invalid -> Mined` must not keep its old reason).
+        let invalid_reason = state.invalid_reason();
         let updated = conn.execute(
             &format!(
                 "UPDATE {}
-                    SET state = :state, txid = :txid, mined_height = :mined_height
+                    SET state = :state, txid = :txid, mined_height = :mined_height,
+                        invalid_reason = :invalid_reason
                   WHERE migration_id = :migration_id AND tx_id = :tx_id",
                 tables.transactions
             ),
@@ -307,6 +315,7 @@ impl<C: BorrowMut<Connection>> Store<C> {
                 ":state": state.as_ref(),
                 ":txid": state.broadcast_txid().map(hex::encode),
                 ":mined_height": state.mined_height().map(u32::from),
+                ":invalid_reason": invalid_reason.as_ref().map(|r| r.as_ref()),
                 ":migration_id": migration_id,
                 ":tx_id": u32::from(id),
             },
@@ -600,7 +609,7 @@ fn read_transactions(
         let mut stmt = conn.prepare(&format!(
             "SELECT tx_id, kind, kind_layer, kind_index, kind_crossing, pczt,
                     scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
-                    lock_owner
+                    lock_owner, invalid_reason
                FROM {}
               WHERE migration_id = ?
               ORDER BY tx_id",
@@ -621,6 +630,7 @@ fn read_transactions(
                 txid: row.get(10)?,
                 mined_height: row.get(11)?,
                 lock_owner: row.get(12)?,
+                invalid_reason: row.get(13)?,
             })
         })?;
         mapped.collect::<Result<_, _>>()?
@@ -645,10 +655,18 @@ fn read_transactions(
                     .ok_or(Error::Corrupt("state.txid"))
             })
             .transpose()?;
+        let invalid_reason = r
+            .invalid_reason
+            .map(|s| {
+                InvalidReason::try_from(s.as_str())
+                    .map_err(|_| Error::Corrupt("state.invalid_reason"))
+            })
+            .transpose()?;
         let state = MigrationTxState::from_stored(
             &r.state,
             txid,
             r.mined_height.map(BlockHeight::from_u32),
+            invalid_reason,
         )
         .map_err(|_| Error::Corrupt("state"))?;
         let depends_on = read_deps(conn, t, migration_id, r.tx_id)?;
@@ -711,6 +729,7 @@ struct TxRow {
     /// `FromSql` impl errors cleanly (`InvalidBlobSize`) if a non-NULL blob is not exactly 32
     /// bytes, so a corrupt row is rejected rather than silently truncated or panicking.
     lock_owner: Option<[u8; 32]>,
+    invalid_reason: Option<String>,
 }
 
 fn read_deps(
@@ -896,14 +915,15 @@ fn replace_migration(
             .map_or((None, None), |(l, i)| (Some(l as u64), Some(i as u64)));
         let kind_crossing = kind.transfer_crossing().map(|c| c as u64);
         let tx_state = mtx.state();
+        let invalid_reason = tx_state.invalid_reason();
         tx.execute(
             &format!(
                 "INSERT INTO {} (migration_id, tx_id, kind, kind_layer, kind_index, kind_crossing,
                                  pczt, scheduled_height, expiry_height, anchor_boundary, state, txid,
-                                 mined_height, lock_owner)
+                                 mined_height, lock_owner, invalid_reason)
                  VALUES (:migration_id, :tx_id, :kind, :kind_layer, :kind_index, :kind_crossing,
                          :pczt, :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
-                         :mined_height, :lock_owner)",
+                         :mined_height, :lock_owner, :invalid_reason)",
                 t.transactions
             ),
             named_params! {
@@ -921,6 +941,7 @@ fn replace_migration(
                 ":txid": tx_state.broadcast_txid().map(hex::encode),
                 ":mined_height": tx_state.mined_height().map(u32::from),
                 ":lock_owner": mtx.lock_owner(),
+                ":invalid_reason": invalid_reason.as_ref().map(|r| r.as_ref()),
             },
         )?;
         for (ordinal, dep) in mtx.depends_on().iter().enumerate() {

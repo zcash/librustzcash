@@ -678,9 +678,12 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
 )";
 /// One row per migration transaction. `kind` is `preparation` or `transfer`; `pczt` is the pre-signed
 /// transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle discriminant, with the
-/// hex broadcast `txid` and `mined_height`. `lock_owner` records the `LockOwner` under which this
+/// hex broadcast `txid`, `mined_height`, and `invalid_reason` payload columns (the last non-NULL
+/// exactly for an `invalid` row). `lock_owner` records the `LockOwner` under which this
 /// transaction's notes are locked, if any. Dependencies are edges in
-/// `orchard_ironwood_migration_transaction_deps`.
+/// `orchard_ironwood_migration_transaction_deps`. `invalid_reason` sits last so that a table
+/// created by the `orchard_ironwood_migration_tables` DDL and one repaired by the
+/// `orchard_ironwood_migration_invalid_reason` `ADD COLUMN` share this schema text.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
 CREATE TABLE orchard_ironwood_migration_transactions (
     migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
@@ -697,6 +700,7 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     txid TEXT,
     mined_height INTEGER,
     lock_owner BLOB,
+    invalid_reason TEXT,
     PRIMARY KEY (migration_id, tx_id)
 )";
 /// The dependency edges between migration transactions.

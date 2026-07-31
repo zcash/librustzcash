@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- The pool-migration store persists the new
+  `zcash_pool_migration::engine::MigrationTxState::Invalid` lifecycle state:
+  `orchard_ironwood_migration_transactions` has a new nullable `invalid_reason`
+  column, non-NULL exactly for an `invalid` row (mirroring how `txid` and
+  `mined_height` carry the `broadcast` and `mined` payloads). The
+  `orchard_ironwood_migration_invalid_reason` schema migration adds the column
+  on a wallet whose table predates it; a fresh wallet gets it from the table
+  DDL.
+
 ## [0.22.0-rc.6] - 2026-07-29
 
 ### Added

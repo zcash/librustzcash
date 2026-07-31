@@ -446,6 +446,118 @@ mod tests {
         );
     }
 
+    /// The `Invalid` lifecycle state round-trips through the store's `invalid_reason` column: a
+    /// replace/get preserves the reason exactly, `update_transaction` records a new verdict, and
+    /// moving on from `Invalid` (here to `Mined`, the one transition that may supersede it) clears
+    /// the stored reason rather than leaving it stale beside the new state. This pins the two
+    /// column behaviours the general `put_then_get_round_trips` property (whose generator also
+    /// produces `Invalid` states) does not isolate.
+    #[test]
+    fn invalid_state_round_trips() {
+        use zcash_pool_migration::denomination::DenominationPlan;
+        use zcash_pool_migration::engine::{
+            InvalidReason, MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
+        };
+        use zcash_pool_migration::preparation::PreparationPlan;
+        use zcash_protocol::consensus::BlockHeight;
+        use zcash_protocol::value::Zatoshis;
+
+        let denominations = DenominationPlan::from_stored_parts(
+            Vec::new(),
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+        )
+        .expect("an empty stored plan reconstructs");
+
+        let dead = MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![1, 2, 3],
+            Vec::new(),
+            BlockHeight::from_u32(100),
+            BlockHeight::from_u32(200),
+            None,
+            MigrationTxState::Invalid {
+                reason: InvalidReason::FundingSpent,
+            },
+            None,
+        );
+        let state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            denominations,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![dead],
+            AnchorBucketInterval::ZIP_318,
+        );
+
+        let mut store = fresh_store();
+        store.replace_migration(&state).expect("write succeeds");
+        assert_eq!(
+            store
+                .get_migration()
+                .expect("read succeeds")
+                .expect("a migration is stored"),
+            state,
+            "the invalid state and its reason must round-trip unchanged"
+        );
+
+        // A newer verdict lands through `update_transaction`...
+        store
+            .update_transaction(
+                MigrationTransferId::new(0),
+                MigrationTxState::Invalid {
+                    reason: InvalidReason::RejectedExpired,
+                },
+            )
+            .expect("update succeeds");
+        assert_eq!(
+            store
+                .get_migration()
+                .expect("read succeeds")
+                .expect("a migration is stored")
+                .transactions()[0]
+                .state()
+                .invalid_reason(),
+            Some(InvalidReason::RejectedExpired)
+        );
+
+        // ...and the mined transition both persists and clears the reason column.
+        store
+            .update_transaction(
+                MigrationTransferId::new(0),
+                MigrationTxState::Mined {
+                    height: BlockHeight::from_u32(150),
+                },
+            )
+            .expect("update succeeds");
+        assert_eq!(
+            store
+                .get_migration()
+                .expect("read succeeds")
+                .expect("a migration is stored")
+                .transactions()[0]
+                .state(),
+            MigrationTxState::Mined {
+                height: BlockHeight::from_u32(150)
+            }
+        );
+        let stored_reason: Option<String> = store
+            .into_inner()
+            .query_row(
+                "SELECT invalid_reason FROM orchard_ironwood_migration_transactions",
+                [],
+                |row| row.get(0),
+            )
+            .expect("the row exists");
+        assert_eq!(
+            stored_reason, None,
+            "a state that is no longer invalid must not keep a stale reason in its row"
+        );
+    }
+
     /// `migration_lock_owners` returns exactly the distinct, non-`None` lock owners across an
     /// account's migration transactions: an account with no migration returns the empty set,
     /// a `None` lock_owner contributes nothing, and repeated owners collapse to one entry.
