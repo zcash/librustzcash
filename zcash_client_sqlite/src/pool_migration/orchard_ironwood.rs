@@ -165,7 +165,9 @@ mod retention_follows_the_committed_migration {
     };
     use zcash_pool_migration::{
         denomination::DenominationPlan,
-        engine::{MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite},
+        engine::{
+            MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite, ReplanThreshold,
+        },
         preparation::PreparationPlan,
         scheduling::AnchorBucketInterval,
     };
@@ -192,6 +194,7 @@ mod retention_follows_the_committed_migration {
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             Vec::new(),
             interval,
+            ReplanThreshold::DEFAULT,
         )
     }
 
@@ -315,6 +318,7 @@ mod tests {
         engine::{
             MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
             MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+            ReplanThreshold,
         },
         preparation::PreparationPlan,
         scheduling::AnchorBucketInterval,
@@ -425,6 +429,7 @@ mod tests {
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             vec![locked, unlocked],
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
 
         let mut store = fresh_store();
@@ -503,6 +508,7 @@ mod tests {
                 tx(3, 3, Some(owner_a_bytes)),
             ],
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
 
         store.replace_migration(&state).expect("write succeeds");
@@ -535,6 +541,7 @@ mod tests {
             PreparationPlan::from_parts(vec![Vec::new()], Vec::new()),
             Vec::new(),
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
         let err = fresh_store()
             .replace_migration(&state)
@@ -574,6 +581,7 @@ mod tests {
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             Vec::new(),
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
 
         PoolMigrations::for_account(&mut conn, account_a)

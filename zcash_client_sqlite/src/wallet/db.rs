@@ -624,7 +624,15 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 /// `orchard_ironwood_migration_anchor_interval` `ADD COLUMN` share this schema text; the store
 /// always writes the column explicitly.
 ///
+/// `replan_threshold` is the integer percent above which unsatisfiable planned transfer value
+/// triggers an immediate replan, stamped at commit. Its `DEFAULT` is
+/// [`ReplanThreshold::DEFAULT`]'s percent (20), present only so that a table created by the
+/// `orchard_ironwood_migration_tables` DDL and one repaired by the
+/// `orchard_ironwood_migration_unsatisfiability` `ADD COLUMN` share this schema text; the store
+/// always writes the column explicitly.
+///
 /// [`AnchorBucketInterval::ZIP_318`]: zcash_protocol::zip318::AnchorBucketInterval::ZIP_318
+/// [`ReplanThreshold::DEFAULT`]: zcash_pool_migration::engine::ReplanThreshold::DEFAULT
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
 CREATE TABLE orchard_ironwood_migrations (
     id INTEGER PRIMARY KEY,
@@ -635,7 +643,8 @@ CREATE TABLE orchard_ironwood_migrations (
     note_split_prep_fees INTEGER NOT NULL,
     note_split_total_input INTEGER NOT NULL,
     note_split_total_migratable INTEGER NOT NULL,
-    anchor_bucket_interval INTEGER NOT NULL DEFAULT 144
+    anchor_bucket_interval INTEGER NOT NULL DEFAULT 144,
+    replan_threshold INTEGER NOT NULL DEFAULT 20
 )";
 /// The denomination crossing values (an ordered list of zatoshi amounts). The funding-note values
 /// have no table of their own: each is its crossing value plus the denomination fee buffer.

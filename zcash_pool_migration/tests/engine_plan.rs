@@ -18,7 +18,7 @@ use zcash_pool_migration::denomination::{DenominationPlan, plan_denominations};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationError, MigrationState, MigrationStatus, MigrationTransaction,
     MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
-    plan_migration,
+    ReplanThreshold, plan_migration,
 };
 use zcash_pool_migration::preparation::{
     FUNDING_OUTPUTS_PER_TX, PreparationPlan, plan_preparation,
@@ -249,6 +249,7 @@ fn stores_loads_and_updates_a_migration() {
         PreparationPlan::from_parts(Vec::new(), Vec::new()),
         vec![tx],
         AnchorBucketInterval::ZIP_318,
+        ReplanThreshold::DEFAULT,
     );
     backend.replace_migration(&state).unwrap();
 

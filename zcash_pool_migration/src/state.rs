@@ -387,6 +387,39 @@ impl MigrationState {
         }
     }
 
+    /// Whether the unsatisfiable share of planned transfer value STRICTLY exceeds the
+    /// [`ReplanThreshold`](crate::engine::ReplanThreshold) stamped at commit — the condition under
+    /// which the migration should be re-planned immediately rather than after satisfiable work
+    /// drains. The share counts each unmined transfer marked
+    /// [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at) at its crossing value, over
+    /// the total planned crossing value; preparations enter only through the transfers they fund,
+    /// and a mined transfer counts in the denominator only. Derived, never stored: a stored copy
+    /// could not un-cross the threshold when a reorg clears marks.
+    pub fn replan_required(&self) -> bool {
+        let unsat: u64 = self
+            .transactions
+            .iter()
+            .filter(|t| {
+                t.unsatisfiable_at.is_some() && !matches!(t.state, MigrationTxState::Mined { .. })
+            })
+            .filter_map(|t| self.transfer_crossing_value(t))
+            .map(u64::from)
+            .sum();
+        let total: u64 = self
+            .denominations
+            .crossing_values()
+            .iter()
+            .copied()
+            .map(u64::from)
+            .sum();
+        // Widened to u128: `DenominationPlan::from_stored_parts` validates each crossing value but
+        // not the list's sum, so a corrupt store could hand this a `total` large enough that the
+        // `100 * unsat` or `percent * total` product overflows `u64` (a debug panic, or a silent
+        // wraparound in release).
+        100u128 * u128::from(unsat)
+            > u128::from(self.replan_threshold.percent()) * u128::from(total)
+    }
+
     /// Whether this migration has reached a terminal status (`Complete`, `Failed`, or
     /// `Superseded`), so a new migration may replace it. A non-terminal migration is still in
     /// progress and must not be overwritten.
@@ -716,6 +749,7 @@ mod tests {
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,
             anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
+            replan_threshold: crate::engine::ReplanThreshold::DEFAULT,
         }
     }
 
@@ -749,6 +783,7 @@ mod tests {
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,
             anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
+            replan_threshold: crate::engine::ReplanThreshold::DEFAULT,
         }
     }
 
@@ -796,6 +831,86 @@ mod tests {
             state.transfer_crossing_value(&state.transactions[0]),
             None,
             "a preparation transaction crosses nothing"
+        );
+    }
+
+    #[test]
+    fn replan_required_crosses_the_stamped_threshold_strictly() {
+        // Crossings 20 + 80: the 20-crossing alone is exactly 20% — NOT more than the threshold.
+        let mut s = state_with_crossings(
+            &[20_000_000, 80_000_000],
+            15_000,
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                tx(1, transfer(0), MigrationTxState::Signed),
+                tx(2, transfer(1), MigrationTxState::Signed),
+            ],
+        );
+        assert!(!s.replan_required());
+        s.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        assert!(
+            !s.replan_required(),
+            "exactly at threshold is not MORE than it"
+        );
+        s.transactions[2].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        assert!(s.replan_required());
+        // A mined transfer counts in the denominator only: un-mark the 80-crossing and mine it;
+        // the marked 20-crossing is back to exactly 20%.
+        s.transactions[2].unsatisfiable_at = None;
+        s.transactions[2].state = mined(60);
+        assert!(!s.replan_required());
+    }
+
+    /// The two [`ReplanThreshold`](crate::engine::ReplanThreshold) endpoints have distinct
+    /// meanings, and a marked preparation never contributes to the numerator (only its funded
+    /// transfers can).
+    #[test]
+    fn replan_required_threshold_endpoints_and_preparation_exemption() {
+        // Threshold 0: nothing marked yet, so nothing triggers.
+        let mut zero = state_with_crossings(
+            &[20_000_000, 80_000_000],
+            15_000,
+            vec![
+                tx(0, prep(0, 0), MigrationTxState::Signed),
+                tx(1, transfer(0), MigrationTxState::Signed),
+                tx(2, transfer(1), MigrationTxState::Signed),
+            ],
+        );
+        zero.replan_threshold = crate::engine::ReplanThreshold::new(0).expect("0 is valid");
+        assert!(!zero.replan_required(), "nothing marked yet");
+
+        // Marking the UNMINED PREPARATION contributes nothing to the numerator: a preparation
+        // crosses nothing (see `transfer_crossing_value_is_none_for_a_preparation`), so even at
+        // the most sensitive threshold, marking one alone cannot trigger a replan.
+        zero.transactions[0].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        assert!(
+            !zero.replan_required(),
+            "a marked preparation contributes nothing to the numerator"
+        );
+
+        // Marking a transfer, however small its crossing value, DOES trigger at threshold 0: any
+        // marked unmined transfer value is more than zero.
+        zero.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        assert!(zero.replan_required());
+
+        // Threshold 100: even with EVERY transfer marked, `unsat == total`, and the comparison is
+        // strict, so an immediate replan is never triggered — only draining to completion (or a
+        // policy change) can resolve a fully-unsatisfiable migration under this threshold.
+        let mut hundred = state_with_crossings(
+            &[20_000_000, 80_000_000],
+            15_000,
+            vec![
+                tx(0, prep(0, 0), MigrationTxState::Signed),
+                tx(1, transfer(0), MigrationTxState::Signed),
+                tx(2, transfer(1), MigrationTxState::Signed),
+            ],
+        );
+        hundred.replan_threshold = crate::engine::ReplanThreshold::new(100).expect("100 is valid");
+        hundred.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        hundred.transactions[2].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        assert!(
+            !hundred.replan_required(),
+            "threshold 100 never triggers immediately, even when everything is marked"
         );
     }
 

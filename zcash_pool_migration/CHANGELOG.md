@@ -12,6 +12,12 @@ and this library adheres to Rust's notion of
   `engine::MigrationState::mark_superseded`, the terminal status and transition
   recording that a migration's remaining value is being re-planned; a superseded
   migration is terminal, so the commit guard accepts a replacement.
+- `engine::ReplanThreshold`, the integer percent of planned transfer value,
+  unsatisfiable, above which a migration is re-planned immediately rather than
+  after satisfiable work drains; stamped on the migration at commit.
+- `engine::MigrationState::{replan_threshold, replan_required}`: the accessor
+  for the stamped threshold, and the derived determination of whether the
+  unsatisfiable share of planned transfer value strictly exceeds it.
 
 ### Changed
 - `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
@@ -34,6 +40,10 @@ and this library adheres to Rust's notion of
   the transaction has been determined unsatisfiable) and `spend_nullifiers`
   (the transaction's real-spend nullifiers, cached from the built PCZT); both
   have accessors.
+- `engine::MigrationState::from_parts` and the `engine::commit_preparation`,
+  `engine::build_preparation_unsigned`, and
+  `engine::commit_preparation_with_funding` entry points each take a further
+  `engine::ReplanThreshold` parameter, stamped on the committed migration.
 
 ## [0.1.0-rc.5] - 2026-07-29
 

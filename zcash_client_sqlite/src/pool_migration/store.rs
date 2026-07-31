@@ -36,7 +36,7 @@ use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState,
+    MigrationTxState, ReplanThreshold,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
@@ -83,6 +83,10 @@ fn create_migrations_sql(t: &Tables) -> String {
     // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
     // column explicitly, so no insert ever falls back to it.
     //
+    // `replan_threshold` carries a `DEFAULT` for the same reason, matching the `ADD COLUMN` in the
+    // `orchard_ironwood_migration_unsatisfiability` schema migration; its default is
+    // `ReplanThreshold::DEFAULT`'s percent.
+    //
     // `account_id` is a foreign key into the wallet's `accounts` table: the pool-migration tables
     // live in the wallet database alongside `accounts`, so an account's migration is owned by its
     // account row and removed with it. Deleting an account cascades to its migration here, whose
@@ -98,10 +102,12 @@ fn create_migrations_sql(t: &Tables) -> String {
             note_split_prep_fees INTEGER NOT NULL,
             note_split_total_input INTEGER NOT NULL,
             note_split_total_migratable INTEGER NOT NULL,
-            anchor_bucket_interval INTEGER NOT NULL DEFAULT {}
+            anchor_bucket_interval INTEGER NOT NULL DEFAULT {},
+            replan_threshold INTEGER NOT NULL DEFAULT {}
         )",
         t.migrations,
-        AnchorBucketInterval::ZIP_318.block_count()
+        AnchorBucketInterval::ZIP_318.block_count(),
+        ReplanThreshold::DEFAULT.percent()
     )
 }
 
@@ -383,7 +389,8 @@ fn read_migration(
         .query_row(
             &format!(
                 "SELECT id, status, note_split_fee_buffer, note_split_change, note_split_prep_fees,
-                        note_split_total_input, note_split_total_migratable, anchor_bucket_interval
+                        note_split_total_input, note_split_total_migratable, anchor_bucket_interval,
+                        replan_threshold
                    FROM {} WHERE account_id = ?",
                 t.migrations
             ),
@@ -398,6 +405,7 @@ fn read_migration(
                     row.get::<_, u64>(5)?,
                     row.get::<_, u64>(6)?,
                     row.get::<_, u32>(7)?,
+                    row.get::<_, u8>(8)?,
                 ))
             },
         )
@@ -412,6 +420,7 @@ fn read_migration(
         total_input,
         total_migratable,
         anchor_bucket_interval,
+        replan_threshold,
     )) = row
     else {
         return Ok(None);
@@ -419,6 +428,8 @@ fn read_migration(
     let anchor_bucket_interval = NonZeroU32::new(anchor_bucket_interval)
         .map(AnchorBucketInterval::custom)
         .ok_or(Error::Corrupt("anchor_bucket_interval"))?;
+    let replan_threshold =
+        ReplanThreshold::new(replan_threshold).ok_or(Error::Corrupt("replan_threshold"))?;
 
     let crossing_values = read_zatoshi_list(conn, t.crossing_values, migration_id)?;
     let denominations = DenominationPlan::from_stored_parts(
@@ -442,6 +453,7 @@ fn read_migration(
         preparation,
         transactions,
         anchor_bucket_interval,
+        replan_threshold,
     )))
 }
 
@@ -818,9 +830,9 @@ fn replace_migration(
         &format!(
             "INSERT INTO {} (account_id, status, note_split_fee_buffer, note_split_change,
                              note_split_prep_fees, note_split_total_input, note_split_total_migratable,
-                             anchor_bucket_interval)
+                             anchor_bucket_interval, replan_threshold)
              VALUES (:account_id, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable,
-                     :anchor_bucket_interval)",
+                     :anchor_bucket_interval, :replan_threshold)",
             t.migrations
         ),
         named_params! {
@@ -832,6 +844,7 @@ fn replace_migration(
             ":total_input": ns.total_input().into_u64(),
             ":total_migratable": ns.total_migratable().into_u64(),
             ":anchor_bucket_interval": state.anchor_bucket_interval().block_count().get(),
+            ":replan_threshold": state.replan_threshold().percent(),
         },
     )?;
     let migration_id = tx.last_insert_rowid();
