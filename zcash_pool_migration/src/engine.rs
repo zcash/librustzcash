@@ -476,20 +476,20 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     // rather than now — later, never wrong.
     let mut findings: Vec<(MigrationTransferId, StepSatisfiability)> = Vec::new();
     for tx in state.transactions() {
-        if !matches!(tx.state(), MigrationTxState::Broadcast { .. })
-            || tx.unsatisfiable_at().is_some()
+        // In flight, and not already marked: exactly the transactions this sweep is about.
+        if matches!(tx.state(), MigrationTxState::Broadcast { .. })
+            && tx.unsatisfiable_at().is_none()
         {
-            continue;
-        }
-        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
-        if matches!(
-            &answer,
-            StepSatisfiability::Unsatisfiable {
-                cause: UnsatisfiableCause::AnchorInvalidated,
-                ..
+            let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
+            if matches!(
+                &answer,
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::AnchorInvalidated,
+                    ..
+                }
+            ) {
+                findings.push((tx.id(), answer));
             }
-        ) {
-            findings.push((tx.id(), answer));
         }
     }
     if !findings.is_empty() {
@@ -3924,9 +3924,13 @@ mod tests {
     use super::*;
     use crate::{
         denomination::{DENOM_CAP, MIGRATION_MAX_PREPARED_NOTES_PER_RUN},
-        preparation::FUNDING_OUTPUTS_PER_TX,
         signing_rounds::{SigningRoundBudget, min_signing_rounds},
+        testing::{
+            arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
+            assert_put_get_roundtrip, assert_update_transaction, first_transaction_id,
+        },
     };
+    use proptest::proptest;
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
     use zcash_protocol::{local_consensus::LocalNetwork, value::COIN};
@@ -4232,18 +4236,6 @@ mod tests {
         }
     }
 
-    /// The canonical fees on the test network, computed exactly as `plan_migration` computes them.
-    fn test_fees() -> (Zatoshis, Zatoshis) {
-        canonical_fees(&test_net(), BlockHeight::from_u32(2_000_000))
-            .expect("the canonical fees compute")
-    }
-
-    /// A count-only preparation-layout stub for tests that exercise the split in isolation: one
-    /// padded transaction per [`FUNDING_OUTPUTS_PER_TX`] funding notes.
-    fn prep_tx_count_stub(notes: &[Zatoshis]) -> Option<usize> {
-        Some(notes.len().div_ceil(FUNDING_OUTPUTS_PER_TX))
-    }
-
     /// A minimal in-memory backend: a fixed set of note values and a chain tip.
     struct MockBackend {
         notes: Vec<Zatoshis>,
@@ -4538,69 +4530,27 @@ mod tests {
         }
     }
 
+    /// The in-crate mock store answers the same three questions every store is held to: an empty
+    /// store reports nothing, a written migration reads back unchanged, and a transaction-state
+    /// update persists.
+    ///
+    /// Drawn from [`arb_migration_state`] and asserted through the shared conformance suite rather
+    /// than written out by hand: no particular field value is what makes any of these true, so
+    /// pinning one only narrows what the round-trip is exercised over — and a hand-written fixture
+    /// silently stops covering fields the persisted types later grow.
     #[test]
     fn stores_loads_and_updates_a_migration() {
-        let mut backend = MockBackend::new(Vec::new(), 0);
-        assert!(backend.get_migration().unwrap().is_none());
-
-        let mut rng = ChaCha8Rng::seed_from_u64(1);
-        let (prep_tx_fee, transfer_buffer) = test_fees();
-        let denominations = crate::denomination::plan_denominations(
-            Zatoshis::from_u64(100 * COIN).expect("test balance is valid"),
-            transfer_buffer,
-            prep_tx_fee,
-            &prep_tx_count_stub,
-            &mut rng,
-        );
-        let tx = MigrationTransaction {
-            id: MigrationTransferId(0),
-            kind: MigrationTxKind::Transfer { crossing: 0 },
-            pczt: vec![1, 2, 3], // a stand-in for the serialized pre-signed PCZT
-            depends_on: Vec::new(),
-            scheduled_height: BlockHeight::from_u32(2_000_100),
-            expiry_height: BlockHeight::from_u32(2_069_220),
-            anchor_boundary: None,
-            state: MigrationTxState::Signed,
-            lock_owner: None,
-            unsatisfiable: None,
-            spend_nullifiers: Vec::new(),
-            broadcast_failure_at: None,
-        };
-        let state = MigrationState {
-            status: MigrationStatus::Committed,
-            denominations,
-            preparation: crate::preparation::PreparationPlan::from_parts(Vec::new(), Vec::new()),
-            transactions: vec![tx],
-            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
-            replan_threshold: ReplanThreshold::DEFAULT,
-        };
-        backend.replace_migration(&state).unwrap();
-
-        // The stored transactions round-trip, and a state update persists.
-        let loaded = backend
-            .get_migration()
-            .unwrap()
-            .expect("a migration is stored");
-        assert_eq!(loaded.status, MigrationStatus::Committed);
-        assert_eq!(loaded.transactions, state.transactions);
-
-        backend
-            .update_transaction(
-                MigrationTransferId(0),
-                MigrationTxState::Mined {
-                    txid: TxId::from_bytes([0; 32]),
-                    height: BlockHeight::from_u32(2_000_105),
-                },
-            )
-            .unwrap();
-        let loaded = backend.get_migration().unwrap().unwrap();
-        assert_eq!(
-            loaded.transactions[0].state,
-            MigrationTxState::Mined {
-                txid: TxId::from_bytes([0; 32]),
-                height: BlockHeight::from_u32(2_000_105)
+        proptest!(|(
+            state in arb_migration_state(),
+            new_state in arb_migration_tx_state(),
+        )| {
+            let mut backend = MockBackend::new(Vec::new(), 0);
+            assert_empty_is_none(&backend);
+            assert_put_get_roundtrip(&mut backend, &state);
+            if let Some(id) = first_transaction_id(&state) {
+                assert_update_transaction(&mut backend, &state, id, new_state);
             }
-        );
+        });
     }
 }
 
