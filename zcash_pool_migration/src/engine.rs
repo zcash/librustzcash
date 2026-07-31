@@ -253,6 +253,68 @@ impl fmt::Display for ParseMigrationTxKindError {
     }
 }
 
+/// Why a migration transaction was marked [`Invalid`](MigrationTxState::Invalid): the observed
+/// event that killed it.
+///
+/// Each variant is a piece of EVIDENCE the consumer observed through I/O the engine deliberately
+/// never performs — its own network submissions and its wallet's scan of the chain — and reported
+/// with [`MigrationState::mark_invalid`]. The engine cannot detect any of these itself (it sees
+/// only the persisted state), which is exactly why they are recorded as state rather than
+/// recomputed: once recorded, every state-driven decision accounts for them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvalidReason {
+    /// A note funding this transaction was spent OUTSIDE the migration (for example by another
+    /// wallet instance sharing the same spend authority), observed by the consumer's wallet scan.
+    /// The transaction double-spends that note, so no node will ever mine it.
+    FundingSpent,
+    /// The network rejected the transaction as INVALID when the consumer submitted it. Something is
+    /// structurally wrong with the signed artifact (or the chain state it commits to), so
+    /// resubmitting it can only be rejected again.
+    RejectedInvalid,
+    /// The network rejected the transaction as EXPIRED when the consumer submitted it: the node's
+    /// tip is already past the transaction's [`expiry_height`](MigrationTransaction::expiry_height)
+    /// (ZIP 203), even though the consumer's own (staler) chain view had not yet confirmed the
+    /// expiry when it broadcast.
+    RejectedExpired,
+}
+
+impl AsRef<str> for InvalidReason {
+    /// The stable lowercase wire name of the reason, as stored by a backend and parsed back with
+    /// [`TryFrom<&str>`](Self). Borrow-free: it returns a `&'static str`, so encoding a reason
+    /// allocates nothing.
+    fn as_ref(&self) -> &str {
+        match self {
+            InvalidReason::FundingSpent => "funding_spent",
+            InvalidReason::RejectedInvalid => "rejected_invalid",
+            InvalidReason::RejectedExpired => "rejected_expired",
+        }
+    }
+}
+
+/// The error returned when a string does not name an [`InvalidReason`] (its [`TryFrom<&str>`] impl).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseInvalidReasonError;
+
+impl fmt::Display for ParseInvalidReasonError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unrecognized migration transaction invalidity reason")
+    }
+}
+
+impl TryFrom<&str> for InvalidReason {
+    type Error = ParseInvalidReasonError;
+
+    /// Parses the lowercase wire name produced by [`AsRef<str>`](AsRef).
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(match s {
+            "funding_spent" => InvalidReason::FundingSpent,
+            "rejected_invalid" => InvalidReason::RejectedInvalid,
+            "rejected_expired" => InvalidReason::RejectedExpired,
+            _ => return Err(ParseInvalidReasonError),
+        })
+    }
+}
+
 /// Where a migration transaction is in its lifecycle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MigrationTxState {
@@ -271,6 +333,23 @@ pub enum MigrationTxState {
     Broadcast { txid: TxId },
     /// Mined at the given height.
     Mined { height: BlockHeight },
+    /// Dead by OBSERVED EVENT: the consumer reported (via [`MigrationState::mark_invalid`]) that
+    /// this transaction can never mine — a funding note was spent outside the migration, or the
+    /// network rejected the submission — for the recorded `reason`.
+    ///
+    /// This is the event-based complement to the height-computable expiry death the crate already
+    /// models: expiry is derived from persisted heights on every query, while invalidity rests on
+    /// evidence from the consumer's network I/O or wallet scan — inputs the engine deliberately
+    /// never sees — so it must be recorded once observed. It is a state variant rather than an
+    /// orthogonal flag so that every state-matched query (`next_provable`, `next_broadcastable`,
+    /// the wake-up schedule, the completion check) excludes an invalid transaction automatically;
+    /// [`next_step`](MigrationState::next_step) surfaces it as
+    /// [`AdvanceStep::Attend`](crate::state::AdvanceStep::Attend) for out-of-band resolution.
+    /// The only evidence that outranks it is chain inclusion itself:
+    /// [`mark_mined`](MigrationState::mark_mined) supersedes a stale invalidity verdict, while
+    /// [`mark_broadcast`](MigrationState::mark_broadcast) does not touch it (a submission is not
+    /// evidence of validity).
+    Invalid { reason: InvalidReason },
 }
 
 /// One transaction of a committed migration: its pre-signed PCZT plus the metadata the consuming
@@ -418,8 +497,8 @@ impl TryFrom<&str> for MigrationStatus {
 
 impl AsRef<str> for MigrationTxState {
     /// The stable lowercase wire name of the lifecycle state, as a store persists it (the queryable
-    /// discriminant); the `Broadcast` txid and `Mined` height are stored alongside and reattached by
-    /// [`from_stored`](Self::from_stored).
+    /// discriminant); the `Broadcast` txid, `Mined` height, and `Invalid` reason are stored
+    /// alongside and reattached by [`from_stored`](Self::from_stored).
     fn as_ref(&self) -> &str {
         match self {
             MigrationTxState::AwaitingSignature => "awaiting_signature",
@@ -427,13 +506,15 @@ impl AsRef<str> for MigrationTxState {
             MigrationTxState::Proved => "proved",
             MigrationTxState::Broadcast { .. } => "broadcast",
             MigrationTxState::Mined { .. } => "mined",
+            MigrationTxState::Invalid { .. } => "invalid",
         }
     }
 }
 
-/// The error returned when a stored `(state, txid, mined_height)` triple does not reconstruct a
-/// [`MigrationTxState`] (its [`from_stored`](MigrationTxState::from_stored) constructor): an
-/// unrecognized discriminant, or a `broadcast`/`mined` row missing its txid/height payload.
+/// The error returned when a stored `(state, txid, mined_height, invalid_reason)` tuple does not
+/// reconstruct a [`MigrationTxState`] (its [`from_stored`](MigrationTxState::from_stored)
+/// constructor): an unrecognized discriminant, or a `broadcast`/`mined`/`invalid` row missing its
+/// txid/height/reason payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParseMigrationTxStateError;
 
@@ -462,14 +543,25 @@ impl MigrationTxState {
         }
     }
 
+    /// The reason of an [`Invalid`](Self::Invalid) state (its stored payload), or `None` for any
+    /// other state.
+    pub fn invalid_reason(&self) -> Option<InvalidReason> {
+        match self {
+            MigrationTxState::Invalid { reason } => Some(*reason),
+            _ => None,
+        }
+    }
+
     /// Reconstruct a state from a store: the lowercase discriminant produced by
-    /// [`AsRef<str>`](AsRef), plus the `broadcast` txid and `mined` height columns (each `None` for a
-    /// state that does not carry it). Errors on an unrecognized discriminant, or a `broadcast`/`mined`
-    /// discriminant whose payload column is absent.
+    /// [`AsRef<str>`](AsRef), plus the `broadcast` txid, `mined` height, and `invalid` reason
+    /// columns (each `None` for a state that does not carry it). Errors on an unrecognized
+    /// discriminant, or a `broadcast`/`mined`/`invalid` discriminant whose payload column is
+    /// absent.
     pub fn from_stored(
         state: &str,
         txid: Option<[u8; 32]>,
         mined_height: Option<BlockHeight>,
+        invalid_reason: Option<InvalidReason>,
     ) -> Result<Self, ParseMigrationTxStateError> {
         Ok(match state {
             "awaiting_signature" => MigrationTxState::AwaitingSignature,
@@ -480,6 +572,9 @@ impl MigrationTxState {
             },
             "mined" => MigrationTxState::Mined {
                 height: mined_height.ok_or(ParseMigrationTxStateError)?,
+            },
+            "invalid" => MigrationTxState::Invalid {
+                reason: invalid_reason.ok_or(ParseMigrationTxStateError)?,
             },
             _ => return Err(ParseMigrationTxStateError),
         })
@@ -1449,7 +1544,9 @@ pub enum ProveError<E> {
     /// are proved against a caller-supplied anchor (a transfer proves against its drawn boundary).
     NotAPreparation(MigrationTransferId),
     /// The transaction is not in the [`Signed`](MigrationTxState::Signed) state, so it is not ready
-    /// to prove (it is unsigned, already proved, or already broadcast).
+    /// to prove (it is unsigned, already proved, already broadcast, or marked
+    /// [`Invalid`](MigrationTxState::Invalid) — a dead transaction is resolved out-of-band, not
+    /// proved).
     NotReady(MigrationTransferId),
     /// A transfer carries no anchor boundary. Every transfer draws one at scheduling time, so this
     /// indicates a corrupt stored state rather than a normal condition.
@@ -1648,6 +1745,15 @@ pub enum RebuildError<E> {
     /// still valid, or it has already mined. Guards against reissuing a live transaction as a second,
     /// double-spending copy.
     NotExpired(MigrationTransferId),
+    /// The transaction is marked [`Invalid`](MigrationTxState::Invalid) for the given reason, and
+    /// an invalid transaction is resolved out-of-band (typically by cancelling the migration and
+    /// re-planning the remaining balance), never rebuilt — even when its expiry height has also
+    /// passed. Its death is event-based: a spent funding note would make any rebuild another
+    /// guaranteed double-spend, and a network rejection means the artifact (or the plan behind it)
+    /// needs investigation, so silently reissuing the part is exactly the wrong remediation. A
+    /// consumer that wants the automatic expired-transfer rebuild path simply does not mark a
+    /// merely-expired transfer invalid: the ordinary expiry detection reschedules it on its own.
+    Invalid(MigrationTransferId, InvalidReason),
     /// The stored migration state is internally inconsistent: the denomination plan carries no crossing or
     /// funding value for this transfer's crossing index, or the transfer's stored PCZT is
     /// malformed.
@@ -1700,6 +1806,13 @@ impl<E: fmt::Display> fmt::Display for RebuildError<E> {
                 f,
                 "transaction {} has not expired; there is nothing to rebuild",
                 u32::from(*id)
+            ),
+            RebuildError::Invalid(id, reason) => write!(
+                f,
+                "transaction {} is marked invalid ({}); an invalid transaction is resolved \
+                 out-of-band, not rebuilt",
+                u32::from(*id),
+                reason.as_ref()
             ),
             RebuildError::InconsistentPlan(m) => {
                 write!(f, "the migration plan is internally inconsistent: {m}")
@@ -1862,6 +1975,13 @@ where
         MigrationTxKind::Transfer { crossing } => crossing,
         MigrationTxKind::Preparation { .. } => return Err(RebuildError::NotATransfer(id)),
     };
+    // A transfer marked invalid is dead by observed event, and its remediation is out-of-band (see
+    // `RebuildError::Invalid`) — checked before the expiry condition because an invalid transfer
+    // may well ALSO be past its expiry, and rebuilding it then would re-spend a funding note that
+    // may be gone or reissue an artifact the network already rejected.
+    if let MigrationTxState::Invalid { reason } = tx.state {
+        return Err(RebuildError::Invalid(id, reason));
+    }
     // Only an expired, not-yet-mined transfer is rebuilt (the same condition the state machine reports
     // as expired): a still-valid or already-mined transfer is a typed error, not a silently reissued
     // double spend.
@@ -3791,8 +3911,9 @@ mod commit_tests {
         assert_eq!(state.transactions[0].state, MigrationTxState::Signed);
     }
 
-    /// Rebuilding rejects a transaction that has not expired, a preparation transaction, and an
-    /// unknown id, so a caller cannot reissue a still-valid transfer as a double-spending copy.
+    /// Rebuilding rejects a transaction that has not expired, one marked invalid, a preparation
+    /// transaction, and an unknown id, so a caller cannot reissue a still-valid transfer as a
+    /// double-spending copy — nor an event-dead one whose remediation is out-of-band.
     #[test]
     fn rebuild_expired_transfer_rejects_ineligible_transactions() {
         let seed = 101u64;
@@ -3825,11 +3946,23 @@ mod commit_tests {
             Err(RebuildError::UnknownTransaction(rejected)) if rejected == unknown
         ));
 
+        // A transfer marked invalid, even one whose expiry has ALSO passed: rejected with its
+        // recorded reason. Its death is event-based and resolved out-of-band (`Attend`, typically
+        // cancel and re-plan); rebuilding it could re-spend a funding note that is already gone.
+        state.transactions[0].state = MigrationTxState::Invalid {
+            reason: InvalidReason::FundingSpent,
+        };
+        backend.tip = state.transactions[0].expiry_height + 1;
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            Err(RebuildError::Invalid(rejected, InvalidReason::FundingSpent)) if rejected == id
+        ));
+        state.transactions[0].state = MigrationTxState::Signed;
+
         // A preparation transaction, even an expired one: rejected. Only a transfer (a leaf of the
         // dependency graph) is rebuilt this way; an expired preparation invalidates its dependents'
         // pre-signatures and needs its own remediation.
         state.transactions[0].kind = MigrationTxKind::Preparation { layer: 0, index: 0 };
-        backend.tip = state.transactions[0].expiry_height + 1;
         assert!(matches!(
             rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
             Err(RebuildError::NotATransfer(rejected)) if rejected == id
@@ -4559,5 +4692,51 @@ mod commit_tests {
         backend.sched_params = SchedulingParams::ZIP_318;
         prove_transfer(&mut backend, &mut state, transfer_id)
             .expect("the transfer proves once the grid matches again");
+    }
+
+    /// The `Invalid` lifecycle state round-trips through the stored-column codec: every reason
+    /// survives `AsRef<str>` / `TryFrom<&str>` and `from_stored`, and an `invalid` discriminant
+    /// without its reason payload is rejected, exactly like a payload-less `broadcast` or `mined`.
+    #[test]
+    fn invalid_state_round_trips_through_from_stored() {
+        for reason in [
+            InvalidReason::FundingSpent,
+            InvalidReason::RejectedInvalid,
+            InvalidReason::RejectedExpired,
+        ] {
+            let state = MigrationTxState::Invalid { reason };
+            assert_eq!(state.as_ref(), "invalid");
+            assert_eq!(state.invalid_reason(), Some(reason));
+            assert_eq!(
+                InvalidReason::try_from(reason.as_ref()),
+                Ok(reason),
+                "the reason's own wire name round-trips"
+            );
+            assert_eq!(
+                MigrationTxState::from_stored("invalid", None, None, Some(reason)),
+                Ok(state)
+            );
+        }
+        assert_eq!(
+            MigrationTxState::from_stored("invalid", None, None, None),
+            Err(ParseMigrationTxStateError),
+            "an invalid row missing its reason column does not reconstruct"
+        );
+        assert_eq!(
+            InvalidReason::try_from("bogus"),
+            Err(ParseInvalidReasonError)
+        );
+        // The reason column is payload for the `invalid` discriminant alone: any other stored
+        // state reconstructs regardless of what the column holds, so a stale value cannot brick a
+        // row (the store nulls it on update, but a reader must not depend on that).
+        assert_eq!(
+            MigrationTxState::from_stored(
+                "signed",
+                None,
+                None,
+                Some(InvalidReason::RejectedExpired)
+            ),
+            Ok(MigrationTxState::Signed)
+        );
     }
 }

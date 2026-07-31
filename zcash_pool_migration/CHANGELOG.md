@@ -7,6 +7,46 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_pool_migration::engine::MigrationTxState::Invalid` (with its
+  `invalid_reason` accessor) and `zcash_pool_migration::engine::InvalidReason`
+  (plus `ParseInvalidReasonError` and its `AsRef<str>` / `TryFrom<&str>` wire
+  codec): the event-based failure state for a transaction the consumer has
+  observed can never mine — a funding note spent outside the migration, or a
+  network-rejected broadcast. It is a state variant rather than an orthogonal
+  flag so that every state-matched query excludes an invalid transaction
+  automatically, and a run containing one never reaches `Complete`.
+- `zcash_pool_migration::engine::MigrationState::mark_invalid`, recording that
+  evidence. A `Mined` transaction is never marked (it succeeded, so the
+  evidence is stale), `mark_mined` supersedes an invalidity verdict (chain
+  inclusion outranks it), and `mark_broadcast` leaves one standing (a
+  submission is not evidence of validity).
+- `zcash_pool_migration::state::AdvanceStep::Attend`, surfaced by `next_step`
+  ahead of all actionable work whenever any transaction is invalid: no
+  automatic step can advance that part of the migration, and the consumer
+  resolves it out-of-band, typically by cancelling the migration and
+  re-planning the remaining balance.
+- `zcash_pool_migration::state::Blocker::Invalid`, the per-transaction view of
+  the same fact in `transaction_statuses` (reported not-ready with no action;
+  the reason rides in the status's `state`).
+- `zcash_pool_migration::engine::RebuildError::Invalid`: the rebuild entry
+  points reject an invalid transfer — even one whose expiry height has also
+  passed — rather than re-spend a funding note that may be gone or reissue an
+  artifact the network rejected.
+- `zcash_pool_migration::state::DuenessTargets` and the estimate-aware query
+  variants `engine::MigrationState::next_provable_at` /
+  `next_broadcastable_at`, for a consumer whose scanned chain view lags the
+  real chain between syncs: a wall-clock estimate of the real target height
+  may ACCELERATE schedule due-ness (and, in `next_broadcastable_at`, withhold
+  a broadcast the estimate says the node would reject as expired), while
+  expiry, rebuild eligibility, and anchor-boundary settledness evaluate on the
+  scanned target only. The single-target `next_provable` /
+  `next_broadcastable` are now delegating wrappers over these with both
+  targets equal — no behavior change.
+- `zcash_pool_migration::testing::arb_invalid_reason`; the
+  `arb_migration_tx_state` strategy now also generates `Invalid` states, so
+  store conformance suites cover the new state's persistence.
+
 ### Changed
 - `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
   in preference to `AdvanceStep::Prove` (previously the reverse), so a wallet
@@ -19,6 +59,13 @@ and this library adheres to Rust's notion of
   schedule, so broadcastable at the same wake-up once proved — or a transfer,
   whose broadcast follows at its own scheduled height. Match with
   `AdvanceStep::Prove { id, kind }`.
+- `engine::MigrationTxState::from_stored` takes the stored invalid reason as a
+  fourth argument (`None` for every row written before the `Invalid` state
+  existed).
+- `engine::MigrationState::expired_transactions` never reports a transaction
+  marked `Invalid` (and no query treats one as expired): its death is already
+  recorded and surfaced through `AdvanceStep::Attend`, not the expiry path's
+  rebuild.
 
 ## [0.1.0-rc.5] - 2026-07-29
 

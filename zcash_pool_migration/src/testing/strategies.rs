@@ -16,8 +16,8 @@ use zcash_protocol::value::testing::arb_zatoshis;
 
 use crate::denomination::DenominationPlan;
 use crate::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState,
+    InvalidReason, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+    MigrationTxKind, MigrationTxState,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::scheduling::AnchorBucketInterval;
@@ -137,9 +137,18 @@ pub fn arb_migration_tx_kind() -> impl Strategy<Value = MigrationTxKind> {
     ]
 }
 
+/// An arbitrary [`InvalidReason`], covering every variant.
+pub fn arb_invalid_reason() -> impl Strategy<Value = InvalidReason> {
+    prop_oneof![
+        Just(InvalidReason::FundingSpent),
+        Just(InvalidReason::RejectedInvalid),
+        Just(InvalidReason::RejectedExpired),
+    ]
+}
+
 /// An arbitrary [`MigrationTxState`], covering every variant (including the
-/// [`Broadcast`](MigrationTxState::Broadcast) txid and [`Mined`](MigrationTxState::Mined) height
-/// payloads).
+/// [`Broadcast`](MigrationTxState::Broadcast) txid, [`Mined`](MigrationTxState::Mined) height, and
+/// [`Invalid`](MigrationTxState::Invalid) reason payloads).
 pub fn arb_migration_tx_state() -> impl Strategy<Value = MigrationTxState> {
     prop_oneof![
         Just(MigrationTxState::AwaitingSignature),
@@ -147,6 +156,7 @@ pub fn arb_migration_tx_state() -> impl Strategy<Value = MigrationTxState> {
         Just(MigrationTxState::Proved),
         arb_txid().prop_map(|txid| MigrationTxState::Broadcast { txid }),
         arb_block_height().prop_map(|height| MigrationTxState::Mined { height }),
+        arb_invalid_reason().prop_map(|reason| MigrationTxState::Invalid { reason }),
     ]
 }
 

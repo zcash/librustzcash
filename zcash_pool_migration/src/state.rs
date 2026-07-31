@@ -6,7 +6,9 @@
 //! or a server like Zallet) makes the SAME decisions from the SAME state. The consumer supplies the
 //! I/O: it detects that a broadcast transaction has mined (via its own chain view) and calls
 //! [`MigrationState::mark_mined`], it broadcasts a transaction and calls
-//! [`MigrationState::mark_broadcast`], and it performs the build/prove/broadcast work that
+//! [`MigrationState::mark_broadcast`], it reports evidence that a transaction can never mine (a
+//! funding note spent outside the migration, a node rejection) with
+//! [`MigrationState::mark_invalid`], and it performs the build/prove/broadcast work that
 //! [`MigrationState::next_step`] tells it to do. The decision of WHAT to do next, and the transaction
 //! status a wallet shows the user, live here.
 //!
@@ -27,8 +29,8 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState,
+    InvalidReason, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+    MigrationTxKind, MigrationTxState,
 };
 use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 
@@ -38,6 +40,19 @@ use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 /// [`MigrationState::next_step`] again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvanceStep {
+    /// No automatic step can advance this migration: transaction `id` is marked
+    /// [`Invalid`](MigrationTxState::Invalid) (see its status for the reason), and the consumer
+    /// resolves it out-of-band — typically by cancelling the migration and re-planning the
+    /// remaining balance.
+    ///
+    /// Surfaced ahead of all actionable work: every broadcast of an invalid transaction is a
+    /// guaranteed rejection (and everything depending on it waits forever), so a consumer needs
+    /// the attention signal before it continues to drive the run. Only a terminal migration
+    /// ([`Complete`](Self::Complete)) takes precedence.
+    Attend {
+        /// The invalid transaction needing attention.
+        id: MigrationTransferId,
+    },
     /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses and
     /// store the proven PCZT), WITHOUT broadcasting: its dependencies are mined and, for a transfer,
     /// its drawn anchor boundary has settled (the boundary block is strictly below the chain tip, so
@@ -140,6 +155,14 @@ pub enum Blocker {
     /// signal that the migration needs a new signing ceremony over the affected subtree. Reported
     /// so a wallet can show the transaction as needing attention rather than as merely waiting.
     Expired,
+    /// Marked [`Invalid`](MigrationTxState::Invalid): the consumer observed evidence that this
+    /// transaction can never mine (its [`state`](TransactionStatus::state) carries the
+    /// [`InvalidReason`]), so no chain condition will ever make it actionable again. Its
+    /// resolution is out-of-band, surfaced to the driver as [`AdvanceStep::Attend`]. Reported as a
+    /// blocker — like [`Signature`](Self::Signature) and [`Expired`](Self::Expired), whose facts
+    /// the state and heights also already imply — so a wallet keyed on blockers shows it as
+    /// needing attention rather than as done.
+    Invalid,
 }
 
 /// The status of one migration transaction, as a wallet renders it and decides the next step. This is
@@ -185,6 +208,66 @@ pub struct TransactionStatus {
     pub(crate) txid: Option<TxId>,
 }
 
+/// The pair of target heights the estimate-aware delivery queries
+/// ([`MigrationState::next_provable_at`], [`MigrationState::next_broadcastable_at`]) evaluate
+/// due-ness against, for a consumer whose SCANNED chain view lags the real chain between syncs (a
+/// mobile wallet waking from the background).
+///
+/// `scanned` is the trustworthy target: `scanned_tip + 1`, the height of the next block a
+/// transaction could mine in as witnessed by the data the wallet has actually scanned. `effective`
+/// is the serving target: a wall-clock ESTIMATE of where the real chain's target has reached,
+/// clamped to never fall below `scanned`, consulted only to decide that a scheduled height has
+/// ARRIVED.
+///
+/// The rule the pair encodes: **the estimate may only ACCELERATE schedule due-ness; expiry,
+/// rebuild eligibility, and every other destructive decision evaluate on the scanned target
+/// only.** An estimate can be wrong in either direction, and the two kinds of decision fail
+/// differently. Serving a broadcast a few blocks before its scheduled height is harmless — the
+/// schedule's jitter dwarfs the estimate's error. Treating a transfer as EXPIRED on an estimate
+/// would trigger its rebuild — an entirely new, freshly signed transaction — while the original
+/// may in fact still mine, making the rebuild a double-spend of it. A transfer's anchor-boundary
+/// settledness is likewise a statement about scanned data (the boundary checkpoint either exists
+/// in the wallet's commitment tree or it does not — an estimate cannot conjure it), so it too is
+/// judged on `scanned` alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, CopyGetters)]
+pub struct DuenessTargets {
+    /// The scanned target height (`scanned_tip + 1`): expiry, anchor-boundary settledness, and
+    /// every destructive decision evaluate here.
+    #[getset(get_copy = "pub")]
+    scanned: BlockHeight,
+    /// The serving target: schedule due-ness evaluates here. Never below
+    /// [`scanned`](Self::scanned), by construction.
+    #[getset(get_copy = "pub")]
+    effective: BlockHeight,
+}
+
+impl DuenessTargets {
+    /// The targets for a scanned target height plus an optional wall-clock estimate of the real
+    /// chain's target: `effective` is the larger of the two, or `scanned_target` alone when there
+    /// is no estimate. The clamp is what maintains `effective >= scanned`: an estimate BEHIND the
+    /// scanned tip is simply stale (the scanned data has overtaken it), and must not drag serving
+    /// backwards below what the scanned view already proves due.
+    pub fn new(scanned_target: BlockHeight, estimated_target: Option<BlockHeight>) -> Self {
+        let effective = estimated_target.map_or(scanned_target, |estimated| {
+            core::cmp::max(scanned_target, estimated)
+        });
+        Self {
+            scanned: scanned_target,
+            effective,
+        }
+    }
+
+    /// The degenerate targets of a consumer with no estimate: both heights are `target`. The
+    /// single-target queries delegate through this, making them the `effective == scanned` special
+    /// case of the `_at` variants by construction.
+    pub const fn at(target: BlockHeight) -> Self {
+        Self {
+            scanned: target,
+            effective: target,
+        }
+    }
+}
+
 impl MigrationState {
     /// Whether every transaction in `depends_on` is mined.
     pub fn deps_mined(&self, depends_on: &[MigrationTransferId]) -> bool {
@@ -203,9 +286,15 @@ impl MigrationState {
     /// [`expiry_height`](MigrationTransaction::expiry_height) (ZIP 203), so it is expired once
     /// `expiry_height < target_height`. An `expiry_height` of `0` disables expiry (the transaction
     /// never expires), and an already-`Mined` transaction is never expired: it was included before its
-    /// expiry and is final.
+    /// expiry and is final. An [`Invalid`](MigrationTxState::Invalid) transaction is never expired
+    /// either — its death is already recorded, and its remediation (out-of-band, via
+    /// [`AdvanceStep::Attend`]) is not the expiry path's rebuild — so a dead transaction is never
+    /// reported through both channels at once.
     fn is_expired(t: &MigrationTransaction, target_height: BlockHeight) -> bool {
-        if matches!(t.state, MigrationTxState::Mined { .. }) {
+        if matches!(
+            t.state,
+            MigrationTxState::Mined { .. } | MigrationTxState::Invalid { .. }
+        ) {
             return false;
         }
         let expiry = u32::from(t.expiry_height);
@@ -219,7 +308,10 @@ impl MigrationState {
     /// signed anew with a fresh anchor and expiry while keeping its denomination. A TRANSFER here
     /// is also surfaced as [`AdvanceStep::Rebuild`]; a PREPARATION is not (rebuilding it means
     /// re-signing its whole dependent subtree, a remediation beyond a single advance step), so a
-    /// wallet uses this list to tell the user the migration needs a new signing ceremony.
+    /// wallet uses this list to tell the user the migration needs a new signing ceremony. A
+    /// transaction marked [`Invalid`](MigrationTxState::Invalid) is never listed: its death is
+    /// already recorded, surfaced as [`AdvanceStep::Attend`] and resolved out-of-band rather than
+    /// through the expiry path.
     pub fn expired_transactions(&self, target_height: BlockHeight) -> Vec<MigrationTransferId> {
         self.transactions
             .iter()
@@ -242,9 +334,18 @@ impl MigrationState {
             .map(|t| t.id)
     }
 
-    /// Whether transaction `t` is ready to PROVE at `target_height` (`chain_tip + 1`): its
-    /// dependencies are mined and its Orchard anchor is resolvable from the wallet's commitment tree
-    /// right now.
+    /// The id of the first transaction marked [`Invalid`](MigrationTxState::Invalid), the one
+    /// [`Self::next_step`] surfaces as [`AdvanceStep::Attend`]. Purely state-matched: invalidity
+    /// is recorded evidence, not a height computation, so no target height is involved.
+    fn next_attention(&self) -> Option<MigrationTransferId> {
+        self.transactions
+            .iter()
+            .find(|t| matches!(t.state, MigrationTxState::Invalid { .. }))
+            .map(|t| t.id)
+    }
+
+    /// Whether transaction `t` is ready to PROVE at `targets`: its dependencies are mined and its
+    /// Orchard anchor is resolvable from the wallet's commitment tree right now.
     ///
     /// A TRANSFER anchors to a drawn boundary ([`anchor_boundary`](MigrationTransaction::anchor_boundary)),
     /// which must have SETTLED: the boundary block must be strictly below the chain tip so its
@@ -255,30 +356,38 @@ impl MigrationState {
     /// broadcast (see [`Self::next_step`]). A PREPARATION carries no drawn boundary and anchors to
     /// a fresh checkpoint at the tip when proved, so it is prove-ready once its dependencies are
     /// mined and its scheduled height has arrived.
-    fn prove_ready(&self, t: &MigrationTransaction, target_height: BlockHeight) -> bool {
+    ///
+    /// Under the dual-target rule (see [`DuenessTargets`]) only the preparation's schedule
+    /// comparison consults the EFFECTIVE serving target; expiry and a transfer's boundary
+    /// settledness are statements about scanned chain data, judged on the SCANNED target alone.
+    fn prove_ready_at(&self, t: &MigrationTransaction, targets: DuenessTargets) -> bool {
         // An expired transaction can never be mined, so proving it is wasted work: it must be rebuilt
         // (with a fresh anchor and expiry) first. Guarding here keeps `next_provable` from ever
-        // offering an expired transaction.
-        if Self::is_expired(t, target_height) {
+        // offering an expired transaction. Judged on the SCANNED target: an estimate never decides
+        // an expiry.
+        if Self::is_expired(t, targets.scanned()) {
             return false;
         }
         if !self.deps_mined(&t.depends_on) {
             return false;
         }
         match t.anchor_boundary {
-            // A transfer: the boundary must be strictly below the tip. `target_height` is `tip + 1`,
-            // so `boundary < tip` is `boundary + 1 < target_height`.
-            Some(boundary) => u32::from(boundary) + 1 < u32::from(target_height),
-            // A preparation: prove-ready once its schedule is due.
-            None => t.scheduled_height <= target_height,
+            // A transfer: the boundary must be strictly below the SCANNED tip — its checkpoint
+            // exists in the wallet's tree only once the scanned data proves the boundary settled;
+            // an estimate cannot conjure it. The scanned target is `tip + 1`, so `boundary < tip`
+            // is `boundary + 1 < target`.
+            Some(boundary) => u32::from(boundary) + 1 < u32::from(targets.scanned()),
+            // A preparation: prove-ready once its schedule is due on the SERVING target (the one
+            // comparison the estimate may accelerate).
+            None => t.scheduled_height <= targets.effective(),
         }
     }
 
-    /// The next pre-signed transaction ready to PROVE, as [`Self::next_provable`] selects it, with
-    /// the whole transaction visible so [`Self::next_step`] can also surface its kind.
-    fn next_provable_tx(&self, target_height: BlockHeight) -> Option<&MigrationTransaction> {
+    /// The next pre-signed transaction ready to PROVE, as [`Self::next_provable_at`] selects it,
+    /// with the whole transaction visible so [`Self::next_step`] can also surface its kind.
+    fn next_provable_tx_at(&self, targets: DuenessTargets) -> Option<&MigrationTransaction> {
         self.transactions.iter().find(|t| {
-            matches!(t.state, MigrationTxState::Signed) && self.prove_ready(t, target_height)
+            matches!(t.state, MigrationTxState::Signed) && self.prove_ready_at(t, targets)
         })
     }
 
@@ -286,23 +395,62 @@ impl MigrationState {
     /// is resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
     /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
     /// broadcast in separate waking sessions.
+    ///
+    /// Equivalent to [`Self::next_provable_at`] with both targets at `target_height` (the
+    /// no-estimate case).
     pub fn next_provable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
-        self.next_provable_tx(target_height).map(|t| t.id)
+        self.next_provable_at(DuenessTargets::at(target_height))
+    }
+
+    /// The estimate-aware variant of [`Self::next_provable`], for a consumer whose scanned chain
+    /// view lags the real chain (see [`DuenessTargets`]): a preparation transaction's schedule
+    /// due-ness is judged on the EFFECTIVE serving target, so a wall-clock estimate can surface it
+    /// at the wake-up its schedule aimed at rather than one sync later; expiry and a transfer's
+    /// anchor-boundary settledness are judged on the SCANNED target alone.
+    pub fn next_provable_at(&self, targets: DuenessTargets) -> Option<MigrationTransferId> {
+        self.next_provable_tx_at(targets).map(|t| t.id)
     }
 
     /// The id of the next transaction ready to BROADCAST: already `Proved`, its dependencies mined,
     /// and scheduled at or before `target_height` (`chain_tip + 1`).
+    ///
+    /// Equivalent to [`Self::next_broadcastable_at`] with both targets at `target_height` (the
+    /// no-estimate case).
     pub fn next_broadcastable(&self, target_height: BlockHeight) -> Option<MigrationTransferId> {
+        self.next_broadcastable_at(DuenessTargets::at(target_height))
+    }
+
+    /// The estimate-aware variant of [`Self::next_broadcastable`], for a consumer whose scanned
+    /// chain view lags the real chain (see [`DuenessTargets`]): the schedule comparison is judged
+    /// on the EFFECTIVE serving target, so a wall-clock estimate can surface a due broadcast at
+    /// the wake-up its schedule aimed at rather than one sync later.
+    ///
+    /// The expiry handling is deliberately ASYMMETRIC between the two targets. A transaction the
+    /// SCANNED target proves expired is excluded exactly as everywhere else, and the ordinary
+    /// expired -> [`AdvanceStep::Rebuild`] path owns it. A transaction whose
+    /// [`expiry_height`](MigrationTransaction::expiry_height) only the EFFECTIVE target has passed
+    /// is ALSO not served, yet is treated as expired NOWHERE: if the estimate is right, the node's
+    /// tip is past its expiry and broadcasting it is a guaranteed network rejection, so the
+    /// protective refusal wastes nothing; if the estimate is wrong, one broadcast waits until the
+    /// scanned tip either reaches the scheduled height (still unexpired: it is served) or confirms
+    /// the expiry (the rebuild path takes over). The estimate may WITHHOLD a doomed submission
+    /// (protective, reversible) but never trigger a rebuild (destructive — a new signing —
+    /// requiring the scanned tip's proof).
+    pub fn next_broadcastable_at(&self, targets: DuenessTargets) -> Option<MigrationTransferId> {
         self.transactions
             .iter()
             .find(|t| {
                 matches!(t.state, MigrationTxState::Proved)
-                    && t.scheduled_height <= target_height
+                    && t.scheduled_height <= targets.effective()
                     && self.deps_mined(&t.depends_on)
                     // An expired proven transaction would be rejected by the node; it must be rebuilt,
                     // not broadcast. This is what stops a wallet resumed after its broadcast windows
-                    // lapsed from broadcasting a stale, no-longer-includable transaction.
-                    && !Self::is_expired(t, target_height)
+                    // lapsed from broadcasting a stale, no-longer-includable transaction. Judged on
+                    // the EFFECTIVE target: since `effective >= scanned`, the one comparison both
+                    // excludes a scanned-confirmed expiry (like every other query) and refuses the
+                    // merely-estimated one — the doomed-broadcast guard; see the method docs for
+                    // the asymmetry.
+                    && !Self::is_expired(t, targets.effective())
             })
             .map(|t| t.id)
     }
@@ -321,14 +469,14 @@ impl MigrationState {
     ///
     /// Covered are transfers in the `Signed` or `AwaitingSignature` state — proving and signature
     /// application are independent operations, so a transfer whose signed PCZT has not yet been
-    /// returned by the external signer still needs its proof on the same schedule — while `Proved`,
-    /// `Broadcast`, and `Mined` transfers, expired transfers (their rebuild reschedules them), and
-    /// preparations (which anchor at the tip when proved, driven by [`Self::next_step`] at their
-    /// own broadcast wake-ups) are not. A transfer lacking a drawn anchor boundary (impossible for
-    /// a state committed by this crate) likewise contributes no wake-up: like a preparation, it is
-    /// driven by [`Self::next_step`] at its scheduled height. Nothing is persisted: the schedule
-    /// is derived from the migration state, so recompute it — with fresh jitter — after any state
-    /// change (a proof stored, a rebuild, a missed wake-up).
+    /// returned by the external signer still needs its proof on the same schedule — while
+    /// `Proved`, `Broadcast`, `Mined`, and `Invalid` transfers, expired transfers (their rebuild
+    /// reschedules them), and preparations (which anchor at the tip when proved, driven by
+    /// [`Self::next_step`] at their own broadcast wake-ups) are not. A transfer lacking a drawn
+    /// anchor boundary (impossible for a state committed by this crate) likewise contributes no
+    /// wake-up: like a preparation, it is driven by [`Self::next_step`] at its scheduled height.
+    /// Nothing is persisted: the schedule is derived from the migration state, so recompute it —
+    /// with fresh jitter — after any state change (a proof stored, a rebuild, a missed wake-up).
     pub fn sync_wakeup_schedule<R: RngCore + CryptoRng>(
         &self,
         current_tip: BlockHeight,
@@ -357,7 +505,10 @@ impl MigrationState {
     /// Recomputes the overall [`MigrationStatus`]: `Complete` once every transaction is mined,
     /// `InProgress` once any has been broadcast or mined. Leaves the status unchanged otherwise (an
     /// uncommitted or freshly committed migration keeps its `Planning`/`Committed` status until work
-    /// begins).
+    /// begins). A run containing an [`Invalid`](MigrationTxState::Invalid) transaction is by the
+    /// same all-mined test never `Complete`: it stays non-terminal, with [`Self::next_step`]
+    /// reporting [`AdvanceStep::Attend`], until the consumer resolves it (typically by cancelling,
+    /// which IS terminal, and re-planning).
     pub fn recompute_status(&mut self) {
         // A terminal status (Complete or Failed, the latter also used for a cancelled migration) is
         // final: never move out of it. Otherwise a cancelled migration whose transactions were
@@ -395,9 +546,18 @@ impl MigrationState {
 
     /// Records that the transaction `id` was broadcast with the given `txid`, then recomputes the
     /// overall status. The consumer calls this after it broadcasts the transaction the engine handed
-    /// it.
+    /// it. An unknown `id` is a no-op.
+    ///
+    /// An [`Invalid`](MigrationTxState::Invalid) transaction is left unchanged: a submission is
+    /// not evidence of validity (a node accepting a transaction into its mempool does not make it
+    /// minable), so it must not erase a recorded death — if the transaction does mine after all,
+    /// [`Self::mark_mined`] supersedes the verdict then.
     pub fn mark_broadcast(&mut self, id: MigrationTransferId, txid: TxId) {
-        if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
+        if let Some(tx) = self
+            .transactions
+            .iter_mut()
+            .find(|t| t.id == id && !matches!(t.state, MigrationTxState::Invalid { .. }))
+        {
             tx.state = MigrationTxState::Broadcast { txid };
         }
         self.recompute_status();
@@ -406,9 +566,41 @@ impl MigrationState {
     /// Records that the transaction `id` was mined at `height`, then recomputes the overall status. The
     /// consumer detects mining through its own chain view (matching a broadcast transaction's txid) and
     /// calls this, which is what lets a later preparation layer or the transfers become actionable.
+    /// An unknown `id` is a no-op.
+    ///
+    /// Mining DOES overwrite an [`Invalid`](MigrationTxState::Invalid) transaction: inclusion in a
+    /// block is the one piece of evidence that outranks an invalidity verdict (which rests on a
+    /// single node's rejection or the consumer's own scan inference), so a stale or mistaken
+    /// [`Self::mark_invalid`] is self-healing — the chain's verdict wins whichever report arrives
+    /// last.
     pub fn mark_mined(&mut self, id: MigrationTransferId, height: BlockHeight) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
             tx.state = MigrationTxState::Mined { height };
+        }
+        self.recompute_status();
+    }
+
+    /// Records the consumer's observed EVIDENCE that transaction `id` can never mine — a funding
+    /// note spent outside the migration, or a node rejecting the submission — moving it to
+    /// [`Invalid`](MigrationTxState::Invalid) with the given `reason`, then recomputes the overall
+    /// status. The consumer reports this from its own I/O (its wallet scan, its broadcast error
+    /// handling): the engine deliberately performs neither, so an event-based death exists for the
+    /// state machine only once it is recorded here. [`Self::next_step`] thereafter surfaces the
+    /// transaction as [`AdvanceStep::Attend`], and every actionable query excludes it.
+    ///
+    /// An already-[`Mined`](MigrationTxState::Mined) transaction is left unchanged: it was
+    /// included in a block, so it SUCCEEDED, and whatever prompted the call is stale — refusing it
+    /// here is what makes a race between a mining detection and an invalidity report converge on
+    /// the chain's verdict in either arrival order. An unknown `id` is a no-op, matching
+    /// [`Self::mark_broadcast`] / [`Self::mark_mined`]. Every other state is overwritten,
+    /// including an earlier `Invalid` (the newest evidence carries the reason shown to the user).
+    pub fn mark_invalid(&mut self, id: MigrationTransferId, reason: InvalidReason) {
+        if let Some(tx) = self
+            .transactions
+            .iter_mut()
+            .find(|t| t.id == id && !matches!(t.state, MigrationTxState::Mined { .. }))
+        {
+            tx.state = MigrationTxState::Invalid { reason };
         }
         self.recompute_status();
     }
@@ -451,6 +643,10 @@ impl MigrationState {
     /// the step's completion, the same step is returned. The steps map onto the crate's
     /// operations as follows:
     ///
+    /// - [`AdvanceStep::Attend`]: the transaction is marked [`Invalid`](MigrationTxState::Invalid)
+    ///   (its entry in [`Self::transaction_statuses`] carries the reason) and nothing this crate
+    ///   automates can advance it: resolve it out-of-band, typically by cancelling the migration
+    ///   and re-planning the remaining balance. The one step no engine operation discharges.
     /// - [`AdvanceStep::Prove`]: install the transaction's deferred anchor and witnesses and store
     ///   the proven PCZT — [`prove_transfer`](crate::engine::prove_transfer) /
     ///   [`prove_preparation`](crate::engine::prove_preparation), which also record the
@@ -474,8 +670,17 @@ impl MigrationState {
     ///
     /// # Ordering, and what it implies for wallet construction
     ///
-    /// When several actions are available at once the priority is BROADCAST, then PROVE, then
-    /// REBUILD.
+    /// When several actions are available at once the priority is ATTEND, then BROADCAST, then
+    /// PROVE, then REBUILD.
+    ///
+    /// Attend outranks everything but a terminal run: an invalid transaction means part of the
+    /// migration is dead in a way no automatic step remedies — every broadcast of it is a
+    /// guaranteed rejection, and everything depending on it waits forever — so a consumer must
+    /// receive the attention signal before it continues to drive, rather than after it has spent
+    /// its waking sessions working a run whose outcome is already decided. (The signal hides no
+    /// work: the still-valid transactions stay visible through [`Self::transaction_statuses`] and
+    /// served by [`Self::next_provable`] / [`Self::next_broadcastable`], so a consumer that
+    /// deliberately continues past it can.)
     ///
     /// Broadcast precedes prove because the two kinds of work want to be in DIFFERENT WAKING
     /// SESSIONS. ZIP 318 requires that a background wake window be used either to sync the wallet
@@ -514,11 +719,27 @@ impl MigrationState {
     /// slept through a transfer's proving wake-ups and its broadcast height is simply offered
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
     /// has expired.
+    ///
+    /// This method is deliberately SINGLE-TARGET: the drive loop is evaluated on the consumer's
+    /// scanned chain view (`target_height` = `scanned_tip + 1`), since everything it decides —
+    /// expiry, boundary settledness, what to rebuild — must rest on data the wallet has actually
+    /// seen. A consumer whose scanned tip lags the real chain between syncs and that keeps a
+    /// wall-clock estimate of the real target serves its delivery lanes through
+    /// [`Self::next_provable_at`] / [`Self::next_broadcastable_at`] instead, where the estimate
+    /// may accelerate schedule due-ness (and only that; see [`DuenessTargets`]).
     pub fn next_step(&self, target_height: BlockHeight) -> AdvanceStep {
         // A terminal migration (complete, or failed/cancelled) has no next action: never build or
         // broadcast for it, so a cancelled migration cannot be driven further.
         if self.is_terminal() {
             return AdvanceStep::Complete;
+        }
+        // An invalid transaction outranks all actionable work: part of the run is dead in a way no
+        // automatic step remedies, and the consumer must see that before it keeps driving (see the
+        // ordering rationale above). The migration itself is NOT terminal — the consumer resolves
+        // the death out-of-band, typically by cancelling and re-planning — which is why this is a
+        // step, not a status.
+        if let Some(id) = self.next_attention() {
+            return AdvanceStep::Attend { id };
         }
         // If the wallet has a transaction available for broadcast, it should immediately
         // do that and *not* initiate any sync operations unless the user specifically needs
@@ -530,7 +751,7 @@ impl MigrationState {
         // At this point we know we're not broadcasting, so we can sync and prove. The kind rides
         // along because it decides the session handling: a preparation is broadcast as soon as it
         // is proved, a transfer's broadcast waits for its own (later) session.
-        if let Some(t) = self.next_provable_tx(target_height) {
+        if let Some(t) = self.next_provable_tx_at(DuenessTargets::at(target_height)) {
             return AdvanceStep::Prove {
                 id: t.id,
                 kind: t.kind,
@@ -562,7 +783,9 @@ impl MigrationState {
     /// transfer's drawn boundary has settled; a preparation is due on its schedule) is ready to
     /// prove; a `Proved` one whose scheduled height has arrived is ready to broadcast. Otherwise a
     /// waiting transaction reports what it is blocked on: its dependencies (a preparation still to
-    /// mine), an anchor boundary yet to settle, the broadcast schedule, or an external signature.
+    /// mine), an anchor boundary yet to settle, the broadcast schedule, an external signature, or
+    /// its own death (expired, or marked invalid — the latter with its reason in
+    /// [`state`](TransactionStatus::state)).
     pub fn transaction_statuses(&self, target_height: BlockHeight) -> Vec<TransactionStatus> {
         self.transactions
             .iter()
@@ -570,7 +793,9 @@ impl MigrationState {
                 let deps_ok = self.deps_mined(&t.depends_on);
                 // An expired transaction (not yet mined, past its expiry height) can never be mined and
                 // must be rebuilt; report that ahead of any other blocker, so a wallet shows it as
-                // needing attention rather than as waiting on a dependency or the schedule.
+                // needing attention rather than as waiting on a dependency or the schedule. (An
+                // `Invalid` transaction is never `is_expired`, so its more specific verdict — which
+                // carries a reason — is what gets reported below.)
                 let (ready, action, blocked_on) = if Self::is_expired(t, target_height) {
                     (false, None, Some(Blocker::Expired))
                 } else {
@@ -589,7 +814,7 @@ impl MigrationState {
                         MigrationTxState::Signed => {
                             if !deps_ok {
                                 (false, None, Some(Blocker::Dependencies))
-                            } else if self.prove_ready(t, target_height) {
+                            } else if self.prove_ready_at(t, DuenessTargets::at(target_height)) {
                                 (true, Some(NextAction::Prove), None)
                             } else {
                                 // Deps mined but not prove-ready: a transfer waiting for its anchor
@@ -614,6 +839,10 @@ impl MigrationState {
                         }
                         MigrationTxState::Broadcast { .. } => (false, None, None),
                         MigrationTxState::Mined { .. } => (false, None, None),
+                        // Dead by observed event: not actionable, and no chain condition will
+                        // change that (`next_step` surfaces the run-level attention signal as
+                        // `Attend`). The reason rides in `state`, which this view carries.
+                        MigrationTxState::Invalid { .. } => (false, None, Some(Blocker::Invalid)),
                     }
                 };
                 let txid = match t.state {
@@ -1355,5 +1584,369 @@ mod tests {
             s.next_step(BlockHeight::from_u32(1_000)),
             AdvanceStep::Complete
         );
+    }
+
+    /// A transaction in the given invalid state, for the failure-state tests.
+    fn invalid(reason: InvalidReason) -> MigrationTxState {
+        MigrationTxState::Invalid { reason }
+    }
+
+    /// The precedence pin for evidence-based death: with an invalid transaction present, `Attend`
+    /// is surfaced ahead of a broadcast that is due right now (and hence ahead of prove and
+    /// rebuild, which rank below broadcast).
+    #[test]
+    fn attend_precedes_broadcast_and_all_other_work() {
+        let due = tx(0, transfer(0), MigrationTxState::Proved); // scheduled at 0: due immediately
+        let dead = tx(1, transfer(1), invalid(InvalidReason::FundingSpent));
+        let s = state_with(vec![due, dead]);
+
+        assert_eq!(
+            s.next_broadcastable(BlockHeight::from_u32(100)),
+            Some(MigrationTransferId(0)),
+            "the broadcast IS due; the precedence, not the query, holds it back"
+        );
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(100)),
+            AdvanceStep::Attend {
+                id: MigrationTransferId(1)
+            }
+        );
+    }
+
+    /// An invalid transaction is excluded from every actionable query — never provable,
+    /// broadcastable, or wake-up-scheduled — and its death is reported through the invalidity
+    /// channel alone: even past its expiry height it is neither listed as expired nor offered for
+    /// rebuild.
+    #[test]
+    fn invalid_transaction_is_excluded_from_every_query() {
+        let target = BlockHeight::from_u32(100);
+        // A transfer that would be provable (boundary settled, no dependencies, never expires) —
+        // and broadcastable were it proved (scheduled height passed) — except for its state.
+        let s = state_with(vec![scheduled_transfer(
+            0,
+            0,
+            40,
+            60,
+            invalid(InvalidReason::RejectedInvalid),
+        )]);
+        assert_eq!(s.next_provable(target), None);
+        assert_eq!(s.next_broadcastable(target), None);
+        let mut r = ChaCha8Rng::seed_from_u64(1);
+        let wakeups = s
+            .sync_wakeup_schedule(BlockHeight::from_u32(50), &WakeupParams::new(10, 0), &mut r)
+            .expect("feasible");
+        assert!(
+            wakeups.is_empty(),
+            "a dead transfer needs no proving wake-up"
+        );
+
+        // The counterfactual, proving the exclusions are the state's doing and not the fixture's:
+        // merely `Signed`, the same transfer is provable and wake-up-scheduled.
+        let mut alive = s.clone();
+        alive.transactions[0].state = MigrationTxState::Signed;
+        assert_eq!(alive.next_provable(target), Some(MigrationTransferId(0)));
+        let mut r = ChaCha8Rng::seed_from_u64(1);
+        assert!(
+            !alive
+                .sync_wakeup_schedule(BlockHeight::from_u32(50), &WakeupParams::new(10, 0), &mut r)
+                .expect("feasible")
+                .is_empty()
+        );
+
+        // Past its expiry as well: still reported through the invalidity channel alone.
+        let mut dead_and_expired = s;
+        dead_and_expired.transactions[0].expiry_height = BlockHeight::from_u32(80);
+        assert!(
+            dead_and_expired.expired_transactions(target).is_empty(),
+            "an invalid transaction is not reported as expired (its death is already recorded)"
+        );
+        assert_eq!(
+            dead_and_expired.next_step(target),
+            AdvanceStep::Attend {
+                id: MigrationTransferId(0)
+            },
+            "and never offered for rebuild"
+        );
+    }
+
+    /// `mark_invalid` records the death (with its reason) for a not-yet-mined transaction and an
+    /// unknown id is a no-op, matching `mark_broadcast`/`mark_mined`; on an already-invalid row
+    /// the newest evidence wins.
+    #[test]
+    fn mark_invalid_records_the_reason_and_ignores_unknown_ids() {
+        let mut s = state_with(vec![
+            tx(0, prep(0, 0), MigrationTxState::Signed),
+            tx(1, transfer(0), MigrationTxState::Proved),
+        ]);
+
+        s.mark_invalid(MigrationTransferId(9), InvalidReason::FundingSpent);
+        assert!(
+            s.transactions
+                .iter()
+                .all(|t| t.state.invalid_reason().is_none()),
+            "an unknown id changes nothing"
+        );
+
+        s.mark_invalid(MigrationTransferId(1), InvalidReason::FundingSpent);
+        assert_eq!(
+            s.transactions[1].state,
+            invalid(InvalidReason::FundingSpent)
+        );
+        assert_eq!(
+            s.status,
+            MigrationStatus::Committed,
+            "nothing broadcast or mined: recomputing the status changes nothing"
+        );
+
+        s.mark_invalid(MigrationTransferId(1), InvalidReason::RejectedInvalid);
+        assert_eq!(
+            s.transactions[1].state.invalid_reason(),
+            Some(InvalidReason::RejectedInvalid),
+            "the newest evidence carries the reason"
+        );
+    }
+
+    /// Chain inclusion is the one piece of evidence that outranks an invalidity verdict: a mined
+    /// row is never marked invalid, `mark_mined` supersedes an earlier verdict, and a broadcast (a
+    /// mere submission, not evidence of validity) leaves the verdict standing — so a race between
+    /// the mining detection and the invalidity report converges on the chain's answer in either
+    /// arrival order.
+    #[test]
+    fn chain_inclusion_outranks_invalidity_evidence() {
+        // Evidence arriving after the mining detection is stale: rejected.
+        let mut s = state_with(vec![tx(0, transfer(0), mined(10))]);
+        s.mark_invalid(MigrationTransferId(0), InvalidReason::FundingSpent);
+        assert_eq!(s.transactions[0].state, mined(10));
+
+        // The other arrival order: the verdict lands first, then the transaction is seen mined.
+        let mut s = state_with(vec![tx(
+            0,
+            transfer(0),
+            invalid(InvalidReason::RejectedExpired),
+        )]);
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(20));
+        assert_eq!(s.transactions[0].state, mined(20));
+        assert_eq!(s.status, MigrationStatus::Complete);
+
+        // A broadcast is not inclusion: it must not erase the verdict.
+        let mut s = state_with(vec![tx(
+            0,
+            transfer(0),
+            invalid(InvalidReason::FundingSpent),
+        )]);
+        s.mark_broadcast(MigrationTransferId(0), TxId::from_bytes([7; 32]));
+        assert_eq!(
+            s.transactions[0].state.invalid_reason(),
+            Some(InvalidReason::FundingSpent)
+        );
+    }
+
+    /// A run containing an invalid transaction never reaches `Complete`: the all-mined test fails,
+    /// so the migration stays non-terminal — surfacing `Attend` — even when every OTHER
+    /// transaction has mined.
+    #[test]
+    fn a_run_with_an_invalid_transaction_is_not_complete() {
+        let mut s = state_with(vec![
+            tx(0, prep(0, 0), mined(10)),
+            tx(1, transfer(0), MigrationTxState::Proved),
+        ]);
+        s.mark_invalid(MigrationTransferId(1), InvalidReason::FundingSpent);
+        assert_eq!(
+            s.status,
+            MigrationStatus::InProgress,
+            "started (a transaction mined), but never complete"
+        );
+        assert!(!s.is_terminal());
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(100)),
+            AdvanceStep::Attend {
+                id: MigrationTransferId(1)
+            }
+        );
+    }
+
+    /// An invalid transaction reports not-ready with no action and the `Invalid` blocker, its
+    /// reason riding in `state` — and that verdict wins over `Expired` when both hold, the
+    /// recorded event (which carries a reason) being the more specific fact.
+    #[test]
+    fn transaction_statuses_report_invalid_with_its_reason() {
+        let reason = InvalidReason::RejectedExpired;
+        let dead = tx_expiring(1, transfer(0), invalid(reason), 50);
+        let s = state_with(vec![tx(0, prep(0, 0), mined(10)), dead]);
+
+        // Target 100 is past the expiry height 50 too: Invalid still wins.
+        let v = s.transaction_statuses(BlockHeight::from_u32(100));
+        assert!(!v[1].ready);
+        assert_eq!(v[1].action, None);
+        assert_eq!(v[1].blocked_on, Some(Blocker::Invalid));
+        assert_eq!(
+            v[1].state.invalid_reason(),
+            Some(reason),
+            "the reason is readable off the status's state"
+        );
+    }
+
+    /// A terminal (cancelled) migration is never asked to attend: `Complete` still wins, so a
+    /// consumer that already cancelled a run with a dead transaction is not re-alerted forever.
+    #[test]
+    fn terminal_migration_is_not_offered_for_attention() {
+        let mut s = state_with(vec![tx(
+            0,
+            transfer(0),
+            invalid(InvalidReason::FundingSpent),
+        )]);
+        s.status = MigrationStatus::Failed;
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(100)),
+            AdvanceStep::Complete
+        );
+    }
+
+    /// `DuenessTargets::new` clamps: a stale estimate below the scanned target never drags the
+    /// serving target backwards, and no estimate leaves both targets coincident (the
+    /// [`DuenessTargets::at`] case).
+    #[test]
+    fn dueness_targets_clamp_a_stale_estimate() {
+        let scanned = BlockHeight::from_u32(200);
+
+        let stale = DuenessTargets::new(scanned, Some(BlockHeight::from_u32(150)));
+        assert_eq!(stale.scanned(), scanned);
+        assert_eq!(stale.effective(), scanned);
+
+        assert_eq!(
+            DuenessTargets::new(scanned, None),
+            DuenessTargets::at(scanned)
+        );
+
+        let ahead = DuenessTargets::new(scanned, Some(BlockHeight::from_u32(250)));
+        assert_eq!(ahead.scanned(), scanned);
+        assert_eq!(ahead.effective(), BlockHeight::from_u32(250));
+    }
+
+    /// The estimate accelerates SCHEDULE due-ness: work due only under the effective target is
+    /// served by the `_at` lanes — a proved transfer for broadcast, a pre-signed preparation for
+    /// proving (its prove-readiness IS schedule due-ness) — while the single-target queries at the
+    /// scanned tip alone still serve nothing.
+    #[test]
+    fn estimated_target_accelerates_schedule_dueness() {
+        let scanned = BlockHeight::from_u32(100);
+        let targets = DuenessTargets::new(scanned, Some(BlockHeight::from_u32(130)));
+
+        // A proved transfer scheduled between the scanned and effective targets.
+        let mut xfer = tx(0, transfer(0), MigrationTxState::Proved);
+        xfer.scheduled_height = BlockHeight::from_u32(120);
+        let s = state_with(vec![xfer]);
+        assert_eq!(s.next_broadcastable(scanned), None);
+        assert_eq!(
+            s.next_broadcastable_at(targets),
+            Some(MigrationTransferId(0))
+        );
+
+        // A pre-signed preparation scheduled likewise.
+        let mut prep0 = tx(0, prep(0, 0), MigrationTxState::Signed);
+        prep0.scheduled_height = BlockHeight::from_u32(120);
+        let s = state_with(vec![prep0]);
+        assert_eq!(s.next_provable(scanned), None);
+        assert_eq!(s.next_provable_at(targets), Some(MigrationTransferId(0)));
+    }
+
+    /// The estimate never DECIDES an expiry — but it does WITHHOLD a doomed broadcast. A proved,
+    /// due transfer whose expiry only the effective target has passed is refused by the
+    /// estimate-aware lane (if the estimate is right, the node would reject the submission), yet
+    /// treated as expired NOWHERE: not listed, not offered for rebuild. The two outcomes are
+    /// distinct decisions, and only the protective refusal may ride on the estimate; once the
+    /// SCANNED tip confirms the expiry, the ordinary rebuild path takes over.
+    #[test]
+    fn estimated_target_withholds_a_doomed_broadcast_but_never_decides_expiry() {
+        let scanned = BlockHeight::from_u32(100);
+        let targets = DuenessTargets::new(scanned, Some(BlockHeight::from_u32(130)));
+        // Due below the scanned target; expires between the scanned and effective targets.
+        let mut xfer = tx_expiring(0, transfer(0), MigrationTxState::Proved, 110);
+        xfer.scheduled_height = BlockHeight::from_u32(90);
+        let s = state_with(vec![xfer]);
+
+        // The scanned view serves it (still includable as far as scanned data proves)...
+        assert_eq!(s.next_broadcastable(scanned), Some(MigrationTransferId(0)));
+        // ...the estimate-aware lane refuses it...
+        assert_eq!(s.next_broadcastable_at(targets), None);
+        // ...and nothing treats it as expired on the estimate: that verdict needs the scanned tip.
+        assert!(s.expired_transactions(scanned).is_empty());
+        assert_eq!(
+            s.next_step(scanned),
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(0)
+            }
+        );
+
+        // Once the SCANNED target itself passes the expiry, the ordinary expired path owns it.
+        let confirmed = BlockHeight::from_u32(111);
+        assert_eq!(
+            s.expired_transactions(confirmed),
+            vec![MigrationTransferId(0)]
+        );
+        assert_eq!(
+            s.next_step(confirmed),
+            AdvanceStep::Rebuild {
+                id: MigrationTransferId(0)
+            }
+        );
+        assert_eq!(s.next_broadcastable_at(DuenessTargets::at(confirmed)), None);
+    }
+
+    /// A transfer's anchor-boundary settledness is a statement about SCANNED data — the boundary
+    /// checkpoint either exists in the wallet's tree or it does not, and an estimate cannot
+    /// conjure it — so the effective target never accelerates it.
+    #[test]
+    fn boundary_settledness_is_not_accelerated() {
+        // Boundary at 100, schedule long since due: provable once the boundary settles.
+        let mut xfer = tx(0, transfer(0), MigrationTxState::Signed);
+        xfer.anchor_boundary = Some(BlockHeight::from_u32(100));
+        xfer.scheduled_height = BlockHeight::from_u32(90);
+        let s = state_with(vec![xfer]);
+
+        // Scanned tip 100 (target 101): the boundary is not yet strictly below the tip, and no
+        // estimate — however far ahead — changes that.
+        let unsettled = DuenessTargets::new(
+            BlockHeight::from_u32(101),
+            Some(BlockHeight::from_u32(1_000)),
+        );
+        assert_eq!(s.next_provable_at(unsettled), None);
+
+        // One scanned block later the boundary has genuinely settled.
+        let settled = DuenessTargets::new(
+            BlockHeight::from_u32(102),
+            Some(BlockHeight::from_u32(1_000)),
+        );
+        assert_eq!(s.next_provable_at(settled), Some(MigrationTransferId(0)));
+    }
+
+    /// With no estimate the `_at` lanes and the single-target queries agree everywhere: the
+    /// single-target queries delegate through [`DuenessTargets::at`], pinned here over a mixed
+    /// fixture across a sweep of targets that crosses schedules, a boundary settlement, and an
+    /// expiry.
+    #[test]
+    fn single_target_queries_equal_the_at_variants_with_no_estimate() {
+        let mut expiring = tx_expiring(2, transfer(1), MigrationTxState::Proved, 60);
+        expiring.scheduled_height = BlockHeight::from_u32(40);
+        let mut late_prep = tx(3, prep(1, 0), MigrationTxState::Signed);
+        late_prep.scheduled_height = BlockHeight::from_u32(80);
+        let s = state_with(vec![
+            tx(0, prep(0, 0), mined(10)),
+            scheduled_transfer(1, 0, 44, 70, MigrationTxState::Signed),
+            expiring,
+            late_prep,
+        ]);
+
+        for target in 0..120u32 {
+            let target = BlockHeight::from_u32(target);
+            assert_eq!(
+                s.next_provable(target),
+                s.next_provable_at(DuenessTargets::at(target))
+            );
+            assert_eq!(
+                s.next_broadcastable(target),
+                s.next_broadcastable_at(DuenessTargets::at(target))
+            );
+        }
     }
 }
