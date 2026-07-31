@@ -268,6 +268,9 @@ mod retention_follows_the_committed_migration {
 
     /// A migration carrying no transactions, recorded as committed under `interval`. Only the
     /// recorded grid matters here; the retention decision does not look at the transfers.
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s `arb_migration_state`:
+    /// the grid IS the subject, and that strategy draws it arbitrarily.
     fn migration_committed_under(interval: AnchorBucketInterval) -> MigrationState {
         MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -540,6 +543,13 @@ mod check_step_satisfiability {
 
     /// A pre-signed transfer caching `nfs` as its real-spend nullifiers, in the `Signed` state,
     /// with expiry height `expiry` (`0` disables expiry, per ZIP 203).
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s
+    /// `arb_migration_transaction`, like every constructor in this module: the four fields the
+    /// oracle's input-level judgment reads — the cache, the expiry, the non-`mined` lifecycle
+    /// state, and the absent anchor boundary that keeps the anchor path out of it — are all
+    /// pinned by an assertion here. `an_empty_cache_on_a_signed_row_is_corrupt` goes further and
+    /// asks for the one pairing `arb_state_and_spend_nullifiers` is written never to generate.
     fn transfer(nfs: Vec<Nullifier>, expiry: u32) -> MigrationTransaction {
         MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
@@ -607,6 +617,38 @@ mod check_step_satisfiability {
         .expect("the PCZT serializes")
     }
 
+    /// A transaction of `kind` in lifecycle state `state`, storing a PCZT with `anchor` installed,
+    /// recording `boundary` as the anchor boundary it was proven against, and caching `nfs` as its
+    /// real-spend nullifiers.
+    ///
+    /// `kind`, `state`, and `boundary` are the three fields the anchor-validity tests vary against
+    /// one another, so they are the parameters; the rest is filler no assertion reads. The stored
+    /// PCZT is why no strategy can stand in here at all: `arb_migration_transaction` draws its
+    /// `pczt` as arbitrary bytes, which do not deserialize as a PCZT — let alone carry a chosen
+    /// anchor, which is the whole subject of these tests.
+    fn anchored_transaction(
+        kind: MigrationTxKind,
+        state: MigrationTxState,
+        boundary: Option<BlockHeight>,
+        nfs: Vec<Nullifier>,
+        anchor: Anchor,
+    ) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            kind,
+            pczt_anchored_at(anchor),
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            boundary,
+            state,
+            None,
+            None,
+            cache(nfs),
+            None,
+        )
+    }
+
     /// A pre-signed transfer that has been BROADCAST and not yet mined, proven against `boundary`
     /// with `anchor` installed, and caching `nfs` as its real-spend nullifiers. This is the only
     /// shape the anchor-validity judgment applies to.
@@ -615,21 +657,14 @@ mod check_step_satisfiability {
         boundary: BlockHeight,
         anchor: Anchor,
     ) -> MigrationTransaction {
-        MigrationTransaction::from_parts(
-            MigrationTransferId::new(0),
+        anchored_transaction(
             MigrationTxKind::Transfer { crossing: 0 },
-            pczt_anchored_at(anchor),
-            Vec::new(),
-            BlockHeight::from_u32(0),
-            BlockHeight::from_u32(0),
-            Some(boundary),
             MigrationTxState::Broadcast {
                 txid: TxId::from_bytes([7; 32]),
             },
-            None,
-            None,
-            cache(nfs),
-            None,
+            Some(boundary),
+            nfs,
+            anchor,
         )
     }
 
@@ -1100,19 +1135,14 @@ mod check_step_satisfiability {
     fn a_displaced_anchor_on_an_unbroadcast_transfer_does_not_mark() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
         let as_of = st.generate_and_scan_empty_blocks(12);
-        let signed = MigrationTransaction::from_parts(
-            MigrationTransferId::new(0),
+        // Exactly `broadcast_transfer`'s shape but for the lifecycle state: the boundary still
+        // sits at the settle depth, so only the state can be what prevents the mark.
+        let signed = anchored_transaction(
             MigrationTxKind::Transfer { crossing: 0 },
-            pczt_anchored_at(no_such_root()),
-            Vec::new(),
-            BlockHeight::from_u32(0),
-            BlockHeight::from_u32(0),
-            Some(as_of - SETTLE.blocks()),
             MigrationTxState::Signed,
-            None,
-            None,
-            cache(vec![nf]),
-            None,
+            Some(as_of - SETTLE.blocks()),
+            vec![nf],
+            no_such_root(),
         );
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1161,21 +1191,16 @@ mod check_step_satisfiability {
     fn a_broadcast_preparation_is_not_anchor_judged() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
         let as_of = st.generate_and_scan_empty_blocks(12);
-        let prep = MigrationTransaction::from_parts(
-            MigrationTransferId::new(0),
+        // `broadcast_transfer`'s shape but for the kind, and the absent boundary that follows from
+        // it: a preparation records none.
+        let prep = anchored_transaction(
             MigrationTxKind::Preparation { layer: 0, index: 0 },
-            pczt_anchored_at(no_such_root()),
-            Vec::new(),
-            BlockHeight::from_u32(0),
-            BlockHeight::from_u32(0),
-            None,
             MigrationTxState::Broadcast {
                 txid: TxId::from_bytes([7; 32]),
             },
             None,
-            None,
-            cache(vec![nf]),
-            None,
+            vec![nf],
+            no_such_root(),
         );
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1239,8 +1264,14 @@ mod truncation_follows_the_wallet {
     use crate::testing::{BlockCache, db::TestDbFactory};
 
     /// A migration transaction in `state`, marked at `unsatisfiable_at`; the plan-shaped fields are
-    /// immaterial to truncation. A mark is a stamp and a kind together, and which kind it is does
-    /// not matter here, so every mark is an observed spend.
+    /// immaterial to truncation. A mark is a stamp and a kind together, and truncation treats every
+    /// kind alike, so the kind is FIXED at an observed spend — which is what lets the surviving
+    /// mark be asserted whole, stamp and kind, rather than only by its height.
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s
+    /// `arb_migration_transaction`: the id orders the rows the assertions index by, and the
+    /// lifecycle state and the mark are the two things truncation acts on, so all three are
+    /// caller-chosen here.
     fn tx(
         id: u32,
         state: MigrationTxState,
