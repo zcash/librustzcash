@@ -41,7 +41,11 @@ workspace.
   corrupted-data error for a not-yet-mined row whose stored PCZT is already
   proven (its real spends are no longer identifiable, so the cache cannot be
   reconstructed), and leaving a mined row's cache empty — and
-  `replan_threshold` to the default policy.
+  `replan_threshold` to the default policy. It also restores the `txid` of
+  every `mined` pool-migration transaction stored without one (which is every
+  such row written by a previous release), recovering it from the wallet's own
+  record of the spend and failing with a corrupted-data error naming any row
+  for which no such record exists.
 - `pool_migration::orchard_ironwood::PoolMigrations` implements the new
   `zcash_pool_migration` `PoolMigrationRead::check_step_satisfiability`
   method, answering each cached real-spend nullifier from the wallet's
