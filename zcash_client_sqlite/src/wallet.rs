@@ -2201,6 +2201,82 @@ fn estimate_tree_size<P: consensus::Parameters>(
     Ok(result)
 }
 
+fn pending_range_overlaps_scanned_blocks(
+    conn: &rusqlite::Connection,
+    start_height: BlockHeight,
+    end_height: Option<BlockHeight>,
+    scanned_priority: i64,
+) -> Result<bool, SqliteClientError> {
+    conn.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM scan_queue
+             WHERE priority > :scanned_priority
+               AND :start_height < block_range_end
+               AND (:end_height IS NULL OR block_range_start < :end_height)
+               AND block_range_start <= (SELECT MAX(height) FROM blocks)
+         )",
+        named_params! {
+            ":start_height": u32::from(start_height),
+            ":end_height": end_height.map(u32::from),
+            ":scanned_priority": scanned_priority,
+        },
+        |row| row.get(0),
+    )
+    .map_err(SqliteClientError::from)
+}
+
+fn scanned_output_count(
+    conn: &rusqlite::Connection,
+    output_count_col: &str,
+    start_height: BlockHeight,
+    end_height: Option<BlockHeight>,
+    scanned_priority: i64,
+) -> Result<Option<u64>, SqliteClientError> {
+    // A normal in-order scan has pending work above the greatest height in
+    // `blocks`. In that case, checking every stored block for overlap with
+    // `scan_queue` cannot exclude any rows. Only retain the correlated
+    // exclusion when pending work overlaps the queried stored-block span.
+    let pending_ranges_overlap =
+        pending_range_overlaps_scanned_blocks(conn, start_height, end_height, scanned_priority)?;
+    if pending_ranges_overlap {
+        conn.query_row(
+            &format!(
+                "SELECT SUM({output_count_col})
+                 FROM blocks
+                 WHERE :start_height <= height
+                   AND (:end_height IS NULL OR height < :end_height)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM scan_queue
+                       WHERE block_range_start <= blocks.height
+                         AND blocks.height < block_range_end
+                         AND priority > :scanned_priority
+                   )",
+            ),
+            named_params! {
+                ":start_height": u32::from(start_height),
+                ":end_height": end_height.map(u32::from),
+                ":scanned_priority": scanned_priority,
+            },
+            |row| row.get::<_, Option<u64>>(0),
+        )
+    } else {
+        conn.query_row(
+            &format!(
+                "SELECT SUM({output_count_col})
+                 FROM blocks
+                 WHERE :start_height <= height
+                   AND (:end_height IS NULL OR height < :end_height)",
+            ),
+            named_params! {
+                ":start_height": u32::from(start_height),
+                ":end_height": end_height.map(u32::from),
+            },
+            |row| row.get::<_, Option<u64>>(0),
+        )
+    }
+    .map_err(SqliteClientError::from)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn subtree_scan_progress<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
@@ -2233,18 +2309,6 @@ fn subtree_scan_progress<P: consensus::Parameters>(
               AND priority > :scanned_priority
         )";
 
-    let mut stmt_scanned_count_until = conn.prepare_cached(&format!(
-        "SELECT SUM({output_count_col})
-        FROM blocks
-        WHERE :start_height <= height AND height < :end_height
-        {unscanned_filter}",
-    ))?;
-    let mut stmt_scanned_count_from = conn.prepare_cached(&format!(
-        "SELECT SUM({output_count_col})
-        FROM blocks
-        WHERE :start_height <= height
-        {unscanned_filter}",
-    ))?;
     let mut stmt_start_tree_size = conn.prepare_cached(&format!(
         "SELECT MAX({table_prefix}_commitment_tree_size - {output_count_col})
         FROM blocks
@@ -2406,13 +2470,12 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     // Count the total outputs scanned so far on the birthday side of the recover-until height.
     let recovered_count = recover_until_height
         .map(|end_height| {
-            stmt_scanned_count_until.query_row(
-                named_params! {
-                    ":start_height": u32::from(min_birthday_height),
-                    ":end_height": u32::from(end_height),
-                    ":scanned_priority": scanned_priority,
-                },
-                |row| row.get::<_, Option<u64>>(0),
+            scanned_output_count(
+                conn,
+                output_count_col,
+                min_birthday_height,
+                Some(end_height),
+                scanned_priority,
             )
         })
         .transpose()?;
@@ -2432,12 +2495,12 @@ fn subtree_scan_progress<P: consensus::Parameters>(
     let scan = {
         // Count the total outputs scanned so far on the chain tip side of the
         // recover-until height.
-        let scanned_count = stmt_scanned_count_from.query_row(
-            named_params![
-                ":start_height": u32::from(recover_until_height.unwrap_or(min_birthday_height)),
-                ":scanned_priority": scanned_priority,
-            ],
-            |row| row.get::<_, Option<u64>>(0),
+        let scanned_count = scanned_output_count(
+            conn,
+            output_count_col,
+            recover_until_height.unwrap_or(min_birthday_height),
+            None,
+            scanned_priority,
         )?;
 
         recover_until_size
@@ -5901,6 +5964,7 @@ mod tests {
     use zcash_client_backend::data_api::{
         Account as _, AccountSource, TransactionDataRequest, TransactionStatus, WalletRead,
         WalletWrite,
+        scanning::ScanPriority,
         testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
         wallet::ConfirmationsPolicy,
     };
@@ -5916,12 +5980,124 @@ mod tests {
 
     use super::{
         KeyScope, ShieldedPool, TxQueryType, TxRef, account_birthday,
-        flag_previously_received_change, min_shared_checkpoint_height, queue_tx_retrieval,
-        select_truncation_height,
+        flag_previously_received_change, min_shared_checkpoint_height,
+        pending_range_overlaps_scanned_blocks, priority_code, queue_tx_retrieval,
+        scanned_output_count, select_truncation_height,
     };
 
     #[cfg(feature = "orchard")]
     use {crate::testing::db::TestDb, zcash_protocol::local_consensus::LocalNetwork};
+
+    #[test]
+    fn scanned_output_count_uses_pending_ranges_only_when_they_overlap() {
+        /// Keeps the fixture heights distinct from protocol activation heights.
+        const FIRST_SCANNED_HEIGHT: u32 = 100;
+        /// Provides several rows whose aggregate can detect incorrect filtering.
+        const SCANNED_BLOCK_COUNT: u32 = 3;
+        /// Makes the pending range extend beyond the scanned prefix.
+        const PENDING_BLOCK_COUNT: u32 = 10;
+        /// Gives every fixture row a distinct, nonzero output count.
+        const FIRST_OUTPUT_COUNT: u32 = 1;
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE blocks (
+                 height INTEGER PRIMARY KEY,
+                 sapling_output_count INTEGER NOT NULL
+             );
+             CREATE TABLE scan_queue (
+                 block_range_start INTEGER NOT NULL UNIQUE,
+                 block_range_end INTEGER NOT NULL UNIQUE,
+                 priority INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+
+        let first_scanned_height = BlockHeight::from_u32(FIRST_SCANNED_HEIGHT);
+        let last_scanned_height = first_scanned_height + SCANNED_BLOCK_COUNT.saturating_sub(1);
+        for (height, output_count) in (u32::from(first_scanned_height)
+            ..=u32::from(last_scanned_height))
+            .zip(FIRST_OUTPUT_COUNT..)
+        {
+            conn.execute(
+                "INSERT INTO blocks (height, sapling_output_count) VALUES (?1, ?2)",
+                (height, output_count),
+            )
+            .unwrap();
+        }
+
+        let scanned_priority = priority_code(&ScanPriority::Scanned);
+        let historic_priority = priority_code(&ScanPriority::Historic);
+        let pending_start = u32::from(last_scanned_height) + 1;
+        let pending_end = pending_start + PENDING_BLOCK_COUNT;
+        conn.execute(
+            "INSERT INTO scan_queue (
+                 block_range_start,
+                 block_range_end,
+                 priority
+             ) VALUES (?1, ?2, ?3)",
+            (pending_start, pending_end, historic_priority),
+        )
+        .unwrap();
+
+        assert!(
+            !pending_range_overlaps_scanned_blocks(
+                &conn,
+                first_scanned_height,
+                None,
+                scanned_priority,
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            scanned_output_count(
+                &conn,
+                "sapling_output_count",
+                first_scanned_height,
+                None,
+                scanned_priority,
+            )
+            .unwrap(),
+            Some(
+                (FIRST_OUTPUT_COUNT..FIRST_OUTPUT_COUNT + SCANNED_BLOCK_COUNT)
+                    .map(u64::from)
+                    .sum(),
+            ),
+        );
+
+        conn.execute("DELETE FROM scan_queue", []).unwrap();
+        let overlapping_start = u32::from(first_scanned_height) + 1;
+        conn.execute(
+            "INSERT INTO scan_queue (
+                 block_range_start,
+                 block_range_end,
+                 priority
+             ) VALUES (?1, ?2, ?3)",
+            (overlapping_start, pending_end, historic_priority),
+        )
+        .unwrap();
+
+        assert!(
+            pending_range_overlaps_scanned_blocks(
+                &conn,
+                first_scanned_height,
+                None,
+                scanned_priority,
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            scanned_output_count(
+                &conn,
+                "sapling_output_count",
+                first_scanned_height,
+                None,
+                scanned_priority,
+            )
+            .unwrap(),
+            Some(u64::from(FIRST_OUTPUT_COUNT)),
+        );
+    }
 
     fn connection_with_checkpoint_tables() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
