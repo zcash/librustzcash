@@ -63,9 +63,7 @@ use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
 
 /// The drive policy every scenario here uses: a ten-block reorg settle depth, the caller policy
 /// the satisfiability oracle judges anchor displacements under.
-const ADVANCE: AdvanceConfig = AdvanceConfig {
-    reorg_settle_depth: ReorgSettleDepth(10),
-};
+const ADVANCE: AdvanceConfig = AdvanceConfig::new(ReorgSettleDepth::new(10));
 
 /// A cap on the empty blocks a drive loop will mine waiting for the migration's schedule, so a
 /// migration that can never make progress fails the test rather than spinning. The privacy
@@ -1597,13 +1595,13 @@ fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
 
     // Rebuild the chain past the boundary, and then past it by the settle depth: only then is the
     // displacement definitive.
-    while run.tip() < boundary + ADVANCE.reorg_settle_depth.0 - 1 {
+    while run.tip() < boundary + ADVANCE.reorg_settle_depth().blocks() - 1 {
         run.mine_empty_block();
     }
     let unsettled = run.fully_scanned_height();
     assert_eq!(
         unsettled,
-        boundary + (ADVANCE.reorg_settle_depth.0 - 1),
+        boundary + (ADVANCE.reorg_settle_depth().blocks() - 1),
         "the chain sits one block short of the settle depth",
     );
     assert_eq!(

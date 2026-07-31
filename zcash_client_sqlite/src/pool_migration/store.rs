@@ -1129,7 +1129,7 @@ fn anchor_displaced(
     let (Some(root_at), Some(boundary)) = (source_root_at, tx.anchor_boundary()) else {
         return Ok(false);
     };
-    if boundary > as_of || u32::from(as_of) - u32::from(boundary) < settle.0 {
+    if boundary > as_of || u32::from(as_of) - u32::from(boundary) < settle.blocks() {
         return Ok(false);
     }
 

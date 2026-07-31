@@ -427,7 +427,7 @@ mod check_step_satisfiability {
 
     /// The settle depth the anchor-validity tests hold the oracle to; the input-level tests do not
     /// consult it.
-    const SETTLE: ReorgSettleDepth = ReorgSettleDepth(10);
+    const SETTLE: ReorgSettleDepth = ReorgSettleDepth::new(10);
 
     /// The repeated byte `b` as a canonical Pallas base element. The top byte is cleared, because
     /// a canonical encoding must be numerically below the field modulus and `0xbb…bb` need not be;
@@ -980,7 +980,7 @@ mod check_step_satisfiability {
     fn an_anchor_still_rooted_at_its_boundary_is_satisfiable() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
         let as_of = scan_empty_blocks(&mut st, 12);
-        let boundary = as_of - SETTLE.0;
+        let boundary = as_of - SETTLE.blocks();
         let anchor = orchard_root_at(&mut st, boundary);
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1008,7 +1008,7 @@ mod check_step_satisfiability {
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - (SETTLE.0 - 1), no_such_root()),
+                    &broadcast_transfer(vec![nf], as_of - (SETTLE.blocks() - 1), no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
@@ -1018,7 +1018,7 @@ mod check_step_satisfiability {
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, no_such_root()),
+                    &broadcast_transfer(vec![nf], as_of - SETTLE.blocks(), no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
@@ -1043,7 +1043,7 @@ mod check_step_satisfiability {
     fn an_unreadable_tree_state_ends_the_search_without_marking() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
         let as_of = scan_empty_blocks(&mut st, 12);
-        let displaced = broadcast_transfer(vec![nf], as_of - SETTLE.0, no_such_root());
+        let displaced = broadcast_transfer(vec![nf], as_of - SETTLE.blocks(), no_such_root());
 
         {
             let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1092,7 +1092,7 @@ mod check_step_satisfiability {
     /// SAME stored transaction is marked.
     #[test]
     fn an_anchor_displacement_above_the_scanned_region_does_not_mark() {
-        const IMMEDIATE: ReorgSettleDepth = ReorgSettleDepth(0);
+        const IMMEDIATE: ReorgSettleDepth = ReorgSettleDepth::new(0);
 
         let (mut st, account, nf, as_of) = wallet_with_scanned_note();
         // Three further blocks, of which only the last is scanned: the commitment tree gains a
@@ -1158,7 +1158,7 @@ mod check_step_satisfiability {
             Vec::new(),
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(0),
-            Some(as_of - SETTLE.0),
+            Some(as_of - SETTLE.blocks()),
             MigrationTxState::Signed,
             None,
             None,
@@ -1191,7 +1191,7 @@ mod check_step_satisfiability {
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, no_such_root()),
+                    &broadcast_transfer(vec![nf], as_of - SETTLE.blocks(), no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),

@@ -161,9 +161,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     // layer 0 first; layer 1 only once layer 0 mines; the transfers only once the whole preparation
     // mines.
     let mut state = state;
-    let config = AdvanceConfig {
-        reorg_settle_depth: ReorgSettleDepth(10),
-    };
+    let config = AdvanceConfig::new(ReorgSettleDepth::new(10));
     // A height past every scheduled broadcast (so each transaction is due, not blocked on the
     // schedule) but within every expiry window (so none is expired and offered for rebuild): the
     // latest scheduled height. This exercises the dependency-ordering walk, not expiry handling.
