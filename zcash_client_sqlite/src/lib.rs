@@ -373,7 +373,8 @@ impl<AccountId: Eq + std::hash::Hash> WalletSnapshot<AccountId> {
         self.chain_tip_height == self.fully_scanned_height
     }
 
-    /// Combines this snapshot with a precomputed [`Progress`] value.
+    /// Combines this snapshot with a precomputed
+    /// [`Progress`](zcash_client_backend::data_api::Progress) value.
     ///
     /// Used by [`WalletRead::get_wallet_summary`] so that balance work is not
     /// duplicated between the snapshot and full-summary paths.
