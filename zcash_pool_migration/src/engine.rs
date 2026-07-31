@@ -186,10 +186,23 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
 /// churn.
 #[derive(Clone, Copy, Debug)]
 pub struct AdvanceConfig {
-    /// The caller's reorg-settlement policy; see [`ReorgSettleDepth`]. Explicitly required — no
-    /// `Default` — because the right value tracks the chain's block spacing, and keeping it
-    /// current is the caller's responsibility, not this crate's.
-    pub reorg_settle_depth: ReorgSettleDepth,
+    reorg_settle_depth: ReorgSettleDepth,
+}
+
+impl AdvanceConfig {
+    /// Drive-level policy under the caller's reorg-settlement policy.
+    ///
+    /// The settle depth is explicitly required — no `Default` — because the right value tracks the
+    /// chain's block spacing, and keeping it current is the caller's responsibility, not this
+    /// crate's.
+    pub const fn new(reorg_settle_depth: ReorgSettleDepth) -> Self {
+        Self { reorg_settle_depth }
+    }
+
+    /// The caller's reorg-settlement policy; see [`ReorgSettleDepth`].
+    pub const fn reorg_settle_depth(&self) -> ReorgSettleDepth {
+        self.reorg_settle_depth
+    }
 }
 
 /// Decide the next step to advance a committed migration and VERIFY it against the store before
@@ -375,7 +388,7 @@ pub fn advance_migration<St: PoolMigrationWrite>(
         {
             continue;
         }
-        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
+        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
         if matches!(
             &answer,
             StepSatisfiability::Unsatisfiable {
@@ -407,7 +420,7 @@ pub fn advance_migration<St: PoolMigrationWrite>(
             let Some(reported_tip) = tx.broadcast_failure_at() else {
                 continue;
             };
-            let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
+            let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
             if answer_as_of(&answer) < reported_tip {
                 // The wallet has not scanned every block that could hold the spend behind the
                 // rejection, so neither answer it could give would be about the right chain.
@@ -430,7 +443,7 @@ pub fn advance_migration<St: PoolMigrationWrite>(
             // typically kills several transfers at once — so the whole damage is assessed in the
             // call that finds the first of it, and the replan threshold trips here rather than
             // one broadcast attempt at a time.
-            broaden_after_discovery(store, state, &mut verdicts, config.reorg_settle_depth)?;
+            broaden_after_discovery(store, state, &mut verdicts, config.reorg_settle_depth())?;
             state.record_satisfiability(target_height, &verdicts);
         }
         for id in &adjudicated {
@@ -475,7 +488,7 @@ pub fn advance_migration<St: PoolMigrationWrite>(
             // spin the loop. Anything already recorded is still persisted below.
             break AdvanceStep::Waiting;
         };
-        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
+        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
         match answer {
             StepSatisfiability::Satisfiable { .. } => break step,
             // Not an obstruction: the wallet cannot yet vouch for the inputs (their source is
@@ -494,7 +507,7 @@ pub fn advance_migration<St: PoolMigrationWrite>(
                 // A DISCOVERY, so BROADEN, then record as ONE batch so the durable closure runs
                 // once over the whole discovery.
                 let mut batch = vec![(candidate, answer)];
-                broaden_after_discovery(store, state, &mut batch, config.reorg_settle_depth)?;
+                broaden_after_discovery(store, state, &mut batch, config.reorg_settle_depth())?;
                 state.record_satisfiability(target_height, &batch);
                 dirty = true;
             }
@@ -965,7 +978,19 @@ impl ReplanThreshold {
 /// judged settled under an aggressive depth self-corrects: the marks it produces are cleared by
 /// reorg truncation if the chain swings back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReorgSettleDepth(pub u32);
+pub struct ReorgSettleDepth(u32);
+
+impl ReorgSettleDepth {
+    /// A settle depth of `blocks` blocks.
+    pub const fn new(blocks: u32) -> Self {
+        Self(blocks)
+    }
+
+    /// The depth in blocks.
+    pub const fn blocks(&self) -> u32 {
+        self.0
+    }
+}
 
 /// A store's answer to "does the environment this store lives in obstruct this pre-signed
 /// transaction?" — see [`PoolMigrationRead::check_step_satisfiability`]. Deliberately EXHAUSTIVE:
@@ -4662,9 +4687,7 @@ mod advance_tests {
     }
 
     fn config() -> AdvanceConfig {
-        AdvanceConfig {
-            reorg_settle_depth: ReorgSettleDepth(10),
-        }
+        AdvanceConfig::new(ReorgSettleDepth::new(10))
     }
 
     /// Which half of the store interface fails, for the error-propagation test.

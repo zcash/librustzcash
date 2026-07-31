@@ -408,8 +408,11 @@ Grouping is the author's responsibility, and is stable under `cargo fmt` once wr
 
 Type safety is paramount. This is a security-critical codebase.
 
-- Struct fields must be private (or `pub(crate)`). Expose constructors returning
-  `Result` or `Option` that enforce invariants, plus accessor methods.
+- Struct fields must be at most `pub(crate)` — never `pub`, and this holds for tuple
+  structs and newtypes too. Public construction goes through an explicit constructor
+  function: `Result`- or `Option`-returning where there are invariants to enforce, a
+  plain `new` where there are none yet, so that a later invariant has somewhere to live
+  without breaking every caller. Expose accessor methods for reads.
 - Make invalid states unrepresentable.
 - Error enum types (and ONLY error enum types) should be non-exhaustive.
 - Use newtypes over bare integers, strings, and byte arrays. Avoid `usize` except for
