@@ -1746,7 +1746,7 @@ mod tests {
     fn recorded_unsatisfiability_kinds_round_trip() {
         use zcash_pool_migration::denomination::DenominationPlan;
         use zcash_pool_migration::engine::{
-            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
+            DuenessTargets, MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
             ReplanThreshold, StepSatisfiability, UnsatisfiableCause, UnsatisfiableKind,
         };
         use zcash_pool_migration::preparation::PreparationPlan;
@@ -1792,7 +1792,7 @@ mod tests {
         );
         let as_of = BlockHeight::from_u32(500);
         state.record_satisfiability(
-            BlockHeight::from_u32(600),
+            DuenessTargets::at(BlockHeight::from_u32(600)),
             &[(
                 MigrationTransferId::new(0),
                 StepSatisfiability::Unsatisfiable {
