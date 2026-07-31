@@ -18,9 +18,10 @@ use zcash_protocol::value::COIN;
 
 use zcash_pool_migration::build::sign_pczt;
 use zcash_pool_migration::engine::{
-    MigrationPlan, MigrationStatus, MigrationTxKind, MigrationTxState, PoolMigrationRead,
-    PoolMigrationWrite, ReplanThreshold, batch_unsigned_by_action_budget,
-    build_preparation_unsigned, commit_preparation, plan_migration,
+    AdvanceConfig, MigrationPlan, MigrationStatus, MigrationTxKind, MigrationTxState,
+    PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, ReplanThreshold, advance_migration,
+    batch_unsigned_by_action_budget, build_preparation_unsigned, commit_preparation,
+    plan_migration,
 };
 use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
 use zcash_pool_migration::signing_rounds::SigningRoundBudget;
@@ -155,9 +156,14 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         }
     }
 
-    // The state machine walks the broadcasts in dependency order: layer 0 first; layer 1 only once
-    // layer 0 mines; the transfers only once the whole preparation mines.
+    // Driven the way a consumer drives it — through `advance_migration`, against the mock store,
+    // which vouches for every candidate — the migration walks the broadcasts in dependency order:
+    // layer 0 first; layer 1 only once layer 0 mines; the transfers only once the whole preparation
+    // mines.
     let mut state = state;
+    let config = AdvanceConfig {
+        reorg_settle_depth: ReorgSettleDepth(10),
+    };
     // A height past every scheduled broadcast (so each transaction is due, not blocked on the
     // schedule) but within every expiry window (so none is expired and offered for rebuild): the
     // latest scheduled height. This exercises the dependency-ordering walk, not expiry handling.
@@ -167,7 +173,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .map(|t| t.scheduled_height())
         .max()
         .expect("the committed migration has transactions");
-    match state.next_step(target, &[]) {
+    match advance_migration(&mut backend, &mut state, target, &config).expect("the store answers") {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
         }
@@ -186,7 +192,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { layer: 1, .. }))
         .map(|t| t.id())
         .collect();
-    match state.next_step(target, &[]) {
+    match advance_migration(&mut backend, &mut state, target, &config).expect("the store answers") {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(
                 layer1_ids.contains(&id),
@@ -202,7 +208,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
             BlockHeight::from_u32(2_000_020),
         );
     }
-    match state.next_step(target, &[]) {
+    match advance_migration(&mut backend, &mut state, target, &config).expect("the store answers") {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             let tx = state
                 .transactions()

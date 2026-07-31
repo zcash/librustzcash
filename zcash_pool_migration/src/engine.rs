@@ -203,8 +203,43 @@ pub struct AdvanceConfig {
 /// So a consumer never spends proving or broadcast work on a transaction whose inputs are gone,
 /// and a migration whose plan has been undercut — most often by an ordinary wallet spend consuming
 /// notes it had allocated — surfaces [`AdvanceStep::Replan`] instead of retrying a dead
-/// transaction forever. [`MigrationState::next_step`] documents what each returned step means and
-/// the I/O the consumer performs for it.
+/// transaction forever.
+///
+/// # The drive loop
+///
+/// One call returns ONE step. The consumer performs that step's I/O, records the outcome in the
+/// state, persists it, and calls this again; until the state records the step's completion, the
+/// same step is offered again. The steps map onto the crate's operations as follows:
+///
+/// - [`AdvanceStep::Prove`]: install the transaction's deferred anchor and witnesses and store the
+///   proven PCZT — [`prove_transfer`] / [`prove_preparation`], which also record the
+///   `Signed -> Proved` transition. Proving needs a SYNCED wallet and mutable access to its
+///   commitment trees, but only the account's viewing key. The step carries the transaction's kind
+///   so the consumer can tell, without a lookup, whether the broadcast follows in the same session
+///   (a preparation) or in its own later one (a transfer).
+/// - [`AdvanceStep::Broadcast`]: submit the stored proven transaction to the network, then record
+///   it with [`MigrationState::mark_broadcast`]. Its mining is later detected through the
+///   consumer's own chain view and recorded with [`MigrationState::mark_mined`], which is what
+///   unblocks the transactions depending on it.
+/// - [`AdvanceStep::Rebuild`]: construct and sign a replacement for an expired transfer —
+///   [`rebuild_expired_transfer`] or its unsigned (external-signer) variant. The only step that
+///   needs the account's SPEND AUTHORITY.
+/// - [`AdvanceStep::Replan`]: the migration itself needs replacing — mark it superseded
+///   ([`MigrationState::mark_superseded`]), persist, and re-plan the remaining balance through the
+///   ordinary planning flow. Surfaced when the unsatisfiable share of planned transfer value
+///   strictly exceeds the committed [`ReplanThreshold`], and — once no live work remains at all —
+///   when dead value would otherwise be stranded.
+/// - [`AdvanceStep::Waiting`]: nothing is actionable at this height. Consult
+///   [`MigrationState::transaction_statuses`] for what each transaction is blocked on, and register
+///   the heights at which to wake and re-check: [`MigrationState::sync_wakeup_schedule`] for the
+///   proving wake-ups, plus each transaction's own scheduled broadcast height.
+/// - [`AdvanceStep::Complete`]: the migration is terminal (every transaction mined, or the
+///   migration failed/cancelled); nothing will ever be actionable again, so stop polling.
+///
+/// A transaction that can never mine is never named: those marked unsatisfiable, those expired
+/// without mining, and everything stranded behind either are excluded from the prove, broadcast,
+/// and rebuild queues alike. And a DUE BROADCAST is named ahead of any proving work, which is what
+/// makes a broadcast-only waking session possible (see the ZIP 318 note below).
 ///
 /// # What a call costs
 ///
@@ -243,9 +278,13 @@ pub struct AdvanceConfig {
 /// outcome through the ordinary mutators ([`MigrationState::mark_broadcast`],
 /// [`MigrationState::mark_mined`], the prove and rebuild functions), persisting afterwards as
 /// usual, then calls this again. In particular, the ZIP 318 separation of SYNC wake-ups from
-/// BROADCAST wake-ups is the consumer's runtime policy: this function has no notion of a session
-/// and will offer proving work in the same loop once every due broadcast is dispatched (see
-/// [`MigrationState::next_step`]).
+/// BROADCAST wake-ups is the consumer's runtime policy. Broadcasting a stored proven transaction
+/// needs no sync at all, while proving is inherently sync-bound, so surfacing every due broadcast
+/// first is what lets a wallet wake, submit, and end the session without initiating sync
+/// operations. But this function itself has no notion of a session — once every due broadcast is
+/// dispatched it offers proving work in the same loop — so a wallet honoring the separation stops
+/// driving the migration after broadcasting and leaves the offered proving work to its next sync
+/// wake-up.
 pub fn advance_migration<St: PoolMigrationWrite>(
     store: &mut St,
     state: &mut MigrationState,
@@ -2070,11 +2109,11 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// transaction becomes [`Proved`](MigrationTxState::Proved), ready to broadcast.
 ///
 /// The CALLER decides WHEN to prove each transfer (once its funding note is mined and its drawn
-/// anchor boundary has settled — [`MigrationState::next_step`] surfaces this as
-/// [`AdvanceStep::Prove`], typically at a sync wake-up well before the broadcast height); this
-/// function performs the proof for the one transfer `id`. It is idempotent only in the sense that
-/// a transaction not in [`Signed`](MigrationTxState::Signed)
-/// is rejected with [`ProveError::NotReady`] rather than re-proved.
+/// anchor boundary has settled — [`advance_migration`] surfaces this as [`AdvanceStep::Prove`],
+/// typically at a sync wake-up well before the broadcast height); this function performs the proof
+/// for the one transfer `id`. It is idempotent only in the sense that a transaction not in
+/// [`Signed`](MigrationTxState::Signed) is rejected with [`ProveError::NotReady`] rather than
+/// re-proved.
 ///
 /// A prover that reports the funding note ABSENT from the account's unspent set
 /// ([`ProveFailure::InputNotAvailable`]) is not an error: absence is a membership observation
@@ -2376,12 +2415,12 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 /// unchanged denomination.
 ///
 /// A transfer can only be included in a block at or below its expiry height (ZIP 203); once the
-/// chain passes it, the pre-signed transaction is dead and
-/// [`next_step`](MigrationState::next_step) surfaces it as [`AdvanceStep::Rebuild`]. NOTHING of
-/// the expired artifact is reusable — the signature hash covers the expiry height, so its
-/// signatures cannot authorize any rescheduled copy. This is ZIP 318's expired-transaction
-/// handling: "a new transaction with a fresh anchor and expiry is constructed for the affected
-/// part, with its denomination unchanged".
+/// chain passes it, the pre-signed transaction is dead and [`advance_migration`] surfaces it as
+/// [`AdvanceStep::Rebuild`]. NOTHING of the expired artifact is reusable — the signature hash
+/// covers the expiry height, so its signatures cannot authorize any rescheduled copy. This is
+/// ZIP 318's expired-transaction handling: "a new transaction with a fresh anchor and expiry is
+/// constructed for the affected part, with its denomination unchanged".
+///
 /// This function performs that reconstruction: it reschedules the part from the current tip with a
 /// fresh memoryless delay, derives the new canonical expiry, draws a fresh boundary anchor, builds
 /// a new transfer PCZT against the same funding note and crossing value, signs it anew, and

@@ -8,11 +8,15 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `engine::{AdvanceConfig, advance_migration}`, the verified drive API: it plans
-  the next step, checks the transaction that step names against the store's
-  satisfiability oracle, and re-plans around what it discovers, so every step it
-  returns has been vouched for by the store and every determination it records is
-  persisted before that step is surfaced.
+- `engine::{AdvanceConfig, advance_migration}`, the API to drive a committed
+  migration with: it plans the next step, checks the transaction that step names
+  against the store's satisfiability oracle, and re-plans around what it
+  discovers, so every step it returns has been vouched for by the store and every
+  determination it records is persisted before that step is surfaced. A
+  transaction that can never mine — marked unsatisfiable, expired without mining,
+  or dependent on either — is never offered, and a due `AdvanceStep::Broadcast` is
+  surfaced ahead of any `AdvanceStep::Prove`, so a wallet that wakes to find a
+  transaction due can broadcast it and end the session without syncing.
 - `engine::MigrationStatus::Superseded` (wire name `"superseded"`) and
   `engine::MigrationState::mark_superseded`, the terminal status and transition
   recording that a migration's remaining value is being re-planned; a superseded
@@ -60,11 +64,6 @@ and this library adheres to Rust's notion of
   `InProgress`.
 
 ### Changed
-- `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
-  in preference to `AdvanceStep::Prove` (previously the reverse), so a wallet
-  that wakes to find a transaction ready to broadcast can submit it and end the
-  session without syncing; proving work is surfaced only once no broadcast is
-  due.
 - `state::AdvanceStep::Prove` now also carries the transaction's
   `engine::MigrationTxKind`, so a consumer can tell without a lookup whether it
   is proving a preparation transaction — by construction due on its broadcast
@@ -84,19 +83,6 @@ and this library adheres to Rust's notion of
   `engine::build_preparation_unsigned`, and
   `engine::commit_preparation_with_funding` entry points each take a further
   `engine::ReplanThreshold` parameter, stamped on the committed migration.
-- `engine::MigrationState::next_step` takes a further `set_aside` parameter,
-  the drive loop's call-local list of transaction ids to skip (candidates whose
-  satisfiability check answered "not yet"); pass `&[]` when driving without an
-  oracle. Transactions that can never mine — marked unsatisfiable, expired
-  unmined, or dependent on either — are no longer offered for proving,
-  broadcast, or rebuild; `AdvanceStep::Replan` is returned after due broadcasts
-  but ahead of proving when `replan_required` holds, and in preference to
-  `AdvanceStep::Waiting` when dead value is stranded with no live work left (a
-  migration no longer waits forever in that state).
-- `engine::MigrationState::{next_provable, next_broadcastable}` take two
-  further parameters: the set of transaction ids judged unable to ever mine and
-  a set-aside list, both excluded from the queue. `next_step` supplies both;
-  pass an empty set and `&[]` to reproduce the previous behaviour.
 - `engine::MigrationState::sync_wakeup_schedule` also excludes transfers marked
   unsatisfiable or dependent on a transaction that can never mine, alongside
   the expired transfers it already excluded.
@@ -125,6 +111,15 @@ and this library adheres to Rust's notion of
   `ProveOutcome::NotYetProvable` with no state change. Match on the outcome,
   and persist the state after `MarkedUnsatisfiable` as after a successful
   proof.
+
+### Removed
+- `engine::MigrationState::{next_step, next_provable, next_broadcastable}`. The
+  planning kernel is internal to the crate now; `engine::advance_migration` is
+  the API to drive a committed migration with, and every step it returns has
+  been checked against the store's satisfiability oracle, which calling the
+  kernel directly bypassed. Replace `state.next_step(target_height, &[])` with
+  `advance_migration(&mut store, &mut state, target_height, &config)`, which
+  returns the same `state::AdvanceStep`.
 
 ### Fixed
 - `engine::rebuild_expired_transfer` and

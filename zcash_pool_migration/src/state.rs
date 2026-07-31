@@ -1,5 +1,5 @@
-//! Migration state logic: the pure, backend-agnostic methods a consuming application uses to drive a
-//! committed migration and render its progress.
+//! Migration state logic: the pure, backend-agnostic decisions that advance a committed migration
+//! and render its progress.
 //!
 //! These are methods on [`MigrationState`] that operate only on the persisted state and never touch a
 //! wallet, a prover, or the network, so every consumer (a mobile wallet using these crates directly,
@@ -7,8 +7,9 @@
 //! I/O: it detects that a broadcast transaction has mined (via its own chain view) and calls
 //! [`MigrationState::mark_mined`], it broadcasts a transaction and calls
 //! [`MigrationState::mark_broadcast`], and it performs the build/prove/broadcast work that
-//! [`MigrationState::next_step`] tells it to do. The decision of WHAT to do next, and the transaction
-//! status a wallet shows the user, live here.
+//! [`advance_migration`](crate::engine::advance_migration) — the drive API, which puts each planned
+//! step to the store's satisfiability oracle before surfacing it — tells it to do. The decision of
+//! WHAT to do next, and the transaction status a wallet shows the user, live here.
 //!
 //! Every transaction is built and pre-signed when the migration is committed (one signing phase;
 //! anchors and witnesses are deferred to proving time per ZIP 374), so the state machine's only
@@ -16,8 +17,8 @@
 //! witnesses — once its anchor is resolvable (for a transfer, once its drawn boundary settles),
 //! and becomes broadcastable once it is proved, its dependencies (the preparation layers that
 //! mint its inputs) have mined, and its scheduled height has arrived. See
-//! [`MigrationState::next_step`] for how the two are ordered and the sync/broadcast session
-//! separation that ordering is designed around.
+//! [`advance_migration`](crate::engine::advance_migration) for what each step asks of the consumer
+//! and the sync/broadcast session separation the ordering is designed around.
 
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
@@ -36,7 +37,8 @@ use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 /// The next thing to do to advance a committed migration, decided purely from its state. The consumer
 /// performs the corresponding I/O and updates the state (via the commit functions and
 /// [`MigrationState::mark_broadcast`] / [`MigrationState::mark_mined`]), then calls
-/// [`MigrationState::next_step`] again.
+/// [`advance_migration`](crate::engine::advance_migration) again, which documents the work each
+/// step names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvanceStep {
     /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses and
@@ -44,7 +46,7 @@ pub enum AdvanceStep {
     /// its drawn anchor boundary has settled (the boundary block is strictly below the chain tip, so
     /// its checkpoint exists in the wallet's commitment tree). Broadcast is a separate later step;
     /// whether it belongs in the same waking session depends on the transaction's `kind` (see that
-    /// field, and [`MigrationState::next_step`]).
+    /// field, and [`advance_migration`](crate::engine::advance_migration)).
     ///
     /// Proving is not time-critical: the wallet durably retains the boundary checkpoints its
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
@@ -144,11 +146,12 @@ pub enum Blocker {
     /// can no longer be included in a block (ZIP 203): the pre-signed artifact is dead, and an
     /// entirely new transaction must be constructed and signed anew (with a fresh anchor and
     /// expiry, its denomination unchanged) before this part can advance. For a TRANSFER the
-    /// consumer performs that rebuild when [`next_step`](MigrationState::next_step) returns
-    /// [`AdvanceStep::Rebuild`]. For a PREPARATION no single-transaction rebuild exists (its
-    /// dependents' pre-signatures commit to the notes it would have minted), so this blocker is the
-    /// signal that the migration needs a new signing ceremony over the affected subtree. Reported
-    /// so a wallet can show the transaction as needing attention rather than as merely waiting.
+    /// consumer performs that rebuild when
+    /// [`advance_migration`](crate::engine::advance_migration) returns [`AdvanceStep::Rebuild`].
+    /// For a PREPARATION no single-transaction rebuild exists (its dependents' pre-signatures
+    /// commit to the notes it would have minted), so this blocker is the signal that the migration
+    /// needs a new signing ceremony over the affected subtree. Reported so a wallet can show the
+    /// transaction as needing attention rather than as merely waiting.
     Expired,
     /// Determined unsatisfiable: its inputs can never again all exist unspent on chain, directly
     /// observed ([`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at)) or inherited from a
@@ -338,7 +341,7 @@ impl MigrationState {
     /// mined and its scheduled height has arrived.
     fn prove_ready(&self, t: &MigrationTransaction, target_height: BlockHeight) -> bool {
         // An expired transaction can never be mined, so proving it is wasted work: it must be rebuilt
-        // (with a fresh anchor and expiry) first. Guarding here keeps `next_provable` from ever
+        // (with a fresh anchor and expiry) first. Guarding here keeps `next_provable_tx` from ever
         // offering an expired transaction.
         if Self::is_expired(t, target_height) {
             return false;
@@ -355,8 +358,15 @@ impl MigrationState {
         }
     }
 
-    /// The next pre-signed transaction ready to PROVE, as [`Self::next_provable`] selects it, with
-    /// the whole transaction visible so [`Self::next_step`] can also surface its kind.
+    /// The next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor is
+    /// resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
+    /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
+    /// broadcast in separate waking sessions. The whole transaction is returned, not just its id,
+    /// so [`Self::next_step`] can also surface its kind.
+    ///
+    /// Transactions in `dead` — the ids judged unable to ever mine at `target_height` — and in
+    /// `set_aside` — the drive loop's call-local exclusions — are never offered;
+    /// [`Self::next_step`] supplies both.
     fn next_provable_tx(
         &self,
         target_height: BlockHeight,
@@ -371,31 +381,13 @@ impl MigrationState {
         })
     }
 
-    /// The id of the next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor
-    /// is resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
-    /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
-    /// broadcast in separate waking sessions.
-    ///
-    /// Transactions in `dead` — the ids judged unable to ever mine at `target_height` — and in
-    /// `set_aside` — the drive loop's call-local exclusions — are never offered;
-    /// [`Self::next_step`] supplies both.
-    pub fn next_provable(
-        &self,
-        target_height: BlockHeight,
-        dead: &BTreeSet<MigrationTransferId>,
-        set_aside: &[MigrationTransferId],
-    ) -> Option<MigrationTransferId> {
-        self.next_provable_tx(target_height, dead, set_aside)
-            .map(|t| t.id)
-    }
-
     /// The id of the next transaction ready to BROADCAST: already `Proved`, its dependencies mined,
     /// and scheduled at or before `target_height` (`chain_tip + 1`).
     ///
     /// Transactions in `dead` — the ids judged unable to ever mine at `target_height` — and in
     /// `set_aside` — the drive loop's call-local exclusions — are never offered;
     /// [`Self::next_step`] supplies both.
-    pub fn next_broadcastable(
+    pub(crate) fn next_broadcastable(
         &self,
         target_height: BlockHeight,
         dead: &BTreeSet<MigrationTransferId>,
@@ -438,12 +430,13 @@ impl MigrationState {
     /// `Broadcast`, and `Mined` transfers, dead transfers (the expired ones, whose rebuild
     /// reschedules them, and those marked unsatisfiable or dependent on a transaction that can
     /// never mine, whose remedy is the migration-level replan — see [`AdvanceStep::Replan`]), and
-    /// preparations (which anchor at the tip when proved, driven by [`Self::next_step`] at their
-    /// own broadcast wake-ups) are not. A transfer lacking a drawn anchor boundary (impossible for
-    /// a state committed by this crate) likewise contributes no wake-up: like a preparation, it is
-    /// driven by [`Self::next_step`] at its scheduled height. Nothing is persisted: the schedule
-    /// is derived from the migration state, so recompute it — with fresh jitter — after any state
-    /// change (a proof stored, a rebuild, a missed wake-up).
+    /// preparations (which anchor at the tip when proved, driven by
+    /// [`advance_migration`](crate::engine::advance_migration) at their own broadcast wake-ups) are
+    /// not. A transfer lacking a drawn anchor boundary (impossible for a state committed by this
+    /// crate) likewise contributes no wake-up: like a preparation, it is driven by
+    /// [`advance_migration`](crate::engine::advance_migration) at its scheduled height. Nothing is
+    /// persisted: the schedule is derived from the migration state, so recompute it — with fresh
+    /// jitter — after any state change (a proof stored, a rebuild, a missed wake-up).
     pub fn sync_wakeup_schedule<R: RngCore + CryptoRng>(
         &self,
         current_tip: BlockHeight,
@@ -793,6 +786,13 @@ impl MigrationState {
     /// consumer (a mobile wallet using these crates directly, or a server like Zallet) advances
     /// the same state the same way.
     ///
+    /// This is the planning KERNEL, and it is internal to the crate: it DECIDES, but it does not
+    /// VERIFY. The step it names has not been put to the store's satisfiability oracle, so it may
+    /// name a transaction the wallet already knows can never execute.
+    /// [`advance_migration`](crate::engine::advance_migration) is what wraps this decision in that
+    /// check, and it is the API a consumer drives a migration with; it also documents what each
+    /// step asks of the consumer.
+    ///
     /// `set_aside` is the drive loop's call-local list of candidates whose satisfiability check
     /// ([`PoolMigrationRead::check_step_satisfiability`](crate::engine::PoolMigrationRead::check_step_satisfiability))
     /// answered "not yet": every queue — prove, broadcast, and rebuild alike — skips them, so
@@ -800,40 +800,10 @@ impl MigrationState {
     /// the identical deferred step forever. A non-empty list also holds back the late
     /// [`Replan`](AdvanceStep::Replan) slot: deferral means information is pending after sync, so
     /// the pass ends in [`Waiting`](AdvanceStep::Waiting) rather than a destructive supersede.
-    /// Pass `&[]` when driving without an oracle.
+    /// Pass `&[]` to plan without an oracle.
     ///
-    /// # The drive loop
-    ///
-    /// One call returns ONE step. The consumer performs that step's I/O, records the outcome in
-    /// the state, persists it, and calls this again; a call is pure, so until the state records
-    /// the step's completion, the same step is returned. The steps map onto the crate's
-    /// operations as follows:
-    ///
-    /// - [`AdvanceStep::Prove`]: install the transaction's deferred anchor and witnesses and store
-    ///   the proven PCZT — [`prove_transfer`](crate::engine::prove_transfer) /
-    ///   [`prove_preparation`](crate::engine::prove_preparation), which also record the
-    ///   `Signed -> Proved` transition. Proving needs a SYNCED wallet and mutable access to its
-    ///   commitment trees, but only the account's viewing key. The step carries the transaction's
-    ///   kind so the consumer can tell, without a lookup, whether the broadcast follows in the
-    ///   same session (a preparation) or in its own later one (a transfer); see below.
-    /// - [`AdvanceStep::Broadcast`]: submit the stored proven transaction to the network, then
-    ///   record it with [`Self::mark_broadcast`]. Its mining is later detected through the
-    ///   consumer's own chain view and recorded with [`Self::mark_mined`], which is what unblocks
-    ///   the transactions depending on it.
-    /// - [`AdvanceStep::Rebuild`]: construct and sign a replacement for an expired transfer —
-    ///   [`rebuild_expired_transfer`](crate::engine::rebuild_expired_transfer) or its unsigned
-    ///   (external-signer) variant. The only step that needs the account's SPEND AUTHORITY.
-    /// - [`AdvanceStep::Replan`]: the migration itself needs replacing — mark it superseded
-    ///   ([`Self::mark_superseded`]), persist, and re-plan the remaining balance through the
-    ///   ordinary planning flow. Surfaced when the unsatisfiable share of planned value strictly
-    ///   exceeds the committed [`ReplanThreshold`](crate::engine::ReplanThreshold), or when dead
-    ///   value is stranded with no live work left; see the ordering below.
-    /// - [`AdvanceStep::Waiting`]: nothing is actionable at this height. Consult
-    ///   [`Self::transaction_statuses`] for what each transaction is blocked on, and register the
-    ///   heights at which to wake and re-check: [`Self::sync_wakeup_schedule`] for the proving
-    ///   wake-ups, plus each transaction's own scheduled broadcast height.
-    /// - [`AdvanceStep::Complete`]: the migration is terminal (every transaction mined, or the
-    ///   migration failed/cancelled); nothing will ever be actionable again, so stop polling.
+    /// One call returns ONE step, and the call is pure: until the state records that step's
+    /// completion, the same step is decided again.
     ///
     /// # Ordering, and what it implies for wallet construction
     ///
@@ -874,12 +844,10 @@ impl MigrationState {
     /// and witnesses from the synced commitment tree). Surfacing every due broadcast before any
     /// proving work is what makes a broadcast-only session possible: a wallet that wakes to find
     /// transactions due submits them immediately, without first initiating sync operations (unless
-    /// the user independently needs to sync, e.g. to spend funds manually). Note that this method
-    /// has no notion of a session — once every due broadcast is dispatched it will offer proving
-    /// work in the same loop, and enforcing the session separation is the CONSUMER's runtime
-    /// policy (see the "Out of scope" notes in [`crate::scheduling`]): a wallet honoring it stops
-    /// driving the migration after broadcasting and leaves the offered proving work to its next
-    /// sync wake-up.
+    /// the user independently needs to sync, e.g. to spend funds manually). Note that neither this
+    /// method nor the drive API above it has any notion of a session — once every due broadcast is
+    /// dispatched, proving work is offered in the same loop, and enforcing the session separation
+    /// is the CONSUMER's runtime policy (see the "Out of scope" notes in [`crate::scheduling`]).
     ///
     /// Proving is in turn DECOUPLED from the broadcast schedule: a transfer is provable as soon
     /// as its drawn anchor boundary settles (strictly below the chain tip), typically long before
@@ -904,7 +872,7 @@ impl MigrationState {
     /// slept through a transfer's proving wake-ups and its broadcast height is simply offered
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
     /// has expired.
-    pub fn next_step(
+    pub(crate) fn next_step(
         &self,
         target_height: BlockHeight,
         set_aside: &[MigrationTransferId],
@@ -1807,7 +1775,8 @@ mod tests {
         // The same holds for a still-`Signed` (unproved) expired transfer: it is not provable either.
         s.transactions[1].state = MigrationTxState::Signed;
         assert_eq!(
-            s.next_provable(BlockHeight::from_u32(51), &BTreeSet::new(), &[]),
+            s.next_provable_tx(BlockHeight::from_u32(51), &BTreeSet::new(), &[])
+                .map(|t| t.id),
             None
         );
         assert_eq!(
