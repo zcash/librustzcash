@@ -27,21 +27,23 @@ workspace.
   `orchard_ironwood_migration_tables` is unchanged and still creates the old
   names, so an external migration anchored between the two sees the schema it
   always has.
-- The database schema now includes the `unsatisfiable_at`, `spend_nullifiers`,
+- The database schema now includes the `unsatisfiable_at`,
   `unsatisfiable_kind`, and `broadcast_failure_at` columns on
   `orchard_ironwood_migration_transactions`, recording the chain height backing
   a spent-input observation when a pool-migration transaction has been
-  determined unsatisfiable and which observation that was (`inputs_spent`,
-  `inputs_invalidated`, `anchor_invalidated`, or `inherited`), caching each
-  transaction's real-spend nullifiers, and recording the chain tip a node
-  reported when it REJECTED a broadcast of the transaction, and the
+  determined unsatisfiable, which observation that was (`inputs_spent`,
+  `inputs_invalidated`, `anchor_invalidated`, or `inherited`), and the chain tip
+  a node reported when it REJECTED a broadcast of the transaction; the
+  `orchard_ironwood_migration_spend_nullifiers` table, caching each
+  transaction's real-spend nullifiers one row per nullifier, ordered by
+  `ordinal` and held to 32 bytes by a `CHECK`; and the
   `replan_threshold` column
   on `orchard_ironwood_migrations`, recording the integer percent of planned
   transfer value, unsatisfiable, above which the migration is re-planned
   immediately. `unsatisfiable_at` and `unsatisfiable_kind` are `NULL` together
   or non-`NULL` together, and a row where they disagree — or one naming a kind
   this release does not know — is reported as corrupt. The migration that adds
-  these columns backfills `spend_nullifiers` for existing rows from their
+  these backfills the nullifier cache for existing rows from their
   stored PCZTs — failing with a corrupted-data error for a not-yet-mined row
   whose stored PCZT is already proven (its real spends are no longer
   identifiable, so the cache cannot be reconstructed), and leaving a mined
