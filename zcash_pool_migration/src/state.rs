@@ -770,15 +770,15 @@ impl MigrationState {
     ///
     /// | Answer | Effect |
     /// |---|---|
-    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](crate::engine::UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](crate::engine::UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](crate::engine::UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of` height, under the cause's [`UnsatisfiableKind`] |
+    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](crate::engine::UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](crate::engine::UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](crate::engine::UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of_height`, under the cause's [`UnsatisfiableKind`] |
     /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`Expired`](crate::engine::UnsatisfiableCause::Expired) | no mark |
     /// | [`Satisfiable`](StepSatisfiability::Satisfiable) / [`NotYetSatisfiable`](StepSatisfiability::NotYetSatisfiable) | no mark |
     ///
     /// The input-level and anchor-level causes record an observation about chain state that the
     /// state machine cannot re-derive on its own (the store saw the inputs spent, or an anchor
     /// permanently displaced), so it must be stored durably; the mark carries the answer's
-    /// `as_of` — the chain height the observation RESTS ON, not the height it was recorded at —
-    /// which is what gives reorg truncation exact semantics, and the cause's reduced
+    /// `as_of_height` — the chain height the observation RESTS ON, not the height it was recorded
+    /// at — which is what gives reorg truncation exact semantics, and the cause's reduced
     /// [`UnsatisfiableKind`], so a wallet can say WHY without re-consulting the oracle. `Expired`
     /// instead confirms a derivation the kernel already makes from the same
     /// [`expiry_height`](MigrationTransaction::expiry_height), so a stored copy would add
@@ -821,7 +821,11 @@ impl MigrationState {
         // Direct marks: only the input-level and anchor-level causes record, and only onto an
         // unmarked, unmined transaction.
         for (id, answer) in determinations {
-            let StepSatisfiability::Unsatisfiable { cause, as_of } = answer else {
+            let StepSatisfiability::Unsatisfiable {
+                cause,
+                as_of_height,
+            } = answer
+            else {
                 continue;
             };
             // Whether a cause marks — and under which kind — is defined once, on the cause itself:
@@ -836,7 +840,7 @@ impl MigrationState {
                     && t.unsatisfiable.is_none()
                     && !matches!(t.state, MigrationTxState::Mined { .. })
             }) {
-                t.unsatisfiable = Some((*as_of, kind));
+                t.unsatisfiable = Some((*as_of_height, kind));
             }
         }
         // The durable closure, to a fixpoint. Each pass is two-phase — collect the inherited
@@ -2660,13 +2664,13 @@ mod tests {
                         cause: UnsatisfiableCause::InputsSpent {
                             nullifiers: vec![[9; 32]],
                         },
-                        as_of: h,
+                        as_of_height: h,
                     },
                 ),
                 // Non-marking answers are no-ops:
                 (
                     MigrationTransferId(2),
-                    StepSatisfiability::NotYetSatisfiable { as_of: h },
+                    StepSatisfiability::NotYetSatisfiable { as_of_height: h },
                 ),
             ],
         );
@@ -2700,7 +2704,7 @@ mod tests {
                 MigrationTransferId(0),
                 StepSatisfiability::Unsatisfiable {
                     cause: UnsatisfiableCause::Expired,
-                    as_of: h,
+                    as_of_height: h,
                 },
             )],
         );
@@ -2716,14 +2720,14 @@ mod tests {
                     MigrationTransferId(1),
                     StepSatisfiability::Unsatisfiable {
                         cause: UnsatisfiableCause::AnchorInvalidated,
-                        as_of: h,
+                        as_of_height: h,
                     },
                 ),
                 (
                     MigrationTransferId(2),
                     StepSatisfiability::Unsatisfiable {
                         cause: UnsatisfiableCause::InputsInvalidated { anchor: [7; 32] },
-                        as_of: h,
+                        as_of_height: h,
                     },
                 ),
                 (
@@ -2732,7 +2736,7 @@ mod tests {
                         cause: UnsatisfiableCause::InputsSpent {
                             nullifiers: vec![[8; 32]],
                         },
-                        as_of: h,
+                        as_of_height: h,
                     },
                 ),
             ],
@@ -2752,7 +2756,7 @@ mod tests {
                 MigrationTransferId(1),
                 StepSatisfiability::Unsatisfiable {
                     cause: UnsatisfiableCause::AnchorInvalidated,
-                    as_of: BlockHeight::from_u32(650),
+                    as_of_height: BlockHeight::from_u32(650),
                 },
             )],
         );
@@ -2938,26 +2942,26 @@ mod tests {
                         cause: UnsatisfiableCause::InputsSpent {
                             nullifiers: vec![[9; 32]],
                         },
-                        as_of: h,
+                        as_of_height: h,
                     },
                 ),
                 (
                     MigrationTransferId(1),
                     StepSatisfiability::Unsatisfiable {
                         cause: UnsatisfiableCause::AnchorInvalidated,
-                        as_of: h,
+                        as_of_height: h,
                     },
                 ),
                 (
                     MigrationTransferId(2),
                     StepSatisfiability::Unsatisfiable {
                         cause: UnsatisfiableCause::InputsInvalidated { anchor: [7; 32] },
-                        as_of: h,
+                        as_of_height: h,
                     },
                 ),
                 (
                     MigrationTransferId(4),
-                    StepSatisfiability::Satisfiable { as_of: h },
+                    StepSatisfiability::Satisfiable { as_of_height: h },
                 ),
             ],
         );
@@ -3059,7 +3063,7 @@ mod tests {
                     cause: UnsatisfiableCause::InputsSpent {
                         nullifiers: vec![[9; 32]],
                     },
-                    as_of: BlockHeight::from_u32(500),
+                    as_of_height: BlockHeight::from_u32(500),
                 },
             )],
         );
@@ -3073,7 +3077,7 @@ mod tests {
                     cause: UnsatisfiableCause::InputsSpent {
                         nullifiers: vec![[9; 32]],
                     },
-                    as_of: BlockHeight::from_u32(420),
+                    as_of_height: BlockHeight::from_u32(420),
                 },
             )],
         );
@@ -3351,7 +3355,7 @@ mod tests {
                     cause: UnsatisfiableCause::InputsSpent {
                         nullifiers: vec![[9; 32]],
                     },
-                    as_of: BlockHeight::from_u32(110),
+                    as_of_height: BlockHeight::from_u32(110),
                 },
             )],
         );

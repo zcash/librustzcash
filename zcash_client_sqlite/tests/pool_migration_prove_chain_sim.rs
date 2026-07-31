@@ -129,7 +129,7 @@ impl PoolMigrationRead for MigrationTestStore {
         // consults the oracle. Every drive in this file runs against the SQLite store, whose
         // oracle answers from the wallet's own tables.
         Ok(engine::StepSatisfiability::Satisfiable {
-            as_of: BlockHeight::from_u32(0),
+            as_of_height: BlockHeight::from_u32(0),
         })
     }
 }
@@ -1152,7 +1152,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
     // The user sweeps the account. The transfer's funding note is now spent by a mined
     // transaction the wallet has scanned; the migration still believes it is spendable.
     run.sweep_to_external();
-    let as_of = run.fully_scanned_height();
+    let as_of_height = run.fully_scanned_height();
 
     // (1) The PROVE seam, on a copy of the state, so the drive seam below is exercised from the
     // same starting point rather than from this determination's marks.
@@ -1177,7 +1177,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
             .find(|t| t.id() == transfer_id)
             .expect("the transfer is present")
             .unsatisfiable_at(),
-        Some(as_of),
+        Some(as_of_height),
         "the mark carries the fully-scanned height the observation rests on",
     );
 
@@ -1192,7 +1192,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
         if matches!(tx.kind(), MigrationTxKind::Transfer { .. }) {
             assert_eq!(
                 tx.unsatisfiable_at(),
-                Some(as_of),
+                Some(as_of_height),
                 "every affected transfer is marked at the observation's height",
             );
         }
@@ -1207,7 +1207,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
         if matches!(tx.kind(), MigrationTxKind::Transfer { .. }) {
             assert_eq!(
                 tx.unsatisfiable_at(),
-                Some(as_of),
+                Some(as_of_height),
                 "the mark survives the round trip through the store",
             );
         }
@@ -1453,7 +1453,7 @@ fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
     // The same sync, the opposite verdict: the wallet now sees its own note spent by a mined
     // transaction, which is evidence, and the ordinary marking machinery takes over.
     run.st.scan_cached_blocks(sweep_tip, 1);
-    let as_of = run.fully_scanned_height();
+    let as_of_height = run.fully_scanned_height();
     assert_eq!(
         run.advance(&mut committed.state),
         AdvanceStep::Replan,
@@ -1462,7 +1462,7 @@ fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
     let adjudicated = transfer(&committed.state);
     assert_eq!(
         adjudicated.unsatisfiable(),
-        Some((as_of, engine::UnsatisfiableKind::InputsSpent)),
+        Some((as_of_height, engine::UnsatisfiableKind::InputsSpent)),
         "the rejection is adjudicated into a mark resting on the wallet's own scanned evidence",
     );
     assert_eq!(
@@ -1476,7 +1476,10 @@ fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
     );
     assert_eq!(
         (stored.unsatisfiable(), stored.broadcast_failure_at()),
-        (Some((as_of, engine::UnsatisfiableKind::InputsSpent)), None),
+        (
+            Some((as_of_height, engine::UnsatisfiableKind::InputsSpent)),
+            None
+        ),
         "both survive the round trip through the SQLite store",
     );
     assert!(committed.state.replan_required());
@@ -1631,7 +1634,7 @@ fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
     // the height the observation rests on, the whole planned crossing value is unsatisfiable, and
     // the migration is re-planned.
     run.mine_empty_block();
-    let as_of = run.fully_scanned_height();
+    let as_of_height = run.fully_scanned_height();
     assert_eq!(
         run.advance(&mut committed.state),
         AdvanceStep::Replan,
@@ -1645,7 +1648,7 @@ fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
             .find(|t| t.id() == transfer_id)
             .expect("the crossing is present")
             .unsatisfiable_at(),
-        Some(as_of),
+        Some(as_of_height),
         "the mark carries the fully-scanned height the observation rests on",
     );
     assert_eq!(
@@ -1656,13 +1659,13 @@ fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
             .find(|t| t.id() == transfer_id)
             .expect("the crossing is present")
             .unsatisfiable_at(),
-        Some(as_of),
+        Some(as_of_height),
         "the in-flight sweep's mark is persisted before the step is surfaced",
     );
 
     // And it is exactly as revocable as the chain it rests on: a rewind below the mark's stamp
     // clears it, because the state that displaced the anchor no longer exists either.
-    committed.state.truncate_to_height(as_of - 1);
+    committed.state.truncate_to_height(as_of_height - 1);
     assert!(
         committed
             .state

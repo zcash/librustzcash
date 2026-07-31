@@ -154,7 +154,7 @@ pub trait PoolMigrationRead {
     /// wallet's scanned height does not regress in normal operation: a chain rollback reaches this
     /// state through [`MigrationState::truncate_to_height`], which withdraws the determinations
     /// resting on the discarded region rather than leaving the store to answer as though they were
-    /// still backed. An implementation may therefore treat its `as_of` as monotone between
+    /// still backed. An implementation may therefore treat its `as_of_height` as monotone between
     /// truncations, and every answer it gives rests on evidence at or below that height. Asking a
     /// store about a migration committed by some other wallet is outside the contract: the two
     /// have neither the same notes nor the same scan history, so the answers would describe a
@@ -514,7 +514,7 @@ pub fn advance_migration<St: PoolMigrationWrite>(
                 continue;
             };
             let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
-            if answer_as_of(&answer) < reported_tip {
+            if answer_as_of_height(&answer) < reported_tip {
                 // The wallet has not scanned every block that could hold the spend behind the
                 // rejection, so neither answer it could give would be about the right chain.
                 reevaluation_pending = true;
@@ -625,11 +625,11 @@ fn records_a_determination(answer: &StepSatisfiability) -> bool {
 
 /// The fully-scanned height a satisfiability answer rests on, whichever answer it is: the height
 /// that decides whether the answer is ABOUT the chain state a question was raised at.
-fn answer_as_of(answer: &StepSatisfiability) -> BlockHeight {
+fn answer_as_of_height(answer: &StepSatisfiability) -> BlockHeight {
     match answer {
-        StepSatisfiability::Satisfiable { as_of }
-        | StepSatisfiability::NotYetSatisfiable { as_of }
-        | StepSatisfiability::Unsatisfiable { as_of, .. } => *as_of,
+        StepSatisfiability::Satisfiable { as_of_height }
+        | StepSatisfiability::NotYetSatisfiable { as_of_height }
+        | StepSatisfiability::Unsatisfiable { as_of_height, .. } => *as_of_height,
     }
 }
 
@@ -870,9 +870,9 @@ pub struct MigrationTransaction {
     ///
     /// This is TESTIMONY, not evidence: another observer's report of chain state this wallet has
     /// not seen. It never produces an [`unsatisfiable`](Self::unsatisfiable) mark — marks rest on
-    /// scanned state at or below an answer's `as_of`, which is what makes reorg truncation exact
-    /// — and it carries no cause, because the engine verifies a rejection through channels it
-    /// owns rather than trusting the node's stated reason. Its whole effect is to withhold the
+    /// scanned state at or below an answer's `as_of_height`, which is what makes reorg truncation
+    /// exact — and it carries no cause, because the engine verifies a rejection through channels
+    /// it owns rather than trusting the node's stated reason. Its whole effect is to withhold the
     /// transaction from the broadcast queue and to hold the drive loop at
     /// [`Reevaluate`](crate::state::AdvanceStep::Reevaluate) until the wallet can answer.
     #[getset(get_copy = "pub")]
@@ -1094,21 +1094,21 @@ pub enum StepSatisfiability {
     /// Every queried input is among the account's unspent notes, and nothing else obstructs.
     Satisfiable {
         /// The fully-scanned height the observation rests on.
-        as_of: BlockHeight,
+        as_of_height: BlockHeight,
     },
     /// Some input's nullifier corresponds to no note the wallet has seen — its source is not yet
     /// mined, or not yet scanned — or a known creator is unmined but still viable. Not an
     /// obstruction: retry after further sync.
     NotYetSatisfiable {
         /// The fully-scanned height the observation rests on.
-        as_of: BlockHeight,
+        as_of_height: BlockHeight,
     },
     /// Permanently obstructed.
     Unsatisfiable {
         /// Why the step can never execute.
         cause: UnsatisfiableCause,
         /// The fully-scanned height the observation rests on.
-        as_of: BlockHeight,
+        as_of_height: BlockHeight,
     },
 }
 
@@ -1296,7 +1296,7 @@ pub enum InputObservation {
 ///
 /// [`spend_nullifiers`]: MigrationTransaction::spend_nullifiers
 pub fn classify_input_observations(
-    as_of: BlockHeight,
+    as_of_height: BlockHeight,
     expired: bool,
     observations: &[([u8; 32], InputObservation)],
 ) -> StepSatisfiability {
@@ -1308,7 +1308,7 @@ pub fn classify_input_observations(
     if !spent.is_empty() {
         return StepSatisfiability::Unsatisfiable {
             cause: UnsatisfiableCause::InputsSpent { nullifiers: spent },
-            as_of,
+            as_of_height,
         };
     }
     if let Some(anchor) = observations.iter().find_map(|(_, o)| match o {
@@ -1317,22 +1317,22 @@ pub fn classify_input_observations(
     }) {
         return StepSatisfiability::Unsatisfiable {
             cause: UnsatisfiableCause::InputsInvalidated { anchor },
-            as_of,
+            as_of_height,
         };
     }
     if expired {
         return StepSatisfiability::Unsatisfiable {
             cause: UnsatisfiableCause::Expired,
-            as_of,
+            as_of_height,
         };
     }
     if observations
         .iter()
         .any(|(_, o)| matches!(o, InputObservation::Unknown))
     {
-        return StepSatisfiability::NotYetSatisfiable { as_of };
+        return StepSatisfiability::NotYetSatisfiable { as_of_height };
     }
-    StepSatisfiability::Satisfiable { as_of }
+    StepSatisfiability::Satisfiable { as_of_height }
 }
 
 impl AsRef<str> for MigrationTxState {
@@ -2642,7 +2642,7 @@ fn interpret_input_not_available(
                 cause: UnsatisfiableCause::InputsSpent {
                     nullifiers: vec![nullifier],
                 },
-                as_of,
+                as_of_height: as_of,
             },
         )],
     );
@@ -4057,9 +4057,9 @@ mod tests {
     /// expired besides).
     #[test]
     fn classify_seen_spent_dominates_invalidated() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         let got = classify_input_observations(
-            as_of,
+            as_of_height,
             true,
             &[
                 ([1; 32], InputObservation::Invalidated([9; 32])),
@@ -4072,7 +4072,7 @@ mod tests {
                 cause: UnsatisfiableCause::InputsSpent {
                     nullifiers: vec![[2; 32]]
                 },
-                as_of,
+                as_of_height,
             }
         );
     }
@@ -4081,9 +4081,9 @@ mod tests {
     /// inputs that will never exist on chain, so the input-level cause is the one reported.
     #[test]
     fn classify_invalidated_dominates_expired() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         let got = classify_input_observations(
-            as_of,
+            as_of_height,
             true,
             &[
                 ([1; 32], InputObservation::Unknown),
@@ -4094,7 +4094,7 @@ mod tests {
             got,
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::InputsInvalidated { anchor: [9; 32] },
-                as_of,
+                as_of_height,
             }
         );
     }
@@ -4103,9 +4103,9 @@ mod tests {
     /// "retry after further sync".
     #[test]
     fn classify_expired_dominates_unknown() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         let got = classify_input_observations(
-            as_of,
+            as_of_height,
             true,
             &[
                 ([1; 32], InputObservation::Unknown),
@@ -4116,7 +4116,7 @@ mod tests {
             got,
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::Expired,
-                as_of,
+                as_of_height,
             }
         );
     }
@@ -4125,41 +4125,41 @@ mod tests {
     /// unspent, the answer is "not yet", never "satisfiable".
     #[test]
     fn classify_unknown_dominates_unspent() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         let got = classify_input_observations(
-            as_of,
+            as_of_height,
             false,
             &[
                 ([1; 32], InputObservation::Unspent),
                 ([2; 32], InputObservation::Unknown),
             ],
         );
-        assert_eq!(got, StepSatisfiability::NotYetSatisfiable { as_of });
+        assert_eq!(got, StepSatisfiability::NotYetSatisfiable { as_of_height });
     }
 
     /// All inputs known unspent and the transaction unexpired: satisfiable, at the observation
     /// height.
     #[test]
     fn classify_all_unspent_is_satisfiable() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         let got = classify_input_observations(
-            as_of,
+            as_of_height,
             false,
             &[
                 ([1; 32], InputObservation::Unspent),
                 ([2; 32], InputObservation::Unspent),
             ],
         );
-        assert_eq!(got, StepSatisfiability::Satisfiable { as_of });
+        assert_eq!(got, StepSatisfiability::Satisfiable { as_of_height });
     }
 
     /// A mixed observation set collects ALL seen-spent nullifiers, in the cache's order, not just
     /// the first: the caller reports the complete set of dead inputs.
     #[test]
     fn classify_collects_every_spent_nullifier() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         let got = classify_input_observations(
-            as_of,
+            as_of_height,
             false,
             &[
                 ([1; 32], InputObservation::SeenSpent),
@@ -4173,7 +4173,7 @@ mod tests {
                 cause: UnsatisfiableCause::InputsSpent {
                     nullifiers: vec![[1; 32], [3; 32]]
                 },
-                as_of,
+                as_of_height,
             }
         );
     }
@@ -4183,9 +4183,9 @@ mod tests {
     /// tests above each pin one adjacent edge).
     #[test]
     fn classify_omnibus_seen_spent_tops_everything() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         let got = classify_input_observations(
-            as_of,
+            as_of_height,
             true,
             &[
                 ([1; 32], InputObservation::Unspent),
@@ -4200,7 +4200,7 @@ mod tests {
                 cause: UnsatisfiableCause::InputsSpent {
                     nullifiers: vec![[2; 32]]
                 },
-                as_of,
+                as_of_height,
             }
         );
     }
@@ -4210,10 +4210,10 @@ mod tests {
     /// vacuous satisfiability) is the CALLER's obligation, per the function's contract.
     #[test]
     fn classify_empty_observations_unexpired_is_satisfiable() {
-        let as_of = BlockHeight::from_u32(100);
+        let as_of_height = BlockHeight::from_u32(100);
         assert_eq!(
-            classify_input_observations(as_of, false, &[]),
-            StepSatisfiability::Satisfiable { as_of }
+            classify_input_observations(as_of_height, false, &[]),
+            StepSatisfiability::Satisfiable { as_of_height }
         );
     }
 
@@ -4288,7 +4288,9 @@ mod tests {
         ) -> Result<StepSatisfiability, Self::Error> {
             // This mock models a wallet whose environment never obstructs a step; tests that
             // exercise the oracle configure the `zcash_pool_migration_memory` mocks instead.
-            Ok(StepSatisfiability::Satisfiable { as_of: self.tip })
+            Ok(StepSatisfiability::Satisfiable {
+                as_of_height: self.tip,
+            })
         }
     }
 
@@ -4567,24 +4569,24 @@ mod advance_tests {
     use crate::preparation::PreparationPlan;
 
     /// A store that answers satisfiability from a fixed table — anything absent is satisfiable at
-    /// `as_of`, the healthy default — and counts what the drive loop asks of it.
+    /// `as_of_height`, the healthy default — and counts what the drive loop asks of it.
     struct TestStore {
         stored: Option<MigrationState>,
         satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
-        as_of: BlockHeight,
+        as_of_height: BlockHeight,
         queries: Cell<usize>,
         replaced: Cell<usize>,
     }
 
     impl TestStore {
         fn new(
-            as_of: u32,
+            as_of_height: u32,
             answers: impl IntoIterator<Item = (MigrationTransferId, StepSatisfiability)>,
         ) -> Self {
             TestStore {
                 stored: None,
                 satisfiability: answers.into_iter().collect(),
-                as_of: BlockHeight::from_u32(as_of),
+                as_of_height: BlockHeight::from_u32(as_of_height),
                 queries: Cell::new(0),
                 replaced: Cell::new(0),
             }
@@ -4610,11 +4612,11 @@ mod advance_tests {
             _settle: ReorgSettleDepth,
         ) -> Result<StepSatisfiability, Self::Error> {
             self.queries.set(self.queries.get() + 1);
-            Ok(self
-                .satisfiability
-                .get(&tx.id())
-                .cloned()
-                .unwrap_or(StepSatisfiability::Satisfiable { as_of: self.as_of }))
+            Ok(self.satisfiability.get(&tx.id()).cloned().unwrap_or(
+                StepSatisfiability::Satisfiable {
+                    as_of_height: self.as_of_height,
+                },
+            ))
         }
     }
 
@@ -4721,12 +4723,12 @@ mod advance_tests {
         }
     }
 
-    fn spent(as_of: u32) -> StepSatisfiability {
+    fn spent(as_of_height: u32) -> StepSatisfiability {
         StepSatisfiability::Unsatisfiable {
             cause: UnsatisfiableCause::InputsSpent {
                 nullifiers: vec![[9; 32]],
             },
-            as_of: BlockHeight::from_u32(as_of),
+            as_of_height: BlockHeight::from_u32(as_of_height),
         }
     }
 
@@ -4751,7 +4753,7 @@ mod advance_tests {
     struct FailingStore {
         stored: Option<MigrationState>,
         satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
-        as_of: BlockHeight,
+        as_of_height: BlockHeight,
         fails: Failure,
         queries: Cell<usize>,
         replaced: Cell<usize>,
@@ -4760,13 +4762,13 @@ mod advance_tests {
     impl FailingStore {
         fn new(
             fails: Failure,
-            as_of: u32,
+            as_of_height: u32,
             answers: impl IntoIterator<Item = (MigrationTransferId, StepSatisfiability)>,
         ) -> Self {
             FailingStore {
                 stored: None,
                 satisfiability: answers.into_iter().collect(),
-                as_of: BlockHeight::from_u32(as_of),
+                as_of_height: BlockHeight::from_u32(as_of_height),
                 fails,
                 queries: Cell::new(0),
                 replaced: Cell::new(0),
@@ -4790,11 +4792,11 @@ mod advance_tests {
             if self.fails == Failure::Oracle {
                 return Err(StoreFailed);
             }
-            Ok(self
-                .satisfiability
-                .get(&tx.id())
-                .cloned()
-                .unwrap_or(StepSatisfiability::Satisfiable { as_of: self.as_of }))
+            Ok(self.satisfiability.get(&tx.id()).cloned().unwrap_or(
+                StepSatisfiability::Satisfiable {
+                    as_of_height: self.as_of_height,
+                },
+            ))
         }
     }
 
@@ -4946,7 +4948,7 @@ mod advance_tests {
             [(
                 MigrationTransferId(1),
                 StepSatisfiability::NotYetSatisfiable {
-                    as_of: BlockHeight::from_u32(1600),
+                    as_of_height: BlockHeight::from_u32(1600),
                 },
             )],
         );
@@ -4984,7 +4986,7 @@ mod advance_tests {
         store.set_answer(
             MigrationTransferId(1),
             StepSatisfiability::Satisfiable {
-                as_of: BlockHeight::from_u32(1700),
+                as_of_height: BlockHeight::from_u32(1700),
             },
         );
         let step = advance_migration(
@@ -5084,7 +5086,7 @@ mod advance_tests {
                     MigrationTransferId(0),
                     StepSatisfiability::Unsatisfiable {
                         cause: UnsatisfiableCause::AnchorInvalidated,
-                        as_of: BlockHeight::from_u32(1600),
+                        as_of_height: BlockHeight::from_u32(1600),
                     },
                 ),
                 (MigrationTransferId(3), spent(1600)),
@@ -5145,7 +5147,7 @@ mod advance_tests {
                 MigrationTransferId(1),
                 StepSatisfiability::Unsatisfiable {
                     cause: UnsatisfiableCause::Expired,
-                    as_of: BlockHeight::from_u32(1600),
+                    as_of_height: BlockHeight::from_u32(1600),
                 },
             )],
         );
@@ -5374,7 +5376,7 @@ mod advance_tests {
         // The wallet syncs past the reported tip and the same answer now decides the question:
         // nothing obstructs, so the rejection was transient, the report is discharged, and the
         // broadcast is offered again IN THIS CALL.
-        store.as_of = BlockHeight::from_u32(1700);
+        store.as_of_height = BlockHeight::from_u32(1700);
         assert_eq!(
             advance_migration(
                 &mut store,
@@ -5528,7 +5530,7 @@ mod advance_tests {
                 MigrationTransferId(1),
                 StepSatisfiability::Unsatisfiable {
                     cause: UnsatisfiableCause::AnchorInvalidated,
-                    as_of: BlockHeight::from_u32(1600),
+                    as_of_height: BlockHeight::from_u32(1600),
                 },
             )],
         );
@@ -5788,7 +5790,9 @@ mod commit_tests {
         ) -> Result<StepSatisfiability, Self::Error> {
             // This mock models a wallet whose environment never obstructs a step; tests that
             // exercise the oracle configure the `zcash_pool_migration_memory` mocks instead.
-            Ok(StepSatisfiability::Satisfiable { as_of: self.tip })
+            Ok(StepSatisfiability::Satisfiable {
+                as_of_height: self.tip,
+            })
         }
     }
 
