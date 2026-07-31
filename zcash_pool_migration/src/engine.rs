@@ -298,13 +298,13 @@ pub struct MigrationTransaction {
     /// What it does (a preparation transaction or a transfer).
     #[getset(get_copy = "pub")]
     pub(crate) kind: MigrationTxKind,
-    /// The unproven PCZT, serialized (`pczt::Pczt::serialize`): pre-signed, except while the
-    /// transaction awaits an external signature
-    /// ([`AwaitingSignature`](MigrationTxState::AwaitingSignature)), when these are the unsigned
-    /// bytes the signed PCZT replaces. Every transaction is built when the migration is
-    /// committed — one signing phase — so this is always present: the durable artifact the
-    /// application proves (installing its anchor and witnesses at that point; ZIP 374) and
-    /// broadcasts.
+    /// The serialized PCZT (`pczt::Pczt::serialize`), whose contents track the transaction's
+    /// lifecycle: unsigned bytes while the transaction awaits an external signature
+    /// ([`AwaitingSignature`](MigrationTxState::AwaitingSignature)), then the pre-signed PCZT
+    /// with anchors and witnesses still deferred (ZIP 374), then — once the application proves
+    /// it — the PROVEN PCZT, witnesses and anchors installed and proofs attached, ready to
+    /// broadcast. Every transaction is built when the migration is committed — one signing
+    /// phase — so this is always present.
     #[getset(get = "pub")]
     pub(crate) pczt: Vec<u8>,
     /// The transactions that must be mined before this one may be broadcast (the preparation layer
@@ -339,9 +339,12 @@ pub struct MigrationTransaction {
     pub(crate) unsatisfiable_at: Option<BlockHeight>,
     /// The nullifiers of this transaction's REAL spends — the deferred-witness actions; the
     /// padded dummy spends carry their own witnesses (ZIP 374) — extracted from the built PCZT
-    /// when the migration is committed. A cache of data derivable from the stored PCZT, kept
-    /// because the PCZT bytes are immutable once signed and `pczt` parsing is `orchard`-gated
-    /// while the state machine must remain feature-free.
+    /// when the migration is committed, BEFORE any proof. Proving replaces the stored bytes
+    /// with the proven PCZT, whose real spends all carry installed witnesses and so are no
+    /// longer identifiable there; from commit onward this cache is therefore the SOLE
+    /// real-spend authority for the transaction's remaining life — consumers (the rebuild path,
+    /// the unsatisfiability machinery) read it and never re-derive from the stored bytes. It
+    /// also spares the feature-free state machine the `orchard`-gated `pczt` parsing.
     #[getset(get = "pub")]
     pub(crate) spend_nullifiers: Vec<[u8; 32]>,
     /// The transaction's lifecycle state.
@@ -1730,8 +1733,9 @@ pub enum RebuildError<E> {
     /// double-spending copy.
     NotExpired(MigrationTransferId),
     /// The stored migration state is internally inconsistent: the denomination plan carries no crossing or
-    /// funding value for this transfer's crossing index, or the transfer's stored PCZT is
-    /// malformed.
+    /// funding value for this transfer's crossing index, or the transfer's persisted nullifier
+    /// cache ([`MigrationTransaction::spend_nullifiers`]) does not hold exactly the one funding
+    /// nullifier a transfer spends.
     InconsistentPlan(alloc::string::String),
     /// The transfer's funding note — the EXACT note its expired PCZT spends, matched by nullifier
     /// among the wallet's spendable notes — is no longer available. It should still be unspent
@@ -1985,24 +1989,19 @@ where
             RebuildError::InconsistentPlan(format!("no funding value for transfer {crossing}"))
         })?;
 
-    // Recover the funding note's IDENTITY from the expired PCZT itself: its one real spend (the
-    // action with no witness; ZIP 374 deferral leaves the padding dummy its arbitrary witness)
-    // reveals the nullifier of the exact note this part is funded by. Denominations repeat across
-    // a migration, so matching the wallet's spendable notes by value alone could grab a sibling
-    // transfer's funding note and turn the rebuilt transfer into a double-spend of that
-    // still-valid sibling.
-    let stored_pczt = pczt::Pczt::parse(&tx.pczt).map_err(|e| {
-        RebuildError::InconsistentPlan(format!("the stored transfer PCZT does not parse: {e:?}"))
-    })?;
-    let mut real_spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&stored_pczt)
-        .into_iter()
-        .map(|(_, nf)| nf);
-    let funding_nullifier = match (real_spend_nullifiers.next(), real_spend_nullifiers.next()) {
-        (Some(nf), None) => nf,
+    // Recover the funding note's IDENTITY from the transaction's persisted nullifier cache: its
+    // one real spend's nullifier names the exact note this part is funded by. Denominations
+    // repeat across a migration, so matching the wallet's spendable notes by value alone could
+    // grab a sibling transfer's funding note and turn the rebuilt transfer into a double-spend of
+    // that still-valid sibling. The CACHE, not the stored PCZT, is the authority: proving
+    // replaces the stored bytes with the PROVEN PCZT, whose real spend carries an installed
+    // witness, so the deferred-witness rule no longer identifies it there — while the cache is
+    // extracted at commit (and refreshed below), before any proof.
+    let funding_nullifier = match tx.spend_nullifiers.as_slice() {
+        &[nf] => nf,
         _ => {
             return Err(RebuildError::InconsistentPlan(
-                "the stored transfer PCZT does not have exactly one real (unwitnessed) spend"
-                    .into(),
+                "the transfer's nullifier cache does not hold exactly one funding nullifier".into(),
             ));
         }
     };
@@ -3460,6 +3459,31 @@ mod commit_tests {
         }
     }
 
+    /// Install a stand-in witness on every still-deferred spend of `pczt`, mimicking the one
+    /// structural effect of real proving the engine itself can observe: a PROVEN PCZT carries no
+    /// unwitnessed spends, so the deferred-witness rule no longer identifies its real spends.
+    /// The path is arbitrary (a single-leaf tree), exactly like the builder's dummy witnesses;
+    /// anchors and proofs need the commitment tree the mock does not model, and nothing in the
+    /// engine inspects them.
+    fn install_stand_in_witnesses(pczt: pczt::Pczt) -> pczt::Pczt {
+        use incrementalmerkletree::{Hashable, Level};
+        use orchard::tree::{MerkleHashOrchard, MerklePath};
+
+        let witnesses: Vec<(usize, MerklePath)> = crate::pczt_spends::real_spend_nullifiers(&pczt)
+            .into_iter()
+            .map(|(index, _)| {
+                let auth_path = core::array::from_fn(|level| {
+                    MerkleHashOrchard::empty_root(Level::from(level as u8))
+                });
+                (index, MerklePath::from_parts(0, auth_path))
+            })
+            .collect();
+        pczt::roles::updater::Updater::new(pczt)
+            .set_orchard_spend_witnesses(witnesses)
+            .expect("the stand-in witnesses install on the deferred spends")
+            .finish()
+    }
+
     impl MigrationProver for CommitMock {
         type Error = core::convert::Infallible;
 
@@ -3469,13 +3493,15 @@ mod commit_tests {
             _anchor_boundary: BlockHeight,
         ) -> Result<pczt::Pczt, Self::Error> {
             // A stand-in for proving. A real prover resolves the funding note's witness against
-            // `anchor_boundary`, installs the Orchard source and Ironwood destination anchors
-            // through the PCZT `Updater` role, and runs the Orchard + Ironwood provers. Resolving
-            // the funding note requires commitment-tree access this mock does not model, so it
-            // returns the PCZT unchanged; the engine's `prove_transfer` orchestration (reading and
-            // passing the persisted `anchor_boundary`, and the Signed -> Proved transition) is what
-            // the tests exercise.
-            Ok(pczt)
+            // `anchor_boundary`, installs it and the Orchard source and Ironwood destination
+            // anchors through the PCZT `Updater` role, and runs the Orchard + Ironwood provers.
+            // Resolving the real witness requires commitment-tree access this mock does not
+            // model, so it installs only a stand-in witness on each deferred spend
+            // ([`install_stand_in_witnesses`]) — enough that the stored proven bytes, like real
+            // proven bytes, no longer identify their real spends by deferred witness. The
+            // engine's `prove_transfer` orchestration (reading and passing the persisted
+            // `anchor_boundary`, and the Signed -> Proved transition) is what the tests exercise.
+            Ok(install_stand_in_witnesses(pczt))
         }
 
         fn anchor_bucket_interval(&self) -> crate::scheduling::AnchorBucketInterval {
@@ -3489,9 +3515,10 @@ mod commit_tests {
         ) -> Result<pczt::Pczt, Self::Error> {
             // A stand-in for proving, as `prove_transfer` above: a real prover installs the Orchard
             // anchor and every spend's witness and runs the Orchard prover (see
-            // `WalletMigrationProver`). This mock models no commitment tree, so it returns the PCZT
-            // unchanged; the engine's `prove_preparation` orchestration is what the tests exercise.
-            Ok(pczt)
+            // `WalletMigrationProver`). This mock models no commitment tree, so it installs only
+            // the stand-in witnesses; the engine's `prove_preparation` orchestration is what the
+            // tests exercise.
+            Ok(install_stand_in_witnesses(pczt))
         }
     }
 
@@ -3801,6 +3828,63 @@ mod commit_tests {
 
         // It is no longer expired at the tip it was rebuilt against.
         assert!(!state.expired_transactions(target).contains(&id));
+    }
+
+    /// A transfer that was PROVED before it expired is still rebuildable. Proving replaces the
+    /// stored bytes with the proven PCZT, whose real spend carries an installed witness, so the
+    /// deferred-witness rule no longer identifies the funding note there — the rebuild must read
+    /// the persisted nullifier cache instead. This is exactly the resumed-wallet scenario in
+    /// which broadcast windows lapse after proving; were the rebuild to fail here, `next_step`
+    /// would keep surfacing the same `Rebuild` for a permanently failing call (a livelock).
+    #[test]
+    fn rebuild_reads_the_nullifier_cache_for_a_proved_transfer() {
+        let seed = 101u64;
+        let params = regtest_network(true);
+        let buffer = u64::from(commit_test_fees().1);
+        let mut backend = CommitMock::new(seed, &[COIN + buffer]);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("commits the migration");
+        assert_eq!(state.transactions.len(), 1, "one directly funded transfer");
+        let id = state.transactions[0].id;
+
+        // Prove the transfer: the PROVEN bytes replace the stored ones, and their real spend now
+        // carries a witness, so it is no longer identifiable from the bytes.
+        prove_transfer(&mut backend, &mut state, id).expect("proves the transfer");
+        let old = state.transactions[0].clone();
+        assert!(matches!(old.state, MigrationTxState::Proved));
+        let proven = pczt::Pczt::parse(&old.pczt).expect("the proven PCZT parses");
+        assert!(
+            crate::pczt_spends::real_spend_nullifiers(&proven).is_empty(),
+            "a proven PCZT's real spends are not identifiable by deferred witness"
+        );
+
+        // The proof went unused: the broadcast window lapsed and the transfer expired.
+        backend.tip = old.expiry_height + 1;
+        let target = backend.chain_tip_height().unwrap() + 1;
+        assert!(state.expired_transactions(target).contains(&id));
+
+        // The rebuild recovers the funding note from the persisted nullifier cache.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng)
+            .expect("rebuilds the expired proved transfer");
+        let new = &state.transactions[0];
+        assert_eq!(new.state, MigrationTxState::Signed);
+        assert!(!new.spend_nullifiers.is_empty());
+        assert_eq!(
+            new.spend_nullifiers, old.spend_nullifiers,
+            "the rebuilt transfer spends the same funding note"
+        );
     }
 
     /// The nullifier of the one real spend (the action with no witness; ZIP 374 deferral leaves
