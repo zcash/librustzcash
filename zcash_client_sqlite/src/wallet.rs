@@ -6204,14 +6204,10 @@ mod tests {
         }
 
         let tx = st.wallet().conn().unchecked_transaction().unwrap();
-        let forced = super::get_wallet_summary(
-            &tx,
-            st.network(),
-            ConfirmationsPolicy::MIN,
-            &FixedProgress,
-        )
-        .unwrap()
-        .expect("fixed progress plus snapshot must yield a summary");
+        let forced =
+            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &FixedProgress)
+                .unwrap()
+                .expect("fixed progress plus snapshot must yield a summary");
         let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
             .unwrap()
             .expect("scanned wallet has a snapshot");
