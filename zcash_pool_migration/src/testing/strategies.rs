@@ -170,9 +170,32 @@ pub fn arb_lock_owner() -> impl Strategy<Value = Option<[u8; 32]>> {
     prop::option::of(any::<[u8; 32]>())
 }
 
-/// An arbitrary [`MigrationTransaction`], built through [`MigrationTransaction::from_parts`]. Its id
-/// is arbitrary here; [`arb_migration_state`] re-keys the transactions it holds so their ids stay
-/// unique within a migration.
+/// An arbitrary lifecycle state paired with a real-spend nullifier cache the state ADMITS.
+///
+/// The two are not independent. An empty cache on a non-mined transaction is corruption, not a
+/// value a store must round-trip: it would read as "no inputs to observe" to the unsatisfiability
+/// machinery, silently exempting the transaction from detection, and every read path treats it as
+/// a loud error rather than an answer. Generating it would hold stores to round-tripping a shape
+/// they are required to reject. A MINED transaction is the one exemption — the schema migration
+/// that introduced the cache leaves such rows empty, because a mined transaction's disposition no
+/// longer turns on its inputs — so the empty cache is generated there and only there.
+pub fn arb_state_and_spend_nullifiers() -> impl Strategy<Value = (MigrationTxState, Vec<[u8; 32]>)>
+{
+    arb_migration_tx_state().prop_flat_map(|state| {
+        let admits_empty = matches!(state, MigrationTxState::Mined { .. });
+        let count = if admits_empty { 0..3usize } else { 1..3usize };
+        (
+            Just(state),
+            prop::collection::vec(prop::array::uniform32(any::<u8>()), count),
+        )
+    })
+}
+
+/// An arbitrary [`MigrationTransaction`], built through [`MigrationTransaction::from_parts`]. Its
+/// id is arbitrary here; [`arb_migration_state`] re-keys the transactions it holds so their ids
+/// stay unique within a migration. Its lifecycle state and nullifier cache are drawn TOGETHER (see
+/// [`arb_state_and_spend_nullifiers`]), because not every pairing of the two is a value a store is
+/// required to round-trip.
 pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction> {
     (
         arb_migration_transfer_id(),
@@ -182,10 +205,9 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         arb_block_height(),
         arb_block_height(),
         prop::option::of(arb_block_height()),
-        arb_migration_tx_state(),
+        arb_state_and_spend_nullifiers(),
         arb_lock_owner(),
         prop::option::of(arb_block_height()),
-        prop::collection::vec(prop::array::uniform32(any::<u8>()), 0..3),
     )
         .prop_map(
             |(
@@ -196,10 +218,9 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 scheduled_height,
                 expiry_height,
                 anchor_boundary,
-                state,
+                (state, spend_nullifiers),
                 lock_owner,
                 unsatisfiable_at,
-                spend_nullifiers,
             )| {
                 MigrationTransaction::from_parts(
                     id,
