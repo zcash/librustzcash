@@ -4412,6 +4412,16 @@ pub(crate) fn truncate_to_height_internal<P: consensus::Parameters>(
         )?;
     }
 
+    // Roll every stored pool migration back with the wallet. A migration's marks and mined heights
+    // are chain-derived exactly as the wallet's own scanned state is, and must not be able to
+    // outlive it: an unsatisfiability mark resting on a rolled-back observation would strand live
+    // value behind evidence that no longer exists, and a transaction still recorded mined above the
+    // truncation would keep its dependents unblocked. The truncation is the only moment at which
+    // either is noticeable, so it is driven here rather than left to the consumer to remember, and
+    // it runs in the same transaction, at the height actually ACHIEVED — which a caller that asked
+    // for a lower one never sees.
+    crate::pool_migration::orchard_ironwood::truncate_to_height(conn, truncation_height)?;
+
     Ok(truncation_height)
 }
 

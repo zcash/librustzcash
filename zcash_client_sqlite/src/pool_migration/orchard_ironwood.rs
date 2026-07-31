@@ -121,10 +121,26 @@ pub(crate) fn active_anchor_bucket_intervals(
                 .map(AnchorRetentionInterval::custom)
                 .collect()
         })
-        .map_err(|e| match e {
-            Error::Db(e) => SqliteClientError::DbError(e),
-            other => SqliteClientError::CorruptedData(other.to_string()),
-        })
+        .map_err(lift_store_error)
+}
+
+/// Roll every stored Orchard -> Ironwood migration back to `height`, which the wallet's own
+/// truncation calls so that a migration's chain-derived state cannot outlive the chain state it
+/// was derived from. See [`store::truncate_to_height`].
+pub(crate) fn truncate_to_height(
+    tx: &rusqlite::Transaction,
+    height: zcash_protocol::consensus::BlockHeight,
+) -> Result<(), SqliteClientError> {
+    store::truncate_to_height(tx, &TABLES, height).map_err(lift_store_error)
+}
+
+/// A store failure as the wallet's own error type reports it: a database error surfaces as itself,
+/// and everything else is data the store could not reconstruct.
+fn lift_store_error(e: Error) -> SqliteClientError {
+    match e {
+        Error::Db(e) => SqliteClientError::DbError(e),
+        other => SqliteClientError::CorruptedData(other.to_string()),
+    }
 }
 
 /// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`]
@@ -1194,6 +1210,213 @@ mod check_step_satisfiability {
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
                 .expect("the oracle answers"),
             StepSatisfiability::NotYetSatisfiable { as_of },
+        );
+    }
+}
+
+/// The wallet's own truncation drives every stored migration's, at the height it ACTUALLY
+/// truncated to: a migration's chain-derived state is exactly as revocable as the wallet's, and a
+/// consumer has no reorg hook to remember.
+#[cfg(all(test, feature = "orchard"))]
+mod truncation_follows_the_wallet {
+    use zcash_client_backend::data_api::testing::{
+        AddressType, TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+    };
+    use zcash_client_backend::data_api::{Account as _, WalletRead, WalletWrite};
+    use zcash_pool_migration::denomination::DenominationPlan;
+    use zcash_pool_migration::engine::{
+        MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReplanThreshold,
+    };
+    use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_pool_migration::scheduling::AnchorBucketInterval;
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::TxId;
+    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::value::Zatoshis;
+
+    use super::PoolMigrations;
+    use crate::testing::{BlockCache, db::TestDbFactory};
+
+    /// A migration transaction in `state`, marked at `unsatisfiable_at`; the plan-shaped fields are
+    /// immaterial to truncation.
+    fn tx(
+        id: u32,
+        state: MigrationTxState,
+        unsatisfiable_at: Option<BlockHeight>,
+    ) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(id),
+            MigrationTxKind::Transfer {
+                crossing: id as usize,
+            },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            state,
+            None,
+            unsatisfiable_at,
+            vec![[id as u8; 32]],
+        )
+    }
+
+    /// A migration in `status` carrying `transactions`.
+    fn migration(
+        status: MigrationStatus,
+        transactions: Vec<MigrationTransaction>,
+    ) -> MigrationState {
+        MigrationState::from_parts(
+            status,
+            DenominationPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            transactions,
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        )
+    }
+
+    #[test]
+    fn wallet_truncation_rolls_back_marks_mined_heights_and_status() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        let (h, _, _) = st.generate_next_block(
+            &fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(100_000),
+        );
+        st.scan_cached_blocks(h, 1);
+        for _ in 0..12 {
+            let (h, _) = st.generate_empty_block();
+            st.scan_cached_blocks(h, 1);
+        }
+        let tip = st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+
+        // A COMPLETE migration: one transaction mined well below the coming truncation, one mined
+        // above it.
+        let low = tip - 6;
+        let mined = |txid: u8, height: BlockHeight| MigrationTxState::Mined {
+            txid: TxId::from_bytes([txid; 32]),
+            height,
+        };
+        {
+            let mut store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+                .expect("the account exists");
+            store
+                .replace_migration(&migration(
+                    MigrationStatus::Complete,
+                    vec![tx(0, mined(0xA0, low), None), tx(1, mined(0xA1, tip), None)],
+                ))
+                .expect("persists the migration");
+        }
+
+        // Truncate the WALLET; nothing tells the migration store directly.
+        let truncated_to = st
+            .wallet_mut()
+            .truncate_to_height(tip - 3)
+            .expect("the wallet truncates");
+        assert!(
+            truncated_to < tip,
+            "the truncation moved the chain view back"
+        );
+
+        let state = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists")
+            .get_migration()
+            .expect("reads the migration")
+            .expect("the migration is present");
+        assert_eq!(
+            state.transactions()[0].state(),
+            mined(0xA0, low),
+            "a transaction mined below the truncation stays mined",
+        );
+        assert_eq!(
+            state.transactions()[1].state(),
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([0xA1; 32])
+            },
+            "a transaction mined above the truncation is demoted, keeping its txid",
+        );
+        assert_eq!(
+            state.status(),
+            MigrationStatus::InProgress,
+            "a Complete status the demotion unsettles reverts",
+        );
+
+        // And the marks: an in-flight transaction marked on evidence above the next truncation
+        // loses that mark, while one marked below keeps it.
+        {
+            let mut store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+                .expect("the account exists");
+            store
+                .replace_migration(&migration(
+                    MigrationStatus::InProgress,
+                    vec![
+                        tx(
+                            0,
+                            MigrationTxState::Broadcast {
+                                txid: TxId::from_bytes([0xB0; 32]),
+                            },
+                            Some(truncated_to),
+                        ),
+                        tx(
+                            1,
+                            MigrationTxState::Broadcast {
+                                txid: TxId::from_bytes([0xB1; 32]),
+                            },
+                            Some(low),
+                        ),
+                    ],
+                ))
+                .expect("persists the marked migration");
+        }
+
+        let deeper = st
+            .wallet_mut()
+            .truncate_to_height(truncated_to - 2)
+            .expect("the wallet truncates again");
+        assert!(deeper < truncated_to);
+        assert!(
+            low <= deeper,
+            "the surviving mark rests below the truncation"
+        );
+
+        let state = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists")
+            .get_migration()
+            .expect("reads the migration")
+            .expect("the migration is present");
+        assert_eq!(
+            state.transactions()[0].unsatisfiable_at(),
+            None,
+            "a mark resting on chain state the truncation discarded is cleared",
+        );
+        assert_eq!(
+            state.transactions()[1].unsatisfiable_at(),
+            Some(low),
+            "a mark resting on retained chain state stands",
         );
     }
 }
