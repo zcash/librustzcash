@@ -8,6 +8,11 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `engine::{AdvanceConfig, advance_migration}`, the verified drive API: it plans
+  the next step, checks the transaction that step names against the store's
+  satisfiability oracle, and re-plans around what it discovers, so every step it
+  returns has been vouched for by the store and every determination it records is
+  persisted before that step is surfaced.
 - `engine::MigrationStatus::Superseded` (wire name `"superseded"`) and
   `engine::MigrationState::mark_superseded`, the terminal status and transition
   recording that a migration's remaining value is being re-planned; a superseded
