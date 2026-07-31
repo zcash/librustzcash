@@ -91,6 +91,48 @@ pub struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
+impl Bundle {
+    /// The outputs of this bundle's actions, in action order.
+    ///
+    /// Every action carries an output, including the padding dummies a Constructor fabricates to
+    /// bring the bundle up to a required action count; use [`Output::carries_value`] to tell them
+    /// apart from the outputs a wallet actually asked for.
+    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
+        self.actions.iter().map(|action| &action.output)
+    }
+
+    /// This bundle's sole action, or `None` if it does not have exactly one.
+    ///
+    /// A one-action bundle is a shape some protocols require (an unpadded single output, for
+    /// example), and asking for it directly avoids a caller indexing into `actions` after a
+    /// separate length check.
+    pub fn sole_action(&self) -> Option<&Action> {
+        match self.actions.as_slice() {
+            [action] => Some(action),
+            _ => None,
+        }
+    }
+
+    /// Whether every output of this bundle that carries value pays `recipient`, which is what
+    /// makes the bundle a send-to-self.
+    ///
+    /// Zero-valued padding dummies are excluded: they pay nobody in particular, so counting them
+    /// would make every padded bundle fail. Returns `None` if any output has had the value or the
+    /// recipient it would be judged on redacted, since the question cannot then be answered rather
+    /// than answered negatively.
+    pub fn value_carrying_outputs_all_pay(&self, recipient: &[u8; 43]) -> Option<bool> {
+        for output in self.outputs() {
+            if !output.carries_value()? {
+                continue;
+            }
+            if !output.pays(recipient)? {
+                return Some(false);
+            }
+        }
+        Some(true)
+    }
+}
+
 /// The default Orchard bundle flags: both spends and outputs enabled (bits 0 and
 /// 1). This is the value the Creator sets on a new bundle, and the flag value of
 /// an empty bundle for serialization purposes.
@@ -673,6 +715,26 @@ pub struct Output {
     /// Proprietary fields related to the note being created.
     #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
+}
+
+impl Output {
+    /// Whether this output carries value, i.e. whether it is one a wallet asked for rather than a
+    /// zero-valued padding dummy a Constructor fabricated.
+    ///
+    /// Returns `None` if the value has been redacted from the PCZT.
+    pub fn carries_value(&self) -> Option<bool> {
+        self.value.map(|value| value > 0)
+    }
+
+    /// Whether this output pays `recipient`, given as the [raw encoding] of an Orchard payment
+    /// address.
+    ///
+    /// Returns `None` if the recipient has been redacted from the PCZT.
+    ///
+    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
+    pub fn pays(&self, recipient: &[u8; 43]) -> Option<bool> {
+        self.recipient.map(|paid| &paid == recipient)
+    }
 }
 
 /// Types for the v1 Orchard PCZT encoding.

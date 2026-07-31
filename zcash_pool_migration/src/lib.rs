@@ -32,6 +32,8 @@ pub mod signing_rounds;
 pub mod state;
 #[cfg(feature = "wallet")]
 pub mod wallet;
+#[cfg(feature = "orchard")]
+pub mod zip318_shape;
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing;

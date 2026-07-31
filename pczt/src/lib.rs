@@ -408,6 +408,22 @@ pub enum EncodingError {
 }
 
 impl Pczt {
+    /// Whether this PCZT carries any transparent inputs or outputs.
+    ///
+    /// The transparent bundle is always present as a value, so its mere existence says nothing;
+    /// this asks whether it holds anything.
+    pub fn has_transparent_data(&self) -> bool {
+        !self.transparent.inputs().is_empty() || !self.transparent.outputs().is_empty()
+    }
+
+    /// Whether this PCZT carries any Sapling spends or outputs.
+    ///
+    /// As for [`has_transparent_data`](Self::has_transparent_data), the bundle is always present
+    /// and this asks whether it holds anything.
+    pub fn has_sapling_data(&self) -> bool {
+        !self.sapling.spends().is_empty() || !self.sapling.outputs().is_empty()
+    }
+
     /// Parses a PCZT from its encoding.
     pub fn parse(bytes: &[u8]) -> Result<Self, ParseError> {
         let (version, body) = parse_header(bytes, MAGIC_BYTES).map_err(|e| match e {
