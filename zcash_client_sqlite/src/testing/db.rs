@@ -107,21 +107,13 @@ impl TestDb {
         &mut self.wallet_db
     }
 
-    /// The wallet database's own SQLite connection.
-    ///
-    /// This is the seam an application uses to open a SIBLING store over the same database — a
-    /// [`PoolMigrations`] for an account's pool migration, say — since those stores are
-    /// constructed over a connection borrow rather than over the wallet. A test that drives such
-    /// a store alongside the wallet borrows the two in turn, exactly as an application holding the
-    /// connection itself would.
-    ///
-    /// [`PoolMigrations`]: crate::pool_migration::orchard_ironwood::PoolMigrations
+    /// The wallet database's own SQLite connection, over which a sibling store (a
+    /// `pool_migration` store, say) is opened.
     pub fn conn(&self) -> &Connection {
         &self.wallet_db.conn
     }
 
-    /// The wallet database's own SQLite connection, mutably: what a sibling store that WRITES
-    /// (a pool migration's `replace_migration`, say) is constructed over. See [`Self::conn`].
+    /// The wallet database's own SQLite connection, mutably. See [`Self::conn`].
     pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.wallet_db.conn
     }

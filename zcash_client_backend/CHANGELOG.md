@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::testing::TestState::generate_and_scan_empty_blocks`
+- `zcash_client_backend::data_api::testing::TestState::create_account_from_test_seed`
+- `zcash_client_backend::data_api::testing::TestState::orchard_anchor_at` (requires
+  the `orchard` feature)
+
 ## [0.24.0-rc.6] - 2026-07-29
 
 ### Added

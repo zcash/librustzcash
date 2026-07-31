@@ -18,15 +18,22 @@ use zcash_protocol::value::COIN;
 
 use zcash_pool_migration::build::sign_pczt;
 use zcash_pool_migration::engine::{
-    AdvanceConfig, MigrationPlan, MigrationStatus, MigrationTxKind, MigrationTxState,
-    PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, ReplanThreshold, advance_migration,
-    batch_unsigned_by_action_budget, build_preparation_unsigned, commit_preparation,
-    plan_migration,
+    AdvanceConfig, MigrationPlan, MigrationStatus, MigrationTransferId, MigrationTxKind,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, ReplanThreshold,
+    advance_migration, batch_unsigned_by_action_budget, build_preparation_unsigned,
+    commit_preparation, plan_migration,
 };
 use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
 use zcash_pool_migration::signing_rounds::SigningRoundBudget;
 use zcash_pool_migration::state::AdvanceStep;
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};
+
+/// A stand-in txid for the transaction with the given transfer id, DISTINCT per id: a walk that
+/// records several transactions mined must not be able to pass with them all recorded under the
+/// same txid.
+fn mined_txid(id: MigrationTransferId) -> TxId {
+    TxId::from_bytes([u32::from(id) as u8; 32])
+}
 
 /// A planned single-note migration and the mock wallet that holds the note.
 fn single_note_setup(seed: u64, balance: u64) -> (CommitMock, MigrationPlan) {
@@ -178,11 +185,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         other => panic!("expected a broadcast step, got {other:?}"),
     }
     for id in &layer0_ids {
-        state.mark_mined(
-            *id,
-            TxId::from_bytes([0; 32]),
-            BlockHeight::from_u32(2_000_010),
-        );
+        state.mark_mined(*id, mined_txid(*id), BlockHeight::from_u32(2_000_010));
     }
     let layer1_ids: Vec<_> = state
         .transactions()
@@ -200,11 +203,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         other => panic!("expected a broadcast step, got {other:?}"),
     }
     for id in &layer1_ids {
-        state.mark_mined(
-            *id,
-            TxId::from_bytes([0; 32]),
-            BlockHeight::from_u32(2_000_020),
-        );
+        state.mark_mined(*id, mined_txid(*id), BlockHeight::from_u32(2_000_020));
     }
     match advance_migration(&mut backend, &mut state, target, &config).expect("the store answers") {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {

@@ -12,6 +12,8 @@ use std::{
 };
 
 use rusqlite::{Connection, OptionalExtension};
+#[cfg(feature = "orchard")]
+use shardtree::error::ShardTreeError;
 
 use zcash_client_backend::{
     data_api::anchor_retention::AnchorRetentionInterval, wallet::LockOwner,
@@ -39,8 +41,6 @@ static TABLES: Tables = Tables {
     transaction_deps: "orchard_ironwood_migration_transaction_deps",
     tx_due_index: "idx_orchard_ironwood_migration_tx_due",
     account_index: "idx_orchard_ironwood_migrations_account",
-    // The wallet-owned tables of the migration's SOURCE pool (Orchard), queried by the
-    // satisfiability oracle but never created here.
     source_notes: "orchard_received_notes",
     source_note_spends: "orchard_received_note_spends",
     source_note_spends_note_fk: "orchard_received_note_id",
@@ -64,8 +64,6 @@ fn orchard_anchor_at(
     view: &rusqlite::Transaction<'_>,
     height: zcash_protocol::consensus::BlockHeight,
 ) -> Result<Option<::orchard::Anchor>, Error> {
-    use shardtree::error::ShardTreeError;
-
     /// A tree failure that is NOT "no root here": a database error surfaces as itself, and
     /// anything else means the stored tree cannot be read back as it was written.
     fn lift(e: ShardTreeError<crate::wallet::commitment_tree::Error>) -> Error {
@@ -410,7 +408,7 @@ mod check_step_satisfiability {
     use zcash_client_backend::data_api::testing::{
         AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
     };
-    use zcash_client_backend::data_api::{Account as _, WalletCommitmentTrees, WalletRead};
+    use zcash_client_backend::data_api::{Account as _, WalletRead};
     use zcash_pool_migration::engine::{
         MigrationTransaction, MigrationTransferId, MigrationTxKind, MigrationTxState,
         PoolMigrationRead, ReorgSettleDepth, StepSatisfiability, UnsatisfiableCause,
@@ -468,9 +466,6 @@ mod check_step_satisfiability {
     }
 
     fn scanned_note_fixture(with_second_account: bool) -> ScannedNoteFixture {
-        use secrecy::{ExposeSecret, SecretVec};
-        use zcash_client_backend::data_api::WalletWrite;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
@@ -481,18 +476,7 @@ mod check_step_satisfiability {
             .expect("the test account exists")
             .account()
             .id();
-        let second_account = with_second_account.then(|| {
-            let seed = SecretVec::new(st.test_seed().expect("a seed").expose_secret().clone());
-            let birthday = st
-                .test_account()
-                .expect("the test account exists")
-                .birthday()
-                .clone();
-            st.wallet_mut()
-                .create_account("", &seed, &birthday, None)
-                .expect("creates a second account")
-                .0
-        });
+        let second_account = with_second_account.then(|| st.create_account_from_test_seed("").0);
         let fvk = OrchardPoolTester::test_account_fvk(&st);
         // The first generated block sits AT the account birthday, so scanning contiguously from
         // it leaves the wallet fully scanned to the last scanned height.
@@ -573,6 +557,34 @@ mod check_step_satisfiability {
         )
     }
 
+    /// A transfer recorded MINED at `height` with an EMPTY real-spend nullifier cache: the shape
+    /// the schema migration that introduced the cache leaves behind, since a mined transaction's
+    /// disposition no longer turns on its inputs.
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s
+    /// `arb_migration_transaction`: every field the assertions turn on is pinned here (the mined
+    /// height must be the wallet's own `as_of`, and the cache must be empty), which is precisely
+    /// what an arbitrary transaction does not give.
+    fn mined_transfer_with_empty_cache(height: BlockHeight) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            MigrationTxState::Mined {
+                txid: TxId::from_bytes([9; 32]),
+                height,
+            },
+            None,
+            None,
+            Vec::new(),
+            None,
+        )
+    }
+
     /// A PCZT whose Orchard bundle carries `anchor` as its installed anchor, serialized as the
     /// store holds it.
     ///
@@ -619,40 +631,6 @@ mod check_step_satisfiability {
             cache(nfs),
             None,
         )
-    }
-
-    /// The wallet's own Orchard commitment tree anchor at the checkpoint `height` — the value a
-    /// transfer proved against that boundary would have installed.
-    fn orchard_root_at(
-        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
-        height: BlockHeight,
-    ) -> Anchor {
-        st.wallet_mut()
-            .with_orchard_tree_mut::<_, _, crate::error::SqliteClientError>(|tree| {
-                Ok(tree
-                    .root_at_checkpoint_id(&height)
-                    .expect("the tree answers")
-                    .expect("the boundary's checkpoint is retained"))
-            })
-            .map(Anchor::from)
-            .expect("reads the Orchard commitment tree")
-    }
-
-    /// Scan `n` further empty blocks, returning the wallet's new fully-scanned height, so an
-    /// anchor boundary can sit a chosen number of blocks below it.
-    fn scan_empty_blocks(
-        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
-        n: usize,
-    ) -> BlockHeight {
-        for _ in 0..n {
-            let (h, _) = st.generate_empty_block();
-            st.scan_cached_blocks(h, 1);
-        }
-        st.wallet()
-            .block_fully_scanned()
-            .expect("reads the fully-scanned block")
-            .expect("the wallet is fully scanned")
-            .block_height()
     }
 
     /// Record a spend of the note with nullifier `nf` by a new transaction whose mined height is
@@ -857,23 +835,7 @@ mod check_step_satisfiability {
     #[test]
     fn a_mined_row_with_an_empty_cache_answers() {
         let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
-        let mined = MigrationTransaction::from_parts(
-            MigrationTransferId::new(0),
-            MigrationTxKind::Transfer { crossing: 0 },
-            vec![0xAB],
-            Vec::new(),
-            BlockHeight::from_u32(0),
-            BlockHeight::from_u32(0),
-            None,
-            MigrationTxState::Mined {
-                txid: TxId::from_bytes([9; 32]),
-                height: as_of,
-            },
-            None,
-            None,
-            Vec::new(),
-            None,
-        );
+        let mined = mined_transfer_with_empty_cache(as_of);
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
@@ -900,23 +862,7 @@ mod check_step_satisfiability {
         use zcash_pool_migration::scheduling::AnchorBucketInterval;
 
         let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
-        let mined = MigrationTransaction::from_parts(
-            MigrationTransferId::new(0),
-            MigrationTxKind::Transfer { crossing: 0 },
-            vec![0xAB],
-            Vec::new(),
-            BlockHeight::from_u32(0),
-            BlockHeight::from_u32(0),
-            None,
-            MigrationTxState::Mined {
-                txid: TxId::from_bytes([9; 32]),
-                height: as_of,
-            },
-            None,
-            None,
-            Vec::new(),
-            None,
-        );
+        let mined = mined_transfer_with_empty_cache(as_of);
         let state = MigrationState::from_parts(
             MigrationStatus::InProgress,
             DenominationPlan::from_stored_parts(
@@ -979,9 +925,12 @@ mod check_step_satisfiability {
     #[test]
     fn an_anchor_still_rooted_at_its_boundary_is_satisfiable() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = scan_empty_blocks(&mut st, 12);
+        let as_of = st.generate_and_scan_empty_blocks(12);
         let boundary = as_of - SETTLE.blocks();
-        let anchor = orchard_root_at(&mut st, boundary);
+        let anchor = st
+            .orchard_anchor_at(boundary)
+            .expect("reads the Orchard commitment tree")
+            .expect("the boundary's checkpoint is retained");
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
@@ -1001,7 +950,7 @@ mod check_step_satisfiability {
     #[test]
     fn an_anchor_displacement_marks_exactly_at_the_settle_depth() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = scan_empty_blocks(&mut st, 12);
+        let as_of = st.generate_and_scan_empty_blocks(12);
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
 
@@ -1042,7 +991,7 @@ mod check_step_satisfiability {
     #[test]
     fn an_unreadable_tree_state_ends_the_search_without_marking() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = scan_empty_blocks(&mut st, 12);
+        let as_of = st.generate_and_scan_empty_blocks(12);
         let displaced = broadcast_transfer(vec![nf], as_of - SETTLE.blocks(), no_such_root());
 
         {
@@ -1126,7 +1075,7 @@ mod check_step_satisfiability {
 
         // Close the gap; the boundary now lies inside the region backing the answer.
         st.scan_cached_blocks(gap, 2);
-        let as_of = scan_empty_blocks(&mut st, 1);
+        let as_of = st.generate_and_scan_empty_blocks(1);
         assert!(
             as_of >= high,
             "the scanned region now reaches the boundary at {high:?}",
@@ -1150,7 +1099,7 @@ mod check_step_satisfiability {
     #[test]
     fn a_displaced_anchor_on_an_unbroadcast_transfer_does_not_mark() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = scan_empty_blocks(&mut st, 12);
+        let as_of = st.generate_and_scan_empty_blocks(12);
         let signed = MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Transfer { crossing: 0 },
@@ -1183,7 +1132,7 @@ mod check_step_satisfiability {
     #[test]
     fn a_spent_input_outranks_a_displaced_anchor() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = scan_empty_blocks(&mut st, 12);
+        let as_of = st.generate_and_scan_empty_blocks(12);
         record_spend(&mut st, nf, Some(as_of));
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1211,7 +1160,7 @@ mod check_step_satisfiability {
     #[test]
     fn a_broadcast_preparation_is_not_anchor_judged() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = scan_empty_blocks(&mut st, 12);
+        let as_of = st.generate_and_scan_empty_blocks(12);
         let prep = MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Preparation { layer: 0, index: 0 },
@@ -1357,10 +1306,7 @@ mod truncation_follows_the_wallet {
             Zatoshis::const_from_u64(100_000),
         );
         st.scan_cached_blocks(h, 1);
-        for _ in 0..12 {
-            let (h, _) = st.generate_empty_block();
-            st.scan_cached_blocks(h, 1);
-        }
+        st.generate_and_scan_empty_blocks(12);
         let tip = st
             .wallet()
             .chain_height()
