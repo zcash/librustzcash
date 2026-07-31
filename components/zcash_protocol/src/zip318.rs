@@ -499,23 +499,6 @@ impl Zip318Classification {
             _ => Self::Unknown,
         }
     }
-
-    /// The kind, if this classification is a conforming one.
-    pub fn kind(&self) -> Option<Zip318TxKind> {
-        match self {
-            Self::Conforms(kind) => Some(*kind),
-            _ => None,
-        }
-    }
-
-    /// Whether this is a transaction of a wallet's own migration: a preparation transaction or a
-    /// transfer, but NOT a canonical crossing payment to a third party.
-    pub fn is_own_migration(&self) -> bool {
-        matches!(
-            self,
-            Self::Conforms(Zip318TxKind::Preparation) | Self::Conforms(Zip318TxKind::Transfer)
-        )
-    }
 }
 
 /// Everything [`classify`] needs to observe about a transaction, gathered by whichever component

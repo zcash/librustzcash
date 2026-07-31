@@ -92,20 +92,7 @@ pub struct Bundle {
 }
 
 impl Bundle {
-    /// The outputs of this bundle's actions, in action order.
-    ///
-    /// Every action carries an output, including the padding dummies a Constructor fabricates to
-    /// bring the bundle up to a required action count; use [`Output::carries_value`] to tell them
-    /// apart from the outputs a wallet actually asked for.
-    pub fn outputs(&self) -> impl Iterator<Item = &Output> {
-        self.actions.iter().map(|action| &action.output)
-    }
-
     /// This bundle's sole action, or `None` if it does not have exactly one.
-    ///
-    /// A one-action bundle is a shape some protocols require (an unpadded single output, for
-    /// example), and asking for it directly avoids a caller indexing into `actions` after a
-    /// separate length check.
     pub fn sole_action(&self) -> Option<&Action> {
         match self.actions.as_slice() {
             [action] => Some(action),
@@ -116,13 +103,15 @@ impl Bundle {
     /// Whether every output of this bundle that carries value pays `recipient`, which is what
     /// makes the bundle a send-to-self.
     ///
-    /// Zero-valued padding dummies are excluded: they pay nobody in particular, so counting them
-    /// would make every padded bundle fail. Returns `None` if any output has had the value or the
-    /// recipient it would be judged on redacted, since the question cannot then be answered rather
-    /// than answered negatively.
+    /// Zero-valued padding dummies are excluded: a Constructor fabricates them to bring the bundle
+    /// up to a required action count and they pay nobody in particular, so counting them would make
+    /// every padded bundle fail. Returns `None` if any output has had the value or the recipient it
+    /// would be judged on redacted, since the question cannot then be answered rather than answered
+    /// negatively.
     pub fn value_carrying_outputs_all_pay(&self, recipient: &[u8; 43]) -> Option<bool> {
-        for output in self.outputs() {
-            if !output.carries_value()? {
+        for action in &self.actions {
+            let output = &action.output;
+            if output.value? == 0 {
                 continue;
             }
             if !output.pays(recipient)? {
@@ -718,14 +707,6 @@ pub struct Output {
 }
 
 impl Output {
-    /// Whether this output carries value, i.e. whether it is one a wallet asked for rather than a
-    /// zero-valued padding dummy a Constructor fabricated.
-    ///
-    /// Returns `None` if the value has been redacted from the PCZT.
-    pub fn carries_value(&self) -> Option<bool> {
-        self.value.map(|value| value > 0)
-    }
-
     /// Whether this output pays `recipient`, given as the [raw encoding] of an Orchard payment
     /// address.
     ///

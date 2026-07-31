@@ -49,10 +49,9 @@ where
     )
 }
 
-/// The evidence behind [`classify_decrypted_tx`], exposed so that a caller can inspect which
-/// clause decided a classification.
+/// The evidence behind [`classify_decrypted_tx`].
 #[cfg(feature = "orchard")]
-pub fn evidence_from_decrypted_tx<AccountId, C>(
+fn evidence_from_decrypted_tx<AccountId, C>(
     tx: &Transaction,
     orchard_outputs: &[DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>],
     ironwood_outputs: &[DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>],

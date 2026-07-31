@@ -8,8 +8,8 @@
 //!
 //! The observations themselves belong to the PCZT, not to ZIP 318, so they live on the `pczt`
 //! types ([`Bundle::value_carrying_outputs_all_pay`], [`Output::pays`],
-//! [`Pczt::has_transparent_data`], and friends). This module only maps them onto the ZIP's clauses,
-//! which is why it is as short as it is.
+//! [`Pczt::has_data_in_pool`]). This module only maps them onto the ZIP's clauses, which is why it
+//! is as short as it is.
 //!
 //! It deliberately answers neither confirmatory clause. A PCZT built by this crate carries DEFERRED
 //! anchors (ZIP 374), so there is no anchor to place on the retention grid, and the fee is not a
@@ -20,9 +20,10 @@
 //! [`classify`]: zcash_protocol::zip318::classify
 //! [`Bundle::value_carrying_outputs_all_pay`]: pczt::orchard::Bundle::value_carrying_outputs_all_pay
 //! [`Output::pays`]: pczt::orchard::Output::pays
-//! [`Pczt::has_transparent_data`]: pczt::Pczt::has_transparent_data
+//! [`Pczt::has_data_in_pool`]: pczt::Pczt::has_data_in_pool
 
 use orchard::keys::{FullViewingKey, Scope};
+use zcash_protocol::PoolType;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::zip318::{
@@ -60,7 +61,10 @@ where
     Zip318Evidence {
         source_actions: Some(pczt.orchard().actions().len()),
         destination_actions: Some(pczt.ironwood().actions().len()),
-        other_bundles_present: Some(pczt.has_transparent_data() || pczt.has_sapling_data()),
+        other_bundles_present: Some(
+            pczt.has_data_in_pool(PoolType::TRANSPARENT)
+                || pczt.has_data_in_pool(PoolType::SAPLING),
+        ),
         source_is_send_to_self: pczt.orchard().value_carrying_outputs_all_pay(&internal),
         sole_destination_output: sole_destination_output(pczt.ironwood(), &internal),
         expiry_is_canonical: Some(constants.is_canonical_expiry(expiry, expiry_reference)),

@@ -25,6 +25,7 @@ use alloc::vec::Vec;
 
 use getset::Getters;
 
+use zcash_protocol::PoolType;
 #[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
 use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
 #[cfg(all(
@@ -408,20 +409,21 @@ pub enum EncodingError {
 }
 
 impl Pczt {
-    /// Whether this PCZT carries any transparent inputs or outputs.
+    /// Whether this PCZT carries any inputs or outputs in the given pool.
     ///
-    /// The transparent bundle is always present as a value, so its mere existence says nothing;
-    /// this asks whether it holds anything.
-    pub fn has_transparent_data(&self) -> bool {
-        !self.transparent.inputs().is_empty() || !self.transparent.outputs().is_empty()
-    }
-
-    /// Whether this PCZT carries any Sapling spends or outputs.
-    ///
-    /// As for [`has_transparent_data`](Self::has_transparent_data), the bundle is always present
-    /// and this asks whether it holds anything.
-    pub fn has_sapling_data(&self) -> bool {
-        !self.sapling.spends().is_empty() || !self.sapling.outputs().is_empty()
+    /// Every bundle is always present as a value, so its existence says nothing; this asks whether
+    /// it holds anything.
+    pub fn has_data_in_pool(&self, pool: PoolType) -> bool {
+        match pool {
+            PoolType::TRANSPARENT => {
+                !self.transparent.inputs().is_empty() || !self.transparent.outputs().is_empty()
+            }
+            PoolType::SAPLING => {
+                !self.sapling.spends().is_empty() || !self.sapling.outputs().is_empty()
+            }
+            PoolType::ORCHARD => !self.orchard.actions().is_empty(),
+            PoolType::IRONWOOD => !self.ironwood.actions().is_empty(),
+        }
     }
 
     /// Parses a PCZT from its encoding.
