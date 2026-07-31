@@ -100,6 +100,12 @@ and this library adheres to Rust's notion of
 - `state::Blocker::AwaitingReevaluation`, reported for a transaction carrying an
   unadjudicated broadcast-failure report — behind `Blocker::Unsatisfiable` and
   ahead of `Blocker::Expired`.
+- The `pczt_spends` module (`orchard` feature), holding
+  `pczt_spends::real_spend_nullifiers` — the `(action index,
+  orchard::note::Nullifier)` of each real spend of an unproven migration PCZT's
+  Orchard bundle — and its `pczt_spends::RealSpendError`. A store crate that
+  reconstructs the real-spend nullifier cache from stored PCZT bytes can use
+  this instead of restating the rule.
 
 ### Changed
 - `engine::MigrationState::truncate_to_height` also discharges every
@@ -163,6 +169,9 @@ and this library adheres to Rust's notion of
   `ProveOutcome::NotYetProvable` with no state change. Match on the outcome,
   and persist the state after `MarkedUnsatisfiable` as after a successful
   proof.
+- `engine::CommitError` and `engine::RebuildError` have a new variant,
+  `RealSpends`, reported when a built (or rebuilt) migration PCZT presents no
+  well-formed set of real spends to cache nullifiers from.
 
 ### Removed
 - `engine::MigrationState::{next_step, next_provable, next_broadcastable}`. The
@@ -172,6 +181,9 @@ and this library adheres to Rust's notion of
   kernel directly bypassed. Replace `state.next_step(target_height)` with
   `advance_migration(&mut store, &mut state, target_height, &config)`, which
   returns the same `state::AdvanceStep`.
+- `wallet::WalletProveError::{NoRealSpend, MalformedNullifier}`, replaced by the
+  single `wallet::WalletProveError::RealSpends`, which carries the
+  `pczt_spends::RealSpendError` describing which of the two conditions held.
 
 ### Fixed
 - `engine::rebuild_expired_transfer` and

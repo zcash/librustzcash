@@ -27,7 +27,7 @@ pub mod build;
 pub mod denomination;
 pub mod engine;
 #[cfg(feature = "orchard")]
-pub(crate) mod pczt_spends;
+pub mod pczt_spends;
 pub mod preparation;
 pub mod scheduling;
 pub mod signing_rounds;

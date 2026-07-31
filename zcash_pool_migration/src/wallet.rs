@@ -52,6 +52,7 @@ use crate::engine::{
     MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ProveFailure,
     ReorgSettleDepth, StepSatisfiability,
 };
+use crate::pczt_spends::RealSpendError;
 use crate::scheduling::{AnchorBucketInterval, DelayDistribution, SchedulingParams};
 
 /// A failure of the wallet-backed migration adapter. Parameterized by the error types of the two
@@ -344,18 +345,13 @@ where
 /// ([`WalletRead::Error`]).
 #[derive(Debug)]
 pub enum WalletProveError<TE, NE, RE> {
-    /// The PCZT has no real Orchard spend whose witness is still deferred. A migration transfer
-    /// spends one funding note and a preparation transaction one or more, so the Orchard bundle
-    /// carries at least one action with an absent witness (the fabricated dummy spends keep their
-    /// own); none means the PCZT is not a deferred-anchor migration transaction awaiting proof.
-    NoRealSpend,
+    /// The PCZT presents no well-formed set of deferred-witness Orchard spends, so it is not a
+    /// deferred-anchor migration transaction awaiting proof. See [`RealSpendError`].
+    RealSpends(RealSpendError),
     /// No spendable Orchard note in the wallet matches a spend's revealed nullifier, so its tree
     /// position is unknown: the note the transaction spends is not among the account's unspent
     /// notes (it was never scanned, or has already been spent).
     UnknownSpentNote(Nullifier),
-    /// A deferred-witness Orchard spend's nullifier bytes are not a valid Orchard nullifier, so the
-    /// PCZT is not a well-formed migration transaction awaiting proof.
-    MalformedNullifier([u8; 32]),
     /// Looking up the note-selection target height (the chain tip) through the wallet failed.
     TargetHeight(RE),
     /// The wallet's fully-scanned height could not be read, so a spend absent from the account's
@@ -401,19 +397,13 @@ impl<TE, NE, RE> From<ShardTreeError<TE>> for WalletProveError<TE, NE, RE> {
 impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> fmt::Display for WalletProveError<TE, NE, RE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WalletProveError::NoRealSpend => {
-                f.write_str("the PCZT has no deferred-witness Orchard spend to prove")
+            WalletProveError::RealSpends(e) => {
+                write!(f, "the PCZT has no spends to prove: {e}")
             }
             WalletProveError::UnknownSpentNote(nf) => {
                 write!(
                     f,
                     "no spendable Orchard note matches spend nullifier {nf:?}"
-                )
-            }
-            WalletProveError::MalformedNullifier(bytes) => {
-                write!(
-                    f,
-                    "a spend's nullifier bytes are not a valid nullifier: {bytes:?}"
                 )
             }
             WalletProveError::TargetHeight(e) => {
@@ -537,16 +527,7 @@ where
         // Every Orchard action whose witness is still deferred is a real spend to witness; the padded
         // dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
         let real_spends: Vec<(usize, Nullifier)> = crate::pczt_spends::real_spend_nullifiers(&pczt)
-            .into_iter()
-            .map(|(index, bytes)| {
-                Option::<Nullifier>::from(Nullifier::from_bytes(&bytes))
-                    .map(|nf| (index, nf))
-                    .ok_or(WalletProveError::MalformedNullifier(bytes))
-            })
-            .collect::<Result<_, _>>()?;
-        if real_spends.is_empty() {
-            return Err(WalletProveError::NoRealSpend);
-        }
+            .map_err(WalletProveError::RealSpends)?;
 
         // Locate each spend in the wallet's note store: map every unspent Orchard note's nullifier
         // (recomputed under the account FVK) to its commitment-tree position, then look up each spend.

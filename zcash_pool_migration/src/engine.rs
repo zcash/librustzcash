@@ -2237,6 +2237,9 @@ pub enum CommitError<E> {
     Backend(E),
     /// Building a migration transaction failed. Carries the structured builder error.
     Build(crate::build::BuildError),
+    /// A built migration PCZT presents no well-formed set of real spends, so the real-spend
+    /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be extracted from it.
+    RealSpends(crate::pczt_spends::RealSpendError),
     /// Serializing a built migration PCZT (for storage or an external signer) failed.
     Serialize(pczt::EncodingError),
     /// NU6.3 is not active on this network, so there is no destination pool to migrate into. The
@@ -2270,6 +2273,9 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
         match self {
             CommitError::Backend(e) => write!(f, "wallet backend error: {e}"),
             CommitError::Build(e) => write!(f, "building the migration failed: {e}"),
+            CommitError::RealSpends(e) => {
+                write!(f, "a built migration transaction has no real spends: {e}")
+            }
             CommitError::Serialize(e) => {
                 write!(f, "serializing a migration transaction failed: {e:?}")
             }
@@ -2644,6 +2650,9 @@ pub enum RebuildError<E> {
     },
     /// Building the fresh transfer PCZT failed.
     Build(crate::build::BuildError),
+    /// The rebuilt transfer PCZT presents no well-formed set of real spends, so the real-spend
+    /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be refreshed from it.
+    RealSpends(crate::pczt_spends::RealSpendError),
     /// Serializing the rebuilt PCZT failed.
     Serialize(pczt::EncodingError),
     /// A wallet backend or signing operation failed.
@@ -2698,6 +2707,9 @@ impl<E: fmt::Display> fmt::Display for RebuildError<E> {
                 configured.block_count()
             ),
             RebuildError::Build(e) => write!(f, "rebuilding the transfer failed: {e}"),
+            RebuildError::RealSpends(e) => {
+                write!(f, "the rebuilt transfer has no real spends: {e}")
+            }
             RebuildError::Serialize(e) => {
                 write!(f, "serializing the rebuilt transfer failed: {e:?}")
             }
@@ -2966,8 +2978,9 @@ where
     // Refresh the nullifier cache from the rebuilt PCZT, for uniformity with the commit path; the
     // rebuild spends the same funding note, so the cached value is in fact stable.
     let spend_nullifiers: Vec<[u8; 32]> = crate::pczt_spends::real_spend_nullifiers(&pczt)
+        .map_err(RebuildError::RealSpends)?
         .into_iter()
-        .map(|(_, nf)| nf)
+        .map(|(_, nf)| nf.to_bytes())
         .collect();
     let (bytes, new_state, unsigned) = match signing {
         Signing::InProcess => {
@@ -3543,8 +3556,9 @@ where
                 // signing/serialization, so the feature-free state machine never re-parses the
                 // stored bytes.
                 let spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&pczt)
+                    .map_err(CommitError::RealSpends)?
                     .into_iter()
-                    .map(|(_, nf)| nf)
+                    .map(|(_, nf)| nf.to_bytes())
                     .collect();
                 let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
                 if matches!(self.signing, Signing::External) {
@@ -3710,8 +3724,9 @@ where
             // signing/serialization, so the feature-free state machine never re-parses the
             // stored bytes.
             let spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&pczt)
+                .map_err(CommitError::RealSpends)?
                 .into_iter()
-                .map(|(_, nf)| nf)
+                .map(|(_, nf)| nf.to_bytes())
                 .collect();
             let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
             if matches!(self.signing, Signing::External) {
@@ -5698,6 +5713,7 @@ mod commit_tests {
         use orchard::tree::{MerkleHashOrchard, MerklePath};
 
         let witnesses: Vec<(usize, MerklePath)> = crate::pczt_spends::real_spend_nullifiers(&pczt)
+            .expect("an unproven migration PCZT has real spends")
             .into_iter()
             .map(|(index, _)| {
                 let auth_path = core::array::from_fn(|level| {
@@ -5858,8 +5874,9 @@ mod commit_tests {
         for tx in &state.transactions {
             let parsed = pczt::Pczt::parse(&tx.pczt).expect("stored PCZT parses");
             let expected: Vec<[u8; 32]> = crate::pczt_spends::real_spend_nullifiers(&parsed)
+                .expect("a committed transaction's stored PCZT has real spends")
                 .into_iter()
-                .map(|(_, nf)| nf)
+                .map(|(_, nf)| nf.to_bytes())
                 .collect();
             assert_eq!(tx.spend_nullifiers, expected);
             // The cache is non-empty by an independent count: a transfer spends exactly its one
@@ -6096,7 +6113,10 @@ mod commit_tests {
         assert!(matches!(old.state, MigrationTxState::Proved));
         let proven = pczt::Pczt::parse(&old.pczt).expect("the proven PCZT parses");
         assert!(
-            crate::pczt_spends::real_spend_nullifiers(&proven).is_empty(),
+            matches!(
+                crate::pczt_spends::real_spend_nullifiers(&proven),
+                Err(crate::pczt_spends::RealSpendError::NoRealSpends)
+            ),
             "a proven PCZT's real spends are not identifiable by deferred witness"
         );
 
