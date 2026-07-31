@@ -67,6 +67,7 @@ use zcash_protocol::{
 
 use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 
+use crate::state::AdvanceStep;
 use crate::{
     denomination::{
         DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
@@ -167,6 +168,226 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
         id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error>;
+}
+
+/// Drive-level policy for [`advance_migration`]: a struct, so future knobs join without signature
+/// churn.
+#[derive(Clone, Copy, Debug)]
+pub struct AdvanceConfig {
+    /// The caller's reorg-settlement policy; see [`ReorgSettleDepth`]. Explicitly required — no
+    /// `Default` — because the right value tracks the chain's block spacing, and keeping it
+    /// current is the caller's responsibility, not this crate's.
+    pub reorg_settle_depth: ReorgSettleDepth,
+}
+
+/// Decide the next step to advance a committed migration and VERIFY it against the store before
+/// surfacing it: the entry point a consuming application drives a migration with, at
+/// `target_height` (`chain_tip + 1`, the height of the next block a transaction could be mined
+/// in).
+///
+/// A single call plans, verifies, records, and persists:
+///
+/// 1. It asks the planning kernel what to do next, decided purely from the persisted state.
+/// 2. It puts the transaction the kernel names to the store's satisfiability oracle
+///    ([`PoolMigrationRead::check_step_satisfiability`]) — the wallet's live view of whether that
+///    pre-signed artifact can still execute.
+/// 3. A candidate the wallet reports PERMANENTLY obstructed (its inputs seen spent elsewhere, or
+///    unable to ever exist) is recorded through [`MigrationState::record_satisfiability`], and the
+///    kernel is asked again — the recorded marks, and everything stranded behind them, now
+///    filtered out of its queues. A candidate the wallet cannot YET vouch for is set aside for the
+///    rest of this call (no mark: the honest reading of "retry after further sync"), so the
+///    migration's other work still surfaces, and the kernel is asked again.
+/// 4. The step that survives verification is returned, with every determination made along the way
+///    already written back to the store.
+///
+/// So a consumer never spends proving or broadcast work on a transaction whose inputs are gone,
+/// and a migration whose plan has been undercut — most often by an ordinary wallet spend consuming
+/// notes it had allocated — surfaces [`AdvanceStep::Replan`] instead of retrying a dead
+/// transaction forever. [`MigrationState::next_step`] documents what each returned step means and
+/// the I/O the consumer performs for it.
+///
+/// # What a call costs
+///
+/// Checking is LAZY UNTIL FIRST DISCOVERY and BROAD AT DISCOVERY, so a healthy migration pays
+/// almost nothing:
+///
+/// - the in-flight sweep — one query per broadcast-but-unmined transaction, judging whether a
+///   settled reorg has permanently invalidated the anchor it was proven against. The broadcast
+///   schedule keeps that set tiny (typically none to two transactions sit between broadcast and
+///   mining), and it is the only check for transactions the kernel will never name as a step;
+/// - one query for the candidate the kernel names — and none at all when the kernel answers
+///   [`Waiting`](AdvanceStep::Waiting), [`Complete`](AdvanceStep::Complete), or
+///   [`Replan`](AdvanceStep::Replan), which name no transaction.
+///
+/// A discovery costs more, deliberately: it also checks every pending transaction whose
+/// dependencies have mined. That is what makes the migration's remaining value re-assessed in the
+/// call that finds the first dead transaction — a send-max that consumed the funding notes trips
+/// the replan threshold immediately, rather than one transfer at a time over the weeks a
+/// privacy-preserving broadcast schedule spans.
+///
+/// # Persistence, and what the consumer owns
+///
+/// This function owns the persistence of the determinations it makes: whenever a check recorded
+/// anything, the state is written back with [`PoolMigrationWrite::replace_migration`] BEFORE the
+/// step is returned, so the store already agrees with the returned `state` when the consumer acts.
+/// Nothing is written when nothing was discovered.
+///
+/// On an `Err`, treat the passed `state` as UNTRUSTED and re-read it with
+/// [`get_migration`](PoolMigrationRead::get_migration) before driving again. A failing store
+/// leaves the two views free to disagree in one direction: the store never holds a determination
+/// the returned state lacks, but the reverse can happen — a write that failed, or in-flight-sweep
+/// marks left unpersisted by a later oracle failure, live only in the in-memory state. Discarding
+/// it costs nothing, because marks are re-derivable: the next call asks the same questions again.
+///
+/// Everything else remains the consumer's: it performs the returned step's I/O and records the
+/// outcome through the ordinary mutators ([`MigrationState::mark_broadcast`],
+/// [`MigrationState::mark_mined`], the prove and rebuild functions), persisting afterwards as
+/// usual, then calls this again. In particular, the ZIP 318 separation of SYNC wake-ups from
+/// BROADCAST wake-ups is the consumer's runtime policy: this function has no notion of a session
+/// and will offer proving work in the same loop once every due broadcast is dispatched (see
+/// [`MigrationState::next_step`]).
+pub fn advance_migration<St: PoolMigrationWrite>(
+    store: &mut St,
+    state: &mut MigrationState,
+    target_height: BlockHeight,
+    config: &AdvanceConfig,
+) -> Result<AdvanceStep, St::Error> {
+    // Whether any determination has been recorded, and so whether the state must be written back
+    // before a step is surfaced.
+    let mut dirty = false;
+    // This call's deferrals: candidates the wallet answered `NotYetSatisfiable` for. They carry no
+    // mark — the answer is "retry after further sync", not an obstruction — so the list lives only
+    // for this call.
+    let mut set_aside: Vec<MigrationTransferId> = Vec::new();
+
+    // The IN-FLIGHT SWEEP. A broadcast-but-unmined transaction is never named as a step, so no
+    // candidate check would ever reach it; its liveness question is whether the anchor it was
+    // PROVEN against still exists on the chain, which only a settled reorg answers no to. That is
+    // `AnchorInvalidated`, and it is the ONLY cause this sweep records:
+    //
+    // - `InputsSpent` about an in-flight transaction is most likely the transaction ITSELF, seen
+    //   spending its own inputs in the block that mined it while this state still says
+    //   `Broadcast` (the consumer's `mark_mined` lags the wallet's scan). Marking on it would
+    //   kill a transaction that is mining.
+    // - `InputsInvalidated` and `Expired` are DELIBERATELY deferred rather than acted on here.
+    //   Their loss is bounded: a producer inside the migration reaches its victim through the
+    //   dependency closure, and a victim of an EXTERNAL producer self-heals at its own expiry,
+    //   when the kernel's derived expiry makes it a dead-set seed. The pending-side channel — a
+    //   candidate check, or the broaden sweep after any discovery — is where an input-level cause
+    //   is a determination.
+    //
+    // One consequence to keep in view: the answer precedence puts `InputsSpent` above the
+    // anchor-level cause, so a store that observes BOTH a spent input and a dead anchor reports
+    // `InputsSpent`, which this sweep drops. That transaction's death then surfaces at its expiry
+    // rather than now — later, never wrong.
+    let mut findings: Vec<(MigrationTransferId, StepSatisfiability)> = Vec::new();
+    for tx in state.transactions() {
+        if !matches!(tx.state(), MigrationTxState::Broadcast { .. })
+            || tx.unsatisfiable_at().is_some()
+        {
+            continue;
+        }
+        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
+        if matches!(
+            &answer,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::AnchorInvalidated,
+                ..
+            }
+        ) {
+            findings.push((tx.id(), answer));
+        }
+    }
+    if !findings.is_empty() {
+        state.record_satisfiability(target_height, &findings);
+        dirty = true;
+    }
+
+    // Plan, verify, record, plan again. Every iteration either breaks, grows `set_aside`, or
+    // strictly grows the marked set — strictly, because the kernel never names an already-marked
+    // transaction (they are in its dead set), so a recorded discovery marks at least the candidate
+    // that produced it. Both are bounded by the transaction count, so the loop terminates.
+    let step = loop {
+        let step = state.next_step(target_height, &set_aside);
+        let candidate = match step {
+            AdvanceStep::Prove { id, .. }
+            | AdvanceStep::Broadcast { id }
+            | AdvanceStep::Rebuild { id } => id,
+            // These name no transaction, so there is nothing to verify.
+            AdvanceStep::Waiting | AdvanceStep::Complete | AdvanceStep::Replan => break step,
+        };
+        let Some(tx) = state.transactions().iter().find(|t| t.id() == candidate) else {
+            // The kernel names its candidates out of `state.transactions()`, so an id that is not
+            // there means the state is corrupt. Nothing can be verified about it and nothing may
+            // be surfaced unverified, so the call reports `Waiting` — the safe degradation, and a
+            // BREAK rather than another iteration, which leaves no way for a corrupt state to
+            // spin the loop. Anything already recorded is still persisted below.
+            break AdvanceStep::Waiting;
+        };
+        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
+        match answer {
+            StepSatisfiability::Satisfiable { .. } => break step,
+            // Not an obstruction: the wallet cannot yet vouch for the inputs (their source is
+            // unmined, or mined but unscanned). Take the candidate out of this call's queues so
+            // the migration's other work still surfaces, and leave no mark — a false mark would
+            // strand live value behind an observation only a reorg can clear.
+            StepSatisfiability::NotYetSatisfiable { .. } => set_aside.push(candidate),
+            answer @ StepSatisfiability::Unsatisfiable { .. } => {
+                if !records_a_determination(&answer) {
+                    // `Expired`: never overrides the kernel, which derives expiry itself from the
+                    // same `expiry_height`. The two can disagree only under caller/store height
+                    // skew, and there the kernel's `target_height` governs, so the step stands
+                    // exactly as planned (for a transfer, the rebuild that is expiry's remedy).
+                    break step;
+                }
+                // A DISCOVERY, so BROADEN. What killed this candidate is a fact about the
+                // migration's environment, not about the candidate alone — the ordinary cause is
+                // an ordinary wallet spend consuming notes the migration had allocated, which
+                // typically kills several transfers at once — and finding the rest of the damage
+                // now is what lets the replan threshold trip in this call. Every pending
+                // transaction whose dependencies have mined is checked: mined ones are final,
+                // in-flight ones belong to the sweep above, already-marked ones would learn
+                // nothing, and one whose dependencies are still unmined could only answer "not
+                // yet" (its death, if any, arrives through the closure).
+                let mut batch = vec![(candidate, answer)];
+                for tx in state.transactions() {
+                    if tx.id() == candidate
+                        || matches!(
+                            tx.state(),
+                            MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. }
+                        )
+                        || tx.unsatisfiable_at().is_some()
+                        || !state.deps_mined(tx.depends_on())
+                    {
+                        continue;
+                    }
+                    let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
+                    if records_a_determination(&answer) {
+                        batch.push((tx.id(), answer));
+                    }
+                }
+                // Recorded as ONE batch, so the durable closure runs once over the whole
+                // discovery.
+                state.record_satisfiability(target_height, &batch);
+                dirty = true;
+            }
+        }
+    };
+
+    // A determination is durable by the time the step it produced is surfaced: the consumer acts
+    // on that step and persists its own outcome, and must not be able to lose the marks this call
+    // discovered along the way.
+    if dirty {
+        store.replace_migration(state)?;
+    }
+    Ok(step)
+}
+
+/// Whether a satisfiability answer is a DISCOVERY for [`advance_migration`] to record and broaden
+/// on: an obstruction whose cause marks ([`UnsatisfiableCause::marks`], the single definition of
+/// that decision). The satisfiable and not-yet answers are not determinations at all.
+fn records_a_determination(answer: &StepSatisfiability) -> bool {
+    matches!(answer, StepSatisfiability::Unsatisfiable { cause, .. } if cause.marks())
 }
 
 /// A stable ordinal identifier for a migration transaction within a migration. This is a ROW KEY
@@ -574,6 +795,31 @@ pub enum UnsatisfiableCause {
     /// current chain, and the invalidating reorg is settled per the caller's
     /// [`ReorgSettleDepth`]: as proven, it can never be mined.
     AnchorInvalidated,
+}
+
+impl UnsatisfiableCause {
+    /// Whether this cause records a DURABLE mark: it reports chain state the state machine cannot
+    /// re-derive (the input-level causes, and the anchor-level one), as opposed to
+    /// [`Expired`](Self::Expired), which only confirms a derivation the kernel already makes from
+    /// the same [`expiry_height`](MigrationTransaction::expiry_height).
+    ///
+    /// The single definition of that decision, deliberately: both
+    /// [`MigrationState::record_satisfiability`] (which applies the mark) and
+    /// [`advance_migration`] (which decides whether an answer is a discovery worth recording and
+    /// broadening on) must agree, because the drive loop's TERMINATION rests on their agreement —
+    /// each recorded discovery must mark at least the candidate that produced it, or the loop
+    /// could re-plan onto the same candidate forever. Two copies of this match could drift into
+    /// exactly that hang.
+    pub(crate) const fn marks(&self) -> bool {
+        // Compiler-forced over the (in-crate exhaustive) cause vocabulary: a new cause must decide
+        // here whether it is an observation to store or a derivation to confirm.
+        match self {
+            UnsatisfiableCause::InputsSpent { .. }
+            | UnsatisfiableCause::InputsInvalidated { .. }
+            | UnsatisfiableCause::AnchorInvalidated => true,
+            UnsatisfiableCause::Expired => false,
+        }
+    }
 }
 
 /// A store implementation's observation for one queried nullifier, fed to
@@ -1825,9 +2071,9 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 ///
 /// The CALLER decides WHEN to prove each transfer (once its funding note is mined and its drawn
 /// anchor boundary has settled — [`MigrationState::next_step`] surfaces this as
-/// [`AdvanceStep::Prove`](crate::state::AdvanceStep::Prove), typically at a sync wake-up well
-/// before the broadcast height); this function performs the proof for the one transfer `id`. It
-/// is idempotent only in the sense that a transaction not in [`Signed`](MigrationTxState::Signed)
+/// [`AdvanceStep::Prove`], typically at a sync wake-up well before the broadcast height); this
+/// function performs the proof for the one transfer `id`. It is idempotent only in the sense that
+/// a transaction not in [`Signed`](MigrationTxState::Signed)
 /// is rejected with [`ProveError::NotReady`] rather than re-proved.
 ///
 /// A prover that reports the funding note ABSENT from the account's unspent set
@@ -2131,11 +2377,11 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 ///
 /// A transfer can only be included in a block at or below its expiry height (ZIP 203); once the
 /// chain passes it, the pre-signed transaction is dead and
-/// [`next_step`](MigrationState::next_step) surfaces it as
-/// [`AdvanceStep::Rebuild`](crate::state::AdvanceStep::Rebuild). NOTHING of the expired artifact is
-/// reusable — the signature hash covers the expiry height, so its signatures cannot authorize any
-/// rescheduled copy. This is ZIP 318's expired-transaction handling: "a new transaction with a
-/// fresh anchor and expiry is constructed for the affected part, with its denomination unchanged".
+/// [`next_step`](MigrationState::next_step) surfaces it as [`AdvanceStep::Rebuild`]. NOTHING of
+/// the expired artifact is reusable — the signature hash covers the expiry height, so its
+/// signatures cannot authorize any rescheduled copy. This is ZIP 318's expired-transaction
+/// handling: "a new transaction with a fresh anchor and expiry is constructed for the affected
+/// part, with its denomination unchanged".
 /// This function performs that reconstruction: it reschedules the part from the current tip with a
 /// fresh memoryless delay, derives the new canonical expiry, draws a fresh boundary anchor, builds
 /// a new transfer PCZT against the same funding note and crossing value, signs it anew, and
@@ -3792,6 +4038,775 @@ mod tests {
                 txid: TxId::from_bytes([0; 32]),
                 height: BlockHeight::from_u32(2_000_105)
             }
+        );
+    }
+}
+
+/// The drive API's tests, over a minimal in-crate store with a configurable answer set: what
+/// [`advance_migration`] surfaces, what it records, how much it asks, and what it persists.
+#[cfg(test)]
+mod advance_tests {
+    use super::*;
+    use alloc::collections::BTreeMap;
+    use core::cell::Cell;
+    use zcash_protocol::value::Zatoshis;
+
+    use crate::denomination::DenominationPlan;
+    use crate::preparation::PreparationPlan;
+
+    /// A store that answers satisfiability from a fixed table — anything absent is satisfiable at
+    /// `as_of`, the healthy default — and counts what the drive loop asks of it.
+    struct TestStore {
+        stored: Option<MigrationState>,
+        satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
+        as_of: BlockHeight,
+        queries: Cell<usize>,
+        replaced: Cell<usize>,
+    }
+
+    impl TestStore {
+        fn new(
+            as_of: u32,
+            answers: impl IntoIterator<Item = (MigrationTransferId, StepSatisfiability)>,
+        ) -> Self {
+            TestStore {
+                stored: None,
+                satisfiability: answers.into_iter().collect(),
+                as_of: BlockHeight::from_u32(as_of),
+                queries: Cell::new(0),
+                replaced: Cell::new(0),
+            }
+        }
+
+        /// Replace one transaction's answer, standing in for the wallet's view changing between
+        /// calls (a dependency scanned, a reorg settled).
+        fn set_answer(&mut self, id: MigrationTransferId, answer: StepSatisfiability) {
+            self.satisfiability.insert(id, answer);
+        }
+    }
+
+    impl PoolMigrationRead for TestStore {
+        type Error = core::convert::Infallible;
+
+        fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            Ok(self.stored.clone())
+        }
+
+        fn check_step_satisfiability(
+            &self,
+            tx: &MigrationTransaction,
+            _settle: ReorgSettleDepth,
+        ) -> Result<StepSatisfiability, Self::Error> {
+            self.queries.set(self.queries.get() + 1);
+            Ok(self
+                .satisfiability
+                .get(&tx.id())
+                .cloned()
+                .unwrap_or(StepSatisfiability::Satisfiable { as_of: self.as_of }))
+        }
+    }
+
+    impl PoolMigrationWrite for TestStore {
+        fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+            self.replaced.set(self.replaced.get() + 1);
+            self.stored = Some(state.clone());
+            Ok(())
+        }
+
+        fn update_transaction(
+            &mut self,
+            id: MigrationTransferId,
+            state: MigrationTxState,
+        ) -> Result<(), Self::Error> {
+            if let Some(stored) = &mut self.stored
+                && let Some(tx) = stored.transactions.iter_mut().find(|t| t.id == id)
+            {
+                tx.state = state;
+            }
+            Ok(())
+        }
+    }
+
+    // The state constructors mirror `state.rs`'s test helpers, so a drive-loop test and a kernel
+    // test describe the same migration the same way.
+
+    fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
+        MigrationTransaction {
+            id: MigrationTransferId(id),
+            kind,
+            pczt: Vec::new(),
+            depends_on: Vec::new(),
+            scheduled_height: BlockHeight::from_u32(0),
+            expiry_height: BlockHeight::from_u32(0),
+            anchor_boundary: None,
+            state,
+            lock_owner: None,
+            unsatisfiable_at: None,
+            spend_nullifiers: Vec::new(),
+        }
+    }
+
+    fn prep(layer: usize, index: usize) -> MigrationTxKind {
+        MigrationTxKind::Preparation { layer, index }
+    }
+
+    fn transfer(crossing: usize) -> MigrationTxKind {
+        MigrationTxKind::Transfer { crossing }
+    }
+
+    fn mined(height: u32) -> MigrationTxState {
+        MigrationTxState::Mined {
+            txid: TxId::from_bytes([0; 32]),
+            height: BlockHeight::from_u32(height),
+        }
+    }
+
+    fn broadcast() -> MigrationTxState {
+        MigrationTxState::Broadcast {
+            txid: TxId::from_bytes([1; 32]),
+        }
+    }
+
+    /// A transfer with the given anchor boundary and scheduled broadcast height, in the given
+    /// lifecycle state (never expiring, like `tx`).
+    fn scheduled_transfer(
+        id: u32,
+        crossing: usize,
+        anchor: u32,
+        broadcast: u32,
+        state: MigrationTxState,
+    ) -> MigrationTransaction {
+        let mut t = tx(id, transfer(crossing), state);
+        t.anchor_boundary = Some(BlockHeight::from_u32(anchor));
+        t.scheduled_height = BlockHeight::from_u32(broadcast);
+        t
+    }
+
+    /// A state whose denomination plan carries the given crossing values, so each transfer's
+    /// contribution to the replan threshold is exactly the value at its crossing index.
+    fn state_with_crossings(
+        crossings: &[u64],
+        transactions: Vec<MigrationTransaction>,
+    ) -> MigrationState {
+        let zats = |v: u64| Zatoshis::from_u64(v).expect("test values are valid");
+        let total = zats(crossings.iter().sum());
+        MigrationState {
+            status: MigrationStatus::Committed,
+            denominations: DenominationPlan::from_stored_parts(
+                crossings.iter().copied().map(zats).collect(),
+                zats(15_000),
+                None,
+                Zatoshis::ZERO,
+                total,
+                total,
+            )
+            .expect("a consistent stored plan reconstructs"),
+            preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            transactions,
+            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
+            replan_threshold: ReplanThreshold::DEFAULT,
+        }
+    }
+
+    fn spent(as_of: u32) -> StepSatisfiability {
+        StepSatisfiability::Unsatisfiable {
+            cause: UnsatisfiableCause::InputsSpent {
+                nullifiers: vec![[9; 32]],
+            },
+            as_of: BlockHeight::from_u32(as_of),
+        }
+    }
+
+    fn config() -> AdvanceConfig {
+        AdvanceConfig {
+            reorg_settle_depth: ReorgSettleDepth(10),
+        }
+    }
+
+    /// Which half of the store interface fails, for the error-propagation test.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Failure {
+        /// The satisfiability oracle fails.
+        Oracle,
+        /// Persisting fails.
+        Write,
+    }
+
+    /// A store whose failing half is chosen up front. `TestStore` is infallible, so error
+    /// propagation needs a store that can actually fail.
+    #[derive(Debug, PartialEq, Eq)]
+    struct StoreFailed;
+
+    struct FailingStore {
+        stored: Option<MigrationState>,
+        satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
+        as_of: BlockHeight,
+        fails: Failure,
+        queries: Cell<usize>,
+        replaced: Cell<usize>,
+    }
+
+    impl FailingStore {
+        fn new(
+            fails: Failure,
+            as_of: u32,
+            answers: impl IntoIterator<Item = (MigrationTransferId, StepSatisfiability)>,
+        ) -> Self {
+            FailingStore {
+                stored: None,
+                satisfiability: answers.into_iter().collect(),
+                as_of: BlockHeight::from_u32(as_of),
+                fails,
+                queries: Cell::new(0),
+                replaced: Cell::new(0),
+            }
+        }
+    }
+
+    impl PoolMigrationRead for FailingStore {
+        type Error = StoreFailed;
+
+        fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            Ok(self.stored.clone())
+        }
+
+        fn check_step_satisfiability(
+            &self,
+            tx: &MigrationTransaction,
+            _settle: ReorgSettleDepth,
+        ) -> Result<StepSatisfiability, Self::Error> {
+            self.queries.set(self.queries.get() + 1);
+            if self.fails == Failure::Oracle {
+                return Err(StoreFailed);
+            }
+            Ok(self
+                .satisfiability
+                .get(&tx.id())
+                .cloned()
+                .unwrap_or(StepSatisfiability::Satisfiable { as_of: self.as_of }))
+        }
+    }
+
+    impl PoolMigrationWrite for FailingStore {
+        fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
+            self.replaced.set(self.replaced.get() + 1);
+            if self.fails == Failure::Write {
+                return Err(StoreFailed);
+            }
+            self.stored = Some(state.clone());
+            Ok(())
+        }
+
+        fn update_transaction(
+            &mut self,
+            _id: MigrationTransferId,
+            _state: MigrationTxState,
+        ) -> Result<(), Self::Error> {
+            Err(StoreFailed)
+        }
+    }
+
+    /// The invariant the drive API exists for: a step is surfaced only after the store has
+    /// vouched for it. The kernel plans A's due broadcast; the check discovers A's inputs spent,
+    /// which broadens into a sweep that also finds C dead, and the call surfaces B's prove — never
+    /// A's broadcast — with both discoveries recorded and persisted in ONE write. A's and C's
+    /// value stays below the replan threshold, so the migration keeps draining.
+    #[test]
+    fn advance_never_surfaces_a_dead_candidate_and_broadens_on_discovery() {
+        let mut state = state_with_crossings(
+            &[5_000_000, 90_000_000, 5_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                // A: proved and due at the target height.
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+                // B and C: signed, boundaries long settled, broadcasts weeks out.
+                scheduled_transfer(2, 1, 1440, 90_000, MigrationTxState::Signed),
+                scheduled_transfer(3, 2, 1440, 90_000, MigrationTxState::Signed),
+            ],
+        );
+        let mut store = TestStore::new(
+            1600,
+            [
+                (MigrationTransferId(1), spent(1600)),
+                (MigrationTransferId(3), spent(1600)),
+            ],
+        );
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert!(
+            matches!(step, AdvanceStep::Prove { id, .. } if id == MigrationTransferId(2)),
+            "the live transfer's prove is surfaced, not the dead transfer's broadcast: {step:?}"
+        );
+        let marked = BlockHeight::from_u32(1600);
+        assert_eq!(
+            state.transactions()[1].unsatisfiable_at(),
+            Some(marked),
+            "the dead candidate is marked at the answer's height"
+        );
+        assert_eq!(
+            state.transactions()[3].unsatisfiable_at(),
+            Some(marked),
+            "the broaden sweep marks a transfer whose own broadcast is weeks away"
+        );
+        assert_eq!(
+            state.transactions()[2].unsatisfiable_at(),
+            None,
+            "the satisfiable transfer is untouched"
+        );
+        assert_eq!(
+            store.replaced.get(),
+            1,
+            "one dirty write persisted the marks"
+        );
+        assert_eq!(
+            store.stored.as_ref().expect("persisted").transactions()[3].unsatisfiable_at(),
+            Some(marked),
+            "the store holds the marks by the time the step is surfaced"
+        );
+    }
+
+    /// Broadening is what makes the threshold trip promptly: the marks discovered in one call
+    /// carry the unsatisfiable share past the committed threshold, so that SAME call re-plans and
+    /// returns `Replan` rather than another step.
+    #[test]
+    fn advance_replan_when_threshold_crossed() {
+        let mut state = state_with_crossings(
+            &[30_000_000, 40_000_000, 30_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+                scheduled_transfer(2, 1, 1440, 90_000, MigrationTxState::Signed),
+                scheduled_transfer(3, 2, 1440, 90_000, MigrationTxState::Signed),
+            ],
+        );
+        let mut store = TestStore::new(
+            1600,
+            [
+                (MigrationTransferId(1), spent(1600)),
+                (MigrationTransferId(3), spent(1600)),
+            ],
+        );
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Replan,
+            "60% of the planned crossing value is unsatisfiable, past the 20% threshold"
+        );
+        assert!(state.replan_required());
+        assert_eq!(store.replaced.get(), 1);
+        let stored = store.stored.as_ref().expect("persisted");
+        assert!(
+            stored.transactions()[1].unsatisfiable_at().is_some()
+                && stored.transactions()[3].unsatisfiable_at().is_some(),
+            "the marks the replan decision rests on are durable before it is surfaced"
+        );
+    }
+
+    /// A `NotYetSatisfiable` answer is a retry, not an obstruction: the candidate is set aside for
+    /// the rest of the call — nothing marked — its sibling surfaces instead, and a FRESH call
+    /// offers the deferred transaction again once the wallet can vouch for it.
+    #[test]
+    fn advance_not_yet_satisfiable_sets_aside_without_marking() {
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+                scheduled_transfer(2, 1, 1440, 1500, MigrationTxState::Proved),
+            ],
+        );
+        let mut store = TestStore::new(
+            1600,
+            [(
+                MigrationTransferId(1),
+                StepSatisfiability::NotYetSatisfiable {
+                    as_of: BlockHeight::from_u32(1600),
+                },
+            )],
+        );
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(2)
+            },
+            "the sibling's due broadcast surfaces while the lagging candidate waits"
+        );
+        assert!(
+            state
+                .transactions()
+                .iter()
+                .all(|t| t.unsatisfiable_at().is_none()),
+            "a not-yet answer marks nothing"
+        );
+        assert_eq!(
+            store.replaced.get(),
+            0,
+            "nothing was recorded, so nothing is written"
+        );
+
+        // The deferral was call-local: once the wallet can vouch for it, the next call offers the
+        // same transaction again.
+        store.set_answer(
+            MigrationTransferId(1),
+            StepSatisfiability::Satisfiable {
+                as_of: BlockHeight::from_u32(1700),
+            },
+        );
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1701),
+            &config(),
+        )
+        .expect("the store never fails");
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+            "set_aside does not persist across calls"
+        );
+        assert_eq!(store.replaced.get(), 0);
+    }
+
+    /// The laziness profile a healthy migration pays: one query for the candidate the kernel
+    /// names, no write at all — and, when nothing is actionable, not even that.
+    #[test]
+    fn advance_is_lazy_when_healthy() {
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+            ],
+        );
+        let mut store = TestStore::new(1600, []);
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            }
+        );
+        assert_eq!(store.queries.get(), 1, "exactly the candidate is checked");
+        assert_eq!(store.replaced.get(), 0, "a healthy call writes nothing");
+
+        // Nothing in flight and nothing actionable — the transfer's boundary has yet to settle —
+        // so there is nothing to check at all.
+        let mut waiting = state_with_crossings(
+            &[100_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 1700, 90_000, MigrationTxState::Signed),
+            ],
+        );
+        let mut store = TestStore::new(1600, []);
+        let step = advance_migration(
+            &mut store,
+            &mut waiting,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+        assert_eq!(step, AdvanceStep::Waiting);
+        assert_eq!(store.queries.get(), 0, "a waiting call asks nothing");
+        assert_eq!(store.replaced.get(), 0);
+    }
+
+    /// The in-flight sweep is the only check a broadcast-but-unmined transaction ever gets, and it
+    /// records exactly one cause. A settled reorg invalidates a broadcast preparation's anchor;
+    /// its pending dependents die through the closure, carrying the migration past the threshold.
+    /// A sibling in flight whose answer is an INPUT-level cause is left alone: an in-flight
+    /// transaction's inputs are spent by itself, so that answer says nothing about its fate.
+    #[test]
+    fn advance_in_flight_anchor_invalidated_flows_to_replan() {
+        let mut dependent_a = scheduled_transfer(1, 0, 1440, 90_000, MigrationTxState::Signed);
+        dependent_a.depends_on = vec![MigrationTransferId(0)];
+        let mut dependent_b = scheduled_transfer(2, 1, 1440, 90_000, MigrationTxState::Signed);
+        dependent_b.depends_on = vec![MigrationTransferId(0)];
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000, 10_000_000],
+            vec![
+                tx(0, prep(0, 0), broadcast()),
+                dependent_a,
+                dependent_b,
+                // In flight, independent, and answering an input-level cause.
+                scheduled_transfer(3, 2, 1440, 1500, broadcast()),
+            ],
+        );
+        let mut store = TestStore::new(
+            1600,
+            [
+                (
+                    MigrationTransferId(0),
+                    StepSatisfiability::Unsatisfiable {
+                        cause: UnsatisfiableCause::AnchorInvalidated,
+                        as_of: BlockHeight::from_u32(1600),
+                    },
+                ),
+                (MigrationTransferId(3), spent(1600)),
+            ],
+        );
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Replan,
+            "the stranded dependents carry the migration past the threshold"
+        );
+        let marked = BlockHeight::from_u32(1600);
+        assert_eq!(state.transactions()[0].unsatisfiable_at(), Some(marked));
+        assert_eq!(
+            state.transactions()[1].unsatisfiable_at(),
+            Some(marked),
+            "a dependent of the dead preparation inherits its stamp"
+        );
+        assert_eq!(state.transactions()[2].unsatisfiable_at(), Some(marked));
+        assert_eq!(
+            state.transactions()[3].unsatisfiable_at(),
+            None,
+            "an input-level answer about an in-flight transaction is not a determination"
+        );
+        assert_eq!(
+            store.queries.get(),
+            2,
+            "one query per in-flight transaction"
+        );
+        assert_eq!(store.replaced.get(), 1);
+        assert_eq!(
+            store.stored.as_ref().expect("persisted").transactions()[1].unsatisfiable_at(),
+            Some(marked)
+        );
+    }
+
+    /// An `Expired` answer confirms a derivation the kernel already makes from the same
+    /// `expiry_height`, so it never overrides the planned step: the rebuild the kernel surfaced —
+    /// expiry's remedy — stands, and nothing is marked (a mark would make the transfer dead
+    /// rather than rebuildable).
+    #[test]
+    fn advance_expired_answer_never_overrides_the_kernel() {
+        let mut expired = scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Signed);
+        expired.expiry_height = BlockHeight::from_u32(1550);
+        let mut state =
+            state_with_crossings(&[100_000_000], vec![tx(0, prep(0, 0), mined(10)), expired]);
+        let mut store = TestStore::new(
+            1600,
+            [(
+                MigrationTransferId(1),
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::Expired,
+                    as_of: BlockHeight::from_u32(1600),
+                },
+            )],
+        );
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Rebuild {
+                id: MigrationTransferId(1)
+            },
+            "the kernel's rebuild stands"
+        );
+        assert_eq!(
+            state.transactions()[1].unsatisfiable_at(),
+            None,
+            "expiry is derived, never recorded"
+        );
+        assert_eq!(store.queries.get(), 1);
+        assert_eq!(
+            store.replaced.get(),
+            0,
+            "nothing was recorded, so nothing is written"
+        );
+    }
+
+    /// The broaden sweep is scoped to transactions the oracle can actually answer about: one
+    /// whose dependencies have yet to mine is never asked (it could only answer "not yet", and
+    /// its death, if any, arrives through the closure), while its unblocked sibling is.
+    #[test]
+    fn advance_broaden_sweep_skips_a_transaction_behind_an_unmined_dependency() {
+        // A transfer funded by a preparation layer that has not been broadcast yet, alongside one
+        // whose funding preparation is already mined.
+        let mut behind_unmined_dep =
+            scheduled_transfer(3, 1, 1440, 90_000, MigrationTxState::Signed);
+        behind_unmined_dep.depends_on = vec![MigrationTransferId(2)];
+        let mut unblocked = scheduled_transfer(4, 2, 1440, 90_000, MigrationTxState::Signed);
+        unblocked.depends_on = vec![MigrationTransferId(0)];
+        let mut state = state_with_crossings(
+            &[5_000_000, 90_000_000, 5_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                // The candidate: proved, due, and dead.
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+                // A second preparation layer, not yet due, so not itself actionable.
+                {
+                    let mut t = tx(2, prep(1, 0), MigrationTxState::Signed);
+                    t.scheduled_height = BlockHeight::from_u32(90_000);
+                    t
+                },
+                behind_unmined_dep,
+                unblocked,
+            ],
+        );
+        let mut store = TestStore::new(
+            1600,
+            [
+                (MigrationTransferId(1), spent(1600)),
+                // Answered only if asked — and the sweep must not ask.
+                (MigrationTransferId(3), spent(1600)),
+                (MigrationTransferId(4), spent(1600)),
+            ],
+        );
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            BlockHeight::from_u32(1601),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Waiting,
+            "the live work is all undue, and the marked share stays below the threshold"
+        );
+        assert_eq!(
+            store.queries.get(),
+            3,
+            "the candidate, then the two transactions the sweep can answer about"
+        );
+        assert_eq!(
+            state.transactions()[3].unsatisfiable_at(),
+            None,
+            "a transaction behind an unmined dependency is never asked, so never marked"
+        );
+        assert_eq!(
+            state.transactions()[4].unsatisfiable_at(),
+            Some(BlockHeight::from_u32(1600)),
+            "its unblocked sibling is swept and marked"
+        );
+        assert_eq!(store.replaced.get(), 1);
+    }
+
+    /// A store error propagates, and the call's contract on the way out: nothing is left half
+    /// written. An oracle failure records nothing and writes nothing; a WRITE failure surfaces the
+    /// error with the discovery live only in the in-memory state, which is exactly why the caller
+    /// must re-read after an error rather than trusting what it holds.
+    #[test]
+    fn advance_store_errors_propagate_without_recording() {
+        let migration = || {
+            state_with_crossings(
+                &[100_000_000],
+                vec![
+                    tx(0, prep(0, 0), mined(10)),
+                    scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+                ],
+            )
+        };
+
+        // The oracle fails on the candidate check.
+        let mut state = migration();
+        let mut store = FailingStore::new(Failure::Oracle, 1600, []);
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1601),
+                &config()
+            ),
+            Err(StoreFailed)
+        );
+        assert!(
+            state
+                .transactions()
+                .iter()
+                .all(|t| t.unsatisfiable_at().is_none()),
+            "an unanswered check determines nothing"
+        );
+        assert_eq!(
+            store.replaced.get(),
+            0,
+            "and nothing is written on the way out"
+        );
+
+        // The oracle answers — the candidate is dead, and it is the only checkable transaction —
+        // but persisting the discovery fails.
+        let mut state = migration();
+        let mut store = FailingStore::new(
+            Failure::Write,
+            1600,
+            [(MigrationTransferId(1), spent(1600))],
+        );
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1601),
+                &config()
+            ),
+            Err(StoreFailed)
+        );
+        assert_eq!(
+            store.queries.get(),
+            1,
+            "the candidate, and nothing to broaden to"
+        );
+        assert_eq!(store.replaced.get(), 1, "the write was attempted");
+        assert!(
+            state.transactions()[1].unsatisfiable_at().is_some(),
+            "the discovery is in the in-memory state"
+        );
+        assert!(
+            store.stored.is_none(),
+            "but not in the store: after an error the caller must re-read, not trust this state"
         );
     }
 }

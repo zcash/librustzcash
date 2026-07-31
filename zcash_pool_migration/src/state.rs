@@ -29,7 +29,7 @@ use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, StepSatisfiability, UnsatisfiableCause,
+    MigrationTxState, StepSatisfiability,
 };
 use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 
@@ -596,8 +596,8 @@ impl MigrationState {
     ///
     /// | Answer | Effect |
     /// |---|---|
-    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of` height |
-    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`Expired`](UnsatisfiableCause::Expired) | no mark |
+    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](crate::engine::UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](crate::engine::UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](crate::engine::UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of` height |
+    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`Expired`](crate::engine::UnsatisfiableCause::Expired) | no mark |
     /// | [`Satisfiable`](StepSatisfiability::Satisfiable) / [`NotYetSatisfiable`](StepSatisfiability::NotYetSatisfiable) | no mark |
     ///
     /// The input-level and anchor-level causes record an observation about chain state that the
@@ -641,15 +641,10 @@ impl MigrationState {
             let StepSatisfiability::Unsatisfiable { cause, as_of } = answer else {
                 continue;
             };
-            // Compiler-forced over the (in-crate exhaustive) cause vocabulary: a new cause must
-            // decide here whether it is an observation to store or a derivation to confirm.
-            let marks = match cause {
-                UnsatisfiableCause::InputsSpent { .. }
-                | UnsatisfiableCause::InputsInvalidated { .. }
-                | UnsatisfiableCause::AnchorInvalidated => true,
-                UnsatisfiableCause::Expired => false,
-            };
-            if !marks {
+            // Whether a cause marks is defined once, on the cause itself: the drive API's loop
+            // decides what to record from the same predicate, and its termination depends on the
+            // two agreeing (see `UnsatisfiableCause::marks`).
+            if !cause.marks() {
                 continue;
             }
             if let Some(t) = self.transactions.iter_mut().find(|t| {
@@ -1093,7 +1088,7 @@ impl MigrationState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::MigrationTransaction;
+    use crate::engine::{MigrationTransaction, UnsatisfiableCause};
     use zcash_protocol::value::Zatoshis;
 
     use crate::denomination::DenominationPlan;
