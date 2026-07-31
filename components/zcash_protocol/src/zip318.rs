@@ -349,8 +349,33 @@ pub trait PoolMigrationConstants {
     /// This is the sharpest single ZIP 318 discriminator. An ordinary transaction expires a fixed
     /// short delta after its target height, so its expiry is essentially uniform; a ZIP 318
     /// transaction's expiry is one of the few heights the rolling window admits.
+    ///
+    /// Use [`is_canonical_expiry_value`](Self::is_canonical_expiry_value) instead when no
+    /// reference height is available, or when the answer must not change as one becomes available.
     fn is_canonical_expiry(&self, expiry: BlockHeight, reference: BlockHeight) -> bool {
         expiry == self.canonical_expiry(reference)
+    }
+
+    /// Returns whether `expiry` could be a canonical rolling expiry for SOME height: whether it is
+    /// a multiple of the expiry modulus and at least one whole window above zero.
+    ///
+    /// This is the height-INDEPENDENT form of
+    /// [`is_canonical_expiry`](Self::is_canonical_expiry), and it exists because the reference
+    /// height a transaction should be judged against is not always available when the judgement
+    /// must be made. A transaction observed before it is mined has no mined height, and judging it
+    /// against the chain tip instead would be unstable: the canonical expiry is a step function of
+    /// the height, so the answer would change once the transaction was mined in a later modulus
+    /// period, contradicting an earlier decision.
+    ///
+    /// It is weaker, deliberately. It admits a canonical expiry belonging to a different period
+    /// than the one the transaction was mined in, which the reference-height form rejects. Nearly
+    /// all of the discriminating power survives: an ordinary expiry is a short fixed delta past an
+    /// arbitrary target height, so it lands on a multiple of the modulus with probability about one
+    /// in the modulus.
+    fn is_canonical_expiry_value(&self, expiry: BlockHeight) -> bool {
+        let (modulus, window) = self.expiry_window();
+        let expiry = u32::from(expiry);
+        expiry >= window && expiry % modulus == 0
     }
 }
 
@@ -434,6 +459,47 @@ pub enum Zip318Classification {
 }
 
 impl Zip318Classification {
+    /// The stable integer encoding of this classification, for a store to persist and a foreign
+    /// function interface to carry.
+    ///
+    /// [`Unknown`](Self::Unknown) is `0`, which is also the value a store should DEFAULT the
+    /// column to. A row holding it has not been classified, and nothing will classify it on its
+    /// own: it needs the transaction rescanned. That is deliberately a real value rather than
+    /// NULL, so a store can find such rows with an ordinary query, and deliberately distinct from
+    /// [`Nonconforming`](Self::Nonconforming), which is a decision that the transaction is not a
+    /// ZIP 318 one. Confusing the two would present "we never looked" as "we looked and it is
+    /// not", which is exactly the claim this type refuses to make without evidence.
+    ///
+    /// The encoding is APPEND-ONLY: existing values never change meaning, and new kinds take new
+    /// codes. See [`from_code`](Self::from_code) for what an older consumer does with a newer one.
+    pub fn to_code(&self) -> i64 {
+        match self {
+            Self::Unknown => 0,
+            Self::Nonconforming => 1,
+            Self::Conforms(Zip318TxKind::Preparation) => 2,
+            Self::Conforms(Zip318TxKind::Transfer) => 3,
+            Self::Conforms(Zip318TxKind::CanonicalCrossingPayment) => 4,
+        }
+    }
+
+    /// Decodes [`to_code`](Self::to_code). An unrecognised code decodes to
+    /// [`Unknown`](Self::Unknown).
+    ///
+    /// Unknown decodes to unknown rather than to a refusal on purpose. A consumer built against an
+    /// older version of this crate meeting a code from a newer one has learned nothing about the
+    /// transaction, and saying so is honest; deciding `Nonconforming` instead would assert a
+    /// judgement it is not entitled to, and would break monotonicity the moment the consumer was
+    /// updated and changed its mind.
+    pub fn from_code(code: i64) -> Self {
+        match code {
+            1 => Self::Nonconforming,
+            2 => Self::Conforms(Zip318TxKind::Preparation),
+            3 => Self::Conforms(Zip318TxKind::Transfer),
+            4 => Self::Conforms(Zip318TxKind::CanonicalCrossingPayment),
+            _ => Self::Unknown,
+        }
+    }
+
     /// The kind, if this classification is a conforming one.
     pub fn kind(&self) -> Option<Zip318TxKind> {
         match self {
@@ -835,6 +901,70 @@ mod tests {
         assert_eq!(ShortWindow.canonical_expiry(h), BlockHeight::from_u32(400));
         assert!(ShortWindow.is_canonical_expiry(BlockHeight::from_u32(400), h));
         assert!(!ShortWindow.is_canonical_expiry(expiry_height(h), h));
+    }
+
+    /// The height-independent expiry test admits every canonical expiry, and rejects the ordinary
+    /// expiry of a transaction targeting any height.
+    #[test]
+    fn the_height_independent_expiry_test_admits_canonical_expiries() {
+        for height in [0u32, 1, 144, 34_559, 34_560, 2_000_000] {
+            let h = BlockHeight::from_u32(height);
+            assert!(
+                Zip318Params.is_canonical_expiry_value(expiry_height(h)),
+                "the canonical expiry for {height} must be admitted without a reference height"
+            );
+            assert!(
+                !Zip318Params.is_canonical_expiry_value(h + 40),
+                "an ordinary expiry for {height} must be rejected"
+            );
+        }
+
+        // Weaker than the reference-height form, and this is the gap: an expiry canonical for one
+        // period is admitted while a transaction mined in another period is being judged.
+        let other_period = expiry_height(BlockHeight::from_u32(0));
+        let mined_much_later = BlockHeight::from_u32(10 * EXPIRY_MODULUS);
+        assert!(Zip318Params.is_canonical_expiry_value(other_period));
+        assert!(!Zip318Params.is_canonical_expiry(other_period, mined_much_later));
+    }
+
+    /// The persisted encoding round-trips, and the two ways of not having a label stay distinct:
+    /// "never classified, needs a rescan" must never be stored or read as "classified, and not a
+    /// ZIP 318 transaction".
+    #[test]
+    fn the_classification_encoding_round_trips() {
+        for classification in [
+            Zip318Classification::Unknown,
+            Zip318Classification::Nonconforming,
+            Zip318Classification::Conforms(Zip318TxKind::Preparation),
+            Zip318Classification::Conforms(Zip318TxKind::Transfer),
+            Zip318Classification::Conforms(Zip318TxKind::CanonicalCrossingPayment),
+        ] {
+            assert_eq!(
+                Zip318Classification::from_code(classification.to_code()),
+                classification
+            );
+        }
+
+        // Zero is `Unknown`, so a column defaulting to zero reads back as unclassified rather
+        // than as a decision. This is what a backfill leaves behind.
+        assert_eq!(Zip318Classification::Unknown.to_code(), 0);
+        assert_eq!(
+            Zip318Classification::from_code(0),
+            Zip318Classification::Unknown
+        );
+        assert_ne!(
+            Zip318Classification::Unknown.to_code(),
+            Zip318Classification::Nonconforming.to_code(),
+            "never classified must not encode as classified-and-refused"
+        );
+
+        // A code from a newer version teaches an older consumer nothing, which is `Unknown`.
+        for unrecognised in [5, 99, -1] {
+            assert_eq!(
+                Zip318Classification::from_code(unrecognised),
+                Zip318Classification::Unknown
+            );
+        }
     }
 
     /// Evidence for a well-formed preparation transaction, from a source that can answer every
