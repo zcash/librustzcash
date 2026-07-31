@@ -42,7 +42,7 @@ use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
     InputObservation, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
     MigrationTxKind, MigrationTxState, ReorgSettleDepth, ReplanThreshold, StepSatisfiability,
-    UnsatisfiableCause, classify_input_observations,
+    UnsatisfiableCause, UnsatisfiableKind, classify_input_observations,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
@@ -228,6 +228,12 @@ fn create_transactions_sql(t: &Tables) -> String {
     // `orchard_ironwood_migration_unsatisfiability` schema migration produce the same stored
     // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
     // column explicitly, so no insert ever falls back to it.
+    //
+    // `unsatisfiable_at` and `unsatisfiable_kind` are one value in two columns — the height an
+    // unsatisfiability observation rests on, and which observation it was — so they are `NULL`
+    // together or non-`NULL` together, and the read path rejects a row where they disagree. The
+    // three columns that migration adds are listed here in the order it adds them, so the created
+    // and repaired schemas stay comparable.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
@@ -246,6 +252,7 @@ fn create_transactions_sql(t: &Tables) -> String {
             lock_owner BLOB,
             unsatisfiable_at INTEGER,
             spend_nullifiers BLOB NOT NULL DEFAULT X'',
+            unsatisfiable_kind TEXT,
             PRIMARY KEY (migration_id, tx_id)
         )",
         t.transactions, t.migrations
@@ -731,7 +738,7 @@ fn read_transactions(
         let mut stmt = conn.prepare(&format!(
             "SELECT tx_id, kind, kind_layer, kind_index, kind_crossing, pczt,
                     scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
-                    lock_owner, unsatisfiable_at, spend_nullifiers
+                    lock_owner, unsatisfiable_at, spend_nullifiers, unsatisfiable_kind
                FROM {}
               WHERE migration_id = ?
               ORDER BY tx_id",
@@ -754,6 +761,7 @@ fn read_transactions(
                 lock_owner: row.get(12)?,
                 unsatisfiable_at: row.get(13)?,
                 spend_nullifiers: row.get(14)?,
+                unsatisfiable_kind: row.get(15)?,
             })
         })?;
         mapped.collect::<Result<_, _>>()?
@@ -797,6 +805,32 @@ fn read_transactions(
             .map(|chunk| <[u8; 32]>::try_from(chunk).expect("chunks_exact yields 32-byte chunks"))
             .collect();
 
+        // An unsatisfiability mark is ONE value spread over two columns: the height the
+        // observation rests on and which observation it was. A name this build does not know is
+        // corruption, exactly as an unrecognized `state` or `status` discriminant is — treating it
+        // as no mark would return a dead transaction to the prove and broadcast queues.
+        let unsatisfiable_at = r.unsatisfiable_at.map(BlockHeight::from_u32);
+        let unsatisfiable_kind = r
+            .unsatisfiable_kind
+            .as_deref()
+            .map(|name| {
+                UnsatisfiableKind::try_from(name).map_err(|_| Error::Corrupt("unsatisfiable_kind"))
+            })
+            .transpose()?;
+        // The engine holds the mark as a pair, so only a row carrying both halves or neither
+        // reassembles: a stamp without a kind cannot be rendered, and a kind without a stamp has
+        // no height for reorg truncation to judge it against, so either alone was not written by
+        // this store.
+        let unsatisfiable = match (unsatisfiable_at, unsatisfiable_kind) {
+            (Some(at), Some(kind)) => Some((at, kind)),
+            (None, None) => None,
+            _ => {
+                return Err(Error::Corrupt(
+                    "unsatisfiable_at / unsatisfiable_kind disagree",
+                ));
+            }
+        };
+
         out.push(MigrationTransaction::from_parts(
             id,
             kind,
@@ -807,7 +841,7 @@ fn read_transactions(
             r.anchor_boundary.map(BlockHeight::from_u32),
             state,
             r.lock_owner,
-            r.unsatisfiable_at.map(BlockHeight::from_u32),
+            unsatisfiable,
             spend_nullifiers,
         ));
     }
@@ -863,6 +897,10 @@ struct TxRow {
     /// The concatenated real-spend nullifiers, still one undivided blob here; the decode step
     /// splits it at its fixed 32-byte stride and rejects any other length as corrupt.
     spend_nullifiers: Vec<u8>,
+    /// The wire name of the [`UnsatisfiableKind`] recorded beside `unsatisfiable_at`, still
+    /// unparsed here; the decode step parses it and rejects a row where the two columns disagree
+    /// about whether a mark stands.
+    unsatisfiable_kind: Option<String>,
 }
 
 fn read_deps(
@@ -1320,14 +1358,20 @@ fn replace_migration(
             .map_or((None, None), |(l, i)| (Some(l as u64), Some(i as u64)));
         let kind_crossing = kind.transfer_crossing().map(|c| c as u64);
         let tx_state = mtx.state();
+        // The mark is one value, split back into its two columns here. Bound to locals so the
+        // kind's wire name can be written as a borrowed `&str`, like every other discriminant
+        // column, rather than allocating a `String` per row.
+        let (unsatisfiable_at, unsatisfiable_kind) = mtx.unsatisfiable().unzip();
         tx.execute(
             &format!(
                 "INSERT INTO {} (migration_id, tx_id, kind, kind_layer, kind_index, kind_crossing,
                                  pczt, scheduled_height, expiry_height, anchor_boundary, state, txid,
-                                 mined_height, lock_owner, unsatisfiable_at, spend_nullifiers)
+                                 mined_height, lock_owner, unsatisfiable_at, spend_nullifiers,
+                                 unsatisfiable_kind)
                  VALUES (:migration_id, :tx_id, :kind, :kind_layer, :kind_index, :kind_crossing,
                          :pczt, :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
-                         :mined_height, :lock_owner, :unsatisfiable_at, :spend_nullifiers)",
+                         :mined_height, :lock_owner, :unsatisfiable_at, :spend_nullifiers,
+                         :unsatisfiable_kind)",
                 t.transactions
             ),
             named_params! {
@@ -1345,8 +1389,9 @@ fn replace_migration(
                 ":txid": tx_state.broadcast_txid().map(hex::encode),
                 ":mined_height": tx_state.mined_height().map(u32::from),
                 ":lock_owner": mtx.lock_owner(),
-                ":unsatisfiable_at": mtx.unsatisfiable_at().map(u32::from),
+                ":unsatisfiable_at": unsatisfiable_at.map(u32::from),
                 ":spend_nullifiers": mtx.spend_nullifiers().concat(),
+                ":unsatisfiable_kind": unsatisfiable_kind.as_ref().map(|k| k.as_ref()),
             },
         )?;
         for (ordinal, dep) in mtx.depends_on().iter().enumerate() {

@@ -616,15 +616,21 @@ pub struct MigrationTransaction {
     /// (which waits on its dependencies rather than anchoring to a drawn boundary).
     #[getset(get_copy = "pub")]
     pub(crate) anchor_boundary: Option<BlockHeight>,
-    /// The height of the chain state a spent-input observation rests on, when this transaction
-    /// has been determined UNSATISFIABLE — its inputs can never again all exist unspent on
-    /// chain — or `None` while no such determination stands. Orthogonal to the lifecycle state
-    /// (a `Proved` transfer keeps its proof and renders as "proved, inputs spent"), mirroring how
-    /// expiry is orthogonal to lifecycle. Recording the backing height rather than the
-    /// observation time is what gives reorg truncation exact semantics: a rewind below this
-    /// height invalidates the observation itself.
-    #[getset(get_copy = "pub")]
-    pub(crate) unsatisfiable_at: Option<BlockHeight>,
+    /// The standing determination that this transaction is UNSATISFIABLE — its inputs can never
+    /// again all exist unspent on chain — as ONE value: the height of the chain state the
+    /// observation rests on, paired with WHAT was observed. `None` while no such determination
+    /// stands. Orthogonal to the lifecycle state (a `Proved` transfer keeps its proof and renders
+    /// as "proved, inputs spent"), mirroring how expiry is orthogonal to lifecycle.
+    ///
+    /// The height is the one the observation RESTS ON rather than the one it was recorded at,
+    /// which is what gives reorg truncation exact semantics: a rewind below it invalidates the
+    /// observation itself. The kind rides along so a wallet can say what killed a transaction
+    /// without re-consulting the oracle (whose answer would by then rest on a later chain state
+    /// anyway): a direct observation records its cause's [`kind`](UnsatisfiableCause::kind), a
+    /// mark applied by the dependency closure records
+    /// [`Inherited`](UnsatisfiableKind::Inherited). Holding them as one pair is what makes a
+    /// stamp without a kind — or a kind without a stamp — unrepresentable.
+    pub(crate) unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)>,
     /// The nullifiers of this transaction's REAL spends — the deferred-witness actions; the
     /// padded dummy spends carry their own witnesses (ZIP 374) — extracted from the built PCZT
     /// when the migration is committed, BEFORE any proof. Proving replaces the stored bytes
@@ -652,9 +658,32 @@ pub struct MigrationTransaction {
 }
 
 impl MigrationTransaction {
+    /// The standing unsatisfiability mark: the height of the chain state the observation rests on
+    /// paired with what was observed, or `None` while this transaction is not determined
+    /// unsatisfiable. [`unsatisfiable_at`](Self::unsatisfiable_at) and
+    /// [`unsatisfiable_kind`](Self::unsatisfiable_kind) project its halves.
+    pub fn unsatisfiable(&self) -> Option<(BlockHeight, UnsatisfiableKind)> {
+        self.unsatisfiable
+    }
+
+    /// The height of the chain state a standing unsatisfiability observation rests on: the stamp
+    /// half of [`unsatisfiable`](Self::unsatisfiable), and the height a truncation must reach
+    /// below to clear the mark.
+    pub fn unsatisfiable_at(&self) -> Option<BlockHeight> {
+        self.unsatisfiable.map(|(at, _)| at)
+    }
+
+    /// WHY this transaction can never mine: the kind half of
+    /// [`unsatisfiable`](Self::unsatisfiable), which a wallet renders without re-consulting the
+    /// satisfiability oracle.
+    pub fn unsatisfiable_kind(&self) -> Option<UnsatisfiableKind> {
+        self.unsatisfiable.map(|(_, kind)| kind)
+    }
+
     /// Reassemble a stored migration transaction from its persisted parts, exactly as a store read
-    /// them back (the inverse of the accessors). The caller is responsible for having persisted a
-    /// consistent row.
+    /// them back (the inverse of the accessors). A store that persists the unsatisfiability mark's
+    /// halves in separate places must reject a row holding one without the other as corrupt on
+    /// read, rather than reconstitute a pair here from half of one.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         id: MigrationTransferId,
@@ -666,7 +695,7 @@ impl MigrationTransaction {
         anchor_boundary: Option<BlockHeight>,
         state: MigrationTxState,
         lock_owner: Option<[u8; 32]>,
-        unsatisfiable_at: Option<BlockHeight>,
+        unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)>,
         spend_nullifiers: Vec<[u8; 32]>,
     ) -> Self {
         Self {
@@ -679,7 +708,7 @@ impl MigrationTransaction {
             anchor_boundary,
             state,
             lock_owner,
-            unsatisfiable_at,
+            unsatisfiable,
             spend_nullifiers,
         }
     }
@@ -849,27 +878,123 @@ pub enum UnsatisfiableCause {
 }
 
 impl UnsatisfiableCause {
+    /// The [`UnsatisfiableKind`] recorded alongside the mark this cause applies, or `None` for a
+    /// cause that applies no mark ([`Expired`](Self::Expired), which only confirms a derivation
+    /// the kernel already makes from the same
+    /// [`expiry_height`](MigrationTransaction::expiry_height)).
+    ///
+    /// This is the single definition of BOTH decisions — whether to mark, and under which kind —
+    /// so the stamp and the kind stored beside it cannot disagree about whether there is a mark at
+    /// all. [`Inherited`](UnsatisfiableKind::Inherited) is never returned here: it names a mark
+    /// that arrived through the dependency closure rather than from any observed cause.
+    pub const fn kind(&self) -> Option<UnsatisfiableKind> {
+        // Compiler-forced over the (in-crate exhaustive) cause vocabulary: a new cause must decide
+        // here whether it is an observation to store — and under which kind — or a derivation to
+        // confirm.
+        match self {
+            UnsatisfiableCause::InputsSpent { .. } => Some(UnsatisfiableKind::InputsSpent),
+            UnsatisfiableCause::InputsInvalidated { .. } => {
+                Some(UnsatisfiableKind::InputsInvalidated)
+            }
+            UnsatisfiableCause::AnchorInvalidated => Some(UnsatisfiableKind::AnchorInvalidated),
+            UnsatisfiableCause::Expired => None,
+        }
+    }
+
     /// Whether this cause records a DURABLE mark: it reports chain state the state machine cannot
     /// re-derive (the input-level causes, and the anchor-level one), as opposed to
     /// [`Expired`](Self::Expired), which only confirms a derivation the kernel already makes from
     /// the same [`expiry_height`](MigrationTransaction::expiry_height).
     ///
-    /// The single definition of that decision, deliberately: both
+    /// Derived from [`kind`](Self::kind) rather than restating its match, deliberately: both
     /// [`MigrationState::record_satisfiability`] (which applies the mark) and
     /// [`advance_migration`] (which decides whether an answer is a discovery worth recording and
     /// broadening on) must agree, because the drive loop's TERMINATION rests on their agreement —
     /// each recorded discovery must mark at least the candidate that produced it, or the loop
-    /// could re-plan onto the same candidate forever. Two copies of this match could drift into
+    /// could re-plan onto the same candidate forever. A second copy of this match could drift into
     /// exactly that hang.
     pub(crate) const fn marks(&self) -> bool {
-        // Compiler-forced over the (in-crate exhaustive) cause vocabulary: a new cause must decide
-        // here whether it is an observation to store or a derivation to confirm.
+        self.kind().is_some()
+    }
+}
+
+/// WHY a transaction can never mine, as persisted beside its
+/// [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at) stamp and rendered by a wallet: a
+/// reduced discriminant of the [`UnsatisfiableCause`] that produced the mark, plus
+/// [`Inherited`](Self::Inherited) for a mark the dependency closure applied.
+///
+/// The full cause is deliberately NOT persisted. Its variants carry evidence payloads — a spent
+/// nullifier list, a dead anchor root — that nothing in the state machine ever reads back, and
+/// that a store can re-derive by asking its oracle again; storing them would grow every marked row
+/// by an unbounded list to answer a question consumers ask only in words. What a consumer needs
+/// durably is which of these happened, which is what this records.
+///
+/// `#[non_exhaustive]`: this tracks the cause vocabulary, which is itself open, so a new marking
+/// cause is expected to bring a new kind with it.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnsatisfiableKind {
+    /// The wallet saw this transaction's own inputs spent: their nullifiers were recognized in
+    /// mined transactions ([`UnsatisfiableCause::InputsSpent`]).
+    InputsSpent,
+    /// This transaction's own inputs will never exist on chain: the wallet knows notes for them,
+    /// but their creating transaction is unmined and was proven against an anchor a settled reorg
+    /// permanently invalidated ([`UnsatisfiableCause::InputsInvalidated`]).
+    InputsInvalidated,
+    /// This transaction is broadcast and unmined, and the anchor its OWN proof installed is no
+    /// longer a root of the chain the wallet has scanned
+    /// ([`UnsatisfiableCause::AnchorInvalidated`]).
+    AnchorInvalidated,
+    /// Nothing was observed about this transaction itself: the mark arrived through the DEPENDENCY
+    /// CLOSURE (see [`MigrationState::record_satisfiability`]), because a transaction it depends
+    /// on can never mine. Which dependency, and what killed it, is read off that dependency's own
+    /// mark.
+    Inherited,
+}
+
+impl AsRef<str> for UnsatisfiableKind {
+    /// The stable lowercase wire name of this kind, as a store persists it. Borrow-free: it
+    /// returns a `&'static str`, so encoding a kind allocates nothing.
+    fn as_ref(&self) -> &str {
         match self {
-            UnsatisfiableCause::InputsSpent { .. }
-            | UnsatisfiableCause::InputsInvalidated { .. }
-            | UnsatisfiableCause::AnchorInvalidated => true,
-            UnsatisfiableCause::Expired => false,
+            UnsatisfiableKind::InputsSpent => "inputs_spent",
+            UnsatisfiableKind::InputsInvalidated => "inputs_invalidated",
+            UnsatisfiableKind::AnchorInvalidated => "anchor_invalidated",
+            UnsatisfiableKind::Inherited => "inherited",
         }
+    }
+}
+
+/// The error returned when a string does not name an [`UnsatisfiableKind`] (its
+/// [`TryFrom<&str>`] impl).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParseUnsatisfiableKindError;
+
+impl fmt::Display for ParseUnsatisfiableKindError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("unrecognized unsatisfiability kind")
+    }
+}
+
+impl TryFrom<&str> for UnsatisfiableKind {
+    type Error = ParseUnsatisfiableKindError;
+
+    /// Parses the lowercase wire name produced by [`AsRef<str>`](AsRef).
+    ///
+    /// The vocabulary is open — this enum is `#[non_exhaustive]` — but an unrecognized name is
+    /// still an ERROR here, and a store surfaces it as corruption exactly as it does an
+    /// unrecognized [`MigrationStatus`] or [`MigrationTxState`] discriminant. A name written by a
+    /// future release is not a value this one can render or reason about, and treating it as
+    /// "unmarked" would resurrect a dead transaction into the prove and broadcast queues, so it is
+    /// reported rather than smoothed over.
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(match s {
+            "inputs_spent" => UnsatisfiableKind::InputsSpent,
+            "inputs_invalidated" => UnsatisfiableKind::InputsInvalidated,
+            "anchor_invalidated" => UnsatisfiableKind::AnchorInvalidated,
+            "inherited" => UnsatisfiableKind::Inherited,
+            _ => return Err(ParseUnsatisfiableKindError),
+        })
     }
 }
 
@@ -2575,9 +2700,9 @@ where
         state
             .transactions
             .iter()
-            .any(|t| t.id == *d && t.unsatisfiable_at.is_some())
+            .any(|t| t.id == *d && t.unsatisfiable.is_some())
     });
-    if tx.unsatisfiable_at.is_some() || dead_dependency {
+    if tx.unsatisfiable.is_some() || dead_dependency {
         return Err(RebuildError::Unsatisfiable(id));
     }
     // Only an expired, not-yet-mined transfer is rebuilt (the same condition the state machine reports
@@ -3296,7 +3421,7 @@ where
                     // `LockOwner` for the commit would set this here.
                     lock_owner: None,
                     // A freshly committed transaction carries no spent-input observation.
-                    unsatisfiable_at: None,
+                    unsatisfiable: None,
                     spend_nullifiers,
                 });
             }
@@ -3462,7 +3587,7 @@ where
                 // `LockOwner` for the commit would set this here.
                 lock_owner: None,
                 // A freshly committed transaction carries no spent-input observation.
-                unsatisfiable_at: None,
+                unsatisfiable: None,
                 spend_nullifiers,
             });
             self.transfer_funding.push((id, note));
@@ -3548,6 +3673,73 @@ mod tests {
         }
 
         assert!(MigrationStatus::try_from("not_a_status").is_err());
+    }
+
+    /// Every `UnsatisfiableKind` variant's wire name is pinned to its literal string, and
+    /// `TryFrom<&str>` recovers the variant from the name `AsRef<str>` produces for it — pinning
+    /// the literal is what catches a shared writer/reader typo. A name this build does not know is
+    /// rejected, so a store reports it as corruption rather than reading it as "unmarked".
+    #[test]
+    fn unsatisfiable_kind_wire_names_are_pinned() {
+        assert_eq!(UnsatisfiableKind::InputsSpent.as_ref(), "inputs_spent");
+        assert_eq!(
+            UnsatisfiableKind::InputsInvalidated.as_ref(),
+            "inputs_invalidated"
+        );
+        assert_eq!(
+            UnsatisfiableKind::AnchorInvalidated.as_ref(),
+            "anchor_invalidated"
+        );
+        assert_eq!(UnsatisfiableKind::Inherited.as_ref(), "inherited");
+
+        for kind in [
+            UnsatisfiableKind::InputsSpent,
+            UnsatisfiableKind::InputsInvalidated,
+            UnsatisfiableKind::AnchorInvalidated,
+            UnsatisfiableKind::Inherited,
+        ] {
+            assert_eq!(UnsatisfiableKind::try_from(kind.as_ref()), Ok(kind));
+        }
+
+        assert!(UnsatisfiableKind::try_from("not_a_kind").is_err());
+    }
+
+    /// Each cause maps to the kind a mark records for it, and `marks` agrees with `kind` by
+    /// construction: the drive loop's termination rests on the mark decision being made once, and
+    /// a cause that reports a kind but no mark (or the reverse) would break it. `Inherited` is
+    /// never a cause's kind — it names a mark the dependency closure applied, not one observed.
+    #[test]
+    fn unsatisfiable_cause_kind_agrees_with_marks() {
+        let cases = [
+            (
+                UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![[1; 32]],
+                },
+                Some(UnsatisfiableKind::InputsSpent),
+            ),
+            (
+                UnsatisfiableCause::InputsInvalidated { anchor: [2; 32] },
+                Some(UnsatisfiableKind::InputsInvalidated),
+            ),
+            (
+                UnsatisfiableCause::AnchorInvalidated,
+                Some(UnsatisfiableKind::AnchorInvalidated),
+            ),
+            (UnsatisfiableCause::Expired, None),
+        ];
+        for (cause, kind) in cases {
+            assert_eq!(cause.kind(), kind, "{cause:?}");
+            assert_eq!(
+                cause.marks(),
+                kind.is_some(),
+                "{cause:?}: marking and the recorded kind must agree"
+            );
+            assert_ne!(
+                cause.kind(),
+                Some(UnsatisfiableKind::Inherited),
+                "{cause:?}: Inherited names a closure-applied mark, never an observed cause"
+            );
+        }
     }
 
     /// A `Mined` state's txid round-trips through `from_stored` alongside its height, and a stored
@@ -4086,7 +4278,7 @@ mod tests {
             anchor_boundary: None,
             state: MigrationTxState::Signed,
             lock_owner: None,
-            unsatisfiable_at: None,
+            unsatisfiable: None,
             spend_nullifiers: Vec::new(),
         };
         let state = MigrationState {
@@ -4226,7 +4418,7 @@ mod advance_tests {
             anchor_boundary: None,
             state,
             lock_owner: None,
-            unsatisfiable_at: None,
+            unsatisfiable: None,
             spend_nullifiers: Vec::new(),
         }
     }
@@ -5759,7 +5951,7 @@ mod commit_tests {
         let mark = BlockHeight::from_u32(TARGET_HEIGHT);
 
         // Marked while still UNEXPIRED: the specific condition wins over `NotExpired`.
-        state.transactions[0].unsatisfiable_at = Some(mark);
+        state.transactions[0].unsatisfiable = Some((mark, UnsatisfiableKind::InputsSpent));
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
             rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
@@ -5787,7 +5979,7 @@ mod commit_tests {
 
         // An UNMARKED expired transfer whose producer is marked: the funding note it would
         // re-spend is minted by a transaction that can never mine.
-        state.transactions[0].unsatisfiable_at = None;
+        state.transactions[0].unsatisfiable = None;
         let producer_id = MigrationTransferId::new(77);
         state.transactions[0].depends_on = vec![producer_id];
         state.transactions.push(MigrationTransaction::from_parts(
@@ -5802,7 +5994,7 @@ mod commit_tests {
                 txid: TxId::from_bytes([7; 32]),
             },
             None,
-            Some(mark),
+            Some((mark, UnsatisfiableKind::InputsSpent)),
             vec![[7u8; 32]],
         ));
         assert!(matches!(
@@ -6679,7 +6871,7 @@ mod commit_tests {
             .iter()
             .find(|t| t.id == id)
             .expect("the transaction is present")
-            .unsatisfiable_at
+            .unsatisfiable_at()
     }
 
     /// A prover reporting an input ABSENT from the unspent set, with every dependency's mined

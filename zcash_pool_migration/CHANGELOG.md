@@ -58,6 +58,24 @@ and this library adheres to Rust's notion of
   mark above the given height, demotes mined transactions above it back to
   broadcast (keeping their txids), and reverts a `Complete` status to
   `InProgress`.
+- `engine::UnsatisfiableKind` and `engine::ParseUnsatisfiableKindError`: the
+  persisted, renderable discriminant of an unsatisfiability mark —
+  `InputsSpent`, `InputsInvalidated`, `AnchorInvalidated`, or `Inherited` for a
+  mark applied by the dependency closure — with `AsRef<str>` /
+  `TryFrom<&str>` over its lowercase wire names. A store persists the name and
+  reports an unrecognized one as corruption.
+- `engine::UnsatisfiableCause::kind`, the `UnsatisfiableKind` a cause records,
+  or `None` for a cause that applies no mark (`Expired`).
+- `engine::MigrationTransaction::unsatisfiable`, the unsatisfiability mark as
+  one optional `(BlockHeight, UnsatisfiableKind)` pair — the chain height the
+  observation rests on and which observation it was — with `unsatisfiable_at`
+  and `unsatisfiable_kind` projecting its halves. A store that persists the
+  halves separately must reject a row holding one without the other as corrupt
+  on read.
+- `state::TransactionStatus::unsatisfiable_kind`, populated exactly when
+  `state::Blocker::Unsatisfiable` is reported. A transaction stranded behind a
+  dependency whose deadness is merely derived (expired and unmined) carries no
+  stored mark and reports `UnsatisfiableKind::Inherited`.
 - `engine::RebuildError::Unsatisfiable`, returned by
   `engine::rebuild_expired_transfer` and
   `engine::rebuild_expired_transfer_unsigned` for a transfer that is itself
@@ -81,10 +99,9 @@ and this library adheres to Rust's notion of
   mined. A transaction keeps the txid it was broadcast under, so a consumer
   rendering progress no longer has to hold one from an earlier status view.
 - `engine::MigrationTransaction::from_parts` takes two further parameters,
-  `unsatisfiable_at` (the chain height backing a spent-input observation, when
-  the transaction has been determined unsatisfiable) and `spend_nullifiers`
-  (the transaction's real-spend nullifiers, cached from the built PCZT); both
-  have accessors.
+  `unsatisfiable` (the unsatisfiability mark, when the transaction has been
+  determined unsatisfiable) and `spend_nullifiers` (the transaction's real-spend
+  nullifiers, cached from the built PCZT); both have accessors.
 - `engine::MigrationState::from_parts` and the `engine::commit_preparation`,
   `engine::build_preparation_unsigned`, and
   `engine::commit_preparation_with_funding` entry points each take a further

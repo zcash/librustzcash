@@ -29,19 +29,25 @@ workspace.
   over the wallet database's own connection.
 
 ### Changed
-- The database schema now includes the `unsatisfiable_at` and
-  `spend_nullifiers` columns on `orchard_ironwood_migration_transactions`,
-  recording the chain height backing a spent-input observation when a
-  pool-migration transaction has been determined unsatisfiable, and caching
-  each transaction's real-spend nullifiers, and the `replan_threshold` column
+- The database schema now includes the `unsatisfiable_at`, `spend_nullifiers`,
+  and `unsatisfiable_kind` columns on
+  `orchard_ironwood_migration_transactions`, recording the chain height backing
+  a spent-input observation when a pool-migration transaction has been
+  determined unsatisfiable and which observation that was (`inputs_spent`,
+  `inputs_invalidated`, `anchor_invalidated`, or `inherited`), and caching each
+  transaction's real-spend nullifiers, and the `replan_threshold` column
   on `orchard_ironwood_migrations`, recording the integer percent of planned
   transfer value, unsatisfiable, above which the migration is re-planned
-  immediately. The migration that adds these columns backfills
-  `spend_nullifiers` for existing rows from their stored PCZTs — failing with a
-  corrupted-data error for a not-yet-mined row whose stored PCZT is already
-  proven (its real spends are no longer identifiable, so the cache cannot be
-  reconstructed), and leaving a mined row's cache empty — and
-  `replan_threshold` to the default policy. It also restores the `txid` of
+  immediately. `unsatisfiable_at` and `unsatisfiable_kind` are `NULL` together
+  or non-`NULL` together, and a row where they disagree — or one naming a kind
+  this release does not know — is reported as corrupt. The migration that adds
+  these columns backfills `spend_nullifiers` for existing rows from their
+  stored PCZTs — failing with a corrupted-data error for a not-yet-mined row
+  whose stored PCZT is already proven (its real spends are no longer
+  identifiable, so the cache cannot be reconstructed), and leaving a mined
+  row's cache empty — and `replan_threshold` to the default policy;
+  `unsatisfiable_kind` needs no backfill, since a database lacking
+  `unsatisfiable_at` carried no marks. It also restores the `txid` of
   every `mined` pool-migration transaction stored without one (which is every
   such row written by a previous release), recovering it from the wallet's own
   record of the spend and failing with a corrupted-data error naming any row

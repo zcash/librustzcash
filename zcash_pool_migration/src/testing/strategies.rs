@@ -10,6 +10,7 @@ use core::num::NonZeroU32;
 use proptest::prelude::*;
 
 use zcash_primitives::transaction::testing::arb_txid;
+use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::consensus::testing::arb_block_height;
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::value::testing::arb_zatoshis;
@@ -17,7 +18,7 @@ use zcash_protocol::value::testing::arb_zatoshis;
 use crate::denomination::DenominationPlan;
 use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, ReplanThreshold,
+    MigrationTxState, ReplanThreshold, UnsatisfiableKind,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::scheduling::AnchorBucketInterval;
@@ -191,6 +192,26 @@ pub fn arb_state_and_spend_nullifiers() -> impl Strategy<Value = (MigrationTxSta
     })
 }
 
+/// An arbitrary [`UnsatisfiableKind`], covering every variant — the directly observed causes and
+/// the [`Inherited`](UnsatisfiableKind::Inherited) mark the dependency closure applies.
+pub fn arb_unsatisfiable_kind() -> impl Strategy<Value = UnsatisfiableKind> {
+    prop_oneof![
+        Just(UnsatisfiableKind::InputsSpent),
+        Just(UnsatisfiableKind::InputsInvalidated),
+        Just(UnsatisfiableKind::AnchorInvalidated),
+        Just(UnsatisfiableKind::Inherited),
+    ]
+}
+
+/// An arbitrary unsatisfiability mark: the stamp-and-kind pair a [`MigrationTransaction`] carries,
+/// or `None` for a transaction under no such determination. A store persisting the halves
+/// separately is required to REJECT a row holding one without the other rather than round-trip it,
+/// so no half-written mark is generated here.
+pub fn arb_unsatisfiability_mark() -> impl Strategy<Value = Option<(BlockHeight, UnsatisfiableKind)>>
+{
+    prop::option::of((arb_block_height(), arb_unsatisfiable_kind()))
+}
+
 /// An arbitrary [`MigrationTransaction`], built through [`MigrationTransaction::from_parts`]. Its
 /// id is arbitrary here; [`arb_migration_state`] re-keys the transactions it holds so their ids
 /// stay unique within a migration. Its lifecycle state and nullifier cache are drawn TOGETHER (see
@@ -207,7 +228,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         prop::option::of(arb_block_height()),
         arb_state_and_spend_nullifiers(),
         arb_lock_owner(),
-        prop::option::of(arb_block_height()),
+        arb_unsatisfiability_mark(),
     )
         .prop_map(
             |(
@@ -220,7 +241,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 anchor_boundary,
                 (state, spend_nullifiers),
                 lock_owner,
-                unsatisfiable_at,
+                unsatisfiable,
             )| {
                 MigrationTransaction::from_parts(
                     id,
@@ -232,7 +253,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     anchor_boundary,
                     state,
                     lock_owner,
-                    unsatisfiable_at,
+                    unsatisfiable,
                     spend_nullifiers,
                 )
             },
@@ -295,7 +316,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                             tx.anchor_boundary(),
                             tx.state(),
                             tx.lock_owner(),
-                            tx.unsatisfiable_at(),
+                            tx.unsatisfiable(),
                             tx.spend_nullifiers().clone(),
                         )
                     })

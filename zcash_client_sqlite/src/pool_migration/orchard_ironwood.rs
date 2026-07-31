@@ -1227,6 +1227,7 @@ mod truncation_follows_the_wallet {
     use zcash_pool_migration::engine::{
         MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
         MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReplanThreshold,
+        UnsatisfiableKind,
     };
     use zcash_pool_migration::preparation::PreparationPlan;
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
@@ -1239,7 +1240,8 @@ mod truncation_follows_the_wallet {
     use crate::testing::{BlockCache, db::TestDbFactory};
 
     /// A migration transaction in `state`, marked at `unsatisfiable_at`; the plan-shaped fields are
-    /// immaterial to truncation.
+    /// immaterial to truncation. A mark is a stamp and a kind together, and which kind it is does
+    /// not matter here, so every mark is an observed spend.
     fn tx(
         id: u32,
         state: MigrationTxState,
@@ -1257,7 +1259,7 @@ mod truncation_follows_the_wallet {
             None,
             state,
             None,
-            unsatisfiable_at,
+            unsatisfiable_at.map(|at| (at, UnsatisfiableKind::InputsSpent)),
             vec![[id as u8; 32]],
         )
     }
@@ -1409,14 +1411,20 @@ mod truncation_follows_the_wallet {
             .expect("reads the migration")
             .expect("the migration is present");
         assert_eq!(
-            state.transactions()[0].unsatisfiable_at(),
-            None,
-            "a mark resting on chain state the truncation discarded is cleared",
+            (
+                state.transactions()[0].unsatisfiable_at(),
+                state.transactions()[0].unsatisfiable_kind()
+            ),
+            (None, None),
+            "a mark resting on chain state the truncation discarded is cleared, kind and all",
         );
         assert_eq!(
-            state.transactions()[1].unsatisfiable_at(),
-            Some(low),
-            "a mark resting on retained chain state stands",
+            (
+                state.transactions()[1].unsatisfiable_at(),
+                state.transactions()[1].unsatisfiable_kind()
+            ),
+            (Some(low), Some(UnsatisfiableKind::InputsSpent)),
+            "a mark resting on retained chain state stands, keeping what it recorded",
         );
     }
 }
@@ -1728,6 +1736,152 @@ mod tests {
             .get_migration()
             .expect_err("a ragged blob must not decode");
         assert!(matches!(err, Error::Corrupt("spend_nullifiers")));
+    }
+
+    /// A mark recorded through the engine's single door survives the store: the stamp AND the
+    /// kind that says why come back exactly, for a direct observation and for the mark the
+    /// dependency closure applies behind it.
+    #[test]
+    fn recorded_unsatisfiability_kinds_round_trip() {
+        use zcash_pool_migration::denomination::DenominationPlan;
+        use zcash_pool_migration::engine::{
+            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
+            ReplanThreshold, StepSatisfiability, UnsatisfiableCause, UnsatisfiableKind,
+        };
+        use zcash_pool_migration::preparation::PreparationPlan;
+        use zcash_protocol::consensus::BlockHeight;
+        use zcash_protocol::value::Zatoshis;
+
+        let transfer = |id: u32, depends_on: Vec<MigrationTransferId>| {
+            MigrationTransaction::from_parts(
+                MigrationTransferId::new(id),
+                MigrationTxKind::Transfer {
+                    crossing: id as usize,
+                },
+                vec![1, 2, 3],
+                depends_on,
+                BlockHeight::from_u32(100),
+                BlockHeight::from_u32(0),
+                None,
+                MigrationTxState::Signed,
+                None,
+                None,
+                vec![[id as u8; 32]],
+            )
+        };
+        let mut state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            DenominationPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![
+                transfer(0, Vec::new()),
+                transfer(1, vec![MigrationTransferId::new(0)]),
+            ],
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        );
+        let as_of = BlockHeight::from_u32(500);
+        state.record_satisfiability(
+            BlockHeight::from_u32(600),
+            &[(
+                MigrationTransferId::new(0),
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::InputsSpent {
+                        nullifiers: vec![[9u8; 32]],
+                    },
+                    as_of,
+                },
+            )],
+        );
+
+        let mut store = fresh_store();
+        store.replace_migration(&state).expect("write succeeds");
+        let loaded = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        assert_eq!(loaded, state, "the whole migration round-trips unchanged");
+        assert_eq!(
+            (
+                loaded.transactions()[0].unsatisfiable_at(),
+                loaded.transactions()[0].unsatisfiable_kind()
+            ),
+            (Some(as_of), Some(UnsatisfiableKind::InputsSpent)),
+            "the observed cause's kind is stored beside its stamp",
+        );
+        assert_eq!(
+            (
+                loaded.transactions()[1].unsatisfiable_at(),
+                loaded.transactions()[1].unsatisfiable_kind()
+            ),
+            (Some(as_of), Some(UnsatisfiableKind::Inherited)),
+            "a closure-applied mark is stored as inherited",
+        );
+    }
+
+    /// The unsatisfiability columns are one value in two places: a stamp without a kind cannot be
+    /// rendered and a kind without a stamp has no height for reorg truncation to judge it against,
+    /// so a row holding either half alone was not written by this store. A kind name this build
+    /// does not know is corruption for the same reason an unrecognized `state` discriminant is:
+    /// reading it as "unmarked" would return a dead transaction to the prove and broadcast queues.
+    #[test]
+    fn a_half_written_or_unknown_unsatisfiability_mark_is_corrupt() {
+        for (sql, what) in [
+            (
+                "UPDATE orchard_ironwood_migration_transactions SET unsatisfiable_at = 500",
+                "a stamp with no kind",
+            ),
+            (
+                "UPDATE orchard_ironwood_migration_transactions
+                    SET unsatisfiable_kind = 'inputs_spent'",
+                "a kind with no stamp",
+            ),
+        ] {
+            let mut conn = fresh_conn();
+            let account = insert_account(&conn);
+            PoolMigrations::for_account(&mut conn, account)
+                .expect("account exists")
+                .replace_migration(&single_transfer_state())
+                .expect("write succeeds");
+            conn.execute(sql, []).expect("corrupts the stored row");
+            let err = PoolMigrations::for_account(&conn, account)
+                .expect("account exists")
+                .get_migration()
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::Corrupt("unsatisfiable_at / unsatisfiable_kind disagree")
+                ),
+                "{what} must not decode, got {err:?}"
+            );
+        }
+
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(&mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        conn.execute(
+            "UPDATE orchard_ironwood_migration_transactions
+                SET unsatisfiable_at = 500, unsatisfiable_kind = 'from_the_future'",
+            [],
+        )
+        .expect("stores an unrecognized kind");
+        let err = PoolMigrations::for_account(&conn, account)
+            .expect("account exists")
+            .get_migration()
+            .unwrap_err();
+        assert!(matches!(err, Error::Corrupt("unsatisfiable_kind")));
     }
 
     /// A stored `replan_threshold` above 100 names no valid percent; reading it back is
