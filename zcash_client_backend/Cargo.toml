@@ -156,7 +156,7 @@ rand.workspace = true
 rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
 tempfile = "3.5.0"
-tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
+tokio = { version = "1.21.0", features = ["macros", "rt-multi-thread", "test-util"] }
 transparent = { workspace = true, features = ["test-dependencies"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
