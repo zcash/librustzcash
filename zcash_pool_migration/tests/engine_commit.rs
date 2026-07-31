@@ -28,10 +28,11 @@ use zcash_pool_migration::signing_rounds::SigningRoundBudget;
 use zcash_pool_migration::state::AdvanceStep;
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};
 
-/// A stand-in txid for the transaction with the given transfer id, DISTINCT per id: a walk that
-/// records several transactions mined must not be able to pass with them all recorded under the
-/// same txid.
-fn mined_txid(id: MigrationTransferId) -> TxId {
+/// A FABRICATED stand-in for the txid a transaction with the given transfer id would be mined
+/// under: nothing here builds or hashes a transaction, so these bytes are not the hash of
+/// anything. Test-only, and DISTINCT per id, so that a walk recording several transactions mined
+/// cannot pass with them all recorded under the same txid.
+fn test_mined_id_simulacrum(id: MigrationTransferId) -> TxId {
     TxId::from_bytes([u32::from(id) as u8; 32])
 }
 
@@ -192,7 +193,11 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         other => panic!("expected a broadcast step, got {other:?}"),
     }
     for id in &layer0_ids {
-        state.mark_mined(*id, mined_txid(*id), BlockHeight::from_u32(2_000_010));
+        state.mark_mined(
+            *id,
+            test_mined_id_simulacrum(*id),
+            BlockHeight::from_u32(2_000_010),
+        );
     }
     let layer1_ids: Vec<_> = state
         .transactions()
@@ -217,7 +222,11 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         other => panic!("expected a broadcast step, got {other:?}"),
     }
     for id in &layer1_ids {
-        state.mark_mined(*id, mined_txid(*id), BlockHeight::from_u32(2_000_020));
+        state.mark_mined(
+            *id,
+            test_mined_id_simulacrum(*id),
+            BlockHeight::from_u32(2_000_020),
+        );
     }
     match advance_migration(
         &mut backend,

@@ -421,10 +421,14 @@ mod check_step_satisfiability {
         AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
     };
     use zcash_client_backend::data_api::{Account as _, WalletRead};
+    use zcash_pool_migration::denomination::DenominationPlan;
     use zcash_pool_migration::engine::{
-        MigrationTransaction, MigrationTransferId, MigrationTxKind, MigrationTxState,
-        PoolMigrationRead, ReorgSettleDepth, StepSatisfiability, UnsatisfiableCause,
+        MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth,
+        ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
     };
+    use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::TxId;
     use zcash_protocol::consensus::{BlockHeight, BranchId};
@@ -545,6 +549,24 @@ mod check_step_satisfiability {
             ..
         } = scanned_note_fixture(false);
         (st, account, nf, as_of_height)
+    }
+
+    /// A wallet holding an account but having scanned NOTHING: it has no fully-scanned height at
+    /// all, so no chain state backs an observation. The counterpart to [`wallet_with_scanned_note`]
+    /// for tests whose subject is what the oracle does without a scanned frontier; each such test
+    /// asserts the unscanned precondition itself, since that is what its claim rests on.
+    fn unscanned_wallet() -> (TestState<BlockCache, TestDb, LocalNetwork>, AccountUuid) {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        (st, account)
     }
 
     /// The real-spend nullifier cache a [`MigrationTransaction`] carries: the engine's persisted
@@ -680,10 +702,32 @@ mod check_step_satisfiability {
         )
     }
 
-    /// Record a spend of the note with nullifier `nf` by a new transaction whose mined height is
-    /// `mined_height` (`None` for a recorded-but-unmined spender), directly in the wallet
-    /// tables: the oracle reads only the spend join and the spender's mined height, so nothing
-    /// requires a fully-formed spending transaction.
+    /// Record a spend of the note with nullifier `nf` by a transaction MINED at `height`, directly
+    /// in the wallet tables. This is the definitive on-chain fact the oracle marks on.
+    fn record_mined_spend(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        nf: Nullifier,
+        height: BlockHeight,
+    ) {
+        record_spend(st, nf, Some(height));
+    }
+
+    /// Record a spend of the note with nullifier `nf` by a transaction the wallet knows of but has
+    /// not seen mined, directly in the wallet tables. The pre-signed transaction and this spender
+    /// are then merely competing for the note, so the oracle must not mark on it.
+    fn record_unmined_spend(st: &mut TestState<BlockCache, TestDb, LocalNetwork>, nf: Nullifier) {
+        record_spend(st, nf, None);
+    }
+
+    /// The shared body behind [`record_mined_spend`] and [`record_unmined_spend`]: insert a
+    /// spending transaction with mined height `mined_height` and join it to the note with
+    /// nullifier `nf`. The oracle reads only the spend join and the spender's mined height, so
+    /// nothing here requires a fully-formed spending transaction.
+    ///
+    /// The spender's txid is the SPENT NOTE'S NULLIFIER, a test-only fabrication: no transaction
+    /// is built here, so there is nothing to hash. Deriving it keeps each spender's txid distinct
+    /// per note without introducing randomness, which `transactions.txid` (unique) requires and a
+    /// repeated constant would violate the moment a test records two spends.
     fn record_spend(
         st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
         nf: Nullifier,
@@ -694,7 +738,7 @@ mod check_step_satisfiability {
             "INSERT INTO transactions (txid, mined_height, min_observed_height)
              VALUES (:txid, :mined_height, :min_observed_height)",
             named_params! {
-                ":txid": [0x5Au8; 32],
+                ":txid": nf.to_bytes(),
                 ":mined_height": mined_height.map(u32::from),
                 // An arbitrary observation height; the constraint only requires it at or below
                 // the mined height when one exists.
@@ -732,7 +776,7 @@ mod check_step_satisfiability {
     #[test]
     fn a_mined_spend_marks_inputs_spent() {
         let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
-        record_spend(&mut st, nf, Some(as_of_height));
+        record_mined_spend(&mut st, nf, as_of_height);
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
@@ -759,7 +803,7 @@ mod check_step_satisfiability {
         let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         // Transaction-status polling can record a spender's mined height before scanning
         // reaches it: the spender sits one block above the fully-scanned height.
-        record_spend(&mut st, nf, Some(as_of_height + 1));
+        record_mined_spend(&mut st, nf, as_of_height + 1);
         {
             let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
                 .expect("the account exists");
@@ -800,7 +844,7 @@ mod check_step_satisfiability {
     #[test]
     fn an_unmined_spend_does_not_obstruct() {
         let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
-        record_spend(&mut st, nf, None);
+        record_unmined_spend(&mut st, nf);
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
@@ -855,16 +899,7 @@ mod check_step_satisfiability {
     /// is reported ahead of [`Error::ChainStateUnavailable`], never masked by it.
     #[test]
     fn an_empty_cache_on_a_signed_row_is_corrupt() {
-        let mut st = TestBuilder::new()
-            .with_data_store_factory(TestDbFactory::default())
-            .with_block_cache(BlockCache::new())
-            .with_account_from_sapling_activation(BlockHash([0; 32]))
-            .build();
-        let account = st
-            .test_account()
-            .expect("the test account exists")
-            .account()
-            .id();
+        let (mut st, account) = unscanned_wallet();
         assert!(
             st.wallet()
                 .block_fully_scanned()
@@ -905,15 +940,10 @@ mod check_step_satisfiability {
     /// vacuous satisfiability.
     #[test]
     fn truncation_demotes_a_backfill_exempt_row_into_the_corruption_guard() {
-        use zcash_pool_migration::denomination::DenominationPlan;
-        use zcash_pool_migration::engine::{
-            MigrationState, MigrationStatus, PoolMigrationWrite, ReplanThreshold,
-        };
-        use zcash_pool_migration::preparation::PreparationPlan;
-        use zcash_pool_migration::scheduling::AnchorBucketInterval;
-
         let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
         let mined = mined_transfer_with_empty_cache(as_of_height);
+        // Hand-built for `mined_transfer_with_empty_cache`'s reason: nothing outside the mined row
+        // is read, so the envelope around it is the minimum a store will accept.
         let state = MigrationState::from_parts(
             MigrationStatus::InProgress,
             DenominationPlan::from_stored_parts(
@@ -1184,7 +1214,7 @@ mod check_step_satisfiability {
     fn a_spent_input_outranks_a_displaced_anchor() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
         let as_of_height = st.generate_and_scan_empty_blocks(12);
-        record_spend(&mut st, nf, Some(as_of_height));
+        record_mined_spend(&mut st, nf, as_of_height);
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
@@ -1489,9 +1519,10 @@ mod tests {
     use zcash_pool_migration::{
         denomination::DenominationPlan,
         engine::{
-            MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
-            MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
-            ReplanThreshold,
+            DuenessTargets, MigrationState, MigrationStatus, MigrationTransaction,
+            MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead,
+            PoolMigrationWrite, ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
+            UnsatisfiableKind,
         },
         preparation::PreparationPlan,
         scheduling::AnchorBucketInterval,
@@ -1569,34 +1600,43 @@ mod tests {
         )
         .expect("an empty stored plan reconstructs");
 
+        // The `from_parts` slots this test does not exercise, named so the positional argument
+        // lists below read as what they are: both transactions are identical filler apart from the
+        // `lock_owner` slot that is the subject.
+        let depends_on: Vec<MigrationTransferId> = Vec::new();
+        let anchor_boundary: Option<BlockHeight> = None;
+        let unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)> = None;
+        let spend_nullifiers: Vec<[u8; 32]> = Vec::new();
+        let broadcast_failure_at: Option<BlockHeight> = None;
+
         let owner_bytes = [7u8; 32];
         let locked = MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Preparation { layer: 0, index: 0 },
             vec![1, 2, 3],
-            Vec::new(),
+            depends_on.clone(),
             BlockHeight::from_u32(100),
             BlockHeight::from_u32(200),
-            None,
+            anchor_boundary,
             MigrationTxState::Signed,
             Some(owner_bytes),
-            None,
-            Vec::new(),
-            None,
+            unsatisfiable,
+            spend_nullifiers.clone(),
+            broadcast_failure_at,
         );
         let unlocked = MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
             MigrationTxKind::Transfer { crossing: 0 },
             vec![4, 5, 6],
-            Vec::new(),
+            depends_on,
             BlockHeight::from_u32(100),
             BlockHeight::from_u32(200),
-            None,
+            anchor_boundary,
             MigrationTxState::Signed,
             None,
-            None,
-            Vec::new(),
-            None,
+            unsatisfiable,
+            spend_nullifiers,
+            broadcast_failure_at,
         );
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -1727,15 +1767,12 @@ mod tests {
 
     /// A minimal committed migration holding one signed transfer with a one-entry nullifier
     /// cache, for tests that corrupt its stored row directly.
-    fn single_transfer_state() -> zcash_pool_migration::engine::MigrationState {
-        use zcash_pool_migration::denomination::DenominationPlan;
-        use zcash_pool_migration::engine::{
-            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind, ReplanThreshold,
-        };
-        use zcash_pool_migration::preparation::PreparationPlan;
-        use zcash_protocol::consensus::BlockHeight;
-        use zcash_protocol::value::Zatoshis;
-
+    ///
+    /// Hand-built rather than drawn from `arb_migration_state`, because its users need exactly one
+    /// transaction to EXIST: a blanket `UPDATE` that corrupts every stored row would pass
+    /// vacuously against a zero-transaction draw, and the round-trip tests address
+    /// `MigrationTransferId::new(0)` by name.
+    fn single_transfer_state() -> MigrationState {
         let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
@@ -1796,15 +1833,10 @@ mod tests {
     /// dependency closure applies behind it.
     #[test]
     fn recorded_unsatisfiability_kinds_round_trip() {
-        use zcash_pool_migration::denomination::DenominationPlan;
-        use zcash_pool_migration::engine::{
-            DuenessTargets, MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind,
-            ReplanThreshold, StepSatisfiability, UnsatisfiableCause, UnsatisfiableKind,
-        };
-        use zcash_pool_migration::preparation::PreparationPlan;
-        use zcash_protocol::consensus::BlockHeight;
-        use zcash_protocol::value::Zatoshis;
-
+        // Hand-built rather than drawn from `arb_migration_transaction`, because the subject is
+        // the specific tx1 -> tx0 dependency edge the mark's closure travels along: that strategy
+        // draws `depends_on` arbitrarily, and `arb_migration_state` re-keys transaction ids
+        // sequentially without remapping it, so a drawn edge can dangle.
         let transfer = |id: u32, depends_on: Vec<MigrationTransferId>| {
             MigrationTransaction::from_parts(
                 MigrationTransferId::new(id),
@@ -1886,8 +1918,6 @@ mod tests {
     /// back as unreported.
     #[test]
     fn a_broadcast_failure_report_round_trips() {
-        use zcash_pool_migration::engine::MigrationTransferId;
-
         let mut store = fresh_store();
         store
             .replace_migration(&single_transfer_state())
