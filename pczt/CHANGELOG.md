@@ -11,13 +11,12 @@ workspace.
 ## [Unreleased]
 
 ### Added
-- `pczt::Pczt::{has_transparent_data, has_sapling_data}`, which report whether
-  the always-present transparent and Sapling bundles actually hold anything.
-- `pczt::orchard::Bundle::{outputs, sole_action, value_carrying_outputs_all_pay}`
-- `pczt::orchard::Output::{carries_value, pays}`, which distinguish an output a
-  wallet asked for from a zero-valued padding dummy, and test the recipient
-  without the caller handling the raw address encoding. Both return `None` when
-  the field they judge has been redacted from the PCZT.
+- `pczt::Pczt::has_data_in_pool`, which reports whether the always-present
+  bundle for a given pool actually holds anything.
+- `pczt::orchard::Bundle::{sole_action, value_carrying_outputs_all_pay}`
+- `pczt::orchard::Output::pays`, which tests the recipient without the caller
+  handling the raw address encoding. It and `value_carrying_outputs_all_pay`
+  return `None` when a field they judge has been redacted from the PCZT.
 
 ## [0.9.1] - 2026-07-26
 
