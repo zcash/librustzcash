@@ -106,8 +106,17 @@ const SOURCE_ROOT_AT: Option<store::SourceRootAt> = Some(orchard_root_at);
 const SOURCE_ROOT_AT: Option<store::SourceRootAt> = None;
 
 /// Create the Orchard -> Ironwood pool-migration tables (and the due-transaction and account
-/// indexes) on `conn`. This is the body the `orchard_ironwood_migration_tables` schema migration's
-/// `up()` calls; it is idempotent (`IF NOT EXISTS`).
+/// indexes) on `conn` in their CURRENT shape, as a wallet has them once every schema migration has
+/// run; idempotent (`IF NOT EXISTS`).
+///
+/// No production code calls this. The `orchard_ironwood_migration_tables` schema migration is
+/// published, so it creates these tables from a frozen copy of the DDL it shipped with, and the
+/// migrations after it evolve that into the shape here (see [`store::init`]). What remains is the
+/// canonical statement of that shape: the fixtures that build a store directly build it from here,
+/// and `canonical_pool_migration_ddl_matches_the_migration_path` holds it to what the migrations
+/// actually produce. The attribute keeps that statement — and everything it reaches, including the
+/// index names no query needs — alive for a pool whose creating migration has yet to ship.
+#[allow(dead_code)]
 pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
@@ -2211,7 +2220,7 @@ mod tests {
 
         /// `update_transaction` is scoped to its account: advancing a transaction's state for
         /// account A does not affect account B's migration on the same connection, even when both
-        /// accounts started from the same migration state (and so share the updated `tx_id`).
+        /// accounts started from the same migration state (and so share the updated `transfer_id`).
         #[test]
         fn update_transaction_is_scoped_to_its_account(
             state in arb_migration_state(),

@@ -694,8 +694,11 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
     value INTEGER NOT NULL,
     PRIMARY KEY (migration_id, ordinal)
 )";
-/// One row per migration transaction. `tx_id` is the transaction's ordinal WITHIN its migration (a
-/// `MigrationTransferId`), not a transaction ID; `kind` is `preparation` or `transfer`; `pczt` is
+/// One row per migration transaction. `transfer_id` is the transaction's ordinal WITHIN its
+/// migration (a `MigrationTransferId`), not a transaction ID — it is created as `tx_id` by the
+/// released `orchard_ironwood_migration_tables` DDL and renamed here by the
+/// `orchard_ironwood_migration_unsatisfiability` schema migration, which is why this text is the
+/// renamed one rather than the created one. `kind` is `preparation` or `transfer`; `pczt` is
 /// the pre-signed transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle
 /// discriminant, with the hex consensus transaction ID in `txid` (`NULL` until broadcast) and
 /// `mined_height`. `lock_owner` records the `LockOwner` under which this
@@ -715,7 +718,7 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
 CREATE TABLE orchard_ironwood_migration_transactions (
     migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
-    tx_id INTEGER NOT NULL,
+    transfer_id INTEGER NOT NULL,
     kind TEXT NOT NULL,
     kind_layer INTEGER,
     kind_index INTEGER,
@@ -732,18 +735,22 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     spend_nullifiers BLOB NOT NULL DEFAULT X'',
     unsatisfiable_kind TEXT,
     broadcast_failure_at INTEGER,
-    PRIMARY KEY (migration_id, tx_id)
+    PRIMARY KEY (migration_id, transfer_id)
 )";
-/// The dependency edges between migration transactions.
+/// The dependency edges between migration transactions: `transfer_id` depends on
+/// `depends_on_transfer_id`, in `ordinal` order. Both columns are ordinals within the migration
+/// named by `migration_id`, and both were created as `tx_id` / `depends_on_tx_id` by the released
+/// `orchard_ironwood_migration_tables` DDL and renamed by the
+/// `orchard_ironwood_migration_unsatisfiability` schema migration.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTION_DEPS: &str = "
 CREATE TABLE orchard_ironwood_migration_transaction_deps (
     migration_id INTEGER NOT NULL,
-    tx_id INTEGER NOT NULL,
+    transfer_id INTEGER NOT NULL,
     ordinal INTEGER NOT NULL,
-    depends_on_tx_id INTEGER NOT NULL,
-    PRIMARY KEY (migration_id, tx_id, ordinal),
-    FOREIGN KEY (migration_id, tx_id)
-        REFERENCES orchard_ironwood_migration_transactions(migration_id, tx_id) ON DELETE CASCADE
+    depends_on_transfer_id INTEGER NOT NULL,
+    PRIMARY KEY (migration_id, transfer_id, ordinal),
+    FOREIGN KEY (migration_id, transfer_id)
+        REFERENCES orchard_ironwood_migration_transactions(migration_id, transfer_id) ON DELETE CASCADE
 )";
 pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATION_TX_DUE: &str = "
 CREATE INDEX idx_orchard_ironwood_migration_tx_due ON orchard_ironwood_migration_transactions (

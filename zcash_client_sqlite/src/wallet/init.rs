@@ -780,23 +780,24 @@ mod tests {
         Ok(result)
     }
 
+    /// A schema statement's text with each opening or closing parenthesis surrounded by whitespace
+    /// and every run of whitespace (including newlines) collapsed to a single space, so that two
+    /// statements are compared for what they declare rather than how they were laid out.
+    fn normalize_sql(s: &str) -> String {
+        let re = Regex::new(r"\s+").unwrap();
+        let re_paren = Regex::new(r"([\(\)])").unwrap();
+        re.replace_all(&re_paren.replace_all(s, " $1 "), " ")
+            .trim()
+            .to_string()
+    }
+
     #[test]
     fn verify_schema() {
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .build();
 
-        let re = Regex::new(r"\s+").unwrap();
-        let re_paren = Regex::new(r"([\(\)])").unwrap();
-
-        // Surround each opening or closing parenthesis character with whitespace, and then
-        // replace each occurrence of any amount of whitespace (including newlines) with a single
-        // space.
-        let normalize = |s: &str| -> String {
-            re.replace_all(&re_paren.replace_all(s, " $1 "), " ")
-                .trim()
-                .to_string()
-        };
+        let normalize = normalize_sql;
 
         let expected_tables = vec![
             db::TABLE_ACCOUNTS,
@@ -945,6 +946,72 @@ mod tests {
             let actual: String = row.get(0).unwrap();
             assert_eq!(normalize(&actual), normalize(&expected_views[expected_idx]));
             expected_idx += 1;
+        }
+    }
+
+    /// The pool-migration store's canonical DDL and the schema the migrations actually leave behind
+    /// are the same schema.
+    ///
+    /// They are written twice on purpose: `orchard_ironwood_migration_tables` is published, so it
+    /// creates its tables from a frozen copy of the DDL it shipped with — down to naming the
+    /// transfer ordinal `tx_id`, which `orchard_ironwood_migration_unsatisfiability` then renames —
+    /// while the store's DDL states the shape those migrations converge on, and is what the
+    /// fixtures that build a store without running any migration create. `verify_schema` above pins
+    /// the constants compared here to the migration path, so this equates the two descriptions:
+    /// were the canonical DDL to drift, a store built by a fixture would answer questions about a
+    /// schema no wallet has.
+    #[test]
+    fn canonical_pool_migration_ddl_matches_the_migration_path() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::pool_migration::orchard_ironwood::init_migration_tables(&conn).unwrap();
+
+        let expected = [
+            (
+                "orchard_ironwood_migrations",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATIONS,
+            ),
+            (
+                "orchard_ironwood_migration_crossing_values",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATION_CROSSING_VALUES,
+            ),
+            (
+                "orchard_ironwood_migration_prep_inputs",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_INPUTS,
+            ),
+            (
+                "orchard_ironwood_migration_prep_outputs",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_OUTPUTS,
+            ),
+            (
+                "orchard_ironwood_migration_prep_direct_funding",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_DIRECT_FUNDING,
+            ),
+            (
+                "orchard_ironwood_migration_transactions",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS,
+            ),
+            (
+                "orchard_ironwood_migration_transaction_deps",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTION_DEPS,
+            ),
+            (
+                "idx_orchard_ironwood_migration_tx_due",
+                db::INDEX_ORCHARD_IRONWOOD_MIGRATION_TX_DUE,
+            ),
+            (
+                "idx_orchard_ironwood_migrations_account",
+                db::INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT,
+            ),
+        ];
+
+        let mut stmt = conn
+            .prepare("SELECT sql FROM sqlite_master WHERE name = ? AND sql IS NOT NULL")
+            .unwrap();
+        for (name, expected) in expected {
+            let actual: String = stmt
+                .query_row([name], |row| row.get(0))
+                .unwrap_or_else(|e| panic!("the canonical DDL creates {name}: {e}"));
+            assert_eq!(normalize_sql(&actual), normalize_sql(expected));
         }
     }
 

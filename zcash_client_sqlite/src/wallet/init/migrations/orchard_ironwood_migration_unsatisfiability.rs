@@ -1,8 +1,22 @@
-//! Adds the `unsatisfiable_at`, `spend_nullifiers`, `unsatisfiable_kind`, and
-//! `broadcast_failure_at` columns to `orchard_ironwood_migration_transactions` where they are
-//! missing, backfills the nullifier cache for existing rows, restores the erased `txid` of every
-//! `mined` row, and adds the `replan_threshold` column to `orchard_ironwood_migrations` where it
-//! is missing.
+//! Renames the pool-migration transfer ordinal from `tx_id` to `transfer_id`, adds the
+//! `unsatisfiable_at`, `spend_nullifiers`, `unsatisfiable_kind`, and `broadcast_failure_at` columns
+//! to `orchard_ironwood_migration_transactions` where they are missing, backfills the nullifier
+//! cache for existing rows, restores the erased `txid` of every `mined` row, and adds the
+//! `replan_threshold` column to `orchard_ironwood_migrations` where it is missing.
+//!
+//! The rename removes a collision between two similarly spelled columns of
+//! `orchard_ironwood_migration_transactions` that name unrelated things: the transaction's ordinal
+//! WITHIN its migration (a `MigrationTransferId`, and the second half of the table's primary key,
+//! which the dependency edges reference), and `txid`, the consensus transaction ID the transaction
+//! was broadcast under. `transfer_id` names the first unambiguously, and the dependency table's two
+//! columns follow it to `transfer_id` and `depends_on_transfer_id`, so no reader has to hold the
+//! distinction in mind to read a query.
+//!
+//! `tx_id` is what [`orchard_ironwood_migration_tables`] creates, and — since that migration is
+//! published — is what it will always create, from a frozen copy of its original DDL. That is what
+//! makes the rename here unconditional: every database arrives at this migration with the old name,
+//! whether it was created before these columns existed or a moment ago, so both paths leave the
+//! same schema text behind.
 //!
 //! `unsatisfiable_at` records the height of the chain state a spent-input observation rests on,
 //! when a migration transaction has been determined UNSATISFIABLE — its inputs can never again
@@ -45,17 +59,12 @@
 //! consumers must treat as loud corruption (the real spends were never identifiable), never as
 //! a transaction with no inputs to observe.
 //!
-//! The `txid` of a `mined` row is restored because a published release erased it. Two
-//! similarly spelled columns of this table meet in that repair, and they name unrelated things:
-//! `tx_id` is the transaction's ordinal WITHIN its migration (a `MigrationTransferId`, and the
-//! second half of the `(migration_id, tx_id)` primary key), while `txid` is the consensus
-//! transaction ID the transaction was broadcast under, stored as hex `TEXT` and `NULL` until it
-//! is broadcast. Only `txid` was erased: both store write paths bound that column through one
-//! accessor covering the two states that carry a txid, and that accessor answered `None` for
-//! `mined`, so every transaction that reached `mined` lost the txid it had been broadcast under.
-//! The reconstructing reader now requires it, so without this repair a wallet that completed a
-//! migration could never read its store back. See [`backfill_mined_txids`] for where the txid is
-//! recovered from and why it is not derived from the stored transaction.
+//! The `txid` of a `mined` row is restored because a published release erased it: both store write
+//! paths bound that column through one accessor covering the two states that carry a txid, and that
+//! accessor answered `None` for `mined`, so every transaction that reached `mined` lost the txid it
+//! had been broadcast under. The reconstructing reader now requires it, so without this repair a
+//! wallet that completed a migration could never read its store back. See [`backfill_mined_txids`]
+//! for where the txid is recovered from and why it is not derived from the stored transaction.
 //!
 //! `replan_threshold` is the integer percent of planned transfer value, unsatisfiable, above which
 //! a migration is re-planned immediately rather than after satisfiable work drains — stamped on
@@ -63,6 +72,8 @@
 //! carries no such stamp, so it backfills to the same default the store's `CREATE TABLE` and this
 //! `ADD COLUMN` share (`ReplanThreshold::DEFAULT`'s percent), which is the policy every migration
 //! committed before this migration was, in fact, evaluated under.
+//!
+//! [`orchard_ironwood_migration_tables`]: super::orchard_ironwood_migration_tables
 
 use std::collections::HashSet;
 
@@ -73,9 +84,10 @@ use uuid::Uuid;
 use super::orchard_ironwood_migration_anchor_interval;
 use crate::wallet::init::WalletMigrationError;
 
-/// Adds the `unsatisfiable_at`, `spend_nullifiers`, `unsatisfiable_kind`, and
-/// `broadcast_failure_at` columns to `orchard_ironwood_migration_transactions`, and the
-/// `replan_threshold` column to `orchard_ironwood_migrations`, where they are missing.
+/// Renames `tx_id` to `transfer_id`, adds the `unsatisfiable_at`, `spend_nullifiers`,
+/// `unsatisfiable_kind`, and `broadcast_failure_at` columns to
+/// `orchard_ironwood_migration_transactions`, and the `replan_threshold` column to
+/// `orchard_ironwood_migrations`, where they are missing.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd334a9fa_b9dc_46bd_9b31_1fba6aa47f55);
 
 const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_migration_anchor_interval::MIGRATION_ID];
@@ -92,9 +104,10 @@ impl schemerz::Migration<Uuid> for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Adds the unsatisfiable_at, spend_nullifiers, unsatisfiable_kind, and \
-         broadcast_failure_at columns to orchard_ironwood_migration_transactions, and the \
-         replan_threshold column to orchard_ironwood_migrations, where missing."
+        "Renames the pool-migration transfer ordinal from tx_id to transfer_id, adds the \
+         unsatisfiable_at, spend_nullifiers, unsatisfiable_kind, and broadcast_failure_at columns \
+         to orchard_ironwood_migration_transactions, and the replan_threshold column to \
+         orchard_ironwood_migrations, where missing."
     }
 }
 
@@ -129,12 +142,11 @@ fn real_spend_nullifiers(pczt_bytes: &[u8]) -> Result<Vec<u8>, WalletMigrationEr
 
 /// Restore the `txid` of every `mined` pool-migration transaction that carries none.
 ///
-/// Three columns spelled alike appear below, over two tables. On
-/// `orchard_ironwood_migration_transactions`, `tx_id` is the transaction's ordinal within its
-/// migration and `txid` is the consensus transaction ID this repair writes; on the wallet's own
-/// `transactions`, `txid` is that same consensus ID as the scanner recorded it, which is where the
-/// value comes from. Every occurrence below is qualified by its table, so no reading of the SQL
-/// turns on which is which.
+/// Two tables' `txid` columns appear below and hold the same kind of value from different sources:
+/// on `orchard_ironwood_migration_transactions` it is what this repair writes, and on the wallet's
+/// own `transactions` it is that consensus ID as the scanner recorded it, which is where the value
+/// comes from. Every occurrence is qualified by its table. (This runs after the rename above, so
+/// the transfer ordinal is `transfer_id` here and no longer reads as a third `txid`.)
 ///
 /// A migration transaction's lifecycle state was stored through one accessor for both states that
 /// carry a txid, and until recently that accessor answered `None` for `mined`: every row a
@@ -165,7 +177,7 @@ fn real_spend_nullifiers(pczt_bytes: &[u8]) -> Result<Vec<u8>, WalletMigrationEr
 fn backfill_mined_txids(conn: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
     let rows: Vec<(i64, u32, Vec<u8>)> = {
         let mut stmt = conn.prepare(
-            "SELECT mtx.migration_id, mtx.tx_id, mtx.pczt
+            "SELECT mtx.migration_id, mtx.transfer_id, mtx.pczt
                FROM orchard_ironwood_migration_transactions mtx
               WHERE mtx.state = 'mined' AND mtx.txid IS NULL",
         )?;
@@ -187,7 +199,7 @@ fn backfill_mined_txids(conn: &rusqlite::Transaction) -> Result<(), WalletMigrat
         conn.execute(
             "UPDATE orchard_ironwood_migration_transactions
                 SET txid = :txid
-              WHERE migration_id = :migration_id AND tx_id = :transfer_id",
+              WHERE migration_id = :migration_id AND transfer_id = :transfer_id",
             named_params! {
                 ":txid": txid,
                 ":migration_id": migration_id,
@@ -250,6 +262,29 @@ impl RusqliteMigration for Migration {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
+        // The rename runs first, so every statement below — and every store query written against
+        // the schema this migration leaves behind — speaks `transfer_id`.
+        //
+        // It is UNCONDITIONAL, unlike the column repairs below, because every database reaching
+        // this migration has the old names: `orchard_ironwood_migration_tables` is published, so it
+        // creates its tables from a frozen copy of the DDL it shipped with, and a database that
+        // predates it does not have the tables at all. Fresh and upgraded wallets therefore travel
+        // the identical path here, which is what lets the created and renamed schemas be one text.
+        //
+        // SQLite rewrites the stored schema for each rename: the transactions table's own
+        // definition and primary key, the dependency table's foreign key into it, and (were there
+        // one) any index naming the column. Only the schema text changes; no row is rewritten, and
+        // the `ON DELETE CASCADE` from the transactions table to its dependency edges survives
+        // because it is the same constraint under a new column name.
+        transaction.execute_batch(
+            "ALTER TABLE orchard_ironwood_migration_transactions
+                RENAME COLUMN tx_id TO transfer_id;
+             ALTER TABLE orchard_ironwood_migration_transaction_deps
+                RENAME COLUMN tx_id TO transfer_id;
+             ALTER TABLE orchard_ironwood_migration_transaction_deps
+                RENAME COLUMN depends_on_tx_id TO depends_on_transfer_id;",
+        )?;
+
         // A wallet whose table was created from the current DDL already has the columns; adding
         // them again is an error rather than a no-op, so the presence check is load-bearing. The
         // four columns are introduced together (by this migration or by the current `CREATE
@@ -292,7 +327,7 @@ impl RusqliteMigration for Migration {
             // machinery, silently exempting the transaction from detection.
             let rows: Vec<(i64, u32, Vec<u8>, String)> = {
                 let mut stmt = transaction.prepare(
-                    "SELECT migration_id, tx_id, pczt, state
+                    "SELECT migration_id, transfer_id, pczt, state
                        FROM orchard_ironwood_migration_transactions",
                 )?;
                 let mapped = stmt.query_map([], |row| {
@@ -328,7 +363,7 @@ impl RusqliteMigration for Migration {
                 transaction.execute(
                     "UPDATE orchard_ironwood_migration_transactions
                         SET spend_nullifiers = :spend_nullifiers
-                      WHERE migration_id = :migration_id AND tx_id = :transfer_id",
+                      WHERE migration_id = :migration_id AND transfer_id = :transfer_id",
                     named_params! {
                         ":spend_nullifiers": spend_nullifiers,
                         ":migration_id": migration_id,
@@ -383,8 +418,32 @@ mod tests {
         test_migrate(&[MIGRATION_ID]);
     }
 
+    /// The pool-migration tables exactly as the released `orchard_ironwood_migration_tables`
+    /// creates them, which is the state a freshly created database reaches this migration in. (One
+    /// created before the columns repaired below existed has the shape `create_pre_fix_table`
+    /// builds instead; both name the transfer ordinal `tx_id`.)
+    fn create_released_tables(conn: &Connection) {
+        conn.execute_batch(super::super::orchard_ironwood_migration_tables::CREATE_TABLES_SQL)
+            .unwrap();
+    }
+
+    /// Whether `orchard_ironwood_migration_transactions` names its transfer ordinal `column`.
+    fn transactions_has_column(conn: &Connection, column: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM pragma_table_info('orchard_ironwood_migration_transactions')
+                WHERE name = :column_name
+             )",
+            named_params![":column_name": column],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    }
+
     /// The pre-fix schema: `orchard_ironwood_migration_transactions` without `unsatisfiable_at`
-    /// and `spend_nullifiers`, which is what a wallet built before this migration has on disk.
+    /// and `spend_nullifiers`, which is what a wallet built before this migration has on disk,
+    /// beside the dependency table that has always accompanied it (unchanged since it was created,
+    /// and the target of one of the renames).
     fn create_pre_fix_table(conn: &Connection) {
         conn.execute_batch(
             "CREATE TABLE orchard_ironwood_migration_transactions (
@@ -403,6 +462,16 @@ mod tests {
                 mined_height INTEGER,
                 lock_owner BLOB,
                 PRIMARY KEY (migration_id, tx_id)
+            );
+            CREATE TABLE orchard_ironwood_migration_transaction_deps (
+                migration_id INTEGER NOT NULL,
+                tx_id INTEGER NOT NULL,
+                ordinal INTEGER NOT NULL,
+                depends_on_tx_id INTEGER NOT NULL,
+                PRIMARY KEY (migration_id, tx_id, ordinal),
+                FOREIGN KEY (migration_id, tx_id)
+                    REFERENCES orchard_ironwood_migration_transactions(migration_id, tx_id)
+                    ON DELETE CASCADE
             )",
         )
         .unwrap();
@@ -466,14 +535,17 @@ mod tests {
         .unwrap();
     }
 
-    /// The fresh path: the tables already carry the columns, so `up` must leave them alone rather
-    /// than fail with "duplicate column name".
+    /// The fresh path: the tables the released creating migration builds already carry every
+    /// column, so `up` must add none of them again (which would fail with "duplicate column
+    /// name") — while still renaming, since that migration creates `tx_id` on every database it
+    /// will ever run on.
     #[test]
-    fn is_a_no_op_when_the_columns_are_present() {
+    fn renames_but_adds_nothing_on_a_freshly_created_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
-        crate::pool_migration::orchard_ironwood::init_migration_tables(&conn).unwrap();
+        create_released_tables(&conn);
         assert!(has_columns(&conn));
         assert!(has_replan_threshold_column(&conn));
+        assert!(transactions_has_column(&conn, "tx_id"));
 
         let tx = conn.transaction().unwrap();
         RusqliteMigration::up(&Migration, &tx).unwrap();
@@ -481,6 +553,57 @@ mod tests {
 
         assert!(has_columns(&conn));
         assert!(has_replan_threshold_column(&conn));
+        assert!(transactions_has_column(&conn, "transfer_id"));
+        assert!(!transactions_has_column(&conn, "tx_id"));
+    }
+
+    /// A dependency edge is still removed with the transfer it hangs off, after the rename has
+    /// rewritten the foreign key that enforces it: the constraint is the same one under new column
+    /// names, and nothing about the rows changed.
+    #[test]
+    fn the_dependency_cascade_survives_the_rename() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE accounts (id INTEGER PRIMARY KEY);")
+            .unwrap();
+        create_released_tables(&conn);
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (id) VALUES (1);
+             INSERT INTO orchard_ironwood_migrations (
+                id, account_id, status, note_split_fee_buffer, note_split_prep_fees,
+                note_split_total_input, note_split_total_migratable
+             )
+             VALUES (1, 1, 'committed', 0, 0, 0, 0);
+             INSERT INTO orchard_ironwood_migration_transactions (
+                migration_id, tx_id, kind, kind_crossing, pczt, scheduled_height, expiry_height,
+                state
+             )
+             VALUES (1, 0, 'transfer', 0, X'00', 200, 240, 'signed'),
+                    (1, 1, 'transfer', 1, X'00', 200, 240, 'signed');
+             INSERT INTO orchard_ironwood_migration_transaction_deps (
+                migration_id, tx_id, ordinal, depends_on_tx_id
+             )
+             VALUES (1, 1, 0, 0);",
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(&Migration, &tx).unwrap();
+        tx.commit().unwrap();
+
+        conn.execute(
+            "DELETE FROM orchard_ironwood_migration_transactions WHERE transfer_id = 1",
+            [],
+        )
+        .unwrap();
+        let remaining: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM orchard_ironwood_migration_transaction_deps",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0, "the edge cascaded with the transfer it names");
     }
 
     /// A stored PCZT that does not parse is corrupt state: the migration surfaces
@@ -502,7 +625,7 @@ mod tests {
 
     /// The upgrade path on empty tables: both pre-fix tables (the sibling `orchard_ironwood_migrations`
     /// and `orchard_ironwood_migration_transactions` tables a real wallet always carries together)
-    /// get their columns added, and nothing needs backfilling.
+    /// get their columns added and the transfer ordinal renamed, and nothing needs backfilling.
     #[test]
     fn adds_columns_to_empty_pre_fix_tables() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -510,6 +633,7 @@ mod tests {
         create_pre_fix_migrations_table(&conn);
         assert!(!has_columns(&conn));
         assert!(!has_replan_threshold_column(&conn));
+        assert!(transactions_has_column(&conn, "tx_id"));
 
         let tx = conn.transaction().unwrap();
         RusqliteMigration::up(&Migration, &tx).unwrap();
@@ -517,6 +641,8 @@ mod tests {
 
         assert!(has_columns(&conn));
         assert!(has_replan_threshold_column(&conn));
+        assert!(transactions_has_column(&conn, "transfer_id"));
+        assert!(!transactions_has_column(&conn, "tx_id"));
     }
 
     /// The upgrade path with data: an existing `orchard_ironwood_migrations` row is backfilled
@@ -689,7 +815,8 @@ mod tests {
     /// (which carries its own witness) contributes nothing — and `unsatisfiable_at`,
     /// `unsatisfiable_kind`, and `broadcast_failure_at` all start out `NULL`: a database that had
     /// none of these columns carried neither an unsatisfiability observation nor a
-    /// broadcast-failure report, so there is nothing for them to say.
+    /// broadcast-failure report, so there is nothing for them to say. The row's transfer ordinal
+    /// arrives under its new name, with nothing left answering to the old one.
     #[cfg(feature = "orchard")]
     #[test]
     fn backfills_real_spend_nullifiers_from_the_stored_pczt() {
@@ -709,11 +836,15 @@ mod tests {
         RusqliteMigration::up(&Migration, &tx).unwrap();
         tx.commit().unwrap();
 
+        assert!(transactions_has_column(&conn, "transfer_id"));
+        assert!(!transactions_has_column(&conn, "tx_id"));
+
         let (unsatisfiable_at, spend_nullifiers, unsatisfiable_kind, broadcast_failure_at) = conn
             .query_row(
                 "SELECT unsatisfiable_at, spend_nullifiers, unsatisfiable_kind,
                         broadcast_failure_at
-                   FROM orchard_ironwood_migration_transactions",
+                   FROM orchard_ironwood_migration_transactions
+                  WHERE transfer_id = 0",
                 [],
                 |row| {
                     Ok((
@@ -835,9 +966,10 @@ mod tests {
         create_pre_fix_table(&conn);
         create_pre_fix_migrations_table(&conn);
         create_wallet_tables(&conn);
-        // The remaining pool-migration child tables, which the reader queries, in their current
-        // shape; the two pre-fix tables above already exist, so this leaves them alone.
-        crate::pool_migration::orchard_ironwood::init_migration_tables(&conn).unwrap();
+        // The remaining pool-migration child tables, which the reader queries, as the released
+        // creating migration builds them; the two pre-fix tables above already exist, so this
+        // leaves them alone.
+        create_released_tables(&conn);
 
         let account = Uuid::from_u128(0x5A);
         conn.execute(
