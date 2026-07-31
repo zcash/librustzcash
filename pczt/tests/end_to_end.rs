@@ -1,5 +1,4 @@
-use std::num::NonZeroU8;
-use std::sync::OnceLock;
+use std::{convert::Infallible, num::NonZeroU8, sync::OnceLock};
 
 use ::transparent::{
     address::{Script, TransparentAddress},
@@ -8,7 +7,10 @@ use ::transparent::{
     sighash::SighashType,
     zip48,
 };
-use orchard::tree::MerkleHashOrchard;
+use orchard::{
+    primitives::redpallas::{self, SpendAuth},
+    tree::MerkleHashOrchard,
+};
 use pczt::{
     Pczt,
     roles::{
@@ -31,7 +33,7 @@ use rand_core::{OsRng, SeedableRng};
 use shardtree::{ShardTree, store::memory::MemoryShardStore};
 use zcash_note_encryption::try_note_decryption;
 use zcash_primitives::transaction::{
-    builder::{BuildConfig, Builder, BundlePadding, PcztResult},
+    builder::{BuildConfig, Builder, BundlePadding, DeferredPcztBuilder, PcztResult},
     fees::zip317,
     sighash::SignableInput,
     sighash_v5::v5_signature_hash,
@@ -39,6 +41,7 @@ use zcash_primitives::transaction::{
 };
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
+    consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     value::Zatoshis,
 };
@@ -794,8 +797,6 @@ fn orchard_to_orchard() {
 /// Extracts each action's wire `fvk` bytes from the Orchard or Ironwood pool of the
 /// PCZT, via the Verifier role's full (FVK-deriving) parse.
 fn wire_spend_fvks(pczt: &Pczt, ironwood: bool) -> Vec<Option<[u8; 96]>> {
-    use std::convert::Infallible;
-
     fn collect(bundle: &orchard::pczt::Bundle) -> Vec<Option<[u8; 96]>> {
         bundle
             .actions()
@@ -838,8 +839,6 @@ fn expected_spend_auth_sig(
     sighash: [u8; 32],
     seed: [u8; 32],
 ) -> [u8; 64] {
-    use std::convert::Infallible;
-
     let mut sig = None;
     let mut compute = |bundle: &orchard::pczt::Bundle| {
         let spend = bundle.actions()[index].spend();
@@ -876,8 +875,6 @@ fn expected_spend_auth_sig(
 /// spend (matching what [`orchard::pczt::Action::apply_signature`] checks), not just
 /// that it is byte-equal to the reference.
 fn assert_valid_spend_auth_sig(rk: &[u8; 32], sighash: [u8; 32], sig: [u8; 64]) {
-    use orchard::primitives::redpallas::{self, SpendAuth};
-
     let rk = redpallas::VerificationKey::<SpendAuth>::try_from(*rk).expect("`rk` is a valid key");
     let sig = redpallas::Signature::<SpendAuth>::from(sig);
     rk.verify(&sighash, &sig)
@@ -1527,8 +1524,6 @@ fn wallet_can_set_sapling_witness_after_signing() {
 /// pre-Ironwood (V5 transaction) flows independently of the mainnet NU6.3 activation
 /// height.
 fn pre_nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
-    use zcash_protocol::consensus::BlockHeight;
-
     zcash_protocol::local_consensus::LocalNetwork {
         overwinter: Some(BlockHeight::from_u32(1)),
         sapling: Some(BlockHeight::from_u32(2)),
@@ -1547,8 +1542,6 @@ fn pre_nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
 
 /// A regtest network with NU6.3 activated, for exercising the Ironwood pool.
 fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
-    use zcash_protocol::consensus::BlockHeight;
-
     zcash_protocol::local_consensus::LocalNetwork {
         overwinter: Some(BlockHeight::from_u32(1)),
         sapling: Some(BlockHeight::from_u32(2)),
@@ -2356,8 +2349,6 @@ fn redacted_anchor_is_not_resolved() {
 
 #[test]
 fn builder_can_defer_anchors_until_proving() {
-    use zcash_primitives::transaction::builder::DeferredPcztBuilder;
-
     let mut rng = OsRng;
 
     let orchard_sk = orchard::keys::SpendingKey::from_bytes([0; 32]).unwrap();
@@ -2508,8 +2499,6 @@ fn builder_can_defer_anchors_until_proving() {
 
 #[test]
 fn deferred_anchors_require_v6() {
-    use zcash_primitives::transaction::builder::DeferredPcztBuilder;
-
     // Under a pre-NU6.3 branch the transaction version (V5) commits its signatures to the
     // shielded anchors, so anchor deferral is refused at construction.
     assert!(matches!(

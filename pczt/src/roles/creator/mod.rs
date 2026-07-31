@@ -13,12 +13,19 @@ use crate::{
     orchard::{Bundle as OrchardBundle, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED},
 };
 
+#[cfg(feature = "zcp-builder")]
+use {
+    crate::common::FLAG_HAS_SIGHASH_SINGLE,
+    ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE},
+    zcash_protocol::{consensus::NetworkConstants, constants::V4_TX_VERSION},
+};
+
 #[cfg(feature = "orchard")]
 use crate::orchard::bundle_version_for_revision;
 
-use zcash_protocol::consensus::BranchId;
-use zcash_protocol::constants::{
-    V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID,
+use zcash_protocol::{
+    consensus::BranchId,
+    constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID},
 };
 
 /// Initial flags allowing any modification.
@@ -282,11 +289,6 @@ impl Creator {
     pub fn build_from_parts<P: zcash_protocol::consensus::Parameters>(
         parts: zcash_primitives::transaction::builder::PcztParts<P>,
     ) -> Option<Pczt> {
-        use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_SINGLE};
-        use zcash_protocol::{consensus::NetworkConstants, constants::V4_TX_VERSION};
-
-        use crate::common::FLAG_HAS_SIGHASH_SINGLE;
-
         let tx_version = match parts.version {
             zcash_primitives::transaction::TxVersion::Sprout(_)
             | zcash_primitives::transaction::TxVersion::V3 => None,
@@ -339,9 +341,9 @@ impl Creator {
 
 #[cfg(test)]
 mod tests {
-    use zcash_protocol::consensus::BranchId;
-    use zcash_protocol::constants::{
-        V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID,
+    use zcash_protocol::{
+        consensus::BranchId,
+        constants::{V5_TX_VERSION, V5_VERSION_GROUP_ID, V6_TX_VERSION, V6_VERSION_GROUP_ID},
     };
 
     use super::{Creator, Error};

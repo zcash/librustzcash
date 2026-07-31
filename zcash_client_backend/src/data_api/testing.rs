@@ -8,6 +8,8 @@ use std::{
     num::NonZeroU32,
 };
 
+#[cfg(feature = "pczt")]
+use super::wallet::{create_pczt_from_proposal, extract_and_store_transaction_from_pczt};
 use assert_matches::assert_matches;
 use group::ff::Field;
 use incrementalmerkletree::{Marking, Retention};
@@ -21,6 +23,19 @@ use shardtree::{
     store::{ShardStore as _, memory::MemoryShardStore},
 };
 use subtle::ConditionallySelectable;
+#[cfg(feature = "transparent-inputs")]
+use {
+    super::{
+        CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
+        wallet::{
+            input_selection::ShieldingSelector, propose_shielding, propose_shielding_coinbase,
+            shield_transparent_funds,
+        },
+    },
+    crate::wallet::TransparentAddressMetadata,
+    ::transparent::address::TransparentAddress,
+    zcash_keys::keys::transparent::gap_limits::GapLimits,
+};
 
 use ::sapling::{
     note_encryption::{SaplingDomain, sapling_note_encryption},
@@ -51,6 +66,19 @@ use zcash_protocol::{
 use zcash_script::script;
 use zip32::DiversifierIndex;
 use zip321::Payment;
+#[cfg(feature = "orchard")]
+use {
+    super::ORCHARD_SHARD_HEIGHT,
+    crate::proto::compact_formats::CompactOrchardAction,
+    ::orchard::{
+        note::{ExtractedNoteCommitment, Note as OrchardNote, NoteVersion, RandomSeed, Rho},
+        note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
+        tree::MerkleHashOrchard,
+    },
+    group::ff::PrimeField,
+    pasta_curves::pallas,
+    zcash_note_encryption::ShieldedOutput,
+};
 
 use super::{
     Account, AccountBalance, AccountBirthday, AccountMeta, AccountPurpose, AccountSource,
@@ -95,23 +123,6 @@ use crate::{
     wallet::{
         LockOwner, Note, NoteId, OutputRef, OvkPolicy, ReceivedNote, WalletTransparentOutput,
     },
-};
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    super::{
-        CoinbaseFilter, TransactionsInvolvingAddress, TransparentBalances,
-        wallet::input_selection::ShieldingSelector,
-    },
-    crate::wallet::TransparentAddressMetadata,
-    ::transparent::address::TransparentAddress,
-    zcash_keys::keys::transparent::gap_limits::GapLimits,
-};
-
-#[cfg(feature = "orchard")]
-use {
-    super::ORCHARD_SHARD_HEIGHT, crate::proto::compact_formats::CompactOrchardAction,
-    ::orchard::tree::MerkleHashOrchard, group::ff::PrimeField, pasta_curves::pallas,
 };
 
 pub mod pool;
@@ -1298,8 +1309,6 @@ where
         InputsT: ShieldingSelector<InputSource = DbT>,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
-        use super::wallet::propose_shielding;
-
         let network = self.network().clone();
         propose_shielding::<_, _, _, _, Infallible>(
             self.wallet_mut(),
@@ -1339,8 +1348,6 @@ where
         InputsT: ShieldingSelector<InputSource = DbT>,
         FeeRuleT: zcash_primitives::transaction::fees::FeeRule + Clone,
     {
-        use super::wallet::propose_shielding_coinbase;
-
         let network = self.network().clone();
         propose_shielding_coinbase::<_, _, _, _, Infallible>(
             self.wallet_mut(),
@@ -1399,8 +1406,6 @@ where
         <DbT as WalletRead>::AccountId: serde::Serialize,
         FeeRuleT: FeeRule,
     {
-        use super::wallet::create_pczt_from_proposal;
-
         let network = self.network().clone();
 
         create_pczt_from_proposal(
@@ -1426,8 +1431,6 @@ where
     where
         <DbT as WalletRead>::AccountId: serde::de::DeserializeOwned,
     {
-        use super::wallet::extract_and_store_transaction_from_pczt;
-
         let prover = real_test_prover();
         let (spend_vk, output_vk) = prover.verifying_keys();
 
@@ -1459,8 +1462,6 @@ where
         InputsT: ShieldingSelector<InputSource = DbT>,
         ChangeT: ChangeStrategy<MetaSource = DbT>,
     {
-        use crate::data_api::wallet::shield_transparent_funds;
-
         let network = self.network().clone();
         shield_transparent_funds(
             self.wallet_mut(),
@@ -2582,8 +2583,6 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
     sender_ovk: Option<&::orchard::keys::OutgoingViewingKey>,
     rng: &mut R,
 ) -> (CompactOrchardAction, ::orchard::Note) {
-    use zcash_note_encryption::ShieldedOutput;
-
     let (compact_action, note) = ::orchard::note_encryption::testing::fake_compact_action(
         rng,
         nf_old,
@@ -2624,10 +2623,6 @@ fn compact_ironwood_action<R: RngCore + CryptoRng>(
     sender_ovk: Option<&::orchard::keys::OutgoingViewingKey>,
     rng: &mut R,
 ) -> (CompactOrchardAction, ::orchard::Note) {
-    use ::orchard::note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho};
-    use ::orchard::note_encryption::{IronwoodDomain, IronwoodNoteEncryption};
-    use zcash_note_encryption::Domain;
-
     // Derive `rho` from the revealed nullifier exactly as the crate does internally
     // (`Rho::from_nf_old(nf) == Rho(nf.inner())`), so that the domain the scanner reconstructs via
     // `IronwoodDomain::for_compact_action(nf_old)` matches and decryption succeeds.
@@ -2639,7 +2634,7 @@ fn compact_ironwood_action<R: RngCore + CryptoRng>(
             break rseed;
         }
     };
-    let note = Note::from_parts(
+    let note = OrchardNote::from_parts(
         recipient,
         ::orchard::value::NoteValue::from_raw(value.into_u64()),
         rho,
@@ -3637,7 +3632,6 @@ impl WalletCommitmentTrees for MockWalletDb {
         &mut self,
         index: u64,
     ) -> Result<Option<::sapling::Node>, ShardTreeError<Self::Error>> {
-        use shardtree::store::ShardStore as _;
         self.with_sapling_tree_mut(|t| {
             let addr =
                 incrementalmerkletree::Address::from_parts(SAPLING_SHARD_HEIGHT.into(), index);
@@ -3697,7 +3691,6 @@ impl WalletCommitmentTrees for MockWalletDb {
         &mut self,
         index: u64,
     ) -> Result<Option<::orchard::tree::MerkleHashOrchard>, ShardTreeError<Self::Error>> {
-        use shardtree::store::ShardStore as _;
         self.with_orchard_tree_mut(|t| {
             let addr =
                 incrementalmerkletree::Address::from_parts(ORCHARD_SHARD_HEIGHT.into(), index);

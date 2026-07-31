@@ -30,10 +30,10 @@ use crate::{
         FLAG_HAS_SIGHASH_SINGLE, FLAG_SHIELDED_MODIFIABLE, FLAG_TRANSPARENT_INPUTS_MODIFIABLE,
         FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE, Global,
     },
+    sighash,
 };
 
 pub use crate::EffectsOnly;
-use crate::sighash;
 
 pub mod batch;
 
@@ -565,7 +565,7 @@ impl From<crate::ExtractError> for Error {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "io-finalizer", feature = "orchard"))]
 mod tests {
     use ff::{Field, PrimeField};
     use pasta_curves::pallas;

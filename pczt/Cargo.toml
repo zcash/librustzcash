@@ -102,7 +102,7 @@ transparent = [
 ]
 
 ## Enables building a PCZT from the output of `zcash_primitives`'s `Builder::build_for_pczt`.
-zcp-builder = ["dep:zcash_primitives"]
+zcp-builder = ["dep:zcash_primitives", "orchard", "sapling", "transparent"]
 
 #! ### PCZT roles behind feature flags
 #!
@@ -159,10 +159,15 @@ tx-extractor = [
 # Undocumented internal feature flag for enabling features needed for tests.
 internal-tests = [
     "io-finalizer",
+    "orchard",
     "prover",
+    "sapling",
     "signer",
+    "spend-finalizer",
+    "transparent",
     "tx-extractor",
     "zcash_script/signature-validation",
+    "zcp-builder",
 ]
 
 [[test]]

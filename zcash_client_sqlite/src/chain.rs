@@ -12,10 +12,12 @@ use crate::{BlockDb, error::SqliteClientError};
 #[cfg(feature = "unstable")]
 use {
     crate::{BlockHash, FsBlockDb, FsBlockDbError},
-    rusqlite::Connection,
-    std::fs::File,
-    std::io::Read,
-    std::path::{Path, PathBuf},
+    rusqlite::{Connection, OptionalExtension, named_params},
+    std::{
+        fs::File,
+        io::Read,
+        path::{Path, PathBuf},
+    },
 };
 
 pub mod init;
@@ -126,8 +128,6 @@ pub(crate) fn blockmetadb_insert(
     conn: &Connection,
     block_meta: &[BlockMeta],
 ) -> Result<(), rusqlite::Error> {
-    use rusqlite::named_params;
-
     let mut stmt_insert = conn.prepare(
         "INSERT INTO compactblocks_meta (
             height,
@@ -212,8 +212,6 @@ pub(crate) fn blockmetadb_find_block(
     conn: &Connection,
     height: BlockHeight,
 ) -> Result<Option<BlockMeta>, rusqlite::Error> {
-    use rusqlite::OptionalExtension;
-
     conn.query_row(
         "SELECT blockhash, time, sapling_outputs_count, orchard_actions_count
         FROM compactblocks_meta

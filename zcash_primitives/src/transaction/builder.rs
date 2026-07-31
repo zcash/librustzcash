@@ -1,7 +1,6 @@
 //! Structs for building transactions.
 
-use core::cmp::Ordering;
-use core::fmt;
+use core::{cmp::Ordering, fmt};
 
 use rand_core::{CryptoRng, RngCore};
 
@@ -1815,12 +1814,15 @@ impl<P: consensus::Parameters, U> Builder<P, U> {
 /// [`std::sync::OnceLock`] for thread-safe lazy initialization. Proving requires
 /// `std` in practice, so this covers the paths that actually create proofs.
 #[cfg(all(feature = "circuits", feature = "std"))]
+use {
+    orchard::circuit::{OrchardCircuitVersion, ProvingKey},
+    std::sync::OnceLock,
+};
+
+#[cfg(all(feature = "circuits", feature = "std"))]
 pub fn cached_orchard_proving_key(
     circuit_version: orchard::circuit::OrchardCircuitVersion,
 ) -> &'static orchard::circuit::ProvingKey {
-    use orchard::circuit::{OrchardCircuitVersion, ProvingKey};
-    use std::sync::OnceLock;
-
     static INSECURE_PRE_NU6_2: OnceLock<ProvingKey> = OnceLock::new();
     static FIXED_POST_NU6_2: OnceLock<ProvingKey> = OnceLock::new();
     static POST_NU6_3: OnceLock<ProvingKey> = OnceLock::new();
@@ -1906,10 +1908,16 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "circuits", feature = "std"))]
+    use {super::cached_orchard_proving_key, core::ptr, orchard::circuit::OrchardCircuitVersion};
+
     #[cfg(feature = "circuits")]
     use {
         super::{Builder, Error},
-        crate::transaction::builder::{BuildConfig, BundlePadding},
+        crate::transaction::{
+            builder::{BuildConfig, BundlePadding},
+            fees::zip317::MINIMUM_FEE,
+        },
         ::sapling::{Node, Rseed, zip32::ExtendedSpendingKey},
         ::transparent::{address::TransparentAddress, builder::TransparentSigningSet},
         assert_matches::assert_matches,
@@ -1918,16 +1926,19 @@ mod tests {
         incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness},
         rand_core::OsRng,
         zcash_protocol::{
-            consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
+            consensus::{BlockHeight, NetworkUpgrade, Parameters, TEST_NETWORK},
             memo::MemoBytes,
             value::{BalanceError, ZatBalance, Zatoshis},
         },
     };
 
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     use {
-        crate::transaction::{OutPoint, TxOut, TxVersion, builder::DEFAULT_TX_EXPIRY_DELTA},
-        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
+        crate::transaction::{
+            OutPoint, TxOut, TxVersion,
+            builder::{self, DEFAULT_TX_EXPIRY_DELTA, TransparentBuilder},
+        },
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
         zcash_protocol::consensus::BranchId,
         zip32::AccountId,
     };
@@ -1939,8 +1950,6 @@ mod tests {
 
     #[cfg(feature = "circuits")]
     fn nu6_3_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
-        use zcash_protocol::consensus::BlockHeight;
-
         zcash_protocol::local_consensus::LocalNetwork {
             overwinter: Some(BlockHeight::from_u32(1)),
             sapling: Some(BlockHeight::from_u32(2)),
@@ -1959,8 +1968,6 @@ mod tests {
 
     #[cfg(all(feature = "circuits", zcash_unstable = "nu7"))]
     fn nu7_test_network() -> zcash_protocol::local_consensus::LocalNetwork {
-        use zcash_protocol::consensus::BlockHeight;
-
         zcash_protocol::local_consensus::LocalNetwork {
             overwinter: Some(BlockHeight::from_u32(1)),
             sapling: Some(BlockHeight::from_u32(2)),
@@ -2115,8 +2122,6 @@ mod tests {
     #[test]
     #[cfg(all(feature = "circuits", feature = "transparent-inputs"))]
     fn build_for_pczt_preserves_explicit_v6_without_ironwood() {
-        use ::transparent::keys::NonHardenedChildIndex;
-
         let mut builder = Builder::new(
             nu6_3_test_network(),
             10u32.into(),
@@ -2578,12 +2583,8 @@ mod tests {
     // This test only works with the transparent_inputs feature because we have to
     // be able to create a tx with a valid balance, without using Sapling inputs.
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(feature = "transparent-inputs", feature = "circuits"))]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
-        use crate::transaction::builder::{self, TransparentBuilder};
-        use ::transparent::{builder::TransparentSigningSet, keys::NonHardenedChildIndex};
-        use zcash_protocol::consensus::NetworkUpgrade;
-
         let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap();
@@ -2651,8 +2652,6 @@ mod tests {
     #[test]
     #[cfg(all(feature = "circuits", feature = "transparent-inputs"))]
     fn build_uses_overridden_expiry_height() {
-        use ::transparent::keys::NonHardenedChildIndex;
-
         let tx_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap();
@@ -2777,8 +2776,6 @@ mod tests {
     #[test]
     #[cfg(feature = "circuits")]
     fn fails_on_negative_change() {
-        use crate::transaction::fees::zip317::MINIMUM_FEE;
-
         let mut rng = OsRng;
 
         // Just use the master key as the ExtendedSpendingKey for this test
@@ -3083,11 +3080,6 @@ mod tests {
     #[cfg(all(feature = "circuits", feature = "std"))]
     #[test]
     fn cached_orchard_proving_key_reuses_one_instance_per_version() {
-        use core::ptr;
-        use orchard::circuit::OrchardCircuitVersion;
-
-        use super::cached_orchard_proving_key;
-
         // Repeated calls for the same circuit version return the very same cached
         // key, so building many transactions does not reconstruct it each time.
         let first = cached_orchard_proving_key(OrchardCircuitVersion::FixedPostNu6_2);

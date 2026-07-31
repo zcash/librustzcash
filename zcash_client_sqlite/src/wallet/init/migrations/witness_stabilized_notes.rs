@@ -11,8 +11,7 @@ use uuid::Uuid;
 use zcash_protocol::{ShieldedPool, consensus};
 
 use super::{account_delete_cascade, ironwood_shardtree};
-use crate::wallet::init::WalletMigrationError;
-use crate::wallet::scanning::mark_stabilized_notes;
+use crate::wallet::{init::WalletMigrationError, scanning::mark_stabilized_notes};
 
 /// Adds a `witness_stabilized` flag to received-note tables, indicating that the note's containing
 /// shard's block extent has been fully scanned and that the shard's end height has received at
@@ -91,14 +90,17 @@ mod tests {
     use rusqlite::named_params;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
-    use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+    use zcash_client_backend::data_api::{SAPLING_SHARD_HEIGHT, scanning::ScanPriority};
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_protocol::consensus::Network;
+    use zcash_protocol::{ShieldedPool, consensus::Network};
 
     use crate::{
         PRUNING_DEPTH, WalletDb,
         testing::db::{test_clock, test_rng},
-        wallet::init::{WalletMigrator, migrations::tests::test_migrate},
+        wallet::{
+            init::{WalletMigrator, migrations::tests::test_migrate},
+            scanning::{mark_stabilized_notes, priority_code},
+        },
     };
 
     use super::{DEPENDENCIES, MIGRATION_ID};
@@ -435,11 +437,6 @@ mod tests {
     /// the per-shard view-based check in `mark_stabilized_notes`.
     #[test]
     fn gap_in_scanned_coverage_prevents_stabilization() {
-        use zcash_client_backend::data_api::scanning::ScanPriority;
-        use zcash_protocol::ShieldedPool;
-
-        use crate::wallet::scanning::{mark_stabilized_notes, priority_code};
-
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =

@@ -1,4 +1,7 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, HashSet},
+    convert::Infallible,
+};
 
 use assert_matches::assert_matches;
 
@@ -6,7 +9,7 @@ use sapling::zip32::ExtendedSpendingKey;
 use transparent::{
     address::{Script, TransparentAddress},
     bundle::{Authorized, Bundle, OutPoint, TxIn, TxOut},
-    keys::TransparentKeyScope,
+    keys::{NonHardenedChildIndex, TransparentKeyScope},
 };
 use zcash_keys::{
     address::Address,
@@ -25,8 +28,19 @@ use zip321::{Payment, TransactionRequest};
 
 #[cfg(feature = "transparent-key-import")]
 use {
-    crate::wallet::TransparentAddressSource,
-    zcash_script::{descriptor::sh, script},
+    crate::{
+        data_api::{
+            AccountBirthday,
+            chain::ChainState,
+            wallet::{self, SpendingKeys},
+        },
+        wallet::TransparentAddressSource,
+    },
+    secp256k1::{Secp256k1, SecretKey},
+    secrecy::Secret,
+    std::collections::HashMap,
+    zcash_protocol::consensus::{NetworkUpgrade, Parameters},
+    zcash_script::{descriptor::sh, pattern::check_multisig, script},
 };
 
 use super::TestAccount;
@@ -46,8 +60,8 @@ use crate::{
             },
         },
     },
-    fees::StandardFeeRule,
-    wallet::WalletTransparentOutput,
+    fees::{ChangeValue, StandardFeeRule, TransparentChangePolicy},
+    wallet::{Exposure, OvkPolicy, WalletTransparentOutput},
 };
 
 pub use super::pool::locking::transparent_note_locking;
@@ -1183,9 +1197,6 @@ where
 /// Builds a test 1-of-1 multisig redeem script from a single keypair.
 #[cfg(feature = "transparent-key-import")]
 fn build_test_redeem_script() -> (script::Redeem, secp256k1::SecretKey) {
-    use secp256k1::{Secp256k1, SecretKey};
-    use zcash_script::pattern::check_multisig;
-
     let secp = Secp256k1::new();
     let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
     let pubkey = secret_key.public_key(&secp);
@@ -1204,8 +1215,6 @@ pub fn import_standalone_transparent_pubkey<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
 {
-    use secp256k1::{Secp256k1, SecretKey};
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -1229,8 +1238,6 @@ pub fn import_standalone_transparent_pubkey_idempotent<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
 {
-    use secp256k1::{Secp256k1, SecretKey};
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -1286,12 +1293,6 @@ pub fn import_standalone_transparent_pubkey_conflict<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
 {
-    use secp256k1::{Secp256k1, SecretKey};
-    use secrecy::Secret;
-
-    use crate::data_api::{AccountBirthday, chain::ChainState};
-    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -1342,9 +1343,6 @@ where
     DSF: DataStoreFactory,
     <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use crate::data_api::wallet::ConfirmationsPolicy;
-    use secp256k1::{Secp256k1, SecretKey};
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -1417,10 +1415,6 @@ pub fn spend_from_standalone_pubkey<DSF>(dsf: DSF, cache: impl TestCache)
 where
     DSF: DataStoreFactory,
 {
-    use crate::data_api::wallet::{self, SpendingKeys};
-    use secp256k1::{Secp256k1, SecretKey};
-    use std::collections::HashMap;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_block_cache(cache)
@@ -1635,11 +1629,6 @@ pub fn import_standalone_transparent_p2sh_conflict<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
 {
-    use secrecy::Secret;
-
-    use crate::data_api::{AccountBirthday, chain::ChainState};
-    use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -1687,8 +1676,6 @@ where
     DSF: DataStoreFactory,
     <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
 {
-    use crate::data_api::wallet::ConfirmationsPolicy;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -1760,9 +1747,6 @@ pub fn spend_from_standalone_p2sh<DSF>(dsf: DSF, cache: impl TestCache)
 where
     DSF: DataStoreFactory,
 {
-    use crate::data_api::wallet::{self, SpendingKeys};
-    use std::collections::HashMap;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_block_cache(cache)
@@ -1880,9 +1864,6 @@ pub fn mark_transparent_addresses_exposed<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
 {
-    use crate::{data_api::WalletRead, wallet::Exposure};
-    use zcash_protocol::consensus::BlockHeight;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -1964,9 +1945,6 @@ pub fn mark_transparent_addresses_exposed_bulk<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
 {
-    use crate::{data_api::WalletRead, wallet::Exposure};
-    use zcash_protocol::consensus::BlockHeight;
-
     let gap_limits = GapLimits::new(5, 2, 2);
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
@@ -2059,8 +2037,6 @@ pub fn mark_transparent_addresses_exposed_unknown_address<DSF>(dsf: DSF)
 where
     DSF: DataStoreFactory,
 {
-    use zcash_protocol::consensus::BlockHeight;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -2727,9 +2703,6 @@ pub fn reserve_next_n_internal_addresses_gap_limit<DSF>(
 ) where
     DSF: DataStoreFactory,
 {
-    use std::collections::HashSet;
-    use transparent::keys::NonHardenedChildIndex;
-
     let mut st = TestBuilder::new()
         .with_data_store_factory(dsf)
         .with_block_cache(cache)
@@ -2814,13 +2787,6 @@ pub fn propose_t2t_with_transparent_change<DSF>(dsf: DSF, cache: impl TestCache)
 where
     DSF: DataStoreFactory,
 {
-    use std::convert::Infallible;
-
-    use crate::{
-        fees::{ChangeValue, TransparentChangePolicy},
-        wallet::{Exposure, OvkPolicy},
-    };
-
     let utxo_value = Zatoshis::const_from_u64(100_000);
     let transfer_amount = Zatoshis::const_from_u64(40_000);
     let (mut st, account, outpoint) = setup_transparent_only_account(dsf, cache, utxo_value);
@@ -2948,8 +2914,6 @@ pub fn propose_t2t_transparent_change_exact_match<DSF>(dsf: DSF, cache: impl Tes
 where
     DSF: DataStoreFactory,
 {
-    use crate::fees::TransparentChangePolicy;
-
     // Under ZIP 317, one P2PKH input and one P2PKH output require the minimum fee of
     // 10_000 zats, so a 50_000-zat UTXO exactly covers a 40_000-zat payment.
     let utxo_value = Zatoshis::const_from_u64(50_000);

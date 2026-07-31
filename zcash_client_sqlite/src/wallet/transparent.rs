@@ -1,17 +1,17 @@
 //! Functions for transparent input support in the wallet.
 use core::ops::Range;
-use std::collections::{HashMap, HashSet};
-use std::num::TryFromIntError;
-use std::ops::DerefMut;
-use std::rc::Rc;
-use std::time::{Duration, SystemTime, SystemTimeError};
+use std::{
+    collections::{HashMap, HashSet},
+    num::TryFromIntError,
+    ops::DerefMut,
+    rc::Rc,
+    time::{Duration, SystemTime, SystemTimeError},
+};
 
 use nonempty::NonEmpty;
 use rand::RngCore;
 use rand_distr::Distribution;
-use rusqlite::OptionalExtension;
-use rusqlite::types::Value;
-use rusqlite::{Connection, Row, ToSql, named_params};
+use rusqlite::{Connection, OptionalExtension, Row, ToSql, named_params, types::Value};
 use tracing::{debug, warn};
 
 use transparent::{
@@ -55,9 +55,11 @@ use zcash_protocol::{
 };
 use zcash_script::script;
 use zip32::Scope;
-
 #[cfg(feature = "transparent-key-import")]
-use bip32::{PublicKey, PublicKeyBytes};
+use {
+    bip32::{PublicKey, PublicKeyBytes},
+    zcash_script::script::Code,
+};
 
 use super::{
     KeyScope, account_birthday_internal, chain_tip_height,
@@ -80,9 +82,13 @@ use crate::{
         mempool_height,
     },
 };
-// Used only by the value-target transparent selection, which is gated on transparent inputs.
 #[cfg(feature = "transparent-inputs")]
-use crate::wallet::locking::locked_tier_expr;
+use {
+    crate::wallet::locking::locked_tier_expr,
+    transparent::keys::ExternalIvk,
+    zcash_address::unified::{Container as _, Encoding as _},
+    zcash_keys::keys::ReceiverRequirement::*,
+};
 
 pub(crate) mod ephemeral;
 
@@ -318,8 +324,6 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             #[cfg(feature = "transparent-key-import")]
             let p2sh_metadata =
                 |rs_bytes: &Vec<u8>| -> Result<TransparentAddressMetadata, SqliteClientError> {
-                    use zcash_script::script::{self, Code};
-
                     let imported_transparent_receiver_script =
                         script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
                             SqliteClientError::CorruptedData(format!(
@@ -376,9 +380,6 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     uivk_str: &str,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
-    use transparent::keys::ExternalIvk;
-    use zcash_address::unified::{Container as _, Encoding as _};
-
     let (network, uivk) = Uivk::decode(uivk_str)
         .map_err(|e| SqliteClientError::CorruptedData(format!("Unable to parse UIVK: {e}")))?;
 
@@ -956,7 +957,6 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
         )?;
 
         if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
-            use zcash_keys::keys::ReceiverRequirement::*;
             generate_gap_addresses(
                 conn,
                 params,
@@ -2541,7 +2541,6 @@ pub(crate) fn get_transparent_address_metadata<P: consensus::Parameters>(
                             #[cfg(feature = "transparent-key-import")]
                             {
                                 if let Some(ref rs_bytes) = _imported_transparent_receiver_script_bytes {
-                                    use zcash_script::script::{self, Code};
 
                                     let imported_transparent_receiver_script =
                                         script::Redeem::parse(&Code(rs_bytes.clone())).map_err(|e| {
@@ -2889,10 +2888,13 @@ pub(crate) fn queue_transparent_spend_detection<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use secrecy::Secret;
-    use transparent::keys::{NonHardenedChildIndex, TransparentKeyScope};
+    use transparent::{
+        bundle::{OutPoint, TxOut},
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    };
     use zcash_client_backend::{
-        data_api::{Account as _, WalletWrite, testing::TestBuilder},
-        wallet::{Exposure, TransparentAddressMetadata},
+        data_api::{Account as _, WalletRead, WalletWrite, testing::TestBuilder},
+        wallet::{Exposure, TransparentAddressMetadata, WalletTransparentOutput},
     };
     use zcash_primitives::block::BlockHash;
 
@@ -2901,9 +2903,24 @@ mod tests {
         error::SqliteClientError,
         testing::{BlockCache, db::TestDbFactory},
         wallet::{
+            encoding::{KeyScope, ReceiverFlags, encode_diversifier_index_be},
             get_account_ref,
             transparent::{ephemeral, find_gap_start, reserve_next_n_addresses},
+            upsert_address,
         },
+    };
+    use rusqlite::named_params;
+    use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest};
+    use zcash_protocol::value::Zatoshis;
+    #[cfg(feature = "transparent-key-import")]
+    use {
+        proptest::prelude::*,
+        secp256k1::{PublicKey, Secp256k1, SecretKey},
+        std::collections::HashSet,
+        transparent::address::TransparentAddress,
+        zcash_client_backend::data_api::{AccountBirthday, chain::ChainState},
+        zcash_keys::{address::Address, encoding::AddressCodec},
+        zcash_protocol::consensus::{NetworkUpgrade, Parameters},
     };
 
     #[test]
@@ -2921,11 +2938,6 @@ mod tests {
     /// responsibility of `truncate_to_height`.)
     #[test]
     fn put_received_transparent_utxo_preserves_mined_height() {
-        use transparent::bundle::{OutPoint, TxOut};
-        use zcash_client_backend::{data_api::WalletRead as _, wallet::WalletTransparentOutput};
-        use zcash_keys::keys::UnifiedAddressRequest;
-        use zcash_protocol::value::Zatoshis;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -3270,12 +3282,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn store_address_range_upgrades_imported_receiver() {
-        use rusqlite::named_params;
-        use transparent::address::TransparentAddress;
-        use zcash_keys::{address::Address, encoding::AddressCodec};
-
-        use crate::wallet::encoding::KeyScope;
-
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -3380,14 +3386,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn store_address_range_upgrades_receiver_imported_under_other_account() {
-        use rusqlite::named_params;
-        use transparent::address::TransparentAddress;
-        use zcash_client_backend::data_api::{AccountBirthday, chain::ChainState};
-        use zcash_keys::{address::Address, encoding::AddressCodec};
-        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
-
-        use crate::wallet::encoding::KeyScope;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -3518,14 +3516,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn store_address_range_reattributes_shielded_notes_of_imported_receiver() {
-        use rusqlite::named_params;
-        use transparent::address::TransparentAddress;
-        use zcash_client_backend::data_api::{AccountBirthday, chain::ChainState};
-        use zcash_keys::{address::Address, encoding::AddressCodec};
-        use zcash_protocol::consensus::{NetworkUpgrade, Parameters};
-
-        use crate::wallet::encoding::{KeyScope, ReceiverFlags};
-
         /// The transparent receiver imported under account B and derived by account A. Its
         /// bytes are arbitrary; nothing derives from or validates them.
         const IMPORTED_RECEIVER_HASH: [u8; 20] = [0x33; 20];
@@ -3701,14 +3691,6 @@ mod tests {
     /// resolve to one.
     #[test]
     fn foreign_addresses_cannot_carry_a_diversifier_index() {
-        use rusqlite::named_params;
-        use zcash_keys::keys::{ReceiverRequirement, UnifiedAddressRequest};
-
-        use crate::wallet::{
-            encoding::{KeyScope, ReceiverFlags, encode_diversifier_index_be},
-            upsert_address,
-        };
-
         /// An address string for the rejected insert. It is never decoded, only stored.
         const UNUSED_ADDRESS: &str = "placeholder-address";
 
@@ -3789,9 +3771,6 @@ mod tests {
     #[test]
     #[cfg(feature = "spend-index")]
     fn spend_index_queries_are_valid_sql() {
-        use transparent::bundle::OutPoint;
-        use zcash_client_backend::data_api::WalletRead;
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -3822,12 +3801,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey_noop_when_address_derived() {
-        use proptest::prelude::*;
-        use rusqlite::named_params;
-        use secp256k1::{PublicKey, Secp256k1, SecretKey};
-        use transparent::address::TransparentAddress;
-        use zcash_keys::{address::Address, encoding::AddressCodec};
-
         proptest!(
             ProptestConfig::with_cases(16),
             |(
@@ -3899,12 +3872,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey_returns_rows_inserted() {
-        use proptest::prelude::*;
-        use rusqlite::named_params;
-        use secp256k1::{PublicKey, Secp256k1, SecretKey};
-        use transparent::address::TransparentAddress;
-        use zcash_keys::encoding::AddressCodec;
-
         proptest!(
             ProptestConfig::with_cases(16),
             |(sk in any::<[u8; 32]>()
@@ -3961,8 +3928,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey_unknown_account() {
-        use secp256k1::{PublicKey, Secp256k1, SecretKey};
-
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -3992,13 +3957,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkeys_batch() {
-        use proptest::prelude::*;
-        use rusqlite::named_params;
-        use secp256k1::{PublicKey, Secp256k1, SecretKey};
-        use std::collections::HashSet;
-        use transparent::address::TransparentAddress;
-        use zcash_keys::encoding::AddressCodec;
-
         proptest!(
             ProptestConfig::with_cases(12),
             |(sks in proptest::collection::vec(
@@ -4065,8 +4023,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkeys_unknown_account() {
-        use secp256k1::{PublicKey, Secp256k1, SecretKey};
-
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))

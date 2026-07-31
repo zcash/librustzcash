@@ -1,4 +1,20 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
+#[cfg(feature = "transparent-inputs")]
+use {
+    crate::{
+        data_api::CoinbaseFilter,
+        fees::{ChangeValue, StandardFeeRule},
+        proposal::{Step, StepOutput, StepOutputIndex},
+    },
+    std::convert::Infallible,
+    transparent::{address::TransparentAddress, bundle::OutPoint, keys::TransparentKeyScope},
+    zcash_primitives::transaction::fees::{
+        transparent as transparent_fees, transparent::InputSize, zip317::P2PKH_STANDARD_INPUT_SIZE,
+    },
+    zcash_protocol::constants::MAX_BLOCK_BYTES,
+    zip321::Payment,
+};
+
 use core::marker::PhantomData;
 use nonempty::NonEmpty;
 use std::{
@@ -10,7 +26,10 @@ use std::{
 use transparent::bundle::TxOut;
 use zcash_address::{ConversionError, ZcashAddress};
 use zcash_keys::address::{Address, UnifiedAddress};
-use zcash_primitives::transaction::fees::{FeeRule, zip317::P2PKH_STANDARD_OUTPUT_SIZE};
+use zcash_primitives::transaction::{
+    TxVersion,
+    fees::{FeeRule, zip317::P2PKH_STANDARD_OUTPUT_SIZE},
+};
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
@@ -19,40 +38,22 @@ use zcash_protocol::{
 };
 use zip321::TransactionRequest;
 
-use crate::data_api::anchor_retention::PoolMigrationParams;
-
-pub use crate::data_api::locking::{LockFilter, LockedInputPolicy};
 use crate::{
     data_api::{
         InputSource, MaxSpendMode, ReceivedNotes, SimpleNoteRetention, TargetValue,
-        wallet::TargetHeight,
+        anchor_retention::PoolMigrationParams, wallet::TargetHeight,
     },
     fees::{ChangeError, ChangeStrategy, EphemeralBalance, TransactionBalance, sapling},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
 };
 
-use super::ConfirmationsPolicy;
+pub use crate::data_api::locking::{LockFilter, LockedInputPolicy};
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    crate::{
-        data_api::CoinbaseFilter,
-        fees::{ChangeValue, StandardFeeRule},
-        proposal::{Step, StepOutput, StepOutputIndex},
-    },
-    std::convert::Infallible,
-    transparent::{address::TransparentAddress, bundle::OutPoint},
-    zcash_primitives::transaction::fees::{
-        transparent as transparent_fees, transparent::InputSize, zip317::P2PKH_STANDARD_INPUT_SIZE,
-    },
-    zip321::Payment,
-};
+use super::ConfirmationsPolicy;
 
 #[cfg(feature = "orchard")]
 use crate::{data_api::wallet::ironwood_active_at, fees::orchard as orchard_fees};
-
-use zcash_primitives::transaction::TxVersion;
 
 /// The type of errors that may be produced in input selection.
 #[derive(Debug)]
@@ -846,8 +847,6 @@ impl<DbT> GreedyInputSelector<DbT> {
 /// for general (non-shielding) transfers.
 #[cfg(feature = "transparent-inputs")]
 fn shielding_max_inputs(block_space_percent: u32) -> usize {
-    use zcash_protocol::constants::MAX_BLOCK_BYTES;
-
     (MAX_BLOCK_BYTES.saturating_mul(block_space_percent as usize) / 100) / P2PKH_STANDARD_INPUT_SIZE
 }
 
@@ -2297,8 +2296,6 @@ fn gather_shielding_inputs<DbT, ChangeErrT>(
 where
     DbT: InputSource,
 {
-    use transparent::keys::TransparentKeyScope;
-
     // Gather the spendable UTXOs for every source address in a single query. This avoids issuing
     // one query per address (including for the many addresses that have no spendable outputs),
     // which is prohibitively expensive for wallets that hold large numbers of transparent
@@ -2550,6 +2547,8 @@ mod tests {
 #[cfg(test)]
 mod spend_policy_tests {
     use super::*;
+    #[cfg(feature = "transparent-inputs")]
+    use crate::data_api::CoinbaseFilter;
     use crate::wallet::LockOwner;
 
     // The default spend policy preserves the historical `ShieldedOnly` behavior: notes may be
@@ -2581,7 +2580,6 @@ mod spend_policy_tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn coinbase_policy_maps_to_filter() {
-        use crate::data_api::CoinbaseFilter;
         assert_eq!(
             CoinbaseFilter::from(CoinbasePolicy::OnlyCoinbase),
             CoinbaseFilter::CoinbaseOnly

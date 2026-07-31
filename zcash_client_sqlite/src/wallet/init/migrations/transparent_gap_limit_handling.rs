@@ -2,9 +2,11 @@
 //! `ephemeral_addresses` tables.
 
 use rand_core::RngCore;
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
-use std::sync::Mutex;
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    sync::Mutex,
+};
 use uuid::Uuid;
 
 use rusqlite::{Transaction, named_params};
@@ -31,6 +33,8 @@ use {
         },
     },
     ::transparent::keys::{IncomingViewingKey as _, NonHardenedChildIndex},
+    ReceiverRequirement::*,
+    transparent::keys::TransparentKeyScope,
     zcash_keys::{encoding::AddressCodec as _, keys::ReceiverRequirement},
     zcash_primitives::transaction::builder::DEFAULT_TX_EXPIRY_DELTA,
     zip32::DiversifierIndex,
@@ -112,8 +116,6 @@ pub(super) fn insert_initial_transparent_addrs<P: consensus::Parameters>(
         ":key_scope_external": KeyScope::EXTERNAL.encode()
     ])?;
     while let Some(row) = min_addr_rows.next()? {
-        use transparent::keys::TransparentKeyScope;
-
         let account_id = AccountRef(row.get("account_id")?);
         let uivk = decode_uivk(params, row.get("uivk")?)?;
         let ufvk = decode_ufvk(params, row.get::<_, Option<String>>("ufvk")?)?;
@@ -743,10 +745,7 @@ impl<P: consensus::Parameters, C: Clock, R: RngCore> RusqliteMigration for Migra
         // account id in each iteration of the loop.
         #[cfg(feature = "transparent-inputs")]
         for (account_id, (uivk, ufvk)) in account_ids {
-            use transparent::keys::TransparentKeyScope;
-
             for key_scope in [TransparentKeyScope::EXTERNAL, TransparentKeyScope::INTERNAL] {
-                use ReceiverRequirement::*;
                 let gap_limit = match key_scope {
                     TransparentKeyScope::EXTERNAL => GapLimits::default().external(),
                     TransparentKeyScope::INTERNAL => GapLimits::default().internal(),

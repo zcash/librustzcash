@@ -1,6 +1,4 @@
-use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::hash::Hash;
+use std::{collections::HashSet, convert::TryFrom, hash::Hash};
 
 use incrementalmerkletree::Retention;
 use sapling::note_encryption::{CompactOutputDescription, SaplingDomain};
@@ -23,13 +21,13 @@ use crate::{
 };
 
 #[cfg(feature = "orchard")]
-use orchard::{
-    note_encryption::{CompactAction, OrchardDomain},
-    tree::MerkleHashOrchard,
+use {
+    super::IronwoodDomain,
+    orchard::{
+        note_encryption::{CompactAction, OrchardDomain},
+        tree::MerkleHashOrchard,
+    },
 };
-
-#[cfg(feature = "orchard")]
-use super::IronwoodDomain;
 
 #[cfg(not(feature = "orchard"))]
 use std::marker::PhantomData;
@@ -796,6 +794,28 @@ mod tests {
 
     use std::convert::Infallible;
 
+    #[cfg(feature = "orchard")]
+    use {
+        super::ScanError,
+        crate::proto::compact_formats::{
+            ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
+        },
+        orchard::{
+            keys::Scope,
+            note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho},
+            note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
+            value::NoteValue,
+        },
+        pasta_curves::{
+            group::ff::{Field, PrimeField},
+            pallas,
+        },
+        proptest::prelude::*,
+        rand_core::{OsRng, RngCore},
+        zcash_note_encryption::Domain,
+        zcash_protocol::ShieldedPool,
+    };
+
     use incrementalmerkletree::{Marking, Position, Retention};
     use sapling::Nullifier;
     use zcash_keys::keys::UnifiedSpendingKey;
@@ -917,24 +937,6 @@ mod tests {
             diversifier_index in 0u32..8,
             internal in proptest::bool::ANY,
         ) {
-            use orchard::{
-                keys::Scope,
-                note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho},
-                note_encryption::{IronwoodDomain, IronwoodNoteEncryption},
-                value::NoteValue,
-            };
-            use pasta_curves::{
-                group::ff::{Field, PrimeField},
-                pallas,
-            };
-            use proptest::prelude::*;
-            use rand_core::{OsRng, RngCore};
-            use zcash_note_encryption::Domain;
-
-            use crate::proto::compact_formats::{
-                ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
-            };
-
             let network = Network::TestNetwork;
             let account = AccountId::ZERO;
             let usk =
@@ -1053,13 +1055,6 @@ mod tests {
     #[cfg(feature = "orchard")]
     #[test]
     fn malformed_compact_ironwood_spend_nullifier_is_a_scan_error() {
-        use zcash_protocol::ShieldedPool;
-
-        use super::ScanError;
-        use crate::proto::compact_formats::{
-            ChainMetadata, CompactBlock, CompactOrchardAction, CompactTx,
-        };
-
         let network = Network::TestNetwork;
         let account = AccountId::ZERO;
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");

@@ -6,20 +6,31 @@ use core::num::NonZeroU32;
 
 use crate::{
     SAPLING_TABLES_PREFIX,
+    error::SqliteClientError,
     testing::{BlockCache, db::TestDbFactory},
 };
 use zcash_client_backend::data_api::{
+    WalletWrite,
     anchor_retention::AnchorRetentionInterval,
+    chain::{ChainState, error::Error},
     testing::{
-        pool::{InputTrust, ShieldedPoolTester},
+        AddressType,
+        pool::{InputTrust, ShieldedPoolTester, dsl::TestDsl},
         sapling::SaplingPoolTester,
     },
 };
 
+#[cfg(feature = "transparent-inputs")]
+use rusqlite::named_params;
+use zcash_protocol::{
+    consensus::{NetworkUpgrade, Parameters},
+    value::Zatoshis,
+};
 #[cfg(feature = "orchard")]
 use {
     crate::ORCHARD_TABLES_PREFIX,
     zcash_client_backend::data_api::testing::orchard::OrchardPoolTester,
+    zcash_protocol::ShieldedPool,
 };
 
 pub(crate) trait ShieldedPoolPersistence {
@@ -508,18 +519,6 @@ pub(crate) fn truncate_to_chain_state_above_scanned<T: ShieldedPoolTester>() {
 /// one captured from a second wallet that scanned the same number of blocks with different note
 /// values, so it has the same tree shape but conflicting node hashes.
 pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTester>() {
-    use zcash_client_backend::data_api::{
-        WalletWrite, chain::ChainState, testing::AddressType, testing::pool::dsl::TestDsl,
-    };
-    #[cfg(feature = "orchard")]
-    use zcash_protocol::ShieldedPool;
-    use zcash_protocol::{
-        consensus::{NetworkUpgrade, Parameters},
-        value::Zatoshis,
-    };
-
-    use crate::error::SqliteClientError;
-
     // `zcash_client_backend::data_api::ll::wallet::PRUNING_DEPTH` is crate-private; mirror it
     // here. Scanning this far past the captured height guarantees its checkpoint is pruned.
     const PRUNING_DEPTH: u32 = 100;
@@ -651,20 +650,6 @@ pub(crate) fn truncate_to_chain_state_commitment_tree_error<T: ShieldedPoolTeste
 /// `put_blocks`' sequentiality checks) but conflicting node hashes, so `insert_frontier` inside
 /// `put_blocks` fails.
 pub(crate) fn put_blocks_commitment_tree_error<T: ShieldedPoolTester>() {
-    use zcash_client_backend::data_api::{
-        chain::{ChainState, error::Error},
-        testing::AddressType,
-        testing::pool::dsl::TestDsl,
-    };
-    #[cfg(feature = "orchard")]
-    use zcash_protocol::ShieldedPool;
-    use zcash_protocol::{
-        consensus::{NetworkUpgrade, Parameters},
-        value::Zatoshis,
-    };
-
-    use crate::error::SqliteClientError;
-
     // Wallet A: scan an initial range of blocks and capture its (consistent) chain state at the
     // last scanned height.
     let mut wallet_a =
@@ -874,8 +859,6 @@ pub(crate) fn pczt_single_step<P0: ShieldedPoolTester, P1: ShieldedPoolTester>(
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn wallet_recovery_computes_fees<T: ShieldedPoolTester>() {
-    use rusqlite::named_params;
-
     zcash_client_backend::data_api::testing::pool::wallet_recovery_computes_fees::<T, _>(
         TestDbFactory::default(),
         BlockCache::new(),

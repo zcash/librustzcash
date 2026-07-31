@@ -1,11 +1,16 @@
 //! Helper functions for managing light client key material.
-#[cfg(feature = "transparent-inputs")]
-use ::transparent::keys::TransparentKeyScope;
-use alloc::collections::BTreeSet;
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::{
+    collections::BTreeSet,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::fmt::{self, Display};
 use nonempty::NonEmpty;
+#[cfg(feature = "transparent-inputs")]
+use {
+    ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex, TransparentKeyScope},
+    core::convert::TryInto,
+};
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
 use zcash_protocol::{PoolType, consensus};
@@ -13,14 +18,12 @@ use zip32::{AccountId, DiversifierIndex};
 
 use crate::address::UnifiedAddress;
 
+// The requirement combinators and the `ReceiverRequirements` constants below name these
+// variants bare.
+use ReceiverRequirement::*;
+
 #[cfg(any(feature = "sapling", feature = "orchard"))]
 use zcash_protocol::consensus::NetworkConstants;
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    ::transparent::keys::{IncomingViewingKey, NonHardenedChildIndex},
-    core::convert::TryInto,
-};
 
 #[cfg(all(
     feature = "transparent-inputs",
@@ -650,7 +653,6 @@ impl ReceiverRequirement {
     /// exists. [`ReceiverRequirement::Require`] and [`ReceiverRequirement::Omit`] are
     /// incompatible; attempting an intersection between these will return an error.
     pub fn intersect(self, other: Self) -> Result<Self, ReceiverRequirementError> {
-        use ReceiverRequirement::*;
         match (self, other) {
             (Require, Omit) | (Omit, Require) => Err(ReceiverRequirementError::Conflict),
             (Require, Require) | (Require, Allow) | (Allow, Require) => Ok(Require),
@@ -712,7 +714,6 @@ impl ReceiverRequirements {
         sapling: ReceiverRequirement,
         p2pkh: ReceiverRequirement,
     ) -> Result<Self, ReceiverRequirementError> {
-        use ReceiverRequirement::*;
         if orchard == Omit && sapling == Omit {
             Err(ReceiverRequirementError::NoShieldedReceiver)
         } else {
@@ -725,22 +726,13 @@ impl ReceiverRequirements {
     }
 
     /// Constructs a new unified address request that allows a receiver of each type.
-    pub const ALLOW_ALL: ReceiverRequirements = {
-        use ReceiverRequirement::*;
-        Self::unsafe_new(Allow, Allow, Allow)
-    };
+    pub const ALLOW_ALL: ReceiverRequirements = { Self::unsafe_new(Allow, Allow, Allow) };
 
     /// Constructs a new unified address request that allows only shielded receivers.
-    pub const SHIELDED: ReceiverRequirements = {
-        use ReceiverRequirement::*;
-        Self::unsafe_new(Allow, Allow, Omit)
-    };
+    pub const SHIELDED: ReceiverRequirements = { Self::unsafe_new(Allow, Allow, Omit) };
 
     /// Constructs a new unified address request that requires an Orchard receiver, and no others.
-    pub const ORCHARD: ReceiverRequirements = {
-        use ReceiverRequirement::*;
-        Self::unsafe_new(Require, Omit, Omit)
-    };
+    pub const ORCHARD: ReceiverRequirements = { Self::unsafe_new(Require, Omit, Omit) };
 
     /// Constructs a new unified address request that includes only the receivers that are allowed
     /// both in itself and a given other request. Returns an error if requirements are incompatible
@@ -763,7 +755,6 @@ impl ReceiverRequirements {
         sapling: ReceiverRequirement,
         p2pkh: ReceiverRequirement,
     ) -> Self {
-        use ReceiverRequirement::*;
         if matches!(orchard, Omit) && matches!(sapling, Omit) {
             panic!("At least one shielded receiver must be allowed.")
         }
@@ -1593,8 +1584,6 @@ impl UnifiedIncomingViewingKey {
         _j: DiversifierIndex,
         request: UnifiedAddressRequest,
     ) -> Result<UnifiedAddress, AddressGenerationError> {
-        use ReceiverRequirement::*;
-
         let request = self
             .receiver_requirements(request)
             .map_err(|_| AddressGenerationError::ShieldedReceiverRequired)?;
@@ -1715,24 +1704,23 @@ impl UnifiedIncomingViewingKey {
         mut j: DiversifierIndex,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        // Find a working diversifier and construct the associated address.
+        // Only a Sapling receiver can reject a diversifier index, so only that configuration
+        // has to search.
+        #[cfg(feature = "sapling")]
         loop {
-            let res = self.address(j, request);
-            match res {
-                Ok(ua) => {
-                    return Ok((ua, j));
-                }
-                #[cfg(feature = "sapling")]
+            match self.address(j, request) {
+                Ok(ua) => return Ok((ua, j)),
                 Err(AddressGenerationError::InvalidSaplingDiversifierIndex(_)) => {
                     if j.increment().is_err() {
                         return Err(AddressGenerationError::DiversifierSpaceExhausted);
                     }
                 }
-                Err(other) => {
-                    return Err(other);
-                }
+                Err(other) => return Err(other),
             }
         }
+
+        #[cfg(not(feature = "sapling"))]
+        self.address(j, request).map(|ua| (ua, j))
     }
 
     /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
@@ -1754,6 +1742,9 @@ impl UnifiedIncomingViewingKey {
     /// Transparent receivers are not considered here, as recovering a diversifier index from a
     /// transparent receiver alone is not possible without additional context.
     pub fn decrypt_diversifiers(&self, ua: &UnifiedAddress) -> BTreeSet<DiversifierIndex> {
+        #[cfg(not(any(feature = "sapling", feature = "orchard")))]
+        let _ = ua;
+
         #[cfg(not(feature = "sapling"))]
         let sapling_di: Option<DiversifierIndex> = None;
 
@@ -1784,7 +1775,6 @@ impl UnifiedIncomingViewingKey {
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<ReceiverRequirements, AddressGenerationError> {
-        use ReceiverRequirement::*;
         match request {
             UnifiedAddressRequest::AllAvailableKeys => self
                 .to_receiver_requirements()
@@ -1820,8 +1810,6 @@ impl UnifiedIncomingViewingKey {
     pub fn to_receiver_requirements(
         &self,
     ) -> Result<ReceiverRequirements, ReceiverRequirementError> {
-        use ReceiverRequirement::*;
-
         let mut orchard = Omit;
         #[cfg(feature = "orchard")]
         if self.orchard.is_some() {
@@ -1887,6 +1875,30 @@ pub mod testing {
 mod tests {
     use proptest::prelude::proptest;
 
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
+    use {
+        super::ReceiverRequirement::*,
+        crate::{
+            address::{Address, UnifiedAddress},
+            keys::UnifiedAddressRequest,
+        },
+        zcash_address::test_vectors,
+        zip32::DiversifierIndex,
+    };
+
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        crate::encoding::AddressCodec,
+        ::transparent::keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
+        alloc::{string::ToString, vec::Vec},
+    };
+
+    #[cfg(any(feature = "orchard", feature = "sapling"))]
+    use zcash_protocol::consensus::NetworkType;
+
     use zcash_protocol::consensus::MAIN_NETWORK;
     use zip32::AccountId;
 
@@ -1901,20 +1913,6 @@ mod tests {
 
     #[cfg(feature = "sapling")]
     use super::sapling;
-
-    #[cfg(feature = "transparent-inputs")]
-    use {
-        crate::encoding::AddressCodec,
-        ::transparent::keys::{AccountPrivKey, IncomingViewingKey},
-        alloc::string::ToString,
-        alloc::vec::Vec,
-    };
-
-    #[cfg(all(
-        feature = "transparent-inputs",
-        any(feature = "orchard", feature = "sapling")
-    ))]
-    use {crate::address::Address, zcash_address::test_vectors, zip32::DiversifierIndex};
 
     #[cfg(feature = "unstable")]
     use super::{Era, UnifiedSpendingKey, testing::arb_unified_spending_key};
@@ -1938,8 +1936,6 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
-        use ::transparent::keys::NonHardenedChildIndex;
-
         let taddr = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
             .unwrap()
             .to_account_pubkey()
@@ -2078,10 +2074,6 @@ mod tests {
         any(feature = "orchard", feature = "sapling")
     ))]
     fn ufvk_derivation() {
-        use crate::keys::UnifiedAddressRequest;
-
-        use super::{ReceiverRequirement::*, UnifiedSpendingKey};
-
         for tv in test_vectors::UNIFIED {
             let usk = UnifiedSpendingKey::from_seed(
                 &MAIN_NETWORK,
@@ -2137,8 +2129,6 @@ mod tests {
     #[test]
     #[cfg(any(feature = "orchard", feature = "sapling"))]
     fn uivk_round_trip() {
-        use zcash_protocol::consensus::NetworkType;
-
         #[cfg(feature = "orchard")]
         let orchard = {
             let sk =
@@ -2263,10 +2253,6 @@ mod tests {
         any(feature = "orchard", feature = "sapling")
     ))]
     fn uivk_derivation() {
-        use crate::keys::UnifiedAddressRequest;
-
-        use super::{ReceiverRequirement::*, UnifiedSpendingKey};
-
         for tv in test_vectors::UNIFIED {
             let usk = UnifiedSpendingKey::from_seed(
                 &MAIN_NETWORK,
@@ -2366,9 +2352,6 @@ mod tests {
         feature = "transparent-inputs"
     ))]
     fn uivk_decrypt_diversifier_matches_own_ua_and_rejects_foreign() {
-        use crate::address::UnifiedAddress;
-        use crate::keys::{UnifiedAddressRequest, UnifiedSpendingKey};
-
         let ufvk_a = UnifiedSpendingKey::from_seed(&MAIN_NETWORK, &[1u8; 32], AccountId::ZERO)
             .unwrap()
             .to_unified_full_viewing_key();

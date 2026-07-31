@@ -6,17 +6,18 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-#[cfg(feature = "orchard")]
-use zcash_primitives::transaction::builder::BundlePadding;
 use zcash_primitives::transaction::{TxId, TxVersion};
-#[cfg(feature = "orchard")]
-use zcash_protocol::zip318::PoolMigrationConstants;
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{BlockHeight, BranchId},
     value::Zatoshis,
 };
 use zip321::{TransactionRequest, Zip321Error};
+#[cfg(feature = "orchard")]
+use {
+    zcash_primitives::transaction::builder::BundlePadding,
+    zcash_protocol::zip318::PoolMigrationConstants,
+};
 
 use crate::{
     data_api::wallet::{ConfirmationsPolicy, TargetHeight},
@@ -1107,15 +1108,33 @@ impl<NoteRef> Debug for Step<NoteRef> {
 mod tests {
     use std::collections::BTreeMap;
 
+    use zcash_keys::address::{Address, UnifiedAddress};
+
     use incrementalmerkletree::Position;
     use nonempty::NonEmpty;
     use zcash_address::ZcashAddress;
-    use zcash_primitives::transaction::builder::BundlePadding;
+    use zcash_primitives::transaction::{
+        TxId,
+        builder::BundlePadding,
+        components::orchard::{ACTION_SIZE, bundle_version_for_branch},
+    };
 
-    use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
-    use zcash_protocol::value::COIN;
-    use zcash_protocol::zip318::PoolMigrationConstants;
-    use zip321::Payment;
+    use crate::{
+        data_api::{
+            anchor_retention::{AnchorRetentionInterval, PoolMigrationParams},
+            wallet::{ConfirmationsPolicy, TargetHeight},
+        },
+        fees::{ChangeValue, DummyOutputCounts, TransactionBalance},
+        wallet::Note,
+    };
+    use zcash_protocol::{
+        PoolType, ShieldedPool,
+        consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        constants::MAX_BLOCK_BYTES,
+        value::{COIN, Zatoshis},
+        zip318::PoolMigrationConstants,
+    };
+    use zip321::{Payment, TransactionRequest};
 
     use orchard::{
         ValuePool,
@@ -1125,24 +1144,8 @@ mod tests {
         value::NoteValue,
     };
     use proptest::prelude::*;
-    use zcash_primitives::transaction::{
-        TxId,
-        components::orchard::{ACTION_SIZE, bundle_version_for_branch},
-    };
-    use zcash_protocol::{
-        PoolType, ShieldedPool,
-        consensus::{BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
-        constants::MAX_BLOCK_BYTES,
-        value::Zatoshis,
-    };
-    use zip321::TransactionRequest;
 
     use super::{Proposal, ProposalError, ShieldedInputs, Step};
-    use crate::{
-        data_api::wallet::{ConfirmationsPolicy, TargetHeight},
-        fees::{ChangeValue, DummyOutputCounts, TransactionBalance},
-        wallet::Note,
-    };
 
     // Builds an Orchard note of the given version and value. The recipient, rho, and rseed are
     // fixed; only the version and value vary, which is all `Note::pool`/`Note::protocol` depend on.
@@ -1569,9 +1572,6 @@ mod tests {
         pool: PoolType,
         ironwood_active: bool,
     ) -> Result<Step<u32>, ProposalError> {
-        use zcash_keys::address::{Address, UnifiedAddress};
-        use zcash_protocol::consensus::Network;
-
         let sk: SpendingKey = Option::from(SpendingKey::from_bytes([0x2a; 32])).unwrap();
         let recipient = FullViewingKey::from(&sk).address_at(0u32, zip32::Scope::External);
         let ua = UnifiedAddress::from_receivers(Some(recipient), None, None).unwrap();

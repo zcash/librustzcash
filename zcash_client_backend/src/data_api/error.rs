@@ -1,17 +1,19 @@
 //! Types for wallet error handling.
 
-use std::collections::HashMap;
-use std::error;
-use std::fmt::{self, Debug, Display};
-use std::hash::Hash;
+use std::{
+    collections::HashMap,
+    error,
+    fmt::{self, Debug, Display, Write},
+    hash::Hash,
+};
 
 use shardtree::error::ShardTreeError;
 use zcash_address::ConversionError;
 use zcash_keys::address::UnifiedAddress;
 use zcash_primitives::transaction::builder;
-use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::{
     PoolType,
+    consensus::BlockHeight,
     value::{BalanceError, Zatoshis},
 };
 
@@ -222,8 +224,6 @@ where
     N: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use fmt::Write;
-
         match self {
             Error::DataSource(e) => {
                 write!(

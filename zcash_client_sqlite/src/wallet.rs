@@ -159,16 +159,25 @@ use {
         bundle::{OutPoint, TxOut},
         keys::{IncomingViewingKey as _, NonHardenedChildIndex, TransparentKeyScope},
     },
+    ReceiverRequirement::*,
+    rusqlite::types::Value,
+    std::rc::Rc,
     zcash_client_backend::{data_api::DecryptedTransaction, wallet::WalletTransparentOutput},
 };
 
 #[cfg(feature = "orchard")]
 use zcash_client_backend::data_api::{IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT};
 
+use FindAccountForAddressError as E;
 #[cfg(feature = "zcashd-compat")]
 use {
     crate::wallet::encoding::{decode_legacy_account_index, encode_legacy_account_index},
     zcash_keys::keys::zcashd,
+};
+#[cfg(feature = "transparent-key-import")]
+use {
+    ::transparent::address::TransparentAddress,
+    zcash_script::{descriptor::sh, script::Evaluable},
 };
 
 pub mod commitment_tree;
@@ -688,7 +697,6 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         TransparentKeyScope::INTERNAL,
         TransparentKeyScope::EPHEMERAL,
     ] {
-        use ReceiverRequirement::*;
         transparent::generate_gap_addresses(
             conn,
             params,
@@ -871,8 +879,6 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     account_id: AccountRef,
     pubkey: secp256k1::PublicKey,
 ) -> Result<usize, SqliteClientError> {
-    use ::transparent::address::TransparentAddress;
-
     let existing_import_account = conn
         .query_row(
             "SELECT accounts.uuid AS account_uuid
@@ -940,10 +946,6 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     account_uuid: AccountUuid,
     redeem_script: zcash_script::script::Redeem,
 ) -> Result<(), SqliteClientError> {
-    use ::transparent::address::TransparentAddress;
-    use zcash_script::descriptor::sh;
-    use zcash_script::script::Evaluable;
-
     // Resolve the account up front so an unknown account is reported explicitly, rather than
     // inferred from a zero-row INSERT below.
     let account_id = get_account_ref(conn, account_uuid)?;
@@ -1056,7 +1058,6 @@ pub(crate) fn get_next_available_address<P: consensus::Parameters, C: Clock>(
         // transparent gap limit.
         #[cfg(feature = "transparent-inputs")]
         {
-            use ReceiverRequirement::*;
             // First, ensure that we have pre-generated as many addresses as we can.
             transparent::generate_gap_addresses(
                 conn,
@@ -1249,8 +1250,6 @@ pub(crate) fn find_account_for_address<P: consensus::Parameters>(
     params: &P,
     address: &Address,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
-    use FindAccountForAddressError as E;
-
     let addr_str = address.encode(params);
     // For a UA the transparent receiver (if any) may match the cached column; for non-UA
     // addresses the same string serves both roles (the `cached_transparent_receiver_address`
@@ -1318,8 +1317,6 @@ fn find_account_for_shielded_address<P: consensus::Parameters>(
     address: &Address,
     shielded_flag: ReceiverFlags,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
-    use FindAccountForAddressError as E;
-
     // The address may be a receiver embedded in a stored UA. Query candidate UAs via
     // `receiver_flags` and verify at the Rust level.
     let mut stmt = conn
@@ -1361,8 +1358,6 @@ fn find_account_for_unified_address_algebraic<P: consensus::Parameters>(
     params: &P,
     unified_address: &UnifiedAddress,
 ) -> Result<Option<AccountUuid>, FindAccountForAddressError<SqliteClientError>> {
-    use FindAccountForAddressError as E;
-
     // Ask each account's UIVK whether it derived any receiver of the UA. This finds every
     // UA that any account in the wallet could have produced, whether or not it was
     // previously exposed.
@@ -1596,9 +1591,6 @@ pub(crate) fn involved_accounts(
     conn: &rusqlite::Connection,
     tx_refs: impl IntoIterator<Item = TxRef>,
 ) -> Result<HashSet<(AccountRef, AccountUuid, Option<TransparentKeyScope>)>, SqliteClientError> {
-    use rusqlite::types::Value;
-    use std::rc::Rc;
-
     let mut stmt = conn.prepare_cached(
         "SELECT account_id, accounts.uuid, key_scope
          FROM v_address_uses
@@ -5892,7 +5884,10 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
+    use std::{
+        collections::HashSet,
+        num::{NonZeroU8, NonZeroU32},
+    };
 
     use rusqlite::{Connection, named_params};
     use sapling::zip32::ExtendedSpendingKey;
@@ -5901,12 +5896,21 @@ mod tests {
     use zcash_client_backend::data_api::{
         Account as _, AccountSource, TransactionDataRequest, TransactionStatus, WalletRead,
         WalletWrite,
-        testing::{AddressType, DataStoreFactory, FakeCompactOutput, TestBuilder, TestState},
+        chain::{ChainState, CommitmentTreeRoot},
+        error::RewindError,
+        testing::{
+            AddressType, DataStoreFactory, FakeCompactOutput, InitialChainState, TestBuilder,
+            TestState, pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+        },
         wallet::ConfirmationsPolicy,
     };
     use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::block::BlockHash;
-    use zcash_protocol::{TxId, consensus::BlockHeight, value::Zatoshis};
+    use zcash_protocol::{
+        TxId,
+        consensus::{BlockHeight, NetworkUpgrade, Parameters},
+        value::Zatoshis,
+    };
 
     use crate::{
         AccountUuid,
@@ -5920,8 +5924,14 @@ mod tests {
         select_truncation_height,
     };
 
+    use incrementalmerkletree::frontier::Frontier;
     #[cfg(feature = "orchard")]
-    use {crate::testing::db::TestDb, zcash_protocol::local_consensus::LocalNetwork};
+    use {
+        crate::testing::db::TestDb, ::orchard::tree::MerkleHashOrchard,
+        incrementalmerkletree::Hashable as _, shardtree::error::ShardTreeError,
+        zcash_client_backend::data_api::WalletCommitmentTrees,
+        zcash_protocol::local_consensus::LocalNetwork,
+    };
 
     fn connection_with_checkpoint_tables() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -6286,18 +6296,6 @@ mod tests {
 
     #[test]
     fn rewound_birthday_does_not_falsely_report_complete_recovery() {
-        use std::num::NonZeroU8;
-
-        use incrementalmerkletree::frontier::Frontier;
-        use zcash_client_backend::data_api::{
-            chain::{ChainState, CommitmentTreeRoot},
-            testing::{InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
-        };
-        use zcash_protocol::{
-            ShieldedPool,
-            consensus::{NetworkUpgrade, Parameters},
-        };
-
         // Configure a prior chain state with three complete sapling subtrees plus a
         // partial frontier. The subtree roots are imported into `tree_shards` (with
         // their `subtree_end_height` populated, per the wallet invariant), but the
@@ -6442,18 +6440,6 @@ mod tests {
 
     #[test]
     fn rewound_birthday_recovery_denominator_includes_imported_subtrees() {
-        use std::num::NonZeroU8;
-
-        use incrementalmerkletree::frontier::Frontier;
-        use zcash_client_backend::data_api::{
-            chain::{ChainState, CommitmentTreeRoot},
-            testing::{InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
-        };
-        use zcash_protocol::{
-            ShieldedPool,
-            consensus::{NetworkUpgrade, Parameters},
-        };
-
         // Same imported-subtrees + small scanned tail setup as the previous
         // rewound-birthday test. In addition to checking that recovery is
         // not falsely reported as 100% complete, this test asserts that the
@@ -6614,18 +6600,6 @@ mod tests {
 
     #[test]
     fn recover_until_above_chain_tip_does_not_overshoot_tip_size() {
-        use std::num::NonZeroU8;
-
-        use incrementalmerkletree::frontier::Frontier;
-        use zcash_client_backend::data_api::{
-            chain::{ChainState, CommitmentTreeRoot},
-            testing::{InitialChainState, pool::ShieldedPoolTester, sapling::SaplingPoolTester},
-        };
-        use zcash_protocol::{
-            ShieldedPool,
-            consensus::{NetworkUpgrade, Parameters},
-        };
-
         // Reproduces the wild scenario in which one of the wallet's accounts has
         // `recover_until_height` slightly above the current chain tip (e.g. UFVK1
         // was registered with `recover_until` a few blocks past the then chain
@@ -6773,9 +6747,6 @@ mod tests {
     /// `reset_account_birthdays` to acknowledge the lowering.
     #[test]
     fn rewind_to_chain_state_below_all_birthdays_with_empty_reset_returns_error() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::{WalletWrite, chain::ChainState, error::RewindError};
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -6805,9 +6776,6 @@ mod tests {
     /// proceeds and the listed account's birthday is lowered to the new floor.
     #[test]
     fn rewind_to_chain_state_below_all_birthdays_with_account_in_reset_succeeds() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::{WalletWrite, chain::ChainState};
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -6839,9 +6807,6 @@ mod tests {
     /// error via `RewindError::DataSource(CorruptedData)`.
     #[test]
     fn rewind_to_chain_state_with_unknown_uuid_in_reset_returns_data_source_error() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::{WalletWrite, chain::ChainState, error::RewindError};
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_account_from_sapling_activation(BlockHash([0; 32]))
@@ -6938,9 +6903,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_to_chain_state_with_empty_ironwood_tree_succeeds() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::chain::ChainState;
-
         let (mut st, start_height) = wallet_with_scanned_blocks();
 
         // Simulate the post-migration state: the Ironwood tables exist but are empty, even
@@ -6982,9 +6944,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_to_chain_state_with_empty_orchard_tree_succeeds() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::chain::ChainState;
-
         let (mut st, start_height) = wallet_with_scanned_blocks();
 
         // Simulate the post-migration state: the Orchard tables exist but are empty, even
@@ -7019,9 +6978,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_to_chain_state_with_straddling_ironwood_checkpoints_errors() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::{chain::ChainState, error::RewindError};
-
         let (mut st, start_height) = wallet_with_scanned_blocks();
         let target_height = start_height + 2;
 
@@ -7055,10 +7011,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_to_chain_state_with_lagging_ironwood_tree_succeeds() {
-        use shardtree::error::ShardTreeError;
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::{WalletCommitmentTrees, chain::ChainState};
-
         let (mut st, start_height) = wallet_with_scanned_blocks();
 
         // Simulate an in-progress NU6.3 rescan: truncate *only* the Ironwood tree back to an
@@ -7106,9 +7058,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_to_chain_state_with_tip_only_ironwood_tree_empties_it() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::chain::ChainState;
-
         let (mut st, start_height) = wallet_with_scanned_blocks();
         let target_height = start_height + 2;
 
@@ -7151,9 +7100,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_to_chain_state_with_witness_destroying_truncation_errors() {
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::{chain::ChainState, error::RewindError};
-
         let mut st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
@@ -7215,14 +7161,6 @@ mod tests {
     #[test]
     #[cfg(feature = "orchard")]
     fn rewind_preserves_ironwood_subtree_roots_at_or_below_target() {
-        use ::orchard::tree::MerkleHashOrchard;
-        use incrementalmerkletree::Hashable as _;
-        use std::collections::HashSet;
-        use zcash_client_backend::data_api::{
-            WalletCommitmentTrees,
-            chain::{ChainState, CommitmentTreeRoot},
-        };
-
         let (mut st, start_height) = wallet_with_scanned_blocks();
         let target_height = start_height + 2;
 

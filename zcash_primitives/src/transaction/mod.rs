@@ -25,6 +25,8 @@ use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
     value::{BalanceError, ZatBalance, Zatoshis},
 };
+// `valid_in_branch` matches on every branch by bare name.
+use zcash_protocol::consensus::BranchId::*;
 
 use self::{
     components::{
@@ -208,7 +210,6 @@ impl TxVersion {
     /// Returns `true` if this transaction version is valid for us in the specified consensus
     /// branch, `false` otherwise.
     pub fn valid_in_branch(&self, consensus_branch_id: BranchId) -> bool {
-        use BranchId::*;
         // Note: we intentionally use `match` expressions instead of the `matches!`
         // macro below because we want exhaustivity.
         match self {

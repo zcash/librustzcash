@@ -43,11 +43,8 @@ use std::{
 
 use shardtree::error::{QueryError, ShardTreeError};
 
-use super::InputSource;
-use super::locking::lock_proposal_inputs;
 pub use super::locking::{LockRequest, unlock_proposal_inputs};
-#[cfg(feature = "orchard")]
-use crate::data_api::anchor_retention::PoolMigrationParams;
+use super::{InputSource, locking::lock_proposal_inputs};
 use crate::{
     data_api::{
         Account, MaxSpendMode, NoteCommitmentTree, SentTransaction, SentTransactionOutput,
@@ -72,22 +69,25 @@ use zcash_keys::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 use zcash_primitives::transaction::{
-    Transaction, TxId,
+    Transaction, TxId, TxVersion,
     builder::{BuildConfig, BuildResult, Builder, BundlePadding},
     components::sapling::zip212_enforcement,
     fees::FeeRule,
 };
-use zcash_protocol::zip318::AnchorBucketInterval;
-#[cfg(feature = "orchard")]
-use zcash_protocol::zip318::PoolMigrationConstants;
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     value::Zatoshis,
+    zip318::AnchorBucketInterval,
 };
 use zip32::Scope;
 use zip321::Payment;
+#[cfg(feature = "orchard")]
+use {
+    crate::data_api::anchor_retention::PoolMigrationParams,
+    zcash_protocol::{consensus::NetworkUpgrade, zip318::PoolMigrationConstants},
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -103,9 +103,6 @@ use {
     transparent::bundle::TxOut,
 };
 
-#[cfg(feature = "orchard")]
-use zcash_protocol::consensus::NetworkUpgrade;
-
 #[cfg(feature = "transparent-key-import")]
 use zcash_script::script::{self as zs_script, Evaluable};
 
@@ -120,12 +117,13 @@ use {
     },
     sapling::note_encryption::SaplingDomain,
     serde::{Deserialize, Serialize},
+    std::collections::BTreeMap,
     transparent::pczt::Bip32Derivation,
-    zcash_note_encryption::try_output_recovery_with_pkd_esk,
+    zcash_note_encryption::{
+        Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput, try_output_recovery_with_pkd_esk,
+    },
     zcash_protocol::{consensus::NetworkConstants, value::BalanceError},
 };
-
-use zcash_primitives::transaction::TxVersion;
 
 pub mod input_selection;
 use input_selection::{
@@ -3184,21 +3182,19 @@ where
                     .iter()
                     .enumerate()
                     .filter_map(|(index, input)| {
-                        build_state
-                            .transparent_input_addresses
-                            .get(
-                                &TransparentAddress::from_script_from_chain(input.script_pubkey())
-                                    .expect("we created this with a supported transparent address"),
-                            )
-                            .and_then(|address_metadata| match address_metadata.source() {
-                                TransparentAddressSource::Derived {
-                                    scope,
-                                    address_index,
-                                } => Some((index, *scope, *address_index)),
-                                #[cfg(feature = "transparent-key-import")]
-                                TransparentAddressSource::StandalonePubkey(_)
-                                | TransparentAddressSource::StandaloneScript(_) => None,
-                            })
+                        let address_metadata = build_state.transparent_input_addresses.get(
+                            &TransparentAddress::from_script_from_chain(input.script_pubkey())
+                                .expect("we created this with a supported transparent address"),
+                        )?;
+                        match address_metadata.source() {
+                            TransparentAddressSource::Derived {
+                                scope,
+                                address_index,
+                            } => Some((index, *scope, *address_index)),
+                            #[cfg(feature = "transparent-key-import")]
+                            TransparentAddressSource::StandalonePubkey(_)
+                            | TransparentAddressSource::StandaloneScript(_) => None,
+                        }
                     })
                     .collect::<Vec<_>>();
 
@@ -3491,9 +3487,6 @@ where
     DbT: WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::AccountId: serde::de::DeserializeOwned,
 {
-    use std::collections::BTreeMap;
-    use zcash_note_encryption::{Domain, ENC_CIPHERTEXT_SIZE, ShieldedOutput};
-
     let finalized = SpendFinalizer::new(pczt).finalize_spends()?;
 
     let proposal_info = finalized

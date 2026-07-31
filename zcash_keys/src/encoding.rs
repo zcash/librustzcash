@@ -4,15 +4,16 @@
 //! [zcash_protocol::constants] module.
 
 use crate::address::UnifiedAddress;
-use alloc::borrow::ToOwned;
-use alloc::string::{String, ToString};
+use alloc::{
+    borrow::ToOwned,
+    string::{String, ToString},
+};
 use bs58::{self, decode::Error as Bs58Error};
 use core::fmt;
 
 use transparent::address::TransparentAddress;
 use zcash_address::unified::{self, Encoding};
 use zcash_protocol::consensus::{self, NetworkConstants};
-
 #[cfg(feature = "sapling")]
 use {
     alloc::vec::Vec,
@@ -22,7 +23,10 @@ use {
     },
     corez::io::{self, Write},
     sapling::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-    zcash_protocol::consensus::NetworkType,
+    zcash_protocol::{
+        consensus::NetworkType,
+        constants::{mainnet, regtest, testnet},
+    },
 };
 
 #[cfg(feature = "sapling")]
@@ -267,8 +271,6 @@ pub fn decode_extended_full_viewing_key(
 pub fn decode_extfvk_with_network(
     s: &str,
 ) -> Result<(NetworkType, ExtendedFullViewingKey), Bech32DecodeError> {
-    use zcash_protocol::constants::{mainnet, regtest, testnet};
-
     let parsed = CheckedHrpstring::new::<Bech32>(s)?;
     let network = match parsed.hrp().as_str() {
         mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY => Ok(NetworkType::Main),

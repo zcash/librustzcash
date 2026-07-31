@@ -105,6 +105,8 @@ mod tests {
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_protocol::consensus::Network;
 
+    #[cfg(feature = "transparent-inputs")]
+    use crate::{TxRef, wallet::involved_accounts};
     use crate::{
         WalletDb,
         testing::db::{test_clock, test_rng},
@@ -372,8 +374,6 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn scenario_ironwood_receipt_leaves_its_account_uninvolved() {
-        use crate::{TxRef, wallet::involved_accounts};
-
         let (_data_file, mut db_data) = wallet_before_migration();
 
         assert!(

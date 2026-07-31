@@ -42,28 +42,42 @@
 //! [`scheduling`]: crate::scheduling
 
 use alloc::vec::Vec;
-use core::fmt;
-use core::num::{NonZeroU32, NonZeroUsize};
+use core::{
+    fmt,
+    num::{NonZeroU32, NonZeroUsize},
+};
+#[cfg(feature = "orchard")]
+use {
+    crate::{
+        build::{AccountDerivation, build_prep_tx, build_transfer_pczt},
+        preparation::PrepOutput,
+    },
+    alloc::collections::BTreeMap,
+};
 
 use corez::io;
 
 use getset::{CopyGetters, Getters};
 use rand_core::RngCore;
-use zcash_protocol::TxId;
-use zcash_protocol::consensus::BlockHeight;
-use zcash_protocol::value::{BalanceError, Zatoshis};
+use zcash_protocol::{
+    TxId,
+    consensus::BlockHeight,
+    value::{BalanceError, Zatoshis},
+};
 
-use zcash_primitives::transaction::fees::FeeRule as _;
-use zcash_primitives::transaction::fees::{transparent, zip317};
+use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 
-#[cfg(feature = "orchard")]
-use crate::build::AccountDerivation;
-use crate::denomination::{DenominationPlan, plan_denominations};
-use crate::preparation::{PrepError, PrepInput, PreparationPlan, plan_preparation};
-use crate::scheduling::{self, Schedule};
-use crate::signing_rounds::{
-    MinRounds, PlannedSigningRound, PlannedTx, SigningRoundBudget, SigningRoundStrategy,
-    min_budget_for_rounds, min_signing_rounds,
+use crate::{
+    denomination::{
+        DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
+        plan_denominations,
+    },
+    preparation::{PREP_TX_ACTIONS, PrepError, PrepInput, PreparationPlan, plan_preparation},
+    scheduling::{self, Schedule},
+    signing_rounds::{
+        MinRounds, PlannedSigningRound, PlannedTx, SigningRoundBudget, SigningRoundStrategy,
+        min_budget_for_rounds, min_signing_rounds,
+    },
 };
 
 /// The estimated number of blocks for a preparation layer's LAST scheduled transaction to mine and
@@ -816,9 +830,6 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
     params: &P,
     height: BlockHeight,
 ) -> Result<(Zatoshis, Zatoshis), zip317::FeeError> {
-    use crate::denomination::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
-    use crate::preparation::PREP_TX_ACTIONS;
-
     let fee_rule = zip317::FeeRule::standard();
     let prep_tx_fee = fee_rule.fee_required(
         params,
@@ -2107,8 +2118,6 @@ impl MigrationPlan {
         unsigned: Vec<UnsignedMigrationTx>,
         budget: SigningRoundBudget,
     ) -> Vec<Vec<UnsignedMigrationTx>> {
-        use alloc::collections::BTreeMap;
-
         let rounds = self.signing_rounds(budget);
         let mut round_of: BTreeMap<u32, usize> = BTreeMap::new();
         for (i, round) in rounds.iter().enumerate() {
@@ -2421,8 +2430,6 @@ where
         prep_tx: &crate::preparation::PrepTransaction,
         layer: usize,
     ) -> Result<Vec<orchard::note::Note>, CommitError<<B as MigrationBackend>::Error>> {
-        use crate::preparation::PrepInput;
-
         let mut spends = Vec::with_capacity(prep_tx.inputs().len());
         for input in prep_tx.inputs() {
             match input {
@@ -2470,9 +2477,6 @@ where
         &mut self,
         plan: &MigrationPlan,
     ) -> Result<(), CommitError<<B as MigrationBackend>::Error>> {
-        use crate::build::build_prep_tx;
-        use crate::preparation::PrepOutput;
-
         for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
             let mut this_layer_ids: Vec<MigrationTransferId> = Vec::with_capacity(prep_layer.len());
             for (index, prep_tx) in prep_layer.iter().enumerate() {
@@ -2595,8 +2599,6 @@ where
         &mut self,
         plan: &MigrationPlan,
     ) -> Result<(), CommitError<<B as MigrationBackend>::Error>> {
-        use crate::build::build_transfer_pczt;
-
         // Each transfer waits only for the preparation transaction that MINTS ITS OWN funding note
         // to be mined (recorded as that note's producer in `minted`), not for the whole last layer:
         // as soon as a transfer's own funding note is on-chain it may broadcast at its scheduled
@@ -2760,13 +2762,14 @@ struct CommitOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        denomination::{DENOM_CAP, MIGRATION_MAX_PREPARED_NOTES_PER_RUN},
+        preparation::FUNDING_OUTPUTS_PER_TX,
+        signing_rounds::{SigningRoundBudget, min_signing_rounds},
+    };
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
-    use zcash_protocol::value::COIN;
-
-    use zcash_protocol::local_consensus::LocalNetwork;
-
-    use crate::preparation::FUNDING_OUTPUTS_PER_TX;
+    use zcash_protocol::{local_consensus::LocalNetwork, value::COIN};
 
     /// A local network with NU6.3 active at a low height, matching the build test network, so the
     /// canonical fees and activation checks compute in planning tests.
@@ -2998,7 +3001,6 @@ mod tests {
     /// cap of 50 * 10,000 ZEC in 50 notes, and the aggregate crossings sum the per-run counts.
     #[test]
     fn whale_migrates_over_several_runs() {
-        use crate::denomination::{DENOM_CAP, MIGRATION_MAX_PREPARED_NOTES_PER_RUN};
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let whale = MockBackend::new(vec![1_200_000 * COIN], 2_000_000);
         let est = estimate_migration_runs(&test_net(), &whale, &mut rng)
@@ -3048,9 +3050,6 @@ mod tests {
     /// match the optimal packer. Rounds are summed per run (they cannot span runs).
     #[test]
     fn signing_rounds_follow_the_signer_budget() {
-        use crate::signing_rounds::{SigningRoundBudget, min_signing_rounds};
-        use core::num::NonZeroU32;
-
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         // A whale, so there are several runs, each with several transactions.
         let whale = MockBackend::new(vec![1_200_000 * COIN], 2_000_000);
@@ -3150,21 +3149,28 @@ mod tests {
 #[cfg(all(test, feature = "orchard"))]
 mod commit_tests {
     use super::*;
+    use crate::{
+        build::{
+            sign_pczt,
+            test_util::{
+                TARGET_HEIGHT, account_derivation, assert_every_spend_is_identifiable,
+                regtest_network, single_note_witness, spend_signability, spending_key,
+            },
+        },
+        denomination::{
+            DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
+        },
+        preparation::{PREP_TX_ACTIONS, plan_preparation},
+        scheduling::{AnchorBucketInterval, SchedulingParams},
+    };
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
-    use zcash_protocol::value::COIN;
+    use zcash_protocol::{
+        consensus::{NetworkUpgrade, Parameters as _},
+        value::COIN,
+    };
 
     use orchard::keys::{FullViewingKey, SpendAuthorizingKey};
-
-    use crate::build::sign_pczt;
-    use crate::build::test_util::{
-        TARGET_HEIGHT, account_derivation, assert_every_spend_is_identifiable, regtest_network,
-        single_note_witness, spend_signability, spending_key,
-    };
-    use crate::denomination::{
-        DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
-    };
-    use crate::preparation::{PREP_TX_ACTIONS, plan_preparation};
 
     /// The canonical fees on the regtest network at the build height, computed exactly as
     /// `plan_migration` computes them.
@@ -3906,7 +3912,6 @@ mod commit_tests {
         // Floor the transfer schedule so every transfer has a candidate anchor boundary above
         // the estimated last-preparation mining height, exactly as `plan_migration` floors it.
         let nu63_activation = {
-            use zcash_protocol::consensus::{NetworkUpgrade, Parameters as _};
             regtest_network(true)
                 .activation_height(NetworkUpgrade::Nu6_3)
                 .expect("NU6.3 is active on the test network")
@@ -4498,9 +4503,6 @@ mod commit_tests {
     /// checkpoint at witness-resolution time.
     #[test]
     fn a_changed_anchor_grid_is_rejected_rather_than_left_unprovable() {
-        use crate::scheduling::{AnchorBucketInterval, SchedulingParams};
-        use core::num::NonZeroU32;
-
         let seed = 7u64;
         let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
         let params = regtest_network(true);

@@ -82,6 +82,7 @@ proptest.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
+sapling = { workspace = true, features = ["test-dependencies"] }
 secp256k1 = { workspace = true, features = ["rand"] }
 transparent = { workspace = true, features = ["test-dependencies"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }

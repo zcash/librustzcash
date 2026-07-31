@@ -8,22 +8,22 @@ use zcash_address::{
     unified::{Container, Receiver},
 };
 use zcash_client_backend::data_api::AccountSource;
-#[cfg(feature = "transparent-inputs")]
-use zcash_keys::keys::AddressGenerationError;
 use zcash_keys::{
     address::{Address, UnifiedAddress},
     keys::{ReceiverRequirement, ReceiverRequirements},
 };
 use zcash_protocol::{PoolType, ShieldedPool, consensus::NetworkType, memo::MemoBytes};
 use zip32::DiversifierIndex;
-
-use crate::error::SqliteClientError;
-
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::transparent::SchedulingError, std::time::SystemTime,
-    transparent::keys::TransparentKeyScope, zcash_client_backend::data_api::TransparentKeyOrigin,
+    super::transparent::SchedulingError,
+    std::time::{Duration, SystemTime},
+    transparent::keys::TransparentKeyScope,
+    zcash_client_backend::data_api::TransparentKeyOrigin,
+    zcash_keys::keys::AddressGenerationError,
 };
+
+use crate::error::SqliteClientError;
 
 #[cfg(feature = "zcashd-compat")]
 use zcash_keys::keys::zcashd;
@@ -105,8 +105,6 @@ pub(crate) fn epoch_seconds(t: SystemTime) -> Result<i64, SchedulingError> {
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn decode_epoch_seconds(i: i64) -> Result<SystemTime, SchedulingError> {
-    use std::time::Duration;
-
     Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(u64::try_from(i)?))
 }
 

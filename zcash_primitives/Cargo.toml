@@ -146,6 +146,8 @@ bench = false
 [[bench]]
 name = "note_decryption"
 harness = false
+# Needs `sapling::prover::mock`, which sapling gates behind its `circuit` feature.
+required-features = ["circuits"]
 
 [badges]
 maintenance = { status = "actively-developed" }

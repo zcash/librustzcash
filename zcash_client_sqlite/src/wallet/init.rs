@@ -1,8 +1,6 @@
 //! Functions for initializing the various databases.
 
-use std::borrow::BorrowMut;
-use std::fmt;
-use std::rc::Rc;
+use std::{borrow::BorrowMut, fmt, rc::Rc};
 
 use rand_core::RngCore;
 use regex::Regex;
@@ -764,10 +762,12 @@ mod tests {
         super::WalletMigrationError,
         crate::wallet::{self, PoolType, pool_code},
         zcash_address::test_vectors,
-        zcash_client_backend::data_api::WalletWrite,
+        zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead, WalletWrite},
+        zcash_primitives::block::BlockHash,
         zip32::DiversifierIndex,
     };
 
+    use regex::Regex;
     #[cfg(all(zcash_unstable = "nu7", feature = "zip-233"))]
     use zcash_protocol::value::Zatoshis;
 
@@ -786,7 +786,6 @@ mod tests {
             .with_data_store_factory(TestDbFactory::default())
             .build();
 
-        use regex::Regex;
         let re = Regex::new(r"\s+").unwrap();
         let re_paren = Regex::new(r"([\(\)])").unwrap();
 
@@ -1458,9 +1457,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead};
-        use zcash_primitives::block::BlockHash;
-
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =

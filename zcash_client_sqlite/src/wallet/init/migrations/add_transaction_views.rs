@@ -281,16 +281,21 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::wallet::init::migrations::{ufvk_support, utxos_table},
-        ::transparent::{
-            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
-            keys::IncomingViewingKey,
+        crate::{
+            UA_TRANSPARENT,
+            wallet::init::migrations::{ufvk_support, utxos_table},
         },
-        zcash_keys::encoding::AddressCodec,
+        ::transparent::{
+            address::Script,
+            bundle::{self as transparent, Authorized, OutPoint, TxIn, TxOut},
+            keys::{IncomingViewingKey, NonHardenedChildIndex},
+        },
+        zcash_client_backend::keys::UnifiedAddressRequest,
+        zcash_keys::{encoding::AddressCodec, keys::ReceiverRequirement::*},
         zcash_primitives::transaction::{TransactionData, TxVersion},
         zcash_protocol::{
             consensus::{BlockHeight, BranchId},
-            value::ZatBalance,
+            value::{ZatBalance, Zatoshis},
         },
     };
 
@@ -394,13 +399,6 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
-        use ::transparent::{address::Script, keys::NonHardenedChildIndex};
-        use zcash_client_backend::keys::UnifiedAddressRequest;
-        use zcash_keys::keys::ReceiverRequirement::*;
-        use zcash_protocol::value::Zatoshis;
-
-        use crate::UA_TRANSPARENT;
-
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data =

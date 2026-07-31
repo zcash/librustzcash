@@ -23,18 +23,20 @@ use core::num::NonZeroU32;
 
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
-use zcash_protocol::consensus::BlockHeight;
-use zcash_protocol::value::COIN;
+use zcash_protocol::{consensus::BlockHeight, value::COIN};
 
 #[cfg(feature = "test-dependencies")]
-use zcash_pool_migration::denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
-use zcash_pool_migration::engine::{
-    MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
-    UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
+use zcash_pool_migration::{
+    denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+    testing::{MIGRATION_SCENARIOS, MULTI_RUN_EVOLUTION, SIGNING_ROUND_EVOLUTION},
 };
-use zcash_pool_migration::signing_rounds::{MinRounds, NextFit, SigningRoundBudget};
-#[cfg(feature = "test-dependencies")]
-use zcash_pool_migration::testing::MIGRATION_SCENARIOS;
+use zcash_pool_migration::{
+    engine::{
+        MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
+        UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
+    },
+    signing_rounds::{MinRounds, NextFit, SigningRoundBudget},
+};
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network};
 
 /// Plan a migration for a wallet holding the given raw note values (in zatoshi).
@@ -308,8 +310,6 @@ fn migration_scenarios_end_to_end() {
 #[cfg(feature = "test-dependencies")]
 #[test]
 fn total_keystone_rounds_evolve_across_runs() {
-    use zcash_pool_migration::testing::MULTI_RUN_EVOLUTION;
-
     let seed = 7;
     for case in MULTI_RUN_EVOLUTION {
         let backend = CommitMock::new(seed, &[case.balance_zec * COIN]);
@@ -371,8 +371,6 @@ fn total_keystone_rounds_evolve_across_runs() {
 #[cfg(feature = "test-dependencies")]
 #[test]
 fn keystone_rounds_evolve_with_actions() {
-    use zcash_pool_migration::testing::SIGNING_ROUND_EVOLUTION;
-
     let seed = 7;
     for case in SIGNING_ROUND_EVOLUTION {
         let (_backend, plan) = plan_notes(seed, &[case.balance_zec * COIN]);

@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, hash::Hash, ops::Range};
 #[cfg(feature = "orchard")]
-use std::collections::BTreeSet;
-use std::hash::Hash;
-use std::ops::Range;
+use {
+    crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint, std::collections::BTreeSet,
+};
 
 use rayon::{
     iter::{IndexedParallelIterator as _, ParallelIterator},
@@ -40,15 +40,13 @@ use {
     std::collections::HashSet,
     transparent::keys::TransparentKeyScope,
     zcash_keys::keys::{
-        ReceiverRequirement, UnifiedAddressRequest,
+        ReceiverRequirement::*,
+        UnifiedAddressRequest,
         transparent::gap_limits::{
             AddressStore, GapAddressesError, GapLimits, generate_gap_addresses,
         },
     },
 };
-
-#[cfg(feature = "orchard")]
-use {crate::data_api::ORCHARD_SHARD_HEIGHT, shardtree::store::Checkpoint};
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
@@ -580,7 +578,6 @@ where
         .map_err(PutBlocksError::Storage)?
     {
         if let Some(t_key_scope) = key_scope {
-            use ReceiverRequirement::*;
             generate_transparent_gap_addresses(
                 wallet_db,
                 gap_limits,
@@ -1069,7 +1066,6 @@ where
     // Regenerate the gap limit addresses.
     #[cfg(feature = "transparent-inputs")]
     for (account_id, key_scope) in gap_update_set {
-        use ReceiverRequirement::*;
         generate_transparent_gap_addresses(
             wallet_db,
             gap_limits,
@@ -1756,15 +1752,13 @@ where
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "orchard")]
-    use std::collections::BTreeSet;
+    use {super::cross_pool_ensure_heights, std::collections::BTreeSet};
 
     use core::num::NonZeroU32;
 
     use proptest::prelude::*;
     use zcash_protocol::consensus::BlockHeight;
 
-    #[cfg(feature = "orchard")]
-    use super::cross_pool_ensure_heights;
     use super::{
         NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor, should_retain_anchor,
         should_track_nullifiers,

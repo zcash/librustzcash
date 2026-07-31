@@ -14,20 +14,17 @@ use crate::{
 // Imports used only by the address-metadata helpers, which are compiled only
 // for tests and the `test-dependencies` feature.
 #[cfg(any(test, feature = "test-dependencies"))]
-use crate::{AccountRef, GapLimits};
-#[cfg(any(test, feature = "test-dependencies"))]
-use ::transparent::{
-    address::TransparentAddress,
-    keys::{NonHardenedChildIndex, TransparentKeyScope},
+use {
+    crate::{AccountRef, GapLimits, wallet::transparent::find_gap_start},
+    ::transparent::{
+        address::TransparentAddress,
+        keys::{NonHardenedChildIndex, TransparentKeyScope},
+    },
+    std::{ops::Range, time::SystemTime},
+    zcash_client_backend::wallet::{Exposure, GapMetadata, TransparentAddressMetadata},
+    zcash_keys::encoding::AddressCodec,
+    zcash_protocol::consensus::{self, BlockHeight},
 };
-#[cfg(any(test, feature = "test-dependencies"))]
-use std::{ops::Range, time::SystemTime};
-#[cfg(any(test, feature = "test-dependencies"))]
-use zcash_client_backend::wallet::{Exposure, TransparentAddressMetadata};
-#[cfg(any(test, feature = "test-dependencies"))]
-use zcash_keys::encoding::AddressCodec;
-#[cfg(any(test, feature = "test-dependencies"))]
-use zcash_protocol::consensus::{self, BlockHeight};
 
 // Imports used only by `find_account_for_ephemeral_address_str`, which is
 // compiled only for the transparent-inputs test surface.
@@ -35,12 +32,7 @@ use zcash_protocol::consensus::{self, BlockHeight};
     any(test, feature = "test-dependencies"),
     feature = "transparent-inputs"
 ))]
-use crate::AccountUuid;
-#[cfg(all(
-    any(test, feature = "test-dependencies"),
-    feature = "transparent-inputs"
-))]
-use rusqlite::OptionalExtension;
+use {crate::AccountUuid, rusqlite::OptionalExtension};
 
 use super::next_check_time;
 
@@ -74,8 +66,6 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
     account_id: AccountRef,
     index_range: Option<Range<NonHardenedChildIndex>>,
 ) -> Result<Vec<(TransparentAddress, TransparentAddressMetadata)>, SqliteClientError> {
-    use crate::wallet::transparent::find_gap_start;
-
     let gap_start = find_gap_start(
         conn,
         account_id,
@@ -106,7 +96,6 @@ pub(crate) fn get_known_ephemeral_addresses<P: consensus::Parameters>(
                 ":key_scope": KeyScope::Ephemeral.encode()
             },
             |row| {
-                use zcash_client_backend::wallet::GapMetadata;
 
                 let addr_str: String = row.get("cached_transparent_receiver_address")?;
 

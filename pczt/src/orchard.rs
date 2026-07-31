@@ -1,21 +1,32 @@
 //! The Orchard fields of a PCZT.
 
-use alloc::collections::BTreeMap;
-use alloc::string::String;
-use alloc::vec::Vec;
-use core::cmp::Ordering;
-use core::fmt;
+use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use core::{cmp::Ordering, fmt};
 
-#[cfg(feature = "orchard")]
-use ff::PrimeField;
 use getset::Getters;
-#[cfg(feature = "orchard")]
-use orchard::bundle::BundleVersion;
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+// `NoteVersion` is re-exported, so it keeps its own statement.
 #[cfg(feature = "orchard")]
 pub(crate) use orchard::note::NoteVersion;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
 #[cfg(feature = "orchard")]
-use zcash_note_encryption::{Domain, ENC_CIPHERTEXT_SIZE, EphemeralKeyBytes, ShieldedOutput};
+use {
+    ::orchard::{
+        Address, Note, ValuePool,
+        bundle::BundleVersion,
+        note::{ExtractedNoteCommitment, Nullifier, RandomSeed, Rho},
+        note_encryption::{CompactAction, IronwoodDomain, OrchardDomain, OrchardNoteEncryption},
+        pczt::ParseError as OrchardParseError,
+        value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+    },
+    ff::PrimeField,
+    zcash_note_encryption::{
+        COMPACT_NOTE_SIZE, Domain, ENC_CIPHERTEXT_SIZE, EphemeralKeyBytes, ShieldedOutput,
+        try_output_recovery_with_pkd_esk,
+    },
+    zcash_protocol::consensus::{BranchId, OrchardProtocolRevision},
+};
 
 use crate::{
     common::{Global, Zip32Derivation},
@@ -176,11 +187,13 @@ impl Parsed {
 /// Shared fixtures for hand-crafting Orchard-protocol PCZT test data.
 #[cfg(all(test, feature = "orchard"))]
 pub(crate) mod testing {
-    use alloc::collections::BTreeMap;
-
-    use pasta_curves::pallas;
-
-    use super::{Action, EncCiphertext, Output, Spend};
+    #[cfg(any(feature = "prover", all(feature = "signer", feature = "io-finalizer")))]
+    use {
+        super::{Action, EncCiphertext, Output, Spend},
+        alloc::collections::BTreeMap,
+        ff::Field,
+        pasta_curves::pallas,
+    };
 
     /// Derives a valid Orchard value commitment encoding for the given value and
     /// trapdoor, so that hand-crafted `Action`s pass the structural validity check
@@ -197,9 +210,8 @@ pub(crate) mod testing {
     /// Derives a valid, randomized `rk` encoding (a curve point, unlike an arbitrary
     /// byte string) so that hand-crafted `Spend`s pass the structural validity check
     /// applied when parsing.
+    #[cfg(any(feature = "prover", all(feature = "signer", feature = "io-finalizer")))]
     pub(crate) fn randomized_verification_key() -> [u8; 32] {
-        use ff::Field;
-
         let sk = orchard::keys::SpendingKey::from_bytes([7; 32]).unwrap();
         let ask = orchard::keys::SpendAuthorizingKey::from(&sk);
         let randomized_signing_key = ask.randomize(&pallas::Scalar::ONE);
@@ -211,6 +223,7 @@ pub(crate) mod testing {
 
     /// A structurally valid dummy Orchard action with no witness (so it is exempt
     /// from anchor-consistency checks), for use as a base in hand-crafted test PCZTs.
+    #[cfg(any(feature = "prover", all(feature = "signer", feature = "io-finalizer")))]
     pub(crate) fn dummy_action() -> Action {
         Action {
             cv_net: Some(value_commitment(0, [3; 32])),
@@ -339,14 +352,6 @@ fn recover_memo_plaintext_from_ciphertext_and_action(
     action: &Action,
     note_version: NoteVersion,
 ) -> Option<MemoPlaintext> {
-    use ::orchard::{
-        Address, Note,
-        note::{ExtractedNoteCommitment, Nullifier, RandomSeed, Rho},
-        note_encryption::{CompactAction, IronwoodDomain, OrchardDomain},
-        value::NoteValue,
-    };
-    use zcash_note_encryption::{COMPACT_NOTE_SIZE, try_output_recovery_with_pkd_esk};
-
     struct OutputRecoveryData {
         cmx: [u8; 32],
         ephemeral_key: [u8; 32],
@@ -673,9 +678,7 @@ pub struct Output {
 
 /// Types for the v1 Orchard PCZT encoding.
 pub mod v1 {
-    use alloc::collections::BTreeMap;
-    use alloc::string::String;
-    use alloc::vec::Vec;
+    use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
     use serde::{Deserialize, Serialize};
     use serde_with::serde_as;
@@ -1181,6 +1184,20 @@ pub(crate) mod v2 {
     mod tests {
         use alloc::{collections::BTreeMap, vec::Vec};
 
+        #[cfg(feature = "orchard")]
+        use {
+            crate::roles::{creator::Creator, redactor::Redactor},
+            ::orchard::{
+                Note,
+                keys::{FullViewingKey, Scope, SpendingKey},
+                note::{ExtractedNoteCommitment, RandomSeed, Rho},
+                note_encryption::{OrchardDomain, OrchardNoteEncryption},
+                value::NoteValue,
+            },
+            zcash_note_encryption::Domain,
+            zcash_protocol::consensus::BranchId,
+        };
+
         use super::super::{
             Action as LogicalAction, Bundle as LogicalBundle, EMPTY_ORCHARD, EncCiphertext,
             MEMO_SIZE, MemoPlaintext, NoteVersion, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED, Output,
@@ -1300,15 +1317,6 @@ pub(crate) mod v2 {
 
         #[cfg(feature = "orchard")]
         fn decryptable_action_with_memo(memo: [u8; MEMO_SIZE]) -> LogicalAction {
-            use ::orchard::{
-                Note,
-                keys::{FullViewingKey, Scope, SpendingKey},
-                note::{ExtractedNoteCommitment, RandomSeed, Rho},
-                note_encryption::{OrchardDomain, OrchardNoteEncryption},
-                value::NoteValue,
-            };
-            use zcash_note_encryption::Domain;
-
             let mut nullifier = [0; 32];
             nullifier[0] = 1;
             let rho = Option::from(Rho::from_bytes(&nullifier)).unwrap();
@@ -1372,10 +1380,6 @@ pub(crate) mod v2 {
         #[cfg(feature = "orchard")]
         #[test]
         fn v2_round_trips_memo_plaintext_ciphertext_data() {
-            use zcash_protocol::consensus::BranchId;
-
-            use crate::{roles::creator::Creator, roles::redactor::Redactor};
-
             const HELLO_MEMO_PAYLOAD_SIZE_REDUCTION: usize = 575;
             // The serialized reduction is one byte larger because postcard uses
             // a shorter length prefix for the stripped memo plaintext.
@@ -1750,9 +1754,6 @@ pub(crate) fn bundle_version_for_revision(
     revision: zcash_protocol::consensus::OrchardProtocolRevision,
     pool: orchard::ValuePool,
 ) -> Option<BundleVersion> {
-    use orchard::ValuePool;
-    use zcash_protocol::consensus::OrchardProtocolRevision;
-
     match pool {
         ValuePool::Orchard => Some(match revision {
             OrchardProtocolRevision::InsecureV1 => BundleVersion::orchard_insecure_v1(),
@@ -1771,8 +1772,6 @@ pub(crate) fn bundle_version_for_revision(
 /// which the Orchard protocol is not supported).
 #[cfg(feature = "orchard")]
 pub(crate) fn orchard_bundle_version(global: &crate::common::Global) -> Option<BundleVersion> {
-    use zcash_protocol::consensus::BranchId;
-
     BranchId::try_from(global.consensus_branch_id)
         .ok()?
         .orchard_protocol_revision()
@@ -1870,14 +1869,7 @@ impl Output {
         &mut self,
         note_version: NoteVersion,
         spend_nullifier: [u8; 32],
-    ) -> Result<(), ::orchard::pczt::ParseError> {
-        use ::orchard::{
-            Address, Note,
-            note::{ExtractedNoteCommitment, RandomSeed, Rho},
-            pczt::ParseError,
-            value::NoteValue,
-        };
-
+    ) -> Result<(), OrchardParseError> {
         if self.cmx.is_some() {
             return Ok(());
         }
@@ -1885,34 +1877,34 @@ impl Output {
         let recipient = Address::from_raw_address_bytes(
             self.recipient
                 .as_ref()
-                .ok_or(ParseError::InvalidExtractedNoteCommitment)?,
+                .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?,
         )
         .into_option()
-        .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+        .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
         let rho = Rho::from_bytes(&spend_nullifier)
             .into_option()
-            .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+            .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
         let rseed = RandomSeed::from_bytes(
             *self
                 .rseed
                 .as_ref()
-                .ok_or(ParseError::InvalidExtractedNoteCommitment)?,
+                .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?,
             &rho,
         )
         .into_option()
-        .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+        .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
         let note = Note::from_parts(
             recipient,
             NoteValue::from_raw(
                 self.value
-                    .ok_or(ParseError::InvalidExtractedNoteCommitment)?,
+                    .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?,
             ),
             rho,
             rseed,
             note_version,
         )
         .into_option()
-        .ok_or(ParseError::InvalidExtractedNoteCommitment)?;
+        .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
 
         self.cmx = Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes());
         Ok(())
@@ -1931,16 +1923,7 @@ impl Output {
         &mut self,
         note_version: NoteVersion,
         spend_nullifier: [u8; 32],
-    ) -> Result<(), ::orchard::pczt::ParseError> {
-        use ::orchard::{
-            Address, Note,
-            note::{RandomSeed, Rho},
-            note_encryption::{OrchardDomain, OrchardNoteEncryption},
-            pczt::ParseError,
-            value::NoteValue,
-        };
-        use zcash_note_encryption::Domain;
-
+    ) -> Result<(), OrchardParseError> {
         let memo: [u8; 512] = match &self.enc_ciphertext {
             EncCiphertext::Encrypted(_) => return Ok(()),
             EncCiphertext::MemoPlaintext(memo) => memo.to_memo(),
@@ -1949,34 +1932,37 @@ impl Output {
         let recipient = Address::from_raw_address_bytes(
             self.recipient
                 .as_ref()
-                .ok_or(ParseError::InvalidRecipient)?,
+                .ok_or(OrchardParseError::InvalidRecipient)?,
         )
         .into_option()
-        .ok_or(ParseError::InvalidRecipient)?;
+        .ok_or(OrchardParseError::InvalidRecipient)?;
         let rho = Rho::from_bytes(&spend_nullifier)
             .into_option()
-            .ok_or(ParseError::InvalidNullifier)?;
+            .ok_or(OrchardParseError::InvalidNullifier)?;
         let rseed = RandomSeed::from_bytes(
-            *self.rseed.as_ref().ok_or(ParseError::InvalidRandomSeed)?,
+            *self
+                .rseed
+                .as_ref()
+                .ok_or(OrchardParseError::InvalidRandomSeed)?,
             &rho,
         )
         .into_option()
-        .ok_or(ParseError::InvalidRandomSeed)?;
+        .ok_or(OrchardParseError::InvalidRandomSeed)?;
         let note = Note::from_parts(
             recipient,
-            NoteValue::from_raw(self.value.ok_or(ParseError::InvalidEncCiphertext)?),
+            NoteValue::from_raw(self.value.ok_or(OrchardParseError::InvalidEncCiphertext)?),
             rho,
             rseed,
             note_version,
         )
         .into_option()
-        .ok_or(ParseError::InvalidEncCiphertext)?;
+        .ok_or(OrchardParseError::InvalidEncCiphertext)?;
         let encryptor = OrchardNoteEncryption::new(None, note, memo);
         let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0;
         let enc_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
 
         if ephemeral_key != self.ephemeral_key {
-            return Err(ParseError::InvalidEncCiphertext);
+            return Err(OrchardParseError::InvalidEncCiphertext);
         }
 
         self.enc_ciphertext = EncCiphertext::Encrypted(enc_ciphertext);
@@ -1987,27 +1973,26 @@ impl Output {
 #[cfg(feature = "orchard")]
 impl Action {
     /// Recomputes `cv_net`, if this action carries it as an omitted field.
-    fn resolve_cv_net(&mut self) -> Result<(), ::orchard::pczt::ParseError> {
-        use ::orchard::{
-            pczt::ParseError,
-            value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
-        };
-
+    fn resolve_cv_net(&mut self) -> Result<(), OrchardParseError> {
         if self.cv_net.is_some() {
             return Ok(());
         }
 
-        let spend_value: NoteValue =
-            NoteValue::from_raw(self.spend.value.ok_or(ParseError::InvalidValueCommitment)?);
+        let spend_value: NoteValue = NoteValue::from_raw(
+            self.spend
+                .value
+                .ok_or(OrchardParseError::InvalidValueCommitment)?,
+        );
         let output_value = NoteValue::from_raw(
             self.output
                 .value
-                .ok_or(ParseError::InvalidValueCommitment)?,
+                .ok_or(OrchardParseError::InvalidValueCommitment)?,
         );
-        let rcv =
-            ValueCommitTrapdoor::from_bytes(self.rcv.ok_or(ParseError::InvalidValueCommitment)?)
-                .into_option()
-                .ok_or(ParseError::InvalidValueCommitment)?;
+        let rcv = ValueCommitTrapdoor::from_bytes(
+            self.rcv.ok_or(OrchardParseError::InvalidValueCommitment)?,
+        )
+        .into_option()
+        .ok_or(OrchardParseError::InvalidValueCommitment)?;
 
         self.cv_net = Some(ValueCommitment::derive(spend_value - output_value, rcv).to_bytes());
         Ok(())
@@ -2027,7 +2012,7 @@ impl Bundle {
     /// For improved efficiency, callers that will pass the same bundle through
     /// multiple roles should call this once up front, not in each role. Parsing
     /// also resolves fields defensively.
-    pub fn resolve_fields(&mut self) -> Result<(), ::orchard::pczt::ParseError> {
+    pub fn resolve_fields(&mut self) -> Result<(), OrchardParseError> {
         for action in &mut self.actions {
             action.resolve_cv_net()?;
             action
