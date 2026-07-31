@@ -38,6 +38,7 @@ use zcash_primitives::{
     block::BlockHash,
     transaction::{Transaction, TxId, components::sapling::zip212_enforcement, fees::FeeRule},
 };
+#[cfg(feature = "pczt")]
 use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{
     ShieldedPool,
@@ -70,6 +71,7 @@ use super::{
     },
 };
 
+#[cfg(feature = "pczt")]
 fn real_test_prover() -> &'static LocalTxProver {
     use std::sync::OnceLock;
 
