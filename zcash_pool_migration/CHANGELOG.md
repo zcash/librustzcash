@@ -8,15 +8,19 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `engine::{AdvanceConfig, advance_migration}`, the API to drive a committed
-  migration with. Call it at each wake-up with the `engine::DuenessTargets` for
-  the next `state::AdvanceStep`, perform that step, record the outcome, and call
-  it again; every step it returns has been checked against the store's
-  satisfiability oracle, and every determination it makes is persisted before
-  the step is surfaced.
-- `engine::DuenessTargets`, the pair of heights a migration's dueness is judged
-  against: the wallet's fully-scanned frontier and its estimate of where the
-  chain tip has reached, both carrying this crate's target convention
+- The `satisfiability` module, holding the vocabulary a store answers a
+  committed migration's liveness questions in — `StepSatisfiability` and its
+  causes, the observations they are folded from, and the caller policies they
+  are judged under — together with the drive API built on those answers.
+- `satisfiability::{AdvanceConfig, advance_migration}`, the API to drive a
+  committed migration with. Call it at each wake-up with the
+  `satisfiability::DuenessTargets` for the next `state::AdvanceStep`, perform
+  that step, record the outcome, and call it again; every step it returns has
+  been checked against the store's satisfiability oracle, and every
+  determination it makes is persisted before the step is surfaced.
+- `satisfiability::DuenessTargets`, the pair of heights a migration's dueness is
+  judged against: the wallet's fully-scanned frontier and its estimate of where
+  the chain tip has reached, both carrying this crate's target convention
   (`height + 1`). Construct it with `DuenessTargets::new(scanned, estimated)`,
   which clamps the effective target up to the scanned one, or with
   `DuenessTargets::at(target)` when the caller's estimate IS its chain view (a
@@ -34,29 +38,30 @@ and this library adheres to Rust's notion of
   (the same fact once the wallet can see it) and ahead of the state-derived
   blockers, and never `ready` or carrying an action, so a consumer's
   `ready() && action() == Some(NextAction::Broadcast)` sync gate agrees exactly
-  with what `engine::advance_migration` will offer. Nothing is recorded, so the
-  transaction returns to the ordinary queues if the estimate overstated the
-  lapse.
+  with what `satisfiability::advance_migration` will offer. Nothing is recorded,
+  so the transaction returns to the ordinary queues if the estimate overstated
+  the lapse.
 - `engine::MigrationStatus::Superseded` (wire name `"superseded"`) and
   `engine::MigrationState::mark_superseded`, the terminal status and transition
   recording that a migration's remaining value is being re-planned; a superseded
   migration is terminal, so the commit guard accepts a replacement.
-- `engine::ReplanThreshold`, the integer percent of planned transfer value,
-  unsatisfiable, above which a migration is re-planned immediately rather than
-  after satisfiable work drains; stamped on the migration at commit.
+- `satisfiability::ReplanThreshold`, the integer percent of planned transfer
+  value, unsatisfiable, above which a migration is re-planned immediately rather
+  than after satisfiable work drains; stamped on the migration at commit.
 - `engine::MigrationState::{replan_threshold, replan_required}`: the accessor
   for the stamped threshold, and the derived determination of whether the
   unsatisfiable share of planned transfer value strictly exceeds it.
-- `engine::ReorgSettleDepth`, the caller-supplied number of blocks the chain
-  must advance past a divergence before a displacement is treated as
+- `satisfiability::ReorgSettleDepth`, the caller-supplied number of blocks the
+  chain must advance past a divergence before a displacement is treated as
   permanent.
-- `engine::StepSatisfiability` and `engine::UnsatisfiableCause`: a store's
-  answer to whether the environment obstructs a pre-signed transaction —
-  executable now, not yet, or never (and why).
-- `engine::InputObservation` and `engine::classify_input_observations`, the
-  pure fold from per-nullifier observations plus the transaction-level expiry
-  judgment into a `StepSatisfiability`, so every store implementation shares
-  one classification and precedence.
+- `satisfiability::StepSatisfiability` and `satisfiability::UnsatisfiableCause`:
+  a store's answer to whether the environment obstructs a pre-signed
+  transaction — executable now, not yet, or never (and why).
+- `satisfiability::InputObservation` and
+  `satisfiability::classify_input_observations`, the pure fold from
+  per-nullifier observations plus the transaction-level expiry judgment into a
+  `StepSatisfiability`, so every store implementation shares one classification
+  and precedence.
 - `engine::MigrationTransferId` now implements `PartialOrd` and `Ord`.
 - `state::AdvanceStep::Replan`, the step directing the consumer to mark the
   migration superseded and re-plan its remaining balance through the ordinary
@@ -68,9 +73,9 @@ and this library adheres to Rust's notion of
   answers as durable `unsatisfiable_at` marks: input-level and anchor-level
   causes mark the checked transaction at the observation's height, and the
   dependency closure marks the dependents stranded behind a dead transaction.
-  Its `engine::DuenessTargets` argument supplies the height that closure judges
-  its expired sources at — the scanned target, since the marks it writes are
-  durable and only a reorg truncation clears one.
+  Its `satisfiability::DuenessTargets` argument supplies the height that
+  closure judges its expired sources at — the scanned target, since the marks
+  it writes are durable and only a reorg truncation clears one.
 - `engine::ProveFailure`, a prover's typed failure: an input not among the
   account's unspent notes (with the nullifier and the fully-scanned height that
   observation rests on), or any other prover error.
@@ -85,14 +90,15 @@ and this library adheres to Rust's notion of
   mark above the given height, demotes mined transactions above it back to
   broadcast (keeping their txids), and reverts a `Complete` status to
   `InProgress`.
-- `engine::UnsatisfiableKind` and `engine::ParseUnsatisfiableKindError`: the
-  persisted, renderable discriminant of an unsatisfiability mark —
-  `InputsSpent`, `InputsInvalidated`, `AnchorInvalidated`, or `Inherited` for a
-  mark applied by the dependency closure — with `AsRef<str>` /
-  `TryFrom<&str>` over its lowercase wire names. A store persists the name and
-  reports an unrecognized one as corruption.
-- `engine::UnsatisfiableCause::kind`, the `UnsatisfiableKind` a cause records,
-  or `None` for a cause that applies no mark (`Expired`).
+- `satisfiability::UnsatisfiableKind` and
+  `satisfiability::ParseUnsatisfiableKindError`: the persisted, renderable
+  discriminant of an unsatisfiability mark — `InputsSpent`,
+  `InputsInvalidated`, `AnchorInvalidated`, or `Inherited` for a mark applied by
+  the dependency closure — with `AsRef<str>` / `TryFrom<&str>` over its
+  lowercase wire names. A store persists the name and reports an unrecognized
+  one as corruption.
+- `satisfiability::UnsatisfiableCause::kind`, the `UnsatisfiableKind` a cause
+  records, or `None` for a cause that applies no mark (`Expired`).
 - `engine::MigrationTransaction::unsatisfiable`, the unsatisfiability mark as
   one optional `(BlockHeight, UnsatisfiableKind)` pair — the chain height the
   observation rests on and which observation it was — with `unsatisfiable_at`
@@ -113,17 +119,18 @@ and this library adheres to Rust's notion of
   REJECTED a broadcast of a `Proved` transaction, together with the chain tip
   that node reported. The report is testimony rather than evidence, so it
   records no unsatisfiability mark: it withholds the transaction from the
-  broadcast queue until `engine::advance_migration` can adjudicate the
+  broadcast queue until `satisfiability::advance_migration` can adjudicate the
   rejection against the wallet's own view. A re-report overwrites; a report on
   a transaction in any other state, or on an unknown id, is a no-op.
 - `engine::MigrationTransaction::broadcast_failure_at`, the chain tip carried by
   a standing broadcast-failure report, or `None` when none stands. A store
   persists it independently of the unsatisfiability mark.
-- `state::AdvanceStep::Reevaluate`, returned by `engine::advance_migration`
-  while a broadcast-failure report stands that the store's oracle cannot yet
-  answer (its fully-scanned height is below the reported tip). Sync the wallet
-  to at least that tip and call `advance_migration` again; it outranks every
-  step but `Complete`, and no other work is offered while it stands.
+- `state::AdvanceStep::Reevaluate`, returned by
+  `satisfiability::advance_migration` while a broadcast-failure report stands
+  that the store's oracle cannot yet answer (its fully-scanned height is below
+  the reported tip). Sync the wallet to at least that tip and call
+  `advance_migration` again; it outranks every step but `Complete`, and no other
+  work is offered while it stands.
 - `state::Blocker::AwaitingReevaluation`, reported for a transaction carrying an
   unadjudicated broadcast-failure report — behind `Blocker::Unsatisfiable` and
   ahead of `Blocker::Expired`.
@@ -136,7 +143,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `engine::MigrationState::{transaction_statuses, expired_transactions}` take an
-  `engine::DuenessTargets` in place of a single target height; pass
+  `satisfiability::DuenessTargets` in place of a single target height; pass
   `DuenessTargets::at(target_height)` for the previous behavior. Under a pair
   whose estimate runs ahead of the scan, `expired_transactions` and
   `state::Blocker::Expired` report only the expiries the wallet's own chain data
@@ -175,7 +182,8 @@ and this library adheres to Rust's notion of
 - `engine::MigrationState::from_parts` and the `engine::commit_preparation`,
   `engine::build_preparation_unsigned`, and
   `engine::commit_preparation_with_funding` entry points each take a further
-  `engine::ReplanThreshold` parameter, stamped on the committed migration.
+  `satisfiability::ReplanThreshold` parameter, stamped on the committed
+  migration.
 - `engine::MigrationState::sync_wakeup_schedule` also excludes transfers marked
   unsatisfiable or dependent on a transaction that can never mine, alongside
   the expired transfers it already excluded.
@@ -185,9 +193,9 @@ and this library adheres to Rust's notion of
   seen spent in a mined transaction, known with a dead unmined creator, or
   unknown — plus the transaction-level expiry judgment and, for a
   broadcast-unmined transaction, whether its installed anchor survives on the
-  chain judged settled per the supplied `engine::ReorgSettleDepth` — and
-  composes `engine::classify_input_observations` into a
-  `engine::StepSatisfiability`. An empty nullifier cache on a non-mined
+  chain judged settled per the supplied `satisfiability::ReorgSettleDepth` —
+  and composes `satisfiability::classify_input_observations` into a
+  `satisfiability::StepSatisfiability`. An empty nullifier cache on a non-mined
   transaction must surface the store's own error, never an answer.
 - `engine::MigrationProver::{prove_transfer, prove_preparation}` now return
   `Result<pczt::Pczt, engine::ProveFailure<Self::Error>>`. An implementation
@@ -210,10 +218,11 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `engine::MigrationState::{next_step, next_provable, next_broadcastable}`. The
-  planning kernel is internal to the crate now; `engine::advance_migration` is
-  the API to drive a committed migration with, and every step it returns has
-  been checked against the store's satisfiability oracle, which calling the
-  kernel directly bypassed. Replace `state.next_step(target_height)` with
+  planning kernel is internal to the crate now;
+  `satisfiability::advance_migration` is the API to drive a committed migration
+  with, and every step it returns has been checked against the store's
+  satisfiability oracle, which calling the kernel directly bypassed. Replace
+  `state.next_step(target_height)` with
   `advance_migration(&mut store, &mut state, targets, &config)`, which returns
   the same `state::AdvanceStep`.
 - `wallet::WalletProveError::{NoRealSpend, MalformedNullifier}`, replaced by the

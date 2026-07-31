@@ -20,8 +20,9 @@ use zcash_client_backend::{
 };
 use zcash_pool_migration::engine::{
     MigrationState, MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
-    PoolMigrationWrite, ReorgSettleDepth, StepSatisfiability,
+    PoolMigrationWrite,
 };
+use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
 
 use crate::{AccountRef, AccountUuid, error::SqliteClientError};
 
@@ -263,10 +264,9 @@ mod retention_follows_the_committed_migration {
     };
     use zcash_pool_migration::{
         denomination::DenominationPlan,
-        engine::{
-            MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite, ReplanThreshold,
-        },
+        engine::{MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite},
         preparation::PreparationPlan,
+        satisfiability::ReplanThreshold,
         scheduling::AnchorBucketInterval,
     };
     use zcash_primitives::block::BlockHash;
@@ -424,10 +424,12 @@ mod check_step_satisfiability {
     use zcash_pool_migration::denomination::DenominationPlan;
     use zcash_pool_migration::engine::{
         MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
-        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth,
-        ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
+        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
     use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_pool_migration::satisfiability::{
+        ReorgSettleDepth, ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
+    };
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::TxId;
@@ -1301,10 +1303,10 @@ mod truncation_follows_the_wallet {
     use zcash_pool_migration::denomination::DenominationPlan;
     use zcash_pool_migration::engine::{
         MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
-        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReplanThreshold,
-        UnsatisfiableKind,
+        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
     };
     use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_pool_migration::satisfiability::{ReplanThreshold, UnsatisfiableKind};
     use zcash_pool_migration::scheduling::AnchorBucketInterval;
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::TxId;
@@ -1519,12 +1521,14 @@ mod tests {
     use zcash_pool_migration::{
         denomination::DenominationPlan,
         engine::{
-            DuenessTargets, MigrationState, MigrationStatus, MigrationTransaction,
-            MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead,
-            PoolMigrationWrite, ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
-            UnsatisfiableKind,
+            MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+            MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
         },
         preparation::PreparationPlan,
+        satisfiability::{
+            DuenessTargets, ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
+            UnsatisfiableKind,
+        },
         scheduling::AnchorBucketInterval,
         testing::{
             arb_migration_state, arb_migration_tx_state, assert_empty_is_none,

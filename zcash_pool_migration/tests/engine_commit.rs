@@ -18,12 +18,14 @@ use zcash_protocol::value::COIN;
 
 use zcash_pool_migration::build::sign_pczt;
 use zcash_pool_migration::engine::{
-    AdvanceConfig, DuenessTargets, MigrationPlan, MigrationStatus, MigrationTransferId,
-    MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth,
-    ReplanThreshold, advance_migration, batch_unsigned_by_action_budget,
+    MigrationPlan, MigrationStatus, MigrationTransferId, MigrationTxKind, MigrationTxState,
+    PoolMigrationRead, PoolMigrationWrite, batch_unsigned_by_action_budget,
     build_preparation_unsigned, commit_preparation, plan_migration,
 };
 use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
+use zcash_pool_migration::satisfiability::{
+    AdvanceConfig, DuenessTargets, ReorgSettleDepth, ReplanThreshold, advance_migration,
+};
 use zcash_pool_migration::signing_rounds::SigningRoundBudget;
 use zcash_pool_migration::state::AdvanceStep;
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};

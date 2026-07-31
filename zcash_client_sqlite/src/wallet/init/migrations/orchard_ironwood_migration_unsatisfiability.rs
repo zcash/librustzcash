@@ -678,7 +678,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             replan_threshold,
-            u32::from(zcash_pool_migration::engine::ReplanThreshold::DEFAULT.percent()),
+            u32::from(zcash_pool_migration::satisfiability::ReplanThreshold::DEFAULT.percent()),
         );
     }
 

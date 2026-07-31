@@ -40,11 +40,14 @@ use rusqlite::{Connection, OptionalExtension, named_params, params};
 use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
-    InputObservation, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
-    MigrationTxKind, MigrationTxState, ReorgSettleDepth, ReplanThreshold, StepSatisfiability,
-    UnsatisfiableCause, UnsatisfiableKind, classify_input_observations,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
+    MigrationTxState,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
+use zcash_pool_migration::satisfiability::{
+    InputObservation, ReorgSettleDepth, ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
+    UnsatisfiableKind, classify_input_observations,
+};
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;

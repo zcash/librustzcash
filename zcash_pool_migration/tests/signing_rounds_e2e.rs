@@ -33,9 +33,9 @@ use zcash_pool_migration::{
 use zcash_pool_migration::{
     engine::{
         MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
-        ReplanThreshold, UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs,
-        plan_migration,
+        UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
     },
+    satisfiability::ReplanThreshold,
     signing_rounds::{MinRounds, NextFit, SigningRoundBudget},
 };
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network};

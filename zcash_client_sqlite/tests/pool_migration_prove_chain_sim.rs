@@ -21,7 +21,7 @@
 //!
 //! [`WalletDb`]: zcash_client_sqlite::WalletDb
 //! [`PoolMigrations`]: zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations
-//! [`advance_migration`]: zcash_pool_migration::engine::advance_migration
+//! [`advance_migration`]: zcash_pool_migration::satisfiability::advance_migration
 #![cfg(all(
     feature = "orchard",
     feature = "pczt-tests",
@@ -55,9 +55,11 @@ use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, ZatBalance, Zatoshis};
 
 use zcash_pool_migration::engine::{
-    self, AdvanceConfig, DuenessTargets, MigrationState, MigrationStatus, MigrationTransferId,
-    MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth,
-    ReplanThreshold,
+    self, MigrationState, MigrationStatus, MigrationTransferId, MigrationTxKind, MigrationTxState,
+    PoolMigrationRead, PoolMigrationWrite,
+};
+use zcash_pool_migration::satisfiability::{
+    self, AdvanceConfig, DuenessTargets, ReorgSettleDepth, ReplanThreshold,
 };
 use zcash_pool_migration::state::{AdvanceStep, Blocker};
 use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
@@ -123,12 +125,12 @@ impl PoolMigrationRead for MigrationTestStore {
     fn check_step_satisfiability(
         &self,
         _tx: &engine::MigrationTransaction,
-        _settle: engine::ReorgSettleDepth,
-    ) -> Result<engine::StepSatisfiability, Self::Error> {
+        _settle: satisfiability::ReorgSettleDepth,
+    ) -> Result<satisfiability::StepSatisfiability, Self::Error> {
         // Not exercised: this store is only ever handed to the plan-and-commit path, which never
         // consults the oracle. Every drive in this file runs against the SQLite store, whose
         // oracle answers from the wallet's own tables.
-        Ok(engine::StepSatisfiability::Satisfiable {
+        Ok(satisfiability::StepSatisfiability::Satisfiable {
             as_of_height: BlockHeight::from_u32(0),
         })
     }
@@ -312,7 +314,7 @@ impl Run {
     fn advance(&mut self, state: &mut MigrationState) -> AdvanceStep {
         let targets = self.targets();
         let mut store = self.store();
-        engine::advance_migration(&mut store, state, targets, &ADVANCE)
+        satisfiability::advance_migration(&mut store, state, targets, &ADVANCE)
             .expect("the store and its satisfiability oracle answer")
     }
 
@@ -663,8 +665,8 @@ impl Run {
     }
 
     /// Phase 3 (drive): advances the committed migration to completion through
-    /// [`engine::advance_migration`], performing each step it names against the simulated chain,
-    /// and asserts what the chain and the wallet should show at each one.
+    /// [`satisfiability::advance_migration`], performing each step it names against the simulated
+    /// chain, and asserts what the chain and the wallet should show at each one.
     ///
     /// A `Prove` step installs the transaction's deferred anchor and witnesses and proves it: a
     /// PREPARATION anchors to a fresh checkpoint at the tip (the caller's choice, as for an
@@ -1462,7 +1464,7 @@ fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
     let adjudicated = transfer(&committed.state);
     assert_eq!(
         adjudicated.unsatisfiable(),
-        Some((as_of_height, engine::UnsatisfiableKind::InputsSpent)),
+        Some((as_of_height, satisfiability::UnsatisfiableKind::InputsSpent)),
         "the rejection is adjudicated into a mark resting on the wallet's own scanned evidence",
     );
     assert_eq!(
@@ -1477,7 +1479,7 @@ fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
     assert_eq!(
         (stored.unsatisfiable(), stored.broadcast_failure_at()),
         (
-            Some((as_of_height, engine::UnsatisfiableKind::InputsSpent)),
+            Some((as_of_height, satisfiability::UnsatisfiableKind::InputsSpent)),
             None
         ),
         "both survive the round trip through the SQLite store",

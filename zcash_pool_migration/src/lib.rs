@@ -29,6 +29,7 @@ pub mod engine;
 #[cfg(feature = "orchard")]
 pub mod pczt_spends;
 pub mod preparation;
+pub mod satisfiability;
 pub mod scheduling;
 pub mod signing_rounds;
 pub mod state;
