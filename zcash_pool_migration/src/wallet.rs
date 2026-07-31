@@ -511,17 +511,12 @@ where
     ) -> Result<::pczt::Pczt, ProverError<W>> {
         // Every Orchard action whose witness is still deferred is a real spend to witness; the padded
         // dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
-        let real_spends: Vec<(usize, Nullifier)> = pczt
-            .orchard()
-            .actions()
-            .iter()
-            .enumerate()
-            .filter(|(_, action)| action.spend().witness().is_none())
-            .map(|(index, action)| {
-                let bytes = action.spend().nullifier();
-                Option::<Nullifier>::from(Nullifier::from_bytes(bytes))
+        let real_spends: Vec<(usize, Nullifier)> = crate::pczt_spends::real_spend_nullifiers(&pczt)
+            .into_iter()
+            .map(|(index, bytes)| {
+                Option::<Nullifier>::from(Nullifier::from_bytes(&bytes))
                     .map(|nf| (index, nf))
-                    .ok_or(WalletProveError::MalformedNullifier(*bytes))
+                    .ok_or(WalletProveError::MalformedNullifier(bytes))
             })
             .collect::<Result<_, _>>()?;
         if real_spends.is_empty() {

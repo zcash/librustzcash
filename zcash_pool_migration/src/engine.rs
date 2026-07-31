@@ -1994,12 +1994,9 @@ where
     let stored_pczt = pczt::Pczt::parse(&tx.pczt).map_err(|e| {
         RebuildError::InconsistentPlan(format!("the stored transfer PCZT does not parse: {e:?}"))
     })?;
-    let mut real_spend_nullifiers = stored_pczt
-        .orchard()
-        .actions()
-        .iter()
-        .filter(|a| a.spend().witness().is_none())
-        .map(|a| *a.spend().nullifier());
+    let mut real_spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&stored_pczt)
+        .into_iter()
+        .map(|(_, nf)| nf);
     let funding_nullifier = match (real_spend_nullifiers.next(), real_spend_nullifiers.next()) {
         (Some(nf), None) => nf,
         _ => {
@@ -2063,6 +2060,12 @@ where
         &mut *rng,
     )
     .map_err(RebuildError::Build)?;
+    // Refresh the nullifier cache from the rebuilt PCZT, for uniformity with the commit path; the
+    // rebuild spends the same funding note, so the cached value is in fact stable.
+    let spend_nullifiers: Vec<[u8; 32]> = crate::pczt_spends::real_spend_nullifiers(&pczt)
+        .into_iter()
+        .map(|(_, nf)| nf)
+        .collect();
     let (bytes, new_state, unsigned) = match signing {
         Signing::InProcess => {
             let signed = backend.sign(pczt).map_err(RebuildError::Backend)?;
@@ -2092,6 +2095,7 @@ where
     tx.expiry_height = expiry_height;
     tx.anchor_boundary = Some(anchor_boundary);
     tx.state = new_state;
+    tx.spend_nullifiers = spend_nullifiers;
     Ok(unsigned)
 }
 
@@ -2632,6 +2636,13 @@ where
                     }
                 }
 
+                // Cache the real-spend nullifiers off the built PCZT before it is consumed by
+                // signing/serialization, so the feature-free state machine never re-parses the
+                // stored bytes.
+                let spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&pczt)
+                    .into_iter()
+                    .map(|(_, nf)| nf)
+                    .collect();
                 let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
                 if matches!(self.signing, Signing::External) {
                     self.unsigned.push(UnsignedMigrationTx {
@@ -2654,9 +2665,7 @@ where
                     lock_owner: None,
                     // A freshly committed transaction carries no spent-input observation.
                     unsatisfiable_at: None,
-                    // The nullifier cache is not yet populated at commit; a later slice extracts
-                    // the real-spend nullifiers from the built PCZT here.
-                    spend_nullifiers: Vec::new(),
+                    spend_nullifiers,
                 });
             }
             self.layer_ids.push(this_layer_ids);
@@ -2792,6 +2801,13 @@ where
                 self.rng,
             )
             .ok_or(CommitError::StalePlan)?;
+            // Cache the real-spend nullifiers off the built PCZT before it is consumed by
+            // signing/serialization, so the feature-free state machine never re-parses the
+            // stored bytes.
+            let spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&pczt)
+                .into_iter()
+                .map(|(_, nf)| nf)
+                .collect();
             let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
             if matches!(self.signing, Signing::External) {
                 self.unsigned.push(UnsignedMigrationTx {
@@ -2815,9 +2831,7 @@ where
                 lock_owner: None,
                 // A freshly committed transaction carries no spent-input observation.
                 unsatisfiable_at: None,
-                // The nullifier cache is not yet populated at commit; a later slice extracts
-                // the real-spend nullifiers from the built PCZT here.
-                spend_nullifiers: Vec::new(),
+                spend_nullifiers,
             });
             self.transfer_funding.push((id, note));
         }
@@ -3583,6 +3597,30 @@ mod commit_tests {
                 }
             }
         }
+
+        // Every committed transaction caches its real-spend nullifiers, matching the
+        // deferred-witness identification the prover uses (ZIP 374: dummies carry witnesses).
+        for tx in &state.transactions {
+            let parsed = pczt::Pczt::parse(&tx.pczt).expect("stored PCZT parses");
+            let expected: Vec<[u8; 32]> = crate::pczt_spends::real_spend_nullifiers(&parsed)
+                .into_iter()
+                .map(|(_, nf)| nf)
+                .collect();
+            assert_eq!(tx.spend_nullifiers, expected);
+            // The cache is non-empty by an independent count: a transfer spends exactly its one
+            // funding note, and a preparation transaction spends at least one note.
+            match tx.kind {
+                MigrationTxKind::Transfer { .. } => assert_eq!(
+                    tx.spend_nullifiers.len(),
+                    1,
+                    "a transfer's one real spend is its funding note"
+                ),
+                MigrationTxKind::Preparation { .. } => assert!(
+                    !tx.spend_nullifiers.is_empty(),
+                    "a preparation transaction has at least one real spend"
+                ),
+            }
+        }
         assert!(backend.get_migration().unwrap().is_some());
     }
 
@@ -3736,6 +3774,13 @@ mod commit_tests {
             "a fresh, later canonical expiry"
         );
         assert_ne!(new.pczt, old.pczt, "a freshly built and re-signed PCZT");
+        // The refreshed nullifier cache equals the expired transaction's: rebuilding re-funds the
+        // transfer with the same note IDENTITY, and a note's nullifier is schedule-independent.
+        assert!(!new.spend_nullifiers.is_empty());
+        assert_eq!(
+            new.spend_nullifiers, old.spend_nullifiers,
+            "the same funding note yields the same real-spend nullifier"
+        );
         // The fresh anchor boundary is on the grid and within the rebuilt schedule's candidate set.
         let boundary = u32::from(
             new.anchor_boundary
