@@ -32,7 +32,10 @@ workspace.
   on `orchard_ironwood_migrations`, recording the integer percent of planned
   transfer value, unsatisfiable, above which the migration is re-planned
   immediately. The migration that adds these columns backfills
-  `spend_nullifiers` for existing rows from their stored PCZTs, and
+  `spend_nullifiers` for existing rows from their stored PCZTs — failing with a
+  corrupted-data error for a not-yet-mined row whose stored PCZT is already
+  proven (its real spends are no longer identifiable, so the cache cannot be
+  reconstructed), and leaving a mined row's cache empty — and
   `replan_threshold` to the default policy.
 
 ## [0.22.0-rc.6] - 2026-07-29
