@@ -655,19 +655,20 @@ fn broaden_after_discovery<St: PoolMigrationRead>(
     settle: ReorgSettleDepth,
 ) -> Result<(), St::Error> {
     for tx in state.transactions() {
-        if batch.iter().any(|(id, _)| *id == tx.id())
-            || matches!(
+        // Unanswered this call, pending, unmarked, and with its dependencies mined: exactly the
+        // transactions this sweep is about.
+        if !batch.iter().any(|(id, _)| *id == tx.id())
+            && !matches!(
                 tx.state(),
                 MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. }
             )
-            || tx.unsatisfiable_at().is_some()
-            || !state.deps_mined(tx.depends_on())
+            && tx.unsatisfiable_at().is_none()
+            && state.deps_mined(tx.depends_on())
         {
-            continue;
-        }
-        let answer = store.check_step_satisfiability(tx, settle)?;
-        if records_a_determination(&answer) {
-            batch.push((tx.id(), answer));
+            let answer = store.check_step_satisfiability(tx, settle)?;
+            if records_a_determination(&answer) {
+                batch.push((tx.id(), answer));
+            }
         }
     }
     Ok(())
