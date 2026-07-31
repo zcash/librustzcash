@@ -111,6 +111,13 @@ and this library adheres to Rust's notion of
   schedule, so broadcastable at the same wake-up once proved — or a transfer,
   whose broadcast follows at its own scheduled height. Match with
   `AdvanceStep::Prove { id, kind }`.
+- `engine::MigrationState::mark_mined` also clears the transaction's
+  unsatisfiability mark and its broadcast-failure report: chain inclusion
+  outranks either judgment about whether it could ever mine, so neither can
+  stand on a mined transaction. A consumer that read `unsatisfiable` or
+  `broadcast_failure_at` off a mined transaction gets `None` where it may
+  previously have seen a stale value; the derived `replan_required` share is
+  unaffected, having always excluded mined transfers.
 - `engine::MigrationTxState::Mined` now carries the mined transaction's txid
   alongside its height, and `engine::MigrationState::mark_mined` takes it;
   `MigrationTxState::from_stored` requires the txid payload for `"mined"` rows,

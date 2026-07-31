@@ -622,9 +622,22 @@ impl MigrationState {
     /// demote a rolled-back mined transaction back to `Broadcast` without losing the id it was
     /// mined under. This is also what lets a later preparation layer or the transfers become
     /// actionable.
+    ///
+    /// Mining also DISCHARGES both standing judgments about whether the transaction ever could
+    /// mine — its [`unsatisfiable`](MigrationTransaction::unsatisfiable) mark and its
+    /// broadcast-failure report ([`Self::report_broadcast_failure`]). Chain inclusion outranks
+    /// either: a persisted "its inputs can never all exist unspent" beside a mined state is a
+    /// contradiction a wallet would render, and a rejection is answered by the very inclusion
+    /// that followed it. Both were derivable rather than fundamental — every other reader already
+    /// exempts mined transactions (the dead set, the replan share, the blocker precedence) — so
+    /// clearing them here costs no information, and a reorg that demotes the row leaves the
+    /// oracle to re-derive against the new chain, exactly as
+    /// [`Self::truncate_to_height`] leaves a cleared mark to be re-derived.
     pub fn mark_mined(&mut self, id: MigrationTransferId, txid: TxId, height: BlockHeight) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
             tx.state = MigrationTxState::Mined { txid, height };
+            tx.unsatisfiable = None;
+            tx.broadcast_failure_at = None;
         }
         self.recompute_status();
     }
@@ -3121,5 +3134,84 @@ mod tests {
             after.len(),
             "reports concern broadcast, not proving",
         );
+    }
+
+    /// Chain inclusion outranks every judgment about whether the transaction could ever mine: a
+    /// mark and a broadcast-failure report are both discharged when the row mines, so neither can
+    /// stand on a mined transaction contradicting it.
+    #[test]
+    fn mining_discharges_the_mark_and_the_report() {
+        let mut s = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            15_000,
+            vec![
+                tx(
+                    0,
+                    transfer(0),
+                    MigrationTxState::Broadcast {
+                        txid: TxId::from_bytes([1; 32]),
+                    },
+                ),
+                tx(1, transfer(1), MigrationTxState::Proved),
+            ],
+        );
+        // 0 was marked in flight (a settled reorg displaced its anchor, say) and then mined
+        // anyway; 1 was rejected at broadcast and then mined under a later attempt.
+        s.transactions[0].unsatisfiable = marked(90);
+        s.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(95));
+        assert!(
+            s.replan_required(),
+            "half the planned crossing value is marked and unmined, past the 20% threshold",
+        );
+
+        s.mark_mined(
+            MigrationTransferId(0),
+            TxId::from_bytes([1; 32]),
+            BlockHeight::from_u32(100),
+        );
+        s.mark_mined(
+            MigrationTransferId(1),
+            TxId::from_bytes([2; 32]),
+            BlockHeight::from_u32(101),
+        );
+
+        assert_eq!(s.transactions[0].unsatisfiable, None);
+        assert_eq!(s.transactions[1].broadcast_failure_at, None);
+        let v = s.transaction_statuses(BlockHeight::from_u32(102));
+        assert_eq!(v[0].blocked_on, None, "a mined row carries no blocker");
+        assert_eq!(v[0].unsatisfiable_kind, None);
+        assert_eq!(v[1].blocked_on, None);
+        assert!(
+            !s.replan_required(),
+            "the share was already computed over unmined transfers, so clearing changes nothing",
+        );
+    }
+
+    /// The reverse order of the same interaction: a mined transaction is never marked in the first
+    /// place, so the replan share is what it was either way.
+    #[test]
+    fn a_mined_transaction_is_neither_marked_nor_reported() {
+        let mut s = state_with(vec![tx(0, transfer(0), MigrationTxState::Proved)]);
+        s.mark_mined(
+            MigrationTransferId(0),
+            TxId::from_bytes([1; 32]),
+            BlockHeight::from_u32(100),
+        );
+        s.record_satisfiability(
+            BlockHeight::from_u32(120),
+            &[(
+                MigrationTransferId(0),
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::InputsSpent {
+                        nullifiers: vec![[9; 32]],
+                    },
+                    as_of: BlockHeight::from_u32(110),
+                },
+            )],
+        );
+        s.report_broadcast_failure(MigrationTransferId(0), BlockHeight::from_u32(110));
+        assert_eq!(s.transactions[0].unsatisfiable, None);
+        assert_eq!(s.transactions[0].broadcast_failure_at, None);
+        assert!(!s.replan_required());
     }
 }
