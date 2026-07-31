@@ -1545,6 +1545,44 @@ pub trait MigrationCrypto {
     fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
 }
 
+/// A prover's typed failure: the one condition the engine handles — an input not among the
+/// unspent set — distinguished from everything else. This seam observes only MEMBERSHIP, which
+/// conflates "spent" with "not yet scanned"; the engine's dependency-coverage guard against
+/// `as_of` sharpens it into positive spend evidence or a retry.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+pub enum ProveFailure<E> {
+    /// A spend's nullifier matched no unspent note, as of the wallet's fully-scanned height.
+    InputNotAvailable {
+        /// The nullifier whose note was not among the unspent set.
+        nullifier: [u8; 32],
+        /// The fully-scanned height the absence observation rests on.
+        as_of: BlockHeight,
+    },
+    /// Any other prover error.
+    Other(E),
+}
+
+/// The outcome of a prove attempt the engine HANDLED — an error return would invite blind
+/// retries of conditions that are not errors.
+#[cfg(feature = "orchard")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProveOutcome {
+    /// The proof was created; the transaction is `Proved` and the proven PCZT stored.
+    Proved,
+    /// An input was not available, and the wallet has not yet scanned past every dependency's
+    /// mined height: nothing can be concluded. No state change; retry after further sync.
+    NotYetProvable,
+    /// An input was not available with every dependency's mined height covered by the wallet's
+    /// scan — positive evidence of a spend. The transaction was marked unsatisfiable (with the
+    /// dependency closure recorded); `replan_required` is the derived accessor's value after
+    /// marking, so the caller can react without re-consulting the state.
+    MarkedUnsatisfiable {
+        /// [`MigrationState::replan_required`] as it stands after the mark.
+        replan_required: bool,
+    },
+}
+
 /// The proving seam for a migration transfer: install a transfer's deferred anchors and witnesses
 /// (ZIP 374) against the boundary its schedule drew, then prove it.
 ///
@@ -1575,11 +1613,20 @@ pub trait MigrationProver {
     /// Resolving the funding note's witness requires the boundary checkpoint to still exist in the
     /// wallet's commitment tree at proving time; a wallet backend keeps it alive through migration
     /// anchor-checkpoint retention (see issue #2700).
+    ///
+    /// Failure is typed: an implementation reports a spend whose nullifier matched no note in the
+    /// account's UNSPENT set as [`ProveFailure::InputNotAvailable`], carrying that nullifier and
+    /// the fully-scanned height the absence rests on, and every other failure as
+    /// [`ProveFailure::Other`]. The distinction matters because absence from the unspent set is
+    /// only a membership observation — a spent note and a note whose creator is not yet scanned
+    /// look alike — so the engine, not the prover, decides what it means (see [`prove_transfer`]).
+    /// The reported height must be one the observation genuinely rests on: it becomes the stamp a
+    /// resulting unsatisfiability mark is truncated against on a reorg.
     fn prove_transfer(
         &mut self,
         pczt: pczt::Pczt,
         anchor_boundary: BlockHeight,
-    ) -> Result<pczt::Pczt, Self::Error>;
+    ) -> Result<pczt::Pczt, ProveFailure<Self::Error>>;
 
     /// Prove a pre-signed PREPARATION transaction against a checkpoint at which its spent notes are
     /// witnessable.
@@ -1594,11 +1641,15 @@ pub trait MigrationProver {
     /// note — and produces only an Orchard bundle (no Ironwood output), so the implementation
     /// installs the anchor and every real spend's witness through the PCZT `Updater` role and proves
     /// the single Orchard bundle.
+    ///
+    /// Failure is typed exactly as for [`prove_transfer`](Self::prove_transfer): a spend absent
+    /// from the account's unspent set is [`ProveFailure::InputNotAvailable`] with the height that
+    /// observation rests on, anything else is [`ProveFailure::Other`].
     fn prove_preparation(
         &mut self,
         pczt: pczt::Pczt,
         anchor: BlockHeight,
-    ) -> Result<pczt::Pczt, Self::Error>;
+    ) -> Result<pczt::Pczt, ProveFailure<Self::Error>>;
 
     /// The anchor bucket grid the wallet backing this prover currently retains its durable anchor
     /// checkpoints on.
@@ -1778,12 +1829,30 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// before the broadcast height); this function performs the proof for the one transfer `id`. It
 /// is idempotent only in the sense that a transaction not in [`Signed`](MigrationTxState::Signed)
 /// is rejected with [`ProveError::NotReady`] rather than re-proved.
+///
+/// A prover that reports the funding note ABSENT from the account's unspent set
+/// ([`ProveFailure::InputNotAvailable`]) is not an error: absence is a membership observation
+/// that cannot by itself distinguish a SPENT input from one whose creating transaction the wallet
+/// has not scanned yet, so the engine sharpens it into a [`ProveOutcome`] by DEPENDENCY COVERAGE.
+/// If every transaction this one waits on is mined at or below the height the observation rests
+/// on, the input note was necessarily scanned and its absence is positive evidence of a spend:
+/// the observation is recorded (marking this transaction and, through the dependency closure,
+/// everything stranded behind it) and answered
+/// [`MarkedUnsatisfiable`](ProveOutcome::MarkedUnsatisfiable). Anything less — a dependency mined
+/// above that height, or an unmined one — concludes nothing and answers
+/// [`NotYetProvable`](ProveOutcome::NotYetProvable) with no state change; a false mark would
+/// strand live value behind an observation only a reorg can clear, so the conservative reading is
+/// always a retry.
+///
+/// The caller PERSISTS the state afterwards, as for a successful proof — a `MarkedUnsatisfiable`
+/// outcome changed the marks and the closure, and an unpersisted mark would be lost on the next
+/// launch.
 #[cfg(feature = "orchard")]
 pub fn prove_transfer<P>(
     prover: &mut P,
     state: &mut MigrationState,
     id: MigrationTransferId,
-) -> Result<(), ProveError<P::Error>>
+) -> Result<ProveOutcome, ProveError<P::Error>>
 where
     P: MigrationProver,
 {
@@ -1814,13 +1883,79 @@ where
     }
 
     let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
-    let proven = prover
-        .prove_transfer(pczt, anchor_boundary)
-        .map_err(ProveError::Prover)?;
-    let bytes = proven.serialize().map_err(ProveError::Serialize)?;
+    match prover.prove_transfer(pczt, anchor_boundary) {
+        Ok(proven) => {
+            let bytes = proven.serialize().map_err(ProveError::Serialize)?;
+            state.set_transaction_proved(id, bytes);
+            Ok(ProveOutcome::Proved)
+        }
+        Err(ProveFailure::InputNotAvailable { nullifier, as_of }) => {
+            Ok(interpret_input_not_available(state, id, nullifier, as_of))
+        }
+        Err(ProveFailure::Other(e)) => Err(ProveError::Prover(e)),
+    }
+}
 
-    state.set_transaction_proved(id, bytes);
-    Ok(())
+/// Decide what a prover's membership-only "input not among the unspent set" observation means for
+/// the transaction `id`, and record it when it is conclusive.
+///
+/// The observation alone cannot distinguish a SPENT input from one whose creating transaction the
+/// wallet has not yet scanned. What separates the two is DEPENDENCY COVERAGE: if every transaction
+/// this one waits on is mined at a height the wallet has already scanned past (`<= as_of`), the
+/// input note was necessarily scanned, so its absence from the unspent set is positive evidence
+/// that it was spent. A transaction with no dependencies is covered trivially — it spends notes
+/// that were spendable when the migration was committed, hence long since scanned. Anything less
+/// (a dependency mined above `as_of`, or an UNMINED dependency, which means the drive layer
+/// offered this transaction before its inputs existed) concludes nothing: the conservative reading
+/// is a retry, never a mark, since a false mark strands live value behind a durable observation
+/// only a reorg can clear.
+///
+/// A conclusive observation is recorded through the ordinary satisfiability mutator
+/// ([`MigrationState::record_satisfiability`]), so it marks and closes over the dependency graph
+/// exactly as an oracle-driven one does. Its `target_height` argument judges expiry for the
+/// closure's expired sources; `as_of + 1` is the honest next-block judgment at the height this
+/// observation rests on.
+#[cfg(feature = "orchard")]
+fn interpret_input_not_available(
+    state: &mut MigrationState,
+    id: MigrationTransferId,
+    nullifier: [u8; 32],
+    as_of: BlockHeight,
+) -> ProveOutcome {
+    let txs = state.transactions();
+    let deps_covered = txs
+        .iter()
+        .find(|t| t.id() == id)
+        // A transaction the state does not hold is unreachable here — every caller locates it
+        // before proving — and reads as uncovered rather than panicking, the same conservative
+        // reading a dangling dependency gets below.
+        .is_some_and(|tx| {
+            tx.depends_on().iter().all(|dep| {
+                txs.iter()
+                    .find(|d| d.id() == *dep)
+                    .and_then(|d| d.state().mined_height())
+                    .is_some_and(|mined| mined <= as_of)
+            })
+        });
+    if !deps_covered {
+        return ProveOutcome::NotYetProvable;
+    }
+
+    state.record_satisfiability(
+        as_of + 1,
+        &[(
+            id,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![nullifier],
+                },
+                as_of,
+            },
+        )],
+    );
+    ProveOutcome::MarkedUnsatisfiable {
+        replan_required: state.replan_required(),
+    }
 }
 
 /// Prove a pre-signed migration PREPARATION transaction against a checkpoint at which its spent
@@ -1839,13 +1974,21 @@ where
 /// A transaction not in [`Signed`](MigrationTxState::Signed) is rejected with
 /// [`ProveError::NotReady`] rather than re-proved; a transfer is rejected with
 /// [`ProveError::NotAPreparation`].
+///
+/// As for [`prove_transfer`], a prover reporting a spend ABSENT from the account's unspent set
+/// ([`ProveFailure::InputNotAvailable`]) is answered with a [`ProveOutcome`] rather than an error,
+/// under the same dependency-coverage rule — which a layer-0 preparation, depending on nothing,
+/// satisfies vacuously: the notes it spends were spendable when the migration was committed, hence
+/// long since scanned. The caller PERSISTS the state afterwards, including after
+/// [`MarkedUnsatisfiable`](ProveOutcome::MarkedUnsatisfiable), which changed the marks and the
+/// dependency closure.
 #[cfg(feature = "orchard")]
 pub fn prove_preparation<P>(
     prover: &mut P,
     state: &mut MigrationState,
     id: MigrationTransferId,
     anchor: BlockHeight,
-) -> Result<(), ProveError<P::Error>>
+) -> Result<ProveOutcome, ProveError<P::Error>>
 where
     P: MigrationProver,
 {
@@ -1862,13 +2005,17 @@ where
     }
 
     let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
-    let proven = prover
-        .prove_preparation(pczt, anchor)
-        .map_err(ProveError::Prover)?;
-    let bytes = proven.serialize().map_err(ProveError::Serialize)?;
-
-    state.set_transaction_proved(id, bytes);
-    Ok(())
+    match prover.prove_preparation(pczt, anchor) {
+        Ok(proven) => {
+            let bytes = proven.serialize().map_err(ProveError::Serialize)?;
+            state.set_transaction_proved(id, bytes);
+            Ok(ProveOutcome::Proved)
+        }
+        Err(ProveFailure::InputNotAvailable { nullifier, as_of }) => {
+            Ok(interpret_input_not_available(state, id, nullifier, as_of))
+        }
+        Err(ProveFailure::Other(e)) => Err(ProveError::Prover(e)),
+    }
 }
 
 /// Why rebuilding an expired migration transfer failed.
@@ -3832,7 +3979,7 @@ mod commit_tests {
             &mut self,
             pczt: pczt::Pczt,
             _anchor_boundary: BlockHeight,
-        ) -> Result<pczt::Pczt, Self::Error> {
+        ) -> Result<pczt::Pczt, ProveFailure<Self::Error>> {
             // A stand-in for proving. A real prover resolves the funding note's witness against
             // `anchor_boundary`, installs it and the Orchard source and Ironwood destination
             // anchors through the PCZT `Updater` role, and runs the Orchard + Ironwood provers.
@@ -3853,7 +4000,7 @@ mod commit_tests {
             &mut self,
             pczt: pczt::Pczt,
             _anchor: BlockHeight,
-        ) -> Result<pczt::Pczt, Self::Error> {
+        ) -> Result<pczt::Pczt, ProveFailure<Self::Error>> {
             // A stand-in for proving, as `prove_transfer` above: a real prover installs the Orchard
             // anchor and every spend's witness and runs the Orchard prover (see
             // `WalletMigrationProver`). This mock models no commitment tree, so it installs only
@@ -4201,7 +4348,10 @@ mod commit_tests {
 
         // Prove the transfer: the PROVEN bytes replace the stored ones, and their real spend now
         // carries a witness, so it is no longer identifiable from the bytes.
-        prove_transfer(&mut backend, &mut state, id).expect("proves the transfer");
+        assert_eq!(
+            prove_transfer(&mut backend, &mut state, id).expect("proves the transfer"),
+            ProveOutcome::Proved
+        );
         let old = state.transactions[0].clone();
         assert!(matches!(old.state, MigrationTxState::Proved));
         let proven = pczt::Pczt::parse(&old.pczt).expect("the proven PCZT parses");
@@ -5127,7 +5277,10 @@ mod commit_tests {
             .expect("a committed migration has transfers");
 
         // Proving reads the persisted boundary, proves, and advances Signed -> Proved.
-        prove_transfer(&mut backend, &mut state, transfer_id).expect("proves the due transfer");
+        assert_eq!(
+            prove_transfer(&mut backend, &mut state, transfer_id).expect("proves the due transfer"),
+            ProveOutcome::Proved
+        );
         let proved = state
             .transactions
             .iter()
@@ -5223,7 +5376,272 @@ mod commit_tests {
 
         // Restoring the committed grid makes the migration provable again.
         backend.sched_params = SchedulingParams::ZIP_318;
-        prove_transfer(&mut backend, &mut state, transfer_id)
-            .expect("the transfer proves once the grid matches again");
+        assert_eq!(
+            prove_transfer(&mut backend, &mut state, transfer_id)
+                .expect("the transfer proves once the grid matches again"),
+            ProveOutcome::Proved
+        );
+    }
+
+    /// The `FailingProver`'s "anything else went wrong" error, which the engine must pass through
+    /// untouched.
+    #[derive(Debug, PartialEq, Eq)]
+    struct MockProveError;
+
+    impl fmt::Display for MockProveError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("the mock prover failed")
+        }
+    }
+
+    /// A prover that never proves, standing in for one whose wallet cannot locate a spend's note:
+    /// it reports [`ProveFailure::InputNotAvailable`] for the configured nullifier and backing
+    /// height, or [`ProveFailure::Other`] when none is configured. It answers the anchor-grid
+    /// question with the grid these tests commit under, so a transfer reaches the prove call rather
+    /// than being turned back by the grid guard.
+    struct FailingProver {
+        input_not_available: Option<([u8; 32], BlockHeight)>,
+    }
+
+    impl FailingProver {
+        fn input_not_available(nullifier: [u8; 32], as_of: u32) -> Self {
+            FailingProver {
+                input_not_available: Some((nullifier, BlockHeight::from_u32(as_of))),
+            }
+        }
+
+        fn other() -> Self {
+            FailingProver {
+                input_not_available: None,
+            }
+        }
+
+        fn failure(&self) -> ProveFailure<MockProveError> {
+            match self.input_not_available {
+                Some((nullifier, as_of)) => ProveFailure::InputNotAvailable { nullifier, as_of },
+                None => ProveFailure::Other(MockProveError),
+            }
+        }
+    }
+
+    impl MigrationProver for FailingProver {
+        type Error = MockProveError;
+
+        fn prove_transfer(
+            &mut self,
+            _pczt: pczt::Pczt,
+            _anchor_boundary: BlockHeight,
+        ) -> Result<pczt::Pczt, ProveFailure<Self::Error>> {
+            Err(self.failure())
+        }
+
+        fn prove_preparation(
+            &mut self,
+            _pczt: pczt::Pczt,
+            _anchor: BlockHeight,
+        ) -> Result<pczt::Pczt, ProveFailure<Self::Error>> {
+            Err(self.failure())
+        }
+
+        fn anchor_bucket_interval(&self) -> crate::scheduling::AnchorBucketInterval {
+            crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval()
+        }
+    }
+
+    /// A freshly committed migration over one wallet note: its state, one layer-0 preparation
+    /// transaction (which depends on nothing), and the transfers that preparation funds.
+    fn committed_for_prove_failures() -> (
+        MigrationState,
+        MigrationTransferId,
+        Vec<MigrationTransferId>,
+    ) {
+        let seed = 7u64;
+        let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(
+            &regtest_network(true),
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("commits the migration");
+
+        let prep_id = state
+            .transactions
+            .iter()
+            .find(|t| matches!(t.kind, MigrationTxKind::Preparation { .. }))
+            .expect("a committed migration has preparation transactions")
+            .id;
+        assert!(
+            state
+                .transactions
+                .iter()
+                .all(|t| t.depends_on.is_empty() || t.depends_on == vec![prep_id]),
+            "this fixture has a single preparation layer, so every dependent waits on it alone"
+        );
+        let transfer_ids: Vec<MigrationTransferId> = state
+            .transactions
+            .iter()
+            .filter(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
+            .map(|t| t.id)
+            .collect();
+        assert!(!transfer_ids.is_empty());
+        (state, prep_id, transfer_ids)
+    }
+
+    fn stamp(state: &MigrationState, id: MigrationTransferId) -> Option<BlockHeight> {
+        state
+            .transactions
+            .iter()
+            .find(|t| t.id == id)
+            .expect("the transaction is present")
+            .unsatisfiable_at
+    }
+
+    /// A prover reporting an input ABSENT from the unspent set, with every dependency's mined
+    /// height inside the wallet's scan, is positive evidence that the input was spent: the engine
+    /// records it through the ordinary satisfiability mutator instead of surfacing an error, so
+    /// the transaction is marked at the observation's height and the dependency closure strands
+    /// its dependents at the same stamp. A layer-0 preparation depends on nothing, which is
+    /// coverage vacuously: the notes it spends were spendable when the migration was committed.
+    #[test]
+    fn prove_input_not_available_with_deps_covered_marks_unsatisfiable() {
+        let (mut state, prep_id, transfer_ids) = committed_for_prove_failures();
+        let nullifier = state
+            .transactions
+            .iter()
+            .find(|t| t.id == prep_id)
+            .expect("the preparation is present")
+            .spend_nullifiers[0];
+        const AS_OF: u32 = 1_500_000;
+
+        let mut prover = FailingProver::input_not_available(nullifier, AS_OF);
+        let outcome = prove_preparation(
+            &mut prover,
+            &mut state,
+            prep_id,
+            BlockHeight::from_u32(AS_OF),
+        )
+        .expect("an unavailable input is handled, not surfaced as an error");
+
+        let ProveOutcome::MarkedUnsatisfiable { replan_required } = outcome else {
+            panic!("expected the observation to be recorded, got {outcome:?}");
+        };
+        // The payload is the derived accessor's value AFTER marking, so a caller can act on it
+        // without re-consulting the state.
+        assert_eq!(replan_required, state.replan_required());
+        assert!(
+            replan_required,
+            "the whole migration's transfer value is stranded behind the one preparation"
+        );
+        assert_eq!(stamp(&state, prep_id), Some(BlockHeight::from_u32(AS_OF)));
+        for id in transfer_ids {
+            assert_eq!(
+                stamp(&state, id),
+                Some(BlockHeight::from_u32(AS_OF)),
+                "the closure strands every transfer the dead preparation funds"
+            );
+        }
+        // The preparation kept its lifecycle state: unsatisfiability is orthogonal to it, and no
+        // proof was produced.
+        assert!(matches!(
+            state
+                .transactions
+                .iter()
+                .find(|t| t.id == prep_id)
+                .expect("the preparation is present")
+                .state,
+            MigrationTxState::Signed
+        ));
+    }
+
+    /// With a dependency mined ABOVE the height the observation rests on, the input's absence is
+    /// equally consistent with a note the wallet has not scanned yet: nothing is concluded and
+    /// nothing is marked. One block further of scan — the dependency's mined height exactly — and
+    /// the same observation becomes conclusive, which pins the coverage comparison at its
+    /// boundary.
+    #[test]
+    fn prove_input_not_available_with_a_dep_above_as_of_concludes_nothing() {
+        let (mut state, prep_id, transfer_ids) = committed_for_prove_failures();
+        let transfer_id = transfer_ids[0];
+        let nullifier = state
+            .transactions
+            .iter()
+            .find(|t| t.id == transfer_id)
+            .expect("the transfer is present")
+            .spend_nullifiers[0];
+        const MINED: u32 = 1_500_000;
+        state.mark_mined(
+            prep_id,
+            TxId::from_bytes([3; 32]),
+            BlockHeight::from_u32(MINED),
+        );
+
+        let mut prover = FailingProver::input_not_available(nullifier, MINED - 1);
+        assert_eq!(
+            prove_transfer(&mut prover, &mut state, transfer_id)
+                .expect("an unavailable input is handled, not surfaced as an error"),
+            ProveOutcome::NotYetProvable
+        );
+        assert_eq!(stamp(&state, transfer_id), None, "nothing is marked");
+        assert_eq!(stamp(&state, prep_id), None);
+
+        // Scanned exactly as far as the dependency's mined height, the input was necessarily
+        // scanned, so its absence is conclusive.
+        let mut prover = FailingProver::input_not_available(nullifier, MINED);
+        assert!(matches!(
+            prove_transfer(&mut prover, &mut state, transfer_id)
+                .expect("an unavailable input is handled, not surfaced as an error"),
+            ProveOutcome::MarkedUnsatisfiable { .. }
+        ));
+        assert_eq!(
+            stamp(&state, transfer_id),
+            Some(BlockHeight::from_u32(MINED))
+        );
+    }
+
+    /// An UNMINED dependency means the drive layer offered this transaction before its inputs
+    /// could exist: the absence says nothing about a spend, so it is read conservatively as a
+    /// retry rather than as evidence.
+    #[test]
+    fn prove_input_not_available_with_an_unmined_dep_concludes_nothing() {
+        let (mut state, prep_id, transfer_ids) = committed_for_prove_failures();
+        let transfer_id = transfer_ids[0];
+
+        let mut prover = FailingProver::input_not_available([9; 32], 1_500_000);
+        assert_eq!(
+            prove_transfer(&mut prover, &mut state, transfer_id)
+                .expect("an unavailable input is handled, not surfaced as an error"),
+            ProveOutcome::NotYetProvable
+        );
+        assert_eq!(stamp(&state, transfer_id), None);
+        assert_eq!(stamp(&state, prep_id), None);
+    }
+
+    /// Every other prover failure is still an error, carried through untouched: only the one
+    /// condition the engine can interpret is handled.
+    #[test]
+    fn prove_other_prover_failures_still_surface_as_errors() {
+        let (mut state, prep_id, transfer_ids) = committed_for_prove_failures();
+        let transfer_id = transfer_ids[0];
+
+        let mut prover = FailingProver::other();
+        assert!(matches!(
+            prove_transfer(&mut prover, &mut state, transfer_id),
+            Err(ProveError::Prover(MockProveError))
+        ));
+        assert!(matches!(
+            prove_preparation(
+                &mut prover,
+                &mut state,
+                prep_id,
+                BlockHeight::from_u32(TARGET_HEIGHT)
+            ),
+            Err(ProveError::Prover(MockProveError))
+        ));
+        assert_eq!(stamp(&state, transfer_id), None);
+        assert_eq!(stamp(&state, prep_id), None);
     }
 }

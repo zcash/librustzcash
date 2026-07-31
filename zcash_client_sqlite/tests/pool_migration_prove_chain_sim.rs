@@ -334,8 +334,11 @@ impl Run {
                     self.account_id,
                     self.fvk.clone(),
                 );
-                engine::prove_preparation(&mut prover, &mut committed.state, prep_id, anchor)
-                    .expect("proves the preparation transaction");
+                assert_eq!(
+                    engine::prove_preparation(&mut prover, &mut committed.state, prep_id, anchor)
+                        .expect("proves the preparation transaction"),
+                    engine::ProveOutcome::Proved
+                );
             }
             let proven = committed
                 .state
@@ -423,8 +426,11 @@ impl Run {
                     self.account_id,
                     self.fvk.clone(),
                 );
-                engine::prove_transfer(&mut prover, &mut committed.state, transfer_id)
-                    .expect("proves the transfer against its drawn boundary");
+                assert_eq!(
+                    engine::prove_transfer(&mut prover, &mut committed.state, transfer_id)
+                        .expect("proves the transfer against its drawn boundary"),
+                    engine::ProveOutcome::Proved
+                );
             }
             let proven = committed
                 .state
@@ -708,8 +714,11 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
             .expect("a rooted Orchard checkpoint exists");
         {
             let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
-            engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
-                .expect("proves the preparation transaction");
+            assert_eq!(
+                engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
+                    .expect("proves the preparation transaction"),
+                engine::ProveOutcome::Proved
+            );
         }
         let proven = state
             .transactions()
@@ -749,11 +758,13 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
 
     for (transfer_id, boundary) in transfer_boundaries {
         let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
-        engine::prove_transfer(&mut prover, &mut state, transfer_id).unwrap_or_else(|e| {
-            panic!(
-                "proving against the retained boundary {boundary:?} on the wallet's configured \
-                 grid failed: {e}"
-            )
-        });
+        let outcome =
+            engine::prove_transfer(&mut prover, &mut state, transfer_id).unwrap_or_else(|e| {
+                panic!(
+                    "proving against the retained boundary {boundary:?} on the wallet's configured \
+                     grid failed: {e}"
+                )
+            });
+        assert_eq!(outcome, engine::ProveOutcome::Proved);
     }
 }
