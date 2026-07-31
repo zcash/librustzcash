@@ -147,6 +147,18 @@ pub trait PoolMigrationRead {
     /// [`classify_input_observations`]. The judgment of what to DO with an answer is made once,
     /// in this crate. An empty nullifier cache on a non-mined transaction is CORRUPTION (see
     /// [`classify_input_observations`]) and surfaces the store's own error, never an answer.
+    ///
+    /// # Precondition
+    ///
+    /// The store answers for the environment of the WALLET THAT COMMITTED the migration, and that
+    /// wallet's scanned height does not regress in normal operation: a chain rollback reaches this
+    /// state through [`MigrationState::truncate_to_height`], which withdraws the determinations
+    /// resting on the discarded region rather than leaving the store to answer as though they were
+    /// still backed. An implementation may therefore treat its `as_of` as monotone between
+    /// truncations, and every answer it gives rests on evidence at or below that height. Asking a
+    /// store about a migration committed by some other wallet is outside the contract: the two
+    /// have neither the same notes nor the same scan history, so the answers would describe a
+    /// different environment than the one the transaction must execute in.
     fn check_step_satisfiability(
         &self,
         tx: &MigrationTransaction,

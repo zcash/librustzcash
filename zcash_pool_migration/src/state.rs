@@ -203,7 +203,9 @@ pub struct TransactionStatus {
     /// The height it was mined at, once mined.
     #[getset(get_copy = "pub")]
     pub(crate) mined_height: Option<BlockHeight>,
-    /// The transaction id (raw internal bytes), once broadcast.
+    /// The transaction id (raw internal bytes), from broadcast onward: a transaction keeps the
+    /// txid it was broadcast under when it mines, so this stays populated through mining rather
+    /// than lapsing at it.
     #[getset(get_copy = "pub")]
     pub(crate) txid: Option<TxId>,
 }
@@ -1028,7 +1030,9 @@ impl MigrationState {
                     }
                 };
                 let txid = match t.state {
-                    MigrationTxState::Broadcast { txid } => Some(txid),
+                    MigrationTxState::Broadcast { txid } | MigrationTxState::Mined { txid, .. } => {
+                        Some(txid)
+                    }
                     _ => None,
                 };
                 let mined_height = match t.state {

@@ -9,14 +9,10 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `engine::{AdvanceConfig, advance_migration}`, the API to drive a committed
-  migration with: it plans the next step, checks the transaction that step names
-  against the store's satisfiability oracle, and re-plans around what it
-  discovers, so every step it returns has been vouched for by the store and every
-  determination it records is persisted before that step is surfaced. A
-  transaction that can never mine — marked unsatisfiable, expired without mining,
-  or dependent on either — is never offered, and a due `AdvanceStep::Broadcast` is
-  surfaced ahead of any `AdvanceStep::Prove`, so a wallet that wakes to find a
-  transaction due can broadcast it and end the session without syncing.
+  migration with. Call it at each wake-up for the next `state::AdvanceStep`,
+  perform that step, record the outcome, and call it again; every step it
+  returns has been checked against the store's satisfiability oracle, and every
+  determination it makes is persisted before the step is surfaced.
 - `engine::MigrationStatus::Superseded` (wire name `"superseded"`) and
   `engine::MigrationState::mark_superseded`, the terminal status and transition
   recording that a migration's remaining value is being re-planned; a superseded
@@ -74,6 +70,10 @@ and this library adheres to Rust's notion of
   alongside its height, and `engine::MigrationState::mark_mined` takes it;
   `MigrationTxState::from_stored` requires the txid payload for `"mined"` rows,
   and `broadcast_txid` also answers for mined transactions.
+- `state::TransactionStatus::txid` is now populated for a MINED transaction as
+  well as a broadcast one; it previously lapsed to `None` once the transaction
+  mined. A transaction keeps the txid it was broadcast under, so a consumer
+  rendering progress no longer has to hold one from an earlier status view.
 - `engine::MigrationTransaction::from_parts` takes two further parameters,
   `unsatisfiable_at` (the chain height backing a spent-input observation, when
   the transaction has been determined unsatisfiable) and `spend_nullifiers`
@@ -117,7 +117,7 @@ and this library adheres to Rust's notion of
   planning kernel is internal to the crate now; `engine::advance_migration` is
   the API to drive a committed migration with, and every step it returns has
   been checked against the store's satisfiability oracle, which calling the
-  kernel directly bypassed. Replace `state.next_step(target_height, &[])` with
+  kernel directly bypassed. Replace `state.next_step(target_height)` with
   `advance_migration(&mut store, &mut state, target_height, &config)`, which
   returns the same `state::AdvanceStep`.
 
