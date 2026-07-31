@@ -34,6 +34,9 @@ use crate::{
 
 use super::{LowLevelWalletRead, LowLevelWalletWrite, TxMeta};
 
+#[cfg(feature = "orchard")]
+use crate::data_api::anchor_retention::{AnchorRetentionInterval, PoolMigrationParams};
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::data_api::Account,
@@ -940,6 +943,30 @@ where
     let tx_ref = wallet_db.put_tx_data(d_tx.tx(), fee, None, None, observed_height)?;
     if let Some(height) = d_tx.mined_height() {
         wallet_db.set_transaction_status(d_tx.tx().txid(), TransactionStatus::Mined(height))?;
+    }
+
+    // Record how the transaction classifies against ZIP 318, so that a wallet can label a
+    // migration transaction in its history without a migration plan, which does not survive a
+    // seed restore. This is the one moment at which the parsed transaction and the decrypted
+    // outputs are both in hand; a store recomputing it later would have neither.
+    //
+    // The SPECIFIED parameters are used rather than the store's own. The only value a wallet
+    // overrides is the anchor bucket interval, and this evidence source cannot evaluate the anchor
+    // clause at all (resolving an anchor to a height needs the retained boundary checkpoints), so
+    // the override cannot change the answer. Deliberately not read from the store: `LowLevelWalletRead`
+    // does not expose it, and adding a second accessor for a grid the store is the authority on is
+    // exactly how two call sites come to disagree. Thread the store's parameters in here if a
+    // future clause ever consults the grid.
+    #[cfg(feature = "orchard")]
+    {
+        let params = PoolMigrationParams::from(AnchorRetentionInterval::default());
+        let classification = crate::data_api::zip318::classify_decrypted_tx(
+            d_tx.tx(),
+            d_tx.orchard_outputs(),
+            d_tx.ironwood_outputs(),
+            &params,
+        );
+        wallet_db.put_zip318_classification(tx_ref, classification)?;
     }
 
     let has_wallet_shielded_spend = mark_notes_spent(

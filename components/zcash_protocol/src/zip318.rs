@@ -542,11 +542,25 @@ pub struct Zip318Evidence {
     pub destination_actions: Option<usize>,
     /// Whether any transparent or Sapling bundle is present. No ZIP 318 transaction carries one.
     pub other_bundles_present: Option<bool>,
-    /// Whether every value-carrying source-pool output pays the account's own internal address.
+    /// Whether the source-pool outputs are consistent with a wallet-internal send-to-self, as
+    /// precisely as this source can tell.
     ///
-    /// Padding dummies carry no value and are excluded; only the outputs the wallet actually
-    /// created are considered.
-    pub source_outputs_all_internal: Option<bool>,
+    /// The clause names the CLAIM rather than a check, because how tightly it can be established
+    /// depends on what the source can see, and no source can do better than its own view:
+    ///
+    /// - From an unproven transaction the wallet is building, exactly: the values and recipients
+    ///   are all present, so "every value-carrying output pays the account's own internal address"
+    ///   is directly checkable, with zero-valued padding dummies excluded.
+    /// - From a MINED transaction, only loosely, and this is not a shortcoming of the
+    ///   implementation. A padding dummy and an unrelated party's output are equally
+    ///   undecryptable, so the two cannot be told apart at all, which is precisely what the
+    ///   padding is for. The strongest sound reading is "at least one output decrypts to the
+    ///   account's own internal address, none decrypts to one of its external addresses, and no
+    ///   external recipient is otherwise known".
+    ///
+    /// The looser reading admits strictly more, so it keeps the over-approximation direction
+    /// [`classify`] already has: no false negatives, some admitted look-alikes.
+    pub source_is_send_to_self: Option<bool>,
     /// The single value-carrying destination-pool output, when the transaction has one.
     pub sole_destination_output: Option<DestinationOutput>,
     /// Whether the expiry height is the canonical rolling expiry, judged against a height the
@@ -630,7 +644,7 @@ where
         return Zip318Classification::Nonconforming;
     }
 
-    match evidence.source_outputs_all_internal {
+    match evidence.source_is_send_to_self {
         None => Zip318Classification::Unknown,
         Some(false) => Zip318Classification::Nonconforming,
         Some(true) => Zip318Classification::Conforms(Zip318TxKind::Preparation),
@@ -974,7 +988,7 @@ mod tests {
             source_actions: Some(PREP_TX_ACTIONS),
             destination_actions: Some(0),
             other_bundles_present: Some(false),
-            source_outputs_all_internal: Some(true),
+            source_is_send_to_self: Some(true),
             sole_destination_output: None,
             expiry_is_canonical: Some(true),
             anchor_on_grid: Some(true),
@@ -988,7 +1002,7 @@ mod tests {
             source_actions: Some(CROSSING_SOURCE_ACTIONS),
             destination_actions: Some(CROSSING_DESTINATION_ACTIONS),
             other_bundles_present: Some(false),
-            source_outputs_all_internal: None,
+            source_is_send_to_self: None,
             sole_destination_output: Some(DestinationOutput { value, owner }),
             expiry_is_canonical: Some(true),
             anchor_on_grid: Some(true),
@@ -1060,7 +1074,7 @@ mod tests {
             (
                 "a preparation output paying elsewhere is not a send-to-self",
                 Zip318Evidence {
-                    source_outputs_all_internal: Some(false),
+                    source_is_send_to_self: Some(false),
                     ..prep_evidence()
                 },
             ),
@@ -1149,7 +1163,7 @@ mod tests {
                 ..prep_evidence()
             },
             Zip318Evidence {
-                source_outputs_all_internal: None,
+                source_is_send_to_self: None,
                 ..prep_evidence()
             },
         ];

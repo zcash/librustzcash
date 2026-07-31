@@ -5137,6 +5137,28 @@ pub(crate) fn put_tx_data(
         .map_err(SqliteClientError::from)
 }
 
+/// Records how a transaction classifies against ZIP 318.
+///
+/// The column defaults to the code for "not classified", so a row this was never called for
+/// reports as unclassified rather than as a decision that the transaction is not a migration
+/// transaction. Rows written before this column existed keep that default, and need the
+/// transaction rescanned before they can be labelled.
+pub(crate) fn put_zip318_classification(
+    conn: &rusqlite::Connection,
+    tx_ref: TxRef,
+    classification: zcash_protocol::zip318::Zip318Classification,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "UPDATE transactions SET zip318_kind = :zip318_kind WHERE id_tx = :id_tx",
+        named_params![
+            ":zip318_kind": classification.to_code(),
+            ":id_tx": tx_ref.0,
+        ],
+    )?;
+
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TxQueryType {
     Status,

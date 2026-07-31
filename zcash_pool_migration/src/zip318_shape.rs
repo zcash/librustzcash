@@ -61,7 +61,7 @@ where
         source_actions: Some(pczt.orchard().actions().len()),
         destination_actions: Some(pczt.ironwood().actions().len()),
         other_bundles_present: Some(pczt.has_transparent_data() || pczt.has_sapling_data()),
-        source_outputs_all_internal: pczt.orchard().value_carrying_outputs_all_pay(&internal),
+        source_is_send_to_self: pczt.orchard().value_carrying_outputs_all_pay(&internal),
         sole_destination_output: sole_destination_output(pczt.ironwood(), &internal),
         expiry_is_canonical: Some(constants.is_canonical_expiry(expiry, expiry_reference)),
         // Deferred anchors and an absent fee field; see the module documentation.
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(evidence.source_actions, Some(PREP_TX_ACTIONS));
         assert_eq!(evidence.destination_actions, Some(0));
         assert_eq!(evidence.other_bundles_present, Some(false));
-        assert_eq!(evidence.source_outputs_all_internal, Some(true));
+        assert_eq!(evidence.source_is_send_to_self, Some(true));
 
         let (pczt, fvk) = transfer(COIN, canonical_expiry());
         let evidence = evidence_from_pczt(

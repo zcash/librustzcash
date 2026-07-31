@@ -314,6 +314,14 @@ CREATE TABLE blocks (
 /// - `trust_status`: A flag indicating whether the transaction should be considered "trusted".
 ///   When set to `1`, outputs of this transaction will be considered spendable with `trusted`
 ///   confirmations instead of `untrusted` confirmations.
+/// - `zip318_kind`: how the transaction classifies against ZIP 318, encoded by
+///   [`Zip318Classification::to_code`]. The default, `0`, means NOT CLASSIFIED, and is what a row
+///   holds until the wallet has decrypted the transaction; it is deliberately distinct from the
+///   code for "nonconforming", which is a decision that the transaction is not a ZIP 318 one. A
+///   client must render the default as no label, never as "not a migration". Rows written before
+///   this column existed keep the default and need the transaction rescanned.
+///
+/// [`Zip318Classification::to_code`]: zcash_protocol::zip318::Zip318Classification::to_code
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -329,6 +337,7 @@ CREATE TABLE "transactions" (
     min_observed_height INTEGER NOT NULL,
     confirmed_unmined_at_height INTEGER,
     trust_status INTEGER,
+    zip318_kind INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (
         block IS NULL OR mined_height = block

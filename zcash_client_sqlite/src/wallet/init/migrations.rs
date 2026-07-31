@@ -70,6 +70,7 @@ mod v_tx_outputs_transparent_addresses;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 mod witness_stabilized_notes;
+mod zip318_classification;
 
 use std::{rc::Rc, sync::Mutex};
 
@@ -168,6 +169,7 @@ pub mod ids {
         v_tx_outputs_use_legacy_false::MIGRATION_ID as V_TX_OUTPUTS_USE_LEGACY_FALSE,
         wallet_summaries::MIGRATION_ID as WALLET_SUMMARIES,
         witness_stabilized_notes::MIGRATION_ID as WITNESS_STABILIZED_NOTES,
+        zip318_classification::MIGRATION_ID as ZIP318_CLASSIFICATION,
     };
 }
 
@@ -358,6 +360,7 @@ pub(super) fn all_migrations<
         Box::new(fix_bad_ironwood_change_flagging::Migration),
         Box::new(v_address_uses_ironwood::Migration),
         Box::new(v_transactions_pool_crossing::Migration),
+        Box::new(zip318_classification::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
         Box::new(note_locking::Migration),
@@ -561,10 +564,10 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     add_transparent_value_index::MIGRATION_ID,
     fix_bad_ironwood_change_flagging::MIGRATION_ID,
     v_address_uses_ironwood::MIGRATION_ID,
-    v_transactions_pool_crossing::MIGRATION_ID,
     orchard_ironwood_migration_anchor_interval::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     tx_status_observation_intent::MIGRATION_ID,
+    zip318_classification::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
