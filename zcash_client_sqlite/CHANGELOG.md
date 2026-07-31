@@ -12,8 +12,8 @@ workspace.
 
 ### Changed
 - Improved `WalletRead::get_wallet_summary` performance during in-order scans
-  by avoiding per-block scan-queue lookups when pending ranges do not overlap
-  stored blocks.
+  by deriving scanned-output totals from stored commitment-tree sizes instead
+  of scanning every stored block.
 
 ## [0.22.0-rc.6] - 2026-07-29
 
