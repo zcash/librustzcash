@@ -17,7 +17,6 @@ use {
         bundle::BundleVersion,
         note::{ExtractedNoteCommitment, Nullifier, RandomSeed, Rho},
         note_encryption::{CompactAction, IronwoodDomain, OrchardDomain, OrchardNoteEncryption},
-        pczt::ParseError as OrchardParseError,
         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
     },
     ff::PrimeField,
@@ -1869,7 +1868,7 @@ impl Output {
         &mut self,
         note_version: NoteVersion,
         spend_nullifier: [u8; 32],
-    ) -> Result<(), OrchardParseError> {
+    ) -> Result<(), orchard::pczt::ParseError> {
         if self.cmx.is_some() {
             return Ok(());
         }
@@ -1877,34 +1876,34 @@ impl Output {
         let recipient = Address::from_raw_address_bytes(
             self.recipient
                 .as_ref()
-                .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?,
+                .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?,
         )
         .into_option()
-        .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
+        .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?;
         let rho = Rho::from_bytes(&spend_nullifier)
             .into_option()
-            .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
+            .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?;
         let rseed = RandomSeed::from_bytes(
             *self
                 .rseed
                 .as_ref()
-                .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?,
+                .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?,
             &rho,
         )
         .into_option()
-        .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
+        .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?;
         let note = Note::from_parts(
             recipient,
             NoteValue::from_raw(
                 self.value
-                    .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?,
+                    .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?,
             ),
             rho,
             rseed,
             note_version,
         )
         .into_option()
-        .ok_or(OrchardParseError::InvalidExtractedNoteCommitment)?;
+        .ok_or(orchard::pczt::ParseError::InvalidExtractedNoteCommitment)?;
 
         self.cmx = Some(ExtractedNoteCommitment::from(note.commitment()).to_bytes());
         Ok(())
@@ -1923,7 +1922,7 @@ impl Output {
         &mut self,
         note_version: NoteVersion,
         spend_nullifier: [u8; 32],
-    ) -> Result<(), OrchardParseError> {
+    ) -> Result<(), orchard::pczt::ParseError> {
         let memo: [u8; 512] = match &self.enc_ciphertext {
             EncCiphertext::Encrypted(_) => return Ok(()),
             EncCiphertext::MemoPlaintext(memo) => memo.to_memo(),
@@ -1932,37 +1931,40 @@ impl Output {
         let recipient = Address::from_raw_address_bytes(
             self.recipient
                 .as_ref()
-                .ok_or(OrchardParseError::InvalidRecipient)?,
+                .ok_or(orchard::pczt::ParseError::InvalidRecipient)?,
         )
         .into_option()
-        .ok_or(OrchardParseError::InvalidRecipient)?;
+        .ok_or(orchard::pczt::ParseError::InvalidRecipient)?;
         let rho = Rho::from_bytes(&spend_nullifier)
             .into_option()
-            .ok_or(OrchardParseError::InvalidNullifier)?;
+            .ok_or(orchard::pczt::ParseError::InvalidNullifier)?;
         let rseed = RandomSeed::from_bytes(
             *self
                 .rseed
                 .as_ref()
-                .ok_or(OrchardParseError::InvalidRandomSeed)?,
+                .ok_or(orchard::pczt::ParseError::InvalidRandomSeed)?,
             &rho,
         )
         .into_option()
-        .ok_or(OrchardParseError::InvalidRandomSeed)?;
+        .ok_or(orchard::pczt::ParseError::InvalidRandomSeed)?;
         let note = Note::from_parts(
             recipient,
-            NoteValue::from_raw(self.value.ok_or(OrchardParseError::InvalidEncCiphertext)?),
+            NoteValue::from_raw(
+                self.value
+                    .ok_or(orchard::pczt::ParseError::InvalidEncCiphertext)?,
+            ),
             rho,
             rseed,
             note_version,
         )
         .into_option()
-        .ok_or(OrchardParseError::InvalidEncCiphertext)?;
+        .ok_or(orchard::pczt::ParseError::InvalidEncCiphertext)?;
         let encryptor = OrchardNoteEncryption::new(None, note, memo);
         let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0;
         let enc_ciphertext = encryptor.encrypt_note_plaintext().to_vec();
 
         if ephemeral_key != self.ephemeral_key {
-            return Err(OrchardParseError::InvalidEncCiphertext);
+            return Err(orchard::pczt::ParseError::InvalidEncCiphertext);
         }
 
         self.enc_ciphertext = EncCiphertext::Encrypted(enc_ciphertext);
@@ -1973,7 +1975,7 @@ impl Output {
 #[cfg(feature = "orchard")]
 impl Action {
     /// Recomputes `cv_net`, if this action carries it as an omitted field.
-    fn resolve_cv_net(&mut self) -> Result<(), OrchardParseError> {
+    fn resolve_cv_net(&mut self) -> Result<(), orchard::pczt::ParseError> {
         if self.cv_net.is_some() {
             return Ok(());
         }
@@ -1981,18 +1983,19 @@ impl Action {
         let spend_value: NoteValue = NoteValue::from_raw(
             self.spend
                 .value
-                .ok_or(OrchardParseError::InvalidValueCommitment)?,
+                .ok_or(orchard::pczt::ParseError::InvalidValueCommitment)?,
         );
         let output_value = NoteValue::from_raw(
             self.output
                 .value
-                .ok_or(OrchardParseError::InvalidValueCommitment)?,
+                .ok_or(orchard::pczt::ParseError::InvalidValueCommitment)?,
         );
         let rcv = ValueCommitTrapdoor::from_bytes(
-            self.rcv.ok_or(OrchardParseError::InvalidValueCommitment)?,
+            self.rcv
+                .ok_or(orchard::pczt::ParseError::InvalidValueCommitment)?,
         )
         .into_option()
-        .ok_or(OrchardParseError::InvalidValueCommitment)?;
+        .ok_or(orchard::pczt::ParseError::InvalidValueCommitment)?;
 
         self.cv_net = Some(ValueCommitment::derive(spend_value - output_value, rcv).to_bytes());
         Ok(())
@@ -2012,7 +2015,7 @@ impl Bundle {
     /// For improved efficiency, callers that will pass the same bundle through
     /// multiple roles should call this once up front, not in each role. Parsing
     /// also resolves fields defensively.
-    pub fn resolve_fields(&mut self) -> Result<(), OrchardParseError> {
+    pub fn resolve_fields(&mut self) -> Result<(), orchard::pczt::ParseError> {
         for action in &mut self.actions {
             action.resolve_cv_net()?;
             action
