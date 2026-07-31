@@ -10,6 +10,11 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- The `orchard` and `sapling` features are now enabled by default. Consumers
+  that require a smaller feature set (such as `no_std` signers) should disable
+  default features and enable only the features they need.
+
 ## [0.9.2] - 2026-08-03
 
 ### Added
