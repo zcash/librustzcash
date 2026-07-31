@@ -597,7 +597,7 @@ jobs:
       # `--all-features` and `--no-default-features` endpoints both miss. The script carries the
       # full rationale and can be run locally against one crate or the whole workspace.
       - name: Clippy each feature
-        run: .github/helpers/clippy-each-feature.sh "$CRATE"
+        run: scripts/clippy-each-feature.sh "$CRATE"
         env:
           CRATE: ${{ matrix.crate }}
 

@@ -17,14 +17,14 @@
 # runner.
 #
 # Usage:
-#   .github/helpers/clippy-each-feature.sh                       # every workspace crate
-#   .github/helpers/clippy-each-feature.sh zcash_client_backend  # one crate
+#   scripts/clippy-each-feature.sh                       # every workspace crate
+#   scripts/clippy-each-feature.sh zcash_client_backend  # one crate
 #
 # Exits non-zero if any configuration fails to lint.
 
 set -uo pipefail
 
-repo_root=$(cd "$(dirname "$0")/../.." && pwd)
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
 
 # GitHub's log-annotation commands are noise outside Actions, so emit them only there.
 if [ -n "${GITHUB_ACTIONS:-}" ]; then
