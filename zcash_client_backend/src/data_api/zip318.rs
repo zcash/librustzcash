@@ -14,6 +14,8 @@
 //!
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 //! [`store_decrypted_tx`]: crate::data_api::ll::wallet::store_decrypted_tx
+//! [`classify`]: zcash_protocol::zip318::classify
+//! [`Zip318Evidence::source_is_send_to_self`]: zcash_protocol::zip318::Zip318Evidence::source_is_send_to_self
 
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::value::Zatoshis;

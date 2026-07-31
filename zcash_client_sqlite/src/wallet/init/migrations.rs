@@ -727,8 +727,10 @@ pub(crate) mod tests {
             ids::V_TX_OUTPUTS_RETURN_ADDRS,
             ids::V_TX_OUTPUTS_TRANSPARENT_ADDRESSES,
             ids::V_TX_OUTPUTS_USE_LEGACY_FALSE,
+            ids::V_TRANSACTIONS_ZIP318_KIND,
             ids::WALLET_SUMMARIES,
             ids::WITNESS_STABILIZED_NOTES,
+            ids::ZIP318_CLASSIFICATION,
         ]);
 
         let migrations =
