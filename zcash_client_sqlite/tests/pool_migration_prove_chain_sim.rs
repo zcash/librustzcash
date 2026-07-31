@@ -1,26 +1,27 @@
 //! End-to-end, real-proving chain simulation of a whole migration over a genuine wallet.
 //!
 //! This drives a real (in-memory) [`WalletDb`] through the `zcash_client_backend` testing
-//! framework, exercising the `zcash_pool_migration` engine's proving path against the wallet's OWN
-//! Orchard commitment tree instead of a hand-built one:
+//! framework, exercising the `zcash_pool_migration` engine against the wallet's OWN Orchard
+//! commitment tree and its OWN pool-migration store instead of hand-built stand-ins:
 //!
-//! 1. fund an account with a spendable Orchard note and commit a migration over the
+//! 1. fund an account with spendable Orchard notes and commit a migration over the
 //!    [`WalletMigration`] adapter (so the plan, the prep transactions, and the transfers all come
-//!    from the real wallet);
-//! 2. prove each PREPARATION transaction against the chain tip (installing the source anchor and its
-//!    spends' witnesses through the PCZT `Updater` role), extract it, mine it, and scan it — so its
-//!    minted funding notes become genuinely scanned received notes with real tree positions;
-//! 3. advance the chain to each TRANSFER's drawn anchor boundary and prove it (resolving the funding
-//!    note's witness from the wallet's tree by the nullifier its spend reveals), extract it, and
-//!    assert both its Orchard and Ironwood bundles verify.
+//!    from the real wallet), then persist it into [`PoolMigrations`], the SQLite store;
+//! 2. drive the committed migration through [`advance_migration`] — the API a consuming
+//!    application uses — performing each step it names against the simulated chain: proving
+//!    installs the source anchor and its spends' witnesses through the PCZT `Updater` role, and
+//!    broadcasting extracts the transaction, mines it, and scans it.
 //!
-//! [`WalletMigrationProver`] resolves every spend's tree position from the wallet's own note store
-//! (no hand-supplied map), so this test also covers that production lookup path. It keeps each
-//! transfer's boundary within this crate's checkpoint pruning window (100 blocks of the tip), so it
-//! needs no migration anchor-checkpoint retention, which is a wallet backend concern out of the
-//! migration crate's control.
+//! Driving through `advance_migration` rather than hand-sequencing the steps is what puts the
+//! SQLite satisfiability oracle in the loop: every step is verified against the wallet's live view
+//! before it is performed, so a migration whose inputs the wallet has seen spent surfaces as a
+//! replan instead of wasted proving work. [`WalletMigrationProver`] resolves every spend's tree
+//! position from the wallet's own note store (no hand-supplied map), so this also covers that
+//! production lookup path.
 //!
 //! [`WalletDb`]: zcash_client_sqlite::WalletDb
+//! [`PoolMigrations`]: zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations
+//! [`advance_migration`]: zcash_pool_migration::engine::advance_migration
 #![cfg(all(
     feature = "orchard",
     feature = "pczt-tests",
@@ -41,21 +42,35 @@ use zcash_client_backend::data_api::testing::{
 use zcash_client_backend::data_api::{Account, WalletRead, WalletTest};
 // The wallet, block cache, DB factory, and Orchard-checkpoint helper come from this crate's own
 // test harness, exposed under its `test-dependencies` feature.
+use zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations;
 use zcash_client_sqlite::testing::db::{TestDb, TestDbFactory};
 use zcash_client_sqlite::testing::{BlockCache, highest_rooted_orchard_checkpoint};
 use zcash_keys::keys::UnifiedSpendingKey;
 
 use zcash_primitives::block::BlockHash;
+use zcash_primitives::transaction::Transaction;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, ZatBalance, Zatoshis};
 
 use zcash_pool_migration::engine::{
-    self, MigrationState, MigrationTransferId, MigrationTxKind, MigrationTxState,
-    PoolMigrationRead, PoolMigrationWrite, ReplanThreshold,
+    self, AdvanceConfig, MigrationState, MigrationStatus, MigrationTransferId, MigrationTxKind,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, ReplanThreshold,
 };
+use zcash_pool_migration::state::AdvanceStep;
 use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
+
+/// The drive policy every scenario here uses: a ten-block reorg settle depth, the caller policy
+/// the satisfiability oracle judges anchor displacements under.
+const ADVANCE: AdvanceConfig = AdvanceConfig {
+    reorg_settle_depth: ReorgSettleDepth(10),
+};
+
+/// A cap on the empty blocks a drive loop will mine waiting for the migration's schedule, so a
+/// migration that can never make progress fails the test rather than spinning. The privacy
+/// schedule spreads a migration's broadcasts over a few hundred blocks at the ZIP 318 grid.
+const MAX_WAITING_BLOCKS: u32 = 5_000;
 
 /// Every network upgrade (through NU6.3, which activates the Ironwood pool) is active from this
 /// height, so a migration built at or above it is post-NU6.3 and its transfers cross into Ironwood.
@@ -76,12 +91,27 @@ fn nu63_network() -> LocalNetwork {
     }
 }
 
-/// A trivial in-memory migration store for the [`WalletMigration`] adapter. The chain simulation
-/// drives proving through the engine's free functions (which mutate the in-memory
-/// [`MigrationState`] directly), so only `replace_migration` (used by commit) is exercised.
+/// The store the [`WalletMigration`] adapter is handed for PLANNING and COMMITTING, holding one
+/// migration state in memory.
+///
+/// The drive itself runs against the real SQLite store ([`PoolMigrations`]); this exists only
+/// because the adapter borrows the wallet immutably for its whole lifetime while a `PoolMigrations`
+/// over the same wallet database needs that database's connection mutably, and one `TestDb` handle
+/// cannot lend both at once. What the adapter actually reads from its store is the COMMIT GUARD's
+/// question — is a non-terminal migration already in progress? — so a commit whose guard must see
+/// persisted state seeds this with exactly what the SQLite store holds
+/// ([`Self::holding`]), and the committed result is written straight back there.
 #[derive(Default)]
 struct MigrationTestStore {
     state: Option<MigrationState>,
+}
+
+impl MigrationTestStore {
+    /// A store presenting `state` — what the SQLite store was last read to hold — so the commit
+    /// guard is put to the migration a wallet has actually persisted.
+    fn holding(state: Option<MigrationState>) -> Self {
+        Self { state }
+    }
 }
 
 impl PoolMigrationRead for MigrationTestStore {
@@ -96,8 +126,9 @@ impl PoolMigrationRead for MigrationTestStore {
         _tx: &engine::MigrationTransaction,
         _settle: engine::ReorgSettleDepth,
     ) -> Result<engine::StepSatisfiability, Self::Error> {
-        // Not exercised: the chain simulation drives proving through the engine's free functions
-        // and never consults the satisfiability oracle.
+        // Not exercised: this store is only ever handed to the plan-and-commit path, which never
+        // consults the oracle. Every drive in this file runs against the SQLite store, whose
+        // oracle answers from the wallet's own tables.
         Ok(engine::StepSatisfiability::Satisfiable {
             as_of: BlockHeight::from_u32(0),
         })
@@ -115,8 +146,8 @@ impl PoolMigrationWrite for MigrationTestStore {
         _id: MigrationTransferId,
         _state: MigrationTxState,
     ) -> Result<(), Self::Error> {
-        // Not exercised: the chain simulation advances proving state through the engine's
-        // `prove_preparation` / `prove_transfer` on the in-memory `MigrationState`, not the store.
+        // Not exercised: the commit path replaces the whole migration; per-transaction lifecycle
+        // updates all happen against the SQLite store during the drive.
         Ok(())
     }
 }
@@ -164,13 +195,12 @@ impl Scenario {
         self
     }
 
-    /// Runs the whole migration for this scenario, phase by phase, asserting every declared
-    /// expectation as it goes: setup, plan-and-commit, prove-preparations, prove-transfers.
+    /// Runs the whole migration for this scenario, asserting every declared expectation as it
+    /// goes: setup, plan-and-commit, then the drive to completion through `advance_migration`.
     fn prove_end_to_end(self) {
         let mut run = Run::setup(&self);
         let mut committed = run.plan_and_commit(&self);
-        run.prove_preparations(&mut committed, &self);
-        run.prove_transfers(&mut committed, &self);
+        run.drive_to_completion(&mut committed, &self);
     }
 }
 
@@ -240,10 +270,271 @@ impl Run {
         }
     }
 
+    /// The account's pool-migration store, over the wallet database's own connection — the same
+    /// borrow an application holding that connection would construct it from.
+    fn store(&mut self) -> PoolMigrations<&mut rusqlite::Connection> {
+        PoolMigrations::for_account(self.st.wallet_mut().conn_mut(), self.account_id)
+            .expect("the account has a pool-migration store")
+    }
+
+    /// Write `state` through to the SQLite store, as a consumer does after performing a step.
+    fn persist(&mut self, state: &MigrationState) {
+        self.store()
+            .replace_migration(state)
+            .expect("persists the migration state");
+    }
+
+    /// The migration the SQLite store holds, read back through the store's own reader.
+    fn stored_migration(&mut self) -> Option<MigrationState> {
+        self.store().get_migration().expect("reads the migration")
+    }
+
+    /// The height of the next block a transaction could be mined in, which is what
+    /// `advance_migration` plans against.
+    fn target_height(&self) -> BlockHeight {
+        self.st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip")
+            + 1
+    }
+
+    /// Ask `advance_migration` for the next step, against the SQLite store and the simulated
+    /// chain's current tip.
+    fn advance(&mut self, state: &mut MigrationState) -> AdvanceStep {
+        let target = self.target_height();
+        let mut store = self.store();
+        engine::advance_migration(&mut store, state, target, &ADVANCE)
+            .expect("the store and its satisfiability oracle answer")
+    }
+
+    /// Mine one empty block and scan it, so the chain reaches the migration's next scheduled
+    /// height.
+    fn mine_empty_block(&mut self) {
+        let (h, _) = self.st.generate_empty_block();
+        self.st.scan_cached_blocks(h, 1);
+    }
+
+    /// Perform an [`AdvanceStep::Prove`] step: install the transaction's deferred anchor and
+    /// witnesses against the wallet's commitment trees, prove it, and persist. A PREPARATION
+    /// anchors to a fresh checkpoint at the tip (the caller's choice, as for an ordinary
+    /// transaction); a TRANSFER to the boundary its schedule drew.
+    ///
+    /// The engine's outcome is returned rather than asserted: a prove attempt whose input the
+    /// wallet no longer holds unspent is not an error but a determination, and persisting is
+    /// exactly as necessary then as it is after a successful proof.
+    fn perform_prove(
+        &mut self,
+        state: &mut MigrationState,
+        id: MigrationTransferId,
+        kind: MigrationTxKind,
+    ) -> engine::ProveOutcome {
+        let anchor = matches!(kind, MigrationTxKind::Preparation { .. }).then(|| {
+            let tip = self.target_height() - 1;
+            highest_rooted_orchard_checkpoint(self.st.wallet_mut(), tip)
+                .expect("a rooted Orchard checkpoint exists")
+        });
+        let outcome = {
+            let mut prover =
+                WalletMigrationProver::new(self.st.wallet_mut(), self.account_id, self.fvk.clone());
+            match anchor {
+                Some(anchor) => engine::prove_preparation(&mut prover, state, id, anchor)
+                    .expect("the prover answers for the preparation transaction"),
+                None => engine::prove_transfer(&mut prover, state, id)
+                    .expect("the prover answers for the transfer"),
+            }
+        };
+        self.persist(state);
+        outcome
+    }
+
+    /// Perform an [`AdvanceStep::Broadcast`] step: extract the stored proven transaction and
+    /// submit it, which in this simulation means mining and scanning it, then record both
+    /// lifecycle transitions a consumer records (broadcast, then mined) and persist. Returns the
+    /// extracted transaction and the height it mined at.
+    fn perform_broadcast(
+        &mut self,
+        state: &mut MigrationState,
+        id: MigrationTransferId,
+    ) -> (Transaction, BlockHeight) {
+        let tx = {
+            let proven = state
+                .transactions()
+                .iter()
+                .find(|t| t.id() == id)
+                .expect("the broadcast candidate is present");
+            TransactionExtractor::new(
+                pczt::Pczt::parse(proven.pczt()).expect("parses the proven PCZT"),
+            )
+            .extract()
+            .expect("extracts and verifies the transaction's proofs")
+        };
+        let txid = tx.txid();
+        let (height, _) = self.st.generate_next_block_from_tx(1, &tx);
+        self.st.scan_cached_blocks(height, 1);
+        state.mark_broadcast(id, txid);
+        state.mark_mined(id, txid, height);
+        self.persist(state);
+        (tx, height)
+    }
+
+    /// Drive only the PREPARATION phase: perform every step the migration names until every
+    /// preparation transaction is mined, mining empty blocks while its schedule has not come due.
+    ///
+    /// This stops with the transfers' anchor boundaries still ahead of the tip — every crossing
+    /// depends on a preparation, so none is provable until the last one mines — which is where a
+    /// test can interpose chain events of its own.
+    fn drive_preparations(&mut self, committed: &mut Committed) {
+        let unmined_preparation = |state: &MigrationState| {
+            state.transactions().iter().any(|t| {
+                matches!(t.kind(), MigrationTxKind::Preparation { .. })
+                    && !matches!(t.state(), MigrationTxState::Mined { .. })
+            })
+        };
+        let mut waited = 0u32;
+        while unmined_preparation(&committed.state) {
+            match self.advance(&mut committed.state) {
+                AdvanceStep::Prove { id, kind } => {
+                    assert!(
+                        matches!(kind, MigrationTxKind::Preparation { .. }),
+                        "no crossing is provable while a preparation it depends on is unmined",
+                    );
+                    assert_eq!(
+                        self.perform_prove(&mut committed.state, id, kind),
+                        engine::ProveOutcome::Proved,
+                    );
+                }
+                AdvanceStep::Broadcast { id } => {
+                    self.perform_broadcast(&mut committed.state, id);
+                }
+                AdvanceStep::Waiting => {
+                    assert!(
+                        waited < MAX_WAITING_BLOCKS,
+                        "no preparation came due within {MAX_WAITING_BLOCKS} blocks",
+                    );
+                    waited += 1;
+                    self.mine_empty_block();
+                }
+                other => panic!("a healthy migration never needs {other:?} while preparing"),
+            }
+        }
+    }
+
+    /// Drive until `advance_migration` first names a TRANSFER for proving, performing every
+    /// preparation step along the way, and return that transfer's id without performing the step.
+    ///
+    /// This is the state a migration sits in for most of its life: its preparations mined, its
+    /// funding notes spendable, and its crossings still to be proved and broadcast on a schedule
+    /// spread over weeks — which is exactly the window in which an ordinary wallet spend can
+    /// consume the notes it allocated.
+    fn drive_to_first_transfer_step(&mut self, committed: &mut Committed) -> MigrationTransferId {
+        let mut waited = 0u32;
+        loop {
+            self.drive_preparations(committed);
+            match self.advance(&mut committed.state) {
+                AdvanceStep::Prove {
+                    id,
+                    kind: MigrationTxKind::Transfer { .. },
+                } => return id,
+                AdvanceStep::Waiting => {
+                    assert!(
+                        waited < MAX_WAITING_BLOCKS,
+                        "no transfer became provable within {MAX_WAITING_BLOCKS} blocks",
+                    );
+                    waited += 1;
+                    self.mine_empty_block();
+                }
+                other => panic!("a healthy migration never needs {other:?} before its transfers"),
+            }
+        }
+    }
+
+    /// The chain tip the wallet has seen.
+    fn tip(&self) -> BlockHeight {
+        self.target_height() - 1
+    }
+
+    /// Sweep every spendable note in the account to an EXTERNAL address through the wallet's own
+    /// send-max machinery, then mine and scan the sweep so the spends are recorded exactly as the
+    /// scanner records them.
+    ///
+    /// This is the ordinary user action a migration has to survive: a "send max" consumes the very
+    /// notes the migration's pre-signed transfers were built to spend, and nothing tells the
+    /// migration about it. The wallet's own proposal, transaction builder, and scanner are used
+    /// throughout, so the spend evidence the satisfiability oracle later reads is genuine.
+    fn sweep_to_external(&mut self) {
+        use core::num::NonZeroU32;
+        use zcash_client_backend::data_api::MaxSpendMode;
+        use zcash_client_backend::data_api::wallet::ConfirmationsPolicy;
+        use zcash_client_backend::fees::StandardFeeRule;
+        use zcash_client_backend::wallet::OvkPolicy;
+        use zcash_keys::address::Address;
+
+        let recipient: Address =
+            OrchardPoolTester::sk_default_address(&OrchardPoolTester::sk(&[0xf5; 32]));
+        let recipient = recipient.to_zcash_address(self.st.network());
+        let confirmations = ConfirmationsPolicy::new_symmetrical(
+            NonZeroU32::new(1).expect("1 is not zero"),
+            #[cfg(feature = "transparent-inputs")]
+            false,
+        );
+        let proposal = self
+            .st
+            .propose_send_max_transfer(
+                self.account_id,
+                &StandardFeeRule::Zip317,
+                recipient,
+                None,
+                MaxSpendMode::MaxSpendable,
+                confirmations,
+            )
+            .expect("proposes a send-max sweep of the account's spendable notes");
+        // The wallet's own builder, with the testing harness's mock provers: nothing here
+        // verifies the sweep's proofs, and what the migration must react to is the SPENDS the
+        // scanner records, which are as real as any other transaction's.
+        let txids = self
+            .st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                &self.usk.clone(),
+                OvkPolicy::Sender,
+                &proposal,
+            )
+            .expect("builds the sweep");
+        assert_eq!(txids.len(), 1, "the sweep is a single transaction");
+        let txid = txids.head;
+
+        let tx = self
+            .st
+            .wallet()
+            .get_transaction(txid)
+            .expect("reads the swept transaction")
+            .expect("the sweep was stored");
+        let (height, _) = self.st.generate_next_block_from_tx(1, &tx);
+        self.st.scan_cached_blocks(height, 1);
+        assert_eq!(
+            self.st.get_total_balance(self.account_id),
+            Zatoshis::ZERO,
+            "the send-max sweep leaves the account empty",
+        );
+    }
+
+    /// The wallet's fully-scanned height: the chain state every satisfiability observation the
+    /// oracle and the prove seam make rests on.
+    fn fully_scanned_height(&self) -> BlockHeight {
+        self.st
+            .wallet()
+            .block_fully_scanned()
+            .expect("reads the fully-scanned block")
+            .expect("the wallet is fully scanned")
+            .block_height()
+    }
+
     /// Phase 2 (plan and commit): plans and commits the migration over the wallet adapter (its plan,
     /// preparations, and transfers all drawn from the real wallet's notes), checks the planned
-    /// funding-note count and migrated value against the scenario, and returns the committed
-    /// migration (every transaction Signed, with anchors and witnesses deferred).
+    /// funding-note count and migrated value against the scenario, persists it into the SQLite
+    /// store, and returns the committed migration (every transaction Signed, with anchors and
+    /// witnesses deferred).
     fn plan_and_commit(&mut self, scenario: &Scenario) -> Committed {
         let tip = self
             .st
@@ -251,13 +542,14 @@ impl Run {
             .chain_height()
             .expect("reads the chain height")
             .expect("the wallet has a chain tip");
+        let stored = self.stored_migration();
         let mut rng = ChaCha8Rng::seed_from_u64(0);
         let (state, funding_notes, migrated, change) = {
             let adapter = WalletMigration::new(
                 self.st.wallet(),
                 self.account_id,
                 self.usk.clone(),
-                MigrationTestStore::default(),
+                MigrationTestStore::holding(stored),
             );
             let plan = engine::plan_migration(&self.network, &adapter, &mut rng)
                 .expect("plans the migration");
@@ -294,6 +586,10 @@ impl Run {
             assert!(matches!(tx.state(), MigrationTxState::Signed));
         }
 
+        // The committed migration becomes the store's: everything after this point is driven from
+        // persisted state, exactly as a wallet resuming after a restart would.
+        self.persist(&state);
+
         Committed {
             state,
             funding_notes,
@@ -301,231 +597,138 @@ impl Run {
         }
     }
 
-    /// Phase 3 (prove preparations): proves each preparation against the current tip, extracts it
-    /// (asserting it is Orchard-only), then mines and scans it so its minted funding notes become
-    /// spendable; finally checks the wallet balance is the funding less the reserved preparation fees.
-    fn prove_preparations(&mut self, committed: &mut Committed, scenario: &Scenario) {
-        let prep_ids: Vec<MigrationTransferId> = committed
-            .state
-            .transactions()
-            .iter()
-            .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { .. }))
-            .map(|t| t.id())
-            .collect();
+    /// Phase 3 (drive): advances the committed migration to completion through
+    /// [`engine::advance_migration`], performing each step it names against the simulated chain,
+    /// and asserts what the chain and the wallet should show at each one.
+    ///
+    /// A `Prove` step installs the transaction's deferred anchor and witnesses and proves it: a
+    /// PREPARATION anchors to a fresh checkpoint at the tip (the caller's choice, as for an
+    /// ordinary transaction), a TRANSFER to the boundary its schedule drew. A `Broadcast` step
+    /// extracts the proven PCZT — asserting the bundle shape the kind implies, and for a transfer
+    /// checking the wallet's own view of the mined crossing — and submits it, which in this
+    /// simulation means mining and scanning it. `Waiting` means the migration's privacy schedule
+    /// has not come due, so the chain advances a block. Nothing else may be named: a healthy
+    /// migration over a wallet whose notes nothing else touches never needs a rebuild or a replan.
+    ///
+    /// The step-verifying oracle is the SQLite store's, so every step performed here was first
+    /// checked against the wallet's live note and note-spend tables.
+    fn drive_to_completion(&mut self, committed: &mut Committed, scenario: &Scenario) {
+        // The Ironwood output note each transfer creates, collected to check the destination pool.
+        let mut ironwood_notes: Vec<Zatoshis> = Vec::new();
+        let mut preparations_mined = 0usize;
+        let mut transfers_mined = 0usize;
+        let mut waited = 0u32;
+
+        loop {
+            match self.advance(&mut committed.state) {
+                AdvanceStep::Prove { id, kind } => {
+                    assert_eq!(
+                        self.perform_prove(&mut committed.state, id, kind),
+                        engine::ProveOutcome::Proved,
+                        "{}: proving {id:?}",
+                        scenario.label
+                    );
+                    let proven = committed
+                        .state
+                        .transactions()
+                        .iter()
+                        .find(|t| t.id() == id)
+                        .expect("the proved transaction is present");
+                    assert!(matches!(proven.state(), MigrationTxState::Proved));
+                }
+
+                AdvanceStep::Broadcast { id } => {
+                    let kind = committed
+                        .state
+                        .transactions()
+                        .iter()
+                        .find(|t| t.id() == id)
+                        .expect("the broadcast candidate is present")
+                        .kind();
+                    let (tx, _) = self.perform_broadcast(&mut committed.state, id);
+                    assert!(
+                        tx.orchard_bundle().is_some(),
+                        "{}: every migration transaction spends Orchard notes",
+                        scenario.label
+                    );
+
+                    match kind {
+                        MigrationTxKind::Preparation { .. } => {
+                            // A preparation transaction is Orchard-only: no Ironwood bundle.
+                            assert!(
+                                tx.ironwood_bundle().is_none(),
+                                "{}: a preparation has no Ironwood bundle",
+                                scenario.label
+                            );
+                            preparations_mined += 1;
+                            if preparations_mined == scenario.expected_preparations {
+                                // Every preparation is now mined and scanned, so its minted
+                                // funding notes are spendable: the balance is the funding notes
+                                // plus the plan's change, the source balance less the reserved
+                                // preparation fees.
+                                let funding_notes_total: u64 =
+                                    committed.funding_notes.iter().map(|&v| u64::from(v)).sum();
+                                assert_eq!(
+                                    self.st.get_total_balance(self.account_id),
+                                    Zatoshis::from_u64(funding_notes_total + committed.change)
+                                        .expect("a valid balance"),
+                                    "{}: balance after preparations",
+                                    scenario.label
+                                );
+                            }
+                        }
+                        MigrationTxKind::Transfer { .. } => {
+                            transfers_mined += 1;
+                            ironwood_notes.push(self.assert_mined_crossing(&tx, scenario));
+                        }
+                    }
+                }
+
+                AdvanceStep::Waiting => {
+                    assert!(
+                        waited < MAX_WAITING_BLOCKS,
+                        "{}: the migration made no progress within {MAX_WAITING_BLOCKS} blocks",
+                        scenario.label
+                    );
+                    waited += 1;
+                    self.mine_empty_block();
+                }
+
+                AdvanceStep::Complete => break,
+
+                other => panic!(
+                    "{}: a healthy migration never needs {other:?}",
+                    scenario.label
+                ),
+            }
+        }
+
         assert_eq!(
-            prep_ids.len(),
-            scenario.expected_preparations,
+            preparations_mined, scenario.expected_preparations,
             "{}: preparation transactions",
             scenario.label
         );
-
-        for prep_id in prep_ids {
-            let tip = self
-                .st
-                .wallet()
-                .chain_height()
-                .expect("reads the chain height")
-                .expect("the wallet has a chain tip");
-            let anchor = highest_rooted_orchard_checkpoint(self.st.wallet_mut(), tip)
-                .expect("a rooted Orchard checkpoint exists");
-            {
-                let mut prover = WalletMigrationProver::new(
-                    self.st.wallet_mut(),
-                    self.account_id,
-                    self.fvk.clone(),
-                );
-                assert_eq!(
-                    engine::prove_preparation(&mut prover, &mut committed.state, prep_id, anchor)
-                        .expect("proves the preparation transaction"),
-                    engine::ProveOutcome::Proved
-                );
-            }
-            let proven = committed
-                .state
-                .transactions()
-                .iter()
-                .find(|t| t.id() == prep_id)
-                .expect("the preparation transaction is present");
-            assert!(matches!(proven.state(), MigrationTxState::Proved));
-            let tx = TransactionExtractor::new(
-                pczt::Pczt::parse(proven.pczt()).expect("parses the proven preparation PCZT"),
-            )
-            .extract()
-            .expect("extracts and verifies the preparation transaction");
-            // A preparation transaction is Orchard-only: no Ironwood bundle.
-            assert!(
-                tx.orchard_bundle().is_some(),
-                "the preparation has an Orchard bundle"
-            );
-            assert!(
-                tx.ironwood_bundle().is_none(),
-                "the preparation has no Ironwood bundle"
-            );
-
-            let (prep_height, _) = self.st.generate_next_block_from_tx(1, &tx);
-            self.st.scan_cached_blocks(prep_height, 1);
-        }
-
-        let funding_notes_total: u64 = committed.funding_notes.iter().map(|&v| u64::from(v)).sum();
         assert_eq!(
-            self.st.get_total_balance(self.account_id),
-            Zatoshis::from_u64(funding_notes_total + committed.change).expect("a valid balance"),
-            "{}: balance after preparations",
-            scenario.label
-        );
-    }
-
-    /// Phase 4 (prove transfers): advances the chain to each transfer's drawn anchor boundary (so
-    /// that checkpoint is settled and holds the funding note, within the pruning window), proves the
-    /// transfer, extracts it, and asserts both its Orchard and Ironwood bundles verify. Finally
-    /// checks the destination pool: the migration created exactly one Ironwood note per transfer,
-    /// together holding the whole migrated value.
-    fn prove_transfers(&mut self, committed: &mut Committed, scenario: &Scenario) {
-        let mut transfers: Vec<(MigrationTransferId, BlockHeight)> = committed
-            .state
-            .transactions()
-            .iter()
-            .filter(|t| matches!(t.kind(), MigrationTxKind::Transfer { .. }))
-            .map(|t| {
-                (
-                    t.id(),
-                    t.anchor_boundary()
-                        .expect("a transfer carries a drawn boundary"),
-                )
-            })
-            .collect();
-        transfers.sort_by_key(|(_, boundary)| *boundary);
-        assert_eq!(
-            transfers.len(),
-            scenario.expected_transfers,
+            transfers_mined, scenario.expected_transfers,
             "{}: transfers",
             scenario.label
         );
-
-        // The Ironwood output note each transfer creates, collected to check the destination pool.
-        let mut ironwood_notes: Vec<Zatoshis> = Vec::new();
-
-        for (transfer_id, boundary) in transfers {
-            loop {
-                let tip = self
-                    .st
-                    .wallet()
-                    .chain_height()
-                    .expect("reads the chain height")
-                    .expect("the wallet has a chain tip");
-                if tip > boundary {
-                    break;
-                }
-                let (h, _) = self.st.generate_empty_block();
-                self.st.scan_cached_blocks(h, 1);
-            }
-
-            {
-                let mut prover = WalletMigrationProver::new(
-                    self.st.wallet_mut(),
-                    self.account_id,
-                    self.fvk.clone(),
-                );
-                assert_eq!(
-                    engine::prove_transfer(&mut prover, &mut committed.state, transfer_id)
-                        .expect("proves the transfer against its drawn boundary"),
-                    engine::ProveOutcome::Proved
-                );
-            }
-            let proven = committed
-                .state
-                .transactions()
-                .iter()
-                .find(|t| t.id() == transfer_id)
-                .expect("the transfer is present");
-            assert!(matches!(proven.state(), MigrationTxState::Proved));
-            let tx = TransactionExtractor::new(
-                pczt::Pczt::parse(proven.pczt()).expect("parses the proven transfer PCZT"),
-            )
-            .extract()
-            .expect("extracts and verifies the transfer's Orchard and Ironwood proofs");
-            assert!(
-                tx.orchard_bundle().is_some(),
-                "the transfer has an Orchard bundle"
-            );
-            let ironwood = tx
-                .ironwood_bundle()
-                .expect("the transfer has an Ironwood bundle");
-            // A transfer creates exactly one Ironwood output: the migrated crossing note. Its value
-            // is the magnitude of the (output-only) bundle's value balance.
-            assert_eq!(
-                ironwood.actions().len(),
-                1,
-                "{}: Ironwood outputs per transfer",
-                scenario.label
-            );
-            let crossing_value =
-                Zatoshis::from_u64(i64::from(ironwood.value_balance()).unsigned_abs())
-                    .expect("a valid Ironwood note value");
-            ironwood_notes.push(crossing_value);
-
-            // The transfer's Orchard bundle is spend-only, so its value balance is the spent
-            // funding note's value; the Ironwood bundle is output-only, so its value balance
-            // magnitude is the crossing value. Their difference is the transfer's fee.
-            let funding_value = Zatoshis::from_u64(
-                i64::from(
-                    *tx.orchard_bundle()
-                        .expect("the transfer has an Orchard bundle")
-                        .value_balance(),
-                )
-                .unsigned_abs(),
-            )
-            .expect("a valid funding note value");
-            let transfer_fee =
-                (funding_value - crossing_value).expect("the funding note covers the crossing");
-
-            // Mine and scan the transfer, then check the wallet's view of it: the history entry
-            // must report the funding note as spent, the crossing note as received, and a balance
-            // change of only the fee, not the whole value of the notes spent.
-            let (h, _) = self.st.generate_next_block_from_tx(1, &tx);
-            self.st.scan_cached_blocks(h, 1);
-
-            let history = self
-                .st
-                .wallet()
-                .get_tx_history()
-                .expect("reads the transaction history");
-            let entry = history
-                .iter()
-                .find(|t| t.txid() == tx.txid())
-                .expect("the mined transfer appears in the transaction history");
-            assert_eq!(
-                entry.total_spent(),
-                funding_value,
-                "{}: transfer total_spent",
-                scenario.label
-            );
-            assert_eq!(
-                entry.total_received(),
-                crossing_value,
-                "{}: transfer total_received",
-                scenario.label
-            );
-            assert_eq!(
-                entry.account_value_delta(),
-                -ZatBalance::from(transfer_fee),
-                "{}: transfer balance delta is only the fee",
-                scenario.label
-            );
-            // The transfer is classified as a pool crossing carrying the crossing value, which
-            // is the amount a wallet should display for it (the balance delta is only the fee).
-            assert!(
-                entry.is_pool_crossing(),
-                "{}: the transfer is a pool crossing",
-                scenario.label
-            );
-            assert_eq!(
-                entry.pool_crossing_value(),
-                Some(crossing_value),
-                "{}: transfer pool_crossing_value",
-                scenario.label
-            );
-        }
+        assert_eq!(
+            committed.state.status(),
+            MigrationStatus::Complete,
+            "{}: a fully mined migration is complete",
+            scenario.label
+        );
+        // The drive's determinations are durable: what the store holds agrees with what the drive
+        // returned.
+        assert_eq!(
+            self.stored_migration()
+                .expect("the migration is in the store")
+                .status(),
+            MigrationStatus::Complete,
+            "{}: the store agrees the migration is complete",
+            scenario.label
+        );
 
         // After every transfer is mined and scanned, the wallet holds the migrated value (now in
         // the Ironwood pool) plus the plan's change.
@@ -540,12 +743,6 @@ impl Run {
 
         // The destination pool holds exactly one Ironwood note per crossing, together carrying the
         // whole migrated value.
-        assert_eq!(
-            ironwood_notes.len(),
-            scenario.expected_transfers,
-            "{}: Ironwood notes",
-            scenario.label
-        );
         let ironwood_total: u64 = ironwood_notes.iter().map(|&v| u64::from(v)).sum();
         assert_eq!(
             Zatoshis::from_u64(ironwood_total).expect("a valid balance"),
@@ -553,6 +750,87 @@ impl Run {
             "{}: Ironwood balance",
             scenario.label
         );
+    }
+
+    /// Asserts everything a MINED transfer should show, and returns the value that crossed: its
+    /// Ironwood bundle carries exactly one output (the crossing note), and the wallet's own
+    /// transaction history reports the funding note spent, the crossing note received, a balance
+    /// change of only the fee, and the transaction classified as a pool crossing carrying the
+    /// crossing value — which is the amount a wallet should display for it.
+    fn assert_mined_crossing(
+        &mut self,
+        tx: &zcash_primitives::transaction::Transaction,
+        scenario: &Scenario,
+    ) -> Zatoshis {
+        let ironwood = tx
+            .ironwood_bundle()
+            .expect("the transfer has an Ironwood bundle");
+        // A transfer creates exactly one Ironwood output: the migrated crossing note. Its value
+        // is the magnitude of the (output-only) bundle's value balance.
+        assert_eq!(
+            ironwood.actions().len(),
+            1,
+            "{}: Ironwood outputs per transfer",
+            scenario.label
+        );
+        let crossing_value = Zatoshis::from_u64(i64::from(ironwood.value_balance()).unsigned_abs())
+            .expect("a valid Ironwood note value");
+
+        // The transfer's Orchard bundle is spend-only, so its value balance is the spent funding
+        // note's value; the Ironwood bundle is output-only, so its value balance magnitude is the
+        // crossing value. Their difference is the transfer's fee.
+        let funding_value = Zatoshis::from_u64(
+            i64::from(
+                *tx.orchard_bundle()
+                    .expect("the transfer has an Orchard bundle")
+                    .value_balance(),
+            )
+            .unsigned_abs(),
+        )
+        .expect("a valid funding note value");
+        let transfer_fee =
+            (funding_value - crossing_value).expect("the funding note covers the crossing");
+
+        let history = self
+            .st
+            .wallet()
+            .get_tx_history()
+            .expect("reads the transaction history");
+        let entry = history
+            .iter()
+            .find(|t| t.txid() == tx.txid())
+            .expect("the mined transfer appears in the transaction history");
+        assert_eq!(
+            entry.total_spent(),
+            funding_value,
+            "{}: transfer total_spent",
+            scenario.label
+        );
+        assert_eq!(
+            entry.total_received(),
+            crossing_value,
+            "{}: transfer total_received",
+            scenario.label
+        );
+        assert_eq!(
+            entry.account_value_delta(),
+            -ZatBalance::from(transfer_fee),
+            "{}: transfer balance delta is only the fee",
+            scenario.label
+        );
+        assert!(
+            entry.is_pool_crossing(),
+            "{}: the transfer is a pool crossing",
+            scenario.label
+        );
+        assert_eq!(
+            entry.pool_crossing_value(),
+            Some(crossing_value),
+            "{}: transfer pool_crossing_value",
+            scenario.label
+        );
+
+        crossing_value
     }
 }
 
@@ -767,4 +1045,411 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
             });
         assert_eq!(outcome, engine::ProveOutcome::Proved);
     }
+}
+
+/// The scenario the unsatisfiability machinery exists for: while a committed migration waits out
+/// its privacy schedule, the user spends the whole balance — a "send max" to an external address —
+/// consuming the very funding notes the pre-signed crossings were built to spend.
+///
+/// Nothing tells the migration. What it has instead is the wallet's own view, and this drives that
+/// view through both seams that read it, over a real chain and a real store:
+///
+/// 1. the PROVE seam. Proving a crossing whose funding note the wallet no longer holds unspent is
+///    not an error: the prover reports the note absent from the account's unspent set, the engine
+///    sharpens that membership observation into positive spend evidence (every dependency of this
+///    transfer is mined at a height the wallet has scanned past), and the transfer is marked at the
+///    height the observation rests on.
+/// 2. the DRIVE seam. `advance_migration` puts the same transfer to the SQLite satisfiability
+///    oracle, which recognizes the spend in the wallet's own note-spend tables, records it, and —
+///    the whole of the planned crossing value now unsatisfiable, far above the committed
+///    threshold — reports `Replan` with every mark durably persisted.
+///
+/// The consumer's contracted response to `Replan` then completes the loop: supersede, and the
+/// commit guard that refused a replacement a moment earlier accepts one for the remaining balance.
+#[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
+fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
+    // The cheapest scenario that still has both a preparation and a crossing: one funding note,
+    // one transfer, so the swept share is the whole planned crossing value.
+    const SWEPT: &str = "Gwen, 0.0152 ZEC (a single minimum-denomination note)";
+    let scenario = scenarios()
+        .into_iter()
+        .find(|scenario| scenario.label == SWEPT)
+        .expect("the single-crossing scenario exists");
+
+    let mut run = Run::setup(&scenario);
+    let mut committed = run.plan_and_commit(&scenario);
+    let transfer_id = run.drive_to_first_transfer_step(&mut committed);
+
+    // The user sweeps the account. The transfer's funding note is now spent by a mined
+    // transaction the wallet has scanned; the migration still believes it is spendable.
+    run.sweep_to_external();
+    let as_of = run.fully_scanned_height();
+
+    // (1) The PROVE seam, on a copy of the state, so the drive seam below is exercised from the
+    // same starting point rather than from this determination's marks.
+    let mut probe = committed.state.clone();
+    let outcome = {
+        let mut prover =
+            WalletMigrationProver::new(run.st.wallet_mut(), run.account_id, run.fvk.clone());
+        engine::prove_transfer(&mut prover, &mut probe, transfer_id)
+            .expect("an unavailable input is answered, never raised as an error")
+    };
+    assert_eq!(
+        outcome,
+        engine::ProveOutcome::MarkedUnsatisfiable {
+            replan_required: true
+        },
+        "a swept funding note with every dependency mined and scanned is positive spend evidence",
+    );
+    assert_eq!(
+        probe
+            .transactions()
+            .iter()
+            .find(|t| t.id() == transfer_id)
+            .expect("the transfer is present")
+            .unsatisfiable_at(),
+        Some(as_of),
+        "the mark carries the fully-scanned height the observation rests on",
+    );
+
+    // (2) The DRIVE seam. The oracle reads the same spend out of the wallet's tables, the whole
+    // planned crossing value is unsatisfiable, and the committed threshold is exceeded.
+    assert_eq!(
+        run.advance(&mut committed.state),
+        AdvanceStep::Replan,
+        "a fully swept migration is re-planned rather than retried",
+    );
+    for tx in committed.state.transactions() {
+        if matches!(tx.kind(), MigrationTxKind::Transfer { .. }) {
+            assert_eq!(
+                tx.unsatisfiable_at(),
+                Some(as_of),
+                "every affected transfer is marked at the observation's height",
+            );
+        }
+    }
+
+    // The marks are DURABLE: `advance_migration` wrote them back before returning the step, so a
+    // wallet that stops here and resumes later re-reads them rather than re-deriving them.
+    let stored = run
+        .stored_migration()
+        .expect("the store holds the migration");
+    for tx in stored.transactions() {
+        if matches!(tx.kind(), MigrationTxKind::Transfer { .. }) {
+            assert_eq!(
+                tx.unsatisfiable_at(),
+                Some(as_of),
+                "the mark survives the round trip through the store",
+            );
+        }
+    }
+    assert!(
+        stored.replan_required(),
+        "the persisted migration still reports the replan",
+    );
+
+    // Nothing is left to migrate right now: the sweep took the whole balance.
+    {
+        let stored = run.stored_migration();
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let adapter = WalletMigration::new(
+            run.st.wallet(),
+            run.account_id,
+            run.usk.clone(),
+            MigrationTestStore::holding(stored),
+        );
+        assert!(
+            matches!(
+                engine::plan_migration(&run.network, &adapter, &mut rng),
+                Err(engine::MigrationError::NothingToMigrate),
+            ),
+            "the sweep left no migratable balance",
+        );
+    }
+
+    // Fund the account afresh, so a replacement migration has something to plan over. Enough
+    // blocks follow for the new note to become spendable and its shard to complete.
+    let (h, _, _) = run.st.generate_next_block(
+        &run.fvk.clone(),
+        AddressType::DefaultExternal,
+        zats(2 * COIN),
+    );
+    run.st.scan_cached_blocks(h, 1);
+    for _ in 0..(SHARD_COMPLETION_BLOCKS + 10) {
+        run.mine_empty_block();
+    }
+
+    // The commit guard REFUSES while the superseded-but-not-yet-marked migration is in progress:
+    // a committed migration is resumed from the store, never rebuilt over.
+    let tip = run.target_height() - 1;
+    {
+        let stored = run.stored_migration();
+        let mut rng = ChaCha8Rng::seed_from_u64(2);
+        let mut adapter = WalletMigration::new(
+            run.st.wallet(),
+            run.account_id,
+            run.usk.clone(),
+            MigrationTestStore::holding(stored),
+        );
+        let plan = engine::plan_migration(&run.network, &adapter, &mut rng)
+            .expect("plans the fresh balance");
+        assert!(
+            matches!(
+                engine::commit_preparation_with_funding(
+                    &run.network,
+                    tip,
+                    &mut adapter,
+                    &plan,
+                    &mut rng,
+                    ReplanThreshold::DEFAULT,
+                ),
+                Err(engine::CommitError::MigrationInProgress),
+            ),
+            "an in-progress migration is never committed over",
+        );
+    }
+
+    // The consumer's contracted response to `Replan`: supersede, and persist.
+    committed.state.mark_superseded();
+    run.persist(&committed.state);
+    assert!(
+        run.stored_migration()
+            .expect("the store holds the migration")
+            .is_terminal(),
+        "the persisted migration is terminal, so a replacement may take its place",
+    );
+
+    // Now the guard accepts, and the remaining balance is committed to a fresh migration.
+    let stored = run.stored_migration();
+    let mut rng = ChaCha8Rng::seed_from_u64(3);
+    let mut adapter = WalletMigration::new(
+        run.st.wallet(),
+        run.account_id,
+        run.usk.clone(),
+        MigrationTestStore::holding(stored),
+    );
+    let plan =
+        engine::plan_migration(&run.network, &adapter, &mut rng).expect("plans the fresh balance");
+    let (replanned, _) = engine::commit_preparation_with_funding(
+        &run.network,
+        tip,
+        &mut adapter,
+        &plan,
+        &mut rng,
+        ReplanThreshold::DEFAULT,
+    )
+    .expect("the commit guard accepts a replacement for a superseded migration");
+    assert!(
+        !replanned.is_terminal(),
+        "the replacement migration is live",
+    );
+    assert!(
+        replanned
+            .transactions()
+            .iter()
+            .any(|t| matches!(t.kind(), MigrationTxKind::Transfer { .. })),
+        "the replacement migration carries crossings for the remaining balance",
+    );
+    assert!(
+        replanned
+            .transactions()
+            .iter()
+            .all(|t| t.unsatisfiable_at().is_none()),
+        "the replacement carries none of the superseded migration's marks",
+    );
+}
+
+/// The transaction the stored proven PCZT for `id` extracts to.
+fn extract_proven(state: &MigrationState, id: MigrationTransferId) -> Transaction {
+    let proven = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == id)
+        .expect("the transaction is present");
+    TransactionExtractor::new(pczt::Pczt::parse(proven.pczt()).expect("parses the proven PCZT"))
+        .extract()
+        .expect("extracts and verifies the transaction's proofs")
+}
+
+/// A settled reorg that reaches BELOW a broadcast crossing's anchor boundary: the chain state its
+/// proof was made over is gone, so as proven it can never be mined, and no amount of waiting or
+/// re-broadcasting will change that.
+///
+/// This is the anchor-validity arm of the satisfiability oracle, driven over a real chain. The
+/// setup makes the displacement genuine rather than incidental: a wallet note arrives BELOW the
+/// crossing's boundary, so the tree the crossing anchors to contains a commitment the reorg
+/// discards, and the replacement chain never commits it. The installed anchor is therefore the
+/// root of no block of the chain the wallet now holds — which is exactly the condition the oracle
+/// must establish before marking, since consensus accepts an anchor that is the root of ANY
+/// previous block and a reorg that merely re-arranges the same outputs leaves the old root live.
+///
+/// `advance_migration`'s in-flight sweep is what finds it. A broadcast-but-unmined transaction is
+/// never named as a step, so no candidate check would ever reach it; the sweep asks after exactly
+/// this one question, for exactly this set of transactions.
+#[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
+fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
+    const SINGLE_CROSSING: &str = "Gwen, 0.0152 ZEC (a single minimum-denomination note)";
+    let scenario = scenarios()
+        .into_iter()
+        .find(|scenario| scenario.label == SINGLE_CROSSING)
+        .expect("the single-crossing scenario exists");
+
+    let mut run = Run::setup(&scenario);
+    let mut committed = run.plan_and_commit(&scenario);
+    run.drive_preparations(&mut committed);
+
+    let (transfer_id, boundary) = {
+        let transfer = committed
+            .state
+            .transactions()
+            .iter()
+            .find(|t| matches!(t.kind(), MigrationTxKind::Transfer { .. }))
+            .expect("the migration has a crossing");
+        (
+            transfer.id(),
+            transfer
+                .anchor_boundary()
+                .expect("a committed transfer carries its boundary"),
+        )
+    };
+
+    // A wallet note arrives just BELOW the crossing's anchor boundary, so the tree state the
+    // crossing anchors to contains a commitment that exists only on this chain. Without it, a
+    // reorg below the boundary would leave the boundary's root unchanged — the empty blocks in
+    // between add nothing to the tree — and the installed anchor would still be live, which is
+    // the answer the oracle should give and not the one under test here.
+    //
+    // It sits just below the boundary on purpose: the fork must stay inside the wallet's rewind
+    // window (this crate retains the most recent hundred checkpoints), and a deeper fork could
+    // not be truncated to at all.
+    assert!(
+        run.tip() + 2 < boundary,
+        "the preparations mined well below the crossing's boundary",
+    );
+    while run.tip() + 2 < boundary {
+        run.mine_empty_block();
+    }
+    let fvk = run.fvk.clone();
+    let (note_height, _, _) =
+        run.st
+            .generate_next_block(&fvk, AddressType::DefaultExternal, zats(COIN / 10));
+    run.st.scan_cached_blocks(note_height, 1);
+    assert_eq!(note_height + 1, boundary);
+
+    // Prove the crossing against that boundary, then record its submission. The privacy schedule
+    // would put the broadcast step many blocks further on, and driving there would carry the chain
+    // past the point where the reorg below the boundary is still a rewind the wallet can perform;
+    // what is under test is the judgment made on a transaction ALREADY in flight, so the
+    // submission is recorded through the same mutator a consumer calls after submitting.
+    let mut waited = 0u32;
+    loop {
+        match run.advance(&mut committed.state) {
+            AdvanceStep::Prove { id, kind } => {
+                assert_eq!(id, transfer_id);
+                assert_eq!(
+                    run.perform_prove(&mut committed.state, id, kind),
+                    engine::ProveOutcome::Proved,
+                );
+                break;
+            }
+            AdvanceStep::Waiting => {
+                assert!(
+                    waited < MAX_WAITING_BLOCKS,
+                    "the crossing never became provable"
+                );
+                waited += 1;
+                run.mine_empty_block();
+            }
+            other => panic!("a healthy migration never needs {other:?}"),
+        }
+    }
+    let txid = extract_proven(&committed.state, transfer_id).txid();
+    committed.state.mark_broadcast(transfer_id, txid);
+    run.persist(&committed.state);
+
+    // The reorg. The wallet truncates to below the interposed note and re-scans a chain whose
+    // replacement blocks carry no notes at all, and the consumer's reorg hook rolls the migration
+    // back with it (nothing to roll back yet: the crossing is in flight and unmarked).
+    let fork = note_height - 1;
+    run.st.truncate_to_height(fork);
+    committed.state.truncate_to_height(fork);
+    run.persist(&committed.state);
+
+    // Rebuild the chain past the boundary, and then past it by the settle depth: only then is the
+    // displacement definitive.
+    while run.tip() < boundary + ADVANCE.reorg_settle_depth.0 - 1 {
+        run.mine_empty_block();
+    }
+    let unsettled = run.fully_scanned_height();
+    assert_eq!(
+        unsettled,
+        boundary + (ADVANCE.reorg_settle_depth.0 - 1),
+        "the chain sits one block short of the settle depth",
+    );
+    assert_eq!(
+        run.advance(&mut committed.state),
+        AdvanceStep::Waiting,
+        "one block short of the settle depth, the displacement concludes nothing",
+    );
+    assert!(
+        committed
+            .state
+            .transactions()
+            .iter()
+            .all(|t| t.unsatisfiable_at().is_none()),
+        "nothing is marked before the displacement settles",
+    );
+
+    // One more block, and the displacement is settled: the in-flight sweep marks the crossing at
+    // the height the observation rests on, the whole planned crossing value is unsatisfiable, and
+    // the migration is re-planned.
+    run.mine_empty_block();
+    let as_of = run.fully_scanned_height();
+    assert_eq!(
+        run.advance(&mut committed.state),
+        AdvanceStep::Replan,
+        "a crossing whose anchor a settled reorg destroyed is re-planned, not retried",
+    );
+    assert_eq!(
+        committed
+            .state
+            .transactions()
+            .iter()
+            .find(|t| t.id() == transfer_id)
+            .expect("the crossing is present")
+            .unsatisfiable_at(),
+        Some(as_of),
+        "the mark carries the fully-scanned height the observation rests on",
+    );
+    assert_eq!(
+        run.stored_migration()
+            .expect("the store holds the migration")
+            .transactions()
+            .iter()
+            .find(|t| t.id() == transfer_id)
+            .expect("the crossing is present")
+            .unsatisfiable_at(),
+        Some(as_of),
+        "the in-flight sweep's mark is persisted before the step is surfaced",
+    );
+
+    // And it is exactly as revocable as the chain it rests on: a rewind below the mark's stamp
+    // clears it, because the state that displaced the anchor no longer exists either.
+    committed.state.truncate_to_height(as_of - 1);
+    assert!(
+        committed
+            .state
+            .transactions()
+            .iter()
+            .all(|t| t.unsatisfiable_at().is_none()),
+        "reorg truncation below the mark's stamp clears it",
+    );
 }

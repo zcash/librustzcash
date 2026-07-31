@@ -24,6 +24,9 @@ workspace.
   with no change to any foreign function interface.
 - `pool_migration::orchard_ironwood::Error::ChainStateUnavailable`, returned
   when a satisfiability check has no fully-scanned height to observe from.
+- `zcash_client_sqlite::testing::db::TestDb::conn` and `TestDb::conn_mut`, for
+  tests that open a sibling store (a `pool_migration` `PoolMigrations`, say)
+  over the wallet database's own connection.
 
 ### Changed
 - The database schema now includes the `unsatisfiable_at` and
@@ -43,8 +46,16 @@ workspace.
   `zcash_pool_migration` `PoolMigrationRead::check_step_satisfiability`
   method, answering each cached real-spend nullifier from the wallet's
   Orchard note and note-spend tables as observed at the fully-scanned height
-  (an unrecognized nullifier reads as not-yet-satisfiable, and anchor-validity
-  observations are not yet produced).
+  (an unrecognized nullifier reads as not-yet-satisfiable). A pool-migration
+  TRANSFER that has been broadcast and is not yet mined is additionally
+  reported unsatisfiable through `UnsatisfiableCause::AnchorInvalidated` once
+  the Orchard anchor installed in its stored proven PCZT is the root of none of
+  the tree states the wallet retains, and the fully-scanned height has
+  advanced at least the caller's `ReorgSettleDepth` past the boundary the
+  transfer anchored to. A broadcast PREPARATION is never so reported: it
+  records no anchor boundary, so neither the root to compare against nor the
+  height to settle the comparison at is recoverable. Per-input
+  `InputObservation::Invalidated` observations are likewise not produced.
 
 ## [0.22.0-rc.6] - 2026-07-29
 

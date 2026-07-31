@@ -44,7 +44,57 @@ static TABLES: Tables = Tables {
     source_notes: "orchard_received_notes",
     source_note_spends: "orchard_received_note_spends",
     source_note_spends_note_fk: "orchard_received_note_id",
+    source_tree_checkpoints: "orchard_tree_checkpoints",
 };
+
+/// The Orchard note commitment tree root at the checkpoint `height`, as the anchor-validity
+/// judgment consumes it: `None` when the tree can produce no root there.
+///
+/// `None` covers both "no checkpoint at that height" (never created, or pruned without being
+/// retained) and a tree too incomplete to compute one from the shard data actually held — both of
+/// which leave the judgment unable to conclude, which is exactly what `None` tells it. Only a
+/// genuine database or deserialization failure is an error; those are conditions the caller cannot
+/// act on by waiting.
+///
+/// This reads the tree through the same `rusqlite::Transaction` the rest of the satisfiability
+/// answer is computed in, so every root compared and the `as_of` it is compared under come from
+/// one database snapshot.
+#[cfg(feature = "orchard")]
+fn orchard_root_at(
+    view: &rusqlite::Transaction<'_>,
+    height: zcash_protocol::consensus::BlockHeight,
+) -> Result<Option<[u8; 32]>, Error> {
+    use shardtree::error::ShardTreeError;
+
+    /// A tree failure that is NOT "no root here": a database error surfaces as itself, and
+    /// anything else means the stored tree cannot be read back as it was written.
+    fn lift(e: ShardTreeError<crate::wallet::commitment_tree::Error>) -> Error {
+        match e {
+            ShardTreeError::Storage(crate::wallet::commitment_tree::Error::Query(e)) => {
+                Error::Db(e)
+            }
+            _ => Error::Corrupt("orchard commitment tree"),
+        }
+    }
+
+    let tree = crate::orchard_tree(view).map_err(lift)?;
+    match tree.root_at_checkpoint_id(&height) {
+        Ok(root) => Ok(root.map(|root| ::orchard::Anchor::from(root).to_bytes())),
+        // A QUERY-level failure is the tree reporting that it cannot answer for this height — the
+        // shard data it holds does not complete a root, or the checkpoint has been pruned — which
+        // is what `None` already expresses: the judgment cannot conclude.
+        Err(ShardTreeError::Query(_)) => Ok(None),
+        Err(e) => Err(lift(e)),
+    }
+}
+
+/// The source-pool tree access the satisfiability oracle's anchor-validity judgment needs, or
+/// `None` in a build that cannot read the Orchard commitment tree at all — in which case the
+/// judgment declines and the oracle keeps its conservative answer.
+#[cfg(feature = "orchard")]
+const SOURCE_ROOT_AT: Option<store::SourceRootAt> = Some(orchard_root_at);
+#[cfg(not(feature = "orchard"))]
+const SOURCE_ROOT_AT: Option<store::SourceRootAt> = None;
 
 /// Create the Orchard -> Ironwood pool-migration tables (and the due-transaction and account
 /// indexes) on `conn`. This is the body the `orchard_ironwood_migration_tables` schema migration's
@@ -141,7 +191,7 @@ impl<C: Borrow<Connection>> PoolMigrationRead for PoolMigrations<C> {
         tx: &MigrationTransaction,
         settle: ReorgSettleDepth,
     ) -> Result<StepSatisfiability, Self::Error> {
-        self.0.check_step_satisfiability(tx, settle)
+        self.0.check_step_satisfiability(tx, settle, SOURCE_ROOT_AT)
     }
 }
 
@@ -321,9 +371,10 @@ mod retention_follows_the_committed_migration {
 
 /// The satisfiability oracle over a REAL wallet database: each cached real-spend nullifier is
 /// answered from the wallet's Orchard note and note-spend tables, expiry from the fully-scanned
-/// height, and an empty nullifier cache on a non-mined row is corruption. The wallet fixture
-/// scans a genuine received note, so the nullifier under test is one the production scanner
-/// recorded, not a hand-computed stand-in.
+/// height, and a broadcast transfer's installed anchor from the wallet's own Orchard commitment
+/// tree; an empty nullifier cache on a non-mined row is corruption. The wallet fixture scans a
+/// genuine received note, so the nullifier under test is one the production scanner recorded, not
+/// a hand-computed stand-in, and the roots the anchor judgment compares are the tree's own.
 #[cfg(all(test, feature = "orchard"))]
 mod check_step_satisfiability {
     use rusqlite::named_params;
@@ -331,14 +382,14 @@ mod check_step_satisfiability {
     use zcash_client_backend::data_api::testing::{
         AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
     };
-    use zcash_client_backend::data_api::{Account as _, WalletRead};
+    use zcash_client_backend::data_api::{Account as _, WalletCommitmentTrees, WalletRead};
     use zcash_pool_migration::engine::{
         MigrationTransaction, MigrationTransferId, MigrationTxKind, MigrationTxState,
         PoolMigrationRead, ReorgSettleDepth, StepSatisfiability, UnsatisfiableCause,
     };
     use zcash_primitives::block::BlockHash;
     use zcash_protocol::TxId;
-    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::consensus::{BlockHeight, BranchId};
     use zcash_protocol::local_consensus::LocalNetwork;
     use zcash_protocol::value::Zatoshis;
 
@@ -346,9 +397,13 @@ mod check_step_satisfiability {
     use crate::AccountUuid;
     use crate::testing::{BlockCache, db::TestDb, db::TestDbFactory};
 
-    /// An arbitrary settle depth: the store does not yet consult it (anchor-validity
-    /// observations await the reorg bookkeeping), so its value is immaterial here.
+    /// The settle depth the anchor-validity tests hold the oracle to; the input-level tests do not
+    /// consult it.
     const SETTLE: ReorgSettleDepth = ReorgSettleDepth(10);
+
+    /// A root value the wallet's Orchard tree never takes, so an anchor carrying it is displaced
+    /// at every checkpoint.
+    const NO_SUCH_ROOT: [u8; 32] = [0xA5; 32];
 
     /// A wallet with one scanned Orchard note, assembled by [`scanned_note_fixture`].
     struct ScannedNoteFixture {
@@ -461,6 +516,81 @@ mod check_step_satisfiability {
             None,
             nfs,
         )
+    }
+
+    /// A PCZT whose Orchard bundle carries `anchor` as its installed anchor, serialized as the
+    /// store holds it.
+    ///
+    /// The anchor judgment reads exactly one field out of a proven transaction's bytes, and the
+    /// Creator role installs that field directly, so this stands in for a real proof without a
+    /// Halo2 proving run — the whole-migration chain simulation covers the genuinely proven
+    /// article.
+    fn pczt_anchored_at(anchor: [u8; 32]) -> Vec<u8> {
+        pczt::roles::creator::Creator::new(BranchId::Nu6_3.into(), 0, 133, None, Some(anchor))
+            .expect("NU6.3 is a supported branch")
+            .build()
+            .expect("a v6 PCZT may carry an Orchard anchor with no actions")
+            .serialize()
+            .expect("the PCZT serializes")
+    }
+
+    /// A pre-signed transfer that has been BROADCAST and not yet mined, proven against `boundary`
+    /// with `anchor` installed, and caching `nfs` as its real-spend nullifiers. This is the only
+    /// shape the anchor-validity judgment applies to.
+    fn broadcast_transfer(
+        nfs: Vec<[u8; 32]>,
+        boundary: BlockHeight,
+        anchor: [u8; 32],
+    ) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            pczt_anchored_at(anchor),
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            Some(boundary),
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([7; 32]),
+            },
+            None,
+            None,
+            nfs,
+        )
+    }
+
+    /// The wallet's own Orchard commitment tree root at the checkpoint `height` — the value a
+    /// transfer proved against that boundary would have installed.
+    fn orchard_root_at(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        height: BlockHeight,
+    ) -> [u8; 32] {
+        st.wallet_mut()
+            .with_orchard_tree_mut::<_, _, crate::error::SqliteClientError>(|tree| {
+                Ok(tree
+                    .root_at_checkpoint_id(&height)
+                    .expect("the tree answers")
+                    .expect("the boundary's checkpoint is retained"))
+            })
+            .map(|root| ::orchard::Anchor::from(root).to_bytes())
+            .expect("reads the Orchard commitment tree")
+    }
+
+    /// Scan `n` further empty blocks, returning the wallet's new fully-scanned height, so an
+    /// anchor boundary can sit a chosen number of blocks below it.
+    fn scan_empty_blocks(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        n: usize,
+    ) -> BlockHeight {
+        for _ in 0..n {
+            let (h, _) = st.generate_empty_block();
+            st.scan_cached_blocks(h, 1);
+        }
+        st.wallet()
+            .block_fully_scanned()
+            .expect("reads the fully-scanned block")
+            .expect("the wallet is fully scanned")
+            .block_height()
     }
 
     /// Record a spend of the note with nullifier `nf` by a new transaction whose mined height is
@@ -777,6 +907,270 @@ mod check_step_satisfiability {
             store.check_step_satisfiability(&reloaded.transactions()[0], SETTLE),
             Err(Error::Corrupt("spend_nullifiers")),
         ));
+    }
+
+    /// An in-flight transfer whose installed anchor is still the tree's root at the boundary it
+    /// was proven against is not obstructed: the chain the wallet has scanned still contains the
+    /// state the proof was made over.
+    #[test]
+    fn an_anchor_still_rooted_at_its_boundary_is_satisfiable() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of = scan_empty_blocks(&mut st, 12);
+        let boundary = as_of - SETTLE.0;
+        let anchor = orchard_root_at(&mut st, boundary);
+
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&broadcast_transfer(vec![nf], boundary, anchor), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
+    }
+
+    /// The settlement boundary, exactly. A displacement is definitive only once the scanned chain
+    /// has built `settle` blocks on top of the boundary whose content changed: one block short of
+    /// that depth nothing is concluded, and AT that depth the transfer is unsatisfiable through
+    /// `AnchorInvalidated`. Both answers come from the same stored transaction and the same
+    /// wallet; only the boundary's distance below the fully-scanned height differs.
+    #[test]
+    fn an_anchor_displacement_marks_exactly_at_the_settle_depth() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of = scan_empty_blocks(&mut st, 12);
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+
+        assert_eq!(
+            store
+                .check_step_satisfiability(
+                    &broadcast_transfer(vec![nf], as_of - (SETTLE.0 - 1), NO_SUCH_ROOT),
+                    SETTLE,
+                )
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+            "one block short of the settle depth concludes nothing",
+        );
+        assert_eq!(
+            store
+                .check_step_satisfiability(
+                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, NO_SUCH_ROOT),
+                    SETTLE,
+                )
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::AnchorInvalidated,
+                as_of,
+            },
+            "at the settle depth the displacement is definitive",
+        );
+    }
+
+    /// A tree state the search cannot produce a root for is a state that was NOT ruled out, so it
+    /// ends the search without concluding: the mark rests on an EXHAUSTIVE negative, and a search
+    /// that skipped an unreadable state would not be one.
+    ///
+    /// The fixture is the marking case from
+    /// [`an_anchor_displacement_marks_exactly_at_the_settle_depth`] — asserted first, so the
+    /// difference is exactly the unreadable state — plus one checkpoint whose recorded tree
+    /// position lies beyond any shard data the wallet holds, which is how a retained checkpoint
+    /// the tree can no longer complete a root for presents itself.
+    #[test]
+    fn an_unreadable_tree_state_ends_the_search_without_marking() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of = scan_empty_blocks(&mut st, 12);
+        let displaced = broadcast_transfer(vec![nf], as_of - SETTLE.0, NO_SUCH_ROOT);
+
+        {
+            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+                .expect("the account exists");
+            assert_eq!(
+                store
+                    .check_step_satisfiability(&displaced, SETTLE)
+                    .expect("the oracle answers"),
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::AnchorInvalidated,
+                    as_of,
+                },
+                "without the unreadable state, this displacement is definitive",
+            );
+        }
+
+        // A checkpoint below the scanned region whose position is past everything the tree holds:
+        // the tree finds the checkpoint but cannot complete a root over that many commitments.
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO orchard_tree_checkpoints (checkpoint_id, position)
+                 VALUES (:checkpoint_id, :position)",
+                named_params! {
+                    ":checkpoint_id": u32::from(as_of) - 50,
+                    ":position": u64::from(u32::MAX),
+                },
+            )
+            .expect("records a checkpoint the tree cannot root");
+
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&displaced, SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+            "a state the search could not read is a state it did not rule out",
+        );
+    }
+
+    /// Evidence-height discipline for the anchor judgment, isolated from settlement by asking at
+    /// depth zero: a boundary ABOVE the fully-scanned height is outside the region backing the
+    /// answer — its checkpoint may still be rewritten by scanning that has not happened — so it
+    /// concludes nothing, however displaced the anchor looks. Once scanning closes the gap, the
+    /// SAME stored transaction is marked.
+    #[test]
+    fn an_anchor_displacement_above_the_scanned_region_does_not_mark() {
+        const IMMEDIATE: ReorgSettleDepth = ReorgSettleDepth(0);
+
+        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        // Three further blocks, of which only the last is scanned: the commitment tree gains a
+        // checkpoint at that height while the fully-scanned height stays below the gap.
+        let (gap, _) = st.generate_empty_block();
+        let (_, _) = st.generate_empty_block();
+        let (high, _) = st.generate_empty_block();
+        st.scan_cached_blocks(high, 1);
+        assert_eq!(
+            st.wallet()
+                .block_fully_scanned()
+                .expect("reads the fully-scanned block")
+                .expect("the wallet is fully scanned to the pre-gap height")
+                .block_height(),
+            as_of,
+            "the unscanned gap holds the fully-scanned height below the new checkpoint",
+        );
+
+        let tx = broadcast_transfer(vec![nf], high, NO_SUCH_ROOT);
+        {
+            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+                .expect("the account exists");
+            assert_eq!(
+                store
+                    .check_step_satisfiability(&tx, IMMEDIATE)
+                    .expect("the oracle answers"),
+                StepSatisfiability::Satisfiable { as_of },
+                "a boundary above the scanned region must not obstruct yet",
+            );
+        }
+
+        // Close the gap; the boundary now lies inside the region backing the answer.
+        st.scan_cached_blocks(gap, 2);
+        let as_of = scan_empty_blocks(&mut st, 1);
+        assert!(
+            as_of >= high,
+            "the scanned region now reaches the boundary at {high:?}",
+        );
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&tx, IMMEDIATE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::AnchorInvalidated,
+                as_of,
+            },
+        );
+    }
+
+    /// The anchor judgment applies only to a BROADCAST transaction. The same displaced anchor on a
+    /// still-`Signed` transfer concludes nothing: nothing has been committed to the network, so
+    /// the transfer will simply be proven afresh against a live boundary.
+    #[test]
+    fn a_displaced_anchor_on_an_unbroadcast_transfer_does_not_mark() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of = scan_empty_blocks(&mut st, 12);
+        let signed = MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            pczt_anchored_at(NO_SUCH_ROOT),
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            Some(as_of - SETTLE.0),
+            MigrationTxState::Signed,
+            None,
+            None,
+            vec![nf],
+        );
+
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&signed, SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
+    }
+
+    /// A spent input outranks a dead anchor: the answer precedence puts `InputsSpent` above the
+    /// anchor-level cause, and the in-flight sweep acts only on the latter, so an in-flight
+    /// transaction seen spending its own inputs (most often because it is mining) is not marked
+    /// by this route.
+    #[test]
+    fn a_spent_input_outranks_a_displaced_anchor() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of = scan_empty_blocks(&mut st, 12);
+        record_spend(&mut st, nf, Some(as_of));
+
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(
+                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, NO_SUCH_ROOT),
+                    SETTLE,
+                )
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![nf]
+                },
+                as_of,
+            },
+        );
+    }
+
+    /// A PREPARATION is not judged: it records no anchor boundary — its proving height is chosen
+    /// by the caller and persisted nowhere — so there is neither a root to compare against nor a
+    /// reference height to settle a comparison at. It reads as unobstructed however displaced its
+    /// installed anchor is.
+    #[test]
+    fn a_broadcast_preparation_is_not_anchor_judged() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of = scan_empty_blocks(&mut st, 12);
+        let prep = MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Preparation { layer: 0, index: 0 },
+            pczt_anchored_at(NO_SUCH_ROOT),
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([7; 32]),
+            },
+            None,
+            None,
+            vec![nf],
+        );
+
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&prep, SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
     }
 
     /// The observations are scoped to the store's account: the same nullifier, asked about
