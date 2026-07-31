@@ -55,8 +55,9 @@ use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, ZatBalance, Zatoshis};
 
 use zcash_pool_migration::engine::{
-    self, AdvanceConfig, MigrationState, MigrationStatus, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, ReplanThreshold,
+    self, AdvanceConfig, DuenessTargets, MigrationState, MigrationStatus, MigrationTransferId,
+    MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth,
+    ReplanThreshold,
 };
 use zcash_pool_migration::state::{AdvanceStep, Blocker};
 use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
@@ -298,12 +299,20 @@ impl Run {
             + 1
     }
 
+    /// The dueness targets the simulation drives at. The simulated wallet scans every block it
+    /// mines, so its chain view IS its scanned frontier and the pair is degenerate: these
+    /// scenarios exercise the migration flow, not the estimate/scan divergence (the kernel's own
+    /// tests cover that).
+    fn targets(&self) -> DuenessTargets {
+        DuenessTargets::at(self.target_height())
+    }
+
     /// Ask `advance_migration` for the next step, against the SQLite store and the simulated
     /// chain's current tip.
     fn advance(&mut self, state: &mut MigrationState) -> AdvanceStep {
-        let target = self.target_height();
+        let targets = self.targets();
         let mut store = self.store();
-        engine::advance_migration(&mut store, state, target, &ADVANCE)
+        engine::advance_migration(&mut store, state, targets, &ADVANCE)
             .expect("the store and its satisfiability oracle answer")
     }
 
@@ -1393,7 +1402,7 @@ fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
     assert_eq!(
         committed
             .state
-            .transaction_statuses(run.target_height())
+            .transaction_statuses(run.targets())
             .iter()
             .find(|s| s.id() == transfer_id)
             .expect("the crossing is present")

@@ -9,10 +9,34 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `engine::{AdvanceConfig, advance_migration}`, the API to drive a committed
-  migration with. Call it at each wake-up for the next `state::AdvanceStep`,
-  perform that step, record the outcome, and call it again; every step it
-  returns has been checked against the store's satisfiability oracle, and every
-  determination it makes is persisted before the step is surfaced.
+  migration with. Call it at each wake-up with the `engine::DuenessTargets` for
+  the next `state::AdvanceStep`, perform that step, record the outcome, and call
+  it again; every step it returns has been checked against the store's
+  satisfiability oracle, and every determination it makes is persisted before
+  the step is surfaced.
+- `engine::DuenessTargets`, the pair of heights a migration's dueness is judged
+  against: the wallet's fully-scanned frontier and its estimate of where the
+  chain tip has reached, both carrying this crate's target convention
+  (`height + 1`). Construct it with `DuenessTargets::new(scanned, estimated)`,
+  which clamps the effective target up to the scanned one, or with
+  `DuenessTargets::at(target)` when the caller's estimate IS its chain view (a
+  server that follows the chain continuously). ZIP 318 forbids contacting
+  lightwalletd before the next-step decision, so a wallet holds only a local
+  scanned frontier and a wall-clock estimate at that moment; the estimate serves
+  the broadcast and proving SCHEDULE, while every judgment that persists a
+  verdict or destroys work — expiry as a determination, the dead set, rebuild
+  eligibility, the drain-time replan, the durable dependency closure, and a
+  transfer's anchor-boundary settledness — is made at the scanned target alone.
+- `state::Blocker::ExpiryImminent`, reported for a transaction whose expiry
+  height is at or above the caller's scanned target and below its effective one:
+  the wallet cannot yet observe whether it lapsed, so nothing is determined, but
+  its broadcast and its proof are withheld. Reported behind `Blocker::Expired`
+  (the same fact once the wallet can see it) and ahead of the state-derived
+  blockers, and never `ready` or carrying an action, so a consumer's
+  `ready() && action() == Some(NextAction::Broadcast)` sync gate agrees exactly
+  with what `engine::advance_migration` will offer. Nothing is recorded, so the
+  transaction returns to the ordinary queues if the estimate overstated the
+  lapse.
 - `engine::MigrationStatus::Superseded` (wire name `"superseded"`) and
   `engine::MigrationState::mark_superseded`, the terminal status and transition
   recording that a migration's remaining value is being re-planned; a superseded
@@ -44,6 +68,9 @@ and this library adheres to Rust's notion of
   answers as durable `unsatisfiable_at` marks: input-level and anchor-level
   causes mark the checked transaction at the observation's height, and the
   dependency closure marks the dependents stranded behind a dead transaction.
+  Its `engine::DuenessTargets` argument supplies the height that closure judges
+  its expired sources at — the scanned target, since the marks it writes are
+  durable and only a reorg truncation clears one.
 - `engine::ProveFailure`, a prover's typed failure: an input not among the
   account's unspent notes (with the nullifier and the fully-scanned height that
   observation rests on), or any other prover error.
@@ -108,6 +135,14 @@ and this library adheres to Rust's notion of
   this instead of restating the rule.
 
 ### Changed
+- `engine::MigrationState::{transaction_statuses, expired_transactions}` take an
+  `engine::DuenessTargets` in place of a single target height; pass
+  `DuenessTargets::at(target_height)` for the previous behavior. Under a pair
+  whose estimate runs ahead of the scan, `expired_transactions` and
+  `state::Blocker::Expired` report only the expiries the wallet's own chain data
+  supports, a transaction due only by the estimate is reported ready to
+  broadcast, and one whose expiry the estimate has passed is reported under the
+  new `state::Blocker::ExpiryImminent`.
 - `engine::MigrationState::truncate_to_height` also discharges every
   broadcast-failure report whose observed tip is strictly above the given
   height, alongside the unsatisfiability marks it already cleared.
@@ -179,8 +214,8 @@ and this library adheres to Rust's notion of
   the API to drive a committed migration with, and every step it returns has
   been checked against the store's satisfiability oracle, which calling the
   kernel directly bypassed. Replace `state.next_step(target_height)` with
-  `advance_migration(&mut store, &mut state, target_height, &config)`, which
-  returns the same `state::AdvanceStep`.
+  `advance_migration(&mut store, &mut state, targets, &config)`, which returns
+  the same `state::AdvanceStep`.
 - `wallet::WalletProveError::{NoRealSpend, MalformedNullifier}`, replaced by the
   single `wallet::WalletProveError::RealSpends`, which carries the
   `pczt_spends::RealSpendError` describing which of the two conditions held.

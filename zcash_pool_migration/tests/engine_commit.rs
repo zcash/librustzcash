@@ -18,10 +18,10 @@ use zcash_protocol::value::COIN;
 
 use zcash_pool_migration::build::sign_pczt;
 use zcash_pool_migration::engine::{
-    AdvanceConfig, MigrationPlan, MigrationStatus, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, ReplanThreshold,
-    advance_migration, batch_unsigned_by_action_budget, build_preparation_unsigned,
-    commit_preparation, plan_migration,
+    AdvanceConfig, DuenessTargets, MigrationPlan, MigrationStatus, MigrationTransferId,
+    MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth,
+    ReplanThreshold, advance_migration, batch_unsigned_by_action_budget,
+    build_preparation_unsigned, commit_preparation, plan_migration,
 };
 use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
 use zcash_pool_migration::signing_rounds::SigningRoundBudget;
@@ -178,7 +178,14 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .map(|t| t.scheduled_height())
         .max()
         .expect("the committed migration has transactions");
-    match advance_migration(&mut backend, &mut state, target, &config).expect("the store answers") {
+    match advance_migration(
+        &mut backend,
+        &mut state,
+        DuenessTargets::at(target),
+        &config,
+    )
+    .expect("the store answers")
+    {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
         }
@@ -193,7 +200,14 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { layer: 1, .. }))
         .map(|t| t.id())
         .collect();
-    match advance_migration(&mut backend, &mut state, target, &config).expect("the store answers") {
+    match advance_migration(
+        &mut backend,
+        &mut state,
+        DuenessTargets::at(target),
+        &config,
+    )
+    .expect("the store answers")
+    {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(
                 layer1_ids.contains(&id),
@@ -205,7 +219,14 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     for id in &layer1_ids {
         state.mark_mined(*id, mined_txid(*id), BlockHeight::from_u32(2_000_020));
     }
-    match advance_migration(&mut backend, &mut state, target, &config).expect("the store answers") {
+    match advance_migration(
+        &mut backend,
+        &mut state,
+        DuenessTargets::at(target),
+        &config,
+    )
+    .expect("the store answers")
+    {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             let tx = state
                 .transactions()
