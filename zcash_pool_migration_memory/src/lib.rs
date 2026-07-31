@@ -258,6 +258,7 @@ fn set_transaction_state(
         stored.preparation().clone(),
         transactions,
         stored.anchor_bucket_interval(),
+        stored.replan_threshold(),
     );
 }
 

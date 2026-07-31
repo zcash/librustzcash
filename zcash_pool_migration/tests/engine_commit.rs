@@ -19,8 +19,8 @@ use zcash_protocol::value::COIN;
 use zcash_pool_migration::build::sign_pczt;
 use zcash_pool_migration::engine::{
     MigrationPlan, MigrationStatus, MigrationTxKind, MigrationTxState, PoolMigrationRead,
-    PoolMigrationWrite, batch_unsigned_by_action_budget, build_preparation_unsigned,
-    commit_preparation, plan_migration,
+    PoolMigrationWrite, ReplanThreshold, batch_unsigned_by_action_budget,
+    build_preparation_unsigned, commit_preparation, plan_migration,
 };
 use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
 use zcash_pool_migration::signing_rounds::SigningRoundBudget;
@@ -58,6 +58,7 @@ fn commits_the_whole_migration_in_one_pass() {
         &mut backend,
         &plan,
         &mut rng,
+        ReplanThreshold::DEFAULT,
     )
     .expect("commits the migration");
     assert_eq!(state.status(), MigrationStatus::Committed);
@@ -127,6 +128,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         &mut backend,
         &plan,
         &mut rng,
+        ReplanThreshold::DEFAULT,
     )
     .expect("commits the migration");
     assert_eq!(state.transactions().len(), prep_count + transfer_count);
@@ -232,6 +234,7 @@ fn external_signing_batches_by_action_budget() {
         &mut backend,
         &plan,
         &mut rng,
+        ReplanThreshold::DEFAULT,
     )
     .expect("builds the migration unsigned");
     assert_eq!(unsigned.len(), state.transactions().len());

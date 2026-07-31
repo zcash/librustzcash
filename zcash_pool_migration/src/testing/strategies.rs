@@ -18,7 +18,7 @@ use zcash_protocol::value::testing::arb_zatoshis;
 use crate::denomination::DenominationPlan;
 use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState,
+    MigrationTxState, ReplanThreshold,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::scheduling::AnchorBucketInterval;
@@ -230,11 +230,17 @@ pub fn arb_anchor_bucket_interval() -> impl Strategy<Value = AnchorBucketInterva
     ]
 }
 
+/// An arbitrary [`ReplanThreshold`]: any valid percent, so a store is exercised across the whole
+/// stamped-policy range and not just the [`ReplanThreshold::DEFAULT`].
+pub fn arb_replan_threshold() -> impl Strategy<Value = ReplanThreshold> {
+    (0u8..=100).prop_map(|p| ReplanThreshold::new(p).expect("<=100"))
+}
+
 /// An arbitrary whole [`MigrationState`], built through [`MigrationState::from_parts`]: a status, a
 /// denomination plan (from which the funding-note values derive), a preparation plan, a small set of
 /// transactions re-keyed with sequential [`MigrationTransferId`]s (so their row keys are unique, as a
-/// store requires), and the anchor bucket grid it was committed under. Generated values are
-/// self-consistent enough to persist and read back unchanged.
+/// store requires), the anchor bucket grid it was committed under, and the replan threshold it was
+/// stamped with. Generated values are self-consistent enough to persist and read back unchanged.
 pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
     (
         arb_migration_status(),
@@ -242,9 +248,17 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
         arb_preparation_plan(),
         prop::collection::vec(arb_migration_transaction(), 0..6),
         arb_anchor_bucket_interval(),
+        arb_replan_threshold(),
     )
         .prop_map(
-            |(status, denominations, preparation, txs, anchor_bucket_interval)| {
+            |(
+                status,
+                denominations,
+                preparation,
+                txs,
+                anchor_bucket_interval,
+                replan_threshold,
+            )| {
                 // Re-key the transactions with sequential ids so their row keys are unique; a store
                 // keys transaction rows by id and returns them in id order.
                 let transactions = txs
@@ -272,6 +286,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                     preparation,
                     transactions,
                     anchor_bucket_interval,
+                    replan_threshold,
                 )
             },
         )

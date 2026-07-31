@@ -33,7 +33,8 @@ use zcash_pool_migration::{
 use zcash_pool_migration::{
     engine::{
         MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
-        UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
+        ReplanThreshold, UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs,
+        plan_migration,
     },
     signing_rounds::{MinRounds, NextFit, SigningRoundBudget},
 };
@@ -120,6 +121,7 @@ fn keystone_external_signing_end_to_end() {
         &mut backend,
         &plan,
         &mut rng,
+        ReplanThreshold::DEFAULT,
     )
     .expect("builds the migration unsigned");
     assert_eq!(unsigned.len(), plan.total_transactions());

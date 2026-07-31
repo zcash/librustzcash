@@ -53,7 +53,7 @@ use zcash_protocol::value::{COIN, ZatBalance, Zatoshis};
 
 use zcash_pool_migration::engine::{
     self, MigrationState, MigrationTransferId, MigrationTxKind, MigrationTxState,
-    PoolMigrationRead, PoolMigrationWrite,
+    PoolMigrationRead, PoolMigrationWrite, ReplanThreshold,
 };
 use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
 
@@ -259,6 +259,7 @@ impl Run {
                 &mut adapter,
                 &plan,
                 &mut rng,
+                ReplanThreshold::DEFAULT,
             )
             .expect("commits the migration");
             (state, funding_notes, migrated, change)
@@ -642,9 +643,15 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
     );
 
     let plan = engine::plan_migration(&network, &adapter, &mut rng).expect("plans the migration");
-    let (state, _) =
-        engine::commit_preparation_with_funding(&network, tip, &mut adapter, &plan, &mut rng)
-            .expect("commits the migration");
+    let (state, _) = engine::commit_preparation_with_funding(
+        &network,
+        tip,
+        &mut adapter,
+        &plan,
+        &mut rng,
+        ReplanThreshold::DEFAULT,
+    )
+    .expect("commits the migration");
 
     // Every transfer anchors to a boundary of the WALLET's grid; nothing lands off it, and the
     // migration records that grid so a later reconfiguration is detectable.

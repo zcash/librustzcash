@@ -458,6 +458,39 @@ impl TryFrom<&str> for MigrationStatus {
     }
 }
 
+/// The share of planned transfer value (an integer percent) above which a migration with
+/// unsatisfiable transfers should be re-planned IMMEDIATELY rather than after satisfiable work
+/// drains. Stamped on the migration at commit (like the anchor bucket grid), so every consumer
+/// of the same state applies the same policy: the threshold governs a determination derived
+/// from persisted marks, and two consumers of one migration must not disagree about it.
+///
+/// The two endpoints have distinct meanings: `0` triggers a replan as soon as ANY value is marked
+/// unsatisfiable, however small; `100` never triggers immediately (the strict `>` in
+/// [`MigrationState::replan_required`] can never be satisfied), so an unsatisfiable migration is
+/// only ever re-planned once satisfiable work drains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplanThreshold(u8);
+
+impl ReplanThreshold {
+    /// The default policy: strictly more than 20% of planned transfer value unsatisfiable
+    /// triggers an immediate replan.
+    pub const DEFAULT: Self = Self(20);
+
+    /// A threshold of `percent` (0 ..= 100), or `None` if `percent > 100`.
+    pub const fn new(percent: u8) -> Option<Self> {
+        if percent <= 100 {
+            Some(Self(percent))
+        } else {
+            None
+        }
+    }
+
+    /// The integer percent.
+    pub const fn percent(&self) -> u8 {
+        self.0
+    }
+}
+
 impl AsRef<str> for MigrationTxState {
     /// The stable lowercase wire name of the lifecycle state, as a store persists it (the queryable
     /// discriminant); the `Broadcast` txid and `Mined` height are stored alongside and reattached by
@@ -562,6 +595,9 @@ pub struct MigrationState {
     /// so [`prove_transfer`] and the rebuild path reject the mismatch up front.
     #[getset(get_copy = "pub")]
     pub(crate) anchor_bucket_interval: crate::scheduling::AnchorBucketInterval,
+    /// The replan threshold stamped when this migration was committed.
+    #[getset(get_copy = "pub")]
+    pub(crate) replan_threshold: ReplanThreshold,
 }
 
 impl MigrationState {
@@ -573,6 +609,7 @@ impl MigrationState {
         preparation: PreparationPlan,
         transactions: Vec<MigrationTransaction>,
         anchor_bucket_interval: crate::scheduling::AnchorBucketInterval,
+        replan_threshold: ReplanThreshold,
     ) -> Self {
         Self {
             status,
@@ -580,6 +617,7 @@ impl MigrationState {
             preparation,
             transactions,
             anchor_bucket_interval,
+            replan_threshold,
         }
     }
 
@@ -2233,8 +2271,10 @@ struct MintedNote {
 /// ([`CommitError::MigrationInProgress`]): a committed migration is resumed from the store, or
 /// cancelled, never rebuilt over.
 ///
-/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3), and
-/// `rng` a cryptographically secure RNG.
+/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3),
+/// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
+/// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
+/// a specific policy.
 #[cfg(feature = "orchard")]
 pub fn commit_preparation<P, B, R>(
     params: &P,
@@ -2242,6 +2282,7 @@ pub fn commit_preparation<P, B, R>(
     backend: &mut B,
     plan: &MigrationPlan,
     rng: &mut R,
+    replan_threshold: ReplanThreshold,
 ) -> Result<MigrationState, CommitError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters + Clone,
@@ -2258,6 +2299,7 @@ where
         plan,
         rng,
         Signing::InProcess,
+        replan_threshold,
     )
     .map(|output| output.state)
 }
@@ -2274,8 +2316,10 @@ where
 /// `replace_migration`, and drive the broadcasts through the normal state machine (proving remains a
 /// consumer responsibility, at broadcast time).
 ///
-/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3), and
-/// `rng` a cryptographically secure RNG.
+/// `params` is the network, `target_height` the height the transactions are built at (post-NU6.3),
+/// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
+/// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
+/// a specific policy.
 #[cfg(feature = "orchard")]
 pub fn build_preparation_unsigned<P, B, R>(
     params: &P,
@@ -2283,6 +2327,7 @@ pub fn build_preparation_unsigned<P, B, R>(
     backend: &mut B,
     plan: &MigrationPlan,
     rng: &mut R,
+    replan_threshold: ReplanThreshold,
 ) -> Result<(MigrationState, Vec<UnsignedMigrationTx>), CommitError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters + Clone,
@@ -2292,8 +2337,16 @@ where
         + PoolMigrationWrite,
     R: RngCore + rand_core::CryptoRng,
 {
-    commit_preparation_inner(params, target_height, backend, plan, rng, Signing::External)
-        .map(|output| (output.state, output.unsigned))
+    commit_preparation_inner(
+        params,
+        target_height,
+        backend,
+        plan,
+        rng,
+        Signing::External,
+        replan_threshold,
+    )
+    .map(|output| (output.state, output.unsigned))
 }
 
 /// Shared body of [`commit_preparation`] (with [`Signing::InProcess`]) and
@@ -2307,6 +2360,7 @@ fn commit_preparation_inner<P, B, R>(
     plan: &MigrationPlan,
     rng: &mut R,
     signing: Signing,
+    replan_threshold: ReplanThreshold,
 ) -> Result<CommitOutput, CommitError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters + Clone,
@@ -2322,7 +2376,7 @@ where
     committer.build_transfers(plan)?;
     // `into_state` consumes the committer, releasing its `&mut backend` reborrow, so the store
     // write below can borrow `backend` again.
-    let output = committer.into_state(plan);
+    let output = committer.into_state(plan, replan_threshold);
     backend
         .replace_migration(&output.state)
         .map_err(CommitError::Backend)?;
@@ -2334,6 +2388,10 @@ where
 /// locate each transfer's spend in the wallet's Orchard commitment tree at proving time; a
 /// production consumer recovers them from its own scanned note store, so this entry point exists
 /// for tests (and downstream test harnesses) that drive real proving without a scanning wallet.
+///
+/// `replan_threshold` is the policy stamped on the committed migration (see
+/// [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent a specific
+/// policy; the other parameters are as [`commit_preparation`]'s.
 #[cfg(all(feature = "orchard", any(test, feature = "test-dependencies")))]
 pub fn commit_preparation_with_funding<P, B, R>(
     params: &P,
@@ -2341,6 +2399,7 @@ pub fn commit_preparation_with_funding<P, B, R>(
     backend: &mut B,
     plan: &MigrationPlan,
     rng: &mut R,
+    replan_threshold: ReplanThreshold,
 ) -> Result<(MigrationState, TransferFunding), CommitError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters + Clone,
@@ -2357,6 +2416,7 @@ where
         plan,
         rng,
         Signing::InProcess,
+        replan_threshold,
     )
     .map(|output| (output.state, output.transfer_funding))
 }
@@ -2767,7 +2827,7 @@ where
     /// Assemble the committed [`MigrationState`] from the accumulated transactions and return it
     /// with the unsigned PCZTs and each transfer's funding note. Consuming `self` releases the
     /// `&mut backend` reborrow, so the caller can persist the state through the backend afterward.
-    fn into_state(self, plan: &MigrationPlan) -> CommitOutput {
+    fn into_state(self, plan: &MigrationPlan, replan_threshold: ReplanThreshold) -> CommitOutput {
         let state = MigrationState {
             status: MigrationStatus::Committed,
             denominations: plan.denominations().clone(),
@@ -2776,6 +2836,9 @@ where
             // Stamp the grid the transfers were anchored to, so a later reconfiguration of the
             // backend is detectable rather than silently invalidating them.
             anchor_bucket_interval: self.backend.scheduling_params().anchor_bucket_interval(),
+            // Stamp the replan policy in effect at commit, so every consumer of this migration
+            // applies the same threshold.
+            replan_threshold,
         };
         CommitOutput {
             state,
@@ -3210,6 +3273,7 @@ mod tests {
             preparation: crate::preparation::PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions: vec![tx],
             anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
+            replan_threshold: ReplanThreshold::DEFAULT,
         };
         backend.replace_migration(&state).unwrap();
 
@@ -3448,6 +3512,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
         assert_eq!(state.status, MigrationStatus::Committed);
@@ -3551,6 +3616,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration for external signing");
         assert!(
@@ -3578,6 +3644,7 @@ mod commit_tests {
             &mut anonymous,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration for external signing");
         let unidentifiable = anonymous_state
@@ -3628,6 +3695,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
         assert_eq!(state.transactions.len(), 1);
@@ -3727,6 +3795,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
         // Direct funding: two transfers, no preparation transactions.
@@ -3783,6 +3852,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
         let tx = state.transactions[0].clone();
@@ -3824,6 +3894,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("builds the migration unsigned");
         // Sign out of band and apply, exactly as the external-signing caller does.
@@ -3909,6 +3980,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
         let id = state.transactions[0].id;
@@ -4050,6 +4122,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
         assert_eq!(state.transactions.len(), prep_count + transfer_count);
@@ -4164,6 +4237,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
 
@@ -4241,6 +4315,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng2,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
 
@@ -4347,6 +4422,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("builds the migration unsigned");
         assert_eq!(unsigned.len(), state.transactions.len());
@@ -4409,6 +4485,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("builds the migration unsigned");
 
@@ -4484,6 +4561,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
 
@@ -4495,6 +4573,7 @@ mod commit_tests {
                 &mut backend,
                 &plan,
                 &mut rng,
+                ReplanThreshold::DEFAULT,
             ),
             Err(CommitError::MigrationInProgress)
         ));
@@ -4510,6 +4589,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("replaces a terminal migration");
     }
@@ -4533,6 +4613,7 @@ mod commit_tests {
                 &mut backend,
                 &plan,
                 &mut rng,
+                ReplanThreshold::DEFAULT,
             ),
             Err(CommitError::StalePlan)
         ));
@@ -4556,6 +4637,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
 
@@ -4624,6 +4706,7 @@ mod commit_tests {
             &mut backend,
             &plan,
             &mut rng,
+            ReplanThreshold::DEFAULT,
         )
         .expect("commits the migration");
 

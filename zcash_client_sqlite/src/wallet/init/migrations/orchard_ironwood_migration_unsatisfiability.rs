@@ -1,6 +1,7 @@
 //! Adds the `unsatisfiable_at` and `spend_nullifiers` columns to
-//! `orchard_ironwood_migration_transactions` where they are missing, and backfills the
-//! nullifier cache for existing rows.
+//! `orchard_ironwood_migration_transactions` where they are missing, backfills the
+//! nullifier cache for existing rows, and adds the `replan_threshold` column to
+//! `orchard_ironwood_migrations` where it is missing.
 //!
 //! `unsatisfiable_at` records the height of the chain state a spent-input observation rests on,
 //! when a migration transaction has been determined UNSATISFIABLE — its inputs can never again
@@ -18,6 +19,13 @@
 //! stored PCZT — using the base `pczt` data model, which needs no protocol feature. A stored
 //! PCZT that does not parse is corrupt state and fails the migration, matching how the store's
 //! read paths reject data they cannot reconstruct.
+//!
+//! `replan_threshold` is the integer percent of planned transfer value, unsatisfiable, above which
+//! a migration is re-planned immediately rather than after satisfiable work drains — stamped on
+//! `orchard_ironwood_migrations` at commit. A migration committed before this column existed
+//! carries no such stamp, so it backfills to the same default the store's `CREATE TABLE` and this
+//! `ADD COLUMN` share (`ReplanThreshold::DEFAULT`'s percent), which is the policy every migration
+//! committed before this migration was, in fact, evaluated under.
 
 use std::collections::HashSet;
 
@@ -29,7 +37,8 @@ use super::orchard_ironwood_migration_anchor_interval;
 use crate::wallet::init::WalletMigrationError;
 
 /// Adds the `unsatisfiable_at` and `spend_nullifiers` columns to
-/// `orchard_ironwood_migration_transactions` where they are missing.
+/// `orchard_ironwood_migration_transactions`, and the `replan_threshold` column to
+/// `orchard_ironwood_migrations`, where they are missing.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd334a9fa_b9dc_46bd_9b31_1fba6aa47f55);
 
 const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_migration_anchor_interval::MIGRATION_ID];
@@ -47,7 +56,8 @@ impl schemerz::Migration<Uuid> for Migration {
 
     fn description(&self) -> &'static str {
         "Adds the unsatisfiable_at and spend_nullifiers columns to \
-         orchard_ironwood_migration_transactions where missing."
+         orchard_ironwood_migration_transactions, and the replan_threshold column to \
+         orchard_ironwood_migrations, where missing."
     }
 }
 
@@ -80,7 +90,7 @@ impl RusqliteMigration for Migration {
         // two columns are introduced together (by this migration or by the current `CREATE
         // TABLE`), so one check governs both — and on the fresh path the store itself wrote
         // `spend_nullifiers`, so there is nothing to backfill either.
-        let has_columns = transaction.query_row(
+        let has_tx_columns = transaction.query_row(
             "SELECT EXISTS (
                 SELECT 1 FROM pragma_table_info('orchard_ironwood_migration_transactions')
                 WHERE name = :column_name
@@ -88,44 +98,66 @@ impl RusqliteMigration for Migration {
             named_params![":column_name": "spend_nullifiers"],
             |row| row.get::<_, bool>(0),
         )?;
-        if has_columns {
-            return Ok(());
+        if !has_tx_columns {
+            // The `DEFAULT` matches the one carried by the current `CREATE TABLE`, so the two
+            // paths agree on the stored schema text (SQLite cannot add a `NOT NULL` column
+            // without one); the store always binds the column explicitly, so no insert ever
+            // falls back to it.
+            transaction.execute_batch(
+                "ALTER TABLE orchard_ironwood_migration_transactions
+                    ADD COLUMN unsatisfiable_at INTEGER;
+                 ALTER TABLE orchard_ironwood_migration_transactions
+                    ADD COLUMN spend_nullifiers BLOB NOT NULL DEFAULT X'';",
+            )?;
+
+            // Backfill the nullifier cache for every existing row from its stored PCZT. No row is
+            // left at the empty default: an empty cache on a transaction that HAS real spends
+            // would read as "no inputs to observe" to the unsatisfiability machinery, silently
+            // exempting the transaction from detection.
+            let rows: Vec<(i64, u32, Vec<u8>)> = {
+                let mut stmt = transaction.prepare(
+                    "SELECT migration_id, tx_id, pczt FROM orchard_ironwood_migration_transactions",
+                )?;
+                let mapped = stmt.query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get::<_, Vec<u8>>(2)?))
+                })?;
+                mapped.collect::<Result<_, _>>()?
+            };
+            for (migration_id, tx_id, pczt_bytes) in rows {
+                let spend_nullifiers = real_spend_nullifiers(&pczt_bytes)?;
+                transaction.execute(
+                    "UPDATE orchard_ironwood_migration_transactions
+                        SET spend_nullifiers = :spend_nullifiers
+                      WHERE migration_id = :migration_id AND tx_id = :tx_id",
+                    named_params! {
+                        ":spend_nullifiers": spend_nullifiers,
+                        ":migration_id": migration_id,
+                        ":tx_id": tx_id,
+                    },
+                )?;
+            }
         }
 
-        // The `DEFAULT` matches the one carried by the current `CREATE TABLE`, so the two paths
-        // agree on the stored schema text (SQLite cannot add a `NOT NULL` column without one);
-        // the store always binds the column explicitly, so no insert ever falls back to it.
-        transaction.execute_batch(
-            "ALTER TABLE orchard_ironwood_migration_transactions
-                ADD COLUMN unsatisfiable_at INTEGER;
-             ALTER TABLE orchard_ironwood_migration_transactions
-                ADD COLUMN spend_nullifiers BLOB NOT NULL DEFAULT X'';",
+        // `replan_threshold` lives on a different table (`orchard_ironwood_migrations`), so its
+        // presence is checked and repaired independently of the transactions-table columns above.
+        let has_replan_threshold = transaction.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM pragma_table_info('orchard_ironwood_migrations')
+                WHERE name = :column_name
+             )",
+            named_params![":column_name": "replan_threshold"],
+            |row| row.get::<_, bool>(0),
         )?;
-
-        // Backfill the nullifier cache for every existing row from its stored PCZT. No row is
-        // left at the empty default: an empty cache on a transaction that HAS real spends would
-        // read as "no inputs to observe" to the unsatisfiability machinery, silently exempting
-        // the transaction from detection.
-        let rows: Vec<(i64, u32, Vec<u8>)> = {
-            let mut stmt = transaction.prepare(
-                "SELECT migration_id, tx_id, pczt FROM orchard_ironwood_migration_transactions",
-            )?;
-            let mapped = stmt.query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get::<_, Vec<u8>>(2)?))
-            })?;
-            mapped.collect::<Result<_, _>>()?
-        };
-        for (migration_id, tx_id, pczt_bytes) in rows {
-            let spend_nullifiers = real_spend_nullifiers(&pczt_bytes)?;
-            transaction.execute(
-                "UPDATE orchard_ironwood_migration_transactions
-                    SET spend_nullifiers = :spend_nullifiers
-                  WHERE migration_id = :migration_id AND tx_id = :tx_id",
-                named_params! {
-                    ":spend_nullifiers": spend_nullifiers,
-                    ":migration_id": migration_id,
-                    ":tx_id": tx_id,
-                },
+        if !has_replan_threshold {
+            // The `DEFAULT` matches the one carried by the current `CREATE TABLE`
+            // (`ReplanThreshold::DEFAULT`'s percent), so the two paths agree on the stored schema
+            // text. SQLite's `ADD COLUMN ... DEFAULT` itself backfills every existing row to that
+            // value — the policy every migration committed before this column existed was, in
+            // fact, evaluated under; the store always binds the column explicitly on write, so no
+            // FUTURE insert ever falls back to it.
+            transaction.execute_batch(
+                "ALTER TABLE orchard_ironwood_migrations
+                    ADD COLUMN replan_threshold INTEGER NOT NULL DEFAULT 20;",
             )?;
         }
 
@@ -186,6 +218,37 @@ mod tests {
         .unwrap()
     }
 
+    /// The pre-fix schema: `orchard_ironwood_migrations` without `replan_threshold`, which is what
+    /// a wallet built before this migration has on disk.
+    fn create_pre_fix_migrations_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE orchard_ironwood_migrations (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                note_split_fee_buffer INTEGER NOT NULL,
+                note_split_change INTEGER,
+                note_split_prep_fees INTEGER NOT NULL,
+                note_split_total_input INTEGER NOT NULL,
+                note_split_total_migratable INTEGER NOT NULL,
+                anchor_bucket_interval INTEGER NOT NULL DEFAULT 144
+            )",
+        )
+        .unwrap();
+    }
+
+    fn has_replan_threshold_column(conn: &Connection) -> bool {
+        conn.query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM pragma_table_info('orchard_ironwood_migrations')
+                WHERE name = 'replan_threshold'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    }
+
     /// Insert a pre-fix transactions row carrying `pczt` (a transfer in the `signed` state; the
     /// other columns are immaterial to the backfill).
     fn insert_pre_fix_row(conn: &Connection, tx_id: u32, pczt: &[u8]) {
@@ -200,19 +263,21 @@ mod tests {
         .unwrap();
     }
 
-    /// The fresh path: the table already carries the columns, so `up` must leave it alone rather
+    /// The fresh path: the tables already carry the columns, so `up` must leave them alone rather
     /// than fail with "duplicate column name".
     #[test]
     fn is_a_no_op_when_the_columns_are_present() {
         let mut conn = Connection::open_in_memory().unwrap();
         crate::pool_migration::orchard_ironwood::init_migration_tables(&conn).unwrap();
         assert!(has_columns(&conn));
+        assert!(has_replan_threshold_column(&conn));
 
         let tx = conn.transaction().unwrap();
         RusqliteMigration::up(&Migration, &tx).unwrap();
         tx.commit().unwrap();
 
         assert!(has_columns(&conn));
+        assert!(has_replan_threshold_column(&conn));
     }
 
     /// A stored PCZT that does not parse is corrupt state: the migration surfaces
@@ -232,18 +297,60 @@ mod tests {
         ));
     }
 
-    /// The upgrade path on an empty table: the columns are added and nothing needs backfilling.
+    /// The upgrade path on empty tables: both pre-fix tables (the sibling `orchard_ironwood_migrations`
+    /// and `orchard_ironwood_migration_transactions` tables a real wallet always carries together)
+    /// get their columns added, and nothing needs backfilling.
     #[test]
-    fn adds_columns_to_an_empty_pre_fix_table() {
+    fn adds_columns_to_empty_pre_fix_tables() {
         let mut conn = Connection::open_in_memory().unwrap();
         create_pre_fix_table(&conn);
+        create_pre_fix_migrations_table(&conn);
         assert!(!has_columns(&conn));
+        assert!(!has_replan_threshold_column(&conn));
 
         let tx = conn.transaction().unwrap();
         RusqliteMigration::up(&Migration, &tx).unwrap();
         tx.commit().unwrap();
 
         assert!(has_columns(&conn));
+        assert!(has_replan_threshold_column(&conn));
+    }
+
+    /// The upgrade path with data: an existing `orchard_ironwood_migrations` row is backfilled
+    /// with `ReplanThreshold::DEFAULT`'s percent — the policy every migration committed before this
+    /// column existed was, in fact, evaluated under.
+    #[test]
+    fn backfills_replan_threshold_to_the_default_for_existing_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        // The sibling transactions table is a real wallet's pre-fix state too, so `up` reaches
+        // the migrations-table part in the same shape it would in production.
+        create_pre_fix_table(&conn);
+        create_pre_fix_migrations_table(&conn);
+        conn.execute(
+            "INSERT INTO orchard_ironwood_migrations (
+                account_id, status, note_split_fee_buffer, note_split_prep_fees,
+                note_split_total_input, note_split_total_migratable
+             )
+             VALUES (1, 'committed', 15000, 30000, 100000000, 100000000)",
+            [],
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(&Migration, &tx).unwrap();
+        tx.commit().unwrap();
+
+        let replan_threshold: u32 = conn
+            .query_row(
+                "SELECT replan_threshold FROM orchard_ironwood_migrations",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            replan_threshold,
+            u32::from(zcash_pool_migration::engine::ReplanThreshold::DEFAULT.percent()),
+        );
     }
 
     /// The upgrade path with data: a row whose `pczt` column holds a REAL serialized migration
@@ -346,6 +453,7 @@ mod tests {
 
         let mut conn = Connection::open_in_memory().unwrap();
         create_pre_fix_table(&conn);
+        create_pre_fix_migrations_table(&conn);
         insert_pre_fix_row(&conn, 0, &pczt_bytes);
 
         let tx = conn.transaction().unwrap();
