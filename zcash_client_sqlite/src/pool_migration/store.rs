@@ -22,8 +22,11 @@
 //! them from the denomination plan (each crossing value plus the fee buffer).
 //!
 //! The column set is the same for every pool; only the table and index names change (plus, for
-//! the wallet-owned source-pool note tables the satisfiability oracle queries, the per-pool name
-//! of the note-spends junction's note-reference column).
+//! the wallet-owned source-pool note and commitment-tree tables the satisfiability oracle queries,
+//! the per-pool name of the note-spends junction's note-reference column). The one thing table
+//! names cannot reach is the source pool's SHARD TREE, which is typed by its hash and shard
+//! height; the oracle's anchor-validity judgment therefore takes root resolution as a capability
+//! from the concrete pool facade (see [`SourceRootAt`]).
 //!
 //! [`PoolMigrationRead`]: zcash_pool_migration::engine::PoolMigrationRead
 //! [`PoolMigrationWrite`]: zcash_pool_migration::engine::PoolMigrationWrite
@@ -39,7 +42,7 @@ use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
     InputObservation, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
     MigrationTxKind, MigrationTxState, ReorgSettleDepth, ReplanThreshold, StepSatisfiability,
-    classify_input_observations,
+    UnsatisfiableCause, classify_input_observations,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
@@ -88,7 +91,40 @@ pub(crate) struct Tables {
     /// The `source_note_spends` column referencing a `source_notes` row's `id` (the wallet
     /// schema names it per pool, so it cannot be interpolated from the table name).
     pub source_note_spends_note_fk: &'static str,
+    /// The WALLET's note-commitment-tree checkpoint table for the migration's SOURCE pool, whose
+    /// `checkpoint_id` column is a block height and whose `position` column is that checkpoint's
+    /// tree state. Like `source_notes`, queried but never created here: the anchor-validity
+    /// judgment enumerates the checkpoints whose roots it must rule an installed anchor out of.
+    pub source_tree_checkpoints: &'static str,
 }
+
+/// Resolve the SOURCE pool's note-commitment-tree root at the checkpoint `height`, as a concrete
+/// pool facade supplies it; `Ok(None)` when the tree can produce no root there (no checkpoint at
+/// that height, or the retained shard data cannot complete one).
+///
+/// This is a CAPABILITY the caller passes in rather than something the generic store reconstructs:
+/// a shard tree is typed by its hash and shard height, both pool-specific, so table names — the
+/// only per-pool knowledge [`Tables`] carries — cannot reach it. A facade whose build cannot read
+/// its source pool's tree at all passes `None` for the capability, and every anchor-validity
+/// judgment then declines, exactly as it does for a boundary whose checkpoint is gone.
+pub(crate) type SourceRootAt =
+    fn(&rusqlite::Transaction<'_>, BlockHeight) -> Result<Option<[u8; 32]>, Error>;
+
+/// The largest number of distinct source-tree states an anchor-validity judgment will probe before
+/// declining to conclude; see [`anchor_displaced`].
+///
+/// The judgment marks only on an EXHAUSTIVE negative — the installed anchor is the root at none of
+/// the checkpoints the wallet retains — so a probe set too large to walk is answered "cannot
+/// conclude" rather than "invalidated". The bound is what keeps a rare path from becoming an
+/// unbounded one: each probe recomputes a tree root from shard data.
+///
+/// This is a HORIZON, not headroom. Nothing in a production release ever releases a retained
+/// checkpoint (`remove_retained_checkpoints_below` has test callers only), so the retained set
+/// grows monotonically by one per anchor-grid boundary: at the ZIP 318 grid of 144 blocks, this
+/// limit is reached after roughly 147,000 blocks — some months of chain — after which every
+/// anchor-validity judgment on that wallet declines permanently. Raising the limit moves the date;
+/// only bounding the retained set removes it.
+const ANCHOR_PROBE_LIMIT: usize = 1024;
 
 // ---------------------------------------------------------------------------
 // DDL
@@ -308,7 +344,8 @@ impl<C: Borrow<Connection>> Store<C> {
     }
 
     /// Report whether the wallet's chain view obstructs `tx`, per
-    /// [`PoolMigrationRead::check_step_satisfiability`]'s contract.
+    /// [`PoolMigrationRead::check_step_satisfiability`]'s contract. `source_root_at` is the
+    /// source-pool tree access the anchor-validity judgment needs (see [`SourceRootAt`]).
     ///
     /// [`PoolMigrationRead::check_step_satisfiability`]:
     ///     zcash_pool_migration::engine::PoolMigrationRead::check_step_satisfiability
@@ -316,8 +353,16 @@ impl<C: Borrow<Connection>> Store<C> {
         &self,
         tx: &MigrationTransaction,
         settle: ReorgSettleDepth,
+        source_root_at: Option<SourceRootAt>,
     ) -> Result<StepSatisfiability, Error> {
-        check_step_satisfiability(self.conn.borrow(), self.tables, self.account_id, tx, settle)
+        check_step_satisfiability(
+            self.conn.borrow(),
+            self.tables,
+            self.account_id,
+            tx,
+            settle,
+            source_root_at,
+        )
     }
 }
 
@@ -813,17 +858,36 @@ fn read_deps(
 /// [`Unknown`](InputObservation::Unknown); the observations, plus the transaction-level expiry
 /// judgment, then compose through [`classify_input_observations`].
 ///
-/// Anchor-validity observations ([`InputObservation::Invalidated`], and the transaction-level
-/// `AnchorInvalidated` answer for a broadcast-unmined transaction, which is what `settle` would
-/// judge) require the reorg bookkeeping this store does not yet consult; until then a
-/// dead-anchored creator reads as still viable (`Unknown`), which errs toward
-/// `NotYetSatisfiable` — never toward a false mark.
+/// A broadcast-but-unmined transaction additionally has its INSTALLED anchor judged against the
+/// current chain (see [`anchor_displaced`]), which is where `settle` and `source_root_at` are
+/// used; that answer takes the precedence position below `Expired`, so it is asked only when the
+/// per-input fold has answered nothing definite.
+///
+/// The per-input [`InputObservation::Invalidated`] observation — a known note whose UNMINED
+/// creating transaction was itself proven against a dead anchor — is NOT produced, so a
+/// dead-anchored creator still reads as `Unspent` or `Unknown`, which errs toward `Satisfiable` /
+/// `NotYetSatisfiable`, never toward a false mark. Two data are missing for it, and neither is
+/// recoverable from what the wallet stores:
+///
+/// - the creating transaction's ANCHOR HEIGHT. A raw transaction carries its anchor ROOT, not the
+///   height that root was drawn at, and the wallet's `transactions` table has no anchor column. The
+///   settlement judgment (invariant: a displacement is definitive only once the chain has built
+///   `settle` blocks past the displaced height) has no reference height to be made against — and
+///   the only case that would need one is exactly the case a root search cannot date, since a root
+///   still found among the retained checkpoints is by definition still live.
+/// - a FOREIGN unmined creator's raw bytes. `transactions.raw` is nullable and is populated only
+///   for transactions the wallet itself created or has since enhanced, so for the general creator
+///   the anchor cannot be read at all.
+///
+/// A creator INSIDE the migration needs neither: `advance_migration` reaches its victims through
+/// the dependency closure of the producer's own mark.
 fn check_step_satisfiability(
     conn: &Connection,
     t: &Tables,
     account_id: AccountRef,
     tx: &MigrationTransaction,
-    _settle: ReorgSettleDepth,
+    settle: ReorgSettleDepth,
+    source_root_at: Option<SourceRootAt>,
 ) -> Result<StepSatisfiability, Error> {
     // An empty nullifier cache on a non-mined transaction is corruption, never vacuous
     // satisfiability (see `classify_input_observations`): every validly committed transaction
@@ -835,11 +899,12 @@ fn check_step_satisfiability(
         return Err(Error::Corrupt("spend_nullifiers"));
     }
 
-    // Every read — the fully-scanned height and the per-nullifier observations — happens inside
-    // one transaction, so the answer rests on a single database snapshot: a concurrent scan
-    // cannot advance the scan queue between the `as_of` read and the observations it is supposed
-    // to back. Future anchor-validity observations must join this transaction and apply the same
-    // evidence-height <= `as_of` discipline as the spend lookup below.
+    // Every read — the fully-scanned height, the per-nullifier observations, and the anchor
+    // comparison — happens inside one transaction, so the answer rests on a single database
+    // snapshot: a concurrent scan cannot advance the scan queue between the `as_of` read and the
+    // observations it is supposed to back, nor rewrite the commitment tree between the `as_of`
+    // read and the roots compared against it. Every observation applies the same evidence-height
+    // <= `as_of` discipline.
     let view = conn.unchecked_transaction()?;
 
     let as_of = crate::wallet::fully_scanned_height(&view)?.ok_or(Error::ChainStateUnavailable)?;
@@ -887,7 +952,6 @@ fn check_step_satisfiability(
         observations.push((*nf, observation));
     }
     drop(stmt);
-    view.commit()?;
 
     // Expiry is judged at the next block the transaction could be mined in (`as_of + 1`),
     // mirroring the engine's `MigrationState::is_expired` exactly: an `expiry_height` of 0
@@ -897,7 +961,164 @@ fn check_step_satisfiability(
         && expiry != 0
         && expiry <= u32::from(as_of);
 
-    Ok(classify_input_observations(as_of, expired, &observations))
+    let classified = classify_input_observations(as_of, expired, &observations);
+
+    // `AnchorInvalidated` sits BELOW `Expired` in the answer precedence, so it is asked only when
+    // the per-input fold (and expiry) answered nothing definite. Asking it last also keeps the
+    // tree work off every answer that was already decided.
+    let answer = if matches!(
+        classified,
+        StepSatisfiability::Satisfiable { .. } | StepSatisfiability::NotYetSatisfiable { .. }
+    ) && anchor_displaced(&view, t, tx, as_of, settle, source_root_at)?
+    {
+        StepSatisfiability::Unsatisfiable {
+            cause: UnsatisfiableCause::AnchorInvalidated,
+            as_of,
+        }
+    } else {
+        classified
+    };
+
+    view.commit()?;
+    Ok(answer)
+}
+
+/// Whether `tx` is broadcast, unmined, and PERMANENTLY unminable because the anchor installed in
+/// its proven PCZT is no longer a root of the chain the wallet has scanned — the observation
+/// behind [`UnsatisfiableCause::AnchorInvalidated`].
+///
+/// Every gate below is a condition for CONCLUDING; failing any of them answers "cannot conclude"
+/// (`false`), never "invalidated", because a false mark strands live value behind an observation
+/// only a reorg can clear.
+///
+/// 1. **Only a broadcast-unmined transaction.** A transaction that has not been proven has no
+///    installed anchor to judge, and a mined one's disposition no longer turns on it.
+/// 2. **Only a transaction that RECORDS the height it anchored to.** A transfer's
+///    [`anchor_boundary`](MigrationTransaction::anchor_boundary) is that height; a PREPARATION
+///    carries none — it is proved against a caller-chosen checkpoint at or after its dependencies
+///    mined, and that height is persisted nowhere — so a preparation is not judged here. Without
+///    it there is neither a root to compare against nor a reference height to settle the
+///    comparison at.
+/// 3. **Evidence at or below `as_of`.** A boundary above the fully-scanned height is outside the
+///    region backing this answer; its checkpoint may yet be rewritten by scanning that has not
+///    happened. This is the invariant that keeps a mark honest: the mark carries `as_of`, and
+///    reorg truncation clears marks stamped above the truncation height, so evidence inside the
+///    scanned region guarantees a rollback of that evidence forces a truncation below the stamp.
+/// 4. **Settled per the caller's [`ReorgSettleDepth`].** The displacement is definitive only once
+///    the scanned chain has built `settle` blocks on top of the boundary whose content changed:
+///    `as_of >= boundary + settle`. Since a displacement at the boundary means the chains forked
+///    strictly BELOW it, this also buries the fork itself by more than `settle` — the rule is
+///    stricter than "the fork is settled", never laxer. It rests only on `as_of` and a height the
+///    transaction itself records, so it needs no reorg history the wallet does not keep.
+/// 5. **An EXHAUSTIVE negative.** A mismatch at the boundary is not by itself death: consensus
+///    accepts an anchor that is the root of ANY previous block, and a reorg that re-mines the same
+///    outputs across different block boundaries leaves the same root live at a different height.
+///    So the installed anchor is ruled out against every distinct tree state the wallet retains at
+///    or below `as_of`, and only an exhaustive miss concludes. A state whose root the retained
+///    shard data cannot produce is one that was not ruled out, so it ends the search without
+///    concluding, as does a probe set larger than [`ANCHOR_PROBE_LIMIT`].
+///
+/// What the wallet RETAINS is narrower than what it has SCANNED, and that is the one place this
+/// judgment can still be wrong. The shard tree prunes ordinary checkpoints past `PRUNING_DEPTH`,
+/// keeping only the anchor-grid boundaries beyond it, so a root that aged out without being a
+/// retained boundary is invisible to the search: an exhaustive miss over the retained states is
+/// not an exhaustive miss over the chain's blocks. The hole opens only once the fork carries more
+/// than `PRUNING_DEPTH` blocks — a reorg deeper than the wallet's own rewind window — and it
+/// cannot be closed by waiting, since a transfer's expiry window is far wider than that. This is
+/// the residual case in which the judgment can mark a transfer that is still, in fact, mineable.
+///
+/// Only the SOURCE pool's anchor is judged. A transfer also installs a DESTINATION-pool anchor at
+/// the same height, and a reorg can invalidate that one alone; not judging it can only miss a
+/// death (answering satisfiable for a transaction that will not mine), never invent one, and the
+/// missed case self-heals at the transaction's own expiry.
+fn anchor_displaced(
+    view: &rusqlite::Transaction<'_>,
+    t: &Tables,
+    tx: &MigrationTransaction,
+    as_of: BlockHeight,
+    settle: ReorgSettleDepth,
+    source_root_at: Option<SourceRootAt>,
+) -> Result<bool, Error> {
+    if !matches!(tx.state(), MigrationTxState::Broadcast { .. }) {
+        return Ok(false);
+    }
+    let (Some(root_at), Some(boundary)) = (source_root_at, tx.anchor_boundary()) else {
+        return Ok(false);
+    };
+    if boundary > as_of || u32::from(as_of) - u32::from(boundary) < settle.0 {
+        return Ok(false);
+    }
+
+    // The anchor the PROVER installed, read back from the stored proven PCZT — the only record of
+    // it, since neither the engine's transaction type nor this schema stores anchor bytes. It is
+    // absent on a PCZT that was never proven, which a broadcast transaction's cannot be.
+    let Some(installed) = installed_source_anchor(tx.pczt())? else {
+        return Ok(false);
+    };
+    let Some(at_boundary) = root_at(view, boundary)? else {
+        // The boundary's checkpoint is not retained, so there is nothing to compare: whether the
+        // anchor still names a root of this chain is simply unknown here.
+        return Ok(false);
+    };
+    if at_boundary == installed {
+        return Ok(false);
+    }
+
+    let probes = source_tree_probe_heights(view, t, boundary, as_of)?;
+    if probes.len() > ANCHOR_PROBE_LIMIT {
+        return Ok(false);
+    }
+    for height in probes {
+        match root_at(view, height)? {
+            // A state whose root the retained shard data cannot produce is a state that was NOT
+            // ruled out; concluding over it would not be an exhaustive negative.
+            None => return Ok(false),
+            Some(root) if root == installed => return Ok(false),
+            Some(_) => {}
+        }
+    }
+    Ok(true)
+}
+
+/// The SOURCE-pool anchor installed in a stored PCZT, or `None` if none has been installed (the
+/// PCZT was never proven).
+///
+/// The `orchard` bundle of the PCZT data model is the SOURCE bundle of every pool migration this
+/// store serves: a ZIP 318 crossing spends Orchard notes and creates destination-pool ones, which
+/// occupy the separate `ironwood` bundle. The same assumption backs the `spend_nullifiers` cache
+/// the schema migration backfills from these bytes. Reading it needs only the base PCZT data
+/// model, no protocol feature.
+fn installed_source_anchor(pczt: &[u8]) -> Result<Option<[u8; 32]>, Error> {
+    let parsed = pczt::Pczt::parse(pczt).map_err(|_| Error::Corrupt("pczt"))?;
+    Ok(*parsed.orchard().anchor())
+}
+
+/// The checkpoint heights at which the source pool's tree takes each DISTINCT state at or below
+/// `as_of` — the complete set of heights whose roots an installed anchor must be ruled out of,
+/// ordered by distance from `boundary` so a still-live anchor is found in the fewest probes.
+///
+/// Checkpoints sharing a `position` share a root (a block that added no note commitments leaves the
+/// tree where it was), so one representative per position is enough, and the empty tree state
+/// (`position IS NULL`) groups as one alongside them.
+fn source_tree_probe_heights(
+    view: &rusqlite::Transaction<'_>,
+    t: &Tables,
+    boundary: BlockHeight,
+    as_of: BlockHeight,
+) -> Result<Vec<BlockHeight>, Error> {
+    let mut stmt = view.prepare(&format!(
+        "SELECT MIN(checkpoint_id) FROM {} WHERE checkpoint_id <= :as_of GROUP BY position",
+        t.source_tree_checkpoints
+    ))?;
+    let rows = stmt.query_map(named_params! { ":as_of": u32::from(as_of) }, |row| {
+        row.get::<_, u32>(0)
+    })?;
+    let mut out = Vec::new();
+    for height in rows {
+        out.push(BlockHeight::from_u32(height?));
+    }
+    out.sort_by_key(|h| u32::from(*h).abs_diff(u32::from(boundary)));
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

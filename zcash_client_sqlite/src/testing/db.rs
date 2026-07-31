@@ -107,15 +107,22 @@ impl TestDb {
         &mut self.wallet_db
     }
 
-    // Used only by this crate's own `#[cfg(test)]` tests, not by the harness exposed under
-    // `test-dependencies`, so it is dead in a non-test `test-dependencies` build.
-    #[allow(dead_code)]
-    pub(crate) fn conn(&self) -> &Connection {
+    /// The wallet database's own SQLite connection.
+    ///
+    /// This is the seam an application uses to open a SIBLING store over the same database — a
+    /// [`PoolMigrations`] for an account's pool migration, say — since those stores are
+    /// constructed over a connection borrow rather than over the wallet. A test that drives such
+    /// a store alongside the wallet borrows the two in turn, exactly as an application holding the
+    /// connection itself would.
+    ///
+    /// [`PoolMigrations`]: crate::pool_migration::orchard_ironwood::PoolMigrations
+    pub fn conn(&self) -> &Connection {
         &self.wallet_db.conn
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+    /// The wallet database's own SQLite connection, mutably: what a sibling store that WRITES
+    /// (a pool migration's `replace_migration`, say) is constructed over. See [`Self::conn`].
+    pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.wallet_db.conn
     }
 
