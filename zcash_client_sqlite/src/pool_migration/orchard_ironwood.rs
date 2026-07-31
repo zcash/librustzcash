@@ -47,7 +47,7 @@ static TABLES: Tables = Tables {
     source_tree_checkpoints: "orchard_tree_checkpoints",
 };
 
-/// The Orchard note commitment tree root at the checkpoint `height`, as the anchor-validity
+/// The Orchard note commitment tree anchor at the checkpoint `height`, as the anchor-validity
 /// judgment consumes it: `None` when the tree can produce no root there.
 ///
 /// `None` covers both "no checkpoint at that height" (never created, or pruned without being
@@ -60,10 +60,10 @@ static TABLES: Tables = Tables {
 /// answer is computed in, so every root compared and the `as_of` it is compared under come from
 /// one database snapshot.
 #[cfg(feature = "orchard")]
-fn orchard_root_at(
+fn orchard_anchor_at(
     view: &rusqlite::Transaction<'_>,
     height: zcash_protocol::consensus::BlockHeight,
-) -> Result<Option<[u8; 32]>, Error> {
+) -> Result<Option<::orchard::Anchor>, Error> {
     use shardtree::error::ShardTreeError;
 
     /// A tree failure that is NOT "no root here": a database error surfaces as itself, and
@@ -79,13 +79,24 @@ fn orchard_root_at(
 
     let tree = crate::orchard_tree(view).map_err(lift)?;
     match tree.root_at_checkpoint_id(&height) {
-        Ok(root) => Ok(root.map(|root| ::orchard::Anchor::from(root).to_bytes())),
+        Ok(root) => Ok(root.map(::orchard::Anchor::from)),
         // A QUERY-level failure is the tree reporting that it cannot answer for this height — the
         // shard data it holds does not complete a root, or the checkpoint has been pruned — which
         // is what `None` already expresses: the judgment cannot conclude.
         Err(ShardTreeError::Query(_)) => Ok(None),
         Err(e) => Err(lift(e)),
     }
+}
+
+/// [`orchard_anchor_at`] in the byte encoding the pool-agnostic store compares roots in: a shard
+/// tree is typed by its hash, so the generic store cannot name [`orchard::Anchor`] and the
+/// conversion happens here, at the facade boundary.
+#[cfg(feature = "orchard")]
+fn orchard_root_at(
+    view: &rusqlite::Transaction<'_>,
+    height: zcash_protocol::consensus::BlockHeight,
+) -> Result<Option<[u8; 32]>, Error> {
+    orchard_anchor_at(view, height).map(|anchor| anchor.map(|anchor| anchor.to_bytes()))
 }
 
 /// The source-pool tree access the satisfiability oracle's anchor-validity judgment needs, or
@@ -395,6 +406,7 @@ mod retention_follows_the_committed_migration {
 mod check_step_satisfiability {
     use rusqlite::named_params;
 
+    use ::orchard::{Anchor, note::Nullifier};
     use zcash_client_backend::data_api::testing::{
         AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
     };
@@ -417,9 +429,27 @@ mod check_step_satisfiability {
     /// consult it.
     const SETTLE: ReorgSettleDepth = ReorgSettleDepth(10);
 
+    /// The repeated byte `b` as a canonical Pallas base element. The top byte is cleared, because
+    /// a canonical encoding must be numerically below the field modulus and `0xbb…bb` need not be;
+    /// both `Anchor` and `Nullifier` reject anything else.
+    fn field_pattern(b: u8) -> [u8; 32] {
+        let mut bytes = [b; 32];
+        bytes[31] = 0;
+        bytes
+    }
+
     /// A root value the wallet's Orchard tree never takes, so an anchor carrying it is displaced
     /// at every checkpoint.
-    const NO_SUCH_ROOT: [u8; 32] = [0xA5; 32];
+    fn no_such_root() -> Anchor {
+        Option::from(Anchor::from_bytes(field_pattern(0xA5)))
+            .expect("the pattern is a canonical field element")
+    }
+
+    /// The nullifier of no note this wallet has ever seen.
+    fn unknown_nullifier() -> Nullifier {
+        Option::from(Nullifier::from_bytes(&field_pattern(0xEE)))
+            .expect("the pattern is a canonical field element")
+    }
 
     /// A wallet with one scanned Orchard note, assembled by [`scanned_note_fixture`].
     struct ScannedNoteFixture {
@@ -432,7 +462,7 @@ mod check_step_satisfiability {
         /// clear the fully-scanned height afterwards).
         second_account: Option<AccountUuid>,
         /// The note's nullifier, exactly as the scanner recorded it.
-        nf: [u8; 32],
+        nf: Nullifier,
         /// The wallet's fully-scanned height: the observation basis every answer must carry.
         as_of: BlockHeight,
     }
@@ -481,7 +511,7 @@ mod check_step_satisfiability {
             .expect("the wallet is fully scanned")
             .block_height();
         assert_eq!(as_of, h2, "the wallet is fully scanned to the last block");
-        let nf: [u8; 32] = st
+        let nf_bytes: [u8; 32] = st
             .wallet()
             .conn()
             .query_row(
@@ -490,6 +520,8 @@ mod check_step_satisfiability {
                 |row| row.get(0),
             )
             .expect("the scanned note has a recorded nullifier");
+        let nf = Option::from(Nullifier::from_bytes(&nf_bytes))
+            .expect("the scanner records a well-formed nullifier");
         ScannedNoteFixture {
             st,
             account: account_id,
@@ -503,7 +535,7 @@ mod check_step_satisfiability {
     fn wallet_with_scanned_note() -> (
         TestState<BlockCache, TestDb, LocalNetwork>,
         AccountUuid,
-        [u8; 32],
+        Nullifier,
         BlockHeight,
     ) {
         let ScannedNoteFixture {
@@ -516,9 +548,15 @@ mod check_step_satisfiability {
         (st, account, nf, as_of)
     }
 
+    /// The real-spend nullifier cache a [`MigrationTransaction`] carries: the engine's persisted
+    /// shape is pool-agnostic bytes, so the typed nullifiers a test names are encoded here.
+    fn cache(nfs: Vec<Nullifier>) -> Vec<[u8; 32]> {
+        nfs.into_iter().map(|nf| nf.to_bytes()).collect()
+    }
+
     /// A pre-signed transfer caching `nfs` as its real-spend nullifiers, in the `Signed` state,
     /// with expiry height `expiry` (`0` disables expiry, per ZIP 203).
-    fn transfer(nfs: Vec<[u8; 32]>, expiry: u32) -> MigrationTransaction {
+    fn transfer(nfs: Vec<Nullifier>, expiry: u32) -> MigrationTransaction {
         MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Transfer { crossing: 0 },
@@ -530,7 +568,7 @@ mod check_step_satisfiability {
             MigrationTxState::Signed,
             None,
             None,
-            nfs,
+            cache(nfs),
             None,
         )
     }
@@ -542,22 +580,28 @@ mod check_step_satisfiability {
     /// Creator role installs that field directly, so this stands in for a real proof without a
     /// Halo2 proving run — the whole-migration chain simulation covers the genuinely proven
     /// article.
-    fn pczt_anchored_at(anchor: [u8; 32]) -> Vec<u8> {
-        pczt::roles::creator::Creator::new(BranchId::Nu6_3.into(), 0, 133, None, Some(anchor))
-            .expect("NU6.3 is a supported branch")
-            .build()
-            .expect("a v6 PCZT may carry an Orchard anchor with no actions")
-            .serialize()
-            .expect("the PCZT serializes")
+    fn pczt_anchored_at(anchor: Anchor) -> Vec<u8> {
+        pczt::roles::creator::Creator::new(
+            BranchId::Nu6_3.into(),
+            0,
+            133,
+            None,
+            Some(anchor.to_bytes()),
+        )
+        .expect("NU6.3 is a supported branch")
+        .build()
+        .expect("a v6 PCZT may carry an Orchard anchor with no actions")
+        .serialize()
+        .expect("the PCZT serializes")
     }
 
     /// A pre-signed transfer that has been BROADCAST and not yet mined, proven against `boundary`
     /// with `anchor` installed, and caching `nfs` as its real-spend nullifiers. This is the only
     /// shape the anchor-validity judgment applies to.
     fn broadcast_transfer(
-        nfs: Vec<[u8; 32]>,
+        nfs: Vec<Nullifier>,
         boundary: BlockHeight,
-        anchor: [u8; 32],
+        anchor: Anchor,
     ) -> MigrationTransaction {
         MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
@@ -572,17 +616,17 @@ mod check_step_satisfiability {
             },
             None,
             None,
-            nfs,
+            cache(nfs),
             None,
         )
     }
 
-    /// The wallet's own Orchard commitment tree root at the checkpoint `height` — the value a
+    /// The wallet's own Orchard commitment tree anchor at the checkpoint `height` — the value a
     /// transfer proved against that boundary would have installed.
     fn orchard_root_at(
         st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
         height: BlockHeight,
-    ) -> [u8; 32] {
+    ) -> Anchor {
         st.wallet_mut()
             .with_orchard_tree_mut::<_, _, crate::error::SqliteClientError>(|tree| {
                 Ok(tree
@@ -590,7 +634,7 @@ mod check_step_satisfiability {
                     .expect("the tree answers")
                     .expect("the boundary's checkpoint is retained"))
             })
-            .map(|root| ::orchard::Anchor::from(root).to_bytes())
+            .map(Anchor::from)
             .expect("reads the Orchard commitment tree")
     }
 
@@ -617,7 +661,7 @@ mod check_step_satisfiability {
     /// requires a fully-formed spending transaction.
     fn record_spend(
         st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
-        nf: [u8; 32],
+        nf: Nullifier,
         mined_height: Option<BlockHeight>,
     ) {
         let conn = st.wallet_mut().conn_mut();
@@ -638,7 +682,7 @@ mod check_step_satisfiability {
             .execute(
                 "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
                  SELECT id, :tx_ref FROM orchard_received_notes WHERE nf = :nf",
-                named_params! {":tx_ref": tx_ref, ":nf": nf},
+                named_params! {":tx_ref": tx_ref, ":nf": nf.to_bytes()},
             )
             .expect("records the spend");
         assert_eq!(
@@ -672,7 +716,7 @@ mod check_step_satisfiability {
                 .expect("the oracle answers"),
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::InputsSpent {
-                    nullifiers: vec![nf]
+                    nullifiers: vec![nf.to_bytes()]
                 },
                 as_of,
             },
@@ -714,7 +758,7 @@ mod check_step_satisfiability {
                 .expect("the oracle answers"),
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::InputsSpent {
-                    nullifiers: vec![nf]
+                    nullifiers: vec![nf.to_bytes()]
                 },
                 as_of: h3,
             },
@@ -745,7 +789,7 @@ mod check_step_satisfiability {
             .expect("the account exists");
         assert_eq!(
             store
-                .check_step_satisfiability(&transfer(vec![[0xEE; 32]], 0), SETTLE)
+                .check_step_satisfiability(&transfer(vec![unknown_nullifier()], 0), SETTLE)
                 .expect("the oracle answers"),
             StepSatisfiability::NotYetSatisfiable { as_of },
         );
@@ -964,7 +1008,7 @@ mod check_step_satisfiability {
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - (SETTLE.0 - 1), NO_SUCH_ROOT),
+                    &broadcast_transfer(vec![nf], as_of - (SETTLE.0 - 1), no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
@@ -974,7 +1018,7 @@ mod check_step_satisfiability {
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, NO_SUCH_ROOT),
+                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
@@ -999,7 +1043,7 @@ mod check_step_satisfiability {
     fn an_unreadable_tree_state_ends_the_search_without_marking() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
         let as_of = scan_empty_blocks(&mut st, 12);
-        let displaced = broadcast_transfer(vec![nf], as_of - SETTLE.0, NO_SUCH_ROOT);
+        let displaced = broadcast_transfer(vec![nf], as_of - SETTLE.0, no_such_root());
 
         {
             let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1067,7 +1111,7 @@ mod check_step_satisfiability {
             "the unscanned gap holds the fully-scanned height below the new checkpoint",
         );
 
-        let tx = broadcast_transfer(vec![nf], high, NO_SUCH_ROOT);
+        let tx = broadcast_transfer(vec![nf], high, no_such_root());
         {
             let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
                 .expect("the account exists");
@@ -1110,7 +1154,7 @@ mod check_step_satisfiability {
         let signed = MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Transfer { crossing: 0 },
-            pczt_anchored_at(NO_SUCH_ROOT),
+            pczt_anchored_at(no_such_root()),
             Vec::new(),
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(0),
@@ -1118,7 +1162,7 @@ mod check_step_satisfiability {
             MigrationTxState::Signed,
             None,
             None,
-            vec![nf],
+            cache(vec![nf]),
             None,
         );
 
@@ -1147,13 +1191,13 @@ mod check_step_satisfiability {
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, NO_SUCH_ROOT),
+                    &broadcast_transfer(vec![nf], as_of - SETTLE.0, no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::InputsSpent {
-                    nullifiers: vec![nf]
+                    nullifiers: vec![nf.to_bytes()]
                 },
                 as_of,
             },
@@ -1171,7 +1215,7 @@ mod check_step_satisfiability {
         let prep = MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Preparation { layer: 0, index: 0 },
-            pczt_anchored_at(NO_SUCH_ROOT),
+            pczt_anchored_at(no_such_root()),
             Vec::new(),
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(0),
@@ -1181,7 +1225,7 @@ mod check_step_satisfiability {
             },
             None,
             None,
-            vec![nf],
+            cache(vec![nf]),
             None,
         );
 
