@@ -2331,6 +2331,17 @@ pub enum RebuildError<E> {
     /// still valid, or it has already mined. Guards against reissuing a live transaction as a second,
     /// double-spending copy.
     NotExpired(MigrationTransferId),
+    /// The transfer's inputs can never again all exist unspent on chain: it is itself marked
+    /// [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at), or a transaction it depends on
+    /// is. A rebuild re-spends the SAME funding note under a fresh anchor and expiry, so it cannot
+    /// cure a missing input — nothing a rebuild produces could ever be mined either. The remedy is
+    /// the migration-level replan ([`AdvanceStep::Replan`]): mark the migration superseded and
+    /// re-plan its remaining balance.
+    ///
+    /// Reported in preference to [`NotExpired`](Self::NotExpired) and ahead of the expiry check,
+    /// because a dead transfer is usually also an expired one, and the more specific condition is
+    /// the one a caller must act on.
+    Unsatisfiable(MigrationTransferId),
     /// The stored migration state is internally inconsistent: the denomination plan carries no crossing or
     /// funding value for this transfer's crossing index, or the transfer's persisted nullifier
     /// cache ([`MigrationTransaction::spend_nullifiers`]) does not hold exactly the one funding
@@ -2383,6 +2394,12 @@ impl<E: fmt::Display> fmt::Display for RebuildError<E> {
             RebuildError::NotExpired(id) => write!(
                 f,
                 "transaction {} has not expired; there is nothing to rebuild",
+                u32::from(*id)
+            ),
+            RebuildError::Unsatisfiable(id) => write!(
+                f,
+                "transfer {}'s inputs can never again all exist unspent, so no rebuild can revive \
+                 it; the migration must be re-planned",
                 u32::from(*id)
             ),
             RebuildError::InconsistentPlan(m) => {
@@ -2546,6 +2563,23 @@ where
         MigrationTxKind::Transfer { crossing } => crossing,
         MigrationTxKind::Preparation { .. } => return Err(RebuildError::NotATransfer(id)),
     };
+    // A transfer whose inputs are gone is beyond rebuilding, and that is checked BEFORE expiry: a
+    // dead transfer is usually an expired one too, and answering `NotExpired` (or, worse,
+    // rebuilding) would send the caller down a remedy that cannot work. The rebuild re-spends the
+    // SAME funding note — recovered by identity from the nullifier cache below — so it cannot cure
+    // a missing input, and its own dead dependency would leave it re-anchored to notes that never
+    // arrive. `advance_migration` never surfaces such a transfer as `AdvanceStep::Rebuild`, but
+    // `expired_transactions` is public and a consumer may drive the rebuild from it directly, so
+    // the guard belongs here rather than only in the planning kernel.
+    let dead_dependency = tx.depends_on.iter().any(|d| {
+        state
+            .transactions
+            .iter()
+            .any(|t| t.id == *d && t.unsatisfiable_at.is_some())
+    });
+    if tx.unsatisfiable_at.is_some() || dead_dependency {
+        return Err(RebuildError::Unsatisfiable(id));
+    }
     // Only an expired, not-yet-mined transfer is rebuilt (the same condition the state machine reports
     // as expired): a still-valid or already-mined transfer is a typed error, not a silently reissued
     // double spend.
@@ -5692,6 +5726,88 @@ mod commit_tests {
         assert!(matches!(
             rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
             Err(RebuildError::NotATransfer(rejected)) if rejected == id
+        ));
+    }
+
+    /// A transfer whose inputs can never again all exist unspent is beyond rebuilding, and is
+    /// refused SPECIFICALLY: the rebuild re-spends the same funding note, so a fresh anchor and
+    /// expiry cure nothing, and the caller must re-plan instead. The guard runs ahead of the
+    /// expiry check, so a marked transfer reports `Unsatisfiable` whether or not it has expired —
+    /// a dead transfer is usually an expired one too, and `NotExpired` would send the caller down
+    /// a remedy that cannot work. A marked DEPENDENCY disqualifies an unmarked transfer the same
+    /// way: the rebuild would re-anchor to inputs that never arrive.
+    #[test]
+    fn rebuild_rejects_an_unsatisfiable_transfer_or_dependency() {
+        let seed = 109u64;
+        let params = regtest_network(true);
+        let buffer = u64::from(commit_test_fees().1);
+        let mut backend = CommitMock::new(seed, &[COIN + buffer]);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("commits the migration");
+        assert_eq!(state.transactions.len(), 1, "one directly funded transfer");
+        let id = state.transactions[0].id;
+        let mark = BlockHeight::from_u32(TARGET_HEIGHT);
+
+        // Marked while still UNEXPIRED: the specific condition wins over `NotExpired`.
+        state.transactions[0].unsatisfiable_at = Some(mark);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
+        ));
+
+        // Marked AND expired — the ordinary shape of a dead transfer, and the one a consumer
+        // driving from `expired_transactions` would hand to the rebuild. Still refused, rather
+        // than rebuilt against a note the wallet has seen spent.
+        backend.tip = state.transactions[0].expiry_height + 1;
+        let target = backend.chain_tip_height().unwrap() + 1;
+        assert!(
+            state.expired_transactions(target).contains(&id),
+            "the marked transfer is also expired, as a dead transfer usually is"
+        );
+        let before = state.transactions[0].clone();
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
+        ));
+        assert_eq!(
+            state.transactions[0], before,
+            "a refused rebuild leaves the transfer untouched"
+        );
+
+        // An UNMARKED expired transfer whose producer is marked: the funding note it would
+        // re-spend is minted by a transaction that can never mine.
+        state.transactions[0].unsatisfiable_at = None;
+        let producer_id = MigrationTransferId::new(77);
+        state.transactions[0].depends_on = vec![producer_id];
+        state.transactions.push(MigrationTransaction::from_parts(
+            producer_id,
+            MigrationTxKind::Preparation { layer: 0, index: 0 },
+            Vec::new(),
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([7; 32]),
+            },
+            None,
+            Some(mark),
+            vec![[7u8; 32]],
+        ));
+        assert!(matches!(
+            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
         ));
     }
 
