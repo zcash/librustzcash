@@ -1486,7 +1486,8 @@ SELECT accounts.uuid                AS account_uuid,
        -- between shielded pools; NULL when it is not such a transfer. A transaction is one
        -- exactly when this column is non-NULL.
        pool_crossings.crossing_value AS pool_crossing_value,
-       transactions.trust_status
+       transactions.trust_status,
+       transactions.zip318_kind
 FROM notes
 JOIN accounts ON accounts.id = notes.account_id
 JOIN transactions ON transactions.id_tx = notes.transaction_id
@@ -1498,7 +1499,8 @@ LEFT JOIN sent_note_counts
 LEFT JOIN pool_crossings
      ON pool_crossings.account_id = notes.account_id
      AND pool_crossings.transaction_id = notes.transaction_id
-GROUP BY notes.account_id, notes.transaction_id";
+GROUP BY notes.account_id, notes.transaction_id
+";
 
 /// Selects all outputs received by the wallet, plus any outputs sent from the wallet to
 /// external recipients.

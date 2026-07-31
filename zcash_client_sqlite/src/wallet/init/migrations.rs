@@ -64,6 +64,7 @@ mod v_transactions_note_uniqueness;
 mod v_transactions_pool_crossing;
 mod v_transactions_shielding_balance;
 mod v_transactions_transparent_history;
+mod v_transactions_zip318_kind;
 mod v_tx_outputs_key_scopes;
 mod v_tx_outputs_return_addrs;
 mod v_tx_outputs_transparent_addresses;
@@ -163,6 +164,7 @@ pub mod ids {
         v_transactions_pool_crossing::MIGRATION_ID as V_TRANSACTIONS_POOL_CROSSING,
         v_transactions_shielding_balance::MIGRATION_ID as V_TRANSACTIONS_SHIELDING_BALANCE,
         v_transactions_transparent_history::MIGRATION_ID as V_TRANSACTIONS_TRANSPARENT_HISTORY,
+        v_transactions_zip318_kind::MIGRATION_ID as V_TRANSACTIONS_ZIP318_KIND,
         v_tx_outputs_key_scopes::MIGRATION_ID as V_TX_OUTPUTS_KEY_SCOPES,
         v_tx_outputs_return_addrs::MIGRATION_ID as V_TX_OUTPUTS_RETURN_ADDRS,
         v_tx_outputs_transparent_addresses::MIGRATION_ID as V_TX_OUTPUTS_TRANSPARENT_ADDRESSES,
@@ -361,6 +363,7 @@ pub(super) fn all_migrations<
         Box::new(v_address_uses_ironwood::Migration),
         Box::new(v_transactions_pool_crossing::Migration),
         Box::new(zip318_classification::Migration),
+        Box::new(v_transactions_zip318_kind::Migration),
         Box::new(orchard_ironwood_migration_tables::Migration),
         Box::new(tree_retained_checkpoints::Migration),
         Box::new(note_locking::Migration),
@@ -567,7 +570,7 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     orchard_ironwood_migration_anchor_interval::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     tx_status_observation_intent::MIGRATION_ID,
-    zip318_classification::MIGRATION_ID,
+    v_transactions_zip318_kind::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
