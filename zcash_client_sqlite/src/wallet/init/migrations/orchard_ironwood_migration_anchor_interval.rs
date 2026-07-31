@@ -32,7 +32,7 @@ use crate::wallet::init::WalletMigrationError;
 /// Adds the `anchor_bucket_interval` column to `orchard_ironwood_migrations` where it is missing.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x1ab3caf9_ef1e_482c_93a3_a3f1080038df);
 
-const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_migration_tables::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_migration_tables::MIGRATION_ID];
 
 pub(super) struct Migration;
 

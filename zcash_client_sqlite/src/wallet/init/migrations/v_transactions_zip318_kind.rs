@@ -34,7 +34,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x6f2b1c84_9a3d_4e50_b7c6_2d9f1a4
 
 /// `zip318_classification` adds the underlying column on the `transactions` table that this view
 /// column reads.
-const DEPENDENCIES: &[Uuid] = &[zip318_classification::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[zip318_classification::MIGRATION_ID];
 
 pub(super) struct Migration;
 

@@ -36,7 +36,7 @@ use super::ironwood_received_notes;
 /// was provided from the account corresponding to that key.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xcc104d0d_54d6_4e07_9404_202676561d94);
 
-const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
 

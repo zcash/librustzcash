@@ -21,7 +21,7 @@ use crate::ORCHARD_TABLES_PREFIX;
 /// provided from the account corresponding to that key.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x6d36656d_533b_4b65_ae91_dcb95c4ad289);
 
-const DEPENDENCIES: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[fix_broken_commitment_trees::MIGRATION_ID];
 
 pub(super) struct Migration;
 

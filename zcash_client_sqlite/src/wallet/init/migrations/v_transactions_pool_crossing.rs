@@ -41,7 +41,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x835d61e1_5b88_4f44_92b3_746fb91
 /// `account_delete_cascade` is the prior owner of the `v_transactions` definition this migration
 /// recreates; `ironwood_pool_code_views` supplies the Ironwood arms of `v_received_outputs` and
 /// `v_received_output_spends` that the crossing classification aggregates over.
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     account_delete_cascade::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
 ];

@@ -23,7 +23,7 @@ use super::ufvk_support;
 /// the `accounts` table.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd956978c_9c87_4d6e_815d_fb8f088d094c);
 
-const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[ufvk_support::MIGRATION_ID];
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(crate) params: P,

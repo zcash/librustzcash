@@ -41,7 +41,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x0a35a9e4_6c1d_4f7a_9c02_51b8de4
 /// `v_transactions_pool_crossing` is the most recent migration to touch how transactions are
 /// classified for history purposes; ordering after it keeps the two classifications' migrations in
 /// a single chain rather than letting them race.
-const DEPENDENCIES: &[Uuid] = &[v_transactions_pool_crossing::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[v_transactions_pool_crossing::MIGRATION_ID];
 
 pub(super) struct Migration;
 

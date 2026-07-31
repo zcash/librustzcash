@@ -13,7 +13,7 @@ use super::{
 /// Fixes the `transparent_received_outputs` table schema to not depend on feature flags.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xb951587c_34fd_4f02_a313_05ff7adb6268);
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     fix_bad_change_flagging::MIGRATION_ID,
     v_transactions_additional_totals::MIGRATION_ID,
     ensure_default_transparent_address::MIGRATION_ID,

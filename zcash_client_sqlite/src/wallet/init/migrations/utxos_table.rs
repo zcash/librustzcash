@@ -9,7 +9,7 @@ use crate::wallet::init::{WalletMigrationError, migrations::initial_setup};
 /// The migration that adds initial support for transparent UTXOs to the wallet.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xa2e0ed2e_8852_475e_b0a4_f154b15b9dbe);
 
-const DEPENDENCIES: &[Uuid] = &[initial_setup::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[initial_setup::MIGRATION_ID];
 
 pub(super) struct Migration;
 

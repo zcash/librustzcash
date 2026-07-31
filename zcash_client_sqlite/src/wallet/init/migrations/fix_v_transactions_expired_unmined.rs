@@ -12,7 +12,7 @@ use crate::wallet::init::{WalletMigrationError, migrations::fix_transparent_rece
 /// been mined.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x54733173_5f3c_4870_831e_a48a4a93b1d7);
 
-const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
 
 pub(super) struct Migration;
 
