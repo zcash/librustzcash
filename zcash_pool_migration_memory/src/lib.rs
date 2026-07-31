@@ -352,7 +352,9 @@ impl PoolMigrationRead for MockBackend {
             .satisfiability
             .get(&tx.id())
             .cloned()
-            .unwrap_or(StepSatisfiability::Satisfiable { as_of: self.tip }))
+            .unwrap_or(StepSatisfiability::Satisfiable {
+                as_of_height: self.tip,
+            }))
     }
 }
 
@@ -488,7 +490,7 @@ impl PoolMigrationRead for CommitMock {
             .get(&tx.id())
             .cloned()
             .unwrap_or(StepSatisfiability::Satisfiable {
-                as_of: BlockHeight::from_u32(COMMIT_MOCK_TIP),
+                as_of_height: BlockHeight::from_u32(COMMIT_MOCK_TIP),
             }))
     }
 }

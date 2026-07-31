@@ -1009,30 +1009,31 @@ fn check_step_satisfiability(
 
     // Every read — the fully-scanned height, the per-nullifier observations, and the anchor
     // comparison — happens inside one transaction, so the answer rests on a single database
-    // snapshot: a concurrent scan cannot advance the scan queue between the `as_of` read and the
-    // observations it is supposed to back, nor rewrite the commitment tree between the `as_of`
-    // read and the roots compared against it. Every observation applies the same evidence-height
-    // <= `as_of` discipline.
+    // snapshot: a concurrent scan cannot advance the scan queue between the `as_of_height` read
+    // and the observations it is supposed to back, nor rewrite the commitment tree between the
+    // `as_of_height` read and the roots compared against it. Every observation applies the same
+    // evidence-height <= `as_of_height` discipline.
     let view = conn.unchecked_transaction()?;
 
-    let as_of = crate::wallet::fully_scanned_height(&view)?.ok_or(Error::ChainStateUnavailable)?;
+    let as_of_height =
+        crate::wallet::fully_scanned_height(&view)?.ok_or(Error::ChainStateUnavailable)?;
 
     // Per cached nullifier: is the note known, and if so, has the wallet seen it spent in a
-    // transaction MINED at or below `as_of`? An unmined recorded spend does not obstruct: the
-    // pre-signed transaction and the recorded spender are then merely competing for the note.
+    // transaction MINED at or below `as_of_height`? An unmined recorded spend does not obstruct:
+    // the pre-signed transaction and the recorded spender are then merely competing for the note.
     //
-    // The `mined_height <= as_of` bound is the invariant that keeps unsatisfiability marks
-    // honest: a mark's evidence must lie inside the scanned region backing `as_of`, because
+    // The `mined_height <= as_of_height` bound is the invariant that keeps unsatisfiability marks
+    // honest: a mark's evidence must lie inside the scanned region backing `as_of_height`, because
     // reorg truncation clears marks whose `unsatisfiable_at` exceeds the truncation height — so
-    // evidence at height <= `as_of` guarantees that a rollback of the evidence forces a
-    // truncation below the mark's stamp, and no false mark can survive. Evidence ABOVE `as_of`
-    // (possible when transaction-status polling records a mined height ahead of scanning) must
-    // not obstruct yet; it reads as `Unspent` until scanning catches up.
+    // evidence at height <= `as_of_height` guarantees that a rollback of the evidence forces a
+    // truncation below the mark's stamp, and no false mark can survive. Evidence ABOVE
+    // `as_of_height` (possible when transaction-status polling records a mined height ahead of
+    // scanning) must not obstruct yet; it reads as `Unspent` until scanning catches up.
     let mut stmt = view.prepare(&format!(
         "SELECT EXISTS (
              SELECT 1 FROM {spends} s
              JOIN transactions ON transactions.id_tx = s.transaction_id
-             WHERE s.{note_fk} = rn.id AND transactions.mined_height <= :as_of
+             WHERE s.{note_fk} = rn.id AND transactions.mined_height <= :as_of_height
          )
          FROM {notes} rn
          WHERE rn.nf = :nf AND rn.account_id = :account_id",
@@ -1047,7 +1048,7 @@ fn check_step_satisfiability(
                 named_params! {
                     ":nf": nf,
                     ":account_id": account_id.0,
-                    ":as_of": u32::from(as_of),
+                    ":as_of_height": u32::from(as_of_height),
                 },
                 |row| row.get(0),
             )
@@ -1061,15 +1062,15 @@ fn check_step_satisfiability(
     }
     drop(stmt);
 
-    // Expiry is judged at the next block the transaction could be mined in (`as_of + 1`),
+    // Expiry is judged at the next block the transaction could be mined in (`as_of_height + 1`),
     // mirroring the engine's `MigrationState::is_expired` exactly: an `expiry_height` of 0
     // disables expiry, and a mined transaction is never expired.
     let expiry = u32::from(tx.expiry_height());
     let expired = !matches!(tx.state(), MigrationTxState::Mined { .. })
         && expiry != 0
-        && expiry <= u32::from(as_of);
+        && expiry <= u32::from(as_of_height);
 
-    let classified = classify_input_observations(as_of, expired, &observations);
+    let classified = classify_input_observations(as_of_height, expired, &observations);
 
     // `AnchorInvalidated` sits BELOW `Expired` in the answer precedence, so it is asked only when
     // the per-input fold (and expiry) answered nothing definite. Asking it last also keeps the
@@ -1077,11 +1078,11 @@ fn check_step_satisfiability(
     let answer = if matches!(
         classified,
         StepSatisfiability::Satisfiable { .. } | StepSatisfiability::NotYetSatisfiable { .. }
-    ) && anchor_displaced(&view, t, tx, as_of, settle, source_root_at)?
+    ) && anchor_displaced(&view, t, tx, as_of_height, settle, source_root_at)?
     {
         StepSatisfiability::Unsatisfiable {
             cause: UnsatisfiableCause::AnchorInvalidated,
-            as_of,
+            as_of_height,
         }
     } else {
         classified
@@ -1107,24 +1108,25 @@ fn check_step_satisfiability(
 ///    mined, and that height is persisted nowhere — so a preparation is not judged here. Without
 ///    it there is neither a root to compare against nor a reference height to settle the
 ///    comparison at.
-/// 3. **Evidence at or below `as_of`.** A boundary above the fully-scanned height is outside the
-///    region backing this answer; its checkpoint may yet be rewritten by scanning that has not
-///    happened. This is the invariant that keeps a mark honest: the mark carries `as_of`, and
-///    reorg truncation clears marks stamped above the truncation height, so evidence inside the
-///    scanned region guarantees a rollback of that evidence forces a truncation below the stamp.
+/// 3. **Evidence at or below `as_of_height`.** A boundary above the fully-scanned height is
+///    outside the region backing this answer; its checkpoint may yet be rewritten by scanning that
+///    has not happened. This is the invariant that keeps a mark honest: the mark carries
+///    `as_of_height`, and reorg truncation clears marks stamped above the truncation height, so
+///    evidence inside the scanned region guarantees a rollback of that evidence forces a truncation
+///    below the stamp.
 /// 4. **Settled per the caller's [`ReorgSettleDepth`].** The displacement is definitive only once
 ///    the scanned chain has built `settle` blocks on top of the boundary whose content changed:
-///    `as_of >= boundary + settle`. Since a displacement at the boundary means the chains forked
-///    strictly BELOW it, this also buries the fork itself by more than `settle` — the rule is
-///    stricter than "the fork is settled", never laxer. It rests only on `as_of` and a height the
-///    transaction itself records, so it needs no reorg history the wallet does not keep.
+///    `as_of_height >= boundary + settle`. Since a displacement at the boundary means the chains
+///    forked strictly BELOW it, this also buries the fork itself by more than `settle` — the rule
+///    is stricter than "the fork is settled", never laxer. It rests only on `as_of_height` and a
+///    height the transaction itself records, so it needs no reorg history the wallet does not keep.
 /// 5. **An EXHAUSTIVE negative.** A mismatch at the boundary is not by itself death: consensus
 ///    accepts an anchor that is the root of ANY previous block, and a reorg that re-mines the same
 ///    outputs across different block boundaries leaves the same root live at a different height.
 ///    So the installed anchor is ruled out against every distinct tree state the wallet retains at
-///    or below `as_of`, and only an exhaustive miss concludes. A state whose root the retained
-///    shard data cannot produce is one that was not ruled out, so it ends the search without
-///    concluding, as does a probe set larger than [`ANCHOR_PROBE_LIMIT`].
+///    or below `as_of_height`, and only an exhaustive miss concludes. A state whose root the
+///    retained shard data cannot produce is one that was not ruled out, so it ends the search
+///    without concluding, as does a probe set larger than [`ANCHOR_PROBE_LIMIT`].
 ///
 /// What the wallet RETAINS is narrower than what it has SCANNED, and that is the one place this
 /// judgment can still be wrong. The shard tree prunes ordinary checkpoints past `PRUNING_DEPTH`,
@@ -1143,7 +1145,7 @@ fn anchor_displaced(
     view: &rusqlite::Transaction<'_>,
     t: &Tables,
     tx: &MigrationTransaction,
-    as_of: BlockHeight,
+    as_of_height: BlockHeight,
     settle: ReorgSettleDepth,
     source_root_at: Option<SourceRootAt>,
 ) -> Result<bool, Error> {
@@ -1153,7 +1155,7 @@ fn anchor_displaced(
     let (Some(root_at), Some(boundary)) = (source_root_at, tx.anchor_boundary()) else {
         return Ok(false);
     };
-    if boundary > as_of || u32::from(as_of) - u32::from(boundary) < settle.blocks() {
+    if boundary > as_of_height || u32::from(as_of_height) - u32::from(boundary) < settle.blocks() {
         return Ok(false);
     }
 
@@ -1172,7 +1174,7 @@ fn anchor_displaced(
         return Ok(false);
     }
 
-    let probes = source_tree_probe_heights(view, t, boundary, as_of)?;
+    let probes = source_tree_probe_heights(view, t, boundary, as_of_height)?;
     if probes.len() > ANCHOR_PROBE_LIMIT {
         return Ok(false);
     }
@@ -1202,8 +1204,8 @@ fn installed_source_anchor(pczt: &[u8]) -> Result<Option<[u8; 32]>, Error> {
 }
 
 /// The checkpoint heights at which the source pool's tree takes each DISTINCT state at or below
-/// `as_of` — the complete set of heights whose roots an installed anchor must be ruled out of,
-/// ordered by distance from `boundary` so a still-live anchor is found in the fewest probes.
+/// `as_of_height` — the complete set of heights whose roots an installed anchor must be ruled out
+/// of, ordered by distance from `boundary` so a still-live anchor is found in the fewest probes.
 ///
 /// Checkpoints sharing a `position` share a root (a block that added no note commitments leaves the
 /// tree where it was), so one representative per position is enough, and the empty tree state
@@ -1212,15 +1214,16 @@ fn source_tree_probe_heights(
     view: &rusqlite::Transaction<'_>,
     t: &Tables,
     boundary: BlockHeight,
-    as_of: BlockHeight,
+    as_of_height: BlockHeight,
 ) -> Result<Vec<BlockHeight>, Error> {
     let mut stmt = view.prepare(&format!(
-        "SELECT MIN(checkpoint_id) FROM {} WHERE checkpoint_id <= :as_of GROUP BY position",
+        "SELECT MIN(checkpoint_id) FROM {} WHERE checkpoint_id <= :as_of_height GROUP BY position",
         t.source_tree_checkpoints
     ))?;
-    let rows = stmt.query_map(named_params! { ":as_of": u32::from(as_of) }, |row| {
-        row.get::<_, u32>(0)
-    })?;
+    let rows = stmt.query_map(
+        named_params! { ":as_of_height": u32::from(as_of_height) },
+        |row| row.get::<_, u32>(0),
+    )?;
     let mut out = Vec::new();
     for height in rows {
         out.push(BlockHeight::from_u32(height?));

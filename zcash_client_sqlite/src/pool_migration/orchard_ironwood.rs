@@ -57,8 +57,8 @@ static TABLES: Tables = Tables {
 /// act on by waiting.
 ///
 /// This reads the tree through the same `rusqlite::Transaction` the rest of the satisfiability
-/// answer is computed in, so every root compared and the `as_of` it is compared under come from
-/// one database snapshot.
+/// answer is computed in, so every root compared and the `as_of_height` it is compared under come
+/// from one database snapshot.
 #[cfg(feature = "orchard")]
 fn orchard_anchor_at(
     view: &rusqlite::Transaction<'_>,
@@ -474,7 +474,7 @@ mod check_step_satisfiability {
         /// The note's nullifier, exactly as the scanner recorded it.
         nf: Nullifier,
         /// The wallet's fully-scanned height: the observation basis every answer must carry.
-        as_of: BlockHeight,
+        as_of_height: BlockHeight,
     }
 
     fn scanned_note_fixture(with_second_account: bool) -> ScannedNoteFixture {
@@ -500,13 +500,16 @@ mod check_step_satisfiability {
         st.scan_cached_blocks(h, 1);
         let (h2, _) = st.generate_empty_block();
         st.scan_cached_blocks(h2, 1);
-        let as_of = st
+        let as_of_height = st
             .wallet()
             .block_fully_scanned()
             .expect("reads the fully-scanned block")
             .expect("the wallet is fully scanned")
             .block_height();
-        assert_eq!(as_of, h2, "the wallet is fully scanned to the last block");
+        assert_eq!(
+            as_of_height, h2,
+            "the wallet is fully scanned to the last block"
+        );
         let nf_bytes: [u8; 32] = st
             .wallet()
             .conn()
@@ -523,7 +526,7 @@ mod check_step_satisfiability {
             account: account_id,
             second_account,
             nf,
-            as_of,
+            as_of_height,
         }
     }
 
@@ -538,10 +541,10 @@ mod check_step_satisfiability {
             st,
             account,
             nf,
-            as_of,
+            as_of_height,
             ..
         } = scanned_note_fixture(false);
-        (st, account, nf, as_of)
+        (st, account, nf, as_of_height)
     }
 
     /// The real-spend nullifier cache a [`MigrationTransaction`] carries: the engine's persisted
@@ -582,8 +585,8 @@ mod check_step_satisfiability {
     ///
     /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s
     /// `arb_migration_transaction`: every field the assertions turn on is pinned here (the mined
-    /// height must be the wallet's own `as_of`, and the cache must be empty), which is precisely
-    /// what an arbitrary transaction does not give.
+    /// height must be the wallet's own `as_of_height`, and the cache must be empty), which is
+    /// precisely what an arbitrary transaction does not give.
     fn mined_transfer_with_empty_cache(height: BlockHeight) -> MigrationTransaction {
         MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
@@ -715,21 +718,21 @@ mod check_step_satisfiability {
 
     #[test]
     fn known_unspent_inputs_are_satisfiable() {
-        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
     }
 
     #[test]
     fn a_mined_spend_marks_inputs_spent() {
-        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
-        record_spend(&mut st, nf, Some(as_of));
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
+        record_spend(&mut st, nf, Some(as_of_height));
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
@@ -740,23 +743,23 @@ mod check_step_satisfiability {
                 cause: UnsatisfiableCause::InputsSpent {
                     nullifiers: vec![nf.to_bytes()]
                 },
-                as_of,
+                as_of_height,
             },
             "the answer carries exactly the spent nullifier",
         );
     }
 
     /// Spend evidence recorded AHEAD of the scanned region does not obstruct yet: a mark's
-    /// evidence must lie at or below the `as_of` backing it, because reorg truncation clears
-    /// marks by their stamped height — evidence at height <= `as_of` guarantees a rollback of
-    /// the evidence forces a truncation below the mark, so no false mark can survive. Once
-    /// scanning catches up to the evidence, the same stored state obstructs.
+    /// evidence must lie at or below the `as_of_height` backing it, because reorg truncation
+    /// clears marks by their stamped height — evidence at height <= `as_of_height` guarantees a
+    /// rollback of the evidence forces a truncation below the mark, so no false mark can survive.
+    /// Once scanning catches up to the evidence, the same stored state obstructs.
     #[test]
     fn evidence_ahead_of_the_scanned_region_does_not_obstruct_yet() {
-        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         // Transaction-status polling can record a spender's mined height before scanning
         // reaches it: the spender sits one block above the fully-scanned height.
-        record_spend(&mut st, nf, Some(as_of + 1));
+        record_spend(&mut st, nf, Some(as_of_height + 1));
         {
             let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
                 .expect("the account exists");
@@ -764,14 +767,18 @@ mod check_step_satisfiability {
                 store
                     .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
                     .expect("the oracle answers"),
-                StepSatisfiability::Satisfiable { as_of },
+                StepSatisfiability::Satisfiable { as_of_height },
                 "evidence above the scanned region must not obstruct yet",
             );
         }
         // Scan past the spender's height; the evidence now lies inside the scanned region.
         let (h3, _) = st.generate_empty_block();
         st.scan_cached_blocks(h3, 1);
-        assert_eq!(h3, as_of + 1, "the next block is the spender's height");
+        assert_eq!(
+            h3,
+            as_of_height + 1,
+            "the next block is the spender's height"
+        );
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
@@ -782,7 +789,7 @@ mod check_step_satisfiability {
                 cause: UnsatisfiableCause::InputsSpent {
                     nullifiers: vec![nf.to_bytes()]
                 },
-                as_of: h3,
+                as_of_height: h3,
             },
         );
     }
@@ -792,7 +799,7 @@ mod check_step_satisfiability {
     /// definitive on-chain fact.
     #[test]
     fn an_unmined_spend_does_not_obstruct() {
-        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         record_spend(&mut st, nf, None);
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
@@ -800,45 +807,45 @@ mod check_step_satisfiability {
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
     }
 
     #[test]
     fn an_unknown_nullifier_is_not_yet_satisfiable() {
-        let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![unknown_nullifier()], 0), SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::NotYetSatisfiable { as_of },
+            StepSatisfiability::NotYetSatisfiable { as_of_height },
         );
     }
 
-    /// Expiry is judged at the next block a mined observation could extend (`as_of + 1`),
+    /// Expiry is judged at the next block a mined observation could extend (`as_of_height + 1`),
     /// mirroring the engine's `is_expired`: an expiry AT the fully-scanned height can no longer
     /// mine, one just above it still can.
     #[test]
     fn expiry_is_judged_at_the_next_block() {
-        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
             store
-                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of)), SETTLE)
+                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of_height)), SETTLE)
                 .expect("the oracle answers"),
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::Expired,
-                as_of,
+                as_of_height,
             },
         );
         assert_eq!(
             store
-                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of) + 1), SETTLE)
+                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of_height) + 1), SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
     }
 
@@ -878,15 +885,15 @@ mod check_step_satisfiability {
     /// disposition no longer turns on its inputs) rather than erroring.
     #[test]
     fn a_mined_row_with_an_empty_cache_answers() {
-        let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
-        let mined = mined_transfer_with_empty_cache(as_of);
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let mined = mined_transfer_with_empty_cache(as_of_height);
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&mined, SETTLE)
                 .expect("the oracle answers rather than erroring"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
     }
 
@@ -905,8 +912,8 @@ mod check_step_satisfiability {
         use zcash_pool_migration::preparation::PreparationPlan;
         use zcash_pool_migration::scheduling::AnchorBucketInterval;
 
-        let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
-        let mined = mined_transfer_with_empty_cache(as_of);
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let mined = mined_transfer_with_empty_cache(as_of_height);
         let state = MigrationState::from_parts(
             MigrationStatus::InProgress,
             DenominationPlan::from_stored_parts(
@@ -938,12 +945,12 @@ mod check_step_satisfiability {
             store
                 .check_step_satisfiability(&loaded.transactions()[0], SETTLE)
                 .expect("a mined row with an empty cache answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
 
         // A rewind below the mined height: load, truncate, replace.
         let mut truncated = loaded;
-        truncated.truncate_to_height(as_of - 1);
+        truncated.truncate_to_height(as_of_height - 1);
         assert!(matches!(
             truncated.transactions()[0].state(),
             MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([9; 32])
@@ -969,8 +976,8 @@ mod check_step_satisfiability {
     #[test]
     fn an_anchor_still_rooted_at_its_boundary_is_satisfiable() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = st.generate_and_scan_empty_blocks(12);
-        let boundary = as_of - SETTLE.blocks();
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        let boundary = as_of_height - SETTLE.blocks();
         let anchor = st
             .orchard_anchor_at(boundary)
             .expect("reads the Orchard commitment tree")
@@ -982,7 +989,7 @@ mod check_step_satisfiability {
             store
                 .check_step_satisfiability(&broadcast_transfer(vec![nf], boundary, anchor), SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
     }
 
@@ -994,30 +1001,34 @@ mod check_step_satisfiability {
     #[test]
     fn an_anchor_displacement_marks_exactly_at_the_settle_depth() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = st.generate_and_scan_empty_blocks(12);
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
 
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - (SETTLE.blocks() - 1), no_such_root()),
+                    &broadcast_transfer(
+                        vec![nf],
+                        as_of_height - (SETTLE.blocks() - 1),
+                        no_such_root()
+                    ),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
             "one block short of the settle depth concludes nothing",
         );
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - SETTLE.blocks(), no_such_root()),
+                    &broadcast_transfer(vec![nf], as_of_height - SETTLE.blocks(), no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::AnchorInvalidated,
-                as_of,
+                as_of_height,
             },
             "at the settle depth the displacement is definitive",
         );
@@ -1035,8 +1046,9 @@ mod check_step_satisfiability {
     #[test]
     fn an_unreadable_tree_state_ends_the_search_without_marking() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = st.generate_and_scan_empty_blocks(12);
-        let displaced = broadcast_transfer(vec![nf], as_of - SETTLE.blocks(), no_such_root());
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        let displaced =
+            broadcast_transfer(vec![nf], as_of_height - SETTLE.blocks(), no_such_root());
 
         {
             let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1047,7 +1059,7 @@ mod check_step_satisfiability {
                     .expect("the oracle answers"),
                 StepSatisfiability::Unsatisfiable {
                     cause: UnsatisfiableCause::AnchorInvalidated,
-                    as_of,
+                    as_of_height,
                 },
                 "without the unreadable state, this displacement is definitive",
             );
@@ -1061,7 +1073,7 @@ mod check_step_satisfiability {
                 "INSERT INTO orchard_tree_checkpoints (checkpoint_id, position)
                  VALUES (:checkpoint_id, :position)",
                 named_params! {
-                    ":checkpoint_id": u32::from(as_of) - 50,
+                    ":checkpoint_id": u32::from(as_of_height) - 50,
                     ":position": u64::from(u32::MAX),
                 },
             )
@@ -1073,7 +1085,7 @@ mod check_step_satisfiability {
             store
                 .check_step_satisfiability(&displaced, SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
             "a state the search could not read is a state it did not rule out",
         );
     }
@@ -1087,7 +1099,7 @@ mod check_step_satisfiability {
     fn an_anchor_displacement_above_the_scanned_region_does_not_mark() {
         const IMMEDIATE: ReorgSettleDepth = ReorgSettleDepth::new(0);
 
-        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         // Three further blocks, of which only the last is scanned: the commitment tree gains a
         // checkpoint at that height while the fully-scanned height stays below the gap.
         let (gap, _) = st.generate_empty_block();
@@ -1100,7 +1112,7 @@ mod check_step_satisfiability {
                 .expect("reads the fully-scanned block")
                 .expect("the wallet is fully scanned to the pre-gap height")
                 .block_height(),
-            as_of,
+            as_of_height,
             "the unscanned gap holds the fully-scanned height below the new checkpoint",
         );
 
@@ -1112,16 +1124,16 @@ mod check_step_satisfiability {
                 store
                     .check_step_satisfiability(&tx, IMMEDIATE)
                     .expect("the oracle answers"),
-                StepSatisfiability::Satisfiable { as_of },
+                StepSatisfiability::Satisfiable { as_of_height },
                 "a boundary above the scanned region must not obstruct yet",
             );
         }
 
         // Close the gap; the boundary now lies inside the region backing the answer.
         st.scan_cached_blocks(gap, 2);
-        let as_of = st.generate_and_scan_empty_blocks(1);
+        let as_of_height = st.generate_and_scan_empty_blocks(1);
         assert!(
-            as_of >= high,
+            as_of_height >= high,
             "the scanned region now reaches the boundary at {high:?}",
         );
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1132,7 +1144,7 @@ mod check_step_satisfiability {
                 .expect("the oracle answers"),
             StepSatisfiability::Unsatisfiable {
                 cause: UnsatisfiableCause::AnchorInvalidated,
-                as_of,
+                as_of_height,
             },
         );
     }
@@ -1143,13 +1155,13 @@ mod check_step_satisfiability {
     #[test]
     fn a_displaced_anchor_on_an_unbroadcast_transfer_does_not_mark() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = st.generate_and_scan_empty_blocks(12);
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
         // Exactly `broadcast_transfer`'s shape but for the lifecycle state: the boundary still
         // sits at the settle depth, so only the state can be what prevents the mark.
         let signed = anchored_transaction(
             MigrationTxKind::Transfer { crossing: 0 },
             MigrationTxState::Signed,
-            Some(as_of - SETTLE.blocks()),
+            Some(as_of_height - SETTLE.blocks()),
             vec![nf],
             no_such_root(),
         );
@@ -1160,7 +1172,7 @@ mod check_step_satisfiability {
             store
                 .check_step_satisfiability(&signed, SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
     }
 
@@ -1171,15 +1183,15 @@ mod check_step_satisfiability {
     #[test]
     fn a_spent_input_outranks_a_displaced_anchor() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = st.generate_and_scan_empty_blocks(12);
-        record_spend(&mut st, nf, Some(as_of));
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        record_spend(&mut st, nf, Some(as_of_height));
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(
-                    &broadcast_transfer(vec![nf], as_of - SETTLE.blocks(), no_such_root()),
+                    &broadcast_transfer(vec![nf], as_of_height - SETTLE.blocks(), no_such_root()),
                     SETTLE,
                 )
                 .expect("the oracle answers"),
@@ -1187,7 +1199,7 @@ mod check_step_satisfiability {
                 cause: UnsatisfiableCause::InputsSpent {
                     nullifiers: vec![nf.to_bytes()]
                 },
-                as_of,
+                as_of_height,
             },
         );
     }
@@ -1199,7 +1211,7 @@ mod check_step_satisfiability {
     #[test]
     fn a_broadcast_preparation_is_not_anchor_judged() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
-        let as_of = st.generate_and_scan_empty_blocks(12);
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
         // `broadcast_transfer`'s shape but for the kind, and the absent boundary that follows from
         // it: a preparation records none.
         let prep = anchored_transaction(
@@ -1218,7 +1230,7 @@ mod check_step_satisfiability {
             store
                 .check_step_satisfiability(&prep, SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::Satisfiable { as_of },
+            StepSatisfiability::Satisfiable { as_of_height },
         );
     }
 
@@ -1232,7 +1244,7 @@ mod check_step_satisfiability {
             mut st,
             second_account,
             nf,
-            as_of,
+            as_of_height,
             ..
         } = scanned_note_fixture(true);
         let other_account = second_account.expect("the fixture created a second account");
@@ -1242,7 +1254,7 @@ mod check_step_satisfiability {
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
                 .expect("the oracle answers"),
-            StepSatisfiability::NotYetSatisfiable { as_of },
+            StepSatisfiability::NotYetSatisfiable { as_of_height },
         );
     }
 }
@@ -1830,7 +1842,7 @@ mod tests {
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
         );
-        let as_of = BlockHeight::from_u32(500);
+        let as_of_height = BlockHeight::from_u32(500);
         state.record_satisfiability(
             DuenessTargets::at(BlockHeight::from_u32(600)),
             &[(
@@ -1839,7 +1851,7 @@ mod tests {
                     cause: UnsatisfiableCause::InputsSpent {
                         nullifiers: vec![[9u8; 32]],
                     },
-                    as_of,
+                    as_of_height,
                 },
             )],
         );
@@ -1856,7 +1868,7 @@ mod tests {
                 loaded.transactions()[0].unsatisfiable_at(),
                 loaded.transactions()[0].unsatisfiable_kind()
             ),
-            (Some(as_of), Some(UnsatisfiableKind::InputsSpent)),
+            (Some(as_of_height), Some(UnsatisfiableKind::InputsSpent)),
             "the observed cause's kind is stored beside its stamp",
         );
         assert_eq!(
@@ -1864,7 +1876,7 @@ mod tests {
                 loaded.transactions()[1].unsatisfiable_at(),
                 loaded.transactions()[1].unsatisfiable_kind()
             ),
-            (Some(as_of), Some(UnsatisfiableKind::Inherited)),
+            (Some(as_of_height), Some(UnsatisfiableKind::Inherited)),
             "a closure-applied mark is stored as inherited",
         );
     }
