@@ -46,6 +46,13 @@ workspace.
   such row written by a previous release), recovering it from the wallet's own
   record of the spend and failing with a corrupted-data error naming any row
   for which no such record exists.
+- `WalletWrite::truncate_to_height` (and everything routed through it) now also
+  rolls every stored pool migration back to the height it actually truncated
+  to, clearing unsatisfiability marks that rest on discarded chain state,
+  demoting transactions recorded mined above it, and reverting a `Complete`
+  status the demotion unsettles. Applications that were calling
+  `MigrationState::truncate_to_height` themselves from a reorg hook should stop:
+  the wallet now does it, in the same database transaction.
 - `pool_migration::orchard_ironwood::PoolMigrations` implements the new
   `zcash_pool_migration` `PoolMigrationRead::check_step_satisfiability`
   method, answering each cached real-spend nullifier from the wallet's

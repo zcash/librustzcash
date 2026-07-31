@@ -455,6 +455,41 @@ pub(crate) fn active_anchor_bucket_intervals(
         .collect()
 }
 
+/// Roll every stored migration in `t` back to `height`, as the wallet's own truncation does to the
+/// state it derives from the chain: marks resting on rolled-back chain state are cleared, mined
+/// transactions above `height` are demoted to broadcast, and a `Complete` status a demotion
+/// unsettles reverts (see [`MigrationState::truncate_to_height`], which defines all three).
+///
+/// This is driven from the wallet's truncation rather than left to the consumer because the two
+/// must not be able to disagree: a migration whose marks and mined heights outlive the chain state
+/// they were derived from would strand live value behind observations nothing will revisit, and a
+/// wallet that truncates without telling its migration has no other moment at which to notice.
+/// Runs inside the caller's transaction, so the wallet's truncation and the migration's are one
+/// atomic step; a migration the truncation does not change is left untouched rather than rewritten.
+pub(crate) fn truncate_to_height(
+    tx: &rusqlite::Transaction,
+    t: &Tables,
+    height: BlockHeight,
+) -> Result<(), Error> {
+    let accounts: Vec<i64> = {
+        let mut stmt = tx.prepare(&format!("SELECT account_id FROM {}", t.migrations))?;
+        let rows = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    for account_id in accounts {
+        let account = AccountRef(account_id);
+        let Some(before) = read_migration(tx, t, account)? else {
+            continue;
+        };
+        let mut truncated = before.clone();
+        truncated.truncate_to_height(height);
+        if truncated != before {
+            replace_migration(tx, t, account, &truncated)?;
+        }
+    }
+    Ok(())
+}
+
 fn read_migration(
     conn: &Connection,
     t: &Tables,

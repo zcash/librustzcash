@@ -38,6 +38,19 @@
 //! Ironwood, `orchard_ironwood_migration_tables`) runs that DDL inside the wallet schema, so the
 //! pool-migration tables live in the same `wallet.db` and share its schema versioning.
 //!
+//! # Reorgs
+//!
+//! A stored migration's chain-derived state — the unsatisfiability marks, and which of its
+//! transactions are mined — is rolled back with the wallet: [`WalletWrite::truncate_to_height`]
+//! (and everything routed through it) drives each stored migration's own
+//! [`MigrationState::truncate_to_height`] at the height it ACTUALLY truncated to, in the same
+//! database transaction. So a consumer has no reorg hook to remember: a mark can never rest on an
+//! observation the wallet has discarded, and a transaction can never stay recorded mined above the
+//! wallet's own view of the chain.
+//!
+//! [`WalletWrite::truncate_to_height`]: zcash_client_backend::data_api::WalletWrite::truncate_to_height
+//! [`MigrationState::truncate_to_height`]: zcash_pool_migration::engine::MigrationState::truncate_to_height
+//!
 //! # Model
 //!
 //! There is at most one migration in progress per pool per account, stored as a row in the pool's
