@@ -12,7 +12,7 @@ use crate::wallet::init::WalletMigrationError;
 /// ZIP 315 confirmations policy
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x4e68277f_6269_467e_9437_f3853cc4a41f);
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     fix_v_transactions_expired_unmined::MIGRATION_ID,
     tx_observation_height::MIGRATION_ID,
 ];

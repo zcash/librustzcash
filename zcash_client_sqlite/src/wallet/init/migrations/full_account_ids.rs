@@ -24,7 +24,7 @@ pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) params: P,
 }
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     receiving_key_scopes::MIGRATION_ID,
     add_account_birthdays::MIGRATION_ID,
     v_transactions_note_uniqueness::MIGRATION_ID,

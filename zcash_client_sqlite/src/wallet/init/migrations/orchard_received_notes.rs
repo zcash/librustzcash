@@ -15,7 +15,7 @@ use crate::wallet::{init::WalletMigrationError, pool_code};
 /// notes.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x51d7a273_aa19_4109_9325_80e4a5545048);
 
-const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[full_account_ids::MIGRATION_ID];
 
 pub(super) struct Migration;
 

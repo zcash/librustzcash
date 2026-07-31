@@ -14,7 +14,7 @@ use crate::wallet::{
 /// Adds minimum observation height to transaction records.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xab1be47e_dbfd_439a_876a_55a7e4a0ea0b);
 
-const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,

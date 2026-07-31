@@ -12,7 +12,7 @@ use crate::wallet::init::{WalletMigrationError, migrations::fix_v_transactions_e
 /// to the returned fields.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x894574e0_663e_401a_8426_820b1f75149a);
 
-const DEPENDENCIES: &[Uuid] = &[fix_v_transactions_expired_unmined::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[fix_v_transactions_expired_unmined::MIGRATION_ID];
 
 pub(super) struct Migration;
 

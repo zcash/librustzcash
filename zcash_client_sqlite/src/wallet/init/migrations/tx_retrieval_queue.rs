@@ -38,7 +38,7 @@ use {
     },
 };
 
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     orchard_shardtree::MIGRATION_ID,
     ensure_orchard_ua_receiver::MIGRATION_ID,
     ephemeral_addresses::MIGRATION_ID,

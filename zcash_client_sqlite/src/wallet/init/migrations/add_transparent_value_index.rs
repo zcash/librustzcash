@@ -35,7 +35,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x47c0e9c2_2eda_4b9c_be15_63c636c
 // rebuilds (`fix_transparent_received_outputs`, and `utxos_to_txos` which creates the
 // table initially) do not need to be listed explicitly: `account_delete_cascade`
 // transitively depends on both.
-const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 pub(super) struct Migration;
 

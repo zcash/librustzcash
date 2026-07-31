@@ -13,7 +13,7 @@ use super::tx_retrieval_queue;
 /// Adds expiration to transaction enhancement requests.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x9ffe82d4_3bf5_459a_9a21_7affd9e88e95);
 
-const DEPENDENCIES: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[tx_retrieval_queue::MIGRATION_ID];
 
 pub(super) struct Migration;
 

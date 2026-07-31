@@ -15,7 +15,7 @@ use crate::wallet::init::WalletMigrationError;
 /// Migration that adds tables for tracking explicitly-retained shardtree checkpoints ("anchors").
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x62032f4a_88b5_454d_a591_10f3d4c4d2b7);
 
-const DEPENDENCIES: &[Uuid] = &[witness_stabilized_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[witness_stabilized_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
 

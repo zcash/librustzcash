@@ -44,7 +44,7 @@ use {
 /// `ephemeral_addresses` tables.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xc41dfc0e_e870_4859_be47_d2f572f5ca73);
 
-const DEPENDENCIES: &[Uuid] = &[add_account_uuids::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[add_account_uuids::MIGRATION_ID];
 
 pub(super) struct Migration<P, C, R> {
     pub(super) params: P,

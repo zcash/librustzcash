@@ -34,7 +34,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7b2f6a41_9c3d_4e58_8a17_2f6b9d0
 // under the codebase's minimal-frontier convention. If a future migration reshuffles the DAG such that
 // `ironwood_received_notes` no longer pulls in the Orchard source infrastructure, add the Orchard
 // dependencies here explicitly.
-const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
 

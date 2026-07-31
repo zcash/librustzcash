@@ -33,7 +33,7 @@ use crate::{
 /// data structures.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7da6489d_e835_4657_8be5_f512bcce6cbf);
 
-const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,

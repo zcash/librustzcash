@@ -17,7 +17,7 @@ use crate::wallet::init::WalletMigrationError;
 /// address for the account.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x702cf97b_8395_4edc_b584_5c9f87f0ef35);
 
-const DEPENDENCIES: &[Uuid] = &[transparent_gap_limit_handling::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[transparent_gap_limit_handling::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) _params: P,

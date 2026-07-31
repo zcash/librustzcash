@@ -11,7 +11,7 @@ use crate::wallet::init::{WalletMigrationError, migrations::account_delete_casca
 /// views.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x97ac36a9_196f_4dd9_993d_722bde95bebc);
 
-const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 pub(super) struct Migration;
 

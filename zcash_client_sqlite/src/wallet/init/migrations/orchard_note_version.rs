@@ -22,7 +22,7 @@ use super::witness_stabilized_notes;
 /// Adds a `note_version` column to the `orchard_received_notes` table.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x2aa44e8e_e8a7_4760_8de4_501956c969ac);
 
-const DEPENDENCIES: &[Uuid] = &[witness_stabilized_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[witness_stabilized_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
 

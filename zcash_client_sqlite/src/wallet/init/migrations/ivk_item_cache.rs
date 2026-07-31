@@ -22,7 +22,7 @@ use super::standalone_p2sh;
 /// Replaces FVK item cache columns with IVK item cache columns in the `accounts` table.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x93278b0f_77fe_473c_b88e_7f285da38dd3);
 
-const DEPENDENCIES: &[Uuid] = &[standalone_p2sh::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[standalone_p2sh::MIGRATION_ID];
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) params: P,
