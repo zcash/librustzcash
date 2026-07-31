@@ -58,6 +58,12 @@ and this library adheres to Rust's notion of
   mark above the given height, demotes mined transactions above it back to
   broadcast (keeping their txids), and reverts a `Complete` status to
   `InProgress`.
+- `engine::RebuildError::Unsatisfiable`, returned by
+  `engine::rebuild_expired_transfer` and
+  `engine::rebuild_expired_transfer_unsigned` for a transfer that is itself
+  marked `unsatisfiable_at`, or that depends on a transaction which is; it is
+  reported ahead of `RebuildError::NotExpired`. Re-plan the migration's
+  remaining balance rather than retrying the rebuild.
 
 ### Changed
 - `state::AdvanceStep::Prove` now also carries the transaction's
