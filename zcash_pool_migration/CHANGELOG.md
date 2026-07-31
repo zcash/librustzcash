@@ -29,6 +29,12 @@ and this library adheres to Rust's notion of
   judgment into a `StepSatisfiability`, so every store implementation shares
   one classification and precedence.
 - `engine::MigrationTransferId` now implements `PartialOrd` and `Ord`.
+- `state::AdvanceStep::Replan`, the step directing the consumer to mark the
+  migration superseded and re-plan its remaining balance through the ordinary
+  planning flow.
+- `state::Blocker::Unsatisfiable`, reported (ahead of `Blocker::Expired`) for a
+  transaction whose inputs can never again all exist unspent on chain, directly
+  observed or inherited from a dead dependency.
 
 ### Changed
 - `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
@@ -55,6 +61,22 @@ and this library adheres to Rust's notion of
   `engine::build_preparation_unsigned`, and
   `engine::commit_preparation_with_funding` entry points each take a further
   `engine::ReplanThreshold` parameter, stamped on the committed migration.
+- `engine::MigrationState::next_step` takes a further `set_aside` parameter,
+  the drive loop's call-local list of transaction ids to skip (candidates whose
+  satisfiability check answered "not yet"); pass `&[]` when driving without an
+  oracle. Transactions that can never mine — marked unsatisfiable, expired
+  unmined, or dependent on either — are no longer offered for proving,
+  broadcast, or rebuild; `AdvanceStep::Replan` is returned after due broadcasts
+  but ahead of proving when `replan_required` holds, and in preference to
+  `AdvanceStep::Waiting` when dead value is stranded with no live work left (a
+  migration no longer waits forever in that state).
+- `engine::MigrationState::{next_provable, next_broadcastable}` take two
+  further parameters: the set of transaction ids judged unable to ever mine and
+  a set-aside list, both excluded from the queue. `next_step` supplies both;
+  pass an empty set and `&[]` to reproduce the previous behaviour.
+- `engine::MigrationState::sync_wakeup_schedule` also excludes transfers marked
+  unsatisfiable or dependent on a transaction that can never mine, alongside
+  the expired transfers it already excluded.
 - `engine::PoolMigrationRead` has a new required method,
   `check_step_satisfiability`: an implementation reports, for each cached
   real-spend nullifier of the given transaction, whether the note is unspent,

@@ -4632,7 +4632,7 @@ mod commit_tests {
             .map(|t| t.scheduled_height)
             .max()
             .expect("the committed migration has transactions");
-        match state.next_step(target) {
+        match state.next_step(target, &[]) {
             crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
@@ -4652,7 +4652,7 @@ mod commit_tests {
             .filter(|t| matches!(t.kind, MigrationTxKind::Preparation { layer: 1, .. }))
             .map(|t| t.id)
             .collect();
-        match state.next_step(target) {
+        match state.next_step(target, &[]) {
             crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 assert!(
@@ -4669,7 +4669,7 @@ mod commit_tests {
                 BlockHeight::from_u32(2_000_020),
             );
         }
-        match state.next_step(target) {
+        match state.next_step(target, &[]) {
             crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 let tx = state
@@ -4829,7 +4829,7 @@ mod commit_tests {
         let mut height = 2_000_000u32;
         for layer in 0..layer_count {
             let ids = layer_ids(&state, layer);
-            match state.next_step(target) {
+            match state.next_step(target, &[]) {
                 crate::state::AdvanceStep::Prove { id, .. }
                 | crate::state::AdvanceStep::Broadcast { id } => assert!(
                     ids.contains(&id),
@@ -4863,7 +4863,7 @@ mod commit_tests {
                 );
             }
         }
-        match state.next_step(target) {
+        match state.next_step(target, &[]) {
             crate::state::AdvanceStep::Prove { id, .. }
             | crate::state::AdvanceStep::Broadcast { id } => {
                 let tx = state.transactions.iter().find(|t| t.id == id).unwrap();

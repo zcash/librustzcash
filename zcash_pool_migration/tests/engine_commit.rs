@@ -167,7 +167,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .map(|t| t.scheduled_height())
         .max()
         .expect("the committed migration has transactions");
-    match state.next_step(target) {
+    match state.next_step(target, &[]) {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
         }
@@ -186,7 +186,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         .filter(|t| matches!(t.kind(), MigrationTxKind::Preparation { layer: 1, .. }))
         .map(|t| t.id())
         .collect();
-    match state.next_step(target) {
+    match state.next_step(target, &[]) {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(
                 layer1_ids.contains(&id),
@@ -202,7 +202,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
             BlockHeight::from_u32(2_000_020),
         );
     }
-    match state.next_step(target) {
+    match state.next_step(target, &[]) {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             let tx = state
                 .transactions()
