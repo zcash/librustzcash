@@ -780,13 +780,18 @@ mod tests {
         Ok(result)
     }
 
-    /// A schema statement's text with each opening or closing parenthesis surrounded by whitespace
-    /// and every run of whitespace (including newlines) collapsed to a single space, so that two
-    /// statements are compared for what they declare rather than how they were laid out.
+    /// A schema statement's text with each parenthesis and comma surrounded by whitespace and every
+    /// run of whitespace (including newlines) collapsed to a single space, so that two statements
+    /// are compared for what they declare rather than how they were laid out.
+    ///
+    /// The comma is punctuation for the same reason the parentheses are, and it is load-bearing
+    /// here: SQLite's `ALTER TABLE ... ADD COLUMN` splices the new definition into the stored text
+    /// just before the closing parenthesis, so a repaired schema separates its last two columns
+    /// with `\n        , ` where the `CREATE TABLE` that states the same shape writes `,\n`.
     fn normalize_sql(s: &str) -> String {
         let re = Regex::new(r"\s+").unwrap();
-        let re_paren = Regex::new(r"([\(\)])").unwrap();
-        re.replace_all(&re_paren.replace_all(s, " $1 "), " ")
+        let re_punct = Regex::new(r"([(),])").unwrap();
+        re.replace_all(&re_punct.replace_all(s, " $1 "), " ")
             .trim()
             .to_string()
     }
@@ -815,6 +820,7 @@ mod tests {
             db::TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_DIRECT_FUNDING,
             db::TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_INPUTS,
             db::TABLE_ORCHARD_IRONWOOD_MIGRATION_PREP_OUTPUTS,
+            db::TABLE_ORCHARD_IRONWOOD_MIGRATION_SPEND_NULLIFIERS,
             db::TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTION_DEPS,
             db::TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS,
             db::TABLE_ORCHARD_IRONWOOD_MIGRATIONS,
@@ -993,6 +999,10 @@ mod tests {
             (
                 "orchard_ironwood_migration_transaction_deps",
                 db::TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTION_DEPS,
+            ),
+            (
+                "orchard_ironwood_migration_spend_nullifiers",
+                db::TABLE_ORCHARD_IRONWOOD_MIGRATION_SPEND_NULLIFIERS,
             ),
             (
                 "idx_orchard_ironwood_migration_tx_due",

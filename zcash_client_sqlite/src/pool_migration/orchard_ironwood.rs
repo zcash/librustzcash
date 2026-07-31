@@ -40,6 +40,7 @@ static TABLES: Tables = Tables {
     prep_direct_funding: "orchard_ironwood_migration_prep_direct_funding",
     transactions: "orchard_ironwood_migration_transactions",
     transaction_deps: "orchard_ironwood_migration_transaction_deps",
+    spend_nullifiers: "orchard_ironwood_migration_spend_nullifiers",
     tx_due_index: "idx_orchard_ironwood_migration_tx_due",
     account_index: "idx_orchard_ironwood_migrations_account",
     source_notes: "orchard_received_notes",
@@ -1526,8 +1527,8 @@ mod tests {
         },
         preparation::PreparationPlan,
         satisfiability::{
-            DuenessTargets, ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
-            UnsatisfiableKind,
+            DuenessTargets, ReorgSettleDepth, ReplanThreshold, StepSatisfiability,
+            UnsatisfiableCause, UnsatisfiableKind,
         },
         scheduling::AnchorBucketInterval,
         testing::{
@@ -1809,11 +1810,36 @@ mod tests {
         )
     }
 
-    /// A stored `spend_nullifiers` blob whose length is not a multiple of the 32-byte nullifier
-    /// stride cannot have been written by this store; reading it back is corruption, never a
-    /// silently truncated cache.
+    /// The 32-byte stride of the nullifier cache is a `CHECK` on the table that holds it, so a
+    /// value of any other width is refused at the point of storage. This is the guard that
+    /// replaced a read-side length check over a concatenated blob: the ragged cache that check
+    /// existed to catch is no longer a state this schema can be put into.
     #[test]
-    fn ragged_spend_nullifiers_blob_is_corrupt() {
+    fn a_cached_nullifier_of_the_wrong_width_cannot_be_stored() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(&mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        assert!(
+            conn.execute(
+                "UPDATE orchard_ironwood_migration_spend_nullifiers SET nullifier = X'0102030405'",
+                [],
+            )
+            .is_err(),
+            "the stride CHECK refuses a nullifier that is not 32 bytes",
+        );
+    }
+
+    /// What the schema can still lose is the cache itself: a transaction whose nullifier rows are
+    /// gone reads back with an EMPTY cache, which is corruption on any row that is not `mined`
+    /// (only a mined row is exempt from the backfill that supplies it). The satisfiability oracle
+    /// reports that before it consults any chain state, which is why this store — over a database
+    /// with no scanned chain at all — reaches the corruption rather than a missing fully-scanned
+    /// height.
+    #[test]
+    fn a_signed_row_whose_cached_nullifiers_are_gone_is_corrupt() {
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
         PoolMigrations::for_account(&mut conn, account)
@@ -1821,15 +1847,25 @@ mod tests {
             .replace_migration(&single_transfer_state())
             .expect("write succeeds");
         conn.execute(
-            "UPDATE orchard_ironwood_migration_transactions SET spend_nullifiers = X'0102030405'",
+            "DELETE FROM orchard_ironwood_migration_spend_nullifiers",
             [],
         )
-        .expect("corrupts the stored blob");
-        let err = PoolMigrations::for_account(&conn, account)
-            .expect("account exists")
+        .expect("discards the stored cache");
+
+        let store = PoolMigrations::for_account(&conn, account).expect("account exists");
+        let loaded = store
             .get_migration()
-            .expect_err("a ragged blob must not decode");
-        assert!(matches!(err, Error::Corrupt("spend_nullifiers")));
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        let transfer = &loaded.transactions()[0];
+        assert!(
+            transfer.spend_nullifiers().is_empty(),
+            "the rows are gone, so the transaction reads back caching nothing",
+        );
+        assert!(matches!(
+            store.check_step_satisfiability(transfer, ReorgSettleDepth::new(10)),
+            Err(Error::Corrupt("spend_nullifiers")),
+        ));
     }
 
     /// A mark recorded through the engine's single door survives the store: the stamp AND the

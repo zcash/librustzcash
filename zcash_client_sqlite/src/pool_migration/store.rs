@@ -8,11 +8,10 @@
 //! transaction (`pczt`), which is genuinely unstructured, already-versioned bytes; each
 //! transaction's `lock_owner`, an opaque fixed-size token read and written directly as
 //! `Option<[u8; 32]>` (no codec: `rusqlite`'s fixed-size-array `FromSql`/`ToSql` impls handle it,
-//! and reject a non-NULL blob that is not exactly 32 bytes); and each transaction's
-//! `spend_nullifiers`, the concatenation of its real-spend 32-byte nullifiers in action order
-//! (a fixed-stride list, so a child table would add a join for no structure; a length not
-//! divisible by 32 is rejected as corrupt). All amounts are
-//! zatoshi `INTEGER` columns; the broadcast `txid` is stored as hex `TEXT`.
+//! and reject a non-NULL blob that is not exactly 32 bytes); and each cached real-spend
+//! `nullifier`, one per row of the spend-nullifier child table, held to its 32-byte width by a
+//! `CHECK` and read back through those same fixed-size impls. All amounts are zatoshi `INTEGER`
+//! columns; the broadcast `txid` is stored as hex `TEXT`.
 //!
 //! The preparation plan's layers/transactions grid has no tables of its own: each input and output
 //! row carries its transaction's `(layer, tx_index)` coordinate, and every transaction a real plan
@@ -75,6 +74,9 @@ pub(crate) struct Tables {
     pub transactions: &'static str,
     /// The dependency edges between migration transactions.
     pub transaction_deps: &'static str,
+    /// The cached real-spend nullifiers of each migration transaction (an ordered list per
+    /// transaction, one nullifier per row).
+    pub spend_nullifiers: &'static str,
     /// The index over `(state, scheduled_height)` on the transactions table.
     pub tx_due_index: &'static str,
     /// The unique index over `account_id` on the migrations table, enforcing at most one
@@ -227,25 +229,13 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
 }
 
 fn create_transactions_sql(t: &Tables) -> String {
-    // `transfer_id` is the transaction's ordinal within its migration (a `MigrationTransferId`, and
-    // the second half of the primary key that the dependency edges reference); `txid` is the
-    // consensus transaction ID it was broadcast under, held as hex text and `NULL` until broadcast.
-    // The ordinal is created as `tx_id` by the released `orchard_ironwood_migration_tables` DDL,
-    // whose frozen copy will always create it under that name, and renamed to what this DDL creates
-    // directly by the `orchard_ironwood_migration_unsatisfiability` schema migration.
-    //
-    // `spend_nullifiers` carries a `DEFAULT` only so that this DDL and the `ADD COLUMN` in the
-    // `orchard_ironwood_migration_unsatisfiability` schema migration produce the same stored
-    // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
-    // column explicitly, so no insert ever falls back to it.
-    //
     // `unsatisfiable_at` and `unsatisfiable_kind` are one value in two columns — the height an
     // unsatisfiability observation rests on, and which observation it was — so they are `NULL`
     // together or non-`NULL` together, and the read path rejects a row where they disagree.
     //
     // `broadcast_failure_at` is independent of both: the tip an application observed from a node
     // that REJECTED a broadcast, standing until the engine adjudicates the rejection against the
-    // wallet's own view. The four columns that migration adds are listed here in the order it adds
+    // wallet's own view. The three columns that migration adds are listed here in the order it adds
     // them, so the created and repaired schemas stay comparable.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
@@ -264,7 +254,6 @@ fn create_transactions_sql(t: &Tables) -> String {
             mined_height INTEGER,
             lock_owner BLOB,
             unsatisfiable_at INTEGER,
-            spend_nullifiers BLOB NOT NULL DEFAULT X'',
             unsatisfiable_kind TEXT,
             broadcast_failure_at INTEGER,
             PRIMARY KEY (migration_id, transfer_id)
@@ -285,6 +274,30 @@ fn create_transaction_deps_sql(t: &Tables) -> String {
                 REFERENCES {}(migration_id, transfer_id) ON DELETE CASCADE
         )",
         t.transaction_deps, t.transactions
+    )
+}
+
+fn create_spend_nullifiers_sql(t: &Tables) -> String {
+    // The nullifiers of a transaction's REAL spends, cached from its stored PCZT so the pool
+    // migration's state machine never has to parse one. Ordered, because the engine holds them as
+    // a `Vec` and compares migration states for equality: `ordinal` is the position in that list,
+    // exactly as it is for the dependency edges beside it.
+    //
+    // The `CHECK` is the store's stride guard, stated where the data lives rather than enforced on
+    // the way out: a nullifier is 32 bytes, so anything else was not written by this store and
+    // cannot become one on the read path. Reading a row back through `rusqlite`'s fixed-size-array
+    // impl rejects the same shape a second time, which is what makes the guard total.
+    format!(
+        "CREATE TABLE IF NOT EXISTS {} (
+            migration_id INTEGER NOT NULL,
+            transfer_id INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            nullifier BLOB NOT NULL CHECK (length(nullifier) = 32),
+            PRIMARY KEY (migration_id, transfer_id, ordinal),
+            FOREIGN KEY (migration_id, transfer_id)
+                REFERENCES {}(migration_id, transfer_id) ON DELETE CASCADE
+        )",
+        t.spend_nullifiers, t.transactions
     )
 }
 
@@ -315,7 +328,7 @@ fn create_account_index_sql(t: &Tables) -> String {
 /// creating migration yet can be created from this directly.
 pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(
-        "{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};",
+        "{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};",
         create_migrations_sql(t),
         create_crossing_values_sql(t),
         create_prep_inputs_sql(t),
@@ -323,6 +336,7 @@ pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
         create_prep_direct_funding_sql(t),
         create_transactions_sql(t),
         create_transaction_deps_sql(t),
+        create_spend_nullifiers_sql(t),
         create_tx_due_index_sql(t),
         create_account_index_sql(t),
     ))
@@ -760,8 +774,7 @@ fn read_transactions(
         let mut stmt = conn.prepare(&format!(
             "SELECT transfer_id, kind, kind_layer, kind_index, kind_crossing, pczt,
                     scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
-                    lock_owner, unsatisfiable_at, spend_nullifiers, unsatisfiable_kind,
-                    broadcast_failure_at
+                    lock_owner, unsatisfiable_at, unsatisfiable_kind, broadcast_failure_at
                FROM {}
               WHERE migration_id = ?
               ORDER BY transfer_id",
@@ -783,9 +796,8 @@ fn read_transactions(
                 mined_height: row.get(11)?,
                 lock_owner: row.get(12)?,
                 unsatisfiable_at: row.get(13)?,
-                spend_nullifiers: row.get(14)?,
-                unsatisfiable_kind: row.get(15)?,
-                broadcast_failure_at: row.get(16)?,
+                unsatisfiable_kind: row.get(14)?,
+                broadcast_failure_at: row.get(15)?,
             })
         })?;
         mapped.collect::<Result<_, _>>()?
@@ -817,17 +829,7 @@ fn read_transactions(
         )
         .map_err(|_| Error::Corrupt("state"))?;
         let depends_on = read_deps(conn, t, migration_id, r.transfer_id)?;
-
-        // The stored blob is a fixed-stride concatenation of 32-byte nullifiers; any other
-        // length cannot have been written by this store.
-        if r.spend_nullifiers.len() % 32 != 0 {
-            return Err(Error::Corrupt("spend_nullifiers"));
-        }
-        let spend_nullifiers = r
-            .spend_nullifiers
-            .chunks_exact(32)
-            .map(|chunk| <[u8; 32]>::try_from(chunk).expect("chunks_exact yields 32-byte chunks"))
-            .collect();
+        let spend_nullifiers = read_spend_nullifiers(conn, t, migration_id, r.transfer_id)?;
 
         // An unsatisfiability mark is ONE value spread over two columns: the height the
         // observation rests on and which observation it was. A name this build does not know is
@@ -926,9 +928,6 @@ struct TxRow {
     /// The chain height backing a spent-input observation, when the transaction has been
     /// determined unsatisfiable; `NULL` while no such determination stands.
     unsatisfiable_at: Option<u32>,
-    /// The concatenated real-spend nullifiers, still one undivided blob here; the decode step
-    /// splits it at its fixed 32-byte stride and rejects any other length as corrupt.
-    spend_nullifiers: Vec<u8>,
     /// The wire name of the [`UnsatisfiableKind`] recorded beside `unsatisfiable_at`, still
     /// unparsed here; the decode step parses it and rejects a row where the two columns disagree
     /// about whether a mark stands.
@@ -957,6 +956,39 @@ fn read_deps(
     let mut out = Vec::new();
     for r in rows {
         out.push(MigrationTransferId::new(r?));
+    }
+    Ok(out)
+}
+
+/// The cached real-spend nullifiers of one migration transaction, in the order it holds them.
+///
+/// Read like the dependency edges beside them: one child-table query per transaction, ordered by
+/// the `ordinal` that carries the list's order. A row whose `nullifier` is not exactly 32 bytes is
+/// rejected by `rusqlite`'s fixed-size-array `FromSql` impl (`InvalidBlobSize`), which is the
+/// read-side half of the `CHECK` the table carries — the write side cannot store one at all.
+///
+/// A transaction with NO rows here reads back with an empty cache, which is not by itself
+/// corruption: a `mined` transaction is exempt from the backfill that populates it. The
+/// non-vacuity rule belongs to whoever asks a satisfiability question about the transaction; see
+/// [`check_step_satisfiability`].
+fn read_spend_nullifiers(
+    conn: &Connection,
+    t: &Tables,
+    migration_id: i64,
+    transfer_id: u32,
+) -> Result<Vec<[u8; 32]>, Error> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT nullifier FROM {}
+          WHERE migration_id = ? AND transfer_id = ?
+          ORDER BY ordinal",
+        t.spend_nullifiers
+    ))?;
+    let rows = stmt.query_map(params![migration_id, transfer_id], |row| {
+        row.get::<_, [u8; 32]>(0)
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
     }
     Ok(out)
 }
@@ -1002,9 +1034,14 @@ fn check_step_satisfiability(
 ) -> Result<StepSatisfiability, Error> {
     // An empty nullifier cache on a non-mined transaction is corruption, never vacuous
     // satisfiability (see `classify_input_observations`): every validly committed transaction
-    // caches its real-spend nullifiers, and only a mined row is exempt from the backfill.
-    // Checked before anything touches the database: corruption needs no chain state, so a wallet
-    // with nothing scanned still reports it (rather than masking it as
+    // caches its real-spend nullifiers, and only a mined row is exempt from the backfill that
+    // supplies the cache for transactions committed before it existed. That exemption is the
+    // `orchard_ironwood_migration_unsatisfiability` schema migration's, and it is why the empty
+    // cache is admissible at all: a stored PCZT that has been PROVEN no longer says which of its
+    // spends are real, so the cache cannot be reconstructed from one, and hard-failing there would
+    // block every wallet whose migration had already completed for no benefit while the row stays
+    // mined. Checked before anything touches the database: corruption needs no chain state, so a
+    // wallet with nothing scanned still reports it (rather than masking it as
     // [`Error::ChainStateUnavailable`]).
     if tx.spend_nullifiers().is_empty() && !matches!(tx.state(), MigrationTxState::Mined { .. }) {
         return Err(Error::Corrupt("spend_nullifiers"));
@@ -1044,25 +1081,30 @@ fn check_step_satisfiability(
         note_fk = t.source_note_spends_note_fk,
         notes = t.source_notes,
     ))?;
-    let mut observations = Vec::with_capacity(tx.spend_nullifiers().len());
-    for nf in tx.spend_nullifiers() {
-        let seen_spent: Option<bool> = stmt
-            .query_row(
-                named_params! {
-                    ":nf": nf,
-                    ":account_id": account_id.0,
-                    ":as_of_height": u32::from(as_of_height),
+    let observations = tx
+        .spend_nullifiers()
+        .iter()
+        .map(|nf| {
+            let seen_spent: Option<bool> = stmt
+                .query_row(
+                    named_params! {
+                        ":nf": nf,
+                        ":account_id": account_id.0,
+                        ":as_of_height": u32::from(as_of_height),
+                    },
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok((
+                *nf,
+                match seen_spent {
+                    None => InputObservation::Unknown,
+                    Some(false) => InputObservation::Unspent,
+                    Some(true) => InputObservation::SeenSpent,
                 },
-                |row| row.get(0),
-            )
-            .optional()?;
-        let observation = match seen_spent {
-            None => InputObservation::Unknown,
-            Some(false) => InputObservation::Unspent,
-            Some(true) => InputObservation::SeenSpent,
-        };
-        observations.push((*nf, observation));
-    }
+            ))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
     drop(stmt);
 
     // Expiry is judged at the next block the transaction could be mined in (`as_of_height + 1`),
@@ -1270,6 +1312,7 @@ fn replace_migration(
     if let Some(migration_id) = resolve_migration_id(tx, t, account_id)? {
         for table in [
             t.transaction_deps,
+            t.spend_nullifiers,
             t.transactions,
             t.prep_inputs,
             t.prep_outputs,
@@ -1408,13 +1451,11 @@ fn replace_migration(
                 "INSERT INTO {} (migration_id, transfer_id, kind, kind_layer, kind_index,
                                  kind_crossing, pczt, scheduled_height, expiry_height,
                                  anchor_boundary, state, txid, mined_height, lock_owner,
-                                 unsatisfiable_at, spend_nullifiers, unsatisfiable_kind,
-                                 broadcast_failure_at)
+                                 unsatisfiable_at, unsatisfiable_kind, broadcast_failure_at)
                  VALUES (:migration_id, :transfer_id, :kind, :kind_layer, :kind_index,
                          :kind_crossing, :pczt, :scheduled_height, :expiry_height,
                          :anchor_boundary, :state, :txid, :mined_height, :lock_owner,
-                         :unsatisfiable_at, :spend_nullifiers, :unsatisfiable_kind,
-                         :broadcast_failure_at)",
+                         :unsatisfiable_at, :unsatisfiable_kind, :broadcast_failure_at)",
                 t.transactions
             ),
             named_params! {
@@ -1433,7 +1474,6 @@ fn replace_migration(
                 ":mined_height": tx_state.mined_height().map(u32::from),
                 ":lock_owner": mtx.lock_owner(),
                 ":unsatisfiable_at": unsatisfiable_at.map(u32::from),
-                ":spend_nullifiers": mtx.spend_nullifiers().concat(),
                 ":unsatisfiable_kind": unsatisfiable_kind.as_ref().map(|k| k.as_ref()),
                 ":broadcast_failure_at": mtx.broadcast_failure_at().map(u32::from),
             },
@@ -1450,6 +1490,23 @@ fn replace_migration(
                     ":transfer_id": u32::from(mtx.id()),
                     ":ordinal": ordinal as u64,
                     ":depends_on_transfer_id": u32::from(*dep),
+                },
+            )?;
+        }
+        // The cache is a list, so its rows carry the position they were read out of the PCZT at,
+        // exactly as the dependency edges above carry theirs.
+        for (ordinal, nf) in mtx.spend_nullifiers().iter().enumerate() {
+            tx.execute(
+                &format!(
+                    "INSERT INTO {} (migration_id, transfer_id, ordinal, nullifier)
+                     VALUES (:migration_id, :transfer_id, :ordinal, :nullifier)",
+                    t.spend_nullifiers
+                ),
+                named_params! {
+                    ":migration_id": migration_id,
+                    ":transfer_id": u32::from(mtx.id()),
+                    ":ordinal": ordinal as u64,
+                    ":nullifier": nf,
                 },
             )?;
         }

@@ -12,14 +12,15 @@
 //! the registration that creates them inside the wallet schema, and it depends on
 //! [`ironwood_received_notes`] because the migration writes Ironwood notes, whose tables must exist.
 //!
-//! The DDL below is a FROZEN COPY of what this migration shipped with, not a call into the store's
-//! canonical DDL. This migration is published, so its effect is observable by anything that anchors
-//! to it: an external [`schemerz`] migration may declare this migration as a dependency and a later
-//! one as a dependent, and it then runs against exactly the schema these statements create — down to
-//! the `tx_id` column that [`orchard_ironwood_migration_unsatisfiability`] renames to `transfer_id`.
-//! Sourcing the text from a shared builder would let an edit made for a future database silently
-//! change what an already-published migration does to an existing one. The canonical DDL in
-//! [`crate::pool_migration::store`] states the FINAL shape instead; a fresh database reaches that
+//! The DDL below is a FROZEN COPY of the text a released build of this migration actually ran, not
+//! a call into the store's canonical DDL. This migration is published, so its effect is observable
+//! by anything that anchors to it: an external [`schemerz`] migration may declare this migration as
+//! a dependency and a later one as a dependent, and it then runs against exactly the schema these
+//! statements create — down to the `tx_id` column that
+//! [`orchard_ironwood_migration_unsatisfiability`] renames to `transfer_id`. Sourcing the text from
+//! a shared builder would let an edit made for a future database silently change what an
+//! already-published migration does to an existing one. The canonical DDL in
+//! `crate::pool_migration::store` states the FINAL shape instead; a fresh database reaches that
 //! shape by running this migration and then the later ones, and the two are pinned together by
 //! `verify_schema` and `canonical_pool_migration_ddl_matches_the_migration_path`.
 //!
@@ -49,13 +50,17 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7b2f6a41_9c3d_4e58_8a17_2f6b9d0
 // dependencies here explicitly.
 const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
 
-/// The pool-migration table and index DDL exactly as this published migration has always run it —
-/// including the `tx_id` column name, the `144` ZIP 318 anchor grid, and the `20` percent replan
-/// threshold as literals rather than as the constants they were interpolated from.
+/// The pool-migration table and index DDL byte-for-byte as `zcash_client_sqlite 0.22.0-rc.6` ran
+/// it — the store's `init` batch of that release, rendered for this pool's table names, down to the
+/// `tx_id` column name and the `144` ZIP 318 anchor grid as a literal rather than the constant it
+/// was interpolated from. Every release that ships these tables ran this text but for one
+/// character-level difference: `0.22.0-rc.2` through `0.22.0-rc.5` created `anchor_bucket_interval`
+/// without its `DEFAULT 144`, which `0.22.0-rc.6` added.
 ///
-/// Frozen, and to be edited only to correct a divergence from what a released build actually ran:
-/// see this module's documentation for why an already-published migration's effect cannot follow
-/// the store's evolving DDL. The statements are idempotent (`IF NOT EXISTS`) and ordered so each
+/// This MUST NEVER CHANGE. It is not a description of the current schema and must not be updated to
+/// track one: see this module's documentation for why an already-published migration's effect
+/// cannot follow the store's evolving DDL. The only edit it may ever take is a correction to what a
+/// released build actually ran. The statements are idempotent (`IF NOT EXISTS`) and ordered so each
 /// foreign-key target is created before the table referencing it.
 pub(super) const CREATE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS orchard_ironwood_migrations (
             id INTEGER PRIMARY KEY,
@@ -66,8 +71,7 @@ pub(super) const CREATE_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS orchard_i
             note_split_prep_fees INTEGER NOT NULL,
             note_split_total_input INTEGER NOT NULL,
             note_split_total_migratable INTEGER NOT NULL,
-            anchor_bucket_interval INTEGER NOT NULL DEFAULT 144,
-            replan_threshold INTEGER NOT NULL DEFAULT 20
+            anchor_bucket_interval INTEGER NOT NULL DEFAULT 144
         );
 CREATE TABLE IF NOT EXISTS orchard_ironwood_migration_crossing_values (
             migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
@@ -119,10 +123,6 @@ CREATE TABLE IF NOT EXISTS orchard_ironwood_migration_transactions (
             txid TEXT,
             mined_height INTEGER,
             lock_owner BLOB,
-            unsatisfiable_at INTEGER,
-            spend_nullifiers BLOB NOT NULL DEFAULT X'',
-            unsatisfiable_kind TEXT,
-            broadcast_failure_at INTEGER,
             PRIMARY KEY (migration_id, tx_id)
         );
 CREATE TABLE IF NOT EXISTS orchard_ironwood_migration_transaction_deps (
