@@ -48,8 +48,9 @@ use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
 
 use crate::build::{AccountDerivation, sign_pczt};
 use crate::engine::{
-    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransferId,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransaction,
+    MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth,
+    StepSatisfiability,
 };
 use crate::scheduling::{AnchorBucketInterval, DelayDistribution, SchedulingParams};
 
@@ -303,6 +304,16 @@ where
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         self.store.get_migration().map_err(Error::Store)
+    }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.store
+            .check_step_satisfiability(tx, settle)
+            .map_err(Error::Store)
     }
 }
 

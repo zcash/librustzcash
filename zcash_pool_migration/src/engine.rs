@@ -135,6 +135,22 @@ pub trait PoolMigrationRead {
 
     /// The migration currently in progress, if any.
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error>;
+
+    /// Report whether the environment this store lives in obstructs the given pre-signed
+    /// transaction, as observed at the wallet's fully-scanned height. Implementations answer the
+    /// MECHANICAL question — per cached spend nullifier
+    /// ([`spend_nullifiers`](MigrationTransaction::spend_nullifiers)): is the note unspent, seen
+    /// spent in a mined transaction, known with a dead unmined creator, or unknown; plus the
+    /// transaction-level expiry judgment, and, for a broadcast-unmined transaction, whether its
+    /// installed anchor survives on the current chain judged settled per `settle` — and compose
+    /// [`classify_input_observations`]. The judgment of what to DO with an answer is made once,
+    /// in this crate. An empty nullifier cache on a non-mined transaction is CORRUPTION (see
+    /// [`classify_input_observations`]) and surfaces the store's own error, never an answer.
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error>;
 }
 
 /// Write access to a persisted pool migration, mirroring `zcash_client_backend`'s `WalletWrite`.
@@ -164,7 +180,7 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
 /// producing a new transaction with a new [`TxId`], so a consumer that keyed its own records on
 /// the [`TxId`] loses track of the transfer exactly when it most needs to follow it. Use the
 /// [`TxId`] to talk to the network about a transaction, and this id to talk about the transfer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MigrationTransferId(pub(crate) u32);
 
 impl MigrationTransferId {
@@ -492,6 +508,145 @@ impl ReplanThreshold {
     pub const fn percent(&self) -> u8 {
         self.0
     }
+}
+
+/// How many blocks the chain must advance past a divergence before a displacement is treated as
+/// PERMANENT. Caller policy, supplied to [`PoolMigrationRead::check_step_satisfiability`]: the
+/// right value tracks the chain's block spacing (on the order of the sync wake-up settle margin —
+/// minutes, not hours — at the current 75-second target), and keeping it current is the caller's
+/// responsibility; this crate deliberately ships no default and never persists it. A displacement
+/// judged settled under an aggressive depth self-corrects: the marks it produces are cleared by
+/// reorg truncation if the chain swings back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReorgSettleDepth(pub u32);
+
+/// A store's answer to "does the environment this store lives in obstruct this pre-signed
+/// transaction?" — see [`PoolMigrationRead::check_step_satisfiability`]. Deliberately EXHAUSTIVE:
+/// executable now, not yet, or never is a complete classification of a step's disposition, and
+/// the consumers' cause-dependent responses are compiler-forced over it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StepSatisfiability {
+    /// Every queried input is among the account's unspent notes, and nothing else obstructs.
+    Satisfiable {
+        /// The fully-scanned height the observation rests on.
+        as_of: BlockHeight,
+    },
+    /// Some input's nullifier corresponds to no note the wallet has seen — its source is not yet
+    /// mined, or not yet scanned — or a known creator is unmined but still viable. Not an
+    /// obstruction: retry after further sync.
+    NotYetSatisfiable {
+        /// The fully-scanned height the observation rests on.
+        as_of: BlockHeight,
+    },
+    /// Permanently obstructed.
+    Unsatisfiable {
+        /// Why the step can never execute.
+        cause: UnsatisfiableCause,
+        /// The fully-scanned height the observation rests on.
+        as_of: BlockHeight,
+    },
+}
+
+/// Why a step can never execute. `#[non_exhaustive]`: new reasons a step can never execute (a
+/// retention-grid change, note-lock conflicts) have a home without breaking consumers' matches.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UnsatisfiableCause {
+    /// The wallet has seen these inputs spent: their nullifiers were recognized in mined
+    /// transactions.
+    InputsSpent {
+        /// The affected inputs' nullifiers, in the cache's action order.
+        nullifiers: Vec<[u8; 32]>,
+    },
+    /// The wallet knows notes for these inputs, but their creating transaction is unmined and can
+    /// never mine: it was proven against an anchor a settled reorg permanently invalidated. The
+    /// inputs will never exist on chain. Carries the invalidated anchor (raw root bytes) —
+    /// evidence the caller cannot recover from the checked transaction itself, since it belongs
+    /// to the producer.
+    InputsInvalidated {
+        /// The dead anchor's raw root bytes.
+        anchor: [u8; 32],
+    },
+    /// The transaction's expiry height has passed without it mining (ZIP 203): the pre-signed
+    /// artifact can never be included in a block.
+    Expired,
+    /// The transaction is broadcast but unmined, its installed anchor is no longer a root on the
+    /// current chain, and the invalidating reorg is settled per the caller's
+    /// [`ReorgSettleDepth`]: as proven, it can never be mined.
+    AnchorInvalidated,
+}
+
+/// A store implementation's observation for one queried nullifier, fed to
+/// [`classify_input_observations`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputObservation {
+    /// The note is known and unspent.
+    Unspent,
+    /// The note is known and the wallet has seen it spent in a mined transaction.
+    SeenSpent,
+    /// The note is known, its creating transaction is unmined, and that transaction's anchor was
+    /// permanently invalidated (settled per the caller's policy). Carries the dead anchor root.
+    Invalidated([u8; 32]),
+    /// No note with this nullifier has been scanned, or its unmined creator is still viable.
+    Unknown,
+}
+
+/// Fold per-nullifier observations, plus the transaction-level expiry judgment, into a
+/// [`StepSatisfiability`], encoding the answer precedence: `InputsSpent` over
+/// `InputsInvalidated` (both are permanent input-level deaths, and a recognized spend is the
+/// definitive on-chain fact) over `Expired` (expiry's remedy — a rebuild, fresh proof included —
+/// cannot cure missing inputs, so the input-level causes must dominate it) over
+/// `NotYetSatisfiable` (anything definite dominates "try later") over `Satisfiable`.
+///
+/// Pure: an implementation supplies only its data access and composes with this, so the
+/// classification is defined once. `AnchorInvalidated` is a transaction-level observation on
+/// broadcast-unmined transactions, answered by the implementation directly rather than through
+/// this per-input fold, and takes the precedence position below `Expired`. The observation set
+/// must come from the transaction's [`spend_nullifiers`] cache, which is non-empty for every
+/// validly committed transaction; implementations surface their corruption error for an empty
+/// cache on a non-mined transaction rather than calling this with no observations (an empty
+/// cache means a backfill-exempted mined row re-entered the watched set after a chain rewind, or
+/// deeper corruption — never vacuous satisfiability).
+///
+/// [`spend_nullifiers`]: MigrationTransaction::spend_nullifiers
+pub fn classify_input_observations(
+    as_of: BlockHeight,
+    expired: bool,
+    observations: &[([u8; 32], InputObservation)],
+) -> StepSatisfiability {
+    let spent: Vec<[u8; 32]> = observations
+        .iter()
+        .filter(|(_, o)| matches!(o, InputObservation::SeenSpent))
+        .map(|(nf, _)| *nf)
+        .collect();
+    if !spent.is_empty() {
+        return StepSatisfiability::Unsatisfiable {
+            cause: UnsatisfiableCause::InputsSpent { nullifiers: spent },
+            as_of,
+        };
+    }
+    if let Some(anchor) = observations.iter().find_map(|(_, o)| match o {
+        InputObservation::Invalidated(a) => Some(*a),
+        _ => None,
+    }) {
+        return StepSatisfiability::Unsatisfiable {
+            cause: UnsatisfiableCause::InputsInvalidated { anchor },
+            as_of,
+        };
+    }
+    if expired {
+        return StepSatisfiability::Unsatisfiable {
+            cause: UnsatisfiableCause::Expired,
+            as_of,
+        };
+    }
+    if observations
+        .iter()
+        .any(|(_, o)| matches!(o, InputObservation::Unknown))
+    {
+        return StepSatisfiability::NotYetSatisfiable { as_of };
+    }
+    StepSatisfiability::Satisfiable { as_of }
 }
 
 impl AsRef<str> for MigrationTxState {
@@ -2938,6 +3093,172 @@ mod tests {
         );
     }
 
+    /// A `SeenSpent` observation dominates every other answer, including the other PERMANENT
+    /// input-level death: a recognized spend is the definitive on-chain fact, so it is the cause
+    /// reported even when a dead anchor is also observed (and even when the transaction has
+    /// expired besides).
+    #[test]
+    fn classify_seen_spent_dominates_invalidated() {
+        let as_of = BlockHeight::from_u32(100);
+        let got = classify_input_observations(
+            as_of,
+            true,
+            &[
+                ([1; 32], InputObservation::Invalidated([9; 32])),
+                ([2; 32], InputObservation::SeenSpent),
+            ],
+        );
+        assert_eq!(
+            got,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![[2; 32]]
+                },
+                as_of,
+            }
+        );
+    }
+
+    /// An `Invalidated` observation dominates expiry: a rebuild (expiry's remedy) cannot cure
+    /// inputs that will never exist on chain, so the input-level cause is the one reported.
+    #[test]
+    fn classify_invalidated_dominates_expired() {
+        let as_of = BlockHeight::from_u32(100);
+        let got = classify_input_observations(
+            as_of,
+            true,
+            &[
+                ([1; 32], InputObservation::Unknown),
+                ([2; 32], InputObservation::Invalidated([9; 32])),
+            ],
+        );
+        assert_eq!(
+            got,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsInvalidated { anchor: [9; 32] },
+                as_of,
+            }
+        );
+    }
+
+    /// Expiry dominates an `Unknown` observation: a definite permanent obstruction outranks
+    /// "retry after further sync".
+    #[test]
+    fn classify_expired_dominates_unknown() {
+        let as_of = BlockHeight::from_u32(100);
+        let got = classify_input_observations(
+            as_of,
+            true,
+            &[
+                ([1; 32], InputObservation::Unknown),
+                ([2; 32], InputObservation::Unspent),
+            ],
+        );
+        assert_eq!(
+            got,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::Expired,
+                as_of,
+            }
+        );
+    }
+
+    /// An `Unknown` observation dominates all-`Unspent`: until every input's note is known
+    /// unspent, the answer is "not yet", never "satisfiable".
+    #[test]
+    fn classify_unknown_dominates_unspent() {
+        let as_of = BlockHeight::from_u32(100);
+        let got = classify_input_observations(
+            as_of,
+            false,
+            &[
+                ([1; 32], InputObservation::Unspent),
+                ([2; 32], InputObservation::Unknown),
+            ],
+        );
+        assert_eq!(got, StepSatisfiability::NotYetSatisfiable { as_of });
+    }
+
+    /// All inputs known unspent and the transaction unexpired: satisfiable, at the observation
+    /// height.
+    #[test]
+    fn classify_all_unspent_is_satisfiable() {
+        let as_of = BlockHeight::from_u32(100);
+        let got = classify_input_observations(
+            as_of,
+            false,
+            &[
+                ([1; 32], InputObservation::Unspent),
+                ([2; 32], InputObservation::Unspent),
+            ],
+        );
+        assert_eq!(got, StepSatisfiability::Satisfiable { as_of });
+    }
+
+    /// A mixed observation set collects ALL seen-spent nullifiers, in the cache's order, not just
+    /// the first: the caller reports the complete set of dead inputs.
+    #[test]
+    fn classify_collects_every_spent_nullifier() {
+        let as_of = BlockHeight::from_u32(100);
+        let got = classify_input_observations(
+            as_of,
+            false,
+            &[
+                ([1; 32], InputObservation::SeenSpent),
+                ([2; 32], InputObservation::Unspent),
+                ([3; 32], InputObservation::SeenSpent),
+            ],
+        );
+        assert_eq!(
+            got,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![[1; 32], [3; 32]]
+                },
+                as_of,
+            }
+        );
+    }
+
+    /// All four observation kinds at once, expired besides: `InputsSpent` still wins, pinning
+    /// every precedence comparison against the top of the order in a single case (the pairwise
+    /// tests above each pin one adjacent edge).
+    #[test]
+    fn classify_omnibus_seen_spent_tops_everything() {
+        let as_of = BlockHeight::from_u32(100);
+        let got = classify_input_observations(
+            as_of,
+            true,
+            &[
+                ([1; 32], InputObservation::Unspent),
+                ([2; 32], InputObservation::SeenSpent),
+                ([3; 32], InputObservation::Invalidated([9; 32])),
+                ([4; 32], InputObservation::Unknown),
+            ],
+        );
+        assert_eq!(
+            got,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![[2; 32]]
+                },
+                as_of,
+            }
+        );
+    }
+
+    /// The fold is TOTAL: empty observations and no expiry classify as satisfiable. Guarding
+    /// against an empty nullifier cache (which is corruption on a non-mined transaction, never
+    /// vacuous satisfiability) is the CALLER's obligation, per the function's contract.
+    #[test]
+    fn classify_empty_observations_unexpired_is_satisfiable() {
+        let as_of = BlockHeight::from_u32(100);
+        assert_eq!(
+            classify_input_observations(as_of, false, &[]),
+            StepSatisfiability::Satisfiable { as_of }
+        );
+    }
+
     /// A local network with NU6.3 active at a low height, matching the build test network, so the
     /// canonical fees and activation checks compute in planning tests.
     fn test_net() -> LocalNetwork {
@@ -3012,6 +3333,16 @@ mod tests {
 
         fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
             Ok(self.stored.clone())
+        }
+
+        fn check_step_satisfiability(
+            &self,
+            _tx: &MigrationTransaction,
+            _settle: ReorgSettleDepth,
+        ) -> Result<StepSatisfiability, Self::Error> {
+            // This mock models a wallet whose environment never obstructs a step; tests that
+            // exercise the oracle configure the `zcash_pool_migration_memory` mocks instead.
+            Ok(StepSatisfiability::Satisfiable { as_of: self.tip })
         }
     }
 
@@ -3416,6 +3747,16 @@ mod commit_tests {
 
         fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
             Ok(self.stored.clone())
+        }
+
+        fn check_step_satisfiability(
+            &self,
+            _tx: &MigrationTransaction,
+            _settle: ReorgSettleDepth,
+        ) -> Result<StepSatisfiability, Self::Error> {
+            // This mock models a wallet whose environment never obstructs a step; tests that
+            // exercise the oracle configure the `zcash_pool_migration_memory` mocks instead.
+            Ok(StepSatisfiability::Satisfiable { as_of: self.tip })
         }
     }
 

@@ -17,6 +17,10 @@ pub enum Error {
     /// unrecognized discriminant, or a missing column for the stored variant). The `&'static str`
     /// names the field.
     Corrupt(&'static str),
+    /// The wallet has no fully-scanned height (nothing has been scanned yet, or an unscanned gap
+    /// remains above the wallet birthday), so a satisfiability observation has no chain state to
+    /// rest on. Not corruption: sync further and retry.
+    ChainStateUnavailable,
     /// The migration state to be written contains a preparation layer with no transactions, or a
     /// transaction with neither inputs nor outputs. The schema stores the layers/transactions grid
     /// only through the input and output rows, so such a state would read back with its grid
@@ -35,6 +39,12 @@ impl fmt::Display for Error {
             Error::Corrupt(field) => {
                 write!(f, "pool-migration store: corrupt stored value for {field}")
             }
+            Error::ChainStateUnavailable => {
+                write!(
+                    f,
+                    "pool-migration store: the wallet has no fully-scanned height to observe from"
+                )
+            }
             Error::Unrepresentable(what) => {
                 write!(f, "pool-migration store: cannot represent {what}")
             }
@@ -46,7 +56,10 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Db(e) => Some(e),
-            Error::AccountUnknown | Error::Corrupt(_) | Error::Unrepresentable(_) => None,
+            Error::AccountUnknown
+            | Error::Corrupt(_)
+            | Error::ChainStateUnavailable
+            | Error::Unrepresentable(_) => None,
         }
     }
 }

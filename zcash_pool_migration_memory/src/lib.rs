@@ -22,6 +22,9 @@
 //! [`MigrationCrypto`]: zcash_pool_migration::engine::MigrationCrypto
 //! [`zcash_client_memory`]: https://docs.rs/zcash_client_memory
 
+use core::cell::Cell;
+use std::collections::BTreeMap;
+
 use incrementalmerkletree::{Hashable, Level};
 use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
 use orchard::note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho};
@@ -37,7 +40,7 @@ use zcash_protocol::value::Zatoshis;
 use zcash_pool_migration::build::{AccountDerivation, sign_pczt};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTransferId,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, StepSatisfiability,
 };
 use zcash_pool_migration::scheduling::SchedulingParams;
 
@@ -270,6 +273,13 @@ pub struct MockBackend {
     tip: BlockHeight,
     stored: Option<MigrationState>,
     sched_params: SchedulingParams,
+    /// Configured per-transaction answers for
+    /// [`check_step_satisfiability`](PoolMigrationRead::check_step_satisfiability); a transaction
+    /// with no entry answers `Satisfiable` at the mock's chain tip.
+    pub satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
+    /// How many times `check_step_satisfiability` has been called, for tests asserting that a
+    /// consumer queries the oracle lazily.
+    pub satisfiability_queries: Cell<usize>,
 }
 
 impl MockBackend {
@@ -284,6 +294,8 @@ impl MockBackend {
             tip: BlockHeight::from_u32(tip),
             stored: None,
             sched_params: SchedulingParams::ZIP_318,
+            satisfiability: BTreeMap::new(),
+            satisfiability_queries: Cell::new(0),
         }
     }
 
@@ -318,6 +330,24 @@ impl PoolMigrationRead for MockBackend {
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         Ok(self.stored.clone())
     }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        _settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.satisfiability_queries
+            .set(self.satisfiability_queries.get() + 1);
+        // The empty-cache-is-corruption contract cannot be honored here: this mock's `Error` is
+        // `Infallible`, so there is no error to surface. The mock answers the configured value
+        // (or `Satisfiable` at its tip) regardless; tests that need the corruption path use the
+        // SQLite implementation.
+        Ok(self
+            .satisfiability
+            .get(&tx.id())
+            .cloned()
+            .unwrap_or(StepSatisfiability::Satisfiable { as_of: self.tip }))
+    }
 }
 
 impl PoolMigrationWrite for MockBackend {
@@ -338,6 +368,10 @@ impl PoolMigrationWrite for MockBackend {
     }
 }
 
+/// The fixed chain-tip height [`CommitMock`] reports (and the height its default
+/// satisfiability answers rest on).
+const COMMIT_MOCK_TIP: u32 = 2_000_000;
+
 /// A wallet mock holding the account's key and its spendable notes' PLAINTEXTS, nothing more: with
 /// anchors and witnesses deferred to proving time (ZIP 374), building and signing an entire
 /// migration needs no tree access at all. It signs with its own spend-authorizing key and stores the
@@ -356,6 +390,13 @@ pub struct CommitMock {
     pub account_derivation: Option<AccountDerivation>,
     /// The in-memory migration state (`None` until a migration is committed).
     pub stored: Option<MigrationState>,
+    /// Configured per-transaction answers for
+    /// [`check_step_satisfiability`](PoolMigrationRead::check_step_satisfiability); a transaction
+    /// with no entry answers `Satisfiable` at the mock's chain tip.
+    pub satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
+    /// How many times `check_step_satisfiability` has been called, for tests asserting that a
+    /// consumer queries the oracle lazily.
+    pub satisfiability_queries: Cell<usize>,
     /// The scheduling parameters this backend reports to the engine.
     sched_params: SchedulingParams,
 }
@@ -376,6 +417,8 @@ impl CommitMock {
             ask: SpendAuthorizingKey::from(&sk),
             account_derivation: Some(account_derivation(seed)),
             stored: None,
+            satisfiability: BTreeMap::new(),
+            satisfiability_queries: Cell::new(0),
             sched_params: SchedulingParams::ZIP_318,
         }
     }
@@ -408,7 +451,7 @@ impl MigrationBackend for CommitMock {
     }
 
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
-        Ok(BlockHeight::from_u32(2_000_000))
+        Ok(BlockHeight::from_u32(COMMIT_MOCK_TIP))
     }
 
     fn scheduling_params(&self) -> SchedulingParams {
@@ -421,6 +464,26 @@ impl PoolMigrationRead for CommitMock {
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         Ok(self.stored.clone())
+    }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        _settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.satisfiability_queries
+            .set(self.satisfiability_queries.get() + 1);
+        // The empty-cache-is-corruption contract cannot be honored here: this mock's `Error` is
+        // `Infallible`, so there is no error to surface. The mock answers the configured value
+        // (or `Satisfiable` at its tip) regardless; tests that need the corruption path use the
+        // SQLite implementation.
+        Ok(self
+            .satisfiability
+            .get(&tx.id())
+            .cloned()
+            .unwrap_or(StepSatisfiability::Satisfiable {
+                as_of: BlockHeight::from_u32(COMMIT_MOCK_TIP),
+            }))
     }
 }
 

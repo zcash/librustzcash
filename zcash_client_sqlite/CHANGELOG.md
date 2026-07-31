@@ -22,6 +22,8 @@ workspace.
   view clients read their transaction history from. The mobile SDKs build their
   history types from this view with their own SQL, so the column reaches them
   with no change to any foreign function interface.
+- `pool_migration::orchard_ironwood::Error::ChainStateUnavailable`, returned
+  when a satisfiability check has no fully-scanned height to observe from.
 
 ### Changed
 - The database schema now includes the `unsatisfiable_at` and
@@ -37,6 +39,12 @@ workspace.
   proven (its real spends are no longer identifiable, so the cache cannot be
   reconstructed), and leaving a mined row's cache empty — and
   `replan_threshold` to the default policy.
+- `pool_migration::orchard_ironwood::PoolMigrations` implements the new
+  `zcash_pool_migration` `PoolMigrationRead::check_step_satisfiability`
+  method, answering each cached real-spend nullifier from the wallet's
+  Orchard note and note-spend tables as observed at the fully-scanned height
+  (an unrecognized nullifier reads as not-yet-satisfiable, and anchor-validity
+  observations are not yet produced).
 
 ## [0.22.0-rc.6] - 2026-07-29
 
