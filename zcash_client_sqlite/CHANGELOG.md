@@ -18,6 +18,10 @@ workspace.
   does not classify existing rows: those keep the default and need the transaction
   rescanned. A client must render the default as no label, never as "not a
   migration".
+- A `zip318_kind` column on `v_transactions`, carrying that value through to the
+  view clients read their transaction history from. The mobile SDKs build their
+  history types from this view with their own SQL, so the column reaches them
+  with no change to any foreign function interface.
 
 ## [0.22.0-rc.6] - 2026-07-29
 
