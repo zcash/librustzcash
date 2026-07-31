@@ -696,7 +696,10 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
 /// disagree is rejected as corrupt. `spend_nullifiers` is the concatenation of its real-spend
 /// 32-byte nullifiers in action order, cached from the stored PCZT (its `DEFAULT` exists only so
 /// this DDL and the `ADD COLUMN` in the `orchard_ironwood_migration_unsatisfiability` schema
-/// migration produce the same stored schema text). Dependencies are edges in
+/// migration produce the same stored schema text). `broadcast_failure_at` is the chain tip an
+/// application observed from a node that REJECTED a broadcast of this transaction, standing until
+/// the engine adjudicates that rejection against the wallet's own view, and independent of the
+/// unsatisfiability columns in both directions. Dependencies are edges in
 /// `orchard_ironwood_migration_transaction_deps`.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
 CREATE TABLE orchard_ironwood_migration_transactions (
@@ -717,6 +720,7 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     unsatisfiable_at INTEGER,
     spend_nullifiers BLOB NOT NULL DEFAULT X'',
     unsatisfiable_kind TEXT,
+    broadcast_failure_at INTEGER,
     PRIMARY KEY (migration_id, tx_id)
 )";
 /// The dependency edges between migration transactions.

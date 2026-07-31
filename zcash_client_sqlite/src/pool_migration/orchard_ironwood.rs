@@ -531,6 +531,7 @@ mod check_step_satisfiability {
             None,
             None,
             nfs,
+            None,
         )
     }
 
@@ -572,6 +573,7 @@ mod check_step_satisfiability {
             None,
             None,
             nfs,
+            None,
         )
     }
 
@@ -826,6 +828,7 @@ mod check_step_satisfiability {
             None,
             None,
             Vec::new(),
+            None,
         );
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
             .expect("the account exists");
@@ -868,6 +871,7 @@ mod check_step_satisfiability {
             None,
             None,
             Vec::new(),
+            None,
         );
         let state = MigrationState::from_parts(
             MigrationStatus::InProgress,
@@ -1115,6 +1119,7 @@ mod check_step_satisfiability {
             None,
             None,
             vec![nf],
+            None,
         );
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1177,6 +1182,7 @@ mod check_step_satisfiability {
             None,
             None,
             vec![nf],
+            None,
         );
 
         let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
@@ -1261,6 +1267,7 @@ mod truncation_follows_the_wallet {
             None,
             unsatisfiable_at.map(|at| (at, UnsatisfiableKind::InputsSpent)),
             vec![[id as u8; 32]],
+            None,
         )
     }
 
@@ -1533,6 +1540,7 @@ mod tests {
             Some(owner_bytes),
             None,
             Vec::new(),
+            None,
         );
         let unlocked = MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
@@ -1546,6 +1554,7 @@ mod tests {
             None,
             None,
             Vec::new(),
+            None,
         );
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -1617,6 +1626,7 @@ mod tests {
                 lock_owner,
                 None,
                 Vec::new(),
+                None,
             )
         };
 
@@ -1709,6 +1719,7 @@ mod tests {
                 None,
                 None,
                 vec![[7u8; 32]],
+                None,
             )],
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
@@ -1767,6 +1778,7 @@ mod tests {
                 None,
                 None,
                 vec![[id as u8; 32]],
+                None,
             )
         };
         let mut state = MigrationState::from_parts(
@@ -1824,6 +1836,61 @@ mod tests {
             ),
             (Some(as_of), Some(UnsatisfiableKind::Inherited)),
             "a closure-applied mark is stored as inherited",
+        );
+    }
+
+    /// A broadcast-failure report survives the store: it is written and read back as its own
+    /// column, independently of the unsatisfiability mark, and an unreported transaction reads
+    /// back as unreported.
+    #[test]
+    fn a_broadcast_failure_report_round_trips() {
+        use zcash_pool_migration::engine::MigrationTransferId;
+
+        let mut store = fresh_store();
+        store
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        // The report applies only to a `Proved` transaction, which is the state a broadcast the
+        // node refused is left in.
+        store
+            .update_transaction(MigrationTransferId::new(0), MigrationTxState::Proved)
+            .expect("the row advances");
+        let mut state = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        let observed_tip = BlockHeight::from_u32(1700);
+        state.report_broadcast_failure(MigrationTransferId::new(0), observed_tip);
+        store.replace_migration(&state).expect("write succeeds");
+        let loaded = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        assert_eq!(loaded, state, "the whole migration round-trips unchanged");
+        assert_eq!(
+            (
+                loaded.transactions()[0].broadcast_failure_at(),
+                loaded.transactions()[0].unsatisfiable(),
+            ),
+            (Some(observed_tip), None),
+            "the report is stored on its own, carrying no mark with it",
+        );
+
+        // Discharging the report writes the column back to NULL rather than leaving the stale
+        // tip standing.
+        let mut discharged = loaded;
+        discharged.truncate_to_height(BlockHeight::from_u32(1699));
+        store
+            .replace_migration(&discharged)
+            .expect("write succeeds");
+        assert_eq!(
+            store
+                .get_migration()
+                .expect("read succeeds")
+                .expect("a migration is stored")
+                .transactions()[0]
+                .broadcast_failure_at(),
+            None,
         );
     }
 

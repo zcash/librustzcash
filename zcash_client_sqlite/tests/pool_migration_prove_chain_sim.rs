@@ -58,7 +58,7 @@ use zcash_pool_migration::engine::{
     self, AdvanceConfig, MigrationState, MigrationStatus, MigrationTransferId, MigrationTxKind,
     MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, ReplanThreshold,
 };
-use zcash_pool_migration::state::AdvanceStep;
+use zcash_pool_migration::state::{AdvanceStep, Blocker};
 use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
 
 /// The drive policy every scenario here uses: a ten-block reorg settle depth, the caller policy
@@ -450,6 +450,53 @@ impl Run {
         }
     }
 
+    /// Drive until `advance_migration` offers a TRANSFER's broadcast, performing every step it
+    /// names along the way (the preparations in full, each transfer's proof), and return that
+    /// transfer's id WITHOUT broadcasting it.
+    ///
+    /// This is the moment a wallet wakes for a broadcast-only session: a proven crossing is due,
+    /// and submitting it is the whole of the work.
+    fn drive_to_first_transfer_broadcast(
+        &mut self,
+        committed: &mut Committed,
+    ) -> MigrationTransferId {
+        let mut waited = 0u32;
+        loop {
+            match self.advance(&mut committed.state) {
+                AdvanceStep::Prove { id, kind } => {
+                    assert_eq!(
+                        self.perform_prove(&mut committed.state, id, kind),
+                        engine::ProveOutcome::Proved,
+                    );
+                }
+                AdvanceStep::Broadcast { id } => {
+                    let kind = committed
+                        .state
+                        .transactions()
+                        .iter()
+                        .find(|t| t.id() == id)
+                        .expect("the broadcast candidate is present")
+                        .kind();
+                    match kind {
+                        MigrationTxKind::Transfer { .. } => return id,
+                        MigrationTxKind::Preparation { .. } => {
+                            self.perform_broadcast(&mut committed.state, id);
+                        }
+                    }
+                }
+                AdvanceStep::Waiting => {
+                    assert!(
+                        waited < MAX_WAITING_BLOCKS,
+                        "no transfer came due within {MAX_WAITING_BLOCKS} blocks",
+                    );
+                    waited += 1;
+                    self.mine_empty_block();
+                }
+                other => panic!("a healthy migration never needs {other:?} before its transfers"),
+            }
+        }
+    }
+
     /// The chain tip the wallet has seen.
     fn tip(&self) -> BlockHeight {
         self.target_height() - 1
@@ -464,6 +511,22 @@ impl Run {
     /// migration about it. The wallet's own proposal, transaction builder, and scanner are used
     /// throughout, so the spend evidence the satisfiability oracle later reads is genuine.
     fn sweep_to_external(&mut self) {
+        let height = self.sweep_to_external_unscanned();
+        self.st.scan_cached_blocks(height, 1);
+        assert_eq!(
+            self.st.get_total_balance(self.account_id),
+            Zatoshis::ZERO,
+            "the send-max sweep leaves the account empty",
+        );
+    }
+
+    /// [`Self::sweep_to_external`] stopping one step short: the sweep is built and MINED, and the
+    /// wallet has not scanned the block that carries it. Returns that block's height.
+    ///
+    /// This is the state a wallet is in when it wakes to broadcast without syncing (ZIP 318): the
+    /// chain holds a spend of its notes, its own tables do not know about it yet, and the only
+    /// thing that can tell it otherwise is the node it talks to.
+    fn sweep_to_external_unscanned(&mut self) -> BlockHeight {
         use core::num::NonZeroU32;
         use zcash_client_backend::data_api::MaxSpendMode;
         use zcash_client_backend::data_api::wallet::ConfirmationsPolicy;
@@ -511,12 +574,7 @@ impl Run {
             .expect("reads the swept transaction")
             .expect("the sweep was stored");
         let (height, _) = self.st.generate_next_block_from_tx(1, &tx);
-        self.st.scan_cached_blocks(height, 1);
-        assert_eq!(
-            self.st.get_total_balance(self.account_id),
-            Zatoshis::ZERO,
-            "the send-max sweep leaves the account empty",
-        );
+        height
     }
 
     /// The wallet's fully-scanned height: the chain state every satisfiability observation the
@@ -1261,6 +1319,160 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
             .all(|t| t.unsatisfiable_at().is_none()),
         "the replacement carries none of the superseded migration's marks",
     );
+}
+
+/// The scenario a broadcast-failure report exists for: the wallet wakes to BROADCAST without
+/// syncing (ZIP 318 keeps sync traffic out of a broadcast session), the node refuses the
+/// transaction, and the wallet's own tables still show its inputs unspent. The node's rejection is
+/// testimony from another observer, so it can never mark; what it does is withhold the transaction
+/// and hold the drive loop at `Reevaluate` until the wallet has scanned the chain state the
+/// rejection could rest on.
+///
+/// Both adjudications are driven here, over a real chain and a real store, in the order a wallet
+/// could meet them:
+///
+/// 1. TRANSIENT. A rejection with nothing behind it (the node was out of sync, a mempool
+///    conflict). The wallet syncs past the reported tip, the oracle finds the crossing's inputs
+///    exactly where they were, the report is discharged, and the broadcast is offered again — in
+///    the same call that adjudicated it.
+/// 2. REAL. Another wallet on the same seed has spent the funding notes in a block this wallet has
+///    not scanned. The same sync turns the same rejection into an ordinary evidence-backed
+///    `InputsSpent` mark, and — the whole planned crossing value now unsatisfiable — a `Replan`.
+///
+/// The distinction is never taken from the node: both rejections are reported identically, and the
+/// wallet's own view is what separates them.
+#[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
+fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
+    const SINGLE_CROSSING: &str = "Gwen, 0.0152 ZEC (a single minimum-denomination note)";
+    let scenario = scenarios()
+        .into_iter()
+        .find(|scenario| scenario.label == SINGLE_CROSSING)
+        .expect("the single-crossing scenario exists");
+
+    let mut run = Run::setup(&scenario);
+    let mut committed = run.plan_and_commit(&scenario);
+    let transfer_id = run.drive_to_first_transfer_broadcast(&mut committed);
+
+    let transfer = |state: &MigrationState| {
+        state
+            .transactions()
+            .iter()
+            .find(|t| t.id() == transfer_id)
+            .expect("the crossing is present")
+            .clone()
+    };
+
+    // (1) THE TRANSIENT REJECTION. A block is mined that this wallet has not scanned — nothing in
+    // it touches the account — and the node the wallet submits to reports that tip when it
+    // refuses the transaction.
+    let (node_tip, _) = run.st.generate_empty_block();
+    assert!(
+        run.fully_scanned_height() < node_tip,
+        "the broadcast session did not sync, so the node knows a chain the wallet does not",
+    );
+    committed
+        .state
+        .report_broadcast_failure(transfer_id, node_tip);
+    run.persist(&committed.state);
+
+    assert_eq!(
+        run.advance(&mut committed.state),
+        AdvanceStep::Reevaluate,
+        "an unadjudicated rejection outranks every other step",
+    );
+    assert!(
+        committed
+            .state
+            .transactions()
+            .iter()
+            .all(|t| t.unsatisfiable_at().is_none()),
+        "testimony from another observer never marks",
+    );
+    assert_eq!(
+        committed
+            .state
+            .transaction_statuses(run.target_height())
+            .iter()
+            .find(|s| s.id() == transfer_id)
+            .expect("the crossing is present")
+            .blocked_on(),
+        Some(Blocker::AwaitingReevaluation),
+    );
+
+    // The wallet syncs at its next wake-up, and the oracle can now answer about the chain the
+    // node named. Nothing obstructs the crossing, so the rejection was transient.
+    run.st.scan_cached_blocks(node_tip, 1);
+    assert_eq!(
+        run.advance(&mut committed.state),
+        AdvanceStep::Broadcast { id: transfer_id },
+        "a discharged report returns the crossing to the broadcast queue in the same call",
+    );
+    assert_eq!(transfer(&committed.state).broadcast_failure_at(), None);
+    assert_eq!(
+        transfer(
+            &run.stored_migration()
+                .expect("the store holds the migration")
+        )
+        .broadcast_failure_at(),
+        None,
+        "the discharge is durable before the step is surfaced",
+    );
+
+    // (2) THE REAL REJECTION. Another wallet on the same seed sweeps the account; the spend is
+    // mined in a block this wallet has not scanned, so its own tables still show the funding note
+    // unspent — and the node refuses the crossing that spends it.
+    let sweep_tip = run.sweep_to_external_unscanned();
+    assert!(run.fully_scanned_height() < sweep_tip);
+    committed
+        .state
+        .report_broadcast_failure(transfer_id, sweep_tip);
+    run.persist(&committed.state);
+
+    assert_eq!(
+        run.advance(&mut committed.state),
+        AdvanceStep::Reevaluate,
+        "the second rejection is reported exactly like the first",
+    );
+    assert_eq!(
+        transfer(&committed.state).unsatisfiable(),
+        None,
+        "and is no more evidence than the first was",
+    );
+
+    // The same sync, the opposite verdict: the wallet now sees its own note spent by a mined
+    // transaction, which is evidence, and the ordinary marking machinery takes over.
+    run.st.scan_cached_blocks(sweep_tip, 1);
+    let as_of = run.fully_scanned_height();
+    assert_eq!(
+        run.advance(&mut committed.state),
+        AdvanceStep::Replan,
+        "the whole planned crossing value is unsatisfiable, past the committed threshold",
+    );
+    let adjudicated = transfer(&committed.state);
+    assert_eq!(
+        adjudicated.unsatisfiable(),
+        Some((as_of, engine::UnsatisfiableKind::InputsSpent)),
+        "the rejection is adjudicated into a mark resting on the wallet's own scanned evidence",
+    );
+    assert_eq!(
+        adjudicated.broadcast_failure_at(),
+        None,
+        "and the testimony that raised the question is discharged",
+    );
+    let stored = transfer(
+        &run.stored_migration()
+            .expect("the store holds the migration"),
+    );
+    assert_eq!(
+        (stored.unsatisfiable(), stored.broadcast_failure_at()),
+        (Some((as_of, engine::UnsatisfiableKind::InputsSpent)), None),
+        "both survive the round trip through the SQLite store",
+    );
+    assert!(committed.state.replan_required());
 }
 
 /// The transaction the stored proven PCZT for `id` extracts to.

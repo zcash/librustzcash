@@ -212,6 +212,16 @@ pub fn arb_unsatisfiability_mark() -> impl Strategy<Value = Option<(BlockHeight,
     prop::option::of((arb_block_height(), arb_unsatisfiable_kind()))
 }
 
+/// An arbitrary broadcast-failure report: the chain tip an application observed from a node that
+/// rejected a broadcast, or `None` for a transaction under no outstanding rejection.
+///
+/// Drawn INDEPENDENTLY of the unsatisfiability mark, because the two are independent: a rejection
+/// the wallet cannot yet explain carries no mark, an adjudicated one carries a mark and no report,
+/// and a store must round-trip every combination it is handed.
+pub fn arb_broadcast_failure() -> impl Strategy<Value = Option<BlockHeight>> {
+    prop::option::of(arb_block_height())
+}
+
 /// An arbitrary [`MigrationTransaction`], built through [`MigrationTransaction::from_parts`]. Its
 /// id is arbitrary here; [`arb_migration_state`] re-keys the transactions it holds so their ids
 /// stay unique within a migration. Its lifecycle state and nullifier cache are drawn TOGETHER (see
@@ -229,6 +239,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         arb_state_and_spend_nullifiers(),
         arb_lock_owner(),
         arb_unsatisfiability_mark(),
+        arb_broadcast_failure(),
     )
         .prop_map(
             |(
@@ -242,6 +253,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 (state, spend_nullifiers),
                 lock_owner,
                 unsatisfiable,
+                broadcast_failure_at,
             )| {
                 MigrationTransaction::from_parts(
                     id,
@@ -255,6 +267,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     lock_owner,
                     unsatisfiable,
                     spend_nullifiers,
+                    broadcast_failure_at,
                 )
             },
         )
@@ -318,6 +331,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                             tx.lock_owner(),
                             tx.unsatisfiable(),
                             tx.spend_nullifiers().clone(),
+                            tx.broadcast_failure_at(),
                         )
                     })
                     .collect();

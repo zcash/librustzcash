@@ -227,6 +227,11 @@ pub fn shared_anchor_witnesses(
 /// untouched. The engine's [`MigrationState`] keeps its transactions behind read-only accessors, so
 /// an external test backend advances one transaction's lifecycle by reconstructing the state from
 /// its public parts.
+///
+/// Every other part is carried across verbatim, including the determinations a transaction row
+/// carries (its unsatisfiability mark, its broadcast-failure report): a store advancing a
+/// lifecycle state records exactly that, and dropping a field here would silently erase a
+/// determination the engine is relying on.
 fn set_transaction_state(
     stored: &mut MigrationState,
     id: MigrationTransferId,
@@ -249,6 +254,7 @@ fn set_transaction_state(
                     t.lock_owner(),
                     t.unsatisfiable(),
                     t.spend_nullifiers().clone(),
+                    t.broadcast_failure_at(),
                 )
             } else {
                 t.clone()

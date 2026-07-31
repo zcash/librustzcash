@@ -99,6 +99,21 @@ pub enum AdvanceStep {
     /// means the per-transfer expired rebuild, and this step's remedy is re-planning, never
     /// re-signing the same notes.
     Replan,
+    /// A broadcast this application attempted was REJECTED by the node it submitted to (recorded
+    /// with [`MigrationState::report_broadcast_failure`]), and the wallet cannot yet say why: its
+    /// answers still rest on chain state below the tip that node reported. The consumer's
+    /// response is to SYNC — at its next sync wake-up, to at least that tip — and call
+    /// [`advance_migration`](crate::engine::advance_migration) again, which adjudicates the
+    /// report against the store's oracle and either marks the transaction or re-offers its
+    /// broadcast.
+    ///
+    /// Nothing else is offered while a report stands: this step outranks every other but
+    /// [`Complete`](Self::Complete). A rejection means some OTHER observer saw chain state this
+    /// wallet has not, and same-seed activity invalidates the whole store view rather than one
+    /// transaction's answer, so proceeding on the rest of the plan would act on a view already
+    /// known to be stale. Only the drive API returns this; the planning kernel, which has no
+    /// oracle to adjudicate against, never does.
+    Reevaluate,
     /// Nothing to do now: waiting for one or more transactions to mine, for an anchor boundary to
     /// settle, or for a scheduled height to arrive.
     Waiting,
@@ -153,6 +168,19 @@ pub enum Blocker {
     /// needs a new signing ceremony over the affected subtree. Reported so a wallet can show the
     /// transaction as needing attention rather than as merely waiting.
     Expired,
+    /// A broadcast of this transaction was rejected by the node it was submitted to
+    /// ([`MigrationState::report_broadcast_failure`]), and the wallet has not yet scanned far
+    /// enough to say why: it is withheld from the broadcast queue until
+    /// [`advance_migration`](crate::engine::advance_migration) adjudicates the report against
+    /// evidence (see [`AdvanceStep::Reevaluate`]).
+    ///
+    /// Reported BEHIND [`Unsatisfiable`](Self::Unsatisfiable) — a determination the wallet has
+    /// made outranks a question it has not yet answered — and AHEAD of
+    /// [`Expired`](Self::Expired) and the state-derived blockers, every one of which describes a
+    /// transaction whose broadcast is merely pending; this one is being actively withheld, which
+    /// is the more specific thing to show. Transient by construction: the next drive call at a
+    /// sufficiently synced wallet replaces it with a mark, or with nothing.
+    AwaitingReevaluation,
     /// Determined unsatisfiable: its inputs can never again all exist unspent on chain, directly
     /// observed ([`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at)) or inherited from a
     /// dead dependency. Resolved only by the migration-level replan ([`AdvanceStep::Replan`]);
@@ -198,6 +226,10 @@ pub struct TransactionStatus {
     /// Why it is not yet actionable, when it is waiting. An in-flight broadcast row is normally
     /// blocker-free, but reports [`Blocker::Unsatisfiable`] when it can never mine (marked, or
     /// dependent on a dead transaction); a mined row never carries a blocker.
+    ///
+    /// The precedence, highest first: [`Blocker::Unsatisfiable`] (a determination),
+    /// [`Blocker::AwaitingReevaluation`] (a rejected broadcast the wallet cannot yet explain),
+    /// [`Blocker::Expired`], then the state-derived blockers.
     #[getset(get_copy = "pub")]
     pub(crate) blocked_on: Option<Blocker>,
     /// WHY it can never mine, populated exactly when [`Blocker::Unsatisfiable`] is reported and
@@ -400,7 +432,10 @@ impl MigrationState {
     ///
     /// Transactions in `dead` — the ids judged unable to ever mine at `target_height` — and in
     /// `set_aside` — the drive loop's call-local exclusions — are never offered;
-    /// [`Self::next_step`] supplies both.
+    /// [`Self::next_step`] supplies both. Nor is a transaction carrying a broadcast-failure
+    /// report ([`MigrationState::report_broadcast_failure`]): that exclusion is PERSISTED rather
+    /// than call-local, because it is precisely the store's stale "satisfiable" that would
+    /// otherwise re-offer the doomed broadcast.
     pub(crate) fn next_broadcastable(
         &self,
         target_height: BlockHeight,
@@ -414,6 +449,10 @@ impl MigrationState {
                     && t.scheduled_height <= target_height
                     && !dead.contains(&t.id)
                     && !set_aside.contains(&t.id)
+                    // A node already rejected this transaction, and nothing the wallet has
+                    // scanned yet explains why: offering it again would repeat a submission
+                    // known to fail.
+                    && t.broadcast_failure_at.is_none()
                     && self.deps_mined(&t.depends_on)
                     // An expired proven transaction would be rejected by the node; it must be rebuilt,
                     // not broadcast. Redundant with the dead set when `next_step` supplies it (every
@@ -590,6 +629,51 @@ impl MigrationState {
         self.recompute_status();
     }
 
+    /// Records that a broadcast of transaction `id` was REJECTED by the node the application
+    /// submitted it to, at `observed_tip`: the chain tip that node reported. The application has
+    /// such a tip even when its wallet is far behind — it talked to the network in order to
+    /// broadcast — and it is the height the rejection's explanation, if there is one, must lie at
+    /// or below. Persist the state afterwards (`replace_migration`).
+    ///
+    /// A node's rejection is TESTIMONY FROM ANOTHER OBSERVER, not evidence in this wallet's view,
+    /// so it records no [`unsatisfiable`](MigrationTransaction::unsatisfiable) mark and no cause:
+    /// the engine never trusts a node's stated reason, and every mark rests on chain state this
+    /// wallet has scanned, which is what makes reorg truncation exact. What the report does is
+    /// WITHHOLD. The transaction leaves the broadcast queue and reports
+    /// [`Blocker::AwaitingReevaluation`] until
+    /// [`advance_migration`](crate::engine::advance_migration) adjudicates it against the store's
+    /// oracle — which it can do once the wallet has scanned to `observed_tip`, and until then
+    /// surfaces [`AdvanceStep::Reevaluate`] instead of any other work. Adjudication either finds
+    /// the spend behind the rejection (an ordinary evidence-backed mark) or does not (the
+    /// rejection was transient, the report is discharged, and the broadcast is offered again).
+    ///
+    /// Recorded only for a [`Proved`](MigrationTxState::Proved) transaction: a broadcast that
+    /// failed never reached [`Self::mark_broadcast`], so that is the state a rejected transaction
+    /// is in. A no-op for an unknown id or a transaction in any other state — in particular a
+    /// mined one, whose inclusion settles the question the report exists to raise. A second
+    /// report OVERWRITES the first: the newest testimony supersedes, and its (later) tip is the
+    /// one the wallet must reach.
+    pub fn report_broadcast_failure(&mut self, id: MigrationTransferId, observed_tip: BlockHeight) {
+        if let Some(tx) = self
+            .transactions
+            .iter_mut()
+            .find(|t| t.id == id && matches!(t.state, MigrationTxState::Proved))
+        {
+            tx.broadcast_failure_at = Some(observed_tip);
+        }
+    }
+
+    /// Discharges the broadcast-failure report on `id`, if it carries one: the drive API's
+    /// adjudication, applied once an oracle answer resting at or above the reported tip has
+    /// decided the question — by recording a mark, or by finding nothing to record. Internal,
+    /// because a report is withdrawn only against evidence, or by
+    /// [`Self::truncate_to_height`] when the chain state it named is gone.
+    pub(crate) fn clear_broadcast_failure(&mut self, id: MigrationTransferId) {
+        if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
+            tx.broadcast_failure_at = None;
+        }
+    }
+
     /// Records the outcomes of satisfiability checks as durable
     /// [`unsatisfiable`](MigrationTransaction::unsatisfiable) marks: the single door
     /// through which satisfiability observations enter the state. The engine's drive and prove
@@ -717,11 +801,16 @@ impl MigrationState {
     /// passing the height the wallet ACTUALLY truncated to — a wallet may truncate lower than
     /// requested and reports the achieved height, and passing the requested height instead
     /// would leave marks standing on state that no longer exists — and persisting the state
-    /// afterwards (`replace_migration`). Three things roll back, and nothing else:
+    /// afterwards (`replace_migration`). Four things roll back, and nothing else:
     ///
     /// - every [`unsatisfiable`](MigrationTransaction::unsatisfiable) mark whose stamp is strictly
     ///   above `height` is cleared, kind and all: the observation it recorded rested on state that
     ///   no longer exists;
+    /// - every broadcast-failure report ([`Self::report_broadcast_failure`]) whose observed tip is
+    ///   strictly above `height` is discharged: it named a chain the wallet no longer holds, and
+    ///   waiting to sync to a vanished tip would withhold the transaction forever. A rejection
+    ///   that is still real on the new chain simply re-reports at the next broadcast attempt,
+    ///   which is the same coarse-and-re-derive discipline the marks follow;
     /// - every [`Mined`](MigrationTxState::Mined) transaction whose mined height is strictly
     ///   above `height` is demoted to [`Broadcast`](MigrationTxState::Broadcast), keeping the
     ///   txid it was mined under: the transaction is back in flight and may well re-mine, and
@@ -754,6 +843,9 @@ impl MigrationState {
         for t in &mut self.transactions {
             if t.unsatisfiable.is_some_and(|(h, _)| h > height) {
                 t.unsatisfiable = None;
+            }
+            if t.broadcast_failure_at.is_some_and(|h| h > height) {
+                t.broadcast_failure_at = None;
             }
             if let MigrationTxState::Mined {
                 txid,
@@ -812,6 +904,11 @@ impl MigrationState {
     /// check, and it is the API a consumer drives a migration with; it also documents what each
     /// step asks of the consumer.
     ///
+    /// `target_height` must come from the caller's CHAIN VIEW — synced or otherwise observed
+    /// block data — and never from a wall-clock estimate of where the tip probably is; see the
+    /// same contract on [`advance_migration`](crate::engine::advance_migration), which spells out
+    /// what an estimate would destroy.
+    ///
     /// `set_aside` is the drive loop's call-local list of candidates whose satisfiability check
     /// ([`PoolMigrationRead::check_step_satisfiability`](crate::engine::PoolMigrationRead::check_step_satisfiability))
     /// answered "not yet": every queue — prove, broadcast, and rebuild alike — skips them, so
@@ -829,6 +926,13 @@ impl MigrationState {
     /// When several actions are available at once the priority is BROADCAST, then REPLAN when
     /// the committed threshold is exceeded, then PROVE, then REBUILD, then REPLAN once dead
     /// value is all that remains.
+    ///
+    /// [`Reevaluate`](AdvanceStep::Reevaluate) is NOT among the steps decided here: adjudicating
+    /// a broadcast-failure report needs the oracle, so the drive API owns that slot. What this
+    /// kernel does with a report is WITHHOLD — a reported transaction is out of the broadcast
+    /// queue for as long as the report stands (see
+    /// [`MigrationState::report_broadcast_failure`]), so a store's stale "satisfiable" cannot
+    /// re-offer a submission a node has already refused.
     ///
     /// Every queue is filtered through the DEAD SET, derived afresh at each call: the
     /// transactions marked [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at) and the
@@ -975,7 +1079,9 @@ impl MigrationState {
     /// prove; a `Proved` one whose scheduled height has arrived is ready to broadcast. Otherwise a
     /// waiting transaction reports what it is blocked on: its dependencies (a preparation still to
     /// mine), an anchor boundary yet to settle, the broadcast schedule, or an external signature —
-    /// or, dominating everything, that it is unsatisfiable ([`Blocker::Unsatisfiable`]).
+    /// or, dominating those, that a rejected broadcast is awaiting reevaluation
+    /// ([`Blocker::AwaitingReevaluation`]), or, dominating everything, that it is unsatisfiable
+    /// ([`Blocker::Unsatisfiable`]).
     pub fn transaction_statuses(&self, target_height: BlockHeight) -> Vec<TransactionStatus> {
         // The transitively-closed dead set, needed to recognize a transaction whose own inputs
         // are intact but whose dependency can never mine.
@@ -1004,11 +1110,25 @@ impl MigrationState {
                         .map(|(_, kind)| kind)
                         .unwrap_or(UnsatisfiableKind::Inherited)
                 });
+                // A transaction whose broadcast a node REJECTED, with the rejection not yet
+                // adjudicated against the wallet's own view (`report_broadcast_failure`). It is
+                // reported behind the unsatisfiable determination above — which may well be what
+                // the adjudication just recorded about this very transaction — and ahead of
+                // expiry and every state-derived blocker below, because being actively withheld
+                // from the broadcast queue is more specific than any of the reasons a broadcast
+                // is merely pending. Guarded on non-mined for the same reason the determination
+                // above is: a mined transaction is final and never carries a blocker (its own
+                // `mark_mined` discharges any report, so only a store handing back an
+                // already-mined reported row could reach this).
+                let awaiting_reevaluation = !matches!(t.state, MigrationTxState::Mined { .. })
+                    && t.broadcast_failure_at.is_some();
                 // An expired transaction (not yet mined, past its expiry height) can never be mined and
                 // must be rebuilt; report that ahead of any other blocker, so a wallet shows it as
                 // needing attention rather than as waiting on a dependency or the schedule.
                 let (ready, action, blocked_on) = if unsatisfiable {
                     (false, None, Some(Blocker::Unsatisfiable))
+                } else if awaiting_reevaluation {
+                    (false, None, Some(Blocker::AwaitingReevaluation))
                 } else if Self::is_expired(t, target_height) {
                     (false, None, Some(Blocker::Expired))
                 } else {
@@ -1121,6 +1241,7 @@ mod tests {
             lock_owner: None,
             unsatisfiable: None,
             spend_nullifiers: Vec::new(),
+            broadcast_failure_at: None,
         }
     }
 
@@ -2800,6 +2921,205 @@ mod tests {
         assert_eq!(
             s.transactions[0].unsatisfiable_at(),
             Some(BlockHeight::from_u32(420))
+        );
+    }
+
+    /// The report is recorded for a `Proved` transaction and nothing else: a failed broadcast
+    /// never reached `mark_broadcast`, so that is the state a rejected transaction is in. An
+    /// unknown id, a transaction not yet proved, one already in flight, and a mined one are all
+    /// no-ops — the last most pointedly, since chain inclusion settles the question the report
+    /// exists to raise.
+    #[test]
+    fn report_broadcast_failure_applies_only_to_proved_transactions() {
+        let tip = BlockHeight::from_u32(900);
+        let mut s = state_with(vec![
+            tx(0, transfer(0), MigrationTxState::Proved),
+            tx(1, transfer(1), MigrationTxState::Signed),
+            tx(
+                2,
+                transfer(2),
+                MigrationTxState::Broadcast {
+                    txid: TxId::from_bytes([1; 32]),
+                },
+            ),
+            tx(3, transfer(3), mined(100)),
+        ]);
+        for id in 0..4 {
+            s.report_broadcast_failure(MigrationTransferId(id), tip);
+        }
+        s.report_broadcast_failure(MigrationTransferId(99), tip);
+
+        assert_eq!(s.transactions[0].broadcast_failure_at, Some(tip));
+        for i in 1..4 {
+            assert_eq!(
+                s.transactions[i].broadcast_failure_at, None,
+                "only a Proved transaction records a rejection",
+            );
+        }
+
+        // The newest testimony supersedes: a second rejection at a later tip replaces the first,
+        // so the adjudication must reach the later chain state.
+        let later = BlockHeight::from_u32(950);
+        s.report_broadcast_failure(MigrationTransferId(0), later);
+        assert_eq!(s.transactions[0].broadcast_failure_at, Some(later));
+        // Including a rejection at an EARLIER tip: whichever report stands is the one to answer,
+        // and the verb keeps no history to reconcile.
+        let earlier = BlockHeight::from_u32(800);
+        s.report_broadcast_failure(MigrationTransferId(0), earlier);
+        assert_eq!(s.transactions[0].broadcast_failure_at, Some(earlier));
+    }
+
+    /// A reported transaction leaves the broadcast queue, and the kernel offers the migration's
+    /// other work instead; discharging the report puts it back.
+    #[test]
+    fn a_reported_transaction_is_withheld_from_the_broadcast_queue() {
+        let mut s = state_with(vec![
+            tx(0, transfer(0), MigrationTxState::Proved),
+            tx(1, transfer(1), MigrationTxState::Proved),
+        ]);
+        let target = BlockHeight::from_u32(50);
+        assert_eq!(
+            s.next_step(target, &[]),
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(0)
+            }
+        );
+
+        s.report_broadcast_failure(MigrationTransferId(0), BlockHeight::from_u32(49));
+        assert_eq!(
+            s.next_step(target, &[]),
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+            "the migration's other due broadcast still surfaces",
+        );
+        s.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(49));
+        assert_eq!(
+            s.next_step(target, &[]),
+            AdvanceStep::Waiting,
+            "with every due broadcast withheld there is nothing else to do",
+        );
+        assert_ne!(
+            s.next_step(target, &[]),
+            AdvanceStep::Reevaluate,
+            "the kernel has no oracle to adjudicate with, so it never names that step",
+        );
+
+        s.clear_broadcast_failure(MigrationTransferId(0));
+        assert_eq!(
+            s.next_step(target, &[]),
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(0)
+            },
+            "a discharged report returns the transaction to the queue",
+        );
+    }
+
+    /// The blocker precedence around the report: an unsatisfiability determination outranks it
+    /// (including one recorded about the very transaction whose rejection was adjudicated), and it
+    /// outranks expiry and the state-derived blockers.
+    #[test]
+    fn statuses_rank_awaiting_reevaluation_below_unsatisfiable_and_above_expired() {
+        let target = BlockHeight::from_u32(100);
+        let mut s = state_with(vec![
+            tx(0, transfer(0), MigrationTxState::Proved),
+            tx(1, transfer(1), MigrationTxState::Proved),
+            tx(2, transfer(2), MigrationTxState::Proved),
+        ]);
+        // 0: reported only. 1: reported AND marked. 2: reported AND expired.
+        s.transactions[1].unsatisfiable = marked(90);
+        s.transactions[2].expiry_height = BlockHeight::from_u32(80);
+        for id in 0..3 {
+            s.report_broadcast_failure(MigrationTransferId(id), BlockHeight::from_u32(99));
+        }
+
+        let v = s.transaction_statuses(target);
+        assert_eq!(v[0].blocked_on, Some(Blocker::AwaitingReevaluation));
+        assert!(!v[0].ready && v[0].action.is_none());
+        assert_eq!(
+            v[0].unsatisfiable_kind, None,
+            "a pending question is not a determination",
+        );
+        assert_eq!(
+            v[1].blocked_on,
+            Some(Blocker::Unsatisfiable),
+            "an answered question outranks an open one",
+        );
+        assert_eq!(
+            v[1].unsatisfiable_kind,
+            Some(UnsatisfiableKind::InputsSpent)
+        );
+        assert_eq!(
+            v[2].blocked_on,
+            Some(Blocker::AwaitingReevaluation),
+            "being actively withheld is more specific than an expiry whose rebuild is pending",
+        );
+
+        // Discharge the reports and the ordinary dispositions return.
+        for id in 0..3 {
+            s.clear_broadcast_failure(MigrationTransferId(id));
+        }
+        let v = s.transaction_statuses(target);
+        assert!(v[0].ready && v[0].action == Some(NextAction::Broadcast));
+        assert_eq!(v[1].blocked_on, Some(Blocker::Unsatisfiable));
+        assert_eq!(v[2].blocked_on, Some(Blocker::Expired));
+    }
+
+    /// A report names a chain tip, so truncation judges it exactly as it judges a mark: a report
+    /// at the truncation height still refers to surviving state, one above it does not.
+    #[test]
+    fn truncation_clears_reports_above_the_height_only() {
+        let mut s = state_with(vec![
+            tx(0, transfer(0), MigrationTxState::Proved),
+            tx(1, transfer(1), MigrationTxState::Proved),
+        ]);
+        s.report_broadcast_failure(MigrationTransferId(0), BlockHeight::from_u32(100));
+        s.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(101));
+
+        s.truncate_to_height(BlockHeight::from_u32(100));
+        assert_eq!(
+            s.transactions[0].broadcast_failure_at,
+            Some(BlockHeight::from_u32(100)),
+            "a report at exactly the truncation height rests on surviving state",
+        );
+        assert_eq!(
+            s.transactions[1].broadcast_failure_at, None,
+            "a report above it named a chain the wallet no longer holds",
+        );
+        assert_eq!(
+            s.next_step(BlockHeight::from_u32(50), &[]),
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+            "and the transaction it withheld is offered again",
+        );
+    }
+
+    /// The wake-up schedule is about PROVING, which a rejected broadcast says nothing about: a
+    /// reported transfer is already proved, so it contributed no wake-up before the report either,
+    /// and an unproved sibling keeps the one it had.
+    #[test]
+    fn a_report_does_not_disturb_the_wakeup_schedule() {
+        let mut s = state_with(vec![
+            scheduled_transfer(0, 0, 1440, 1700, MigrationTxState::Proved),
+            scheduled_transfer(1, 1, 1584, 1800, MigrationTxState::Signed),
+        ]);
+        let params = WakeupParams::new(10, 0);
+        let tip = BlockHeight::from_u32(1600);
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        let before = s
+            .sync_wakeup_schedule(tip, &params, &mut rng)
+            .expect("a schedule exists");
+
+        s.report_broadcast_failure(MigrationTransferId(0), BlockHeight::from_u32(1600));
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        let after = s
+            .sync_wakeup_schedule(tip, &params, &mut rng)
+            .expect("a schedule exists");
+        assert_eq!(
+            before.len(),
+            after.len(),
+            "reports concern broadcast, not proving",
         );
     }
 }
