@@ -262,21 +262,15 @@ fn stores_loads_and_updates_a_migration() {
     assert_eq!(loaded.status(), MigrationStatus::Committed);
     assert_eq!(loaded.transactions(), state.transactions());
 
+    // One binding for the state written and the state expected back, under a distinctive txid, so
+    // the round-trip cannot pass on a zeroed or absent stored value.
+    let mined = MigrationTxState::Mined {
+        txid: TxId::from_bytes([0xA7; 32]),
+        height: BlockHeight::from_u32(2_000_105),
+    };
     backend
-        .update_transaction(
-            MigrationTransferId::new(0),
-            MigrationTxState::Mined {
-                txid: TxId::from_bytes([0; 32]),
-                height: BlockHeight::from_u32(2_000_105),
-            },
-        )
+        .update_transaction(MigrationTransferId::new(0), mined)
         .unwrap();
     let loaded = backend.get_migration().unwrap().unwrap();
-    assert_eq!(
-        loaded.transactions()[0].state(),
-        MigrationTxState::Mined {
-            txid: TxId::from_bytes([0; 32]),
-            height: BlockHeight::from_u32(2_000_105)
-        }
-    );
+    assert_eq!(loaded.transactions()[0].state(), mined);
 }
