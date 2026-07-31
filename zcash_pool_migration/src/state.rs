@@ -7,9 +7,9 @@
 //! I/O: it detects that a broadcast transaction has mined (via its own chain view) and calls
 //! [`MigrationState::mark_mined`], it broadcasts a transaction and calls
 //! [`MigrationState::mark_broadcast`], and it performs the build/prove/broadcast work that
-//! [`advance_migration`](crate::engine::advance_migration) — the drive API, which puts each planned
-//! step to the store's satisfiability oracle before surfacing it — tells it to do. The decision of
-//! WHAT to do next, and the transaction status a wallet shows the user, live here.
+//! [`advance_migration`](crate::satisfiability::advance_migration) — the drive API, which puts each
+//! planned step to the store's satisfiability oracle before surfacing it — tells it to do. The
+//! decision of WHAT to do next, and the transaction status a wallet shows the user, live here.
 //!
 //! Every transaction is built and pre-signed when the migration is committed (one signing phase;
 //! anchors and witnesses are deferred to proving time per ZIP 374), so the state machine's only
@@ -17,8 +17,8 @@
 //! witnesses — once its anchor is resolvable (for a transfer, once its drawn boundary settles),
 //! and becomes broadcastable once it is proved, its dependencies (the preparation layers that
 //! mint its inputs) have mined, and its scheduled height has arrived. See
-//! [`advance_migration`](crate::engine::advance_migration) for what each step asks of the consumer
-//! and the sync/broadcast session separation the ordering is designed around.
+//! [`advance_migration`](crate::satisfiability::advance_migration) for what each step asks of the
+//! consumer and the sync/broadcast session separation the ordering is designed around.
 
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
@@ -29,15 +29,16 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
-    DuenessTargets, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
-    MigrationTxKind, MigrationTxState, StepSatisfiability, UnsatisfiableKind,
+    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
+    MigrationTxState,
 };
+use crate::satisfiability::{DuenessTargets, StepSatisfiability, UnsatisfiableKind};
 use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 
 /// The next thing to do to advance a committed migration, decided purely from its state. The consumer
 /// performs the corresponding I/O and updates the state (via the commit functions and
 /// [`MigrationState::mark_broadcast`] / [`MigrationState::mark_mined`]), then calls
-/// [`advance_migration`](crate::engine::advance_migration) again, which documents the work each
+/// [`advance_migration`](crate::satisfiability::advance_migration) again, which documents the work each
 /// step names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvanceStep {
@@ -46,7 +47,7 @@ pub enum AdvanceStep {
     /// its drawn anchor boundary has settled (the boundary block is strictly below the chain tip, so
     /// its checkpoint exists in the wallet's commitment tree). Broadcast is a separate later step;
     /// whether it belongs in the same waking session depends on the transaction's `kind` (see that
-    /// field, and [`advance_migration`](crate::engine::advance_migration)).
+    /// field, and [`advance_migration`](crate::satisfiability::advance_migration)).
     ///
     /// Proving is not time-critical: the wallet durably retains the boundary checkpoints its
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
@@ -91,7 +92,7 @@ pub enum AdvanceStep {
         id: MigrationTransferId,
     },
     /// The migration needs RE-PLANNING: enough of its planned value can never mine (the share
-    /// strictly exceeds the committed [`ReplanThreshold`](crate::engine::ReplanThreshold)), or
+    /// strictly exceeds the committed [`ReplanThreshold`](crate::satisfiability::ReplanThreshold)), or
     /// dead value is stranded with no live work left. The consumer's response:
     /// [`MigrationState::mark_superseded`], persist, and re-plan the remaining balance through
     /// the ordinary planning flow — whose commit guard accepts the replacement, the superseded
@@ -103,7 +104,7 @@ pub enum AdvanceStep {
     /// with [`MigrationState::report_broadcast_failure`]), and the wallet cannot yet say why: its
     /// answers still rest on chain state below the tip that node reported. The consumer's
     /// response is to SYNC — at its next sync wake-up, to at least that tip — and call
-    /// [`advance_migration`](crate::engine::advance_migration) again, which adjudicates the
+    /// [`advance_migration`](crate::satisfiability::advance_migration) again, which adjudicates the
     /// report against the store's oracle and either marks the transaction or re-offers its
     /// broadcast.
     ///
@@ -176,7 +177,7 @@ pub enum Blocker {
     /// entirely new transaction must be constructed and signed anew (with a fresh anchor and
     /// expiry, its denomination unchanged) before this part can advance. For a TRANSFER the
     /// consumer performs that rebuild when
-    /// [`advance_migration`](crate::engine::advance_migration) returns [`AdvanceStep::Rebuild`].
+    /// [`advance_migration`](crate::satisfiability::advance_migration) returns [`AdvanceStep::Rebuild`].
     /// For a PREPARATION no single-transaction rebuild exists (its dependents' pre-signatures
     /// commit to the notes it would have minted), so this blocker is the signal that the migration
     /// needs a new signing ceremony over the affected subtree. Reported so a wallet can show the
@@ -189,7 +190,7 @@ pub enum Blocker {
     /// A broadcast of this transaction was rejected by the node it was submitted to
     /// ([`MigrationState::report_broadcast_failure`]), and the wallet has not yet scanned far
     /// enough to say why: it is withheld from the broadcast queue until
-    /// [`advance_migration`](crate::engine::advance_migration) adjudicates the report against
+    /// [`advance_migration`](crate::satisfiability::advance_migration) adjudicates the report against
     /// evidence (see [`AdvanceStep::Reevaluate`]).
     ///
     /// Reported BEHIND [`Unsatisfiable`](Self::Unsatisfiable) — a determination the wallet has
@@ -552,12 +553,12 @@ impl MigrationState {
     /// reschedules them, and those marked unsatisfiable or dependent on a transaction that can
     /// never mine, whose remedy is the migration-level replan — see [`AdvanceStep::Replan`]), and
     /// preparations (which anchor at the tip when proved, driven by
-    /// [`advance_migration`](crate::engine::advance_migration) at their own broadcast wake-ups) are
-    /// not. A transfer lacking a drawn anchor boundary (impossible for a state committed by this
-    /// crate) likewise contributes no wake-up: like a preparation, it is driven by
-    /// [`advance_migration`](crate::engine::advance_migration) at its scheduled height. Nothing is
-    /// persisted: the schedule is derived from the migration state, so recompute it — with fresh
-    /// jitter — after any state change (a proof stored, a rebuild, a missed wake-up).
+    /// [`advance_migration`](crate::satisfiability::advance_migration) at their own broadcast
+    /// wake-ups) are not. A transfer lacking a drawn anchor boundary (impossible for a state
+    /// committed by this crate) likewise contributes no wake-up: like a preparation, it is driven
+    /// by [`advance_migration`](crate::satisfiability::advance_migration) at its scheduled height.
+    /// Nothing is persisted: the schedule is derived from the migration state, so recompute it —
+    /// with fresh jitter — after any state change (a proof stored, a rebuild, a missed wake-up).
     pub fn sync_wakeup_schedule<R: RngCore + CryptoRng>(
         &self,
         current_tip: BlockHeight,
@@ -623,13 +624,13 @@ impl MigrationState {
     }
 
     /// Whether the unsatisfiable share of planned transfer value STRICTLY exceeds the
-    /// [`ReplanThreshold`](crate::engine::ReplanThreshold) stamped at commit — the condition under
-    /// which the migration should be re-planned immediately rather than after satisfiable work
-    /// drains. The share counts each unmined transfer marked
-    /// [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at) at its crossing value, over
-    /// the total planned crossing value; preparations enter only through the transfers they fund,
-    /// and a mined transfer counts in the denominator only. Derived, never stored: a stored copy
-    /// could not un-cross the threshold when a reorg clears marks.
+    /// [`ReplanThreshold`](crate::satisfiability::ReplanThreshold) stamped at commit — the
+    /// condition under which the migration should be re-planned immediately rather than after
+    /// satisfiable work drains. The share counts each unmined transfer marked
+    /// [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at) at its crossing value, over the
+    /// total planned crossing value; preparations enter only through the transfers they fund, and a
+    /// mined transfer counts in the denominator only. Derived, never stored: a stored copy could
+    /// not un-cross the threshold when a reorg clears marks.
     pub fn replan_required(&self) -> bool {
         let unsat: u64 = self
             .transactions
@@ -724,10 +725,10 @@ impl MigrationState {
     /// wallet has scanned, which is what makes reorg truncation exact. What the report does is
     /// WITHHOLD. The transaction leaves the broadcast queue and reports
     /// [`Blocker::AwaitingReevaluation`] until
-    /// [`advance_migration`](crate::engine::advance_migration) adjudicates it against the store's
-    /// oracle — which it can do once the wallet has scanned to `observed_tip`, and until then
-    /// surfaces [`AdvanceStep::Reevaluate`] instead of any other work. Adjudication either finds
-    /// the spend behind the rejection (an ordinary evidence-backed mark) or does not (the
+    /// [`advance_migration`](crate::satisfiability::advance_migration) adjudicates it against the
+    /// store's oracle — which it can do once the wallet has scanned to `observed_tip`, and until
+    /// then surfaces [`AdvanceStep::Reevaluate`] instead of any other work. Adjudication either
+    /// finds the spend behind the rejection (an ordinary evidence-backed mark) or does not (the
     /// rejection was transient, the report is discharged, and the broadcast is offered again).
     ///
     /// Recorded only for a [`Proved`](MigrationTxState::Proved) transaction: a broadcast that
@@ -770,8 +771,8 @@ impl MigrationState {
     ///
     /// | Answer | Effect |
     /// |---|---|
-    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](crate::engine::UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](crate::engine::UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](crate::engine::UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of_height`, under the cause's [`UnsatisfiableKind`] |
-    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`Expired`](crate::engine::UnsatisfiableCause::Expired) | no mark |
+    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](crate::satisfiability::UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](crate::satisfiability::UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](crate::satisfiability::UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of_height`, under the cause's [`UnsatisfiableKind`] |
+    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`Expired`](crate::satisfiability::UnsatisfiableCause::Expired) | no mark |
     /// | [`Satisfiable`](StepSatisfiability::Satisfiable) / [`NotYetSatisfiable`](StepSatisfiability::NotYetSatisfiable) | no mark |
     ///
     /// The input-level and anchor-level causes record an observation about chain state that the
@@ -933,7 +934,7 @@ impl MigrationState {
     /// vacuous satisfiability when demoted here: demotion makes it non-mined, and the store
     /// oracle treats an empty cache on a non-mined transaction as loud corruption at its next
     /// satisfiability check (see
-    /// [`classify_input_observations`](crate::engine::classify_input_observations)), never as
+    /// [`classify_input_observations`](crate::satisfiability::classify_input_observations)), never as
     /// an answer.
     pub fn truncate_to_height(&mut self, height: BlockHeight) {
         for t in &mut self.transactions {
@@ -995,9 +996,9 @@ impl MigrationState {
     /// This is the planning KERNEL, and it is internal to the crate: it DECIDES, but it does not
     /// VERIFY. The step it names has not been put to the store's satisfiability oracle, so it may
     /// name a transaction the wallet already knows can never execute.
-    /// [`advance_migration`](crate::engine::advance_migration) is what wraps this decision in that
-    /// check, and it is the API a consumer drives a migration with; it also documents what each
-    /// step asks of the consumer.
+    /// [`advance_migration`](crate::satisfiability::advance_migration) is what wraps this decision
+    /// in that check, and it is the API a consumer drives a migration with; it also documents what
+    /// each step asks of the consumer.
     ///
     /// `targets` carries the caller's scanned frontier and its estimate of the chain tip, and the
     /// two are read by CLASSIFICATION, never interchangeably: every judgment that persists a
@@ -1007,8 +1008,8 @@ impl MigrationState {
     /// [`effective`](DuenessTargets::effective), together with the two reversible things the
     /// estimate is allowed to do: withhold a doomed broadcast and skip a doomed proof. See
     /// [`DuenessTargets`] for the full table and the ZIP 318 session separation behind it, and
-    /// [`advance_migration`](crate::engine::advance_migration) for the same contract on the API a
-    /// consumer actually drives.
+    /// [`advance_migration`](crate::satisfiability::advance_migration) for the same contract on the
+    /// API a consumer actually drives.
     ///
     /// `set_aside` is the drive loop's call-local list of candidates whose satisfiability check
     /// ([`PoolMigrationRead::check_step_satisfiability`](crate::engine::PoolMigrationRead::check_step_satisfiability))
@@ -1186,11 +1187,12 @@ impl MigrationState {
     /// dominating everything, that it is unsatisfiable ([`Blocker::Unsatisfiable`]).
     ///
     /// This view AGREES WITH THE KERNEL by construction: a transaction is reported `ready` with
-    /// [`NextAction::Broadcast`] exactly when [`advance_migration`](crate::engine::advance_migration)
-    /// would offer its broadcast, so the sync-gate predicate a consumer writes over these
-    /// statuses (`ready() && action() == Some(NextAction::Broadcast)`) never wakes a broadcast
-    /// session the drive API would then refuse. In particular the two read the same fields for the
-    /// same purposes: the [`Expired`](Blocker::Expired) determination and the dead set at
+    /// [`NextAction::Broadcast`] exactly when
+    /// [`advance_migration`](crate::satisfiability::advance_migration) would offer its broadcast,
+    /// so the sync-gate predicate a consumer writes over these statuses (`ready() && action() ==
+    /// Some(NextAction::Broadcast)`) never wakes a broadcast session the drive API would then
+    /// refuse. In particular the two read the same fields for the same purposes: the
+    /// [`Expired`](Blocker::Expired) determination and the dead set at
     /// [`scanned`](DuenessTargets::scanned), the schedule and the doomed-broadcast withhold at
     /// [`effective`](DuenessTargets::effective).
     pub fn transaction_statuses(&self, targets: DuenessTargets) -> Vec<TransactionStatus> {
@@ -1328,7 +1330,8 @@ impl MigrationState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{MigrationTransaction, UnsatisfiableCause};
+    use crate::engine::MigrationTransaction;
+    use crate::satisfiability::UnsatisfiableCause;
     use zcash_protocol::value::Zatoshis;
 
     use crate::denomination::DenominationPlan;
@@ -1391,7 +1394,7 @@ mod tests {
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,
             anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
-            replan_threshold: crate::engine::ReplanThreshold::DEFAULT,
+            replan_threshold: crate::satisfiability::ReplanThreshold::DEFAULT,
         }
     }
 
@@ -1425,7 +1428,7 @@ mod tests {
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,
             anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
-            replan_threshold: crate::engine::ReplanThreshold::DEFAULT,
+            replan_threshold: crate::satisfiability::ReplanThreshold::DEFAULT,
         }
     }
 
@@ -1503,7 +1506,7 @@ mod tests {
         assert!(!s.replan_required());
     }
 
-    /// The two [`ReplanThreshold`](crate::engine::ReplanThreshold) endpoints have distinct
+    /// The two [`ReplanThreshold`](crate::satisfiability::ReplanThreshold) endpoints have distinct
     /// meanings, and a marked preparation never contributes to the numerator (only its funded
     /// transfers can).
     #[test]
@@ -1518,7 +1521,7 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Signed),
             ],
         );
-        zero.replan_threshold = crate::engine::ReplanThreshold::new(0).expect("0 is valid");
+        zero.replan_threshold = crate::satisfiability::ReplanThreshold::new(0).expect("0 is valid");
         assert!(!zero.replan_required(), "nothing marked yet");
 
         // Marking the UNMINED PREPARATION contributes nothing to the numerator: a preparation
@@ -1547,7 +1550,8 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Signed),
             ],
         );
-        hundred.replan_threshold = crate::engine::ReplanThreshold::new(100).expect("100 is valid");
+        hundred.replan_threshold =
+            crate::satisfiability::ReplanThreshold::new(100).expect("100 is valid");
         hundred.transactions[1].unsatisfiable = marked(50);
         hundred.transactions[2].unsatisfiable = marked(50);
         assert!(

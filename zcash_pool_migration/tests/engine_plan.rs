@@ -18,11 +18,12 @@ use zcash_pool_migration::denomination::{DenominationPlan, plan_denominations};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationError, MigrationState, MigrationStatus, MigrationTransaction,
     MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
-    ReplanThreshold, plan_migration,
+    plan_migration,
 };
 use zcash_pool_migration::preparation::{
     FUNDING_OUTPUTS_PER_TX, PreparationPlan, plan_preparation,
 };
+use zcash_pool_migration::satisfiability::ReplanThreshold;
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 

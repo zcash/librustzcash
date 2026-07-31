@@ -18,9 +18,10 @@ use zcash_protocol::value::testing::arb_zatoshis;
 use crate::denomination::DenominationPlan;
 use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, ReplanThreshold, UnsatisfiableKind,
+    MigrationTxState,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
+use crate::satisfiability::{ReplanThreshold, UnsatisfiableKind};
 use crate::scheduling::AnchorBucketInterval;
 use crate::signing_rounds::{PlannedTx, SigningRoundBudget};
 

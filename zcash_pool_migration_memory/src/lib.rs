@@ -40,8 +40,9 @@ use zcash_protocol::value::Zatoshis;
 use zcash_pool_migration::build::{AccountDerivation, sign_pczt};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTransferId,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ReorgSettleDepth, StepSatisfiability,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
+use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
 use zcash_pool_migration::scheduling::SchedulingParams;
 
 /// A post-NU6.3 height (past the regtest NU6.3 activation) at which the migration transactions are

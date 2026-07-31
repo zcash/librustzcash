@@ -50,9 +50,9 @@ use crate::build::{AccountDerivation, sign_pczt};
 use crate::engine::{
     MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransaction,
     MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ProveFailure,
-    ReorgSettleDepth, StepSatisfiability,
 };
 use crate::pczt_spends::RealSpendError;
+use crate::satisfiability::{ReorgSettleDepth, StepSatisfiability};
 use crate::scheduling::{AnchorBucketInterval, DelayDistribution, SchedulingParams};
 
 /// A failure of the wallet-backed migration adapter. Parameterized by the error types of the two

@@ -590,7 +590,7 @@ pub use zcash_protocol::zip318::expiry_height;
 /// no schedule produced by this crate contains.
 ///
 /// [`MigrationTransaction::anchor_boundary`]: crate::engine::MigrationTransaction::anchor_boundary
-/// [`advance_migration`]: crate::engine::advance_migration
+/// [`advance_migration`]: crate::satisfiability::advance_migration
 pub fn schedule_sync_wakeups<T: Copy, R: RngCore + CryptoRng>(
     params: &WakeupParams,
     current_tip: BlockHeight,
