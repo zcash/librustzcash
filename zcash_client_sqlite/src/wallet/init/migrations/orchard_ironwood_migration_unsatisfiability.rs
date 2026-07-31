@@ -1,7 +1,7 @@
 //! Adds the `unsatisfiable_at` and `spend_nullifiers` columns to
 //! `orchard_ironwood_migration_transactions` where they are missing, backfills the
-//! nullifier cache for existing rows, and adds the `replan_threshold` column to
-//! `orchard_ironwood_migrations` where it is missing.
+//! nullifier cache for existing rows, restores the erased `txid` of every `mined` row, and adds
+//! the `replan_threshold` column to `orchard_ironwood_migrations` where it is missing.
 //!
 //! `unsatisfiable_at` records the height of the chain state a spent-input observation rests on,
 //! when a migration transaction has been determined UNSATISFIABLE — its inputs can never again
@@ -27,6 +27,13 @@
 //! demotes such a row returns it to the watched set with an empty cache, which satisfiability
 //! consumers must treat as loud corruption (the real spends were never identifiable), never as
 //! a transaction with no inputs to observe.
+//!
+//! The `txid` of a `mined` row is restored because a published release erased it: both store write
+//! paths bound the column through one accessor covering the two states that carry a txid, and that
+//! accessor answered `None` for `mined`, so every transaction that reached `mined` lost the txid it
+//! had been broadcast under. The reconstructing reader now requires it, so without this repair a
+//! wallet that completed a migration could never read its store back. See [`backfill_mined_txids`]
+//! for where the txid is recovered from and why it is not derived from the stored transaction.
 //!
 //! `replan_threshold` is the integer percent of planned transfer value, unsatisfiable, above which
 //! a migration is re-planned immediately rather than after satisfiable work drains — stamped on
@@ -87,6 +94,115 @@ fn real_spend_nullifiers(pczt_bytes: &[u8]) -> Result<Vec<u8>, WalletMigrationEr
         .filter(|action| action.spend().witness().is_none())
         .flat_map(|action| *action.spend().nullifier())
         .collect())
+}
+
+/// Restore the `txid` of every `mined` pool-migration transaction that carries none.
+///
+/// A migration transaction's lifecycle state was stored through one accessor for both states that
+/// carry a txid, and until recently that accessor answered `None` for `mined`: every row a
+/// published release moved from `broadcast` to `mined` had its txid ERASED on the way. The
+/// reconstructing reader now requires it — a mined transaction was always broadcast under a txid
+/// first, so `mined` without one is not a state the type admits — which would leave every wallet
+/// that completed a migration unable to read its own store back, permanently and with no way to
+/// repair it. So the txid is recovered here, once, where the condition can still be reported.
+///
+/// It is recovered from the WALLET's own record of the same event, not from the stored transaction:
+/// the migration transaction spent notes belonging to this wallet, and a note is spent by exactly
+/// one mined transaction, so the spend the scanner recorded names the txid directly. The stored
+/// PCZT supplies the nullifiers to look up — every action's, since a proven PCZT no longer
+/// distinguishes the real spends from their padding dummies, and a dummy's nullifier simply
+/// matches nothing.
+///
+/// Deriving the txid from the stored bytes instead would be self-contained but is the wrong
+/// instrument here. The only public route to a txid over a PCZT is the Transaction Extractor,
+/// which VERIFIES every proof on the way — building an Orchard verifying key on the fly when none
+/// is supplied — so a schema migration would pay seconds to minutes of proof verification per
+/// completed migration, to learn a hash the wallet already has. It is also unavailable in a build
+/// without this crate's `orchard` feature, whereas the tables consulted here exist in every build.
+///
+/// A row whose txid cannot be recovered — the wallet never scanned the transaction that spent its
+/// own notes, or the spend record is gone — fails the migration naming the row. That is a loud,
+/// actionable condition at upgrade time, rather than a store that silently reads back as corrupt
+/// ever after.
+fn backfill_mined_txids(conn: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
+    let rows: Vec<(i64, u32, Vec<u8>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT migration_id, tx_id, pczt
+               FROM orchard_ironwood_migration_transactions
+              WHERE state = 'mined' AND txid IS NULL",
+        )?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get::<_, Vec<u8>>(2)?))
+        })?;
+        mapped.collect::<Result<_, _>>()?
+    };
+
+    for (migration_id, tx_id, pczt_bytes) in rows {
+        let txid = recover_mined_txid(conn, &pczt_bytes)?.ok_or_else(|| {
+            WalletMigrationError::CorruptedData(format!(
+                "pool-migration transaction (migration {migration_id}, tx {tx_id}) is recorded \
+                 mined but stores no txid, and none of the notes its stored PCZT spends is \
+                 recorded as spent by a mined transaction in this wallet, so the txid it was \
+                 mined under cannot be recovered"
+            ))
+        })?;
+        conn.execute(
+            "UPDATE orchard_ironwood_migration_transactions
+                SET txid = :txid
+              WHERE migration_id = :migration_id AND tx_id = :tx_id",
+            named_params! {
+                ":txid": txid,
+                ":migration_id": migration_id,
+                ":tx_id": tx_id,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// The txid the transaction stored as `pczt_bytes` was mined under, as this wallet recorded it, or
+/// `None` if its spends name no single mined transaction.
+///
+/// Every action's nullifier is looked up among the account's Orchard notes; a real spend matches
+/// the note it consumed and a padding dummy matches nothing. All of a transaction's real spends
+/// were consumed by the same mined transaction, so the recovered set has exactly one member for a
+/// recoverable row — anything else (none, or a disagreement) declines rather than guessing.
+///
+/// The stored txid is hex text, as the pool-migration store writes it; the wallet's is the raw
+/// bytes.
+fn recover_mined_txid(
+    conn: &rusqlite::Transaction,
+    pczt_bytes: &[u8],
+) -> Result<Option<String>, WalletMigrationError> {
+    let pczt = pczt::Pczt::parse(pczt_bytes).map_err(|e| {
+        WalletMigrationError::CorruptedData(format!(
+            "stored pool-migration PCZT does not parse: {e:?}"
+        ))
+    })?;
+
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT t.txid
+           FROM transactions t
+           JOIN orchard_received_note_spends s ON s.transaction_id = t.id_tx
+           JOIN orchard_received_notes n ON n.id = s.orchard_received_note_id
+          WHERE n.nf = :nf AND t.mined_height IS NOT NULL",
+    )?;
+    let mut found = HashSet::new();
+    for action in pczt.orchard().actions() {
+        let rows = stmt.query_map(
+            named_params! {":nf": action.spend().nullifier().as_slice()},
+            |row| row.get::<_, Vec<u8>>(0),
+        )?;
+        for txid in rows {
+            found.insert(hex::encode(txid?));
+        }
+    }
+
+    Ok(if found.len() == 1 {
+        found.into_iter().next()
+    } else {
+        None
+    })
 }
 
 impl RusqliteMigration for Migration {
@@ -169,6 +285,8 @@ impl RusqliteMigration for Migration {
                 )?;
             }
         }
+
+        backfill_mined_txids(transaction)?;
 
         // `replan_threshold` lives on a different table (`orchard_ironwood_migrations`), so its
         // presence is checked and repaired independently of the transactions-table columns above.
@@ -571,19 +689,114 @@ mod tests {
         ));
     }
 
-    /// The same proven bytes on a `mined` row are exempt: the transaction is terminal, so no
-    /// satisfiability question remains for the cache to answer, and the row keeps the empty
-    /// cache.
+    /// The wallet-owned tables the txid recovery reads, plus the `accounts` row a pool-migration
+    /// store is scoped by: a minimal stand-in for the wallet schema these unit fixtures build
+    /// their pre-fix pool-migration tables beside.
+    #[cfg(feature = "orchard")]
+    fn create_wallet_tables(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE accounts (
+                id INTEGER PRIMARY KEY,
+                uuid BLOB NOT NULL
+             );
+             CREATE TABLE transactions (
+                id_tx INTEGER PRIMARY KEY,
+                txid BLOB NOT NULL UNIQUE,
+                mined_height INTEGER
+             );
+             CREATE TABLE orchard_received_notes (
+                id INTEGER PRIMARY KEY,
+                nf BLOB
+             );
+             CREATE TABLE orchard_received_note_spends (
+                orchard_received_note_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+    }
+
+    /// Record the wallet's own view of a mined transaction `txid` at `mined_height` spending the
+    /// note whose nullifier is `nf` — exactly the evidence the txid recovery reads back.
+    #[cfg(feature = "orchard")]
+    fn record_wallet_spend(conn: &Connection, txid: [u8; 32], mined_height: u32, nf: [u8; 32]) {
+        conn.execute(
+            "INSERT INTO transactions (txid, mined_height) VALUES (:txid, :mined_height)",
+            named_params![":txid": txid.as_slice(), ":mined_height": mined_height],
+        )
+        .unwrap();
+        let tx_ref = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO orchard_received_notes (nf) VALUES (:nf)",
+            named_params![":nf": nf.as_slice()],
+        )
+        .unwrap();
+        let note_ref = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
+             VALUES (:note_ref, :tx_ref)",
+            named_params![":note_ref": note_ref, ":tx_ref": tx_ref],
+        )
+        .unwrap();
+    }
+
+    /// The same proven bytes on a `mined` row are exempt from the nullifier-cache reconstruction:
+    /// the transaction is terminal, so no satisfiability question remains for the cache to answer,
+    /// and the row keeps the empty cache.
+    ///
+    /// Its erased `txid` is a different matter, and is repaired: a published release nulled the
+    /// column on the way to `mined`, and the reconstructing reader requires it, so this asserts the
+    /// whole round trip — the migration recovers the txid from the wallet's own record of the
+    /// spend, and `get_migration()` reads the row back as a `Mined` state carrying it. Without the
+    /// repair this read fails permanently, which is the condition the backfill exists to prevent.
     #[cfg(feature = "orchard")]
     #[test]
-    fn a_proven_pczt_on_a_mined_row_keeps_the_empty_cache() {
-        let (pczt_bytes, _) = built_transfer_pczt();
+    fn a_mined_row_keeps_its_empty_cache_and_regains_its_txid() {
+        use uuid::Uuid;
+        use zcash_pool_migration::engine::{MigrationTxState, PoolMigrationRead};
+        use zcash_protocol::TxId;
+        use zcash_protocol::consensus::BlockHeight;
+
+        use crate::AccountUuid;
+        use crate::pool_migration::orchard_ironwood::PoolMigrations;
+
+        const MINED_TXID: [u8; 32] = [0x3C; 32];
+        const MINED_HEIGHT: u32 = 220;
+
+        let (pczt_bytes, nullifier) = built_transfer_pczt();
         let proven = proven_shaped(&pczt_bytes);
 
         let mut conn = Connection::open_in_memory().unwrap();
         create_pre_fix_table(&conn);
         create_pre_fix_migrations_table(&conn);
+        create_wallet_tables(&conn);
+        // The remaining pool-migration child tables, which the reader queries, in their current
+        // shape; the two pre-fix tables above already exist, so this leaves them alone.
+        crate::pool_migration::orchard_ironwood::init_migration_tables(&conn).unwrap();
+
+        let account = Uuid::from_u128(0x5A);
+        conn.execute(
+            "INSERT INTO accounts (id, uuid) VALUES (1, :uuid)",
+            named_params![":uuid": account.as_bytes().as_slice()],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO orchard_ironwood_migrations (
+                id, account_id, status, note_split_fee_buffer, note_split_prep_fees,
+                note_split_total_input, note_split_total_migratable
+             )
+             VALUES (1, 1, 'complete', 0, 0, 0, 0)",
+        )
+        .unwrap();
         insert_pre_fix_row(&conn, 0, &proven, "mined");
+        conn.execute(
+            "UPDATE orchard_ironwood_migration_transactions SET mined_height = :mined_height",
+            named_params![":mined_height": MINED_HEIGHT],
+        )
+        .unwrap();
+        // The wallet scanned the transaction that spent the migration's funding note, which is
+        // the only surviving record of the txid it was mined under.
+        record_wallet_spend(&conn, MINED_TXID, MINED_HEIGHT, nullifier);
 
         let tx = conn.transaction().unwrap();
         RusqliteMigration::up(&Migration, &tx).unwrap();
@@ -597,5 +810,42 @@ mod tests {
             )
             .unwrap();
         assert!(spend_nullifiers.is_empty());
+
+        let store = PoolMigrations::for_account(&conn, AccountUuid::from_uuid(account))
+            .expect("the account exists");
+        let state = store
+            .get_migration()
+            .expect("the repaired store reads back")
+            .expect("the migration is present");
+        assert_eq!(
+            state.transactions()[0].state(),
+            MigrationTxState::Mined {
+                txid: TxId::from_bytes(MINED_TXID),
+                height: BlockHeight::from_u32(MINED_HEIGHT),
+            },
+            "the mined row reconstructs with the txid recovered from the wallet's spend record",
+        );
+    }
+
+    /// A `mined` row whose txid was erased and whose spends this wallet has no mined-spend record
+    /// for cannot be repaired, and fails the migration naming the row rather than leaving a store
+    /// that reads back as corrupt ever after.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn an_unrecoverable_mined_txid_fails_the_migration() {
+        let (pczt_bytes, _) = built_transfer_pczt();
+        let proven = proven_shaped(&pczt_bytes);
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_pre_fix_table(&conn);
+        create_pre_fix_migrations_table(&conn);
+        create_wallet_tables(&conn);
+        insert_pre_fix_row(&conn, 0, &proven, "mined");
+
+        let tx = conn.transaction().unwrap();
+        assert!(matches!(
+            RusqliteMigration::up(&Migration, &tx),
+            Err(WalletMigrationError::CorruptedData(_)),
+        ));
     }
 }
