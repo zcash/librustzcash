@@ -224,10 +224,12 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
 }
 
 fn create_transactions_sql(t: &Tables) -> String {
-    // `tx_id` and `txid` are different things: `tx_id` is the transaction's ordinal within its
-    // migration (a `MigrationTransferId`, and the second half of the primary key that the
-    // dependency edges reference), while `txid` is the consensus transaction ID it was broadcast
-    // under, held as hex text and `NULL` until broadcast.
+    // `transfer_id` is the transaction's ordinal within its migration (a `MigrationTransferId`, and
+    // the second half of the primary key that the dependency edges reference); `txid` is the
+    // consensus transaction ID it was broadcast under, held as hex text and `NULL` until broadcast.
+    // The ordinal is created as `tx_id` by the released `orchard_ironwood_migration_tables` DDL,
+    // whose frozen copy will always create it under that name, and renamed to what this DDL creates
+    // directly by the `orchard_ironwood_migration_unsatisfiability` schema migration.
     //
     // `spend_nullifiers` carries a `DEFAULT` only so that this DDL and the `ADD COLUMN` in the
     // `orchard_ironwood_migration_unsatisfiability` schema migration produce the same stored
@@ -245,7 +247,7 @@ fn create_transactions_sql(t: &Tables) -> String {
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
-            tx_id INTEGER NOT NULL,
+            transfer_id INTEGER NOT NULL,
             kind TEXT NOT NULL,
             kind_layer INTEGER,
             kind_index INTEGER,
@@ -262,7 +264,7 @@ fn create_transactions_sql(t: &Tables) -> String {
             spend_nullifiers BLOB NOT NULL DEFAULT X'',
             unsatisfiable_kind TEXT,
             broadcast_failure_at INTEGER,
-            PRIMARY KEY (migration_id, tx_id)
+            PRIMARY KEY (migration_id, transfer_id)
         )",
         t.transactions, t.migrations
     )
@@ -272,12 +274,12 @@ fn create_transaction_deps_sql(t: &Tables) -> String {
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             migration_id INTEGER NOT NULL,
-            tx_id INTEGER NOT NULL,
+            transfer_id INTEGER NOT NULL,
             ordinal INTEGER NOT NULL,
-            depends_on_tx_id INTEGER NOT NULL,
-            PRIMARY KEY (migration_id, tx_id, ordinal),
-            FOREIGN KEY (migration_id, tx_id)
-                REFERENCES {}(migration_id, tx_id) ON DELETE CASCADE
+            depends_on_transfer_id INTEGER NOT NULL,
+            PRIMARY KEY (migration_id, transfer_id, ordinal),
+            FOREIGN KEY (migration_id, transfer_id)
+                REFERENCES {}(migration_id, transfer_id) ON DELETE CASCADE
         )",
         t.transaction_deps, t.transactions
     )
@@ -298,8 +300,16 @@ fn create_account_index_sql(t: &Tables) -> String {
 }
 
 /// Create the pool-migration tables (and the due-transaction and account indexes) named by `t` on
-/// `conn`. This is the body the pool's schema migration's `up()` calls; it is idempotent (`IF NOT
-/// EXISTS`). Tables are created in dependency order so each foreign-key target exists first.
+/// `conn`, in their CURRENT shape. Idempotent (`IF NOT EXISTS`), and ordered so each foreign-key
+/// target is created before the table referencing it.
+///
+/// This states what the tables look like once every schema migration has run; it is not how an
+/// existing wallet got there. A published schema migration's effect cannot follow an evolving DDL,
+/// so `orchard_ironwood_migration_tables` carries a frozen copy of the text it shipped with and the
+/// migrations after it evolve that into this shape — which is why the transfer ordinal is created
+/// as `transfer_id` here but renamed into it there. The two are held together by
+/// `canonical_pool_migration_ddl_matches_the_migration_path`; a pool whose tables have no released
+/// creating migration yet can be created from this directly.
 pub(crate) fn init(conn: &Connection, t: &Tables) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(
         "{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};\n{};",
@@ -406,7 +416,7 @@ impl<C: BorrowMut<Connection>> Store<C> {
             &format!(
                 "UPDATE {}
                     SET state = :state, txid = :txid, mined_height = :mined_height
-                  WHERE migration_id = :migration_id AND tx_id = :tx_id",
+                  WHERE migration_id = :migration_id AND transfer_id = :transfer_id",
                 tables.transactions
             ),
             named_params! {
@@ -414,7 +424,7 @@ impl<C: BorrowMut<Connection>> Store<C> {
                 ":txid": state.broadcast_txid().map(hex::encode),
                 ":mined_height": state.mined_height().map(u32::from),
                 ":migration_id": migration_id,
-                ":tx_id": u32::from(id),
+                ":transfer_id": u32::from(id),
             },
         )?;
         if updated == 0 {
@@ -745,18 +755,18 @@ fn read_transactions(
 ) -> Result<Vec<MigrationTransaction>, Error> {
     let rows: Vec<TxRow> = {
         let mut stmt = conn.prepare(&format!(
-            "SELECT tx_id, kind, kind_layer, kind_index, kind_crossing, pczt,
+            "SELECT transfer_id, kind, kind_layer, kind_index, kind_crossing, pczt,
                     scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
                     lock_owner, unsatisfiable_at, spend_nullifiers, unsatisfiable_kind,
                     broadcast_failure_at
                FROM {}
               WHERE migration_id = ?
-              ORDER BY tx_id",
+              ORDER BY transfer_id",
             t.transactions
         ))?;
         let mapped = stmt.query_map(params![migration_id], |row| {
             Ok(TxRow {
-                tx_id: row.get(0)?,
+                transfer_id: row.get(0)?,
                 kind: row.get(1)?,
                 kind_layer: row.get(2)?,
                 kind_index: row.get(3)?,
@@ -780,7 +790,7 @@ fn read_transactions(
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-        let id = MigrationTransferId::new(r.tx_id);
+        let id = MigrationTransferId::new(r.transfer_id);
         let kind = MigrationTxKind::from_stored(
             &r.kind,
             r.kind_layer.map(|x| x as usize),
@@ -803,7 +813,7 @@ fn read_transactions(
             r.mined_height.map(BlockHeight::from_u32),
         )
         .map_err(|_| Error::Corrupt("state"))?;
-        let depends_on = read_deps(conn, t, migration_id, r.tx_id)?;
+        let depends_on = read_deps(conn, t, migration_id, r.transfer_id)?;
 
         // The stored blob is a fixed-stride concatenation of 32-byte nullifiers; any other
         // length cannot have been written by this store.
@@ -886,14 +896,13 @@ fn read_lock_owners(
 }
 
 /// One row of the transactions table, before it is decoded into a [`MigrationTransaction`]. The
-/// field names mirror the column names exactly, which puts `tx_id` and `txid` side by side: the
-/// first is the transaction's ordinal within its migration (a [`MigrationTransferId`]), the second
-/// the consensus transaction ID it was broadcast under.
+/// field names mirror the column names exactly.
 struct TxRow {
     /// The transaction's ordinal within its migration — the second half of the table's
-    /// `(migration_id, tx_id)` primary key, and the [`MigrationTransferId`] dependency edges name
-    /// it by. Unrelated to `txid` below.
-    tx_id: u32,
+    /// `(migration_id, transfer_id)` primary key, and the [`MigrationTransferId`] dependency edges
+    /// name it by. Unrelated to `txid` below; the released creating migration still spells this
+    /// `tx_id`, which is what made the two easy to read as one.
+    transfer_id: u32,
     kind: String,
     kind_layer: Option<u64>,
     kind_index: Option<u64>,
@@ -904,7 +913,7 @@ struct TxRow {
     anchor_boundary: Option<u32>,
     state: String,
     /// The hex-encoded consensus transaction ID the transaction was broadcast under; `NULL` until
-    /// it is broadcast. Unrelated to `tx_id` above.
+    /// it is broadcast. Unrelated to `transfer_id` above.
     txid: Option<String>,
     mined_height: Option<u32>,
     /// The stored lock-owner token, read directly as a fixed-size blob: `rusqlite`'s `[u8; 32]`
@@ -931,15 +940,17 @@ fn read_deps(
     conn: &Connection,
     t: &Tables,
     migration_id: i64,
-    tx_id: u32,
+    transfer_id: u32,
 ) -> Result<Vec<MigrationTransferId>, Error> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT depends_on_tx_id FROM {}
-          WHERE migration_id = ? AND tx_id = ?
+        "SELECT depends_on_transfer_id FROM {}
+          WHERE migration_id = ? AND transfer_id = ?
           ORDER BY ordinal",
         t.transaction_deps
     ))?;
-    let rows = stmt.query_map(params![migration_id, tx_id], |row| row.get::<_, u32>(0))?;
+    let rows = stmt.query_map(params![migration_id, transfer_id], |row| {
+        row.get::<_, u32>(0)
+    })?;
     let mut out = Vec::new();
     for r in rows {
         out.push(MigrationTransferId::new(r?));
@@ -1388,19 +1399,21 @@ fn replace_migration(
         let (unsatisfiable_at, unsatisfiable_kind) = mtx.unsatisfiable().unzip();
         tx.execute(
             &format!(
-                "INSERT INTO {} (migration_id, tx_id, kind, kind_layer, kind_index, kind_crossing,
-                                 pczt, scheduled_height, expiry_height, anchor_boundary, state, txid,
-                                 mined_height, lock_owner, unsatisfiable_at, spend_nullifiers,
-                                 unsatisfiable_kind, broadcast_failure_at)
-                 VALUES (:migration_id, :tx_id, :kind, :kind_layer, :kind_index, :kind_crossing,
-                         :pczt, :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
-                         :mined_height, :lock_owner, :unsatisfiable_at, :spend_nullifiers,
-                         :unsatisfiable_kind, :broadcast_failure_at)",
+                "INSERT INTO {} (migration_id, transfer_id, kind, kind_layer, kind_index,
+                                 kind_crossing, pczt, scheduled_height, expiry_height,
+                                 anchor_boundary, state, txid, mined_height, lock_owner,
+                                 unsatisfiable_at, spend_nullifiers, unsatisfiable_kind,
+                                 broadcast_failure_at)
+                 VALUES (:migration_id, :transfer_id, :kind, :kind_layer, :kind_index,
+                         :kind_crossing, :pczt, :scheduled_height, :expiry_height,
+                         :anchor_boundary, :state, :txid, :mined_height, :lock_owner,
+                         :unsatisfiable_at, :spend_nullifiers, :unsatisfiable_kind,
+                         :broadcast_failure_at)",
                 t.transactions
             ),
             named_params! {
                 ":migration_id": migration_id,
-                ":tx_id": u32::from(mtx.id()),
+                ":transfer_id": u32::from(mtx.id()),
                 ":kind": kind.as_ref(),
                 ":kind_layer": kind_layer,
                 ":kind_index": kind_index,
@@ -1422,15 +1435,15 @@ fn replace_migration(
         for (ordinal, dep) in mtx.depends_on().iter().enumerate() {
             tx.execute(
                 &format!(
-                    "INSERT INTO {} (migration_id, tx_id, ordinal, depends_on_tx_id)
-                     VALUES (:migration_id, :tx_id, :ordinal, :depends_on_tx_id)",
+                    "INSERT INTO {} (migration_id, transfer_id, ordinal, depends_on_transfer_id)
+                     VALUES (:migration_id, :transfer_id, :ordinal, :depends_on_transfer_id)",
                     t.transaction_deps
                 ),
                 named_params! {
                     ":migration_id": migration_id,
-                    ":tx_id": u32::from(mtx.id()),
+                    ":transfer_id": u32::from(mtx.id()),
                     ":ordinal": ordinal as u64,
-                    ":depends_on_tx_id": u32::from(*dep),
+                    ":depends_on_transfer_id": u32::from(*dep),
                 },
             )?;
         }

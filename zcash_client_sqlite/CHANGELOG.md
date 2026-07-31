@@ -18,6 +18,15 @@ workspace.
   over the wallet database's own connection.
 
 ### Changed
+- The pool-migration transfer ordinal is now named `transfer_id` throughout the
+  database schema. The `orchard_ironwood_migration_unsatisfiability` schema
+  migration renames `orchard_ironwood_migration_transactions.tx_id` to
+  `transfer_id`, and `orchard_ironwood_migration_transaction_deps`'s `tx_id`
+  and `depends_on_tx_id` to `transfer_id` and `depends_on_transfer_id`;
+  applications querying these tables directly must use the new names.
+  `orchard_ironwood_migration_tables` is unchanged and still creates the old
+  names, so an external migration anchored between the two sees the schema it
+  always has.
 - The database schema now includes the `unsatisfiable_at`, `spend_nullifiers`,
   `unsatisfiable_kind`, and `broadcast_failure_at` columns on
   `orchard_ironwood_migration_transactions`, recording the chain height backing

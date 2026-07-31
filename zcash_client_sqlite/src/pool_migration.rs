@@ -33,10 +33,15 @@
 //!
 //! # Schema registration
 //!
-//! Each pool submodule exposes its table DDL as an idempotent `init_migration_tables`; the
-//! corresponding `schemerz` migration in `crate::wallet::init::migrations` (for Orchard ->
-//! Ironwood, `orchard_ironwood_migration_tables`) runs that DDL inside the wallet schema, so the
-//! pool-migration tables live in the same `wallet.db` and share its schema versioning.
+//! The pool-migration tables live in the same `wallet.db` as everything else and share its schema
+//! versioning: a `schemerz` migration in `crate::wallet::init::migrations` (for Orchard ->
+//! Ironwood, `orchard_ironwood_migration_tables`) creates them, and later migrations evolve them.
+//!
+//! Each pool submodule also exposes its tables' CURRENT shape as an idempotent
+//! `init_migration_tables`. That is the shape a wallet has once every migration has run — not the
+//! DDL any released migration executes, since a published migration's effect on an existing
+//! database must not change when the schema does. A pool whose creating migration has not shipped
+//! yet can be created from it directly.
 //!
 //! # Reorgs
 //!
