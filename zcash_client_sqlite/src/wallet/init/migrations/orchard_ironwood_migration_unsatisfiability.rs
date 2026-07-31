@@ -11,14 +11,22 @@
 //!
 //! `spend_nullifiers` caches the nullifiers of each transaction's REAL spends — the
 //! deferred-witness actions; the padded dummy spends carry their own witnesses (ZIP 374) — as a
-//! concatenation of 32-byte values in action order. The cache is derivable from the stored PCZT
-//! bytes, but the pool-migration state machine reads it through the store precisely so it never
+//! concatenation of 32-byte values in action order. The cache is derivable from a not-yet-proven
+//! stored PCZT, but the pool-migration state machine reads it through the store precisely so it never
 //! has to parse a PCZT (in the engine crate, `pczt` parsing is `orchard`-gated while the state
 //! machine is feature-free). Existing rows therefore must satisfy the same invariant the store's
 //! write path maintains, so this migration derives the cache for them by parsing each row's
 //! stored PCZT — using the base `pczt` data model, which needs no protocol feature. A stored
 //! PCZT that does not parse is corrupt state and fails the migration, matching how the store's
-//! read paths reject data they cannot reconstruct.
+//! read paths reject data they cannot reconstruct. So does a not-yet-`mined` row whose PCZT
+//! parses but yields NO real spends: that is the shape of a PROVEN PCZT (proving installs the
+//! deferred witnesses), from which the cache can no longer be reconstructed. A `mined` row with
+//! such bytes is exempt and keeps an empty cache — hard-failing it would block every wallet
+//! whose migration already completed, for no benefit while the row stays mined. The exemption
+//! carries a residual hazard: mined-ness is chain-derived and revocable, so a chain rewind that
+//! demotes such a row returns it to the watched set with an empty cache, which satisfiability
+//! consumers must treat as loud corruption (the real spends were never identifiable), never as
+//! a transaction with no inputs to observe.
 //!
 //! `replan_threshold` is the integer percent of planned transfer value, unsatisfiable, above which
 //! a migration is re-planned immediately rather than after satisfiable work drains — stamped on
@@ -110,21 +118,45 @@ impl RusqliteMigration for Migration {
                     ADD COLUMN spend_nullifiers BLOB NOT NULL DEFAULT X'';",
             )?;
 
-            // Backfill the nullifier cache for every existing row from its stored PCZT. No row is
-            // left at the empty default: an empty cache on a transaction that HAS real spends
-            // would read as "no inputs to observe" to the unsatisfiability machinery, silently
-            // exempting the transaction from detection.
-            let rows: Vec<(i64, u32, Vec<u8>)> = {
+            // Backfill the nullifier cache for every existing row from its stored PCZT. No
+            // non-`mined` row is left at the empty default: an empty cache on a transaction that
+            // HAS real spends would read as "no inputs to observe" to the unsatisfiability
+            // machinery, silently exempting the transaction from detection.
+            let rows: Vec<(i64, u32, Vec<u8>, String)> = {
                 let mut stmt = transaction.prepare(
-                    "SELECT migration_id, tx_id, pczt FROM orchard_ironwood_migration_transactions",
+                    "SELECT migration_id, tx_id, pczt, state
+                       FROM orchard_ironwood_migration_transactions",
                 )?;
                 let mapped = stmt.query_map([], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get::<_, Vec<u8>>(2)?))
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                        row.get(3)?,
+                    ))
                 })?;
                 mapped.collect::<Result<_, _>>()?
             };
-            for (migration_id, tx_id, pczt_bytes) in rows {
+            for (migration_id, tx_id, pczt_bytes, state) in rows {
                 let spend_nullifiers = real_spend_nullifiers(&pczt_bytes)?;
+                // An empty extraction means the stored bytes are a PROVEN PCZT: every built
+                // migration PCZT defers at least one real spend's witness, and proving is what
+                // installs them all. The cache cannot be reconstructed from such bytes, which is
+                // fatal for any row the unsatisfiability machinery still watches. A `mined` row
+                // alone is exempt and keeps the empty cache — hard-failing it would block every
+                // completed-migration wallet for no benefit — at the cost that a chain rewind
+                // demoting the row leaves it watched with an empty cache, which downstream
+                // satisfiability machinery must treat as loud corruption rather than vacuous
+                // satisfiability.
+                if spend_nullifiers.is_empty() && state != "mined" {
+                    return Err(WalletMigrationError::CorruptedData(format!(
+                        "pool-migration transaction (migration {migration_id}, tx {tx_id}, \
+                         state '{state}') stores a PCZT whose real spends are no longer \
+                         identifiable (proven bytes, or deeper corruption); this state was \
+                         persisted before the nullifier cache existed, and the migration cannot \
+                         be resumed: the remaining balance must be re-planned"
+                    )));
+                }
                 transaction.execute(
                     "UPDATE orchard_ironwood_migration_transactions
                         SET spend_nullifiers = :spend_nullifiers
@@ -249,16 +281,16 @@ mod tests {
         .unwrap()
     }
 
-    /// Insert a pre-fix transactions row carrying `pczt` (a transfer in the `signed` state; the
+    /// Insert a pre-fix transactions row carrying `pczt`, a transfer in the given `state` (the
     /// other columns are immaterial to the backfill).
-    fn insert_pre_fix_row(conn: &Connection, tx_id: u32, pczt: &[u8]) {
+    fn insert_pre_fix_row(conn: &Connection, tx_id: u32, pczt: &[u8], state: &str) {
         conn.execute(
             "INSERT INTO orchard_ironwood_migration_transactions (
                 migration_id, tx_id, kind, kind_crossing, pczt, scheduled_height, expiry_height,
                 state
              )
-             VALUES (1, :tx_id, 'transfer', 0, :pczt, 200, 240, 'signed')",
-            named_params![":tx_id": tx_id, ":pczt": pczt],
+             VALUES (1, :tx_id, 'transfer', 0, :pczt, 200, 240, :state)",
+            named_params![":tx_id": tx_id, ":pczt": pczt, ":state": state],
         )
         .unwrap();
     }
@@ -287,7 +319,7 @@ mod tests {
     fn an_unparseable_stored_pczt_fails_the_migration() {
         let mut conn = Connection::open_in_memory().unwrap();
         create_pre_fix_table(&conn);
-        insert_pre_fix_row(&conn, 0, &[1, 2, 3]);
+        insert_pre_fix_row(&conn, 0, &[1, 2, 3], "signed");
 
         let tx = conn.transaction().unwrap();
         let result = RusqliteMigration::up(&Migration, &tx);
@@ -353,13 +385,10 @@ mod tests {
         );
     }
 
-    /// The upgrade path with data: a row whose `pczt` column holds a REAL serialized migration
-    /// transfer is backfilled with exactly its real spend's nullifier — the padding dummy spend
-    /// (which carries its own witness) contributes nothing — and `unsatisfiable_at` starts out
-    /// `NULL` (no spent-input observation stands).
+    /// A REAL serialized migration transfer (built by `zcash_pool_migration`'s builder against a
+    /// local network with NU6.3 active), paired with its one real spend's nullifier.
     #[cfg(feature = "orchard")]
-    #[test]
-    fn backfills_real_spend_nullifiers_from_the_stored_pczt() {
+    fn built_transfer_pczt() -> (Vec<u8>, [u8; 32]) {
         use orchard::keys::{FullViewingKey, Scope, SpendingKey};
         use orchard::note::{Note, NoteVersion, RandomSeed, Rho};
         use orchard::value::NoteValue;
@@ -431,7 +460,7 @@ mod tests {
         let crossing = 100_000_000u64;
         let fee = 3 * MARGINAL_FEE.into_u64();
         let note = note_owned_by(&fvk, crossing + fee);
-        let expected_nullifier = note.nullifier(&fvk).to_bytes();
+        let nullifier = note.nullifier(&fvk).to_bytes();
 
         let pczt = build_transfer_pczt(
             &network,
@@ -445,6 +474,53 @@ mod tests {
         )
         .expect("the self-funding note builds a balanced transfer");
         let pczt_bytes = pczt.serialize().expect("a built PCZT serializes");
+        (pczt_bytes, nullifier)
+    }
+
+    /// The PROVEN shape of a built migration PCZT: every deferred spend witness installed, which
+    /// is the structural effect proving has on the stored bytes, so the deferred-witness rule no
+    /// longer identifies any real spend. The paths are arbitrary (single-leaf trees); nothing
+    /// under test inspects them.
+    #[cfg(feature = "orchard")]
+    fn proven_shaped(pczt_bytes: &[u8]) -> Vec<u8> {
+        use incrementalmerkletree::{Hashable, Level};
+        use orchard::tree::{MerkleHashOrchard, MerklePath};
+
+        let parsed = pczt::Pczt::parse(pczt_bytes).expect("the built PCZT parses");
+        let deferred: Vec<usize> = parsed
+            .orchard()
+            .actions()
+            .iter()
+            .enumerate()
+            .filter(|(_, action)| action.spend().witness().is_none())
+            .map(|(index, _)| index)
+            .collect();
+        assert!(
+            !deferred.is_empty(),
+            "a built migration PCZT defers its real spends' witnesses"
+        );
+        let witnesses = deferred.into_iter().map(|index| {
+            let auth_path = core::array::from_fn(|level| {
+                MerkleHashOrchard::empty_root(Level::from(level as u8))
+            });
+            (index, MerklePath::from_parts(0, auth_path))
+        });
+        pczt::roles::updater::Updater::new(parsed)
+            .set_orchard_spend_witnesses(witnesses)
+            .expect("the witnesses install on the deferred spends")
+            .finish()
+            .serialize()
+            .expect("the proven-shaped PCZT serializes")
+    }
+
+    /// The upgrade path with data: a row whose `pczt` column holds a REAL serialized migration
+    /// transfer is backfilled with exactly its real spend's nullifier — the padding dummy spend
+    /// (which carries its own witness) contributes nothing — and `unsatisfiable_at` starts out
+    /// `NULL` (no spent-input observation stands).
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn backfills_real_spend_nullifiers_from_the_stored_pczt() {
+        let (pczt_bytes, expected_nullifier) = built_transfer_pczt();
 
         // The bundle carries more spends than the one real one (the padding dummy at least), so
         // the exact-32-byte assertion below is load-bearing for the witness filter.
@@ -454,7 +530,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         create_pre_fix_table(&conn);
         create_pre_fix_migrations_table(&conn);
-        insert_pre_fix_row(&conn, 0, &pczt_bytes);
+        insert_pre_fix_row(&conn, 0, &pczt_bytes, "signed");
 
         let tx = conn.transaction().unwrap();
         RusqliteMigration::up(&Migration, &tx).unwrap();
@@ -470,5 +546,56 @@ mod tests {
             .unwrap();
         assert_eq!(unsatisfiable_at, None);
         assert_eq!(spend_nullifiers, expected_nullifier.to_vec());
+    }
+
+    /// A not-yet-mined row whose stored PCZT is already PROVEN — every spend witness installed,
+    /// the shape `proved` and `broadcast` rows have once the proving flow has run — fails the
+    /// migration loudly: the deferred-witness rule extracts nothing from proven bytes, so the
+    /// nullifier cache cannot be reconstructed, and writing it empty would silently exempt the
+    /// transaction from unsatisfiability detection.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn a_proven_pczt_on_a_non_mined_row_fails_the_migration() {
+        let (pczt_bytes, _) = built_transfer_pczt();
+        let proven = proven_shaped(&pczt_bytes);
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_pre_fix_table(&conn);
+        insert_pre_fix_row(&conn, 0, &proven, "broadcast");
+
+        let tx = conn.transaction().unwrap();
+        let result = RusqliteMigration::up(&Migration, &tx);
+        assert!(matches!(
+            result,
+            Err(WalletMigrationError::CorruptedData(_))
+        ));
+    }
+
+    /// The same proven bytes on a `mined` row are exempt: the transaction is terminal, so no
+    /// satisfiability question remains for the cache to answer, and the row keeps the empty
+    /// cache.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn a_proven_pczt_on_a_mined_row_keeps_the_empty_cache() {
+        let (pczt_bytes, _) = built_transfer_pczt();
+        let proven = proven_shaped(&pczt_bytes);
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        create_pre_fix_table(&conn);
+        create_pre_fix_migrations_table(&conn);
+        insert_pre_fix_row(&conn, 0, &proven, "mined");
+
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(&Migration, &tx).unwrap();
+        tx.commit().unwrap();
+
+        let spend_nullifiers: Vec<u8> = conn
+            .query_row(
+                "SELECT spend_nullifiers FROM orchard_ironwood_migration_transactions",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(spend_nullifiers.is_empty());
     }
 }
