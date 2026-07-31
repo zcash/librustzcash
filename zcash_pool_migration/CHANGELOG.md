@@ -45,6 +45,13 @@ and this library adheres to Rust's notion of
   `engine::commit_preparation_with_funding` entry points each take a further
   `engine::ReplanThreshold` parameter, stamped on the committed migration.
 
+### Fixed
+- `engine::rebuild_expired_transfer` and
+  `engine::rebuild_expired_transfer_unsigned` no longer fail for a transfer
+  that was proved or broadcast before it expired; the rebuild now identifies
+  the funding note from the persisted real-spend nullifier cache instead of
+  the stored (by then proven) PCZT.
+
 ## [0.1.0-rc.5] - 2026-07-29
 
 ### Changed

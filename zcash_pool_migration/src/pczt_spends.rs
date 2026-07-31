@@ -6,7 +6,9 @@
 //! wallet adapter's prover (which resolves the spends to tree positions) and by commit-time
 //! extraction of [`MigrationTransaction::spend_nullifiers`]; the `zcash_client_sqlite` schema
 //! migration that backfills the cache for pre-existing rows mirrors the same rule, anchored there
-//! by a test against a builder-produced PCZT.
+//! by a test against a builder-produced PCZT. The rule identifies nothing in a PROVEN PCZT —
+//! proving installs the deferred witnesses — so post-commit consumers read the persisted cache
+//! and never re-derive the real spends from stored bytes.
 //!
 //! [`MigrationTransaction::spend_nullifiers`]: crate::engine::MigrationTransaction::spend_nullifiers
 
