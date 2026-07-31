@@ -90,6 +90,18 @@ impl PoolMigrationRead for MigrationTestStore {
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         Ok(self.state.clone())
     }
+
+    fn check_step_satisfiability(
+        &self,
+        _tx: &engine::MigrationTransaction,
+        _settle: engine::ReorgSettleDepth,
+    ) -> Result<engine::StepSatisfiability, Self::Error> {
+        // Not exercised: the chain simulation drives proving through the engine's free functions
+        // and never consults the satisfiability oracle.
+        Ok(engine::StepSatisfiability::Satisfiable {
+            as_of: BlockHeight::from_u32(0),
+        })
+    }
 }
 
 impl PoolMigrationWrite for MigrationTestStore {

@@ -17,7 +17,8 @@ use zcash_client_backend::{
     data_api::anchor_retention::AnchorRetentionInterval, wallet::LockOwner,
 };
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationState, MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
+    PoolMigrationWrite, ReorgSettleDepth, StepSatisfiability,
 };
 
 use crate::{AccountRef, AccountUuid, error::SqliteClientError};
@@ -38,6 +39,11 @@ static TABLES: Tables = Tables {
     transaction_deps: "orchard_ironwood_migration_transaction_deps",
     tx_due_index: "idx_orchard_ironwood_migration_tx_due",
     account_index: "idx_orchard_ironwood_migrations_account",
+    // The wallet-owned tables of the migration's SOURCE pool (Orchard), queried by the
+    // satisfiability oracle but never created here.
+    source_notes: "orchard_received_notes",
+    source_note_spends: "orchard_received_note_spends",
+    source_note_spends_note_fk: "orchard_received_note_id",
 };
 
 /// Create the Orchard -> Ironwood pool-migration tables (and the due-transaction and account
@@ -128,6 +134,14 @@ impl<C: Borrow<Connection>> PoolMigrationRead for PoolMigrations<C> {
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         self.0.get_migration()
+    }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.0.check_step_satisfiability(tx, settle)
     }
 }
 
@@ -301,6 +315,403 @@ mod retention_follows_the_committed_migration {
                 .expect("reads the migration")
                 .is_some(),
             "the migration is still recorded",
+        );
+    }
+}
+
+/// The satisfiability oracle over a REAL wallet database: each cached real-spend nullifier is
+/// answered from the wallet's Orchard note and note-spend tables, expiry from the fully-scanned
+/// height, and an empty nullifier cache on a non-mined row is corruption. The wallet fixture
+/// scans a genuine received note, so the nullifier under test is one the production scanner
+/// recorded, not a hand-computed stand-in.
+#[cfg(all(test, feature = "orchard"))]
+mod check_step_satisfiability {
+    use rusqlite::named_params;
+
+    use zcash_client_backend::data_api::testing::{
+        AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+    };
+    use zcash_client_backend::data_api::{Account as _, WalletRead};
+    use zcash_pool_migration::engine::{
+        MigrationTransaction, MigrationTransferId, MigrationTxKind, MigrationTxState,
+        PoolMigrationRead, ReorgSettleDepth, StepSatisfiability, UnsatisfiableCause,
+    };
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::TxId;
+    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::local_consensus::LocalNetwork;
+    use zcash_protocol::value::Zatoshis;
+
+    use super::{Error, PoolMigrations};
+    use crate::AccountUuid;
+    use crate::testing::{BlockCache, db::TestDb, db::TestDbFactory};
+
+    /// An arbitrary settle depth: the store does not yet consult it (anchor-validity
+    /// observations await the reorg bookkeeping), so its value is immaterial here.
+    const SETTLE: ReorgSettleDepth = ReorgSettleDepth(10);
+
+    /// A wallet with one scanned Orchard note, assembled by [`scanned_note_fixture`].
+    struct ScannedNoteFixture {
+        /// The test state holding the wallet.
+        st: TestState<BlockCache, TestDb, LocalNetwork>,
+        /// The account that received the note.
+        account: AccountUuid,
+        /// A SECOND account's UUID when requested (same seed, next ZIP 32 index — created
+        /// BEFORE anything is scanned, since account creation adjusts the scan queue and would
+        /// clear the fully-scanned height afterwards).
+        second_account: Option<AccountUuid>,
+        /// The note's nullifier, exactly as the scanner recorded it.
+        nf: [u8; 32],
+        /// The wallet's fully-scanned height: the observation basis every answer must carry.
+        as_of: BlockHeight,
+    }
+
+    fn scanned_note_fixture(with_second_account: bool) -> ScannedNoteFixture {
+        use secrecy::{ExposeSecret, SecretVec};
+        use zcash_client_backend::data_api::WalletWrite;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        let second_account = with_second_account.then(|| {
+            let seed = SecretVec::new(st.test_seed().expect("a seed").expose_secret().clone());
+            let birthday = st
+                .test_account()
+                .expect("the test account exists")
+                .birthday()
+                .clone();
+            st.wallet_mut()
+                .create_account("", &seed, &birthday, None)
+                .expect("creates a second account")
+                .0
+        });
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        // The first generated block sits AT the account birthday, so scanning contiguously from
+        // it leaves the wallet fully scanned to the last scanned height.
+        let (h, _, _) = st.generate_next_block(
+            &fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(100_000),
+        );
+        st.scan_cached_blocks(h, 1);
+        let (h2, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h2, 1);
+        let as_of = st
+            .wallet()
+            .block_fully_scanned()
+            .expect("reads the fully-scanned block")
+            .expect("the wallet is fully scanned")
+            .block_height();
+        assert_eq!(as_of, h2, "the wallet is fully scanned to the last block");
+        let nf: [u8; 32] = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT nf FROM orchard_received_notes WHERE nf IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("the scanned note has a recorded nullifier");
+        ScannedNoteFixture {
+            st,
+            account: account_id,
+            second_account,
+            nf,
+            as_of,
+        }
+    }
+
+    /// [`scanned_note_fixture`] without the second account (the common case).
+    fn wallet_with_scanned_note() -> (
+        TestState<BlockCache, TestDb, LocalNetwork>,
+        AccountUuid,
+        [u8; 32],
+        BlockHeight,
+    ) {
+        let ScannedNoteFixture {
+            st,
+            account,
+            nf,
+            as_of,
+            ..
+        } = scanned_note_fixture(false);
+        (st, account, nf, as_of)
+    }
+
+    /// A pre-signed transfer caching `nfs` as its real-spend nullifiers, in the `Signed` state,
+    /// with expiry height `expiry` (`0` disables expiry, per ZIP 203).
+    fn transfer(nfs: Vec<[u8; 32]>, expiry: u32) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(expiry),
+            None,
+            MigrationTxState::Signed,
+            None,
+            None,
+            nfs,
+        )
+    }
+
+    /// Record a spend of the note with nullifier `nf` by a new transaction whose mined height is
+    /// `mined_height` (`None` for a recorded-but-unmined spender), directly in the wallet
+    /// tables: the oracle reads only the spend join and the spender's mined height, so nothing
+    /// requires a fully-formed spending transaction.
+    fn record_spend(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        nf: [u8; 32],
+        mined_height: Option<BlockHeight>,
+    ) {
+        let conn = st.wallet_mut().conn_mut();
+        conn.execute(
+            "INSERT INTO transactions (txid, mined_height, min_observed_height)
+             VALUES (:txid, :mined_height, :min_observed_height)",
+            named_params! {
+                ":txid": [0x5Au8; 32],
+                ":mined_height": mined_height.map(u32::from),
+                // An arbitrary observation height; the constraint only requires it at or below
+                // the mined height when one exists.
+                ":min_observed_height": mined_height.map_or(1, u32::from),
+            },
+        )
+        .expect("inserts the spending transaction");
+        let tx_ref = conn.last_insert_rowid();
+        let spends = conn
+            .execute(
+                "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
+                 SELECT id, :tx_ref FROM orchard_received_notes WHERE nf = :nf",
+                named_params! {":tx_ref": tx_ref, ":nf": nf},
+            )
+            .expect("records the spend");
+        assert_eq!(
+            spends, 1,
+            "exactly the one note with this nullifier is spent"
+        );
+    }
+
+    #[test]
+    fn known_unspent_inputs_are_satisfiable() {
+        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
+    }
+
+    #[test]
+    fn a_mined_spend_marks_inputs_spent() {
+        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        record_spend(&mut st, nf, Some(as_of));
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![nf]
+                },
+                as_of,
+            },
+            "the answer carries exactly the spent nullifier",
+        );
+    }
+
+    /// Spend evidence recorded AHEAD of the scanned region does not obstruct yet: a mark's
+    /// evidence must lie at or below the `as_of` backing it, because reorg truncation clears
+    /// marks by their stamped height — evidence at height <= `as_of` guarantees a rollback of
+    /// the evidence forces a truncation below the mark, so no false mark can survive. Once
+    /// scanning catches up to the evidence, the same stored state obstructs.
+    #[test]
+    fn evidence_ahead_of_the_scanned_region_does_not_obstruct_yet() {
+        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        // Transaction-status polling can record a spender's mined height before scanning
+        // reaches it: the spender sits one block above the fully-scanned height.
+        record_spend(&mut st, nf, Some(as_of + 1));
+        {
+            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+                .expect("the account exists");
+            assert_eq!(
+                store
+                    .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                    .expect("the oracle answers"),
+                StepSatisfiability::Satisfiable { as_of },
+                "evidence above the scanned region must not obstruct yet",
+            );
+        }
+        // Scan past the spender's height; the evidence now lies inside the scanned region.
+        let (h3, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h3, 1);
+        assert_eq!(h3, as_of + 1, "the next block is the spender's height");
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![nf]
+                },
+                as_of: h3,
+            },
+        );
+    }
+
+    /// A recorded but UNMINED spender does not obstruct: the pre-signed transaction and the
+    /// recorded spender are then merely competing for the note, and only a mined spend is the
+    /// definitive on-chain fact.
+    #[test]
+    fn an_unmined_spend_does_not_obstruct() {
+        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        record_spend(&mut st, nf, None);
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
+    }
+
+    #[test]
+    fn an_unknown_nullifier_is_not_yet_satisfiable() {
+        let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![[0xEE; 32]], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::NotYetSatisfiable { as_of },
+        );
+    }
+
+    /// Expiry is judged at the next block a mined observation could extend (`as_of + 1`),
+    /// mirroring the engine's `is_expired`: an expiry AT the fully-scanned height can no longer
+    /// mine, one just above it still can.
+    #[test]
+    fn expiry_is_judged_at_the_next_block() {
+        let (mut st, account, nf, as_of) = wallet_with_scanned_note();
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of)), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::Expired,
+                as_of,
+            },
+        );
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of) + 1), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
+    }
+
+    /// An empty nullifier cache on a non-mined row is CORRUPTION, never vacuous satisfiability:
+    /// every validly committed transaction caches its real-spend nullifiers. The wallet here has
+    /// scanned NOTHING (no fully-scanned height at all): corruption needs no chain state, so it
+    /// is reported ahead of [`Error::ChainStateUnavailable`], never masked by it.
+    #[test]
+    fn an_empty_cache_on_a_signed_row_is_corrupt() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        assert!(
+            st.wallet()
+                .block_fully_scanned()
+                .expect("reads the fully-scanned block")
+                .is_none(),
+            "nothing is scanned, so no chain state backs an observation",
+        );
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert!(matches!(
+            store.check_step_satisfiability(&transfer(Vec::new(), 0), SETTLE),
+            Err(Error::Corrupt("spend_nullifiers")),
+        ));
+    }
+
+    /// A MINED row is exempt from the nullifier backfill, so its empty cache is not corruption:
+    /// the oracle answers (vacuously satisfiable over zero observations — a mined transaction's
+    /// disposition no longer turns on its inputs) rather than erroring.
+    #[test]
+    fn a_mined_row_with_an_empty_cache_answers() {
+        let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
+        let mined = MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            MigrationTxState::Mined {
+                txid: TxId::from_bytes([9; 32]),
+                height: as_of,
+            },
+            None,
+            None,
+            Vec::new(),
+        );
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&mined, SETTLE)
+                .expect("the oracle answers rather than erroring"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
+    }
+
+    /// The observations are scoped to the store's account: the same nullifier, asked about
+    /// through a DIFFERENT account's store over the same wallet database, reads as `Unknown`
+    /// (that account has seen no such note), so the answer is not-yet-satisfiable rather than
+    /// anything derived from another account's notes.
+    #[test]
+    fn observations_are_scoped_to_the_stores_account() {
+        let ScannedNoteFixture {
+            mut st,
+            second_account,
+            nf,
+            as_of,
+            ..
+        } = scanned_note_fixture(true);
+        let other_account = second_account.expect("the fixture created a second account");
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), other_account)
+            .expect("the second account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::NotYetSatisfiable { as_of },
         );
     }
 }
@@ -547,6 +958,93 @@ mod tests {
             .replace_migration(&state)
             .expect_err("an empty layer cannot be persisted");
         assert!(matches!(err, Error::Unrepresentable(_)));
+    }
+
+    /// A minimal committed migration holding one signed transfer with a one-entry nullifier
+    /// cache, for tests that corrupt its stored row directly.
+    fn single_transfer_state() -> zcash_pool_migration::engine::MigrationState {
+        use zcash_pool_migration::denomination::DenominationPlan;
+        use zcash_pool_migration::engine::{
+            MigrationState, MigrationStatus, MigrationTransaction, MigrationTxKind, ReplanThreshold,
+        };
+        use zcash_pool_migration::preparation::PreparationPlan;
+        use zcash_protocol::consensus::BlockHeight;
+        use zcash_protocol::value::Zatoshis;
+
+        let denominations = DenominationPlan::from_stored_parts(
+            Vec::new(),
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+        )
+        .expect("an empty stored plan reconstructs");
+        MigrationState::from_parts(
+            MigrationStatus::Committed,
+            denominations,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![MigrationTransaction::from_parts(
+                MigrationTransferId::new(0),
+                MigrationTxKind::Transfer { crossing: 0 },
+                vec![1, 2, 3],
+                Vec::new(),
+                BlockHeight::from_u32(100),
+                BlockHeight::from_u32(200),
+                None,
+                MigrationTxState::Signed,
+                None,
+                None,
+                vec![[7u8; 32]],
+            )],
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        )
+    }
+
+    /// A stored `spend_nullifiers` blob whose length is not a multiple of the 32-byte nullifier
+    /// stride cannot have been written by this store; reading it back is corruption, never a
+    /// silently truncated cache.
+    #[test]
+    fn ragged_spend_nullifiers_blob_is_corrupt() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(&mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        conn.execute(
+            "UPDATE orchard_ironwood_migration_transactions SET spend_nullifiers = X'0102030405'",
+            [],
+        )
+        .expect("corrupts the stored blob");
+        let err = PoolMigrations::for_account(&conn, account)
+            .expect("account exists")
+            .get_migration()
+            .expect_err("a ragged blob must not decode");
+        assert!(matches!(err, Error::Corrupt("spend_nullifiers")));
+    }
+
+    /// A stored `replan_threshold` above 100 names no valid percent; reading it back is
+    /// corruption, never a silently clamped policy.
+    #[test]
+    fn replan_threshold_above_100_is_corrupt() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(&mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        conn.execute(
+            "UPDATE orchard_ironwood_migrations SET replan_threshold = 101",
+            [],
+        )
+        .expect("corrupts the stored threshold");
+        let err = PoolMigrations::for_account(&conn, account)
+            .expect("account exists")
+            .get_migration()
+            .expect_err("an out-of-range threshold must not decode");
+        assert!(matches!(err, Error::Corrupt("replan_threshold")));
     }
 
     /// Deleting an account cascades to its in-progress migration: the `account_id` foreign key

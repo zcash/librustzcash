@@ -21,7 +21,9 @@
 //! [`Error::Unrepresentable`]). Likewise the funding-note values have no table: the engine derives
 //! them from the denomination plan (each crossing value plus the fee buffer).
 //!
-//! The column set is the same for every pool; only the table and index names change.
+//! The column set is the same for every pool; only the table and index names change (plus, for
+//! the wallet-owned source-pool note tables the satisfiability oracle queries, the per-pool name
+//! of the note-spends junction's note-reference column).
 //!
 //! [`PoolMigrationRead`]: zcash_pool_migration::engine::PoolMigrationRead
 //! [`PoolMigrationWrite`]: zcash_pool_migration::engine::PoolMigrationWrite
@@ -35,8 +37,9 @@ use rusqlite::{Connection, OptionalExtension, named_params, params};
 use zcash_client_backend::wallet::LockOwner;
 use zcash_pool_migration::denomination::DenominationPlan;
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, ReplanThreshold,
+    InputObservation, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+    MigrationTxKind, MigrationTxState, ReorgSettleDepth, ReplanThreshold, StepSatisfiability,
+    classify_input_observations,
 };
 use zcash_pool_migration::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
@@ -71,6 +74,20 @@ pub(crate) struct Tables {
     /// The unique index over `account_id` on the migrations table, enforcing at most one
     /// migration per account.
     pub account_index: &'static str,
+    /// The WALLET's received-note table for the migration's SOURCE pool — the pool whose notes
+    /// the pre-signed transactions spend — holding each scanned note's nullifier in its `nf`
+    /// column. Not created by [`init`]: unlike the tables above, this one belongs to the wallet
+    /// schema, and the store only queries it (for
+    /// [`check_step_satisfiability`](Store::check_step_satisfiability)'s spent-input
+    /// observations).
+    pub source_notes: &'static str,
+    /// The wallet's junction table recording spends of source-pool received notes, joining note
+    /// rows to the wallet's `transactions` table. Like `source_notes`, queried but never created
+    /// here.
+    pub source_note_spends: &'static str,
+    /// The `source_note_spends` column referencing a `source_notes` row's `id` (the wallet
+    /// schema names it per pool, so it cannot be interpolated from the table name).
+    pub source_note_spends_note_fk: &'static str,
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +305,19 @@ impl<C: Borrow<Connection>> Store<C> {
     /// lock).
     pub(crate) fn migration_lock_owners(&self) -> Result<BTreeSet<LockOwner>, Error> {
         read_lock_owners(self.conn.borrow(), self.tables, self.account_id)
+    }
+
+    /// Report whether the wallet's chain view obstructs `tx`, per
+    /// [`PoolMigrationRead::check_step_satisfiability`]'s contract.
+    ///
+    /// [`PoolMigrationRead::check_step_satisfiability`]:
+    ///     zcash_pool_migration::engine::PoolMigrationRead::check_step_satisfiability
+    pub(crate) fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Error> {
+        check_step_satisfiability(self.conn.borrow(), self.tables, self.account_id, tx, settle)
     }
 }
 
@@ -747,6 +777,8 @@ struct TxRow {
     /// `FromSql` impl errors cleanly (`InvalidBlobSize`) if a non-NULL blob is not exactly 32
     /// bytes, so a corrupt row is rejected rather than silently truncated or panicking.
     lock_owner: Option<[u8; 32]>,
+    /// The chain height backing a spent-input observation, when the transaction has been
+    /// determined unsatisfiable; `NULL` while no such determination stands.
     unsatisfiable_at: Option<u32>,
     /// The concatenated real-spend nullifiers, still one undivided blob here; the decode step
     /// splits it at its fixed 32-byte stride and rejects any other length as corrupt.
@@ -771,6 +803,101 @@ fn read_deps(
         out.push(MigrationTransferId::new(r?));
     }
     Ok(out)
+}
+
+/// Report whether the wallet's chain view obstructs the pre-signed transaction `tx`, observed at
+/// the wallet's fully-scanned height: each cached real-spend nullifier is looked up in the source
+/// pool's received-note table (scoped to the store's account), a spend recorded in a transaction
+/// MINED within the scanned region reads as [`SeenSpent`](InputObservation::SeenSpent), a known
+/// note without one as [`Unspent`](InputObservation::Unspent), and an unrecognized nullifier as
+/// [`Unknown`](InputObservation::Unknown); the observations, plus the transaction-level expiry
+/// judgment, then compose through [`classify_input_observations`].
+///
+/// Anchor-validity observations ([`InputObservation::Invalidated`], and the transaction-level
+/// `AnchorInvalidated` answer for a broadcast-unmined transaction, which is what `settle` would
+/// judge) require the reorg bookkeeping this store does not yet consult; until then a
+/// dead-anchored creator reads as still viable (`Unknown`), which errs toward
+/// `NotYetSatisfiable` — never toward a false mark.
+fn check_step_satisfiability(
+    conn: &Connection,
+    t: &Tables,
+    account_id: AccountRef,
+    tx: &MigrationTransaction,
+    _settle: ReorgSettleDepth,
+) -> Result<StepSatisfiability, Error> {
+    // An empty nullifier cache on a non-mined transaction is corruption, never vacuous
+    // satisfiability (see `classify_input_observations`): every validly committed transaction
+    // caches its real-spend nullifiers, and only a mined row is exempt from the backfill.
+    // Checked before anything touches the database: corruption needs no chain state, so a wallet
+    // with nothing scanned still reports it (rather than masking it as
+    // [`Error::ChainStateUnavailable`]).
+    if tx.spend_nullifiers().is_empty() && !matches!(tx.state(), MigrationTxState::Mined { .. }) {
+        return Err(Error::Corrupt("spend_nullifiers"));
+    }
+
+    // Every read — the fully-scanned height and the per-nullifier observations — happens inside
+    // one transaction, so the answer rests on a single database snapshot: a concurrent scan
+    // cannot advance the scan queue between the `as_of` read and the observations it is supposed
+    // to back. Future anchor-validity observations must join this transaction and apply the same
+    // evidence-height <= `as_of` discipline as the spend lookup below.
+    let view = conn.unchecked_transaction()?;
+
+    let as_of = crate::wallet::fully_scanned_height(&view)?.ok_or(Error::ChainStateUnavailable)?;
+
+    // Per cached nullifier: is the note known, and if so, has the wallet seen it spent in a
+    // transaction MINED at or below `as_of`? An unmined recorded spend does not obstruct: the
+    // pre-signed transaction and the recorded spender are then merely competing for the note.
+    //
+    // The `mined_height <= as_of` bound is the invariant that keeps unsatisfiability marks
+    // honest: a mark's evidence must lie inside the scanned region backing `as_of`, because
+    // reorg truncation clears marks whose `unsatisfiable_at` exceeds the truncation height — so
+    // evidence at height <= `as_of` guarantees that a rollback of the evidence forces a
+    // truncation below the mark's stamp, and no false mark can survive. Evidence ABOVE `as_of`
+    // (possible when transaction-status polling records a mined height ahead of scanning) must
+    // not obstruct yet; it reads as `Unspent` until scanning catches up.
+    let mut stmt = view.prepare(&format!(
+        "SELECT EXISTS (
+             SELECT 1 FROM {spends} s
+             JOIN transactions ON transactions.id_tx = s.transaction_id
+             WHERE s.{note_fk} = rn.id AND transactions.mined_height <= :as_of
+         )
+         FROM {notes} rn
+         WHERE rn.nf = :nf AND rn.account_id = :account_id",
+        spends = t.source_note_spends,
+        note_fk = t.source_note_spends_note_fk,
+        notes = t.source_notes,
+    ))?;
+    let mut observations = Vec::with_capacity(tx.spend_nullifiers().len());
+    for nf in tx.spend_nullifiers() {
+        let seen_spent: Option<bool> = stmt
+            .query_row(
+                named_params! {
+                    ":nf": nf,
+                    ":account_id": account_id.0,
+                    ":as_of": u32::from(as_of),
+                },
+                |row| row.get(0),
+            )
+            .optional()?;
+        let observation = match seen_spent {
+            None => InputObservation::Unknown,
+            Some(false) => InputObservation::Unspent,
+            Some(true) => InputObservation::SeenSpent,
+        };
+        observations.push((*nf, observation));
+    }
+    drop(stmt);
+    view.commit()?;
+
+    // Expiry is judged at the next block the transaction could be mined in (`as_of + 1`),
+    // mirroring the engine's `MigrationState::is_expired` exactly: an `expiry_height` of 0
+    // disables expiry, and a mined transaction is never expired.
+    let expiry = u32::from(tx.expiry_height());
+    let expired = !matches!(tx.state(), MigrationTxState::Mined { .. })
+        && expiry != 0
+        && expiry <= u32::from(as_of);
+
+    Ok(classify_input_observations(as_of, expired, &observations))
 }
 
 // ---------------------------------------------------------------------------

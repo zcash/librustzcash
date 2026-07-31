@@ -3372,60 +3372,68 @@ pub(crate) fn block_metadata<P: consensus::Parameters>(
     .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
 }
 
+/// Returns the height to which the wallet is FULLY scanned (every block from the wallet birthday
+/// through it has been scanned), or `None` if no contiguous scanned range reaches down to the
+/// birthday (including for a wallet with no accounts). This is the height-only computation behind
+/// [`block_fully_scanned`], separated so callers that need no block metadata (and hold no network
+/// parameters) can share it rather than replicate it.
+pub(crate) fn fully_scanned_height(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    let Some(birthday_height) = wallet_birthday(conn)? else {
+        return Ok(None);
+    };
+    // We assume that the only way we get a contiguous range of block heights in the `blocks` table
+    // starting with the birthday block, is if all scanning operations have been performed on those
+    // blocks. This holds because the `blocks` table is only altered by `WalletDb::put_blocks` via
+    // `put_block`, and the effective combination of intra-range linear scanning and the nullifier
+    // map ensures that we discover all wallet-related information within the contiguous range.
+    //
+    // We also assume that every contiguous range of block heights in the `blocks` table has a
+    // single matching entry in the `scan_queue` table with priority "Scanned". This requires no
+    // bugs in the scan queue update logic, which we have had before. However, a bug here would
+    // mean that we return a more conservative fully-scanned height, which likely just causes a
+    // performance regression.
+    //
+    // The fully-scanned height is therefore the last height that falls within the first range in
+    // the scan queue with priority "Scanned".
+    let calc_fully_scanned_height = |row: &rusqlite::Row| {
+        let block_range_start = BlockHeight::from_u32(row.get(0)?);
+        let block_range_end = BlockHeight::from_u32(row.get(1)?);
+
+        // If the start of the earliest scanned range is greater than
+        // the birthday height, then there is an unscanned range between
+        // the wallet birthday and that range, so there is no fully
+        // scanned height.
+        Ok(if block_range_start <= birthday_height {
+            // Scan ranges are end-exclusive.
+            Some(block_range_end - 1)
+        } else {
+            None
+        })
+    };
+    Ok(conn
+        .query_row(
+            "SELECT block_range_start, block_range_end
+            FROM scan_queue
+            WHERE priority = :priority
+            ORDER BY block_range_start ASC
+            LIMIT 1",
+            named_params![":priority": priority_code(&ScanPriority::Scanned)],
+            calc_fully_scanned_height,
+        )
+        .optional()?
+        .flatten())
+}
+
 #[tracing::instrument(skip_all)]
 pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
-    if let Some(birthday_height) = wallet_birthday(conn)? {
-        // We assume that the only way we get a contiguous range of block heights in the `blocks` table
-        // starting with the birthday block, is if all scanning operations have been performed on those
-        // blocks. This holds because the `blocks` table is only altered by `WalletDb::put_blocks` via
-        // `put_block`, and the effective combination of intra-range linear scanning and the nullifier
-        // map ensures that we discover all wallet-related information within the contiguous range.
-        //
-        // We also assume that every contiguous range of block heights in the `blocks` table has a
-        // single matching entry in the `scan_queue` table with priority "Scanned". This requires no
-        // bugs in the scan queue update logic, which we have had before. However, a bug here would
-        // mean that we return a more conservative fully-scanned height, which likely just causes a
-        // performance regression.
-        //
-        // The fully-scanned height is therefore the last height that falls within the first range in
-        // the scan queue with priority "Scanned".
-        let calc_fully_scanned_height = |row: &rusqlite::Row| {
-            let block_range_start = BlockHeight::from_u32(row.get(0)?);
-            let block_range_end = BlockHeight::from_u32(row.get(1)?);
-
-            // If the start of the earliest scanned range is greater than
-            // the birthday height, then there is an unscanned range between
-            // the wallet birthday and that range, so there is no fully
-            // scanned height.
-            Ok(if block_range_start <= birthday_height {
-                // Scan ranges are end-exclusive.
-                Some(block_range_end - 1)
-            } else {
-                None
-            })
-        };
-        let fully_scanned_height = match conn
-            .query_row(
-                "SELECT block_range_start, block_range_end
-                FROM scan_queue
-                WHERE priority = :priority
-                ORDER BY block_range_start ASC
-                LIMIT 1",
-                named_params![":priority": priority_code(&ScanPriority::Scanned)],
-                calc_fully_scanned_height,
-            )
-            .optional()?
-        {
-            Some(Some(h)) => h,
-            _ => return Ok(None),
-        };
-
-        block_metadata(conn, params, fully_scanned_height)
-    } else {
-        Ok(None)
+    match fully_scanned_height(conn)? {
+        Some(height) => block_metadata(conn, params, height),
+        None => Ok(None),
     }
 }
 

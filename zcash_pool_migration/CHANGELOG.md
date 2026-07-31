@@ -18,6 +18,17 @@ and this library adheres to Rust's notion of
 - `engine::MigrationState::{replan_threshold, replan_required}`: the accessor
   for the stamped threshold, and the derived determination of whether the
   unsatisfiable share of planned transfer value strictly exceeds it.
+- `engine::ReorgSettleDepth`, the caller-supplied number of blocks the chain
+  must advance past a divergence before a displacement is treated as
+  permanent.
+- `engine::StepSatisfiability` and `engine::UnsatisfiableCause`: a store's
+  answer to whether the environment obstructs a pre-signed transaction —
+  executable now, not yet, or never (and why).
+- `engine::InputObservation` and `engine::classify_input_observations`, the
+  pure fold from per-nullifier observations plus the transaction-level expiry
+  judgment into a `StepSatisfiability`, so every store implementation shares
+  one classification and precedence.
+- `engine::MigrationTransferId` now implements `PartialOrd` and `Ord`.
 
 ### Changed
 - `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
@@ -44,6 +55,16 @@ and this library adheres to Rust's notion of
   `engine::build_preparation_unsigned`, and
   `engine::commit_preparation_with_funding` entry points each take a further
   `engine::ReplanThreshold` parameter, stamped on the committed migration.
+- `engine::PoolMigrationRead` has a new required method,
+  `check_step_satisfiability`: an implementation reports, for each cached
+  real-spend nullifier of the given transaction, whether the note is unspent,
+  seen spent in a mined transaction, known with a dead unmined creator, or
+  unknown — plus the transaction-level expiry judgment and, for a
+  broadcast-unmined transaction, whether its installed anchor survives on the
+  chain judged settled per the supplied `engine::ReorgSettleDepth` — and
+  composes `engine::classify_input_observations` into a
+  `engine::StepSatisfiability`. An empty nullifier cache on a non-mined
+  transaction must surface the store's own error, never an answer.
 
 ### Fixed
 - `engine::rebuild_expired_transfer` and
