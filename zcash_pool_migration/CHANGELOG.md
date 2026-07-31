@@ -39,6 +39,15 @@ and this library adheres to Rust's notion of
   answers as durable `unsatisfiable_at` marks: input-level and anchor-level
   causes mark the checked transaction at the observation's height, and the
   dependency closure marks the dependents stranded behind a dead transaction.
+- `engine::ProveFailure`, a prover's typed failure: an input not among the
+  account's unspent notes (with the nullifier and the fully-scanned height that
+  observation rests on), or any other prover error.
+- `engine::ProveOutcome`, the outcome of a prove attempt the engine handled:
+  proved, not yet provable, or marked unsatisfiable (carrying
+  `replan_required` as it stands after the mark).
+- `wallet::WalletProveError::ScannedHeight`, reported when the wallet's
+  fully-scanned height could not be read and so a spend's absence from the
+  unspent notes could not be classified.
 - `engine::MigrationState::truncate_to_height`, which the consumer calls
   wherever it truncates its wallet on a reorg: clears every unsatisfiability
   mark above the given height, demotes mined transactions above it back to
@@ -96,6 +105,21 @@ and this library adheres to Rust's notion of
   composes `engine::classify_input_observations` into a
   `engine::StepSatisfiability`. An empty nullifier cache on a non-mined
   transaction must surface the store's own error, never an answer.
+- `engine::MigrationProver::{prove_transfer, prove_preparation}` now return
+  `Result<pczt::Pczt, engine::ProveFailure<Self::Error>>`. An implementation
+  reports a spend whose nullifier matches no note in the account's unspent set
+  as `ProveFailure::InputNotAvailable`, carrying that nullifier and the
+  fully-scanned height the absence rests on, and every other failure as
+  `ProveFailure::Other`.
+- `engine::{prove_transfer, prove_preparation}` now return
+  `Result<engine::ProveOutcome, engine::ProveError<..>>`. An input reported
+  unavailable is no longer an error: with every dependency's mined height
+  covered by the wallet's scan it is recorded as a spent-input observation (the
+  transaction is marked unsatisfiable and the dependency closure applied) and
+  answered `ProveOutcome::MarkedUnsatisfiable`, and otherwise
+  `ProveOutcome::NotYetProvable` with no state change. Match on the outcome,
+  and persist the state after `MarkedUnsatisfiable` as after a successful
+  proof.
 
 ### Fixed
 - `engine::rebuild_expired_transfer` and
