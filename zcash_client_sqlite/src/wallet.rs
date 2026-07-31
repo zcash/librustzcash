@@ -6114,51 +6114,44 @@ mod tests {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
-        // Compare both APIs whenever the stock summary is available. Some
-        // LocalNetwork fixtures return `None` for progress until tip/subtree
-        // state is richer; the snapshot path must still agree in that case.
-        let summary = st
-            .wallet()
-            .get_wallet_summary(ConfirmationsPolicy::MIN)
-            .unwrap();
+        // A scanned wallet always has tip + birthday, so the snapshot must be
+        // present even when LocalNetwork progress accounting still returns None.
         let snapshot = st
             .wallet()
             .db()
             .get_wallet_snapshot(ConfirmationsPolicy::MIN)
-            .unwrap();
+            .unwrap()
+            .expect("scanned wallet must have a snapshot");
+        assert_eq!(snapshot.account_balances().len(), 1);
 
-        match (summary, snapshot) {
-            (None, None) => {}
-            (Some(summary), Some(snapshot)) => {
-                assert_eq!(snapshot.account_balances(), summary.account_balances());
-                assert_eq!(snapshot.chain_tip_height(), summary.chain_tip_height());
-                assert_eq!(
-                    snapshot.fully_scanned_height(),
-                    summary.fully_scanned_height()
-                );
-                assert_eq!(
-                    snapshot.next_sapling_subtree_index(),
-                    summary.next_sapling_subtree_index()
-                );
-                assert_eq!(
-                    snapshot.next_orchard_subtree_index(),
-                    summary.next_orchard_subtree_index()
-                );
-                assert_eq!(
-                    snapshot.next_ironwood_subtree_index(),
-                    summary.next_ironwood_subtree_index()
-                );
-                assert_eq!(snapshot.is_synced(), summary.is_synced());
-                assert_eq!(
-                    snapshot.clone().into_wallet_summary(summary.progress()),
-                    summary
-                );
-            }
-            (summary, snapshot) => panic!(
-                "summary/snapshot availability diverged: summary_is_some={} snapshot_is_some={}",
-                summary.is_some(),
-                snapshot.is_some()
-            ),
+        if let Some(summary) = st
+            .wallet()
+            .get_wallet_summary(ConfirmationsPolicy::MIN)
+            .unwrap()
+        {
+            assert_eq!(snapshot.account_balances(), summary.account_balances());
+            assert_eq!(snapshot.chain_tip_height(), summary.chain_tip_height());
+            assert_eq!(
+                snapshot.fully_scanned_height(),
+                summary.fully_scanned_height()
+            );
+            assert_eq!(
+                snapshot.next_sapling_subtree_index(),
+                summary.next_sapling_subtree_index()
+            );
+            assert_eq!(
+                snapshot.next_orchard_subtree_index(),
+                summary.next_orchard_subtree_index()
+            );
+            assert_eq!(
+                snapshot.next_ironwood_subtree_index(),
+                summary.next_ironwood_subtree_index()
+            );
+            assert_eq!(snapshot.is_synced(), summary.is_synced());
+            assert_eq!(
+                snapshot.clone().into_wallet_summary(summary.progress()),
+                summary
+            );
         }
 
         // Multi-account: both paths must report every account's balance map.
@@ -6217,6 +6210,65 @@ mod tests {
             snapshot.clone().into_wallet_summary(forced.progress()),
             forced
         );
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn wallet_snapshot_available_when_progress_is_missing() {
+        use zcash_client_backend::data_api::testing::{
+            pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+        };
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let value = Zatoshis::const_from_u64(10_000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        struct NoProgress;
+        impl super::ProgressEstimator for NoProgress {
+            fn sapling_scan_progress<P: zcash_protocol::consensus::Parameters>(
+                &self,
+                _: &rusqlite::Connection,
+                _: &P,
+                _: BlockHeight,
+                _: Option<BlockHeight>,
+                _: BlockHeight,
+            ) -> Result<Option<zcash_client_backend::data_api::Progress>, SqliteClientError>
+            {
+                Ok(None)
+            }
+
+            fn orchard_scan_progress<P: zcash_protocol::consensus::Parameters>(
+                &self,
+                _: &rusqlite::Connection,
+                _: &P,
+                _: BlockHeight,
+                _: Option<BlockHeight>,
+                _: BlockHeight,
+            ) -> Result<Option<zcash_client_backend::data_api::Progress>, SqliteClientError>
+            {
+                Ok(None)
+            }
+        }
+
+        let tx = st.wallet().conn().unchecked_transaction().unwrap();
+        assert_eq!(
+            super::get_wallet_summary(&tx, st.network(), ConfirmationsPolicy::MIN, &NoProgress)
+                .unwrap(),
+            None,
+            "missing progress must keep get_wallet_summary returning None"
+        );
+        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
+            .unwrap()
+            .expect("snapshot must still return balances when progress is unavailable");
+        assert_eq!(snapshot.account_balances().len(), 1);
+        assert_eq!(snapshot.chain_tip_height(), h);
     }
 
     #[test]
