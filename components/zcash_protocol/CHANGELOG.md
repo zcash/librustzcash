@@ -13,8 +13,14 @@ workspace.
 ### Added
 - `zcash_protocol::zip318::{CROSSING_SOURCE_ACTIONS, CROSSING_DESTINATION_ACTIONS}`,
   the action counts of a canonical pool crossing.
-- `zcash_protocol::zip318::PoolMigrationConstants::{canonical_expiry, is_canonical_expiry}`,
-  which generalize the free `expiry_height` to an overridden expiry window.
+- `zcash_protocol::zip318::PoolMigrationConstants::{canonical_expiry, is_canonical_expiry,
+  is_canonical_expiry_value}`. The first two generalize the free `expiry_height` to an
+  overridden expiry window; the third judges an expiry without a reference height,
+  for a caller that has none and must not change its answer once it gets one.
+- `zcash_protocol::zip318::Zip318Classification::{to_code, from_code}`, the stable
+  integer encoding a store persists and an FFI carries. Zero means NOT CLASSIFIED
+  and is meant to be a column's default; it is distinct from the code for
+  `Nonconforming`, which is a decision.
 - `zcash_protocol::zip318::{Zip318TxKind, Zip318Classification, Zip318Evidence,
   DestinationOutput, OutputOwner, classify}`, which recognize the ZIP 318
   transaction shapes from evidence a caller gathers. `classify` names a

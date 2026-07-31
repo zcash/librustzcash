@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- A `zip318_kind` column on the `transactions` table, recording how each transaction
+  classifies against ZIP 318 so that a wallet can label a pool-migration transaction
+  in its history without a migration plan, which does not survive a seed restore.
+  The column defaults to the code for NOT CLASSIFIED. The migration deliberately
+  does not classify existing rows: those keep the default and need the transaction
+  rescanned. A client must render the default as no label, never as "not a
+  migration".
+
 ## [0.22.0-rc.6] - 2026-07-29
 
 ### Added
