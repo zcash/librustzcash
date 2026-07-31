@@ -691,6 +691,94 @@ mod check_step_satisfiability {
         );
     }
 
+    /// Reorg truncation composes with the empty-cache corruption guard: a MINED row is exempt
+    /// from the nullifier backfill, so its empty cache answers (the mined exemption above), but
+    /// once `MigrationState::truncate_to_height` demotes it to `Broadcast` — driven through the
+    /// pool-migration API exactly as a consumer's reorg hook would (load, truncate, replace) —
+    /// the SAME row is non-mined with an empty cache: loud corruption at its next check, never
+    /// vacuous satisfiability.
+    #[test]
+    fn truncation_demotes_a_backfill_exempt_row_into_the_corruption_guard() {
+        use zcash_pool_migration::denomination::DenominationPlan;
+        use zcash_pool_migration::engine::{
+            MigrationState, MigrationStatus, PoolMigrationWrite, ReplanThreshold,
+        };
+        use zcash_pool_migration::preparation::PreparationPlan;
+        use zcash_pool_migration::scheduling::AnchorBucketInterval;
+
+        let (mut st, account, _nf, as_of) = wallet_with_scanned_note();
+        let mined = MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            MigrationTxState::Mined {
+                txid: TxId::from_bytes([9; 32]),
+                height: as_of,
+            },
+            None,
+            None,
+            Vec::new(),
+        );
+        let state = MigrationState::from_parts(
+            MigrationStatus::InProgress,
+            DenominationPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![mined],
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        );
+        let mut store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        store
+            .replace_migration(&state)
+            .expect("persists the mined row");
+
+        // The mined exemption: the empty cache answers rather than erroring.
+        let loaded = store
+            .get_migration()
+            .expect("reads the migration")
+            .expect("the migration is present");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&loaded.transactions()[0], SETTLE)
+                .expect("a mined row with an empty cache answers"),
+            StepSatisfiability::Satisfiable { as_of },
+        );
+
+        // A rewind below the mined height: load, truncate, replace.
+        let mut truncated = loaded;
+        truncated.truncate_to_height(as_of - 1);
+        assert!(matches!(
+            truncated.transactions()[0].state(),
+            MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([9; 32])
+        ));
+        store
+            .replace_migration(&truncated)
+            .expect("persists the demoted row");
+
+        // The SAME row, demoted, hits the empty-cache corruption guard.
+        let reloaded = store
+            .get_migration()
+            .expect("reads the migration")
+            .expect("the migration is present");
+        assert!(matches!(
+            store.check_step_satisfiability(&reloaded.transactions()[0], SETTLE),
+            Err(Error::Corrupt("spend_nullifiers")),
+        ));
+    }
+
     /// The observations are scoped to the store's account: the same nullifier, asked about
     /// through a DIFFERENT account's store over the same wallet database, reads as `Unknown`
     /// (that account has seen no such note), so the answer is not-yet-satisfiable rather than

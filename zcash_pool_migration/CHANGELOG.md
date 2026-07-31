@@ -35,6 +35,15 @@ and this library adheres to Rust's notion of
 - `state::Blocker::Unsatisfiable`, reported (ahead of `Blocker::Expired`) for a
   transaction whose inputs can never again all exist unspent on chain, directly
   observed or inherited from a dead dependency.
+- `engine::MigrationState::record_satisfiability`, recording satisfiability
+  answers as durable `unsatisfiable_at` marks: input-level and anchor-level
+  causes mark the checked transaction at the observation's height, and the
+  dependency closure marks the dependents stranded behind a dead transaction.
+- `engine::MigrationState::truncate_to_height`, which the consumer calls
+  wherever it truncates its wallet on a reorg: clears every unsatisfiability
+  mark above the given height, demotes mined transactions above it back to
+  broadcast (keeping their txids), and reverts a `Complete` status to
+  `InProgress`.
 
 ### Changed
 - `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
