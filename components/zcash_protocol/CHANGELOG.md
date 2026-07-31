@@ -10,6 +10,17 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::zip318::{CROSSING_SOURCE_ACTIONS, CROSSING_DESTINATION_ACTIONS}`,
+  the action counts of a canonical pool crossing.
+- `zcash_protocol::zip318::PoolMigrationConstants::{canonical_expiry, is_canonical_expiry}`,
+  which generalize the free `expiry_height` to an overridden expiry window.
+- `zcash_protocol::zip318::{Zip318TxKind, Zip318Classification, Zip318Evidence,
+  DestinationOutput, OutputOwner, classify}`, which recognize the ZIP 318
+  transaction shapes from evidence a caller gathers. `classify` names a
+  conformance class and never a provenance, and is monotone in the evidence, so
+  a decision it reaches is never later contradicted.
+
 ## [0.10.3] - 2026-07-29
 
 ### Added
