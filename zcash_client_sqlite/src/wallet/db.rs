@@ -694,9 +694,11 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
     value INTEGER NOT NULL,
     PRIMARY KEY (migration_id, ordinal)
 )";
-/// One row per migration transaction. `kind` is `preparation` or `transfer`; `pczt` is the pre-signed
-/// transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle discriminant, with the
-/// hex broadcast `txid` and `mined_height`. `lock_owner` records the `LockOwner` under which this
+/// One row per migration transaction. `tx_id` is the transaction's ordinal WITHIN its migration (a
+/// `MigrationTransferId`), not a transaction ID; `kind` is `preparation` or `transfer`; `pczt` is
+/// the pre-signed transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle
+/// discriminant, with the hex consensus transaction ID in `txid` (`NULL` until broadcast) and
+/// `mined_height`. `lock_owner` records the `LockOwner` under which this
 /// transaction's notes are locked, if any. `unsatisfiable_at` is the height of the chain state a
 /// spent-input observation rests on, when the transaction has been determined unsatisfiable, and
 /// `unsatisfiable_kind` the wire name of WHICH observation that was (`inputs_spent`,

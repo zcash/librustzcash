@@ -224,6 +224,11 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
 }
 
 fn create_transactions_sql(t: &Tables) -> String {
+    // `tx_id` and `txid` are different things: `tx_id` is the transaction's ordinal within its
+    // migration (a `MigrationTransferId`, and the second half of the primary key that the
+    // dependency edges reference), while `txid` is the consensus transaction ID it was broadcast
+    // under, held as hex text and `NULL` until broadcast.
+    //
     // `spend_nullifiers` carries a `DEFAULT` only so that this DDL and the `ADD COLUMN` in the
     // `orchard_ironwood_migration_unsatisfiability` schema migration produce the same stored
     // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
@@ -880,8 +885,14 @@ fn read_lock_owners(
     Ok(out)
 }
 
-/// One row of the transactions table, before it is decoded into a [`MigrationTransaction`].
+/// One row of the transactions table, before it is decoded into a [`MigrationTransaction`]. The
+/// field names mirror the column names exactly, which puts `tx_id` and `txid` side by side: the
+/// first is the transaction's ordinal within its migration (a [`MigrationTransferId`]), the second
+/// the consensus transaction ID it was broadcast under.
 struct TxRow {
+    /// The transaction's ordinal within its migration — the second half of the table's
+    /// `(migration_id, tx_id)` primary key, and the [`MigrationTransferId`] dependency edges name
+    /// it by. Unrelated to `txid` below.
     tx_id: u32,
     kind: String,
     kind_layer: Option<u64>,
@@ -892,6 +903,8 @@ struct TxRow {
     expiry_height: u32,
     anchor_boundary: Option<u32>,
     state: String,
+    /// The hex-encoded consensus transaction ID the transaction was broadcast under; `NULL` until
+    /// it is broadcast. Unrelated to `tx_id` above.
     txid: Option<String>,
     mined_height: Option<u32>,
     /// The stored lock-owner token, read directly as a fixed-size blob: `rusqlite`'s `[u8; 32]`
