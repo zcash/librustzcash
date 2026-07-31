@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `WalletSnapshot` and `WalletDb::get_wallet_snapshot`, which return wallet
+  balances, heights, and subtree indices without computing
+  [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
+  use this to avoid the `subtree_scan_progress` aggregates.
+  `WalletRead::get_wallet_summary` is unchanged and still computes progress.
+
 ## [0.22.0-rc.6] - 2026-07-29
 
 ### Added

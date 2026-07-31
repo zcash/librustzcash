@@ -2526,17 +2526,15 @@ fn next_subtree_index<H: HashSer, const SHARD_HEIGHT: u8>(
         .unwrap_or(0))
 }
 
-/// Returns the spendable balance for the account at the specified height.
+/// Returns wallet balances, heights, and subtree indices without scan progress.
 ///
-/// This may be used to obtain a balance that ignores notes that have been detected so recently
-/// that they are not yet spendable, or for which it is not yet possible to construct witnesses.
-#[tracing::instrument(skip(tx, params, progress))]
-pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
+/// See [`crate::WalletDb::get_wallet_snapshot`].
+#[tracing::instrument(skip(tx, params))]
+pub(crate) fn get_wallet_snapshot<P: consensus::Parameters>(
     tx: &rusqlite::Transaction,
     params: &P,
     confirmations_policy: ConfirmationsPolicy,
-    progress: &impl ProgressEstimator,
-) -> Result<Option<WalletSummary<AccountUuid>>, SqliteClientError> {
+) -> Result<Option<crate::WalletSnapshot<AccountUuid>>, SqliteClientError> {
     let chain_tip_height = match chain_tip_height(tx)? {
         Some(h) => h,
         None => {
@@ -2551,59 +2549,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         }
     };
 
-    let recover_until_height = recover_until_height(tx)?;
     let fully_scanned_height = block_fully_scanned(tx, params)?.map(|m| m.block_height());
     let target_height = TargetHeight::from(chain_tip_height + 1);
     let anchor_height = get_anchor_height(tx, target_height, confirmations_policy.trusted())?;
-
-    let sapling_progress = progress.sapling_scan_progress(
-        tx,
-        params,
-        birthday_height,
-        recover_until_height,
-        chain_tip_height,
-    )?;
-
-    #[cfg(feature = "orchard")]
-    let orchard_progress = progress.orchard_scan_progress(
-        tx,
-        params,
-        birthday_height,
-        recover_until_height,
-        chain_tip_height,
-    )?;
-    #[cfg(not(feature = "orchard"))]
-    let orchard_progress: Option<Progress> = None;
-
-    // Treat Sapling and Orchard outputs as having the same cost to scan.
-    let progress = sapling_progress
-        .as_ref()
-        .zip(orchard_progress.as_ref())
-        .map(|(s, o)| {
-            Progress::new(
-                Ratio::new(
-                    s.scan().numerator() + o.scan().numerator(),
-                    s.scan().denominator() + o.scan().denominator(),
-                ),
-                s.recovery()
-                    .zip(o.recovery())
-                    .map(|(s, o)| {
-                        Ratio::new(
-                            s.numerator() + o.numerator(),
-                            s.denominator() + o.denominator(),
-                        )
-                    })
-                    .or_else(|| s.recovery())
-                    .or_else(|| o.recovery()),
-            )
-        })
-        .or(sapling_progress)
-        .or(orchard_progress);
-
-    let progress = match progress {
-        Some(p) => p,
-        None => return Ok(None),
-    };
 
     let mut stmt_accounts = tx.prepare_cached("SELECT uuid FROM accounts")?;
     let mut account_balances = stmt_accounts
@@ -2922,19 +2870,99 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         ORCHARD_SHARD_HEIGHT,
     >(tx, crate::IRONWOOD_TABLES_PREFIX)?;
 
-    let summary = WalletSummary::new(
+    Ok(Some(crate::WalletSnapshot::new(
         account_balances,
         chain_tip_height,
         fully_scanned_height.unwrap_or(birthday_height - 1),
-        progress,
         next_sapling_subtree_index,
         #[cfg(feature = "orchard")]
         next_orchard_subtree_index,
         #[cfg(feature = "orchard")]
         next_ironwood_subtree_index,
-    );
+    )))
+}
 
-    Ok(Some(summary))
+/// Returns the spendable balance for the account at the specified height.
+///
+/// This may be used to obtain a balance that ignores notes that have been detected so recently
+/// that they are not yet spendable, or for which it is not yet possible to construct witnesses.
+///
+/// Progress is computed before the balance snapshot so a missing progress estimate still
+/// short-circuits with `Ok(None)`, matching historical `get_wallet_summary` behaviour.
+#[tracing::instrument(skip(tx, params, progress))]
+pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
+    tx: &rusqlite::Transaction,
+    params: &P,
+    confirmations_policy: ConfirmationsPolicy,
+    progress: &impl ProgressEstimator,
+) -> Result<Option<WalletSummary<AccountUuid>>, SqliteClientError> {
+    let chain_tip_height = match chain_tip_height(tx)? {
+        Some(h) => h,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    let birthday_height = match wallet_birthday(tx)? {
+        Some(h) => h,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    let recover_until_height = recover_until_height(tx)?;
+
+    let sapling_progress = progress.sapling_scan_progress(
+        tx,
+        params,
+        birthday_height,
+        recover_until_height,
+        chain_tip_height,
+    )?;
+
+    #[cfg(feature = "orchard")]
+    let orchard_progress = progress.orchard_scan_progress(
+        tx,
+        params,
+        birthday_height,
+        recover_until_height,
+        chain_tip_height,
+    )?;
+    #[cfg(not(feature = "orchard"))]
+    let orchard_progress: Option<Progress> = None;
+
+    // Treat Sapling and Orchard outputs as having the same cost to scan.
+    let progress = sapling_progress
+        .as_ref()
+        .zip(orchard_progress.as_ref())
+        .map(|(s, o)| {
+            Progress::new(
+                Ratio::new(
+                    s.scan().numerator() + o.scan().numerator(),
+                    s.scan().denominator() + o.scan().denominator(),
+                ),
+                s.recovery()
+                    .zip(o.recovery())
+                    .map(|(s, o)| {
+                        Ratio::new(
+                            s.numerator() + o.numerator(),
+                            s.denominator() + o.denominator(),
+                        )
+                    })
+                    .or_else(|| s.recovery())
+                    .or_else(|| o.recovery()),
+            )
+        })
+        .or(sapling_progress)
+        .or(orchard_progress);
+
+    let progress = match progress {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+
+    Ok(get_wallet_snapshot(tx, params, confirmations_policy)?
+        .map(|snapshot| snapshot.into_wallet_summary(progress)))
 }
 
 /// Returns the memo for a received note, if the note is known to the wallet.
@@ -6049,6 +6077,150 @@ mod tests {
         .unwrap();
 
         assert_eq!(min_shared_checkpoint_height(&conn).unwrap(), None);
+    }
+
+    #[test]
+    fn wallet_snapshot_matches_summary_on_empty_wallet() {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        assert_eq!(
+            st.wallet()
+                .db()
+                .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+                .unwrap(),
+            None
+        );
+        assert_eq!(st.get_wallet_summary(ConfirmationsPolicy::MIN), None);
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn wallet_snapshot_matches_summary_after_scan() {
+        use zcash_client_backend::data_api::testing::{
+            pool::ShieldedPoolTester, sapling::SaplingPoolTester,
+        };
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let dfvk = SaplingPoolTester::test_account_fvk(&st);
+        let value = Zatoshis::const_from_u64(10_000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        // Compare both APIs whenever the stock summary is available. Some
+        // LocalNetwork fixtures return `None` for progress until tip/subtree
+        // state is richer; the snapshot path must still agree in that case.
+        let summary = st
+            .wallet()
+            .get_wallet_summary(ConfirmationsPolicy::MIN)
+            .unwrap();
+        let snapshot = st
+            .wallet()
+            .db()
+            .get_wallet_snapshot(ConfirmationsPolicy::MIN)
+            .unwrap();
+
+        match (summary, snapshot) {
+            (None, None) => {}
+            (Some(summary), Some(snapshot)) => {
+                assert_eq!(snapshot.account_balances(), summary.account_balances());
+                assert_eq!(snapshot.chain_tip_height(), summary.chain_tip_height());
+                assert_eq!(
+                    snapshot.fully_scanned_height(),
+                    summary.fully_scanned_height()
+                );
+                assert_eq!(
+                    snapshot.next_sapling_subtree_index(),
+                    summary.next_sapling_subtree_index()
+                );
+                assert_eq!(
+                    snapshot.next_orchard_subtree_index(),
+                    summary.next_orchard_subtree_index()
+                );
+                assert_eq!(
+                    snapshot.next_ironwood_subtree_index(),
+                    summary.next_ironwood_subtree_index()
+                );
+                assert_eq!(snapshot.is_synced(), summary.is_synced());
+                assert_eq!(
+                    snapshot.clone().into_wallet_summary(summary.progress()),
+                    summary
+                );
+            }
+            (summary, snapshot) => panic!(
+                "summary/snapshot availability diverged: summary_is_some={} snapshot_is_some={}",
+                summary.is_some(),
+                snapshot.is_some()
+            ),
+        }
+
+        // Multi-account: both paths must report every account's balance map.
+        let seed = SecretVec::new(st.test_seed().unwrap().expose_secret().clone());
+        let birthday = st.test_account().unwrap().birthday().clone();
+        st.wallet_mut()
+            .create_account("", &seed, &birthday, None)
+            .unwrap();
+
+        // Fixed progress estimator: proves the snapshot path produces a full
+        // summary even when real progress accounting would return None.
+        struct FixedProgress;
+        impl super::ProgressEstimator for FixedProgress {
+            fn sapling_scan_progress<P: zcash_protocol::consensus::Parameters>(
+                &self,
+                _: &rusqlite::Connection,
+                _: &P,
+                _: BlockHeight,
+                _: Option<BlockHeight>,
+                _: BlockHeight,
+            ) -> Result<Option<zcash_client_backend::data_api::Progress>, SqliteClientError>
+            {
+                Ok(Some(zcash_client_backend::data_api::Progress::new(
+                    zcash_client_backend::data_api::Ratio::new(1, 1),
+                    None,
+                )))
+            }
+
+            fn orchard_scan_progress<P: zcash_protocol::consensus::Parameters>(
+                &self,
+                _: &rusqlite::Connection,
+                _: &P,
+                _: BlockHeight,
+                _: Option<BlockHeight>,
+                _: BlockHeight,
+            ) -> Result<Option<zcash_client_backend::data_api::Progress>, SqliteClientError>
+            {
+                Ok(Some(zcash_client_backend::data_api::Progress::new(
+                    zcash_client_backend::data_api::Ratio::new(1, 1),
+                    None,
+                )))
+            }
+        }
+
+        let tx = st.wallet().conn().unchecked_transaction().unwrap();
+        let forced = super::get_wallet_summary(
+            &tx,
+            st.network(),
+            ConfirmationsPolicy::MIN,
+            &FixedProgress,
+        )
+        .unwrap()
+        .expect("fixed progress plus snapshot must yield a summary");
+        let snapshot = super::get_wallet_snapshot(&tx, st.network(), ConfirmationsPolicy::MIN)
+            .unwrap()
+            .expect("scanned wallet has a snapshot");
+        assert_eq!(snapshot.account_balances().len(), 2);
+        assert_eq!(snapshot.account_balances(), forced.account_balances());
+        assert_eq!(
+            snapshot.clone().into_wallet_summary(forced.progress()),
+            forced
+        );
     }
 
     #[test]

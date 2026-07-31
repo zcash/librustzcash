@@ -289,6 +289,112 @@ pub struct WalletDb<C, P, CL, R> {
     gap_limits: GapLimits,
 }
 
+/// Wallet balances, heights, and subtree indices without scan-progress accounting.
+///
+/// This is the portion of [`WalletSummary`] that applications need when they already
+/// track sync progress through their own scan loop. Computing
+/// [`WalletSummary::progress`] requires scanning every stored `blocks` row against
+/// `scan_queue`, which can dominate `get_wallet_summary` for deep or fragmented
+/// wallets. [`WalletDb::get_wallet_snapshot`] returns this type and skips that work.
+///
+/// All fields are read inside a single SQLite transaction so the snapshot is
+/// internally consistent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalletSnapshot<AccountId: Eq + std::hash::Hash> {
+    account_balances: HashMap<AccountId, zcash_client_backend::data_api::AccountBalance>,
+    chain_tip_height: BlockHeight,
+    fully_scanned_height: BlockHeight,
+    next_sapling_subtree_index: u64,
+    #[cfg(feature = "orchard")]
+    next_orchard_subtree_index: u64,
+    #[cfg(feature = "orchard")]
+    next_ironwood_subtree_index: u64,
+}
+
+impl<AccountId: Eq + std::hash::Hash> WalletSnapshot<AccountId> {
+    /// Constructs a new [`WalletSnapshot`] from its constituent parts.
+    pub fn new(
+        account_balances: HashMap<AccountId, zcash_client_backend::data_api::AccountBalance>,
+        chain_tip_height: BlockHeight,
+        fully_scanned_height: BlockHeight,
+        next_sapling_subtree_index: u64,
+        #[cfg(feature = "orchard")] next_orchard_subtree_index: u64,
+        #[cfg(feature = "orchard")] next_ironwood_subtree_index: u64,
+    ) -> Self {
+        Self {
+            account_balances,
+            chain_tip_height,
+            fully_scanned_height,
+            next_sapling_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_orchard_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_ironwood_subtree_index,
+        }
+    }
+
+    /// Returns the balances of accounts in the wallet, keyed by account ID.
+    pub fn account_balances(
+        &self,
+    ) -> &HashMap<AccountId, zcash_client_backend::data_api::AccountBalance> {
+        &self.account_balances
+    }
+
+    /// Returns the height of the current chain tip.
+    pub fn chain_tip_height(&self) -> BlockHeight {
+        self.chain_tip_height
+    }
+
+    /// Returns the height below which all blocks have been scanned by the wallet, ignoring blocks
+    /// below the wallet birthday.
+    pub fn fully_scanned_height(&self) -> BlockHeight {
+        self.fully_scanned_height
+    }
+
+    /// Returns the Sapling subtree index that should start the next range of subtree roots.
+    pub fn next_sapling_subtree_index(&self) -> u64 {
+        self.next_sapling_subtree_index
+    }
+
+    /// Returns the Orchard subtree index that should start the next range of subtree roots.
+    #[cfg(feature = "orchard")]
+    pub fn next_orchard_subtree_index(&self) -> u64 {
+        self.next_orchard_subtree_index
+    }
+
+    /// Returns the Ironwood subtree index that should start the next range of subtree roots.
+    #[cfg(feature = "orchard")]
+    pub fn next_ironwood_subtree_index(&self) -> u64 {
+        self.next_ironwood_subtree_index
+    }
+
+    /// Returns whether or not wallet scanning is complete.
+    pub fn is_synced(&self) -> bool {
+        self.chain_tip_height == self.fully_scanned_height
+    }
+
+    /// Combines this snapshot with a precomputed [`Progress`] value.
+    ///
+    /// Used by [`WalletRead::get_wallet_summary`] so that balance work is not
+    /// duplicated between the snapshot and full-summary paths.
+    pub fn into_wallet_summary(
+        self,
+        progress: zcash_client_backend::data_api::Progress,
+    ) -> WalletSummary<AccountId> {
+        WalletSummary::new(
+            self.account_balances,
+            self.chain_tip_height,
+            self.fully_scanned_height,
+            progress,
+            self.next_sapling_subtree_index,
+            #[cfg(feature = "orchard")]
+            self.next_orchard_subtree_index,
+            #[cfg(feature = "orchard")]
+            self.next_ironwood_subtree_index,
+        )
+    }
+}
+
 /// A wrapper for a SQLite transaction affecting the wallet database.
 pub struct SqlTransaction<'conn>(&'conn rusqlite::Transaction<'conn>);
 
@@ -538,6 +644,30 @@ impl<C: Borrow<rusqlite::Connection>, P, CL, R> WalletDb<C, P, CL, R> {
             #[cfg(feature = "transparent-inputs")]
             gap_limits: GapLimits::default(),
         }
+    }
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletDb<C, P, CL, R> {
+    /// Returns wallet balances, heights, and subtree indices without computing scan progress.
+    ///
+    /// This is a Vizor-local extension for callers that already track sync progress
+    /// outside of [`WalletSummary::progress`]. It performs the same balance and
+    /// metadata work as [`WalletRead::get_wallet_summary`] inside one SQLite
+    /// transaction, but skips the `subtree_scan_progress` aggregates.
+    ///
+    /// Returns `Ok(None)` when the wallet has no chain tip or birthday, matching
+    /// the early-exit conditions of [`WalletRead::get_wallet_summary`]. Unlike
+    /// that method, a missing progress estimate does not force `None` — progress
+    /// is simply not computed.
+    pub fn get_wallet_snapshot(
+        &self,
+        confirmations_policy: ConfirmationsPolicy,
+    ) -> Result<Option<WalletSnapshot<AccountUuid>>, SqliteClientError> {
+        wallet::get_wallet_snapshot(
+            &self.conn.borrow().unchecked_transaction()?,
+            &self.params,
+            confirmations_policy,
+        )
     }
 }
 
