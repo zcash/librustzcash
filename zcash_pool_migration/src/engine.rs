@@ -199,6 +199,14 @@ pub struct AdvanceConfig {
 ///
 /// A single call plans, verifies, records, and persists:
 ///
+/// 0. It adjudicates any standing BROADCAST-FAILURE REPORT
+///    ([`MigrationState::report_broadcast_failure`]) — a node rejected a broadcast, and the
+///    rejection is another observer's testimony until this wallet has scanned the chain state it
+///    rests on. While the oracle still answers from below the reported tip the call surfaces
+///    [`AdvanceStep::Reevaluate`] and does nothing else; once it answers from at or above that
+///    tip the report is discharged, either recording the ordinary evidence-backed mark or
+///    finding the rejection transient and returning the transaction to the broadcast queue in
+///    this same call.
 /// 1. It asks the planning kernel what to do next, decided purely from the persisted state.
 /// 2. It puts the transaction the kernel names to the store's satisfiability oracle
 ///    ([`PoolMigrationRead::check_step_satisfiability`]) — the wallet's live view of whether that
@@ -241,6 +249,11 @@ pub struct AdvanceConfig {
 ///   ordinary planning flow. Surfaced when the unsatisfiable share of planned transfer value
 ///   strictly exceeds the committed [`ReplanThreshold`], and — once no live work remains at all —
 ///   when dead value would otherwise be stranded.
+/// - [`AdvanceStep::Reevaluate`]: SYNC the wallet to at least the tip reported alongside a
+///   rejected broadcast, then call this again. Surfaced ahead of every step but
+///   [`Complete`](AdvanceStep::Complete), and unconditionally: a rejection means another observer
+///   saw chain state this wallet has not, and same-seed activity invalidates the whole store
+///   view rather than one transaction's answer.
 /// - [`AdvanceStep::Waiting`]: nothing is actionable at this height. Consult
 ///   [`MigrationState::transaction_statuses`] for what each transaction is blocked on, and register
 ///   the heights at which to wake and re-check: [`MigrationState::sync_wakeup_schedule`] for the
@@ -252,6 +265,30 @@ pub struct AdvanceConfig {
 /// without mining, and everything stranded behind either are excluded from the prove, broadcast,
 /// and rebuild queues alike. And a DUE BROADCAST is named ahead of any proving work, which is what
 /// makes a broadcast-only waking session possible (see the ZIP 318 note below).
+///
+/// # The `target_height` contract
+///
+/// `target_height` must come from the consumer's CHAIN VIEW — its synced or otherwise observed
+/// block data — and never from a wall-clock ESTIMATE of where the tip has probably reached. The
+/// height is not merely a scheduling cursor: it is the height every judgment in this call is made
+/// at, and each of those judgments is destructive if made too high.
+///
+/// - EXPIRY is `expiry_height < target_height`, so an estimate that overshoots condemns a live
+///   pre-signed transfer as expired, and its remedy is a rebuild that must be SIGNED ANEW.
+/// - Expired-and-unmined transactions SEED the kernel's dead set, so the same overshoot strands
+///   every dependent behind them.
+/// - The durable dependency closure ([`MigrationState::record_satisfiability`]) stamps inherited
+///   marks off those seeds, writing them into the store.
+/// - The drain-time [`Replan`](AdvanceStep::Replan) fires once every unmined transaction is dead,
+///   and the consumer's contracted response to it — [`MigrationState::mark_superseded`] — is
+///   terminal.
+/// - [`Rebuild`](AdvanceStep::Rebuild) eligibility is judged the same way.
+///
+/// Nothing here compensates for an estimate, because nothing can: the state machine cannot tell a
+/// guess from an observation. Accelerating the SCHEDULE from an estimate — waking early because
+/// the tip has probably arrived — is a coherent thing to want and deliberately out of scope here;
+/// it belongs in a dedicated, clamped parameter that can reach the dueness comparison without
+/// touching expiry, the dead set, or the rebuild queue.
 ///
 /// # What a call costs
 ///
@@ -354,6 +391,63 @@ pub fn advance_migration<St: PoolMigrationWrite>(
         dirty = true;
     }
 
+    // ADJUDICATING THE BROADCAST-FAILURE REPORTS. A report says a node refused a broadcast at a
+    // tip this wallet may not have reached; it is testimony, so nothing is concluded from it
+    // until the wallet's own answers rest at or above that tip. One query per reported
+    // transaction, and none at all for the overwhelmingly common case of no reports.
+    //
+    // Skipped entirely for a TERMINAL migration: it is never driven further, so there is no
+    // broadcast to withhold and no benefit in holding the loop at `Reevaluate` instead of the
+    // `Complete` the kernel is about to return.
+    let mut reevaluation_pending = false;
+    if !state.is_terminal() {
+        let mut adjudicated: Vec<MigrationTransferId> = Vec::new();
+        let mut verdicts: Vec<(MigrationTransferId, StepSatisfiability)> = Vec::new();
+        for tx in state.transactions() {
+            let Some(reported_tip) = tx.broadcast_failure_at() else {
+                continue;
+            };
+            let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
+            if answer_as_of(&answer) < reported_tip {
+                // The wallet has not scanned every block that could hold the spend behind the
+                // rejection, so neither answer it could give would be about the right chain.
+                reevaluation_pending = true;
+                continue;
+            }
+            // At or above the reported tip the question is settled, whichever way it fell: a
+            // marking cause records the ordinary evidence-backed determination, and anything
+            // else means the rejection was transient (a mempool conflict, a node-local policy)
+            // and the transaction returns to the broadcast queue in this same call. Either way
+            // the testimony has been discharged and must not withhold the transaction again.
+            adjudicated.push(tx.id());
+            if records_a_determination(&answer) {
+                verdicts.push((tx.id(), answer));
+            }
+        }
+        if !verdicts.is_empty() {
+            // A DISCOVERY here broadens exactly as one at a candidate check does: what killed
+            // this transaction is a fact about the migration's environment — same-seed spending
+            // typically kills several transfers at once — so the whole damage is assessed in the
+            // call that finds the first of it, and the replan threshold trips here rather than
+            // one broadcast attempt at a time.
+            broaden_after_discovery(store, state, &mut verdicts, config.reorg_settle_depth)?;
+            state.record_satisfiability(target_height, &verdicts);
+        }
+        for id in &adjudicated {
+            state.clear_broadcast_failure(*id);
+        }
+        dirty |= !adjudicated.is_empty();
+    }
+    if reevaluation_pending {
+        // Unconditional: a rejection means some other observer saw chain state this wallet has
+        // not, and same-seed activity invalidates the whole store view rather than one
+        // transaction's answer. Whatever was adjudicated above is still persisted first.
+        if dirty {
+            store.replace_migration(state)?;
+        }
+        return Ok(AdvanceStep::Reevaluate);
+    }
+
     // Plan, verify, record, plan again. Every iteration either breaks, grows `set_aside`, or
     // strictly grows the marked set — strictly, because the kernel never names an already-marked
     // transaction (they are in its dead set), so a recorded discovery marks at least the candidate
@@ -364,8 +458,14 @@ pub fn advance_migration<St: PoolMigrationWrite>(
             AdvanceStep::Prove { id, .. }
             | AdvanceStep::Broadcast { id }
             | AdvanceStep::Rebuild { id } => id,
-            // These name no transaction, so there is nothing to verify.
-            AdvanceStep::Waiting | AdvanceStep::Complete | AdvanceStep::Replan => break step,
+            // These name no transaction, so there is nothing to verify. `Reevaluate` is decided
+            // above, by this function, and the kernel never returns it — but it is a step like
+            // any other here, and matching it explicitly keeps that fact from resting on the
+            // absence of an arm.
+            AdvanceStep::Waiting
+            | AdvanceStep::Complete
+            | AdvanceStep::Replan
+            | AdvanceStep::Reevaluate => break step,
         };
         let Some(tx) = state.transactions().iter().find(|t| t.id() == candidate) else {
             // The kernel names its candidates out of `state.transactions()`, so an id that is not
@@ -391,34 +491,10 @@ pub fn advance_migration<St: PoolMigrationWrite>(
                     // exactly as planned (for a transfer, the rebuild that is expiry's remedy).
                     break step;
                 }
-                // A DISCOVERY, so BROADEN. What killed this candidate is a fact about the
-                // migration's environment, not about the candidate alone — the ordinary cause is
-                // an ordinary wallet spend consuming notes the migration had allocated, which
-                // typically kills several transfers at once — and finding the rest of the damage
-                // now is what lets the replan threshold trip in this call. Every pending
-                // transaction whose dependencies have mined is checked: mined ones are final,
-                // in-flight ones belong to the sweep above, already-marked ones would learn
-                // nothing, and one whose dependencies are still unmined could only answer "not
-                // yet" (its death, if any, arrives through the closure).
+                // A DISCOVERY, so BROADEN, then record as ONE batch so the durable closure runs
+                // once over the whole discovery.
                 let mut batch = vec![(candidate, answer)];
-                for tx in state.transactions() {
-                    if tx.id() == candidate
-                        || matches!(
-                            tx.state(),
-                            MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. }
-                        )
-                        || tx.unsatisfiable_at().is_some()
-                        || !state.deps_mined(tx.depends_on())
-                    {
-                        continue;
-                    }
-                    let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth)?;
-                    if records_a_determination(&answer) {
-                        batch.push((tx.id(), answer));
-                    }
-                }
-                // Recorded as ONE batch, so the durable closure runs once over the whole
-                // discovery.
+                broaden_after_discovery(store, state, &mut batch, config.reorg_settle_depth)?;
                 state.record_satisfiability(target_height, &batch);
                 dirty = true;
             }
@@ -439,6 +515,56 @@ pub fn advance_migration<St: PoolMigrationWrite>(
 /// that decision). The satisfiable and not-yet answers are not determinations at all.
 fn records_a_determination(answer: &StepSatisfiability) -> bool {
     matches!(answer, StepSatisfiability::Unsatisfiable { cause, .. } if cause.marks())
+}
+
+/// The fully-scanned height a satisfiability answer rests on, whichever answer it is: the height
+/// that decides whether the answer is ABOUT the chain state a question was raised at.
+fn answer_as_of(answer: &StepSatisfiability) -> BlockHeight {
+    match answer {
+        StepSatisfiability::Satisfiable { as_of }
+        | StepSatisfiability::NotYetSatisfiable { as_of }
+        | StepSatisfiability::Unsatisfiable { as_of, .. } => *as_of,
+    }
+}
+
+/// Grows `batch` — the determinations [`advance_migration`] has already discovered this call —
+/// with every OTHER determination the store will report right now, so a whole discovery is
+/// assessed at once.
+///
+/// What killed one transaction is a fact about the migration's ENVIRONMENT, not about that
+/// transaction alone: the ordinary cause is a wallet spend consuming notes the migration had
+/// allocated, which typically kills several transfers together. Finding the rest of the damage in
+/// the same call is what lets the replan threshold trip immediately rather than one transfer at a
+/// time over the weeks a privacy-preserving broadcast schedule spans.
+///
+/// Every PENDING transaction whose dependencies have mined is checked, and nothing else: a
+/// transaction already in `batch` has been answered, mined ones are final, in-flight ones belong
+/// to the drive API's own in-flight sweep, already-marked ones would learn nothing, and one whose
+/// dependencies are still unmined could only answer "not yet" (its death, if any, arrives through
+/// the durable dependency closure).
+fn broaden_after_discovery<St: PoolMigrationRead>(
+    store: &St,
+    state: &MigrationState,
+    batch: &mut Vec<(MigrationTransferId, StepSatisfiability)>,
+    settle: ReorgSettleDepth,
+) -> Result<(), St::Error> {
+    for tx in state.transactions() {
+        if batch.iter().any(|(id, _)| *id == tx.id())
+            || matches!(
+                tx.state(),
+                MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. }
+            )
+            || tx.unsatisfiable_at().is_some()
+            || !state.deps_mined(tx.depends_on())
+        {
+            continue;
+        }
+        let answer = store.check_step_satisfiability(tx, settle)?;
+        if records_a_determination(&answer) {
+            batch.push((tx.id(), answer));
+        }
+    }
+    Ok(())
 }
 
 /// A stable ordinal identifier for a migration transaction within a migration. This is a ROW KEY
@@ -631,6 +757,20 @@ pub struct MigrationTransaction {
     /// [`Inherited`](UnsatisfiableKind::Inherited). Holding them as one pair is what makes a
     /// stamp without a kind — or a kind without a stamp — unrepresentable.
     pub(crate) unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)>,
+    /// The standing BROADCAST-FAILURE REPORT: the chain tip the application observed from the
+    /// node that REJECTED a broadcast of this transaction, or `None` while no rejection is
+    /// outstanding. Recorded by [`MigrationState::report_broadcast_failure`] and discharged by
+    /// the drive API once the wallet has scanned to that tip and could adjudicate the rejection.
+    ///
+    /// This is TESTIMONY, not evidence: another observer's report of chain state this wallet has
+    /// not seen. It never produces an [`unsatisfiable`](Self::unsatisfiable) mark — marks rest on
+    /// scanned state at or below an answer's `as_of`, which is what makes reorg truncation exact
+    /// — and it carries no cause, because the engine verifies a rejection through channels it
+    /// owns rather than trusting the node's stated reason. Its whole effect is to withhold the
+    /// transaction from the broadcast queue and to hold the drive loop at
+    /// [`Reevaluate`](crate::state::AdvanceStep::Reevaluate) until the wallet can answer.
+    #[getset(get_copy = "pub")]
+    pub(crate) broadcast_failure_at: Option<BlockHeight>,
     /// The nullifiers of this transaction's REAL spends — the deferred-witness actions; the
     /// padded dummy spends carry their own witnesses (ZIP 374) — extracted from the built PCZT
     /// when the migration is committed, BEFORE any proof. Proving replaces the stored bytes
@@ -684,6 +824,10 @@ impl MigrationTransaction {
     /// them back (the inverse of the accessors). A store that persists the unsatisfiability mark's
     /// halves in separate places must reject a row holding one without the other as corrupt on
     /// read, rather than reconstitute a pair here from half of one.
+    ///
+    /// `broadcast_failure_at` is independent of that mark in both directions: a rejected
+    /// broadcast the wallet cannot yet explain carries no mark, and an adjudicated one carries a
+    /// mark and no report.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         id: MigrationTransferId,
@@ -697,6 +841,7 @@ impl MigrationTransaction {
         lock_owner: Option<[u8; 32]>,
         unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)>,
         spend_nullifiers: Vec<[u8; 32]>,
+        broadcast_failure_at: Option<BlockHeight>,
     ) -> Self {
         Self {
             id,
@@ -710,6 +855,7 @@ impl MigrationTransaction {
             lock_owner,
             unsatisfiable,
             spend_nullifiers,
+            broadcast_failure_at,
         }
     }
 }
@@ -3423,6 +3569,8 @@ where
                     // A freshly committed transaction carries no spent-input observation.
                     unsatisfiable: None,
                     spend_nullifiers,
+                    // Nor a rejected broadcast: it has not been broadcast at all.
+                    broadcast_failure_at: None,
                 });
             }
             self.layer_ids.push(this_layer_ids);
@@ -3589,6 +3737,8 @@ where
                 // A freshly committed transaction carries no spent-input observation.
                 unsatisfiable: None,
                 spend_nullifiers,
+                // Nor a rejected broadcast: it has not been broadcast at all.
+                broadcast_failure_at: None,
             });
             self.transfer_funding.push((id, note));
         }
@@ -4280,6 +4430,7 @@ mod tests {
             lock_owner: None,
             unsatisfiable: None,
             spend_nullifiers: Vec::new(),
+            broadcast_failure_at: None,
         };
         let state = MigrationState {
             status: MigrationStatus::Committed,
@@ -4420,6 +4571,7 @@ mod advance_tests {
             lock_owner: None,
             unsatisfiable: None,
             spend_nullifiers: Vec::new(),
+            broadcast_failure_at: None,
         }
     }
 
@@ -5084,6 +5236,302 @@ mod advance_tests {
         assert!(
             store.stored.is_none(),
             "but not in the store: after an error the caller must re-read, not trust this state"
+        );
+    }
+
+    /// A rejected broadcast whose explanation lies above the wallet's scanned region: the call
+    /// surfaces `Reevaluate` and nothing else, records nothing, and does not fall through to the
+    /// migration's other due work — a rejection means another observer saw chain state this
+    /// wallet has not, which is a fact about the whole view rather than one transaction.
+    #[test]
+    fn advance_holds_at_reevaluate_until_the_oracle_reaches_the_reported_tip() {
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+                scheduled_transfer(2, 1, 1440, 1500, MigrationTxState::Proved),
+            ],
+        );
+        // The node that refused the broadcast reported a tip 100 blocks above the wallet's
+        // fully-scanned height.
+        state.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(1700));
+        let mut store = TestStore::new(1600, []);
+
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1601),
+                &config()
+            )
+            .expect("the store never fails"),
+            AdvanceStep::Reevaluate,
+            "the sibling's due broadcast waits behind the unanswered rejection",
+        );
+        assert_eq!(store.queries.get(), 1, "one query, for the reported row");
+        assert_eq!(store.replaced.get(), 0, "nothing was determined to persist");
+        assert_eq!(
+            state.transactions()[1].broadcast_failure_at(),
+            Some(BlockHeight::from_u32(1700)),
+            "the report stands until it can be answered",
+        );
+        assert!(
+            state
+                .transactions()
+                .iter()
+                .all(|t| t.unsatisfiable_at().is_none()),
+            "testimony never marks",
+        );
+        assert_eq!(
+            state.transaction_statuses(BlockHeight::from_u32(1601))[1].blocked_on(),
+            Some(crate::state::Blocker::AwaitingReevaluation),
+        );
+
+        // The wallet syncs past the reported tip and the same answer now decides the question:
+        // nothing obstructs, so the rejection was transient, the report is discharged, and the
+        // broadcast is offered again IN THIS CALL.
+        store.as_of = BlockHeight::from_u32(1700);
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1701),
+                &config()
+            )
+            .expect("the store never fails"),
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+        );
+        assert_eq!(state.transactions()[1].broadcast_failure_at(), None);
+        assert_eq!(
+            store
+                .stored
+                .as_ref()
+                .expect("the discharge was persisted")
+                .transactions()[1]
+                .broadcast_failure_at(),
+            None,
+            "the discharge is durable before the step is surfaced",
+        );
+    }
+
+    /// The other adjudication: once the wallet has scanned to the reported tip it finds the spend
+    /// behind the rejection, and that becomes an ORDINARY evidence-backed mark — closure,
+    /// threshold, and `Replan` exactly as any other discovery. The report is discharged either
+    /// way; the mark is what stands afterwards.
+    #[test]
+    fn advance_adjudicates_a_reported_broadcast_into_marks_and_a_replan() {
+        let mut prep_layer_1 = tx(1, prep(1, 0), MigrationTxState::Proved);
+        prep_layer_1.depends_on = vec![MigrationTransferId(0)];
+        prep_layer_1.scheduled_height = BlockHeight::from_u32(1500);
+        let mut first = scheduled_transfer(2, 0, 1440, 90_000, MigrationTxState::Signed);
+        first.depends_on = vec![MigrationTransferId(1)];
+        let mut second = scheduled_transfer(3, 1, 1440, 90_000, MigrationTxState::Signed);
+        second.depends_on = vec![MigrationTransferId(1)];
+
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![tx(0, prep(0, 0), mined(10)), prep_layer_1, first, second],
+        );
+        state.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(1700));
+
+        // Another wallet on the same seed spent the notes this preparation was built over, and
+        // the wallet has now scanned the block that did it.
+        let mut store = TestStore::new(1700, [(MigrationTransferId(1), spent(1700))]);
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1701),
+                &config()
+            )
+            .expect("the store never fails"),
+            AdvanceStep::Replan,
+        );
+
+        let marked = BlockHeight::from_u32(1700);
+        assert_eq!(
+            state.transactions()[1].unsatisfiable(),
+            Some((marked, UnsatisfiableKind::InputsSpent)),
+            "the rejection is adjudicated into an evidence-backed mark at the answer's height",
+        );
+        assert_eq!(
+            state.transactions()[1].broadcast_failure_at(),
+            None,
+            "and the testimony it rested on is discharged",
+        );
+        for stranded in [2, 3] {
+            assert_eq!(
+                state.transactions()[stranded].unsatisfiable(),
+                Some((marked, UnsatisfiableKind::Inherited)),
+                "the durable closure strands the crossings behind the dead preparation",
+            );
+        }
+        assert!(state.replan_required());
+        assert_eq!(
+            store.replaced.get(),
+            1,
+            "the marks and the discharge persist in one write"
+        );
+        let stored = store.stored.as_ref().expect("persisted");
+        assert_eq!(
+            stored.transactions()[1].unsatisfiable(),
+            Some((marked, UnsatisfiableKind::InputsSpent))
+        );
+        assert_eq!(stored.transactions()[1].broadcast_failure_at(), None);
+    }
+
+    /// A TERMINAL migration is never driven further, so a report left standing on it neither
+    /// costs a query nor holds the driver at `Reevaluate`: there is no broadcast to withhold.
+    #[test]
+    fn advance_ignores_a_report_on_a_terminal_migration() {
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+            ],
+        );
+        state.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(1700));
+        state.mark_superseded();
+        let mut store = TestStore::new(1600, []);
+
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1601),
+                &config()
+            )
+            .expect("the store never fails"),
+            AdvanceStep::Complete,
+        );
+        assert_eq!(store.queries.get(), 0);
+        assert_eq!(store.replaced.get(), 0);
+    }
+
+    /// `Reevaluate` is a RETURN like any other, so the determinations made on the way to it are
+    /// durable before it is surfaced. Here the in-flight sweep marks a broadcast crossing whose
+    /// anchor a settled reorg displaced, while a second crossing's rejection cannot yet be
+    /// answered: the call ends at `Reevaluate`, and the mark is in the STORE, not only in the
+    /// returned state — a consumer that syncs, restarts, and drives again must not have to
+    /// rediscover it.
+    #[test]
+    fn advance_persists_sweep_marks_before_returning_reevaluate() {
+        let mut in_flight = scheduled_transfer(
+            1,
+            0,
+            1440,
+            1500,
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([4; 32]),
+            },
+        );
+        in_flight.depends_on = vec![MigrationTransferId(0)];
+        let mut reported = scheduled_transfer(2, 1, 1440, 1500, MigrationTxState::Proved);
+        reported.depends_on = vec![MigrationTransferId(0)];
+
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![tx(0, prep(0, 0), mined(10)), in_flight, reported],
+        );
+        state.report_broadcast_failure(MigrationTransferId(2), BlockHeight::from_u32(1700));
+
+        let mut store = TestStore::new(
+            1600,
+            [(
+                MigrationTransferId(1),
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::AnchorInvalidated,
+                    as_of: BlockHeight::from_u32(1600),
+                },
+            )],
+        );
+
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1601),
+                &config()
+            )
+            .expect("the store never fails"),
+            AdvanceStep::Reevaluate,
+        );
+        let marked = BlockHeight::from_u32(1600);
+        assert_eq!(
+            state.transactions()[1].unsatisfiable(),
+            Some((marked, UnsatisfiableKind::AnchorInvalidated)),
+        );
+        assert_eq!(
+            store.replaced.get(),
+            1,
+            "one write carries every determination this call made"
+        );
+        assert_eq!(
+            store
+                .stored
+                .as_ref()
+                .expect("the sweep's mark was persisted before the step was surfaced")
+                .transactions()[1]
+                .unsatisfiable(),
+            Some((marked, UnsatisfiableKind::AnchorInvalidated)),
+        );
+    }
+
+    /// The same durability, for the adjudication's own half: with two rejections outstanding and
+    /// only one of them answerable, the answerable one is discharged and that discharge is
+    /// PERSISTED even though the call still ends at `Reevaluate`. Losing it would leave the
+    /// crossing withheld from the broadcast queue on a question already settled.
+    #[test]
+    fn advance_persists_a_discharged_report_before_returning_reevaluate() {
+        let mut answerable = scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved);
+        answerable.depends_on = vec![MigrationTransferId(0)];
+        let mut pending = scheduled_transfer(2, 1, 1440, 1500, MigrationTxState::Proved);
+        pending.depends_on = vec![MigrationTransferId(0)];
+
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![tx(0, prep(0, 0), mined(10)), answerable, pending],
+        );
+        // The first rejection came from a node whose tip the wallet has since scanned past; the
+        // second from one reporting a tip it has not reached.
+        state.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(1500));
+        state.report_broadcast_failure(MigrationTransferId(2), BlockHeight::from_u32(1700));
+        let mut store = TestStore::new(1600, []);
+
+        assert_eq!(
+            advance_migration(
+                &mut store,
+                &mut state,
+                BlockHeight::from_u32(1601),
+                &config()
+            )
+            .expect("the store never fails"),
+            AdvanceStep::Reevaluate,
+            "one unanswerable rejection still holds the whole loop",
+        );
+        assert_eq!(state.transactions()[1].broadcast_failure_at(), None);
+        assert_eq!(
+            state.transactions()[2].broadcast_failure_at(),
+            Some(BlockHeight::from_u32(1700)),
+        );
+        assert_eq!(store.replaced.get(), 1);
+        let stored = store
+            .stored
+            .as_ref()
+            .expect("the discharge was persisted before the step was surfaced");
+        assert_eq!(
+            stored.transactions()[1].broadcast_failure_at(),
+            None,
+            "the settled question does not withhold the crossing again after a restart",
+        );
+        assert_eq!(
+            stored.transactions()[2].broadcast_failure_at(),
+            Some(BlockHeight::from_u32(1700)),
+            "and the open one still stands",
         );
     }
 }
@@ -5996,6 +6444,7 @@ mod commit_tests {
             None,
             Some((mark, UnsatisfiableKind::InputsSpent)),
             vec![[7u8; 32]],
+            None,
         ));
         assert!(matches!(
             rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),

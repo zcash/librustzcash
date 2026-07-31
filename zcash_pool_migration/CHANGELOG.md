@@ -82,8 +82,29 @@ and this library adheres to Rust's notion of
   marked `unsatisfiable_at`, or that depends on a transaction which is; it is
   reported ahead of `RebuildError::NotExpired`. Re-plan the migration's
   remaining balance rather than retrying the rebuild.
+- `engine::MigrationState::report_broadcast_failure`, recording that a node
+  REJECTED a broadcast of a `Proved` transaction, together with the chain tip
+  that node reported. The report is testimony rather than evidence, so it
+  records no unsatisfiability mark: it withholds the transaction from the
+  broadcast queue until `engine::advance_migration` can adjudicate the
+  rejection against the wallet's own view. A re-report overwrites; a report on
+  a transaction in any other state, or on an unknown id, is a no-op.
+- `engine::MigrationTransaction::broadcast_failure_at`, the chain tip carried by
+  a standing broadcast-failure report, or `None` when none stands. A store
+  persists it independently of the unsatisfiability mark.
+- `state::AdvanceStep::Reevaluate`, returned by `engine::advance_migration`
+  while a broadcast-failure report stands that the store's oracle cannot yet
+  answer (its fully-scanned height is below the reported tip). Sync the wallet
+  to at least that tip and call `advance_migration` again; it outranks every
+  step but `Complete`, and no other work is offered while it stands.
+- `state::Blocker::AwaitingReevaluation`, reported for a transaction carrying an
+  unadjudicated broadcast-failure report — behind `Blocker::Unsatisfiable` and
+  ahead of `Blocker::Expired`.
 
 ### Changed
+- `engine::MigrationState::truncate_to_height` also discharges every
+  broadcast-failure report whose observed tip is strictly above the given
+  height, alongside the unsatisfiability marks it already cleared.
 - `state::AdvanceStep::Prove` now also carries the transaction's
   `engine::MigrationTxKind`, so a consumer can tell without a lookup whether it
   is proving a preparation transaction — by construction due on its broadcast
@@ -98,10 +119,11 @@ and this library adheres to Rust's notion of
   well as a broadcast one; it previously lapsed to `None` once the transaction
   mined. A transaction keeps the txid it was broadcast under, so a consumer
   rendering progress no longer has to hold one from an earlier status view.
-- `engine::MigrationTransaction::from_parts` takes two further parameters,
+- `engine::MigrationTransaction::from_parts` takes three further parameters,
   `unsatisfiable` (the unsatisfiability mark, when the transaction has been
-  determined unsatisfiable) and `spend_nullifiers` (the transaction's real-spend
-  nullifiers, cached from the built PCZT); both have accessors.
+  determined unsatisfiable), `spend_nullifiers` (the transaction's real-spend
+  nullifiers, cached from the built PCZT), and `broadcast_failure_at` (the
+  standing broadcast-failure report); all three have accessors.
 - `engine::MigrationState::from_parts` and the `engine::commit_preparation`,
   `engine::build_preparation_unsigned`, and
   `engine::commit_preparation_with_funding` entry points each take a further

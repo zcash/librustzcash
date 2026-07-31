@@ -242,6 +242,7 @@ fn stores_loads_and_updates_a_migration() {
         None,
         None,
         Vec::new(),
+        None,
     );
     let state = MigrationState::from_parts(
         MigrationStatus::Committed,

@@ -231,9 +231,12 @@ fn create_transactions_sql(t: &Tables) -> String {
     //
     // `unsatisfiable_at` and `unsatisfiable_kind` are one value in two columns — the height an
     // unsatisfiability observation rests on, and which observation it was — so they are `NULL`
-    // together or non-`NULL` together, and the read path rejects a row where they disagree. The
-    // three columns that migration adds are listed here in the order it adds them, so the created
-    // and repaired schemas stay comparable.
+    // together or non-`NULL` together, and the read path rejects a row where they disagree.
+    //
+    // `broadcast_failure_at` is independent of both: the tip an application observed from a node
+    // that REJECTED a broadcast, standing until the engine adjudicates the rejection against the
+    // wallet's own view. The four columns that migration adds are listed here in the order it adds
+    // them, so the created and repaired schemas stay comparable.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             migration_id INTEGER NOT NULL REFERENCES {}(id) ON DELETE CASCADE,
@@ -253,6 +256,7 @@ fn create_transactions_sql(t: &Tables) -> String {
             unsatisfiable_at INTEGER,
             spend_nullifiers BLOB NOT NULL DEFAULT X'',
             unsatisfiable_kind TEXT,
+            broadcast_failure_at INTEGER,
             PRIMARY KEY (migration_id, tx_id)
         )",
         t.transactions, t.migrations
@@ -738,7 +742,8 @@ fn read_transactions(
         let mut stmt = conn.prepare(&format!(
             "SELECT tx_id, kind, kind_layer, kind_index, kind_crossing, pczt,
                     scheduled_height, expiry_height, anchor_boundary, state, txid, mined_height,
-                    lock_owner, unsatisfiable_at, spend_nullifiers, unsatisfiable_kind
+                    lock_owner, unsatisfiable_at, spend_nullifiers, unsatisfiable_kind,
+                    broadcast_failure_at
                FROM {}
               WHERE migration_id = ?
               ORDER BY tx_id",
@@ -762,6 +767,7 @@ fn read_transactions(
                 unsatisfiable_at: row.get(13)?,
                 spend_nullifiers: row.get(14)?,
                 unsatisfiable_kind: row.get(15)?,
+                broadcast_failure_at: row.get(16)?,
             })
         })?;
         mapped.collect::<Result<_, _>>()?
@@ -843,6 +849,7 @@ fn read_transactions(
             r.lock_owner,
             unsatisfiable,
             spend_nullifiers,
+            r.broadcast_failure_at.map(BlockHeight::from_u32),
         ));
     }
     Ok(out)
@@ -901,6 +908,10 @@ struct TxRow {
     /// unparsed here; the decode step parses it and rejects a row where the two columns disagree
     /// about whether a mark stands.
     unsatisfiable_kind: Option<String>,
+    /// The chain tip an application observed from a node that rejected a broadcast of this
+    /// transaction, while that rejection stands unadjudicated; `NULL` otherwise. Independent of
+    /// the mark columns above in both directions.
+    broadcast_failure_at: Option<u32>,
 }
 
 fn read_deps(
@@ -1367,11 +1378,11 @@ fn replace_migration(
                 "INSERT INTO {} (migration_id, tx_id, kind, kind_layer, kind_index, kind_crossing,
                                  pczt, scheduled_height, expiry_height, anchor_boundary, state, txid,
                                  mined_height, lock_owner, unsatisfiable_at, spend_nullifiers,
-                                 unsatisfiable_kind)
+                                 unsatisfiable_kind, broadcast_failure_at)
                  VALUES (:migration_id, :tx_id, :kind, :kind_layer, :kind_index, :kind_crossing,
                          :pczt, :scheduled_height, :expiry_height, :anchor_boundary, :state, :txid,
                          :mined_height, :lock_owner, :unsatisfiable_at, :spend_nullifiers,
-                         :unsatisfiable_kind)",
+                         :unsatisfiable_kind, :broadcast_failure_at)",
                 t.transactions
             ),
             named_params! {
@@ -1392,6 +1403,7 @@ fn replace_migration(
                 ":unsatisfiable_at": unsatisfiable_at.map(u32::from),
                 ":spend_nullifiers": mtx.spend_nullifiers().concat(),
                 ":unsatisfiable_kind": unsatisfiable_kind.as_ref().map(|k| k.as_ref()),
+                ":broadcast_failure_at": mtx.broadcast_failure_at().map(u32::from),
             },
         )?;
         for (ordinal, dep) in mtx.depends_on().iter().enumerate() {

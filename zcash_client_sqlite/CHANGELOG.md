@@ -30,12 +30,14 @@ workspace.
 
 ### Changed
 - The database schema now includes the `unsatisfiable_at`, `spend_nullifiers`,
-  and `unsatisfiable_kind` columns on
+  `unsatisfiable_kind`, and `broadcast_failure_at` columns on
   `orchard_ironwood_migration_transactions`, recording the chain height backing
   a spent-input observation when a pool-migration transaction has been
   determined unsatisfiable and which observation that was (`inputs_spent`,
-  `inputs_invalidated`, `anchor_invalidated`, or `inherited`), and caching each
-  transaction's real-spend nullifiers, and the `replan_threshold` column
+  `inputs_invalidated`, `anchor_invalidated`, or `inherited`), caching each
+  transaction's real-spend nullifiers, and recording the chain tip a node
+  reported when it REJECTED a broadcast of the transaction, and the
+  `replan_threshold` column
   on `orchard_ironwood_migrations`, recording the integer percent of planned
   transfer value, unsatisfiable, above which the migration is re-planned
   immediately. `unsatisfiable_at` and `unsatisfiable_kind` are `NULL` together
@@ -46,17 +48,18 @@ workspace.
   whose stored PCZT is already proven (its real spends are no longer
   identifiable, so the cache cannot be reconstructed), and leaving a mined
   row's cache empty — and `replan_threshold` to the default policy;
-  `unsatisfiable_kind` needs no backfill, since a database lacking
-  `unsatisfiable_at` carried no marks. It also restores the `txid` of
+  `unsatisfiable_kind` and `broadcast_failure_at` need no backfill, since a
+  database lacking `unsatisfiable_at` carried neither marks nor
+  broadcast-failure reports. It also restores the `txid` of
   every `mined` pool-migration transaction stored without one (which is every
   such row written by a previous release), recovering it from the wallet's own
   record of the spend and failing with a corrupted-data error naming any row
   for which no such record exists.
 - `WalletWrite::truncate_to_height` (and everything routed through it) now also
   rolls every stored pool migration back to the height it actually truncated
-  to, clearing unsatisfiability marks that rest on discarded chain state,
-  demoting transactions recorded mined above it, and reverting a `Complete`
-  status the demotion unsettles. Applications that were calling
+  to, clearing unsatisfiability marks and broadcast-failure reports that rest on
+  discarded chain state, demoting transactions recorded mined above it, and
+  reverting a `Complete` status the demotion unsettles. Applications that were calling
   `MigrationState::truncate_to_height` themselves from a reorg hook should stop:
   the wallet now does it, in the same database transaction.
 - `pool_migration::orchard_ironwood::PoolMigrations` implements the new
