@@ -1,4 +1,4 @@
-//! Adds the `unsatisfiable_at` and `spend_nullifiers` columns to
+//! Adds the `unsatisfiable_at`, `spend_nullifiers`, and `unsatisfiable_kind` columns to
 //! `orchard_ironwood_migration_transactions` where they are missing, backfills the
 //! nullifier cache for existing rows, restores the erased `txid` of every `mined` row, and adds
 //! the `replan_threshold` column to `orchard_ironwood_migrations` where it is missing.
@@ -8,6 +8,14 @@
 //! all exist unspent on chain — and is `NULL` while no such determination stands. Recording the
 //! backing height rather than the observation time gives reorg truncation exact semantics: a
 //! rewind below this height invalidates the observation itself.
+//!
+//! `unsatisfiable_kind` records WHICH observation that was, as the wire name of an
+//! `UnsatisfiableKind` (`inputs_spent`, `inputs_invalidated`, `anchor_invalidated`, or
+//! `inherited` for a mark that arrived through the dependency closure rather than from anything
+//! observed about the transaction itself). It is the mark's companion, not an independent
+//! record: the two columns are `NULL` together or non-`NULL` together, and the store rejects a
+//! row where they disagree. Existing rows need no backfill — a pre-existing database has no
+//! `unsatisfiable_at` column either, so no mark can predate this one.
 //!
 //! `spend_nullifiers` caches the nullifiers of each transaction's REAL spends — the
 //! deferred-witness actions; the padded dummy spends carry their own witnesses (ZIP 374) — as a
@@ -51,7 +59,7 @@ use uuid::Uuid;
 use super::orchard_ironwood_migration_anchor_interval;
 use crate::wallet::init::WalletMigrationError;
 
-/// Adds the `unsatisfiable_at` and `spend_nullifiers` columns to
+/// Adds the `unsatisfiable_at`, `spend_nullifiers`, and `unsatisfiable_kind` columns to
 /// `orchard_ironwood_migration_transactions`, and the `replan_threshold` column to
 /// `orchard_ironwood_migrations`, where they are missing.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd334a9fa_b9dc_46bd_9b31_1fba6aa47f55);
@@ -70,7 +78,7 @@ impl schemerz::Migration<Uuid> for Migration {
     }
 
     fn description(&self) -> &'static str {
-        "Adds the unsatisfiable_at and spend_nullifiers columns to \
+        "Adds the unsatisfiable_at, spend_nullifiers, and unsatisfiable_kind columns to \
          orchard_ironwood_migration_transactions, and the replan_threshold column to \
          orchard_ironwood_migrations, where missing."
     }
@@ -211,8 +219,8 @@ impl RusqliteMigration for Migration {
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         // A wallet whose table was created from the current DDL already has the columns; adding
         // them again is an error rather than a no-op, so the presence check is load-bearing. The
-        // two columns are introduced together (by this migration or by the current `CREATE
-        // TABLE`), so one check governs both — and on the fresh path the store itself wrote
+        // three columns are introduced together (by this migration or by the current `CREATE
+        // TABLE`), so one check governs all of them — and on the fresh path the store itself wrote
         // `spend_nullifiers`, so there is nothing to backfill either.
         let has_tx_columns = transaction.query_row(
             "SELECT EXISTS (
@@ -227,11 +235,19 @@ impl RusqliteMigration for Migration {
             // paths agree on the stored schema text (SQLite cannot add a `NOT NULL` column
             // without one); the store always binds the column explicitly, so no insert ever
             // falls back to it.
+            //
+            // `unsatisfiable_kind` needs no backfill and no default: a database that lacked
+            // `unsatisfiable_at` carried no marks either, so every existing row is correctly
+            // unmarked with both columns `NULL`. The columns are added in the same order the
+            // current `CREATE TABLE` lists them, so the created and repaired schemas stay
+            // comparable.
             transaction.execute_batch(
                 "ALTER TABLE orchard_ironwood_migration_transactions
                     ADD COLUMN unsatisfiable_at INTEGER;
                  ALTER TABLE orchard_ironwood_migration_transactions
-                    ADD COLUMN spend_nullifiers BLOB NOT NULL DEFAULT X'';",
+                    ADD COLUMN spend_nullifiers BLOB NOT NULL DEFAULT X'';
+                 ALTER TABLE orchard_ironwood_migration_transactions
+                    ADD COLUMN unsatisfiable_kind TEXT;",
             )?;
 
             // Backfill the nullifier cache for every existing row from its stored PCZT. No
@@ -360,8 +376,8 @@ mod tests {
         conn.query_row(
             "SELECT (
                 SELECT COUNT(*) FROM pragma_table_info('orchard_ironwood_migration_transactions')
-                WHERE name IN ('unsatisfiable_at', 'spend_nullifiers')
-             ) = 2",
+                WHERE name IN ('unsatisfiable_at', 'spend_nullifiers', 'unsatisfiable_kind')
+             ) = 3",
             [],
             |row| row.get::<_, bool>(0),
         )
@@ -633,8 +649,9 @@ mod tests {
 
     /// The upgrade path with data: a row whose `pczt` column holds a REAL serialized migration
     /// transfer is backfilled with exactly its real spend's nullifier — the padding dummy spend
-    /// (which carries its own witness) contributes nothing — and `unsatisfiable_at` starts out
-    /// `NULL` (no spent-input observation stands).
+    /// (which carries its own witness) contributes nothing — and `unsatisfiable_at` and
+    /// `unsatisfiable_kind` both start out `NULL`: a database that had neither column carried no
+    /// unsatisfiability observation either, so there is nothing for them to say.
     #[cfg(feature = "orchard")]
     #[test]
     fn backfills_real_spend_nullifiers_from_the_stored_pczt() {
@@ -654,15 +671,22 @@ mod tests {
         RusqliteMigration::up(&Migration, &tx).unwrap();
         tx.commit().unwrap();
 
-        let (unsatisfiable_at, spend_nullifiers) = conn
+        let (unsatisfiable_at, spend_nullifiers, unsatisfiable_kind) = conn
             .query_row(
-                "SELECT unsatisfiable_at, spend_nullifiers
+                "SELECT unsatisfiable_at, spend_nullifiers, unsatisfiable_kind
                    FROM orchard_ironwood_migration_transactions",
                 [],
-                |row| Ok((row.get::<_, Option<u32>>(0)?, row.get::<_, Vec<u8>>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<u32>>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(unsatisfiable_at, None);
+        assert_eq!(unsatisfiable_kind, None);
         assert_eq!(spend_nullifiers, expected_nullifier.to_vec());
     }
 

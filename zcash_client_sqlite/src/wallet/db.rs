@@ -689,11 +689,15 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
 /// transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle discriminant, with the
 /// hex broadcast `txid` and `mined_height`. `lock_owner` records the `LockOwner` under which this
 /// transaction's notes are locked, if any. `unsatisfiable_at` is the height of the chain state a
-/// spent-input observation rests on, when the transaction has been determined unsatisfiable;
-/// `spend_nullifiers` is the concatenation of its real-spend 32-byte nullifiers in action order,
-/// cached from the stored PCZT (its `DEFAULT` exists only so this DDL and the `ADD COLUMN` in the
-/// `orchard_ironwood_migration_unsatisfiability` schema migration produce the same stored schema
-/// text). Dependencies are edges in `orchard_ironwood_migration_transaction_deps`.
+/// spent-input observation rests on, when the transaction has been determined unsatisfiable, and
+/// `unsatisfiable_kind` the wire name of WHICH observation that was (`inputs_spent`,
+/// `inputs_invalidated`, `anchor_invalidated`, or `inherited` for a mark that arrived through the
+/// dependency closure); the two are `NULL` together or non-`NULL` together, and a row where they
+/// disagree is rejected as corrupt. `spend_nullifiers` is the concatenation of its real-spend
+/// 32-byte nullifiers in action order, cached from the stored PCZT (its `DEFAULT` exists only so
+/// this DDL and the `ADD COLUMN` in the `orchard_ironwood_migration_unsatisfiability` schema
+/// migration produce the same stored schema text). Dependencies are edges in
+/// `orchard_ironwood_migration_transaction_deps`.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
 CREATE TABLE orchard_ironwood_migration_transactions (
     migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
@@ -712,6 +716,7 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     lock_owner BLOB,
     unsatisfiable_at INTEGER,
     spend_nullifiers BLOB NOT NULL DEFAULT X'',
+    unsatisfiable_kind TEXT,
     PRIMARY KEY (migration_id, tx_id)
 )";
 /// The dependency edges between migration transactions.

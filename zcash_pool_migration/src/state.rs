@@ -30,7 +30,7 @@ use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
     MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState, StepSatisfiability,
+    MigrationTxState, StepSatisfiability, UnsatisfiableKind,
 };
 use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 
@@ -200,6 +200,18 @@ pub struct TransactionStatus {
     /// dependent on a dead transaction); a mined row never carries a blocker.
     #[getset(get_copy = "pub")]
     pub(crate) blocked_on: Option<Blocker>,
+    /// WHY it can never mine, populated exactly when [`Blocker::Unsatisfiable`] is reported and
+    /// `None` otherwise — the rendering detail behind that blocker.
+    ///
+    /// For a transaction carrying its own mark this is the stored
+    /// [`unsatisfiable_kind`](MigrationTransaction::unsatisfiable_kind). But `Unsatisfiable` is
+    /// also reported for an UNMARKED transaction whose direct dependency is merely DERIVED dead —
+    /// expired and unmined, a deadness the state machine re-derives at every call and never stores
+    /// (see [`MigrationState::record_satisfiability`]) — and there is no stored kind for that
+    /// case. It reports [`Inherited`](UnsatisfiableKind::Inherited), which is exactly what it is:
+    /// nothing was observed about the transaction itself.
+    #[getset(get_copy = "pub")]
+    pub(crate) unsatisfiable_kind: Option<UnsatisfiableKind>,
     /// The height it was mined at, once mined.
     #[getset(get_copy = "pub")]
     pub(crate) mined_height: Option<BlockHeight>,
@@ -266,7 +278,7 @@ impl MigrationState {
             .iter()
             .filter(|t| {
                 !matches!(t.state, MigrationTxState::Mined { .. })
-                    && (t.unsatisfiable_at.is_some() || Self::is_expired(t, target_height))
+                    && (t.unsatisfiable.is_some() || Self::is_expired(t, target_height))
             })
             .map(|t| t.id)
             .collect();
@@ -321,7 +333,7 @@ impl MigrationState {
             .filter(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
             .find(|t| {
                 Self::is_expired(t, target_height)
-                    && t.unsatisfiable_at.is_none()
+                    && t.unsatisfiable.is_none()
                     && !t.depends_on.iter().any(|d| dead.contains(d))
                     && !set_aside.contains(&t.id)
             })
@@ -514,7 +526,7 @@ impl MigrationState {
             .transactions
             .iter()
             .filter(|t| {
-                t.unsatisfiable_at.is_some() && !matches!(t.state, MigrationTxState::Mined { .. })
+                t.unsatisfiable.is_some() && !matches!(t.state, MigrationTxState::Mined { .. })
             })
             .filter_map(|t| self.transfer_crossing_value(t))
             .map(u64::from)
@@ -579,7 +591,7 @@ impl MigrationState {
     }
 
     /// Records the outcomes of satisfiability checks as durable
-    /// [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at) marks: the single door
+    /// [`unsatisfiable`](MigrationTransaction::unsatisfiable) marks: the single door
     /// through which satisfiability observations enter the state. The engine's drive and prove
     /// paths record through this method after consulting
     /// [`check_step_satisfiability`](crate::engine::PoolMigrationRead::check_step_satisfiability);
@@ -591,7 +603,7 @@ impl MigrationState {
     ///
     /// | Answer | Effect |
     /// |---|---|
-    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](crate::engine::UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](crate::engine::UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](crate::engine::UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of` height |
+    /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`InputsSpent`](crate::engine::UnsatisfiableCause::InputsSpent), [`InputsInvalidated`](crate::engine::UnsatisfiableCause::InputsInvalidated), or [`AnchorInvalidated`](crate::engine::UnsatisfiableCause::AnchorInvalidated) | marks the transaction at the answer's `as_of` height, under the cause's [`UnsatisfiableKind`] |
     /// | [`Unsatisfiable`](StepSatisfiability::Unsatisfiable) via [`Expired`](crate::engine::UnsatisfiableCause::Expired) | no mark |
     /// | [`Satisfiable`](StepSatisfiability::Satisfiable) / [`NotYetSatisfiable`](StepSatisfiability::NotYetSatisfiable) | no mark |
     ///
@@ -599,8 +611,9 @@ impl MigrationState {
     /// state machine cannot re-derive on its own (the store saw the inputs spent, or an anchor
     /// permanently displaced), so it must be stored durably; the mark carries the answer's
     /// `as_of` — the chain height the observation RESTS ON, not the height it was recorded at —
-    /// which is what gives reorg truncation exact semantics. `Expired` instead confirms a
-    /// derivation the kernel already makes from the same
+    /// which is what gives reorg truncation exact semantics, and the cause's reduced
+    /// [`UnsatisfiableKind`], so a wallet can say WHY without re-consulting the oracle. `Expired`
+    /// instead confirms a derivation the kernel already makes from the same
     /// [`expiry_height`](MigrationTransaction::expiry_height), so a stored copy would add
     /// nothing and could only drift.
     ///
@@ -613,7 +626,9 @@ impl MigrationState {
     /// graph, so a stranded subtree is marked even when the oracle was never asked about it
     /// (or was asked about nothing at all): with the dead sources being the marked
     /// transactions and the expired-and-unmined ones (judged at `target_height`), every
-    /// unmined, unmarked transaction with a dead direct dependency inherits a mark. The
+    /// unmined, unmarked transaction with a dead direct dependency inherits a mark, of kind
+    /// [`Inherited`](UnsatisfiableKind::Inherited) — nothing was observed about the transaction
+    /// itself, so what killed it is read off that dependency's own mark. The
     /// inherited stamp is the MINIMUM applicable stamp over its dead direct dependencies — a
     /// marked dependency contributes its `unsatisfiable_at`, an expired-unmined one its
     /// `expiry_height` (both, when it is both) — which is the earliest height whose rollback
@@ -636,18 +651,19 @@ impl MigrationState {
             let StepSatisfiability::Unsatisfiable { cause, as_of } = answer else {
                 continue;
             };
-            // Whether a cause marks is defined once, on the cause itself: the drive API's loop
-            // decides what to record from the same predicate, and its termination depends on the
-            // two agreeing (see `UnsatisfiableCause::marks`).
-            if !cause.marks() {
+            // Whether a cause marks — and under which kind — is defined once, on the cause itself:
+            // the drive API's loop decides what to record from the same predicate, and its
+            // termination depends on the two agreeing (see `UnsatisfiableCause::kind` and its
+            // derived `marks`).
+            let Some(kind) = cause.kind() else {
                 continue;
-            }
+            };
             if let Some(t) = self.transactions.iter_mut().find(|t| {
                 t.id == *id
-                    && t.unsatisfiable_at.is_none()
+                    && t.unsatisfiable.is_none()
                     && !matches!(t.state, MigrationTxState::Mined { .. })
             }) {
-                t.unsatisfiable_at = Some(*as_of);
+                t.unsatisfiable = Some((*as_of, kind));
             }
         }
         // The durable closure, to a fixpoint. Each pass is two-phase — collect the inherited
@@ -659,8 +675,7 @@ impl MigrationState {
                 .transactions
                 .iter()
                 .filter(|t| {
-                    !matches!(t.state, MigrationTxState::Mined { .. })
-                        && t.unsatisfiable_at.is_none()
+                    !matches!(t.state, MigrationTxState::Mined { .. }) && t.unsatisfiable.is_none()
                 })
                 .filter_map(|t| {
                     // The minimum applicable stamp over this transaction's dead direct
@@ -673,7 +688,7 @@ impl MigrationState {
                         .filter_map(|d| {
                             let expired =
                                 Self::is_expired(d, target_height).then_some(d.expiry_height);
-                            match (d.unsatisfiable_at, expired) {
+                            match (d.unsatisfiable_at(), expired) {
                                 (Some(m), Some(e)) => Some(m.min(e)),
                                 (Some(m), None) => Some(m),
                                 (None, Some(e)) => Some(e),
@@ -689,7 +704,9 @@ impl MigrationState {
             }
             for (id, stamp) in inherited {
                 if let Some(t) = self.transactions.iter_mut().find(|t| t.id == id) {
-                    t.unsatisfiable_at = Some(stamp);
+                    // Nothing was observed about this transaction itself; what killed it is read
+                    // off the dead dependency that contributed the stamp.
+                    t.unsatisfiable = Some((stamp, UnsatisfiableKind::Inherited));
                 }
             }
         }
@@ -702,9 +719,9 @@ impl MigrationState {
     /// would leave marks standing on state that no longer exists — and persisting the state
     /// afterwards (`replace_migration`). Three things roll back, and nothing else:
     ///
-    /// - every [`unsatisfiable_at`](MigrationTransaction::unsatisfiable_at) mark strictly above
-    ///   `height` is cleared: the observation it recorded rested on state that no longer
-    ///   exists;
+    /// - every [`unsatisfiable`](MigrationTransaction::unsatisfiable) mark whose stamp is strictly
+    ///   above `height` is cleared, kind and all: the observation it recorded rested on state that
+    ///   no longer exists;
     /// - every [`Mined`](MigrationTxState::Mined) transaction whose mined height is strictly
     ///   above `height` is demoted to [`Broadcast`](MigrationTxState::Broadcast), keeping the
     ///   txid it was mined under: the transaction is back in flight and may well re-mine, and
@@ -735,8 +752,8 @@ impl MigrationState {
     /// an answer.
     pub fn truncate_to_height(&mut self, height: BlockHeight) {
         for t in &mut self.transactions {
-            if t.unsatisfiable_at.is_some_and(|h| h > height) {
-                t.unsatisfiable_at = None;
+            if t.unsatisfiable.is_some_and(|(h, _)| h > height) {
+                t.unsatisfiable = None;
             }
             if let MigrationTxState::Mined {
                 txid,
@@ -967,8 +984,8 @@ impl MigrationState {
             .iter()
             .map(|t| {
                 let deps_ok = self.deps_mined(&t.depends_on);
-                // A transaction determined UNSATISFIABLE — its own inputs observed gone
-                // (`unsatisfiable_at`), or a dependency that can never mine — dominates every
+                // A transaction determined UNSATISFIABLE — its own mark (`unsatisfiable`), or a
+                // dependency that can never mine — dominates every
                 // other disposition: ahead of Expired, because expiry's remedy (a rebuild)
                 // cannot cure missing inputs, and ahead of the state match, because even an
                 // in-flight `Broadcast` row with a dead dependency can never mine. Expiry ALONE
@@ -977,8 +994,16 @@ impl MigrationState {
                 // still applies. A mined transaction is final and never dead, so the Mined arm
                 // below is undisturbed.
                 let unsatisfiable = !matches!(t.state, MigrationTxState::Mined { .. })
-                    && (t.unsatisfiable_at.is_some()
-                        || t.depends_on.iter().any(|d| dead.contains(d)));
+                    && (t.unsatisfiable.is_some() || t.depends_on.iter().any(|d| dead.contains(d)));
+                // The rendering detail behind `Blocker::Unsatisfiable`, and populated only with
+                // it. A transaction stranded behind a merely DERIVED-dead dependency (one expired
+                // and unmined, whose deadness is never stored) carries no mark of its own, and
+                // `Inherited` is exactly its situation: nothing was observed about it.
+                let unsatisfiable_kind = unsatisfiable.then(|| {
+                    t.unsatisfiable
+                        .map(|(_, kind)| kind)
+                        .unwrap_or(UnsatisfiableKind::Inherited)
+                });
                 // An expired transaction (not yet mined, past its expiry height) can never be mined and
                 // must be rebuilt; report that ahead of any other blocker, so a wallet shows it as
                 // needing attention rather than as waiting on a dependency or the schedule.
@@ -1049,6 +1074,7 @@ impl MigrationState {
                     ready,
                     action,
                     blocked_on,
+                    unsatisfiable_kind,
                     mined_height,
                     txid,
                 }
@@ -1071,6 +1097,16 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
 
+    // A DIRECT unsatisfiability mark resting on the chain state at `height`, in the shape
+    // `record_satisfiability` writes for an observed spend. Wherever only the stamp is under test,
+    // which observation it records is immaterial — but a mark always has one.
+    fn marked(height: u32) -> Option<(BlockHeight, UnsatisfiableKind)> {
+        Some((
+            BlockHeight::from_u32(height),
+            UnsatisfiableKind::InputsSpent,
+        ))
+    }
+
     // A migration transaction with the given id/kind/state, no dependencies, scheduled at height 0.
     fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
         MigrationTransaction {
@@ -1083,7 +1119,7 @@ mod tests {
             anchor_boundary: None,
             state,
             lock_owner: None,
-            unsatisfiable_at: None,
+            unsatisfiable: None,
             spend_nullifiers: Vec::new(),
         }
     }
@@ -1210,16 +1246,16 @@ mod tests {
             ],
         );
         assert!(!s.replan_required());
-        s.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        s.transactions[1].unsatisfiable = marked(50);
         assert!(
             !s.replan_required(),
             "exactly at threshold is not MORE than it"
         );
-        s.transactions[2].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        s.transactions[2].unsatisfiable = marked(50);
         assert!(s.replan_required());
         // A mined transfer counts in the denominator only: un-mark the 80-crossing and mine it;
         // the marked 20-crossing is back to exactly 20%.
-        s.transactions[2].unsatisfiable_at = None;
+        s.transactions[2].unsatisfiable = None;
         s.transactions[2].state = mined(60);
         assert!(!s.replan_required());
     }
@@ -1245,7 +1281,7 @@ mod tests {
         // Marking the UNMINED PREPARATION contributes nothing to the numerator: a preparation
         // crosses nothing (see `transfer_crossing_value_is_none_for_a_preparation`), so even at
         // the most sensitive threshold, marking one alone cannot trigger a replan.
-        zero.transactions[0].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        zero.transactions[0].unsatisfiable = marked(50);
         assert!(
             !zero.replan_required(),
             "a marked preparation contributes nothing to the numerator"
@@ -1253,7 +1289,7 @@ mod tests {
 
         // Marking a transfer, however small its crossing value, DOES trigger at threshold 0: any
         // marked unmined transfer value is more than zero.
-        zero.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        zero.transactions[1].unsatisfiable = marked(50);
         assert!(zero.replan_required());
 
         // Threshold 100: even with EVERY transfer marked, `unsat == total`, and the comparison is
@@ -1269,8 +1305,8 @@ mod tests {
             ],
         );
         hundred.replan_threshold = crate::engine::ReplanThreshold::new(100).expect("100 is valid");
-        hundred.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(50));
-        hundred.transactions[2].unsatisfiable_at = Some(BlockHeight::from_u32(50));
+        hundred.transactions[1].unsatisfiable = marked(50);
+        hundred.transactions[2].unsatisfiable = marked(50);
         assert!(
             !hundred.replan_required(),
             "threshold 100 never triggers immediately, even when everything is marked"
@@ -1944,7 +1980,7 @@ mod tests {
                 txid: TxId::from_bytes([2; 32]),
             },
         );
-        inflight.unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        inflight.unsatisfiable = marked(40);
         let mut bdep = tx(
             3,
             prep(1, 0),
@@ -1985,7 +2021,7 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Proved),
             ],
         );
-        s.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        s.transactions[1].unsatisfiable = marked(40);
         assert!(s.replan_required());
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100), &[]),
@@ -2017,7 +2053,7 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Signed),
             ],
         );
-        s.transactions[2].unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        s.transactions[2].unsatisfiable = marked(40);
         assert!(!s.replan_required());
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100), &[]),
@@ -2046,7 +2082,7 @@ mod tests {
                 id: MigrationTransferId(1)
             }
         );
-        s.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(45));
+        s.transactions[1].unsatisfiable = marked(45);
         assert_eq!(
             s.next_step(BlockHeight::from_u32(51), &[]),
             AdvanceStep::Replan
@@ -2070,7 +2106,7 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Signed),
             ],
         );
-        s.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        s.transactions[1].unsatisfiable = marked(40);
         assert!(s.replan_required());
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100), &[]),
@@ -2130,7 +2166,7 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Signed),
             ],
         );
-        s.transactions[2].unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        s.transactions[2].unsatisfiable = marked(40);
         assert!(!s.replan_required());
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100), &[]),
@@ -2164,7 +2200,7 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Signed),
             ],
         );
-        s.transactions[2].unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        s.transactions[2].unsatisfiable = marked(40);
         assert!(!s.replan_required());
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100), &[]),
@@ -2208,7 +2244,7 @@ mod tests {
         // this transfer never expires, so only its unsatisfiable mark can exclude it from the
         // schedule.
         let mut xfer = scheduled_transfer(1, 0, 1440, 1700, MigrationTxState::Signed);
-        xfer.unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        xfer.unsatisfiable = marked(40);
         let s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
         let mut r = ChaCha8Rng::seed_from_u64(1);
         let wakeups = s
@@ -2238,7 +2274,7 @@ mod tests {
                 tx(2, transfer(1), MigrationTxState::Proved),
             ],
         );
-        s.transactions[1].unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        s.transactions[1].unsatisfiable = marked(40);
         assert!(s.replan_required());
         assert_eq!(
             s.next_step(BlockHeight::from_u32(100), &[MigrationTransferId(2)]),
@@ -2259,7 +2295,7 @@ mod tests {
                 txid: TxId::from_bytes([4; 32]),
             },
         );
-        marked_inflight.unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        marked_inflight.unsatisfiable = marked(40);
         let mut awaiting = tx(2, prep(1, 0), MigrationTxState::AwaitingSignature);
         awaiting.depends_on = vec![MigrationTransferId(1)];
         let s = state_with(vec![
@@ -2303,7 +2339,7 @@ mod tests {
         // A marked transfer renders Blocker::Unsatisfiable (ahead of Expired) and is excluded
         // from the sync wake-up schedule; a closure-dead dependent renders the same.
         let mut xfer = scheduled_transfer(1, 0, 1440, 1700, MigrationTxState::Signed);
-        xfer.unsatisfiable_at = Some(BlockHeight::from_u32(40));
+        xfer.unsatisfiable = marked(40);
         xfer.expiry_height = BlockHeight::from_u32(45); // ALSO expired: Unsatisfiable wins
         let mut dep = tx(2, prep(1, 0), MigrationTxState::Signed);
         dep.depends_on = vec![MigrationTransferId(1)];
@@ -2354,10 +2390,10 @@ mod tests {
                 ),
             ],
         );
-        assert_eq!(s.transactions[1].unsatisfiable_at, Some(h));
-        assert_eq!(s.transactions[2].unsatisfiable_at, None);
+        assert_eq!(s.transactions[1].unsatisfiable_at(), Some(h));
+        assert_eq!(s.transactions[2].unsatisfiable_at(), None);
         // Durable closure: the dependent inherits the SOURCE's stamp.
-        assert_eq!(s.transactions[3].unsatisfiable_at, Some(h));
+        assert_eq!(s.transactions[3].unsatisfiable_at(), Some(h));
     }
 
     #[test]
@@ -2389,7 +2425,8 @@ mod tests {
             )],
         );
         assert_eq!(
-            s.transactions[0].unsatisfiable_at, None,
+            s.transactions[0].unsatisfiable_at(),
+            None,
             "Expired never marks"
         );
         s.record_satisfiability(
@@ -2420,10 +2457,11 @@ mod tests {
                 ),
             ],
         );
-        assert_eq!(s.transactions[1].unsatisfiable_at, Some(h));
-        assert_eq!(s.transactions[2].unsatisfiable_at, Some(h));
+        assert_eq!(s.transactions[1].unsatisfiable_at(), Some(h));
+        assert_eq!(s.transactions[2].unsatisfiable_at(), Some(h));
         assert_eq!(
-            s.transactions[3].unsatisfiable_at, None,
+            s.transactions[3].unsatisfiable_at(),
+            None,
             "a mined transaction is final and is never marked"
         );
         // Re-recording at a different height leaves the original stamp (first observation wins;
@@ -2438,7 +2476,7 @@ mod tests {
                 },
             )],
         );
-        assert_eq!(s.transactions[1].unsatisfiable_at, Some(h));
+        assert_eq!(s.transactions[1].unsatisfiable_at(), Some(h));
     }
 
     #[test]
@@ -2461,14 +2499,14 @@ mod tests {
         grandchild.depends_on = vec![MigrationTransferId(1)];
         let mut s = state_with(vec![prep0, dep, grandchild]);
         s.record_satisfiability(BlockHeight::from_u32(60), &[]);
-        assert_eq!(s.transactions[0].unsatisfiable_at, None);
+        assert_eq!(s.transactions[0].unsatisfiable_at(), None);
         assert_eq!(
-            s.transactions[1].unsatisfiable_at,
+            s.transactions[1].unsatisfiable_at(),
             Some(BlockHeight::from_u32(50))
         );
         // The grandchild inherits through the chain (its parent's stamp, itself inherited).
         assert_eq!(
-            s.transactions[2].unsatisfiable_at,
+            s.transactions[2].unsatisfiable_at(),
             Some(BlockHeight::from_u32(50))
         );
         // At a target where the source is NOT yet expired, the closure marks nothing.
@@ -2481,7 +2519,7 @@ mod tests {
             50,
         )]);
         s2.record_satisfiability(BlockHeight::from_u32(50), &[]);
-        assert!(s2.transactions.iter().all(|t| t.unsatisfiable_at.is_none()));
+        assert!(s2.transactions.iter().all(|t| t.unsatisfiable.is_none()));
     }
 
     #[test]
@@ -2494,20 +2532,20 @@ mod tests {
         // leaves the inherited mark standing: B is still expired, so the dependent is still dead,
         // and its stamp says so.
         let mut a = tx(0, transfer(0), MigrationTxState::Signed);
-        a.unsatisfiable_at = Some(BlockHeight::from_u32(500));
+        a.unsatisfiable = marked(500);
         let mut b = tx_expiring(1, transfer(1), MigrationTxState::Signed, 50);
-        b.unsatisfiable_at = Some(BlockHeight::from_u32(400));
+        b.unsatisfiable = marked(400);
         let mut dep = tx(2, prep(1, 0), MigrationTxState::Signed);
         dep.depends_on = vec![MigrationTransferId(0), MigrationTransferId(1)];
         let mut s = state_with(vec![a, b, dep]);
         s.record_satisfiability(BlockHeight::from_u32(600), &[]);
         assert_eq!(
-            s.transactions[2].unsatisfiable_at,
+            s.transactions[2].unsatisfiable_at(),
             Some(BlockHeight::from_u32(50))
         );
         s.truncate_to_height(BlockHeight::from_u32(100));
         assert_eq!(
-            s.transactions[2].unsatisfiable_at,
+            s.transactions[2].unsatisfiable_at(),
             Some(BlockHeight::from_u32(50)),
             "truncation to 100 leaves the minimum stamp standing"
         );
@@ -2540,14 +2578,14 @@ mod tests {
                 },
             ),
         ]);
-        s.transactions[0].unsatisfiable_at = Some(BlockHeight::from_u32(100));
+        s.transactions[0].unsatisfiable = marked(100);
         s.recompute_status();
         assert_eq!(s.status, MigrationStatus::Complete);
         s.truncate_to_height(BlockHeight::from_u32(100));
         // A mark at exactly the truncation height rests on surviving state: kept. A mined height
         // above it: demoted to Broadcast, txid preserved. Complete: reverted (chain-derived).
         assert_eq!(
-            s.transactions[0].unsatisfiable_at,
+            s.transactions[0].unsatisfiable_at(),
             Some(BlockHeight::from_u32(100))
         );
         assert!(
@@ -2560,9 +2598,9 @@ mod tests {
         ));
         assert_eq!(s.status, MigrationStatus::InProgress);
         // Marks strictly above the height clear.
-        s.transactions[0].unsatisfiable_at = Some(BlockHeight::from_u32(101));
+        s.transactions[0].unsatisfiable = marked(101);
         s.truncate_to_height(BlockHeight::from_u32(100));
-        assert_eq!(s.transactions[0].unsatisfiable_at, None);
+        assert_eq!(s.transactions[0].unsatisfiable_at(), None);
         // Policy-terminal statuses are never revived.
         s.status = MigrationStatus::Superseded;
         s.truncate_to_height(BlockHeight::from_u32(5));
@@ -2588,6 +2626,145 @@ mod tests {
         );
     }
 
+    /// Recording an observation stores WHY alongside the stamp: a direct determination records its
+    /// cause's kind, a mark the dependency closure applies records `Inherited` (nothing was
+    /// observed about the transaction itself), and a non-marking answer records neither.
+    #[test]
+    fn record_satisfiability_records_the_cause_kind_and_inherits() {
+        // 0 -> spent inputs, 1 -> a dead anchor, 2 -> invalidated inputs, 3 -> a dependent of 0
+        // reached only through the closure, 4 -> untouched.
+        let mut dependent = tx(3, prep(1, 0), MigrationTxState::Signed);
+        dependent.depends_on = vec![MigrationTransferId(0)];
+        let mut s = state_with(vec![
+            tx(0, transfer(0), MigrationTxState::Signed),
+            tx(
+                1,
+                transfer(1),
+                MigrationTxState::Broadcast {
+                    txid: TxId::from_bytes([1; 32]),
+                },
+            ),
+            tx(2, transfer(2), MigrationTxState::Signed),
+            dependent,
+            tx(4, transfer(3), MigrationTxState::Signed),
+        ]);
+        let h = BlockHeight::from_u32(500);
+        s.record_satisfiability(
+            BlockHeight::from_u32(600),
+            &[
+                (
+                    MigrationTransferId(0),
+                    StepSatisfiability::Unsatisfiable {
+                        cause: UnsatisfiableCause::InputsSpent {
+                            nullifiers: vec![[9; 32]],
+                        },
+                        as_of: h,
+                    },
+                ),
+                (
+                    MigrationTransferId(1),
+                    StepSatisfiability::Unsatisfiable {
+                        cause: UnsatisfiableCause::AnchorInvalidated,
+                        as_of: h,
+                    },
+                ),
+                (
+                    MigrationTransferId(2),
+                    StepSatisfiability::Unsatisfiable {
+                        cause: UnsatisfiableCause::InputsInvalidated { anchor: [7; 32] },
+                        as_of: h,
+                    },
+                ),
+                (
+                    MigrationTransferId(4),
+                    StepSatisfiability::Satisfiable { as_of: h },
+                ),
+            ],
+        );
+        assert_eq!(
+            s.transactions[0].unsatisfiable,
+            Some((h, UnsatisfiableKind::InputsSpent))
+        );
+        assert_eq!(
+            s.transactions[1].unsatisfiable,
+            Some((h, UnsatisfiableKind::AnchorInvalidated))
+        );
+        assert_eq!(
+            s.transactions[2].unsatisfiable,
+            Some((h, UnsatisfiableKind::InputsInvalidated))
+        );
+        assert_eq!(
+            s.transactions[3].unsatisfiable,
+            Some((h, UnsatisfiableKind::Inherited)),
+            "a mark the closure applied says only that it was inherited"
+        );
+        assert_eq!(s.transactions[4].unsatisfiable, None);
+
+        // Truncating below the marks clears them whole: the kind says why THAT observation stood,
+        // and the observation is gone.
+        s.truncate_to_height(BlockHeight::from_u32(400));
+        assert!(
+            s.transactions.iter().all(|t| t.unsatisfiable.is_none()),
+            "a cleared mark leaves nothing behind"
+        );
+    }
+
+    /// The status view surfaces the kind exactly alongside `Blocker::Unsatisfiable` — and for a
+    /// transaction stranded behind a merely DERIVED-dead dependency (expired and unmined, a
+    /// deadness the kernel re-derives and never stores) it reports `Inherited`, which is precisely
+    /// its situation: nothing was observed about the transaction itself.
+    #[test]
+    fn transaction_statuses_surface_the_unsatisfiability_kind() {
+        // 0 -> marked directly; 1 -> depends on 0 and is itself marked by the closure; 2 -> an
+        // expired-unmined preparation, dead by derivation and never marked; 3 -> depends on 2 and
+        // carries no mark at all; 4 -> live.
+        let mut inherited = tx(1, prep(1, 0), MigrationTxState::Signed);
+        inherited.depends_on = vec![MigrationTransferId(0)];
+        let mut stranded = tx(3, transfer(2), MigrationTxState::Signed);
+        stranded.depends_on = vec![MigrationTransferId(2)];
+        let mut s = state_with(vec![
+            tx(0, transfer(0), MigrationTxState::Signed),
+            inherited,
+            tx_expiring(
+                2,
+                prep(0, 0),
+                MigrationTxState::Broadcast {
+                    txid: TxId::from_bytes([2; 32]),
+                },
+                50,
+            ),
+            stranded,
+            tx(4, transfer(3), MigrationTxState::Signed),
+        ]);
+        s.transactions[0].unsatisfiable =
+            Some((BlockHeight::from_u32(500), UnsatisfiableKind::InputsSpent));
+        s.transactions[1].unsatisfiable =
+            Some((BlockHeight::from_u32(500), UnsatisfiableKind::Inherited));
+
+        let v = s.transaction_statuses(BlockHeight::from_u32(600));
+        assert_eq!(v[0].blocked_on, Some(Blocker::Unsatisfiable));
+        assert_eq!(
+            v[0].unsatisfiable_kind,
+            Some(UnsatisfiableKind::InputsSpent)
+        );
+        assert_eq!(v[1].blocked_on, Some(Blocker::Unsatisfiable));
+        assert_eq!(v[1].unsatisfiable_kind, Some(UnsatisfiableKind::Inherited));
+        // The expired source itself is not unsatisfiable: expiry's remedy still applies, and no
+        // kind is reported with `Expired`.
+        assert_eq!(v[2].blocked_on, Some(Blocker::Expired));
+        assert_eq!(v[2].unsatisfiable_kind, None);
+        // Stranded behind it, with NO stored mark of its own: `Inherited` is the honest answer.
+        assert_eq!(
+            s.transactions[3].unsatisfiable, None,
+            "the stranded transaction carries no stored mark; the kind is derived here"
+        );
+        assert_eq!(v[3].blocked_on, Some(Blocker::Unsatisfiable));
+        assert_eq!(v[3].unsatisfiable_kind, Some(UnsatisfiableKind::Inherited));
+        // A live transaction reports neither.
+        assert_ne!(v[4].blocked_on, Some(Blocker::Unsatisfiable));
+        assert_eq!(v[4].unsatisfiable_kind, None);
+    }
+
     #[test]
     fn truncation_then_rederivation_restores_true_marks() {
         // The mark-clear + demotion + kernel-closure pipeline composes: truncating below a mark
@@ -2607,7 +2784,7 @@ mod tests {
             )],
         );
         s.truncate_to_height(BlockHeight::from_u32(400));
-        assert_eq!(s.transactions[0].unsatisfiable_at, None);
+        assert_eq!(s.transactions[0].unsatisfiable_at(), None);
         s.record_satisfiability(
             BlockHeight::from_u32(600),
             &[(
@@ -2621,7 +2798,7 @@ mod tests {
             )],
         );
         assert_eq!(
-            s.transactions[0].unsatisfiable_at,
+            s.transactions[0].unsatisfiable_at(),
             Some(BlockHeight::from_u32(420))
         );
     }
