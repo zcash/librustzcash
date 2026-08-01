@@ -38,18 +38,21 @@ and this library adheres to Rust's notion of
   privacy-preserving broadcast schedule, and that much sooner to a replan.
   `PoolMigrationRead::mined_height` documents the store-side consistency this rests on: it and
   `check_step_satisfiability` must answer from one view of the wallet's scan.
-- `pczt_txid`, deriving a migration transaction's `TxId` from its stored PCZT (`orchard`
-  feature). A migration transaction's id is fixed from the moment it is SIGNED and does not move
-  when proving installs the anchor and witnesses — forced, not incidental: a signature commits to
-  the txid, so a transaction whose id changed under proving would carry a signature over the wrong
-  id and no node would accept it.
-- `satisfiability::advance_migration` additionally sweeps `Proved` transactions, identifying each
-  by the txid derived from its stored PCZT and promoting any the wallet's scan has seen mine —
-  through `Broadcast`, since that is the state the missing record would have written. This closes
-  the gap a recorded-txid sweep cannot see: a consumer that submitted a transaction to a node and
-  then crashed, or failed to persist, before `MigrationState::mark_broadcast` leaves a `Proved`
-  row whose transaction is on chain, which nothing else would ever promote. Consumers that carried
-  their own submit-crash probe can delete it.
+- `pczt_txid`, deriving a migration transaction's `TxId` from its PCZT (`orchard` feature). A
+  migration transaction's id exists from the moment its PCZT is PREPARED — computing it is a
+  prerequisite of signing, since the signature hash is derived from it — and never moves
+  afterwards: signing, and the anchor and witnesses ZIP 374 defers to proving, are all authorizing
+  data, outside the effecting data the txid digest covers.
+- `engine::MigrationTransaction::txid`, that id, recorded on every transaction when it is built and
+  supplied to `MigrationTransaction::from_parts`. Only `rebuild_expired_transfer` changes it, and
+  only because a rebuild is a genuinely different transaction.
+- `satisfiability::advance_migration` additionally sweeps `Proved` transactions, promoting any the
+  wallet's scan has seen mine — through `Broadcast`, since that is the state the missing record
+  would have written. This closes the gap a recorded-txid sweep cannot see: a consumer that
+  submitted a transaction to a node and then crashed, or failed to persist, before
+  `MigrationState::mark_broadcast` leaves a `Proved` row whose transaction is on chain, which
+  nothing else would ever promote. Consumers that carried their own submit-crash probe can delete
+  it.
 - `satisfiability::DuenessTargets`, the pair of heights a migration's dueness is
   judged against: the wallet's fully-scanned frontier and its estimate of where
   the chain tip has reached, both carrying this crate's target convention
@@ -174,6 +177,15 @@ and this library adheres to Rust's notion of
   this instead of restating the rule.
 
 ### Changed
+- `engine::MigrationState::mark_broadcast` and `mark_mined` no longer take a `TxId`. The id is
+  read off the row (`MigrationTransaction::txid`), which is the transaction's own and cannot have
+  changed: a consumer broadcasting a stored transaction has nothing to tell the engine that the
+  engine does not already know, and being able to pass a mismatched id was a way to lose track of
+  a transaction that is on chain.
+- `engine::MigrationTransaction::from_parts` takes the transaction's `TxId`, after
+  `anchor_boundary`.
+- `engine::{CommitError, RebuildError}` gain a `TxId` variant, for a built PCZT whose transaction
+  id cannot be derived.
 - `engine::MigrationState::{transaction_statuses, expired_transactions}` take an
   `satisfiability::DuenessTargets` in place of a single target height; pass
   `DuenessTargets::at(target_height)` for the previous behavior. Under a pair

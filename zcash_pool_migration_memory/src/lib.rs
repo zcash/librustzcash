@@ -252,6 +252,7 @@ fn set_transaction_state(
                     t.scheduled_height(),
                     t.expiry_height(),
                     t.anchor_boundary(),
+                    t.txid(),
                     state,
                     t.lock_owner(),
                     t.unsatisfiable(),

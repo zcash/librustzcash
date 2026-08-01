@@ -441,13 +441,14 @@ impl<C: BorrowMut<Connection>> Store<C> {
         let updated = conn.execute(
             &format!(
                 "UPDATE {}
-                    SET state = :state, txid = :txid, mined_height = :mined_height
+                    SET state = :state, mined_height = :mined_height
                   WHERE migration_id = :migration_id AND transfer_id = :transfer_id",
                 tables.transactions
             ),
             named_params! {
                 ":state": state.as_ref(),
-                ":txid": state.broadcast_txid().map(hex::encode),
+                // The row's id never changes with its lifecycle state, so the single-row
+                // lifecycle update leaves the column alone.
                 ":mined_height": state.mined_height().map(u32::from),
                 ":migration_id": migration_id,
                 ":transfer_id": u32::from(id),
@@ -822,18 +823,23 @@ fn read_transactions(
             r.kind_crossing.map(|x| x as usize),
         )
         .map_err(|_| Error::Corrupt("kind"))?;
+        // Every row carries its transaction's id, derived when the transaction was built, so this
+        // is required rather than optional — and it is the SAME value the lifecycle state carries
+        // once broadcast, which is why the state is reassembled from it below rather than from a
+        // separately stored copy that could disagree.
         let txid = r
             .txid
-            .map(|s| {
+            .ok_or(Error::Corrupt("txid"))
+            .and_then(|s| {
                 hex::decode(&s)
                     .ok()
                     .and_then(|v| <[u8; 32]>::try_from(v).ok())
-                    .ok_or(Error::Corrupt("state.txid"))
+                    .ok_or(Error::Corrupt("txid"))
             })
-            .transpose()?;
+            .map(TxId::from_bytes)?;
         let state = MigrationTxState::from_stored(
             &r.state,
-            txid,
+            Some(<[u8; 32]>::from(txid)),
             r.mined_height.map(BlockHeight::from_u32),
         )
         .map_err(|_| Error::Corrupt("state"))?;
@@ -874,6 +880,7 @@ fn read_transactions(
             BlockHeight::from_u32(r.scheduled_height),
             BlockHeight::from_u32(r.expiry_height),
             r.anchor_boundary.map(BlockHeight::from_u32),
+            txid,
             state,
             r.lock_owner,
             unsatisfiable,
@@ -1510,7 +1517,7 @@ fn replace_migration(
                 ":expiry_height": u32::from(mtx.expiry_height()),
                 ":anchor_boundary": mtx.anchor_boundary().map(u32::from),
                 ":state": tx_state.as_ref(),
-                ":txid": tx_state.broadcast_txid().map(hex::encode),
+                ":txid": hex::encode(mtx.txid().as_ref()),
                 ":mined_height": tx_state.mined_height().map(u32::from),
                 ":lock_owner": mtx.lock_owner(),
                 ":unsatisfiable_at": unsatisfiable_at.map(u32::from),

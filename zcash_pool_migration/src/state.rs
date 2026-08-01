@@ -676,12 +676,20 @@ impl MigrationState {
         }
     }
 
-    /// Records that the transaction `id` was broadcast with the given `txid`, then recomputes the
-    /// overall status. The consumer calls this after it broadcasts the transaction the engine handed
-    /// it.
-    pub fn mark_broadcast(&mut self, id: MigrationTransferId, txid: TxId) {
+    /// Records that the transaction `id` was broadcast, then recomputes the overall status. The
+    /// consumer calls this after it broadcasts the transaction the engine handed it.
+    ///
+    /// Takes no txid. The transaction's id was derived when it was built
+    /// ([`MigrationTransaction::txid`]) and cannot have changed since — signing and proving add
+    /// only authorizing data — so a consumer broadcasting a stored transaction has nothing to tell
+    /// the engine that the engine does not already know better.
+    pub fn mark_broadcast(&mut self, id: MigrationTransferId) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
-            tx.state = MigrationTxState::Broadcast { txid };
+            // The id is the one derived when the transaction was built, not one the caller
+            // supplies: a consumer broadcasting a stored transaction cannot produce a different
+            // one, and being able to pass a mismatched id was a way to lose track of a
+            // transaction that is on chain.
+            tx.state = MigrationTxState::Broadcast { txid: tx.txid };
         }
         self.recompute_status();
     }
@@ -714,9 +722,15 @@ impl MigrationState {
     /// clearing them here costs no information, and a reorg that demotes the row leaves the
     /// oracle to re-derive against the new chain, exactly as
     /// [`Self::truncate_to_height`] leaves a cleared mark to be re-derived.
-    pub fn mark_mined(&mut self, id: MigrationTransferId, txid: TxId, height: BlockHeight) {
+    pub fn mark_mined(&mut self, id: MigrationTransferId, height: BlockHeight) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.id == id) {
-            tx.state = MigrationTxState::Mined { txid, height };
+            // Like `mark_broadcast`, the id comes from the row rather than the caller: the
+            // transaction that mined is the one this row describes, and the two could only
+            // disagree by mistake.
+            tx.state = MigrationTxState::Mined {
+                txid: tx.txid,
+                height,
+            };
             tx.unsatisfiable = None;
             tx.broadcast_failure_at = None;
         }
@@ -1364,6 +1378,15 @@ mod tests {
 
     // A migration transaction with the given id/kind/state, no dependencies, scheduled at height 0.
     fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
+        // The row's id, and the copy any lifecycle state carries, are one value by construction:
+        // production derives both from the built PCZT, so a fixture that let them differ would be
+        // describing a state the engine cannot produce.
+        let txid = TxId::from_bytes([id as u8; 32]);
+        let state = match state {
+            MigrationTxState::Broadcast { .. } => MigrationTxState::Broadcast { txid },
+            MigrationTxState::Mined { height, .. } => MigrationTxState::Mined { txid, height },
+            other => other,
+        };
         MigrationTransaction {
             id: MigrationTransferId(id),
             kind,
@@ -1372,6 +1395,7 @@ mod tests {
             scheduled_height: BlockHeight::from_u32(0),
             expiry_height: BlockHeight::from_u32(0),
             anchor_boundary: None,
+            txid,
             state,
             lock_owner: None,
             unsatisfiable: None,
@@ -1860,24 +1884,16 @@ mod tests {
         ]);
         assert_eq!(s.status, MigrationStatus::Committed);
 
-        s.mark_broadcast(MigrationTransferId(0), TxId::from_bytes([7; 32]));
+        s.mark_broadcast(MigrationTransferId(0));
         assert!(matches!(
             s.transactions[0].state,
-            MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([7; 32])
+            MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([0; 32])
         ));
         assert_eq!(s.status, MigrationStatus::InProgress);
         assert!(!s.is_terminal());
 
-        s.mark_mined(
-            MigrationTransferId(0),
-            TxId::from_bytes([7; 32]),
-            BlockHeight::from_u32(10),
-        );
-        s.mark_mined(
-            MigrationTransferId(1),
-            TxId::from_bytes([8; 32]),
-            BlockHeight::from_u32(11),
-        );
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(10));
+        s.mark_mined(MigrationTransferId(1), BlockHeight::from_u32(11));
         assert_eq!(s.status, MigrationStatus::Complete);
         assert!(s.is_terminal());
     }
@@ -1914,11 +1930,7 @@ mod tests {
         );
 
         // Detecting a mined transaction still does not resurrect it.
-        s.mark_mined(
-            MigrationTransferId(0),
-            TxId::from_bytes([1; 32]),
-            BlockHeight::from_u32(10),
-        );
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(10));
         assert_eq!(s.status, MigrationStatus::Failed);
     }
 
@@ -2892,7 +2904,7 @@ mod tests {
         );
         assert!(matches!(
             s.transactions[1].state,
-            MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([2; 32])
+            MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([1; 32])
         ));
         assert_eq!(s.status, MigrationStatus::InProgress);
         // Marks strictly above the height clear.
@@ -3328,16 +3340,8 @@ mod tests {
             "half the planned crossing value is marked and unmined, past the 20% threshold",
         );
 
-        s.mark_mined(
-            MigrationTransferId(0),
-            TxId::from_bytes([1; 32]),
-            BlockHeight::from_u32(100),
-        );
-        s.mark_mined(
-            MigrationTransferId(1),
-            TxId::from_bytes([2; 32]),
-            BlockHeight::from_u32(101),
-        );
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(100));
+        s.mark_mined(MigrationTransferId(1), BlockHeight::from_u32(101));
 
         assert_eq!(s.transactions[0].unsatisfiable, None);
         assert_eq!(s.transactions[1].broadcast_failure_at, None);
@@ -3356,11 +3360,7 @@ mod tests {
     #[test]
     fn a_mined_transaction_is_neither_marked_nor_reported() {
         let mut s = state_with(vec![tx(0, transfer(0), MigrationTxState::Proved)]);
-        s.mark_mined(
-            MigrationTransferId(0),
-            TxId::from_bytes([1; 32]),
-            BlockHeight::from_u32(100),
-        );
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(100));
         s.record_satisfiability(
             DuenessTargets::at(BlockHeight::from_u32(120)),
             &[(

@@ -604,6 +604,7 @@ mod check_step_satisfiability {
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(expiry),
             None,
+            TxId::from_bytes([0; 32]),
             MigrationTxState::Signed,
             None,
             None,
@@ -629,6 +630,7 @@ mod check_step_satisfiability {
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(0),
             None,
+            TxId::from_bytes([9; 32]),
             MigrationTxState::Mined {
                 txid: TxId::from_bytes([9; 32]),
                 height,
@@ -686,6 +688,13 @@ mod check_step_satisfiability {
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(0),
             boundary,
+            // The row's id is the one its lifecycle state carries, where the state has one: the
+            // store keeps a single txid column, so a fixture stating two different ones would
+            // describe a row it cannot represent.
+            match state {
+                MigrationTxState::Broadcast { txid } | MigrationTxState::Mined { txid, .. } => txid,
+                _ => TxId::from_bytes([0; 32]),
+            },
             state,
             None,
             None,
@@ -1469,6 +1478,11 @@ mod truncation_follows_the_wallet {
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(0),
             None,
+            // One txid per row: where the lifecycle state carries one, that IS the row's.
+            match state {
+                MigrationTxState::Broadcast { txid } | MigrationTxState::Mined { txid, .. } => txid,
+                _ => TxId::from_bytes([id as u8; 32]),
+            },
             state,
             None,
             unsatisfiable_at.map(|at| (at, UnsatisfiableKind::InputsSpent)),
@@ -1642,6 +1656,7 @@ mod truncation_follows_the_wallet {
 #[cfg(test)]
 mod tests {
     use super::{Error, PoolMigrations, init_migration_tables};
+    use zcash_protocol::TxId;
 
     use proptest::prelude::*;
     use rusqlite::Connection;
@@ -1751,6 +1766,7 @@ mod tests {
             BlockHeight::from_u32(100),
             BlockHeight::from_u32(200),
             anchor_boundary,
+            TxId::from_bytes([0; 32]),
             MigrationTxState::Signed,
             Some(owner_bytes),
             unsatisfiable,
@@ -1765,6 +1781,7 @@ mod tests {
             BlockHeight::from_u32(100),
             BlockHeight::from_u32(200),
             anchor_boundary,
+            TxId::from_bytes([1; 32]),
             MigrationTxState::Signed,
             None,
             unsatisfiable,
@@ -1837,6 +1854,7 @@ mod tests {
                 BlockHeight::from_u32(100),
                 BlockHeight::from_u32(200),
                 None,
+                TxId::from_bytes([0; 32]),
                 MigrationTxState::Signed,
                 lock_owner,
                 None,
@@ -1927,6 +1945,7 @@ mod tests {
                 BlockHeight::from_u32(100),
                 BlockHeight::from_u32(200),
                 None,
+                TxId::from_bytes([0; 32]),
                 MigrationTxState::Signed,
                 None,
                 None,
@@ -2016,6 +2035,7 @@ mod tests {
                 BlockHeight::from_u32(100),
                 BlockHeight::from_u32(0),
                 None,
+                TxId::from_bytes([0; 32]),
                 MigrationTxState::Signed,
                 None,
                 None,

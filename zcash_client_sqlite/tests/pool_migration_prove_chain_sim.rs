@@ -374,23 +374,32 @@ impl Run {
         state: &mut MigrationState,
         id: MigrationTransferId,
     ) -> (Transaction, BlockHeight) {
-        let tx = {
+        let (tx, stored_txid) = {
             let proven = state
                 .transactions()
                 .iter()
                 .find(|t| t.id() == id)
                 .expect("the broadcast candidate is present");
-            TransactionExtractor::new(
+            let extracted = TransactionExtractor::new(
                 pczt::Pczt::parse(proven.pczt()).expect("parses the proven PCZT"),
             )
             .extract()
-            .expect("extracts and verifies the transaction's proofs")
+            .expect("extracts and verifies the transaction's proofs");
+            (extracted, proven.txid())
         };
-        let txid = tx.txid();
+        // The id the engine derived from the PCZT when it BUILT this transaction, against the id
+        // the real extracted transaction actually has. This is the claim the stored txid rests
+        // on — that deriving before signing and proving gives the same answer as extracting
+        // afterwards — checked here against a genuinely proven artifact.
+        assert_eq!(
+            stored_txid,
+            tx.txid(),
+            "the stored id must be the extracted transaction's own",
+        );
         let (height, _) = self.st.generate_next_block_from_tx(1, &tx);
         self.st.scan_cached_blocks(height, 1);
-        state.mark_broadcast(id, txid);
-        state.mark_mined(id, txid, height);
+        state.mark_broadcast(id);
+        state.mark_mined(id, height);
         self.persist(state);
         (tx, height)
     }
@@ -1602,8 +1611,18 @@ fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
             other => panic!("a healthy migration never needs {other:?}"),
         }
     }
-    let txid = extract_proven(&committed.state, transfer_id).txid();
-    committed.state.mark_broadcast(transfer_id, txid);
+    assert_eq!(
+        extract_proven(&committed.state, transfer_id).txid(),
+        committed
+            .state
+            .transactions()
+            .iter()
+            .find(|t| t.id() == transfer_id)
+            .expect("the transfer is stored")
+            .txid(),
+        "the stored id must be the extracted transaction's own",
+    );
+    committed.state.mark_broadcast(transfer_id);
     run.persist(&committed.state);
 
     // The reorg. The wallet truncates to below the interposed note and re-scans a chain whose

@@ -400,6 +400,20 @@ pub struct MigrationTransaction {
     /// (which waits on its dependencies rather than anchoring to a drawn boundary).
     #[getset(get_copy = "pub")]
     pub(crate) anchor_boundary: Option<BlockHeight>,
+    /// The id of the transaction this PCZT describes, derived once when it was built.
+    ///
+    /// Available from that moment, and fixed from there: the txid must be computed in order to
+    /// derive the signature hash, so it exists before there is anything to sign. Everything after
+    /// it — the signatures, and the anchor and witnesses ZIP 374 defers to proving — is
+    /// AUTHORIZING data, outside the effecting data the txid digest covers.
+    ///
+    /// Stored rather than re-derived, because every reader wants it and none should pay a PCZT
+    /// parse for it: the drive loop asks the wallet whether it has seen each transaction mine, and
+    /// [`MigrationState::mark_broadcast`] no longer has to be TOLD an id the state already holds.
+    /// Only [`rebuild_expired_transfer`] changes it, and only because a rebuild is a genuinely
+    /// different transaction.
+    #[getset(get_copy = "pub")]
+    pub(crate) txid: TxId,
     /// The standing determination that this transaction is UNSATISFIABLE — its inputs can never
     /// again all exist unspent on chain — as ONE value: the height of the chain state the
     /// observation rests on, paired with WHAT was observed. `None` while no such determination
@@ -501,6 +515,7 @@ impl MigrationTransaction {
         scheduled_height: BlockHeight,
         expiry_height: BlockHeight,
         anchor_boundary: Option<BlockHeight>,
+        txid: TxId,
         state: MigrationTxState,
         lock_owner: Option<[u8; 32]>,
         unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)>,
@@ -515,6 +530,7 @@ impl MigrationTransaction {
             scheduled_height,
             expiry_height,
             anchor_boundary,
+            txid,
             state,
             lock_owner,
             unsatisfiable,
@@ -1611,6 +1627,9 @@ pub enum CommitError<E> {
     /// A built migration PCZT presents no well-formed set of real spends, so the real-spend
     /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be extracted from it.
     RealSpends(crate::pczt_spends::RealSpendError),
+    /// A built PCZT's transaction id could not be derived, so the transaction could not be
+    /// identified for the life of the migration.
+    TxId(crate::pczt_txid::TxIdError),
     /// Serializing a built migration PCZT (for storage or an external signer) failed.
     Serialize(pczt::EncodingError),
     /// NU6.3 is not active on this network, so there is no destination pool to migrate into. The
@@ -1646,6 +1665,9 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
             CommitError::Build(e) => write!(f, "building the migration failed: {e}"),
             CommitError::RealSpends(e) => {
                 write!(f, "a built migration transaction has no real spends: {e}")
+            }
+            CommitError::TxId(e) => {
+                write!(f, "a built migration transaction has no derivable id: {e}")
             }
             CommitError::Serialize(e) => {
                 write!(f, "serializing a migration transaction failed: {e:?}")
@@ -2030,6 +2052,9 @@ pub enum RebuildError<E> {
     /// The rebuilt transfer PCZT presents no well-formed set of real spends, so the real-spend
     /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be refreshed from it.
     RealSpends(crate::pczt_spends::RealSpendError),
+    /// A built PCZT's transaction id could not be derived, so the transaction could not be
+    /// identified for the life of the migration.
+    TxId(crate::pczt_txid::TxIdError),
     /// Serializing the rebuilt PCZT failed.
     Serialize(pczt::EncodingError),
     /// A wallet backend or signing operation failed.
@@ -2086,6 +2111,9 @@ impl<E: fmt::Display> fmt::Display for RebuildError<E> {
             RebuildError::Build(e) => write!(f, "rebuilding the transfer failed: {e}"),
             RebuildError::RealSpends(e) => {
                 write!(f, "the rebuilt transfer has no real spends: {e}")
+            }
+            RebuildError::TxId(e) => {
+                write!(f, "the rebuilt transfer has no derivable id: {e}")
             }
             RebuildError::Serialize(e) => {
                 write!(f, "serializing the rebuilt transfer failed: {e:?}")
@@ -2362,6 +2390,9 @@ where
         .into_iter()
         .map(|(_, nf)| nf.to_bytes())
         .collect();
+    // The rebuilt transaction's own id, derived before signing consumes the PCZT (signing does
+    // not affect it — see `crate::pczt_txid`).
+    let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(RebuildError::TxId)?;
     let (bytes, new_state, unsigned) = match signing {
         Signing::InProcess => {
             let signed = backend.sign(pczt).map_err(RebuildError::Backend)?;
@@ -2390,6 +2421,9 @@ where
     tx.scheduled_height = scheduled_height;
     tx.expiry_height = expiry_height;
     tx.anchor_boundary = Some(anchor_boundary);
+    // A rebuild is a genuinely DIFFERENT transaction — fresh anchor, fresh expiry, signed anew —
+    // so the stored id is replaced rather than carried over. This is the only place it changes.
+    tx.txid = txid;
     tx.state = new_state;
     tx.spend_nullifiers = spend_nullifiers;
     Ok(unsigned)
@@ -2523,19 +2557,24 @@ fn finish_built_pczt<B>(
     backend: &mut B,
     pczt: ::pczt::Pczt,
     signing: Signing,
-) -> Result<(Vec<u8>, MigrationTxState), CommitError<<B as MigrationBackend>::Error>>
+) -> Result<(Vec<u8>, TxId, MigrationTxState), CommitError<<B as MigrationBackend>::Error>>
 where
     B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
 {
+    // Derived BEFORE signing, which is the only order that makes sense: signing needs the txid to
+    // build its signature hash, so the id exists ahead of either arm below and neither can change
+    // it. A migration built for an external signer is therefore as identifiable as one signed in
+    // process, and stays so once the returned signature is applied.
+    let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(CommitError::TxId)?;
     match signing {
         Signing::InProcess => {
             let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
             let bytes = signed.serialize().map_err(CommitError::Serialize)?;
-            Ok((bytes, MigrationTxState::Signed))
+            Ok((bytes, txid, MigrationTxState::Signed))
         }
         Signing::External => {
             let bytes = pczt.serialize().map_err(CommitError::Serialize)?;
-            Ok((bytes, MigrationTxState::AwaitingSignature))
+            Ok((bytes, txid, MigrationTxState::AwaitingSignature))
         }
     }
 }
@@ -2940,7 +2979,7 @@ where
                     .into_iter()
                     .map(|(_, nf)| nf.to_bytes())
                     .collect();
-                let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
+                let (bytes, txid, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
                 if matches!(self.signing, Signing::External) {
                     self.unsigned.push(UnsignedMigrationTx {
                         id,
@@ -2956,6 +2995,7 @@ where
                     scheduled_height,
                     expiry_height,
                     anchor_boundary: None,
+                    txid,
                     state: tx_state,
                     // The engine does not yet acquire locks; a later slice that draws a
                     // `LockOwner` for the commit would set this here.
@@ -3108,7 +3148,7 @@ where
                 .into_iter()
                 .map(|(_, nf)| nf.to_bytes())
                 .collect();
-            let (bytes, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
+            let (bytes, txid, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
             if matches!(self.signing, Signing::External) {
                 self.unsigned.push(UnsignedMigrationTx {
                     id,
@@ -3125,6 +3165,7 @@ where
                 scheduled_height: schedule.broadcast_height(),
                 expiry_height: schedule.expiry_height(),
                 anchor_boundary: Some(anchor_boundary),
+                txid,
                 state: tx_state,
                 // The engine does not yet acquire locks; a later slice that draws a
                 // `LockOwner` for the commit would set this here.
@@ -4751,6 +4792,7 @@ mod commit_tests {
             BlockHeight::from_u32(0),
             BlockHeight::from_u32(0),
             None,
+            TxId::from_bytes([7; 32]),
             MigrationTxState::Broadcast {
                 txid: TxId::from_bytes([7; 32]),
             },
@@ -4926,11 +4968,7 @@ mod commit_tests {
             other => panic!("expected a broadcast step, got {other:?}"),
         }
         for id in &layer0_ids {
-            state.mark_mined(
-                *id,
-                TxId::from_bytes([0; 32]),
-                BlockHeight::from_u32(2_000_010),
-            );
+            state.mark_mined(*id, BlockHeight::from_u32(2_000_010));
         }
         let layer1_ids: Vec<MigrationTransferId> = state
             .transactions
@@ -4949,11 +4987,7 @@ mod commit_tests {
             other => panic!("expected a broadcast step, got {other:?}"),
         }
         for id in &layer1_ids {
-            state.mark_mined(
-                *id,
-                TxId::from_bytes([0; 32]),
-                BlockHeight::from_u32(2_000_020),
-            );
+            state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
         }
         match state.next_step(DuenessTargets::at(target), &[]) {
             crate::state::AdvanceStep::Prove { id, .. }
@@ -5028,11 +5062,7 @@ mod commit_tests {
         assert!(!state.deps_mined(&[p2]));
 
         // Mine ONLY the first producer.
-        state.mark_mined(
-            p1,
-            TxId::from_bytes([0; 32]),
-            BlockHeight::from_u32(2_000_000),
-        );
+        state.mark_mined(p1, BlockHeight::from_u32(2_000_000));
 
         // Crossings funded by p1 are releasable; crossings funded by the still-unmined p2 stay
         // blocked — a crossing does NOT wait for the whole preparation.
@@ -5142,11 +5172,7 @@ mod commit_tests {
             }
             height += 10;
             for id in &ids {
-                state.mark_mined(
-                    *id,
-                    TxId::from_bytes([0; 32]),
-                    BlockHeight::from_u32(height),
-                );
+                state.mark_mined(*id, BlockHeight::from_u32(height));
             }
         }
         match state.next_step(DuenessTargets::at(target), &[]) {
@@ -5709,11 +5735,7 @@ mod commit_tests {
             .expect("the transfer is present")
             .spend_nullifiers[0];
         const MINED: u32 = 1_500_000;
-        state.mark_mined(
-            prep_id,
-            TxId::from_bytes([3; 32]),
-            BlockHeight::from_u32(MINED),
-        );
+        state.mark_mined(prep_id, BlockHeight::from_u32(MINED));
 
         let mut prover = FailingProver::input_not_available(nullifier, MINED - 1);
         assert_eq!(
