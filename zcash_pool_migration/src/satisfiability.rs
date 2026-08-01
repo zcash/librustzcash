@@ -23,7 +23,8 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
-    MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationState, MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
+    PoolMigrationWrite,
 };
 use crate::state::AdvanceStep;
 
@@ -555,11 +556,17 @@ impl DuenessTargets {
 ///
 /// - the in-flight sweep — per broadcast-but-unmined transaction, one indexed
 ///   [`mined_height`](PoolMigrationRead::mined_height) lookup, and then, only for one the scan has
-///   NOT seen mine, one satisfiability query judging whether a settled reorg has permanently
-///   invalidated the anchor it was proven against. A transaction that has mined costs the lookup
-///   alone. The broadcast schedule keeps that set tiny (typically none to two transactions sit
-///   between broadcast and mining), and it is the only check for transactions the kernel will
-///   never name as a step;
+///   NOT seen mine, one satisfiability query judging whether its inputs were spent elsewhere or a
+///   settled reorg has permanently invalidated the anchor it was proven against. A transaction
+///   that has mined costs the lookup alone. The broadcast schedule keeps that set tiny (typically
+///   none to two transactions sit between broadcast and mining), and it is the only check for
+///   transactions the kernel will never name as a step;
+/// - per PROVED transaction, one PCZT parse and txid derivation
+///   ([`pczt_txid`](crate::pczt_txid::pczt_txid)) plus the same indexed lookup, catching a
+///   broadcast the consumer failed to record. This is the sweep's only per-row cost that is not a
+///   database query, and it is paid on a set that empties as transactions are broadcast. A store
+///   that persists each transaction's derived id could answer from there instead; nothing here
+///   requires the derivation to happen per call;
 /// - one query for the candidate the kernel names — and none at all when the kernel answers
 ///   [`Waiting`](AdvanceStep::Waiting), [`Complete`](AdvanceStep::Complete), or
 ///   [`Replan`](AdvanceStep::Replan), which name no transaction.
@@ -618,9 +625,10 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     // for this call.
     let mut set_aside: Vec<MigrationTransferId> = Vec::new();
 
-    // The IN-FLIGHT SWEEP, over exactly the broadcast-but-unmined transactions. The kernel never
-    // names one as a step, so no candidate check would ever reach them; this is where their two
-    // questions are asked, in the order the chain settles them.
+    // The IN-FLIGHT SWEEP, over every transaction that could already be on chain: the ones
+    // recorded `Broadcast`, and the `Proved` ones that might have been broadcast without the
+    // record landing. The kernel never names either as a step, so no candidate check would reach
+    // them; this is where their questions are asked, in the order the chain settles them.
     //
     // FIRST, DID IT MINE? Inclusion is chain-derived and final, so it is asked before anything
     // that could record a verdict about the transaction. `mark_mined` discharges an
@@ -630,33 +638,55 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     // trailing the wallet's own scan: a mined transaction the consumer has not noticed is
     // indistinguishable, to every check that follows, from one still competing for its inputs.
     //
-    // SECOND, AND ONLY FOR A TRANSACTION THE SCAN HAS NOT SEEN MINE: is it still viable? Its
-    // liveness question is whether the anchor it was PROVEN against still exists on the chain,
-    // which only a settled reorg answers no to. That is `AnchorInvalidated`, and it remains the
-    // ONLY cause this sweep records:
+    // A `Proved` row is asked the same question against the txid derived from its stored PCZT
+    // (`pczt_txid`, stable from signing because the anchor is authorizing rather than effecting
+    // data for these transactions). That closes the one gap a recorded-txid sweep cannot see: a
+    // consumer that submitted to a node and then died — or failed to persist — before
+    // `mark_broadcast` leaves a `Proved` row whose transaction is on chain, which nothing else
+    // would ever promote. Such a row is promoted THROUGH `Broadcast`, since that is the state the
+    // lost record would have written.
     //
-    // - `InputsSpent` here is a spend of this transaction's own inputs by something that is NOT
-    //   this transaction — the mining question above already claimed that case — but it is still
-    //   dropped, because the two observations come from one scan and can disagree at its edge: a
-    //   wallet that has recognized the nullifier but not yet written the transaction row would
-    //   report the spend without the inclusion, and marking on it would kill a transaction that is
-    //   mining. The pending-side channel reaches a genuinely foreign spend anyway (below).
-    // - `InputsInvalidated` and `Expired` are DELIBERATELY deferred rather than acted on here.
-    //   Their loss is bounded: a producer inside the migration reaches its victim through the
-    //   dependency closure, and a victim of an EXTERNAL producer self-heals at its own expiry,
-    //   when the kernel's derived expiry makes it a dead-set seed. The pending-side channel — a
-    //   candidate check, or the broaden sweep after any discovery — is where an input-level cause
-    //   is a determination.
+    // SECOND, AND ONLY FOR A TRANSACTION THE SCAN HAS NOT SEEN MINE: is it still viable? Two
+    // causes are determinations here:
     //
-    // One consequence to keep in view: the answer precedence puts `InputsSpent` above the
-    // anchor-level cause, so a store that observes BOTH a spent input and a dead anchor reports
-    // `InputsSpent`, which this sweep drops. That transaction's death then surfaces at its expiry
-    // rather than now — later, never wrong.
+    // - `InputsSpent` means this transaction's own inputs were seen spent in a MINED transaction
+    //   that is not this one — the mining question above has just established, from the same
+    //   scanned view, that the wallet has not seen this transaction mine. The two answers rest on
+    //   one view by the store's contract (see `PoolMigrationRead::mined_height`), so they cannot
+    //   disagree about a transaction at the scan's edge: either the scan has reached the block
+    //   that includes it, and both see it, or neither does. A spender that is not this
+    //   transaction is a foreign spend, and this transaction can never mine.
+    // - `AnchorInvalidated`: the anchor it was PROVEN against no longer exists on the chain, per
+    //   a reorg the caller's `ReorgSettleDepth` judges settled.
+    //
+    // `InputsInvalidated` and `Expired` remain DELIBERATELY deferred rather than acted on here.
+    // Their loss is bounded: a producer inside the migration reaches its victim through the
+    // dependency closure, and a victim of an EXTERNAL producer self-heals at its own expiry, when
+    // the kernel's derived expiry makes it a dead-set seed. The pending-side channel — a candidate
+    // check, or the broaden sweep after any discovery — is where those become determinations.
     let mut mined: Vec<(MigrationTransferId, TxId, BlockHeight)> = Vec::new();
+    let mut unrecorded: Vec<(MigrationTransferId, TxId, BlockHeight)> = Vec::new();
     let mut findings: Vec<(MigrationTransferId, StepSatisfiability)> = Vec::new();
     for tx in state.transactions() {
-        let MigrationTxState::Broadcast { txid } = tx.state() else {
-            continue;
+        let txid = match tx.state() {
+            MigrationTxState::Broadcast { txid } => txid,
+            // A row that was never proved was never broadcast — it carries no proofs, so no node
+            // would have accepted it — and cannot be on chain. Nothing to ask.
+            MigrationTxState::Proved => match unrecorded_broadcast_txid(tx) {
+                Some(txid) => {
+                    if let Some(height) = store.mined_height(txid)? {
+                        unrecorded.push((tx.id(), txid, height));
+                    }
+                    // A `Proved` row has no other question: the anchor judgment applies to a
+                    // transaction already in flight, and its inputs are the pending-side
+                    // channel's business.
+                    continue;
+                }
+                // Corrupt or unreadable stored bytes: nothing to identify it by, so it is passed
+                // over rather than treated as evidence either way.
+                None => continue,
+            },
+            _ => continue,
         };
         if let Some(height) = store.mined_height(txid)? {
             mined.push((tx.id(), txid, height));
@@ -676,7 +706,8 @@ pub fn advance_migration<St: PoolMigrationWrite>(
         if matches!(
             &answer,
             StepSatisfiability::Unsatisfiable {
-                cause: UnsatisfiableCause::AnchorInvalidated,
+                cause: UnsatisfiableCause::InputsSpent { .. }
+                    | UnsatisfiableCause::AnchorInvalidated,
                 ..
             }
         ) {
@@ -685,6 +716,11 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     }
     // Promotions before determinations: `record_satisfiability` seeds its dead set from the
     // transactions that can never mine, and a row promoted above is not one of them.
+    for (id, txid, height) in unrecorded {
+        state.mark_broadcast(id, txid);
+        state.mark_mined(id, txid, height);
+        dirty = true;
+    }
     for (id, txid, height) in mined {
         state.mark_mined(id, txid, height);
         dirty = true;
@@ -811,6 +847,25 @@ pub fn advance_migration<St: PoolMigrationWrite>(
         store.replace_migration(state)?;
     }
     Ok(step)
+}
+
+/// The txid a `Proved` transaction would carry if it had been broadcast, derived from its stored
+/// PCZT — `None` when the stored bytes cannot yield one.
+///
+/// See [`crate::pczt_txid`] for why this is derivable before the transaction is broadcast at all:
+/// the txid commits to effecting data, and the anchor these transactions defer to proving time is
+/// authorizing data, so a signed migration PCZT already fixes the id.
+#[cfg(feature = "orchard")]
+fn unrecorded_broadcast_txid(tx: &MigrationTransaction) -> Option<TxId> {
+    crate::pczt_txid::stored_pczt_txid(tx.pczt()).ok()
+}
+
+/// Without the `orchard` feature this crate can neither build a migration transaction nor parse
+/// one, so the unrecorded-broadcast sweep is inert rather than absent: a build that cannot
+/// construct these transactions cannot have broadcast one either.
+#[cfg(not(feature = "orchard"))]
+fn unrecorded_broadcast_txid(_tx: &MigrationTransaction) -> Option<TxId> {
+    None
 }
 
 /// Whether a satisfiability answer is a DISCOVERY for [`advance_migration`] to record and broaden
@@ -1406,11 +1461,12 @@ mod advance_tests {
         assert_eq!(store.replaced.get(), 0);
     }
 
-    /// The in-flight sweep is the only check a broadcast-but-unmined transaction ever gets, and it
-    /// records exactly one cause. A settled reorg invalidates a broadcast preparation's anchor;
-    /// its pending dependents die through the closure, carrying the migration past the threshold.
-    /// A sibling in flight whose answer is an INPUT-level cause is left alone: an in-flight
-    /// transaction's inputs are spent by itself, so that answer says nothing about its fate.
+    /// The in-flight sweep is the only check a broadcast-but-unmined transaction ever gets, and
+    /// BOTH of its marking causes are determinations. A settled reorg invalidates a broadcast
+    /// preparation's anchor; its pending dependents die through the closure, carrying the
+    /// migration past the threshold. A sibling in flight answering an INPUT-level cause is marked
+    /// too: the mining question was asked of it first and the wallet has not seen it mine, so —
+    /// both answers resting on one scanned view — the spender is some other transaction.
     #[test]
     fn advance_in_flight_anchor_invalidated_flows_to_replan() {
         let mut dependent_a = scheduled_transfer(1, 0, 1440, 90_000, MigrationTxState::Signed);
@@ -1423,7 +1479,8 @@ mod advance_tests {
                 tx(0, prep(0, 0), broadcast()),
                 dependent_a,
                 dependent_b,
-                // In flight, independent, and answering an input-level cause.
+                // In flight, independent, and answering an input-level cause: a FOREIGN
+                // spend, since the mining lookup declines it in the same pass.
                 scheduled_transfer(3, 2, 1440, 1500, broadcast()),
             ],
         );
@@ -1464,8 +1521,13 @@ mod advance_tests {
         assert_eq!(state.transactions()[2].unsatisfiable_at(), Some(marked));
         assert_eq!(
             state.transactions()[3].unsatisfiable_at(),
-            None,
-            "an input-level answer about an in-flight transaction is not a determination"
+            Some(marked),
+            "a foreign spend of an in-flight transaction's inputs is a determination"
+        );
+        assert_eq!(
+            state.transactions()[3].unsatisfiable_kind(),
+            Some(UnsatisfiableKind::InputsSpent),
+            "and it is recorded under the cause that produced it"
         );
         assert_eq!(
             store.queries.get(),

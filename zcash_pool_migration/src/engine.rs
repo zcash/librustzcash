@@ -189,6 +189,23 @@ pub trait PoolMigrationRead {
     /// transaction-status polling, say) is withheld until scanning reaches it, exactly as evidence
     /// above `as_of_height` is withheld there — otherwise a promotion could rest on a block the
     /// wallet would not roll back, and `Mined` would outlive the chain state that justified it.
+    ///
+    /// # Consistency with the oracle
+    ///
+    /// This method and [`check_step_satisfiability`](Self::check_step_satisfiability) must answer
+    /// from ONE view of the wallet's scan. Concretely: if the store reports a transaction's inputs
+    /// seen spent in a mined transaction, and that spender IS the transaction being asked about,
+    /// then this method must report that transaction mined. Both answers are already bounded by
+    /// the same fully-scanned height, so an implementation deriving them from one scan gets this
+    /// for free; one that could report the spend without the inclusion does not satisfy the
+    /// contract.
+    ///
+    /// [`advance_migration`](crate::satisfiability::advance_migration) rests on exactly this to
+    /// tell a FOREIGN spend from a transaction's own. Having asked this method first and been told
+    /// the wallet has not seen the transaction mine, it reads a subsequent
+    /// [`InputsSpent`](crate::satisfiability::UnsatisfiableCause::InputsSpent) answer as a spender
+    /// other than this transaction, and marks on it. A store whose two answers can disagree would
+    /// turn that into killing a transaction that is mining.
     fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 }
 
