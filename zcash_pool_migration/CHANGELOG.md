@@ -30,7 +30,26 @@ and this library adheres to Rust's notion of
   standing outside that loop. The promotion precedes every check that could
   record a verdict, so chain inclusion outranks an unsatisfiability mark and an
   open broadcast-failure report without a special case; a transaction seen mined
-  costs the lookup alone and no longer reaches the satisfiability oracle.
+  costs the lookup alone and no longer reaches the satisfiability oracle. The sweep also now
+  records `satisfiability::UnsatisfiableCause::InputsSpent` for a broadcast transaction, which it
+  previously dropped: having asked the mining question first and been told the wallet has not seen
+  this transaction mine, a spend of its inputs in a mined transaction is necessarily some OTHER
+  transaction's, so the transfer is known dead now rather than at its expiry — weeks earlier on a
+  privacy-preserving broadcast schedule, and that much sooner to a replan.
+  `PoolMigrationRead::mined_height` documents the store-side consistency this rests on: it and
+  `check_step_satisfiability` must answer from one view of the wallet's scan.
+- `pczt_txid`, deriving a migration transaction's `TxId` from its stored PCZT (`orchard`
+  feature). A migration transaction's id is fixed from the moment it is SIGNED and does not move
+  when proving installs the anchor and witnesses — forced, not incidental: a signature commits to
+  the txid, so a transaction whose id changed under proving would carry a signature over the wrong
+  id and no node would accept it.
+- `satisfiability::advance_migration` additionally sweeps `Proved` transactions, identifying each
+  by the txid derived from its stored PCZT and promoting any the wallet's scan has seen mine —
+  through `Broadcast`, since that is the state the missing record would have written. This closes
+  the gap a recorded-txid sweep cannot see: a consumer that submitted a transaction to a node and
+  then crashed, or failed to persist, before `MigrationState::mark_broadcast` leaves a `Proved`
+  row whose transaction is on chain, which nothing else would ever promote. Consumers that carried
+  their own submit-crash probe can delete it.
 - `satisfiability::DuenessTargets`, the pair of heights a migration's dueness is
   judged against: the wallet's fully-scanned frontier and its estimate of where
   the chain tip has reached, both carrying this crate's target convention
