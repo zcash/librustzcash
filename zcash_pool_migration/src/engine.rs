@@ -168,6 +168,28 @@ pub trait PoolMigrationRead {
         tx: &MigrationTransaction,
         settle: ReorgSettleDepth,
     ) -> Result<StepSatisfiability, Self::Error>;
+
+    /// The height at which this wallet's scan has observed the transaction `txid` mined, or `None`
+    /// if it has not observed it mined.
+    ///
+    /// Which of a migration's transactions are mined is CHAIN-DERIVED, exactly like the
+    /// unsatisfiability marks, and this is the roll-forward half of that: a rollback reaches the
+    /// state through [`MigrationState::truncate_to_height`], and the promotion reaches it through
+    /// [`advance_migration`](crate::satisfiability::advance_migration), which asks this question
+    /// about every in-flight transaction it sweeps. A consumer driving through that function
+    /// therefore never calls [`MigrationState::mark_mined`]: it broadcasts, records THAT, and the
+    /// engine notices the mining on its own.
+    ///
+    /// # Precondition
+    ///
+    /// The same evidence discipline as [`check_step_satisfiability`](Self::check_step_satisfiability):
+    /// report a height only once it lies at or below the wallet's fully-scanned height, so a
+    /// rollback of the block carrying the transaction necessarily truncates below the height
+    /// stamped on the row this promotes. A mined height learned AHEAD of scanning (from
+    /// transaction-status polling, say) is withheld until scanning reaches it, exactly as evidence
+    /// above `as_of_height` is withheld there — otherwise a promotion could rest on a block the
+    /// wallet would not roll back, and `Mined` would outlive the chain state that justified it.
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 }
 
 /// Write access to a persisted pool migration, mirroring `zcash_client_backend`'s `WalletWrite`.
@@ -3515,6 +3537,12 @@ mod tests {
                 as_of_height: self.tip,
             })
         }
+
+        /// This mock models a wallet whose scan has seen nothing mine; the drive loop's promotion
+        /// is exercised against the `satisfiability` module's own store.
+        fn mined_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
     }
 
     impl PoolMigrationWrite for MockBackend {
@@ -3889,6 +3917,12 @@ mod commit_tests {
             Ok(StepSatisfiability::Satisfiable {
                 as_of_height: self.tip,
             })
+        }
+
+        /// This mock models a wallet whose scan has seen nothing mine; the drive loop's promotion
+        /// is exercised against the `satisfiability` module's own store.
+        fn mined_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
         }
     }
 

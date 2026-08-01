@@ -43,18 +43,30 @@
 //! database must not change when the schema does. A pool whose creating migration has not shipped
 //! yet can be created from it directly.
 //!
-//! # Reorgs
+//! # Chain-derived state, in both directions
 //!
 //! A stored migration's chain-derived state — the unsatisfiability marks, and which of its
-//! transactions are mined — is rolled back with the wallet: [`WalletWrite::truncate_to_height`]
-//! (and everything routed through it) drives each stored migration's own
+//! transactions are mined — follows this wallet's scan, and neither direction is the consumer's
+//! to drive.
+//!
+//! FORWARD, a transaction is recorded mined because the scan has seen it: the store answers
+//! [`PoolMigrationRead::mined_height`] from the wallet's own `transactions` table, bounded by the
+//! fully-scanned height, and [`advance_migration`] promotes every in-flight transaction it sweeps.
+//! A consumer records that it BROADCAST — testimony no scan can supply — and nothing more.
+//!
+//! BACKWARD, it is rolled back with the wallet: [`WalletWrite::truncate_to_height`] (and
+//! everything routed through it) drives each stored migration's own
 //! [`MigrationState::truncate_to_height`] at the height it ACTUALLY truncated to, in the same
-//! database transaction. So a consumer has no reorg hook to remember: a mark can never rest on an
-//! observation the wallet has discarded, and a transaction can never stay recorded mined above the
-//! wallet's own view of the chain.
+//! database transaction.
+//!
+//! So a consumer has no hook to remember in either direction: a mark can never rest on an
+//! observation the wallet has discarded, and a transaction can neither stay recorded mined above
+//! the wallet's own view of the chain nor lag behind it.
 //!
 //! [`WalletWrite::truncate_to_height`]: zcash_client_backend::data_api::WalletWrite::truncate_to_height
 //! [`MigrationState::truncate_to_height`]: zcash_pool_migration::engine::MigrationState::truncate_to_height
+//! [`PoolMigrationRead::mined_height`]: zcash_pool_migration::engine::PoolMigrationRead::mined_height
+//! [`advance_migration`]: zcash_pool_migration::satisfiability::advance_migration
 //!
 //! # Model
 //!

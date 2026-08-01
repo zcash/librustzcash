@@ -19,6 +19,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
@@ -552,10 +553,13 @@ impl DuenessTargets {
 /// Checking is LAZY UNTIL FIRST DISCOVERY and BROAD AT DISCOVERY, so a healthy migration pays
 /// almost nothing:
 ///
-/// - the in-flight sweep — one query per broadcast-but-unmined transaction, judging whether a
-///   settled reorg has permanently invalidated the anchor it was proven against. The broadcast
-///   schedule keeps that set tiny (typically none to two transactions sit between broadcast and
-///   mining), and it is the only check for transactions the kernel will never name as a step;
+/// - the in-flight sweep — per broadcast-but-unmined transaction, one indexed
+///   [`mined_height`](PoolMigrationRead::mined_height) lookup, and then, only for one the scan has
+///   NOT seen mine, one satisfiability query judging whether a settled reorg has permanently
+///   invalidated the anchor it was proven against. A transaction that has mined costs the lookup
+///   alone. The broadcast schedule keeps that set tiny (typically none to two transactions sit
+///   between broadcast and mining), and it is the only check for transactions the kernel will
+///   never name as a step;
 /// - one query for the candidate the kernel names — and none at all when the kernel answers
 ///   [`Waiting`](AdvanceStep::Waiting), [`Complete`](AdvanceStep::Complete), or
 ///   [`Replan`](AdvanceStep::Replan), which name no transaction.
@@ -581,9 +585,14 @@ impl DuenessTargets {
 /// it costs nothing, because marks are re-derivable: the next call asks the same questions again.
 ///
 /// Everything else remains the consumer's: it performs the returned step's I/O and records the
-/// outcome through the ordinary mutators ([`MigrationState::mark_broadcast`],
-/// [`MigrationState::mark_mined`], the prove and rebuild functions), persisting afterwards as
-/// usual, then calls this again. In particular, the ZIP 318 separation of SYNC wake-ups from
+/// outcome through the ordinary mutators ([`MigrationState::mark_broadcast`], the prove and
+/// rebuild functions), persisting afterwards as usual, then calls this again. Note what is NOT on
+/// that list: MINING. The consumer records what only it can know — that it submitted a
+/// transaction to a node — and this function derives inclusion from the wallet's own scan (see the
+/// in-flight sweep, and [`mined_height`](PoolMigrationRead::mined_height)). A driver that never
+/// calls [`MigrationState::mark_mined`] is the intended shape.
+///
+/// In particular, the ZIP 318 separation of SYNC wake-ups from
 /// BROADCAST wake-ups is the consumer's runtime policy. Broadcasting a stored proven transaction
 /// needs no sync at all, while proving is inherently sync-bound, so surfacing every due broadcast
 /// first is what lets a wallet wake, submit, and end the session without initiating sync
@@ -609,15 +618,29 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     // for this call.
     let mut set_aside: Vec<MigrationTransferId> = Vec::new();
 
-    // The IN-FLIGHT SWEEP. A broadcast-but-unmined transaction is never named as a step, so no
-    // candidate check would ever reach it; its liveness question is whether the anchor it was
-    // PROVEN against still exists on the chain, which only a settled reorg answers no to. That is
-    // `AnchorInvalidated`, and it is the ONLY cause this sweep records:
+    // The IN-FLIGHT SWEEP, over exactly the broadcast-but-unmined transactions. The kernel never
+    // names one as a step, so no candidate check would ever reach them; this is where their two
+    // questions are asked, in the order the chain settles them.
     //
-    // - `InputsSpent` about an in-flight transaction is most likely the transaction ITSELF, seen
-    //   spending its own inputs in the block that mined it while this state still says
-    //   `Broadcast` (the consumer's `mark_mined` lags the wallet's scan). Marking on it would
-    //   kill a transaction that is mining.
+    // FIRST, DID IT MINE? Inclusion is chain-derived and final, so it is asked before anything
+    // that could record a verdict about the transaction. `mark_mined` discharges an
+    // unsatisfiability mark and an open broadcast-failure report on its way through, which is how
+    // "chain inclusion outranks every prior verdict" holds without a single special case anywhere
+    // below. Asking here rather than leaving it to the consumer is what keeps the state from
+    // trailing the wallet's own scan: a mined transaction the consumer has not noticed is
+    // indistinguishable, to every check that follows, from one still competing for its inputs.
+    //
+    // SECOND, AND ONLY FOR A TRANSACTION THE SCAN HAS NOT SEEN MINE: is it still viable? Its
+    // liveness question is whether the anchor it was PROVEN against still exists on the chain,
+    // which only a settled reorg answers no to. That is `AnchorInvalidated`, and it remains the
+    // ONLY cause this sweep records:
+    //
+    // - `InputsSpent` here is a spend of this transaction's own inputs by something that is NOT
+    //   this transaction — the mining question above already claimed that case — but it is still
+    //   dropped, because the two observations come from one scan and can disagree at its edge: a
+    //   wallet that has recognized the nullifier but not yet written the transaction row would
+    //   report the spend without the inclusion, and marking on it would kill a transaction that is
+    //   mining. The pending-side channel reaches a genuinely foreign spend anyway (below).
     // - `InputsInvalidated` and `Expired` are DELIBERATELY deferred rather than acted on here.
     //   Their loss is bounded: a producer inside the migration reaches its victim through the
     //   dependency closure, and a victim of an EXTERNAL producer self-heals at its own expiry,
@@ -629,23 +652,42 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     // anchor-level cause, so a store that observes BOTH a spent input and a dead anchor reports
     // `InputsSpent`, which this sweep drops. That transaction's death then surfaces at its expiry
     // rather than now — later, never wrong.
+    let mut mined: Vec<(MigrationTransferId, TxId, BlockHeight)> = Vec::new();
     let mut findings: Vec<(MigrationTransferId, StepSatisfiability)> = Vec::new();
     for tx in state.transactions() {
-        // In flight, and not already marked: exactly the transactions this sweep is about.
-        if matches!(tx.state(), MigrationTxState::Broadcast { .. })
-            && tx.unsatisfiable_at().is_none()
-        {
-            let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
-            if matches!(
-                &answer,
-                StepSatisfiability::Unsatisfiable {
-                    cause: UnsatisfiableCause::AnchorInvalidated,
-                    ..
-                }
-            ) {
-                findings.push((tx.id(), answer));
-            }
+        let MigrationTxState::Broadcast { txid } = tx.state() else {
+            continue;
+        };
+        if let Some(height) = store.mined_height(txid)? {
+            mined.push((tx.id(), txid, height));
+            // Settled: no verdict may be sought, let alone recorded, about a transaction the
+            // chain has included. This also spares the satisfiability query outright, so a
+            // migration whose transactions are mining pays LESS here than before, not more.
+            continue;
         }
+        // Already marked: nothing further to DETERMINE about it. Note that the mining question
+        // above was still asked of it, deliberately — a marked transaction that mines anyway is a
+        // mark the oracle should not have made (an aggressive settle depth the chain then swung
+        // back under), and promoting it is how that self-corrects rather than stranding the row.
+        if tx.unsatisfiable_at().is_some() {
+            continue;
+        }
+        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
+        if matches!(
+            &answer,
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::AnchorInvalidated,
+                ..
+            }
+        ) {
+            findings.push((tx.id(), answer));
+        }
+    }
+    // Promotions before determinations: `record_satisfiability` seeds its dead set from the
+    // transactions that can never mine, and a row promoted above is not one of them.
+    for (id, txid, height) in mined {
+        state.mark_mined(id, txid, height);
+        dirty = true;
     }
     if !findings.is_empty() {
         state.record_satisfiability(targets, &findings);
@@ -847,8 +889,14 @@ mod advance_tests {
     struct TestStore {
         stored: Option<MigrationState>,
         satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
+        /// The transactions the wallet's scan has seen mine, standing in for the wallet's
+        /// `transactions` table. Empty is the healthy in-flight default: nothing mined yet.
+        mined: BTreeMap<TxId, BlockHeight>,
         as_of_height: BlockHeight,
         queries: Cell<usize>,
+        /// How many times the mining lookup has been asked, separately from `queries`, so a test
+        /// can pin which of the sweep's two questions was paid for.
+        mined_queries: Cell<usize>,
         replaced: Cell<usize>,
     }
 
@@ -860,8 +908,10 @@ mod advance_tests {
             TestStore {
                 stored: None,
                 satisfiability: answers.into_iter().collect(),
+                mined: BTreeMap::new(),
                 as_of_height: BlockHeight::from_u32(as_of_height),
                 queries: Cell::new(0),
+                mined_queries: Cell::new(0),
                 replaced: Cell::new(0),
             }
         }
@@ -870,6 +920,12 @@ mod advance_tests {
         /// calls (a dependency scanned, a reorg settled).
         fn set_answer(&mut self, id: MigrationTransferId, answer: StepSatisfiability) {
             self.satisfiability.insert(id, answer);
+        }
+
+        /// Record that the wallet's scan has seen `txid` mined at `height`, standing in for the
+        /// scan reaching the block that included it.
+        fn set_mined(&mut self, txid: TxId, height: u32) {
+            self.mined.insert(txid, BlockHeight::from_u32(height));
         }
     }
 
@@ -891,6 +947,11 @@ mod advance_tests {
                     as_of_height: self.as_of_height,
                 },
             ))
+        }
+
+        fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            self.mined_queries.set(self.mined_queries.get() + 1);
+            Ok(self.mined.get(&txid).copied())
         }
     }
 
@@ -951,8 +1012,14 @@ mod advance_tests {
     }
 
     fn broadcast() -> MigrationTxState {
+        broadcast_as(1)
+    }
+
+    /// Broadcast under a distinguishable txid, for tests that must speak about ONE in-flight
+    /// transaction's inclusion rather than all of them.
+    fn broadcast_as(byte: u8) -> MigrationTxState {
         MigrationTxState::Broadcast {
-            txid: TxId::from_bytes([1; 32]),
+            txid: TxId::from_bytes([byte; 32]),
         }
     }
 
@@ -1071,6 +1138,13 @@ mod advance_tests {
                     as_of_height: self.as_of_height,
                 },
             ))
+        }
+
+        /// Never fails, and never reports anything mined: `Failure::Oracle` names the
+        /// SATISFIABILITY oracle specifically, so an error-propagation test keeps exercising the
+        /// path it was written for rather than short-circuiting in the mining lookup ahead of it.
+        fn mined_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
         }
     }
 
@@ -1402,6 +1476,135 @@ mod advance_tests {
         assert_eq!(
             store.stored.as_ref().expect("persisted").transactions()[1].unsatisfiable_at(),
             Some(marked)
+        );
+    }
+
+    /// MINING IS DERIVED, NOT REPORTED. The consumer records only that it broadcast; the wallet's
+    /// scan then sees the transaction, and the drive call promotes it — unblocking the dependent
+    /// the preparation funds, and persisting the promotion before returning. Nothing here calls
+    /// `mark_mined`.
+    #[test]
+    fn advance_promotes_a_mined_transaction_from_the_wallets_own_scan() {
+        let dependent = {
+            let mut t = scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved);
+            t.depends_on = vec![MigrationTransferId(0)];
+            t
+        };
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            vec![tx(0, prep(0, 0), broadcast_as(7)), dependent],
+        );
+        let mut store = TestStore::new(1600, []);
+        store.set_mined(TxId::from_bytes([7; 32]), 1550);
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            state.transactions()[0].state(),
+            MigrationTxState::Mined {
+                txid: TxId::from_bytes([7; 32]),
+                height: BlockHeight::from_u32(1550),
+            },
+            "the in-flight preparation is promoted from the scan, with no consumer involvement"
+        );
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+            "the promotion is what makes the dependent's broadcast actionable in this same call"
+        );
+        assert_eq!(
+            store.replaced.get(),
+            1,
+            "a promotion is a determination, and is durable before the step it enables is surfaced"
+        );
+        assert_eq!(
+            store.stored.as_ref().expect("persisted").transactions()[0].state(),
+            MigrationTxState::Mined {
+                txid: TxId::from_bytes([7; 32]),
+                height: BlockHeight::from_u32(1550),
+            },
+        );
+    }
+
+    /// Inclusion outranks every standing judgment, and the sweep's ORDER is what makes that hold
+    /// without a special case: a transaction carrying an open broadcast-failure report that the
+    /// scan has now seen mine is promoted — discharging the report — rather than holding the whole
+    /// migration at `Reevaluate` over a rejection the chain has answered.
+    #[test]
+    fn advance_promotion_discharges_a_broadcast_failure_report() {
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
+            ],
+        );
+        // Rejected at a tip the wallet has not reached: on its own this holds at `Reevaluate`.
+        state.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(1900));
+        state.mark_broadcast(MigrationTransferId(1), TxId::from_bytes([4; 32]));
+        let mut store = TestStore::new(1600, []);
+        store.set_mined(TxId::from_bytes([4; 32]), 1590);
+
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Complete,
+            "every transaction is mined: the rejection is moot, not a reason to stall"
+        );
+        assert_eq!(
+            state.transactions()[1].broadcast_failure_at(),
+            None,
+            "promotion discharges the report on its way through"
+        );
+    }
+
+    /// The sweep's cost: a transaction the scan has seen mine is settled by the mining lookup
+    /// alone and never reaches the satisfiability oracle, so promoting costs strictly less than
+    /// the sweep it replaces work in — while an in-flight sibling still pays for both questions.
+    #[test]
+    fn advance_mined_transaction_skips_the_satisfiability_query() {
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), broadcast_as(7)),
+                scheduled_transfer(1, 0, 1440, 1500, broadcast_as(8)),
+            ],
+        );
+        let mut store = TestStore::new(1600, []);
+        store.set_mined(TxId::from_bytes([7; 32]), 1550);
+
+        advance_migration(
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1601)),
+            &config(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            store.mined_queries.get(),
+            2,
+            "both in-flight transactions are asked whether they mined"
+        );
+        assert_eq!(
+            store.queries.get(),
+            1,
+            "only the one still in flight pays for a satisfiability answer"
         );
     }
 

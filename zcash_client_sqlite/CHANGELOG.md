@@ -76,6 +76,16 @@ workspace.
   records no anchor boundary, so neither the root to compare against nor the
   height to settle the comparison at is recoverable. Per-input
   `InputObservation::Invalidated` observations are likewise not produced.
+- `pool_migration::orchard_ironwood::PoolMigrations` implements the new
+  `zcash_pool_migration` `PoolMigrationRead::mined_height` method, answering
+  from the wallet's own `transactions` table. The answer is bounded by the
+  FULLY-SCANNED height rather than the chain tip: `mined_height` is also written
+  by transaction-status retrieval, which can learn that a transaction mined
+  before scanning reaches its block, and promoting on that would record `Mined`
+  above the region a reorg truncation would roll back. An unsynced wallet
+  reports nothing mined rather than erroring. Together with the truncation hook
+  above, a stored migration's mined heights now follow the wallet's scan in both
+  directions with no consumer hook in either.
 
 ## [0.22.0-rc.6] - 2026-07-29
 
