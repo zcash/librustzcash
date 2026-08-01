@@ -3404,15 +3404,15 @@ fn compact_signer_view(pczt: &pczt::Pczt) -> pczt::Pczt {
 /// independently and returns only new Orchard and Ironwood signatures.
 ///
 /// In addition to the [`SignerView::Compact`] policy of [`redact_pczt_for_signer`],
-/// this removes spend full viewing keys, and removes the randomizer from actions already
-/// authorized in `pczt`, while unsigned actions such as wallet controlled zero value
-/// spends retain theirs. Existing signatures are retained, so every action in the
-/// returned view is either already authorized or still authorizable. Sapling signatures
-/// require a separate signing path.
+/// this removes spend full viewing keys and existing signatures. It also removes the
+/// randomizer from actions already authorized in `pczt`, while unsigned actions such as
+/// wallet controlled zero value spends retain theirs. Sapling signatures require a
+/// separate signing path.
 ///
 /// The caller must retain the authoritative PCZT and apply the returned signature
-/// contributions to it. This function must run before its existing signatures are
-/// redacted. The returned view cannot be signed with the high level
+/// contributions to it; the returned view is not independently extractable. This
+/// function must run before its existing signatures are redacted. The returned view
+/// cannot be signed with the high level
 /// [`pczt::roles::signer::Signer`] because that role expects full viewing keys.
 #[cfg(feature = "pczt")]
 pub fn redact_pczt_for_batch_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
@@ -3432,13 +3432,15 @@ pub fn redact_pczt_for_batch_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
         mut redactor: pczt::roles::redactor::orchard::OrchardRedactor<'_>,
         preauthorized_action_indices: &[usize],
     ) {
-        // The batch Signer derives its FVK and returns only new signatures.
-        redactor.redact_actions(|mut action| action.clear_spend_fvk());
-        // An action that already carries a signature needs nothing further, so it gives up its
-        // randomizer. Its signature is RETAINED: the only pre-signed actions in a wallet PCZT
-        // are the protocol padding dummies, which carry no ZIP 32 derivation and whose
-        // `dummy_sk` the compact view has already cleared, so stripping the signature would
-        // leave an action that neither the Signer nor the wallet could ever authorize.
+        // The batch Signer derives its FVK and returns only new signatures. Existing
+        // signatures MUST be omitted: deployed batch Signers reject requests that
+        // already carry signatures. Omitting them strands nothing — this view is a
+        // signing request, not the authoritative PCZT, and the caller's authoritative
+        // copy retains them.
+        redactor.redact_actions(|mut action| {
+            action.clear_spend_fvk();
+            action.clear_spend_auth_sig();
+        });
         // Unsigned actions keep alpha, including wallet controlled zero value spends.
         for &index in preauthorized_action_indices {
             redactor.redact_action(index, |mut action| action.clear_spend_alpha());

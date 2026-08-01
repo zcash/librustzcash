@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- `zcash_client_backend::data_api::wallet::redact_pczt_for_batch_signer` now
+  omits existing Orchard and Ironwood spend authorization signatures from the
+  batch signing request. They remain present in the caller's authoritative
+  PCZT, so the response only contains new signatures. This restores
+  compatibility with batch Signers that reject pre-signed requests.
+
 ## [0.24.0-rc.6] - 2026-07-29
 
 ### Added
