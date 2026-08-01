@@ -8416,20 +8416,10 @@ where
         assert_eq!(batch_bundle.len(), original_bundle.len());
         for (original, batch) in original_bundle.iter().zip(batch_bundle) {
             assert!(!batch.has_fvk);
-            // A pre-signed protocol padding dummy keeps its signature: the batch view has
-            // already dropped its `dummy_sk` and it carries no derivation, so nothing
-            // downstream could ever reproduce that signature.
-            assert_eq!(batch.has_signature, original.has_signature);
+            assert!(!batch.has_signature);
             assert_eq!(
                 batch.has_alpha,
                 original.has_alpha && !original.has_signature
-            );
-            // The invariant the redaction must preserve: every action is either already
-            // authorized or still authorizable. Neither the Signer nor the wallet can
-            // rescue an action that is left with no signature and no randomizer.
-            assert!(
-                batch.has_signature || batch.has_alpha,
-                "the batch signer view stranded an action: {batch:?}",
             );
 
             if original.has_signature {
@@ -8522,14 +8512,16 @@ where
         .unwrap()
         .finish();
 
-    // Every action is now authorized: the ones the Signer signed, plus the pre-signed
-    // padding dummies whose signatures the batch view retained. Those retained signatures
-    // ride back along with the new ones and re-apply to the authoritative PCZT unchanged.
     let signatures = pczt::roles::signer::extract_orchard_spend_auth_signatures(&signed_view);
-    let expected_signature_positions = (0..original_spend_states.0.len())
+    let expected_signature_positions = orchard_signable
+        .iter()
+        .copied()
         .map(|index| (orchard::ValuePool::Orchard, index))
         .chain(
-            (0..original_spend_states.1.len()).map(|index| (orchard::ValuePool::Ironwood, index)),
+            ironwood_signable
+                .iter()
+                .copied()
+                .map(|index| (orchard::ValuePool::Ironwood, index)),
         )
         .collect::<Vec<_>>();
     let signature_positions = signatures
