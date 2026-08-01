@@ -3432,7 +3432,11 @@ pub fn redact_pczt_for_batch_signer(pczt: &pczt::Pczt) -> pczt::Pczt {
         mut redactor: pczt::roles::redactor::orchard::OrchardRedactor<'_>,
         preauthorized_action_indices: &[usize],
     ) {
-        // The batch Signer derives its FVK and returns only new signatures.
+        // The batch Signer derives its FVK and returns only new signatures. Existing
+        // signatures MUST be omitted: deployed batch Signers reject requests that
+        // already carry signatures. Omitting them strands nothing — this view is a
+        // signing request, not the authoritative PCZT, and the caller's authoritative
+        // copy retains them.
         redactor.redact_actions(|mut action| {
             action.clear_spend_fvk();
             action.clear_spend_auth_sig();
