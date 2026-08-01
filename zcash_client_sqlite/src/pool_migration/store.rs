@@ -48,6 +48,7 @@ use zcash_pool_migration::satisfiability::{
     UnsatisfiableKind, classify_input_observations,
 };
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 
@@ -406,6 +407,14 @@ impl<C: Borrow<Connection>> Store<C> {
             settle,
             source_root_at,
         )
+    }
+
+    /// The height at which the wallet's scan has observed `txid` mined, per
+    /// [`PoolMigrationRead::mined_height`]'s contract.
+    ///
+    /// [`PoolMigrationRead::mined_height`]: zcash_pool_migration::engine::PoolMigrationRead::mined_height
+    pub(crate) fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Error> {
+        mined_height(self.conn.borrow(), txid)
     }
 }
 
@@ -1024,6 +1033,37 @@ fn read_spend_nullifiers(
 ///
 /// A creator INSIDE the migration needs neither: `advance_migration` reaches its victims through
 /// the dependency closure of the producer's own mark.
+/// The height at which the wallet's scan has observed `txid` mined, or `None`.
+///
+/// Bounded by the FULLY-SCANNED height, not the chain tip (which is what `wallet::get_tx_height`
+/// bounds by): `transactions.mined_height` is also written by transaction-status retrieval, which
+/// can learn that a transaction mined well before scanning reaches its block. Promoting on that
+/// would stamp `Mined { height }` above the region a rollback truncates, and
+/// `MigrationState::truncate_to_height` would then leave the promotion standing over chain state
+/// the wallet had discarded. The bound is the same one every unsatisfiability mark rests on — see
+/// `check_step_satisfiability`'s `as_of_height` discipline — so inclusion and obstruction are
+/// judged against one consistent view of what this wallet has actually seen.
+///
+/// A wallet that has scanned nothing has no view to answer from, so it reports nothing mined
+/// rather than erroring: the sweep this serves runs on every drive call, including before a wallet
+/// has ever synced, and "not observed mined" is the honest answer there.
+fn mined_height(conn: &Connection, txid: TxId) -> Result<Option<BlockHeight>, Error> {
+    let view = conn.unchecked_transaction()?;
+    let Some(as_of_height) = crate::wallet::fully_scanned_height(&view)? else {
+        return Ok(None);
+    };
+    let mined = view
+        .query_row(
+            "SELECT mined_height FROM transactions WHERE txid = :txid",
+            named_params! { ":txid": txid.as_ref() },
+            |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
+        )
+        .optional()?
+        .flatten();
+    view.commit()?;
+    Ok(mined.filter(|height| *height <= as_of_height))
+}
+
 fn check_step_satisfiability(
     conn: &Connection,
     t: &Tables,

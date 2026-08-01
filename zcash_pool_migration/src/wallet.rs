@@ -44,7 +44,7 @@ use zcash_client_backend::data_api::{
 };
 use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_primitives::transaction::builder::cached_orchard_proving_key;
-use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+use zcash_protocol::{ShieldedPool, TxId, consensus::BlockHeight, value::Zatoshis};
 
 use crate::build::{AccountDerivation, sign_pczt};
 use crate::engine::{
@@ -315,6 +315,24 @@ where
         self.store
             .check_step_satisfiability(tx, settle)
             .map_err(Error::Store)
+    }
+
+    /// Answered from the WALLET, not the store: inclusion is what the wallet's scan discovers, and
+    /// this adapter is the seam that has one. The fully-scanned bound is applied here rather than
+    /// left to `get_tx_height` — which reports a mined height as soon as the wallet learns it,
+    /// including ahead of scanning — so a promotion cannot rest on a block outside the region a
+    /// rollback would truncate. A wallet that has scanned nothing reports nothing mined.
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        let Some(mined) = self.wallet.get_tx_height(txid).map_err(Error::WalletRead)? else {
+            return Ok(None);
+        };
+        Ok(self
+            .wallet
+            .block_fully_scanned()
+            .map_err(Error::WalletRead)?
+            .map(|meta| meta.block_height())
+            .filter(|scanned| mined <= *scanned)
+            .map(|_| mined))
     }
 }
 

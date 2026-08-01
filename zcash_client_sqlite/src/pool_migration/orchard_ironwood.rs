@@ -23,6 +23,8 @@ use zcash_pool_migration::engine::{
     PoolMigrationWrite,
 };
 use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
+use zcash_protocol::TxId;
+use zcash_protocol::consensus::BlockHeight;
 
 use crate::{AccountRef, AccountUuid, error::SqliteClientError};
 
@@ -228,6 +230,12 @@ impl<C: Borrow<Connection>> PoolMigrationRead for PoolMigrations<C> {
         settle: ReorgSettleDepth,
     ) -> Result<StepSatisfiability, Self::Error> {
         self.0.check_step_satisfiability(tx, settle, SOURCE_ROOT_AT)
+    }
+
+    /// Pool-independent: a transaction's inclusion is read off the wallet's own `transactions`
+    /// table, so unlike the satisfiability oracle this needs no source-pool tree access.
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        self.0.mined_height(txid)
     }
 }
 
@@ -538,7 +546,7 @@ mod check_step_satisfiability {
     }
 
     /// [`scanned_note_fixture`] without the second account (the common case).
-    fn wallet_with_scanned_note() -> (
+    pub(super) fn wallet_with_scanned_note() -> (
         TestState<BlockCache, TestDb, LocalNetwork>,
         AccountUuid,
         Nullifier,
@@ -558,7 +566,7 @@ mod check_step_satisfiability {
     /// all, so no chain state backs an observation. The counterpart to [`wallet_with_scanned_note`]
     /// for tests whose subject is what the oracle does without a scanned frontier; each such test
     /// asserts the unscanned precondition itself, since that is what its claim rests on.
-    fn unscanned_wallet() -> (TestState<BlockCache, TestDb, LocalNetwork>, AccountUuid) {
+    pub(super) fn unscanned_wallet() -> (TestState<BlockCache, TestDb, LocalNetwork>, AccountUuid) {
         let st = TestBuilder::new()
             .with_data_store_factory(TestDbFactory::default())
             .with_block_cache(BlockCache::new())
@@ -1294,6 +1302,126 @@ mod check_step_satisfiability {
 
 /// The wallet's own truncation drives every stored migration's, at the height it ACTUALLY
 /// truncated to: a migration's chain-derived state is exactly as revocable as the wallet's, and a
+/// The store's MINING lookup (`PoolMigrationRead::mined_height`) — the forward half of
+/// chain-derived state, answered from the wallet's own `transactions` table and bounded by the
+/// fully-scanned height, on which `advance_migration` promotes an in-flight transaction to `Mined`
+/// with no consumer involvement.
+#[cfg(all(test, feature = "orchard"))]
+mod mined_height {
+    use rusqlite::named_params;
+
+    use zcash_client_backend::data_api::testing::TestState;
+    use zcash_pool_migration::engine::PoolMigrationRead;
+    use zcash_protocol::TxId;
+    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::local_consensus::LocalNetwork;
+
+    use super::PoolMigrations;
+    use super::check_step_satisfiability::{unscanned_wallet, wallet_with_scanned_note};
+    use crate::testing::{BlockCache, db::TestDb};
+
+    /// Insert a transaction the wallet knows of, at `mined_height`, with no spend join: the mining
+    /// lookup reads `transactions` alone, so nothing here needs a note or a spender.
+    fn record_transaction(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        txid: TxId,
+        mined_height: Option<BlockHeight>,
+    ) {
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO transactions (txid, mined_height, min_observed_height)
+                 VALUES (:txid, :mined_height, :min_observed_height)",
+                named_params! {
+                    ":txid": txid.as_ref(),
+                    ":mined_height": mined_height.map(u32::from),
+                    ":min_observed_height": mined_height.map_or(1, u32::from),
+                },
+            )
+            .expect("inserts the transaction");
+    }
+
+    /// The forward half of chain-derived state: a transaction the scan has seen mined inside the
+    /// scanned region reports its height, and that is what the drive loop promotes on.
+    #[test]
+    fn mined_height_reports_a_transaction_inside_the_scanned_region() {
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let txid = TxId::from_bytes([3; 32]);
+        record_transaction(&mut st, txid, Some(as_of_height));
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store.mined_height(txid).expect("the store answers"),
+            Some(as_of_height),
+        );
+    }
+
+    /// The same discipline the unsatisfiability marks rest on, applied to inclusion:
+    /// `transactions.mined_height` is also written by transaction-status retrieval, which can
+    /// learn a transaction mined before scanning reaches its block. Promoting on that would stamp
+    /// `Mined` above the region a rollback truncates, so it is withheld until the scan arrives.
+    #[test]
+    fn mined_height_withholds_a_transaction_above_the_scanned_region() {
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let txid = TxId::from_bytes([4; 32]);
+        record_transaction(&mut st, txid, Some(as_of_height + 1));
+        {
+            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+                .expect("the account exists");
+            assert_eq!(
+                store.mined_height(txid).expect("the store answers"),
+                None,
+                "a mined height above the scanned region is not yet promotable",
+            );
+        }
+        // Scan past it; the inclusion now lies inside the scanned region.
+        let (h3, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h3, 1);
+        assert_eq!(h3, as_of_height + 1, "the next block is the mined height");
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store.mined_height(txid).expect("the store answers"),
+            Some(h3)
+        );
+    }
+
+    /// The two ways there is nothing to promote: a transaction the wallet has never heard of, and
+    /// one it knows of but has not seen mined (in the mempool, or awaiting retrieval).
+    #[test]
+    fn mined_height_is_none_for_an_unknown_or_unmined_transaction() {
+        let (mut st, account, _nf, _as_of_height) = wallet_with_scanned_note();
+        let unmined = TxId::from_bytes([5; 32]);
+        record_transaction(&mut st, unmined, None);
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(
+            store.mined_height(unmined).expect("the store answers"),
+            None
+        );
+        assert_eq!(
+            store
+                .mined_height(TxId::from_bytes([6; 32]))
+                .expect("the store answers"),
+            None,
+            "a transaction the wallet has never heard of",
+        );
+    }
+
+    /// A wallet that has scanned nothing has no view to answer from, so it reports nothing mined
+    /// rather than erroring: the sweep this serves runs on every drive call, including before a
+    /// wallet has ever synced.
+    #[test]
+    fn mined_height_on_an_unscanned_wallet_is_none() {
+        let (mut st, account) = unscanned_wallet();
+        let txid = TxId::from_bytes([7; 32]);
+        record_transaction(&mut st, txid, Some(BlockHeight::from_u32(100)));
+        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
+            .expect("the account exists");
+        assert_eq!(store.mined_height(txid).expect("the store answers"), None);
+    }
+}
+
 /// consumer has no reorg hook to remember.
 #[cfg(all(test, feature = "orchard"))]
 mod truncation_follows_the_wallet {

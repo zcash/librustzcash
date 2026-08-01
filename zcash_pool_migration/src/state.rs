@@ -687,12 +687,22 @@ impl MigrationState {
     }
 
     /// Records that the transaction `id` was mined under `txid` at `height`, then recomputes the
-    /// overall status. The consumer detects mining through its own chain view by matching a
-    /// broadcast transaction's txid, so it always has the txid to hand here; recording it on
-    /// `Mined` (rather than dropping it once broadcast is superseded) is what lets reorg handling
-    /// demote a rolled-back mined transaction back to `Broadcast` without losing the id it was
-    /// mined under. This is also what lets a later preparation layer or the transfers become
-    /// actionable.
+    /// overall status. This is what lets a later preparation layer or the transfers become
+    /// actionable. Recording the txid on `Mined` (rather than dropping it once broadcast is
+    /// superseded) is what lets reorg handling demote a rolled-back mined transaction back to
+    /// `Broadcast` without losing the id it was mined under.
+    ///
+    /// A DRIVER DOES NOT CALL THIS.
+    /// [`advance_migration`](crate::satisfiability::advance_migration) derives inclusion from the
+    /// wallet's own scan, through [`PoolMigrationRead::mined_height`], for every in-flight
+    /// transaction it sweeps — so a consumer that broadcasts and records THAT gets the promotion
+    /// for free, and one that also polls for mining would only race the sweep to the same answer.
+    /// This remains public for a consumer standing outside that loop: a test fixture building a
+    /// state by hand, or a store reconstructing one. Mining is chain-derived (compare
+    /// [`Self::mark_broadcast`], which records testimony no scan can supply), and deriving it in
+    /// one place is what keeps the stored state from trailing the scan that already knows.
+    ///
+    /// [`PoolMigrationRead::mined_height`]: crate::engine::PoolMigrationRead::mined_height
     ///
     /// Mining also DISCHARGES both standing judgments about whether the transaction ever could
     /// mine — its [`unsatisfiable`](MigrationTransaction::unsatisfiable) mark and its

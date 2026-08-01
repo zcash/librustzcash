@@ -33,6 +33,7 @@ use orchard::value::NoteValue;
 use orchard::{Anchor, NOTE_COMMITMENT_TREE_DEPTH};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::Zatoshis;
@@ -287,6 +288,11 @@ pub struct MockBackend {
     /// How many times `check_step_satisfiability` has been called, for tests asserting that a
     /// consumer queries the oracle lazily.
     pub satisfiability_queries: Cell<usize>,
+    /// Configured mined heights by transaction id, for
+    /// [`mined_height`](PoolMigrationRead::mined_height): a txid with no entry is not observed
+    /// mined. The engine's in-flight sweep promotes a broadcast transaction listed here, so a test
+    /// models mining by adding its txid rather than by calling `mark_mined`.
+    pub mined: BTreeMap<TxId, BlockHeight>,
 }
 
 impl MockBackend {
@@ -303,6 +309,7 @@ impl MockBackend {
             sched_params: SchedulingParams::ZIP_318,
             satisfiability: BTreeMap::new(),
             satisfiability_queries: Cell::new(0),
+            mined: BTreeMap::new(),
         }
     }
 
@@ -357,6 +364,10 @@ impl PoolMigrationRead for MockBackend {
                 as_of_height: self.tip,
             }))
     }
+
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        Ok(self.mined.get(&txid).copied())
+    }
 }
 
 impl PoolMigrationWrite for MockBackend {
@@ -406,6 +417,11 @@ pub struct CommitMock {
     /// How many times `check_step_satisfiability` has been called, for tests asserting that a
     /// consumer queries the oracle lazily.
     pub satisfiability_queries: Cell<usize>,
+    /// Configured mined heights by transaction id, for
+    /// [`mined_height`](PoolMigrationRead::mined_height): a txid with no entry is not observed
+    /// mined. The engine's in-flight sweep promotes a broadcast transaction listed here, so a test
+    /// models mining by adding its txid rather than by calling `mark_mined`.
+    pub mined: BTreeMap<TxId, BlockHeight>,
     /// The scheduling parameters this backend reports to the engine.
     sched_params: SchedulingParams,
 }
@@ -428,6 +444,7 @@ impl CommitMock {
             stored: None,
             satisfiability: BTreeMap::new(),
             satisfiability_queries: Cell::new(0),
+            mined: BTreeMap::new(),
             sched_params: SchedulingParams::ZIP_318,
         }
     }
@@ -493,6 +510,10 @@ impl PoolMigrationRead for CommitMock {
             .unwrap_or(StepSatisfiability::Satisfiable {
                 as_of_height: BlockHeight::from_u32(COMMIT_MOCK_TIP),
             }))
+    }
+
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        Ok(self.mined.get(&txid).copied())
     }
 }
 

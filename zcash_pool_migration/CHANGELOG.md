@@ -18,6 +18,19 @@ and this library adheres to Rust's notion of
   that step, record the outcome, and call it again; every step it returns has
   been checked against the store's satisfiability oracle, and every
   determination it makes is persisted before the step is surfaced.
+- `engine::PoolMigrationRead::mined_height`, answering whether this wallet's scan
+  has observed a transaction mined, at or below its fully-scanned height.
+  `satisfiability::advance_migration` asks it about every broadcast-but-unmined
+  transaction it sweeps and promotes the ones that have mined, so which of a
+  migration's transactions are mined now follows the wallet's scan in both
+  directions: forward here, and backward through
+  `MigrationState::truncate_to_height`. A consumer driving through
+  `advance_migration` records only what it alone can know — that it broadcast —
+  and no longer calls `MigrationState::mark_mined`, which remains for a consumer
+  standing outside that loop. The promotion precedes every check that could
+  record a verdict, so chain inclusion outranks an unsatisfiability mark and an
+  open broadcast-failure report without a special case; a transaction seen mined
+  costs the lookup alone and no longer reaches the satisfiability oracle.
 - `satisfiability::DuenessTargets`, the pair of heights a migration's dueness is
   judged against: the wallet's fully-scanned frontier and its estimate of where
   the chain tip has reached, both carrying this crate's target convention

@@ -49,6 +49,7 @@ use zcash_keys::keys::UnifiedSpendingKey;
 
 use zcash_primitives::block::BlockHash;
 use zcash_primitives::transaction::Transaction;
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::testing::zats;
@@ -133,6 +134,12 @@ impl PoolMigrationRead for MigrationTestStore {
         Ok(satisfiability::StepSatisfiability::Satisfiable {
             as_of_height: BlockHeight::from_u32(0),
         })
+    }
+
+    /// Not exercised, for the same reason as the oracle above: the drives in this file promote
+    /// mined transactions through the SQLite store, which reads the wallet's `transactions` table.
+    fn mined_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        Ok(None)
     }
 }
 
