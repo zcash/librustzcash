@@ -15,6 +15,19 @@ workspace.
 - `zcash_client_backend::data_api::testing::TestState::create_account_from_test_seed`
 - `zcash_client_backend::data_api::testing::TestState::orchard_anchor_at` (requires
   the `orchard` feature)
+- `zcash_client_backend::data_api::ll::wallet::batch_ensure_heights`, the complete set
+  of checkpoint heights a batch of scanned blocks must ensure: cross-pool alignment
+  unioned with the heights an `AnchorRetention` policy retains within the batch's
+  range. `put_blocks` now composes its ensure sets through it; behaviour is unchanged.
+
+  Both obligations are required, and satisfying only the first is a silent correctness
+  bug. Scanning checkpoints a block only at its last note commitment, so a
+  retention-grid boundary landing on a block with no shielded output in any pool is
+  not checkpointed by cross-pool alignment either — and `AnchorRetention` preserves
+  checkpoints, it never creates them. A consumer maintaining its note commitment trees
+  by other means that composes only the cross-pool set therefore marks boundary heights
+  which never materialize, leaving anything pre-signed against them (e.g. a ZIP 318
+  pool-migration transfer) permanently unprovable.
 
 ## [0.24.0-rc.6] - 2026-07-29
 

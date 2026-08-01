@@ -701,19 +701,13 @@ where
             let orchard_checkpoint_positions = checkpoint_positions(&orchard_subtrees);
             let ironwood_checkpoint_positions = checkpoint_positions(&ironwood_subtrees);
 
-            let retained_heights = anchor_retention.map_or_else(BTreeSet::new, |retention| {
-                retention.retained_in_range(from_state.block_height() + 1..=last_scanned_height)
-            });
-
-            let [mut ensure_sapling, mut ensure_orchard, mut ensure_ironwood] =
-                cross_pool_ensure_heights(
-                    &sapling_checkpoint_positions.keys().copied().collect(),
-                    &orchard_checkpoint_positions.keys().copied().collect(),
-                    &ironwood_checkpoint_positions.keys().copied().collect(),
-                );
-            ensure_sapling.extend(retained_heights.iter().copied());
-            ensure_orchard.extend(retained_heights.iter().copied());
-            ensure_ironwood.extend(retained_heights.iter().copied());
+            let [ensure_sapling, ensure_orchard, ensure_ironwood] = batch_ensure_heights(
+                &sapling_checkpoint_positions.keys().copied().collect(),
+                &orchard_checkpoint_positions.keys().copied().collect(),
+                &ironwood_checkpoint_positions.keys().copied().collect(),
+                anchor_retention,
+                from_state.block_height() + 1..=last_scanned_height,
+            );
 
             (
                 ensure_checkpoints(
@@ -1671,6 +1665,49 @@ pub fn cross_pool_ensure_heights(
     ]
 }
 
+/// Given the checkpoint heights present in each of the three shielded pools' note commitment trees,
+/// in the order (Sapling, Orchard, Ironwood), returns for each pool the complete set of checkpoint
+/// heights it must ensure for a batch of scanned blocks covering `range`.
+///
+/// This is the whole of the rule, and the set a caller passes to [`ensure_checkpoints`]. It is the
+/// union of two obligations, and satisfying only the first is a silent correctness bug:
+///
+/// 1. **Cross-pool alignment** ([`cross_pool_ensure_heights`]): every pool must be checkpointed at
+///    every height that is checkpointed in any pool, so anchors align across trees.
+/// 2. **Anchor retention**: every height `anchor_retention` retains within `range`. Scanning
+///    checkpoints a block only at its last note commitment, so a grid boundary landing on a block
+///    with no shielded output in ANY pool is never checkpointed by (1) either — and a retention
+///    policy can only keep alive a checkpoint that EXISTS. [`AnchorRetention`] is a promise to
+///    preserve a checkpoint, never to create one: omit this step and a consumer marks boundary
+///    heights that never materialize, leaving anything anchored to them permanently unprovable.
+///
+/// Obligation (2) has no effect when `anchor_retention` is `None`, so a caller with no retention
+/// policy gets exactly [`cross_pool_ensure_heights`].
+///
+/// [`put_blocks`] calls this. It is public so that a consumer maintaining its note commitment trees
+/// by other means — accumulating updates in memory and flushing in bulk, or building shards out of
+/// band — composes the same set rather than rediscovering the rule, which is why the two obligations
+/// live behind one function instead of at each call site.
+#[cfg(feature = "orchard")]
+pub fn batch_ensure_heights(
+    sapling: &BTreeSet<BlockHeight>,
+    orchard: &BTreeSet<BlockHeight>,
+    ironwood: &BTreeSet<BlockHeight>,
+    anchor_retention: Option<&AnchorRetention>,
+    range: std::ops::RangeInclusive<BlockHeight>,
+) -> [BTreeSet<BlockHeight>; 3] {
+    let mut ensure = cross_pool_ensure_heights(sapling, orchard, ironwood);
+
+    if let Some(retention) = anchor_retention {
+        let retained = retention.retained_in_range(range);
+        for pool in ensure.iter_mut() {
+            pool.extend(retained.iter().copied());
+        }
+    }
+
+    ensure
+}
+
 /// Updates the given note commitment tree with all newly read note commitments starting
 /// at the block `frontier_height + 1`.
 ///
@@ -1763,6 +1800,8 @@ mod tests {
         NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor, should_retain_anchor,
         should_track_nullifiers,
     };
+    #[cfg(feature = "orchard")]
+    use super::batch_ensure_heights;
     use crate::data_api::anchor_retention::{AnchorRetention, AnchorRetentionInterval};
 
     /// A range scanned after a gap of unscanned history (or below the frontier, or with no
@@ -1939,5 +1978,77 @@ mod tests {
             prop_assert_eq!(ensure_orchard, sapling.clone());
             prop_assert_eq!(ensure_ironwood, union(&sapling, &orchard));
         }
+    }
+
+    /// THE anchor-retention obligation: a retained boundary landing on a block with no shielded
+    /// output in ANY pool must still be ensured in every pool.
+    ///
+    /// Cross-pool alignment cannot supply this one — it unions heights that some pool already
+    /// checkpointed, and here no pool did. Retention cannot supply it either: a policy preserves a
+    /// checkpoint, it never creates one. So the boundary is checkpointed by this step or by nothing,
+    /// and "by nothing" is silent — the wallet keeps scanning, balances stay correct, and only a
+    /// transaction pre-signed against that boundary ever notices, by being unprovable forever.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn retained_boundary_on_a_commitment_free_block_is_ensured() {
+        let h = BlockHeight::from;
+        // Interval 12, so 1_200 is a boundary. Every pool's commitments sit elsewhere, which is the
+        // ordinary case on a sparse chain: most blocks carry no shielded output at all.
+        let retention = AnchorRetention::new(
+            h(1_000),
+            AnchorRetentionInterval::custom(NonZeroU32::new(12).unwrap()),
+        );
+
+        let (sap_cp, orch_cp, iw_cp) = (
+            BTreeSet::from([h(1_198)]),
+            BTreeSet::from([h(1_205)]),
+            BTreeSet::new(),
+        );
+
+        // CONTROL, so this test can never pass for the wrong reason: cross-pool alignment alone
+        // does NOT produce 1200. Were the retention union ever dropped, the assertions below would
+        // fail rather than silently agree with a weaker implementation.
+        for heights in cross_pool_ensure_heights(&sap_cp, &orch_cp, &iw_cp) {
+            assert!(
+                !heights.contains(&h(1_200)),
+                "cross-pool alignment must not supply the boundary; the union is what does"
+            );
+        }
+
+        let [sapling, orchard, ironwood] = batch_ensure_heights(
+            &sap_cp,
+            &orch_cp,
+            &iw_cp,
+            Some(&retention),
+            h(1_150)..=h(1_250),
+        );
+
+        for (pool, heights) in [
+            ("sapling", &sapling),
+            ("orchard", &orchard),
+            ("ironwood", &ironwood),
+        ] {
+            assert!(
+                heights.contains(&h(1_200)),
+                "{pool} must ensure the retained boundary 1200, got {heights:?}"
+            );
+        }
+    }
+
+    /// The retention step is additive, never substitutive: with no policy the result is EXACTLY
+    /// `cross_pool_ensure_heights`. This is what makes the composition safe to adopt at every call
+    /// site — a consumer that does not pre-sign against boundaries sees byte-identical behaviour.
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn no_retention_policy_is_exactly_cross_pool() {
+        let h = BlockHeight::from;
+        let sapling = BTreeSet::from([h(100), h(140)]);
+        let orchard = BTreeSet::from([h(120)]);
+        let ironwood = BTreeSet::from([h(160)]);
+
+        assert_eq!(
+            batch_ensure_heights(&sapling, &orchard, &ironwood, None, h(1)..=h(1_000)),
+            cross_pool_ensure_heights(&sapling, &orchard, &ironwood)
+        );
     }
 }
