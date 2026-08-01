@@ -87,6 +87,12 @@ pub fn assert_put_replaces<S: PoolMigrationWrite>(
 ///
 /// Call this only with an `id` that `state` actually contains (the store errors on an unknown
 /// transaction); [`first_transaction_id`] picks a present one.
+///
+/// A `new` state that carries a txid is re-pointed at the ROW's own id before the update. A
+/// transaction's id belongs to the transaction, not to its lifecycle: a store keeps one id per row
+/// and a lifecycle update cannot change which transaction the row is about, so asking one to
+/// round-trip a `Broadcast` or `Mined` state naming some other transaction would be asking it to
+/// represent something no engine transition can produce.
 pub fn assert_update_transaction<S: PoolMigrationWrite>(
     store: &mut S,
     state: &MigrationState,
@@ -95,6 +101,20 @@ pub fn assert_update_transaction<S: PoolMigrationWrite>(
 ) where
     S::Error: Debug,
 {
+    let row_txid = state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == id)
+        .expect("the transaction to update is present")
+        .txid();
+    let new = match new {
+        MigrationTxState::Broadcast { .. } => MigrationTxState::Broadcast { txid: row_txid },
+        MigrationTxState::Mined { height, .. } => MigrationTxState::Mined {
+            txid: row_txid,
+            height,
+        },
+        other => other,
+    };
     store
         .replace_migration(state)
         .expect("replace_migration succeeds");

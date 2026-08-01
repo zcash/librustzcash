@@ -1,11 +1,12 @@
 //! Derivation of a migration transaction's [`TxId`] from its stored PCZT.
 //!
-//! A migration transaction's txid is fixed from the moment it is SIGNED, and proving does not
-//! change it. That is forced rather than incidental: a signature commits to the txid, so a
-//! transaction whose txid moved when its proof was installed would carry a signature over the
-//! wrong id and no node would accept it. Everything this crate defers to proving time under
-//! ZIP 374 — the anchor and the spend witnesses — is therefore AUTHORIZING data, outside the
-//! effecting data the txid digest covers.
+//! A migration transaction's txid exists from the moment the PCZT is PREPARED — before it is
+//! signed, let alone proved — and never moves afterwards. That ordering is not a convenience: the
+//! txid has to be computed in order to derive the signature hash, so producing one is a
+//! prerequisite of signing rather than a consequence of it. Everything that happens later is
+//! AUTHORIZING data — the signatures, and the anchor and spend witnesses ZIP 374 defers to
+//! proving — and none of it enters the effecting data the txid digest covers. A transaction whose
+//! id moved under proving would carry a signature over the wrong id, and no node would accept it.
 //!
 //! So the id of the transaction a consumer will eventually broadcast is knowable long before it
 //! is broadcast, and knowable again afterwards from the same stored bytes. That is what
@@ -51,9 +52,9 @@ impl core::error::Error for TxIdError {}
 
 /// The [`TxId`] of the transaction `pczt` describes.
 ///
-/// Stable across proving (see the module docs): a signed migration PCZT and the proven PCZT it
-/// becomes yield the same answer, which is the id the transaction carries once broadcast and
-/// mined.
+/// Answerable as soon as the PCZT is prepared, and stable from there (see the module docs): an
+/// unsigned PCZT, the signed PCZT it becomes, and the proven PCZT after that all yield the same
+/// answer — the id the transaction carries once broadcast and mined.
 pub fn pczt_txid(pczt: &Pczt) -> Result<TxId, TxIdError> {
     // `into_effects` consumes the PCZT, and callers hold stored bytes they may still need; the
     // clone is one parse's worth of owned data, not a proof-sized copy.

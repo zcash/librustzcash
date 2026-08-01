@@ -76,6 +76,12 @@ workspace.
   records no anchor boundary, so neither the root to compare against nor the
   height to settle the comparison at is recoverable. Per-input
   `InputObservation::Invalidated` observations are likewise not produced.
+- The pool-migration transactions table's `txid` column now holds EVERY row's transaction id,
+  recorded when the transaction is built, rather than appearing only once a transaction is
+  broadcast. The still-unshipped `orchard_ironwood_migration_unsatisfiability` migration fills it
+  for existing rows by DERIVING each id from that row's own stored PCZT — which works whatever the
+  row's lifecycle state, and, unlike the mined-row recovery it replaces, needs no surviving record
+  of the transaction's spends in the wallet's own tables.
 - `pool_migration::orchard_ironwood::PoolMigrations` implements the new
   `zcash_pool_migration` `PoolMigrationRead::mined_height` method, answering
   from the wallet's own `transactions` table. The answer is bounded by the

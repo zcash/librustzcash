@@ -19,12 +19,10 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
-    MigrationState, MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
-    PoolMigrationWrite,
+    MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 use crate::state::AdvanceStep;
 
@@ -664,32 +662,27 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     // dependency closure, and a victim of an EXTERNAL producer self-heals at its own expiry, when
     // the kernel's derived expiry makes it a dead-set seed. The pending-side channel — a candidate
     // check, or the broaden sweep after any discovery — is where those become determinations.
-    let mut mined: Vec<(MigrationTransferId, TxId, BlockHeight)> = Vec::new();
-    let mut unrecorded: Vec<(MigrationTransferId, TxId, BlockHeight)> = Vec::new();
+    let mut mined: Vec<(MigrationTransferId, BlockHeight)> = Vec::new();
+    let mut unrecorded: Vec<(MigrationTransferId, BlockHeight)> = Vec::new();
     let mut findings: Vec<(MigrationTransferId, StepSatisfiability)> = Vec::new();
     for tx in state.transactions() {
         let txid = match tx.state() {
             MigrationTxState::Broadcast { txid } => txid,
             // A row that was never proved was never broadcast — it carries no proofs, so no node
             // would have accepted it — and cannot be on chain. Nothing to ask.
-            MigrationTxState::Proved => match unrecorded_broadcast_txid(tx) {
-                Some(txid) => {
-                    if let Some(height) = store.mined_height(txid)? {
-                        unrecorded.push((tx.id(), txid, height));
-                    }
-                    // A `Proved` row has no other question: the anchor judgment applies to a
-                    // transaction already in flight, and its inputs are the pending-side
-                    // channel's business.
-                    continue;
+            MigrationTxState::Proved => {
+                if let Some(height) = store.mined_height(tx.txid())? {
+                    unrecorded.push((tx.id(), height));
                 }
-                // Corrupt or unreadable stored bytes: nothing to identify it by, so it is passed
-                // over rather than treated as evidence either way.
-                None => continue,
-            },
+                // A `Proved` row has no other question: the anchor judgment applies to a
+                // transaction already in flight, and its inputs are the pending-side channel's
+                // business.
+                continue;
+            }
             _ => continue,
         };
         if let Some(height) = store.mined_height(txid)? {
-            mined.push((tx.id(), txid, height));
+            mined.push((tx.id(), height));
             // Settled: no verdict may be sought, let alone recorded, about a transaction the
             // chain has included. This also spares the satisfiability query outright, so a
             // migration whose transactions are mining pays LESS here than before, not more.
@@ -716,13 +709,15 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     }
     // Promotions before determinations: `record_satisfiability` seeds its dead set from the
     // transactions that can never mine, and a row promoted above is not one of them.
-    for (id, txid, height) in unrecorded {
-        state.mark_broadcast(id, txid);
-        state.mark_mined(id, txid, height);
+    for (id, height) in unrecorded {
+        // Through `Broadcast` first: that is the state the lost record would have written, and it
+        // is what `mark_mined` demotes back to if a reorg later un-mines the transaction.
+        state.mark_broadcast(id);
+        state.mark_mined(id, height);
         dirty = true;
     }
-    for (id, txid, height) in mined {
-        state.mark_mined(id, txid, height);
+    for (id, height) in mined {
+        state.mark_mined(id, height);
         dirty = true;
     }
     if !findings.is_empty() {
@@ -847,25 +842,6 @@ pub fn advance_migration<St: PoolMigrationWrite>(
         store.replace_migration(state)?;
     }
     Ok(step)
-}
-
-/// The txid a `Proved` transaction would carry if it had been broadcast, derived from its stored
-/// PCZT — `None` when the stored bytes cannot yield one.
-///
-/// See [`crate::pczt_txid`] for why this is derivable before the transaction is broadcast at all:
-/// the txid commits to effecting data, and the anchor these transactions defer to proving time is
-/// authorizing data, so a signed migration PCZT already fixes the id.
-#[cfg(feature = "orchard")]
-fn unrecorded_broadcast_txid(tx: &MigrationTransaction) -> Option<TxId> {
-    crate::pczt_txid::stored_pczt_txid(tx.pczt()).ok()
-}
-
-/// Without the `orchard` feature this crate can neither build a migration transaction nor parse
-/// one, so the unrecorded-broadcast sweep is inert rather than absent: a build that cannot
-/// construct these transactions cannot have broadcast one either.
-#[cfg(not(feature = "orchard"))]
-fn unrecorded_broadcast_txid(_tx: &MigrationTransaction) -> Option<TxId> {
-    None
 }
 
 /// Whether a satisfiability answer is a DISCOVERY for [`advance_migration`] to record and broaden
@@ -1035,6 +1011,15 @@ mod advance_tests {
     // test describe the same migration the same way.
 
     fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
+        // The row's id, and the copy any lifecycle state carries, are one value by construction:
+        // production derives both from the built PCZT, so a fixture that let them differ would be
+        // describing a state the engine cannot produce.
+        let txid = TxId::from_bytes([id as u8; 32]);
+        let state = match state {
+            MigrationTxState::Broadcast { .. } => MigrationTxState::Broadcast { txid },
+            MigrationTxState::Mined { height, .. } => MigrationTxState::Mined { txid, height },
+            other => other,
+        };
         MigrationTransaction {
             id: MigrationTransferId(id),
             kind,
@@ -1043,6 +1028,7 @@ mod advance_tests {
             scheduled_height: BlockHeight::from_u32(0),
             expiry_height: BlockHeight::from_u32(0),
             anchor_boundary: None,
+            txid,
             state,
             lock_owner: None,
             unsatisfiable: None,
@@ -1066,15 +1052,11 @@ mod advance_tests {
         }
     }
 
+    /// Broadcast. The txid is a placeholder: `tx` replaces it with the row's own id, so a
+    /// fixture never states one that production could not have produced.
     fn broadcast() -> MigrationTxState {
-        broadcast_as(1)
-    }
-
-    /// Broadcast under a distinguishable txid, for tests that must speak about ONE in-flight
-    /// transaction's inclusion rather than all of them.
-    fn broadcast_as(byte: u8) -> MigrationTxState {
         MigrationTxState::Broadcast {
-            txid: TxId::from_bytes([byte; 32]),
+            txid: TxId::from_bytes([0; 32]),
         }
     }
 
@@ -1554,10 +1536,10 @@ mod advance_tests {
         };
         let mut state = state_with_crossings(
             &[100_000_000],
-            vec![tx(0, prep(0, 0), broadcast_as(7)), dependent],
+            vec![tx(0, prep(0, 0), broadcast()), dependent],
         );
         let mut store = TestStore::new(1600, []);
-        store.set_mined(TxId::from_bytes([7; 32]), 1550);
+        store.set_mined(TxId::from_bytes([0; 32]), 1550);
 
         let step = advance_migration(
             &mut store,
@@ -1570,7 +1552,7 @@ mod advance_tests {
         assert_eq!(
             state.transactions()[0].state(),
             MigrationTxState::Mined {
-                txid: TxId::from_bytes([7; 32]),
+                txid: TxId::from_bytes([0; 32]),
                 height: BlockHeight::from_u32(1550),
             },
             "the in-flight preparation is promoted from the scan, with no consumer involvement"
@@ -1590,7 +1572,7 @@ mod advance_tests {
         assert_eq!(
             store.stored.as_ref().expect("persisted").transactions()[0].state(),
             MigrationTxState::Mined {
-                txid: TxId::from_bytes([7; 32]),
+                txid: TxId::from_bytes([0; 32]),
                 height: BlockHeight::from_u32(1550),
             },
         );
@@ -1611,9 +1593,9 @@ mod advance_tests {
         );
         // Rejected at a tip the wallet has not reached: on its own this holds at `Reevaluate`.
         state.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(1900));
-        state.mark_broadcast(MigrationTransferId(1), TxId::from_bytes([4; 32]));
+        state.mark_broadcast(MigrationTransferId(1));
         let mut store = TestStore::new(1600, []);
-        store.set_mined(TxId::from_bytes([4; 32]), 1590);
+        store.set_mined(TxId::from_bytes([1; 32]), 1590);
 
         let step = advance_migration(
             &mut store,
@@ -1643,12 +1625,12 @@ mod advance_tests {
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
             vec![
-                tx(0, prep(0, 0), broadcast_as(7)),
-                scheduled_transfer(1, 0, 1440, 1500, broadcast_as(8)),
+                tx(0, prep(0, 0), broadcast()),
+                scheduled_transfer(1, 0, 1440, 1500, broadcast()),
             ],
         );
         let mut store = TestStore::new(1600, []);
-        store.set_mined(TxId::from_bytes([7; 32]), 1550);
+        store.set_mined(TxId::from_bytes([0; 32]), 1550);
 
         advance_migration(
             &mut store,
@@ -2206,7 +2188,7 @@ mod advance_tests {
 
         // Withheld, not condemned: an estimate that no longer overshoots the expiry — the wallet
         // synced, and the transfer had not lapsed after all — offers the same broadcast.
-        state.mark_broadcast(MigrationTransferId(2), TxId::from_bytes([2; 32]));
+        state.mark_broadcast(MigrationTransferId(2));
         assert_eq!(
             advance_migration(
                 &mut store,

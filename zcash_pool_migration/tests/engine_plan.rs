@@ -239,6 +239,7 @@ fn stores_loads_and_updates_a_migration() {
         BlockHeight::from_u32(2_000_100),
         BlockHeight::from_u32(2_069_220),
         None,
+        TxId::from_bytes([0; 32]),
         MigrationTxState::Signed,
         None,
         None,

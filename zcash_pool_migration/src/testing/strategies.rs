@@ -237,6 +237,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         arb_block_height(),
         arb_block_height(),
         prop::option::of(arb_block_height()),
+        arb_txid(),
         arb_state_and_spend_nullifiers(),
         arb_lock_owner(),
         arb_unsatisfiability_mark(),
@@ -251,11 +252,23 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 scheduled_height,
                 expiry_height,
                 anchor_boundary,
-                (state, spend_nullifiers),
+                txid,
+                (drawn_state, spend_nullifiers),
                 lock_owner,
                 unsatisfiable,
                 broadcast_failure_at,
             )| {
+                // A lifecycle state that carries a txid carries THIS transaction's: the row's id
+                // and the copy the state holds are one value, written to one column, so a store is
+                // not asked to round-trip a pairing it cannot represent. Same reason
+                // `arb_state_and_spend_nullifiers` draws its two together.
+                let state = match drawn_state {
+                    MigrationTxState::Broadcast { .. } => MigrationTxState::Broadcast { txid },
+                    MigrationTxState::Mined { height, .. } => {
+                        MigrationTxState::Mined { txid, height }
+                    }
+                    other => other,
+                };
                 MigrationTransaction::from_parts(
                     id,
                     kind,
@@ -264,6 +277,7 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     scheduled_height,
                     expiry_height,
                     anchor_boundary,
+                    txid,
                     state,
                     lock_owner,
                     unsatisfiable,
@@ -328,6 +342,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                             tx.scheduled_height(),
                             tx.expiry_height(),
                             tx.anchor_boundary(),
+                            tx.txid(),
                             tx.state(),
                             tx.lock_owner(),
                             tx.unsatisfiable(),
