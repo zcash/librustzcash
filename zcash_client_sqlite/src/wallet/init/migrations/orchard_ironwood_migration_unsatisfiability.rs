@@ -81,6 +81,7 @@
 
 use std::collections::HashSet;
 
+#[cfg(feature = "orchard")]
 use zcash_pool_migration::pczt_txid::stored_pczt_txid;
 
 use rusqlite::named_params;
@@ -174,6 +175,7 @@ fn real_spend_nullifiers(pczt_bytes: &[u8]) -> Result<Vec<[u8; 32]>, WalletMigra
 /// signing, after signing, and after proving. Deriving it therefore works for every row whatever
 /// its lifecycle state, and — unlike recovering a mined row's id by matching its spends against the
 /// wallet's own records — does not depend on the wallet still holding evidence of the spend.
+#[cfg(feature = "orchard")]
 fn backfill_txids(conn: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
     let rows: Vec<(i64, u32, Vec<u8>)> = {
         let mut stmt = conn.prepare(
@@ -317,6 +319,7 @@ impl RusqliteMigration for Migration {
             }
         }
 
+        #[cfg(feature = "orchard")]
         backfill_txids(transaction)?;
 
         // `replan_threshold` lives on the other table (`orchard_ironwood_migrations`), which no
