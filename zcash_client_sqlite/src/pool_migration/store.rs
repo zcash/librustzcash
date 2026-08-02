@@ -376,6 +376,15 @@ impl<C> Store<C> {
 }
 
 impl<C: Borrow<Connection>> Store<C> {
+    /// The wallet database connection this store operates over, for reads a pool facade makes
+    /// outside the store's own tables (for example resolving the account's viewing key when
+    /// finalizing a proved migration transaction — an `orchard`-gated capability, hence the
+    /// feature-conditional dead-code allowance).
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    pub(crate) fn connection(&self) -> &Connection {
+        self.conn.borrow()
+    }
+
     pub(crate) fn get_migration(&self) -> Result<Option<MigrationState>, Error> {
         read_migration(self.conn.borrow(), self.tables, self.account_id)
     }
@@ -420,10 +429,27 @@ impl<C: Borrow<Connection>> Store<C> {
 
 impl<C: BorrowMut<Connection>> Store<C> {
     pub(crate) fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Error> {
+        self.replace_migration_with(state, |_| Ok(()))
+    }
+
+    /// Replace the migration as [`replace_migration`](Self::replace_migration) does, then run
+    /// `and_then` inside the SAME database transaction, so the store update and whatever the
+    /// caller must record alongside it commit or roll back as one atomic write. This is the seam a
+    /// pool facade uses to persist a finalized migration transaction into the wallet's own
+    /// transaction tables atomically with the migration state that says it is proved.
+    pub(crate) fn replace_migration_with<F>(
+        &mut self,
+        state: &MigrationState,
+        and_then: F,
+    ) -> Result<(), Error>
+    where
+        F: FnOnce(&rusqlite::Transaction<'_>) -> Result<(), Error>,
+    {
         let tables = self.tables;
         let account_id = self.account_id;
         let tx = self.conn.borrow_mut().transaction()?;
         replace_migration(&tx, tables, account_id, state)?;
+        and_then(&tx)?;
         tx.commit()?;
         Ok(())
     }

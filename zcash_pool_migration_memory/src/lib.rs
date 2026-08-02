@@ -41,7 +41,7 @@ use zcash_protocol::value::Zatoshis;
 use zcash_pool_migration::build::{AccountDerivation, sign_pczt};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTransferId,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ProvedTransaction,
 };
 use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
 use zcash_pool_migration::scheduling::SchedulingParams;
@@ -387,6 +387,17 @@ impl PoolMigrationWrite for MockBackend {
         }
         Ok(())
     }
+
+    /// The contract's no-wallet-tables form: this mock maintains no wallet-level transaction
+    /// records, so it applies the proof to the state and persists that alone.
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        proven.apply(state);
+        self.replace_migration(state)
+    }
 }
 
 /// The fixed chain-tip height [`CommitMock`] reports (and the height its default
@@ -533,6 +544,17 @@ impl PoolMigrationWrite for CommitMock {
             set_transaction_state(stored, id, state);
         }
         Ok(())
+    }
+
+    /// The contract's no-wallet-tables form: this mock maintains no wallet-level transaction
+    /// records, so it applies the proof to the state and persists that alone.
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        proven.apply(state);
+        self.replace_migration(state)
     }
 }
 

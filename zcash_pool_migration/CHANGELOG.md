@@ -7,6 +7,30 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `engine::ProvedTransaction`: the proof carried out of a successful
+  `engine::prove_transfer` / `engine::prove_preparation` call — the proven PCZT
+  bytes and the row id they belong to — consumed only by
+  `engine::PoolMigrationWrite::store_proved_transaction` (via its
+  `ProvedTransaction::apply`).
+- `engine::PoolMigrationWrite::store_proved_transaction` (required): records a
+  successfully proved transaction on the migration state and persists it. An implementation over a wallet database
+  must, atomically with that write, finalize the now fully-constructed
+  transaction and persist it to the wallet's own transaction store (as
+  `store_transactions_to_be_sent` records the standard spend flows), so the
+  wallet's view protects the migration's inputs from its own spends between
+  proving and broadcast. A store with no wallet-level transaction records
+  implements it as `proven.apply(state)` followed by `replace_migration`.
+
+### Changed
+- `engine::ProveOutcome::Proved` now carries the `ProvedTransaction`, and
+  `engine::prove_transfer` / `engine::prove_preparation` no longer write the
+  proof into the migration state themselves: a caller discharges the returned
+  proof through `PoolMigrationWrite::store_proved_transaction` (nothing else
+  moves a transaction to `Proved`), and persists a `MarkedUnsatisfiable`
+  outcome with `replace_migration` as before. `ProveOutcome` no longer
+  implements `Clone`/`Copy`.
+
 ### Fixed
 - `engine::prove_transfer` now re-validates a transfer's persisted anchor boundary
   against its funding preparations' REAL mined heights, and re-draws it (via

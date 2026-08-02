@@ -42,12 +42,14 @@ use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 /// step names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvanceStep {
-    /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses and
-    /// store the proven PCZT), WITHOUT broadcasting: its dependencies are mined and, for a transfer,
-    /// its drawn anchor boundary has settled (the boundary block is strictly below the chain tip, so
-    /// its checkpoint exists in the wallet's commitment tree). Broadcast is a separate later step;
-    /// whether it belongs in the same waking session depends on the transaction's `kind` (see that
-    /// field, and [`advance_migration`](crate::satisfiability::advance_migration)).
+    /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses
+    /// and store the proof through the store's
+    /// `PoolMigrationWrite::store_proved_transaction`), WITHOUT broadcasting: its dependencies
+    /// are mined and, for a transfer, its drawn anchor boundary has settled (the boundary block
+    /// is strictly below the chain tip, so its checkpoint exists in the wallet's commitment
+    /// tree). Broadcast is a separate later step; whether it belongs in the same waking session
+    /// depends on the transaction's `kind` (see that field, and
+    /// [`advance_migration`](crate::satisfiability::advance_migration)).
     ///
     /// Proving is not time-critical: the wallet durably retains the boundary checkpoints its
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
