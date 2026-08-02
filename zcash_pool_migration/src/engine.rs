@@ -89,9 +89,15 @@ use crate::{
 /// successive layers need only TEMPORAL serialization (the predecessor mined and witnessable) —
 /// they do not wait for anchor-bucket boundaries, which only the pool-crossing transfers anchor to.
 /// Appended after each layer's last scheduled broadcast to base the next layer's schedule, and
-/// after the final layer's to lower-bound the transfer schedule (see [`plan_migration`]); an
-/// under-estimate is self-healing (the commit-time anchor draw re-checks and reports a stale plan),
-/// an over-estimate merely delays the follow-on schedule.
+/// after the final layer's to lower-bound the transfer schedule (see [`plan_migration`]).
+///
+/// This is an ESTIMATE, and preparations routinely mine later than it (a wallet asleep through a
+/// broadcast window delays every layer behind it), so nothing final may rest on it. The commit-time
+/// anchor draw uses it only as a PROVISIONAL lower bound; the boundary a transfer is actually
+/// proved against is re-validated at proving time against the funding preparation's REAL mined
+/// height, and re-drawn if the preparation out-mined the estimate (see [`prove_transfer`]). An
+/// under-estimate therefore costs at most a proving-time re-draw; an over-estimate merely delays
+/// the follow-on schedule.
 const EST_PREP_LAYER_MINING_BLOCKS: u32 = 10;
 
 /// What the migration engine needs from a wallet to PLAN a migration: the account's spendable notes and
@@ -782,6 +788,29 @@ impl MigrationState {
             if tx.id() == id {
                 tx.pczt = proven_pczt;
                 tx.state = MigrationTxState::Proved;
+                break;
+            }
+        }
+    }
+
+    /// Re-point transfer `id`'s drawn anchor boundary at `boundary`.
+    ///
+    /// The commit-time boundary is provisional for a dependency-funded transfer: it was drawn
+    /// before the funding preparation mined, from an estimate of when it would. [`prove_transfer`]
+    /// calls this when the preparation actually mined PAST that boundary — the funding note is not
+    /// in the boundary's tree state, so no witness can ever be computed there — replacing it with a
+    /// boundary re-drawn from the note's real creation height. Sound for a `Signed` transfer by
+    /// construction: the PCZT's anchor and witnesses are deferred to proving (ZIP 374), so the
+    /// stored artifact does not pin the boundary.
+    #[cfg(feature = "orchard")]
+    pub(crate) fn set_transfer_anchor_boundary(
+        &mut self,
+        id: MigrationTransferId,
+        boundary: BlockHeight,
+    ) {
+        for tx in &mut self.transactions {
+            if tx.id() == id {
+                tx.anchor_boundary = Some(boundary);
                 break;
             }
         }
@@ -1711,6 +1740,10 @@ pub enum ProveError<E> {
     /// A transfer carries no anchor boundary. Every transfer draws one at scheduling time, so this
     /// indicates a corrupt stored state rather than a normal condition.
     NoAnchorBoundary(MigrationTransferId),
+    /// The network parameters report no NU6.3 activation height, so no anchor boundary can be
+    /// re-drawn. A migration cannot be committed on such a network (its commit requires the same
+    /// height), so this indicates mismatched parameters rather than a normal condition.
+    Nu63NotActive,
     /// The wallet's anchor retention grid has changed since this migration was committed, so the
     /// boundaries its transfers anchored to are no longer retained and their checkpoints will have
     /// been pruned. The migration cannot be proved and must be re-planned under the current grid
@@ -1758,6 +1791,11 @@ impl<E: fmt::Display> fmt::Display for ProveError<E> {
                 "transfer {} has no drawn anchor boundary; the stored state is inconsistent",
                 u32::from(*id)
             ),
+            ProveError::Nu63NotActive => write!(
+                f,
+                "the network parameters report no NU6.3 activation height, so no anchor boundary \
+                 can be re-drawn"
+            ),
             ProveError::AnchorIntervalMismatch {
                 committed,
                 configured,
@@ -1797,6 +1835,28 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// [`Signed`](MigrationTxState::Signed) is rejected with [`ProveError::NotReady`] rather than
 /// re-proved.
 ///
+/// # The proving-time boundary re-draw
+///
+/// The persisted boundary is PROVISIONAL for a dependency-funded transfer: the schedule drew it
+/// before the funding preparation mined, from an estimate of when it would
+/// ([`EST_PREP_LAYER_MINING_BLOCKS`]), and preparations routinely out-mine that estimate — a
+/// wallet asleep through one broadcast window delays every layer behind it. A funding note mined
+/// PAST the drawn boundary does not exist in the boundary's tree state, so no witness can ever be
+/// computed there: proving against it defers forever rather than failing. ZIP 318 makes anchor
+/// selection a proving-time rule for exactly this reason, so before handing the boundary to the
+/// prover this function re-validates it against the funding preparations' REAL mined heights
+/// (from the migration's own state) and, when the funding note postdates it, re-draws the
+/// boundary from the note's actual creation height and `scanned_tip` — the chain tip the wallet
+/// has observed and can witness at — persisting the fresh draw on the row
+/// ([`MigrationState::set_transfer_anchor_boundary`]). The re-draw is sound for a `Signed`
+/// transfer by construction: the PCZT's anchor and witnesses are deferred to proving (ZIP 374),
+/// so nothing about the stored artifact pins the old boundary. When no grid boundary at or past
+/// the funding note's creation has settled within `scanned_tip` yet, there is nothing valid to
+/// draw and the answer is [`NotYetProvable`](ProveOutcome::NotYetProvable) — retry after further
+/// sync, exactly like any other not-yet-scanned condition. A transfer whose funding predates its
+/// boundary (including every direct-funded transfer, whose notes existed before the commit) keeps
+/// the boundary its schedule drew, so anchor cohorts are preserved wherever they are valid.
+///
 /// A prover that reports the funding note ABSENT from the account's unspent set
 /// ([`ProveFailure::InputNotAvailable`]) is not an error: absence is a membership observation
 /// that cannot by itself distinguish a SPENT input from one whose creating transaction the wallet
@@ -1818,13 +1878,18 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// [`advance_migration`]: crate::satisfiability::advance_migration
 /// [`AdvanceStep::Prove`]: crate::state::AdvanceStep::Prove
 #[cfg(feature = "orchard")]
-pub fn prove_transfer<P>(
+pub fn prove_transfer<C, P, R>(
+    params: &C,
     prover: &mut P,
     state: &mut MigrationState,
     id: MigrationTransferId,
+    scanned_tip: BlockHeight,
+    rng: &mut R,
 ) -> Result<ProveOutcome, ProveError<P::Error>>
 where
+    C: zcash_protocol::consensus::Parameters,
     P: MigrationProver,
+    R: RngCore + rand_core::CryptoRng,
 {
     let tx = state
         .transactions()
@@ -1837,9 +1902,12 @@ where
     if !matches!(tx.state(), MigrationTxState::Signed) {
         return Err(ProveError::NotReady(id));
     }
-    let anchor_boundary = tx
+    let drawn_boundary = tx
         .anchor_boundary()
         .ok_or(ProveError::NoAnchorBoundary(id))?;
+    // Owned copies so the redraw below can take the state mutably.
+    //let depends_on = tx.depends_on().to_vec();
+    //let pczt_bytes = tx.pczt().clone();
 
     // The stored boundary is only provable while the wallet still retains its checkpoint, which it
     // does only if it is still retaining on the grid the migration was committed under.
@@ -1852,7 +1920,53 @@ where
         });
     }
 
+    // The funding note's actual creation height: the highest mined height among this transfer's
+    // dependencies (the preparations that mint its inputs). `None` for a direct-funded transfer —
+    // its notes existed before the commit, so the commit-time draw already respected them — and
+    // when no dependency is mined yet, in which case the prover's own input lookup answers.
+    let funding_creation = tx
+        .depends_on()
+        .iter()
+        .filter_map(|dep| {
+            state
+                .transactions()
+                .iter()
+                .find(|t| t.id() == *dep)
+                .and_then(|producer| producer.state().mined_height())
+        })
+        .max();
+
+    let new_anchor_boundary = match funding_creation {
+        // The funding note postdates the drawn boundary: it is not in that tree state and can
+        // never be witnessed there. Re-draw from reality (see the doc block above).
+        Some(funding_height) if funding_height > drawn_boundary => {
+            let nu63_activation = params
+                .activation_height(zcash_protocol::consensus::NetworkUpgrade::Nu6_3)
+                .ok_or(ProveError::Nu63NotActive)?;
+            match scheduling::draw_anchor_boundary(
+                committed,
+                nu63_activation,
+                funding_height,
+                scanned_tip,
+                rng,
+            ) {
+                Some(fresh) => Some(fresh),
+                // No boundary at or past the funding note's creation has settled yet: nothing
+                // valid to draw, retry after further sync.
+                None => return Ok(ProveOutcome::NotYetProvable),
+            }
+        }
+        _ => None,
+    };
+
     let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
+    let anchor_boundary = if let Some(fresh) = new_anchor_boundary {
+        state.set_transfer_anchor_boundary(id, fresh);
+        fresh
+    } else {
+        drawn_boundary
+    };
+
     match prover.prove_transfer(pczt, anchor_boundary) {
         Ok(proven) => {
             let bytes = proven.serialize().map_err(ProveError::Serialize)?;
@@ -3058,13 +3172,18 @@ where
         // cannot be proved (hence broadcast) before then. A funding note used directly from the
         // wallet has no producer, so that transfer's dependency set is empty.
 
-        // The boundary anchor each transfer will PROVE against is drawn here, at scheduling time,
-        // because the schedule fully determines it: the candidate set lies strictly above the NU6.3
-        // activation, at or after the height the funding notes exist on-chain (the last drawn
+        // A PROVISIONAL boundary anchor is drawn for each transfer here, at scheduling time, from
+        // what the schedule knows: the candidate set lies strictly above the NU6.3 activation, at
+        // or after the height the funding notes are ESTIMATED to exist on-chain (the last drawn
         // preparation height plus the mining margin — the estimate `plan_migration` floored the
         // schedule on), and strictly below the most recent boundary at the transfer's scheduled
-        // broadcast height. The anchor and the funding note's witness are installed against that
-        // boundary through the PCZT Updater role at proving time (ZIP 374); nothing here needs them.
+        // broadcast height. The estimate is not reality: a preparation that out-mines it leaves
+        // this boundary BELOW the funding note's actual creation height, where the note can never
+        // be witnessed — which is why `prove_transfer` re-validates the boundary against the
+        // funding preparation's real mined height at proving time and re-draws it there when the
+        // note postdates it (ZIP 318 anchor selection is a proving-time rule). The anchor and the
+        // funding note's witness are installed against the validated boundary through the PCZT
+        // Updater role at proving time (ZIP 374); nothing here needs them.
         //
         // `plan_migration` floors the first scheduled transfer on this same estimate, so every
         // transfer has a candidate boundary by construction; an empty draw therefore means the plan
@@ -3914,6 +4033,9 @@ mod commit_tests {
         stored: Option<MigrationState>,
         tip: BlockHeight,
         sched_params: crate::scheduling::SchedulingParams,
+        /// Every anchor boundary handed to [`MigrationProver::prove_transfer`], in call order —
+        /// what the proving-time re-draw tests assert against.
+        prove_anchors: Vec<BlockHeight>,
     }
 
     impl CommitMock {
@@ -3934,6 +4056,7 @@ mod commit_tests {
                 stored: None,
                 tip: BlockHeight::from_u32(2_000_000),
                 sched_params: crate::scheduling::SchedulingParams::ZIP_318,
+                prove_anchors: Vec::new(),
             }
         }
     }
@@ -4056,8 +4179,9 @@ mod commit_tests {
         fn prove_transfer(
             &mut self,
             pczt: pczt::Pczt,
-            _anchor_boundary: BlockHeight,
+            anchor_boundary: BlockHeight,
         ) -> Result<pczt::Pczt, ProveFailure<Self::Error>> {
+            self.prove_anchors.push(anchor_boundary);
             // A stand-in for proving. A real prover resolves the funding note's witness against
             // `anchor_boundary`, installs it and the Orchard source and Ironwood destination
             // anchors through the PCZT `Updater` role, and runs the Orchard + Ironwood provers.
@@ -4434,7 +4558,15 @@ mod commit_tests {
         // Prove the transfer: the PROVEN bytes replace the stored ones, and their real spend now
         // carries a witness, so it is no longer identifiable from the bytes.
         assert_eq!(
-            prove_transfer(&mut backend, &mut state, id).expect("proves the transfer"),
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut rng,
+            )
+            .expect("proves the transfer"),
             ProveOutcome::Proved
         );
         let old = state.transactions[0].clone();
@@ -4907,6 +5039,7 @@ mod commit_tests {
             stored: None,
             tip: BlockHeight::from_u32(2_000_000),
             sched_params: crate::scheduling::SchedulingParams::ZIP_318,
+            prove_anchors: Vec::new(),
         };
         let params = regtest_network(true);
         let prep_count = plan.preparation().transaction_count();
@@ -5440,7 +5573,15 @@ mod commit_tests {
 
         // Proving reads the persisted boundary, proves, and advances Signed -> Proved.
         assert_eq!(
-            prove_transfer(&mut backend, &mut state, transfer_id).expect("proves the due transfer"),
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                transfer_id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut rng,
+            )
+            .expect("proves the due transfer"),
             ProveOutcome::Proved
         );
         let proved = state
@@ -5455,7 +5596,14 @@ mod commit_tests {
 
         // An already-proved transfer is not re-proved.
         assert!(matches!(
-            prove_transfer(&mut backend, &mut state, transfer_id),
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                transfer_id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut rng,
+            ),
             Err(ProveError::NotReady(_))
         ));
 
@@ -5468,9 +5616,203 @@ mod commit_tests {
             .expect("a committed migration has preparation transactions")
             .id;
         assert!(matches!(
-            prove_transfer(&mut backend, &mut state, prep_id),
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                prep_id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut rng,
+            ),
             Err(ProveError::NotATransfer(_))
         ));
+    }
+
+    /// Shared prologue of the proving-time re-draw tests: a committed single-note migration and
+    /// its first dependency-funded transfer — the shape the commit-time estimate can betray —
+    /// with the transfer's id, its funding preparation's id, and the boundary the schedule drew.
+    fn committed_with_prep_funded_transfer(
+        seed: u64,
+    ) -> (
+        CommitMock,
+        MigrationState,
+        MigrationTransferId,
+        MigrationTransferId,
+        BlockHeight,
+    ) {
+        let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("commits the migration");
+
+        let (transfer_id, producer_id, drawn_boundary) = state
+            .transactions
+            .iter()
+            .find_map(
+                |t| match (&t.kind, t.depends_on.first(), t.anchor_boundary) {
+                    (MigrationTxKind::Transfer { .. }, Some(dep), Some(boundary)) => {
+                        Some((t.id, *dep, boundary))
+                    }
+                    _ => None,
+                },
+            )
+            .expect("a single-note migration funds its transfers from minted preparation notes");
+        (backend, state, transfer_id, producer_id, drawn_boundary)
+    }
+
+    /// A funding preparation that mined PAST the transfer's drawn boundary makes that boundary
+    /// permanently unwitnessable — the note is not in its tree state — so proving re-draws the
+    /// boundary from the note's REAL creation height and hands the prover the fresh one, persisting
+    /// it on the row. This is the field shape that wedged a live migration: the commit-time draw
+    /// trusted `EST_PREP_LAYER_MINING_BLOCKS` and the preparations out-mined it.
+    #[test]
+    fn prove_transfer_redraws_a_boundary_the_funding_note_postdates() {
+        let (mut backend, mut state, transfer_id, producer_id, drawn_boundary) =
+            committed_with_prep_funded_transfer(23);
+        let step = state.anchor_bucket_interval().block_count().get();
+
+        // The preparation mines 30 blocks PAST the drawn boundary (the estimate was short), and
+        // the wallet has scanned far enough past the mined height for a fresh boundary to have
+        // settled.
+        let funding_mined = drawn_boundary + 30;
+        state.mark_mined(producer_id, funding_mined);
+        let scanned_tip = funding_mined + 2 * step;
+
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(24);
+        assert_eq!(
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                transfer_id,
+                scanned_tip,
+                &mut rng,
+            )
+            .expect("proves the transfer against the re-drawn boundary"),
+            ProveOutcome::Proved
+        );
+
+        let &[proved_against] = backend.prove_anchors.as_slice() else {
+            panic!("exactly one prove call reaches the prover");
+        };
+        assert!(
+            proved_against >= funding_mined,
+            "the re-drawn boundary ({proved_against}) is at or past the funding note's creation \
+             ({funding_mined}) — the old one ({drawn_boundary}) could never witness it"
+        );
+        assert!(
+            proved_against < scanned_tip,
+            "the re-drawn boundary is one the wallet has scanned and can witness at"
+        );
+        assert!(
+            state.anchor_bucket_interval().is_boundary(proved_against),
+            "the re-drawn boundary stays on the anchor bucket grid"
+        );
+        assert_eq!(
+            state
+                .transactions
+                .iter()
+                .find(|t| t.id == transfer_id)
+                .expect("the transfer is present")
+                .anchor_boundary,
+            Some(proved_against),
+            "the fresh boundary is persisted on the row"
+        );
+    }
+
+    /// With the funding note mined past the drawn boundary but NO fresh grid boundary settled at
+    /// or past it yet, there is nothing valid to draw: the answer is `NotYetProvable` — retry
+    /// after further sync — never a prove attempt against the impossible stored boundary.
+    #[test]
+    fn redraw_reports_not_yet_provable_until_a_boundary_past_the_funding_settles() {
+        let (mut backend, mut state, transfer_id, producer_id, drawn_boundary) =
+            committed_with_prep_funded_transfer(29);
+
+        // The preparation out-mined the boundary, but the wallet's scan stands exactly at the
+        // mined height: every settled grid boundary is behind the funding note.
+        let funding_mined = drawn_boundary + 30;
+        state.mark_mined(producer_id, funding_mined);
+
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(30);
+        assert_eq!(
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                transfer_id,
+                funding_mined,
+                &mut rng,
+            )
+            .expect("nothing to draw is a retry, not an error"),
+            ProveOutcome::NotYetProvable
+        );
+        assert!(
+            backend.prove_anchors.is_empty(),
+            "the impossible stored boundary is never handed to the prover"
+        );
+        assert_eq!(
+            state
+                .transactions
+                .iter()
+                .find(|t| t.id == transfer_id)
+                .expect("the transfer is present")
+                .anchor_boundary,
+            Some(drawn_boundary),
+            "the stored boundary is untouched until a valid draw exists"
+        );
+    }
+
+    /// A boundary the funding note PREDATES is healthy — the note is in its tree state — and is
+    /// NOT re-drawn: the commit-time draw stands, so anchor cohorts survive wherever they are
+    /// valid.
+    #[test]
+    fn prove_transfer_keeps_a_boundary_the_funding_note_predates() {
+        let (mut backend, mut state, transfer_id, producer_id, drawn_boundary) =
+            committed_with_prep_funded_transfer(31);
+        let step = state.anchor_bucket_interval().block_count().get();
+
+        // The preparation mined BEFORE the drawn boundary, as the schedule assumed.
+        state.mark_mined(producer_id, drawn_boundary - 1);
+
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(32);
+        assert_eq!(
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                transfer_id,
+                drawn_boundary + 2 * step,
+                &mut rng,
+            )
+            .expect("proves the transfer against the drawn boundary"),
+            ProveOutcome::Proved
+        );
+        assert_eq!(
+            backend.prove_anchors,
+            vec![drawn_boundary],
+            "the healthy drawn boundary is handed to the prover unchanged"
+        );
+        assert_eq!(
+            state
+                .transactions
+                .iter()
+                .find(|t| t.id == transfer_id)
+                .expect("the transfer is present")
+                .anchor_boundary,
+            Some(drawn_boundary),
+            "no re-draw was persisted"
+        );
     }
 
     /// A committed migration records the anchor bucket grid it was scheduled against, and both the
@@ -5516,8 +5858,16 @@ mod commit_tests {
             .id;
 
         // Proving reports the mismatch instead of resolving a boundary the wallet no longer retains.
+        let mut prove_rng = ChaCha8Rng::seed_from_u64(seed + 3);
         assert!(matches!(
-            prove_transfer(&mut backend, &mut state, transfer_id),
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                transfer_id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut prove_rng,
+            ),
             Err(ProveError::AnchorIntervalMismatch {
                 committed: c,
                 configured: g,
@@ -5539,8 +5889,15 @@ mod commit_tests {
         // Restoring the committed grid makes the migration provable again.
         backend.sched_params = SchedulingParams::ZIP_318;
         assert_eq!(
-            prove_transfer(&mut backend, &mut state, transfer_id)
-                .expect("the transfer proves once the grid matches again"),
+            prove_transfer(
+                &params,
+                &mut backend,
+                &mut state,
+                transfer_id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut prove_rng,
+            )
+            .expect("the transfer proves once the grid matches again"),
             ProveOutcome::Proved
         );
     }
@@ -5737,10 +6094,23 @@ mod commit_tests {
         const MINED: u32 = 1_500_000;
         state.mark_mined(prep_id, BlockHeight::from_u32(MINED));
 
+        // Far enough past the dependency's mined height that the proving-time boundary re-draw
+        // (if the mined height out-ran the drawn boundary) has a settled candidate to pick.
+        let scanned_tip = BlockHeight::from_u32(MINED + 288);
+        let params = regtest_network(true);
+        let mut rng = ChaCha8Rng::seed_from_u64(41);
+
         let mut prover = FailingProver::input_not_available(nullifier, MINED - 1);
         assert_eq!(
-            prove_transfer(&mut prover, &mut state, transfer_id)
-                .expect("an unavailable input is handled, not surfaced as an error"),
+            prove_transfer(
+                &params,
+                &mut prover,
+                &mut state,
+                transfer_id,
+                scanned_tip,
+                &mut rng,
+            )
+            .expect("an unavailable input is handled, not surfaced as an error"),
             ProveOutcome::NotYetProvable
         );
         assert_eq!(stamp(&state, transfer_id), None, "nothing is marked");
@@ -5750,8 +6120,15 @@ mod commit_tests {
         // scanned, so its absence is conclusive.
         let mut prover = FailingProver::input_not_available(nullifier, MINED);
         assert!(matches!(
-            prove_transfer(&mut prover, &mut state, transfer_id)
-                .expect("an unavailable input is handled, not surfaced as an error"),
+            prove_transfer(
+                &params,
+                &mut prover,
+                &mut state,
+                transfer_id,
+                scanned_tip,
+                &mut rng,
+            )
+            .expect("an unavailable input is handled, not surfaced as an error"),
             ProveOutcome::MarkedUnsatisfiable { .. }
         ));
         assert_eq!(
@@ -5770,8 +6147,15 @@ mod commit_tests {
 
         let mut prover = FailingProver::input_not_available([9; 32], 1_500_000);
         assert_eq!(
-            prove_transfer(&mut prover, &mut state, transfer_id)
-                .expect("an unavailable input is handled, not surfaced as an error"),
+            prove_transfer(
+                &regtest_network(true),
+                &mut prover,
+                &mut state,
+                transfer_id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut ChaCha8Rng::seed_from_u64(42),
+            )
+            .expect("an unavailable input is handled, not surfaced as an error"),
             ProveOutcome::NotYetProvable
         );
         assert_eq!(stamp(&state, transfer_id), None);
@@ -5787,7 +6171,14 @@ mod commit_tests {
 
         let mut prover = FailingProver::other();
         assert!(matches!(
-            prove_transfer(&mut prover, &mut state, transfer_id),
+            prove_transfer(
+                &regtest_network(true),
+                &mut prover,
+                &mut state,
+                transfer_id,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut ChaCha8Rng::seed_from_u64(43),
+            ),
             Err(ProveError::Prover(MockProveError))
         ));
         assert!(matches!(
