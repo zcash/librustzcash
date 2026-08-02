@@ -352,13 +352,26 @@ impl Run {
                 .expect("a rooted Orchard checkpoint exists")
         });
         let outcome = {
+            // The proving-time boundary re-draw's inputs: the network (for the NU6.3 floor), the
+            // scanned tip (blocks are scanned as they are mined here, so the chain tip IS the
+            // scanned tip), and an rng for the ZIP 318 age draw.
+            let params = *self.st.network();
+            let scanned_tip = self.target_height() - 1;
+            let mut redraw_rng = ChaCha8Rng::seed_from_u64(97);
             let mut prover =
                 WalletMigrationProver::new(self.st.wallet_mut(), self.account_id, self.fvk.clone());
             match anchor {
                 Some(anchor) => engine::prove_preparation(&mut prover, state, id, anchor)
                     .expect("the prover answers for the preparation transaction"),
-                None => engine::prove_transfer(&mut prover, state, id)
-                    .expect("the prover answers for the transfer"),
+                None => engine::prove_transfer(
+                    &params,
+                    &mut prover,
+                    state,
+                    id,
+                    scanned_tip,
+                    &mut redraw_rng,
+                )
+                .expect("the prover answers for the transfer"),
             }
         };
         self.persist(state);
@@ -1118,14 +1131,32 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
     }
 
     for (transfer_id, boundary) in transfer_boundaries {
+        // In this simulation every preparation mines before its transfers' drawn boundaries, so
+        // the proving-time boundary re-draw never fires and each proof genuinely exercises the
+        // RETAINED boundary recorded above (were that untrue, proving would have failed here
+        // before the re-draw existed: an out-mined boundary has no witness to resolve).
+        let params = *st.network();
+        let scanned_tip = st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+        let mut redraw_rng = ChaCha8Rng::seed_from_u64(11);
         let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
-        let outcome =
-            engine::prove_transfer(&mut prover, &mut state, transfer_id).unwrap_or_else(|e| {
-                panic!(
-                    "proving against the retained boundary {boundary:?} on the wallet's configured \
-                     grid failed: {e}"
-                )
-            });
+        let outcome = engine::prove_transfer(
+            &params,
+            &mut prover,
+            &mut state,
+            transfer_id,
+            scanned_tip,
+            &mut redraw_rng,
+        )
+        .unwrap_or_else(|e| {
+            panic!(
+                "proving against the retained boundary {boundary:?} on the wallet's configured \
+                 grid failed: {e}"
+            )
+        });
         assert_eq!(outcome, engine::ProveOutcome::Proved);
     }
 }
@@ -1176,10 +1207,19 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
     // same starting point rather than from this determination's marks.
     let mut probe = committed.state.clone();
     let outcome = {
+        let params = *run.st.network();
+        let mut redraw_rng = ChaCha8Rng::seed_from_u64(13);
         let mut prover =
             WalletMigrationProver::new(run.st.wallet_mut(), run.account_id, run.fvk.clone());
-        engine::prove_transfer(&mut prover, &mut probe, transfer_id)
-            .expect("an unavailable input is answered, never raised as an error")
+        engine::prove_transfer(
+            &params,
+            &mut prover,
+            &mut probe,
+            transfer_id,
+            as_of_height,
+            &mut redraw_rng,
+        )
+        .expect("an unavailable input is answered, never raised as an error")
     };
     assert_eq!(
         outcome,
