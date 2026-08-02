@@ -110,7 +110,7 @@ use zcash_script::script::{self as zs_script, Evaluable};
 use {
     crate::data_api::error::PcztError,
     bip32::ChildNumber,
-    orchard::note_encryption::OrchardDomain,
+    orchard::note_encryption::{IronwoodDomain, OrchardDomain},
     pczt::roles::{
         creator::Creator, io_finalizer::IoFinalizer, redactor::Redactor,
         spend_finalizer::SpendFinalizer, tx_extractor::TransactionExtractor, updater::Updater,
@@ -3504,62 +3504,82 @@ where
             })
         })?;
 
-    let orchard_output_info = finalized
-        .orchard()
-        .actions()
-        .iter()
-        .map(|act| {
-            let note = || {
-                let recipient =
-                    act.output().recipient().as_ref().and_then(|b| {
+    // The per-action sent-output recovery shared by the Orchard and Ironwood bundles, which
+    // differ only in the note plaintext version their notes carry (`V2` for Orchard, `V3` —
+    // ZIP 2005 — for Ironwood): the note reconstructed from the PCZT's output fields, zipped
+    // with the recipient metadata `create_pczt_from_proposal` attached to the output.
+    #[allow(clippy::type_complexity)]
+    fn orchard_protocol_output_info<AccountId: serde::de::DeserializeOwned>(
+        actions: &[pczt::orchard::Action],
+        note_version: orchard::note::NoteVersion,
+    ) -> Result<
+        Vec<
+            Option<(
+                (PcztRecipient<AccountId>, Option<ZcashAddress>),
+                orchard::Note,
+            )>,
+        >,
+        PcztError,
+    > {
+        actions
+            .iter()
+            .map(|act| {
+                let note = || {
+                    let recipient = act.output().recipient().as_ref().and_then(|b| {
                         ::orchard::Address::from_raw_address_bytes(b).into_option()
                     })?;
-                let value = act
+                    let value = act
+                        .output()
+                        .value()
+                        .map(orchard::value::NoteValue::from_raw)?;
+                    let rho =
+                        orchard::note::Rho::from_bytes(act.spend().nullifier()).into_option()?;
+                    let rseed = act.output().rseed().as_ref().and_then(|rseed| {
+                        orchard::note::RandomSeed::from_bytes(*rseed, &rho).into_option()
+                    })?;
+
+                    orchard::Note::from_parts(recipient, value, rho, rseed, note_version)
+                        .into_option()
+                };
+
+                let external_address = act
                     .output()
-                    .value()
-                    .map(orchard::value::NoteValue::from_raw)?;
-                let rho = orchard::note::Rho::from_bytes(act.spend().nullifier()).into_option()?;
-                let rseed = act.output().rseed().as_ref().and_then(|rseed| {
-                    orchard::note::RandomSeed::from_bytes(*rseed, &rho).into_option()
-                })?;
+                    .user_address()
+                    .as_deref()
+                    .map(ZcashAddress::try_from_encoded)
+                    .transpose()
+                    .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {e}")))?;
 
-                orchard::Note::from_parts(
-                    recipient,
-                    value,
-                    rho,
-                    rseed,
-                    orchard::note::NoteVersion::V2,
-                )
-                .into_option()
-            };
+                let pczt_recipient = act
+                    .output()
+                    .proprietary()
+                    .get(PROPRIETARY_OUTPUT_INFO)
+                    .map(|v| postcard::from_bytes::<PcztRecipient<AccountId>>(v))
+                    .transpose()
+                    .map_err(|e: postcard::Error| {
+                        PcztError::Invalid(format!(
+                            "Postcard decoding of proprietary output info failed: {e}"
+                        ))
+                    })?
+                    .map(|pczt_recipient| (pczt_recipient, external_address));
 
-            let external_address = act
-                .output()
-                .user_address()
-                .as_deref()
-                .map(ZcashAddress::try_from_encoded)
-                .transpose()
-                .map_err(|e| PcztError::Invalid(format!("Invalid user_address: {e}")))?;
+                // If the pczt recipient is not present, this is a dummy note; if the note is not
+                // present, then the PCZT has been pruned to make this output unrecoverable and so
+                // we also ignore it.
+                Ok(pczt_recipient.zip(note()))
+            })
+            .collect::<Result<Vec<_>, PcztError>>()
+    }
 
-            let pczt_recipient = act
-                .output()
-                .proprietary()
-                .get(PROPRIETARY_OUTPUT_INFO)
-                .map(|v| postcard::from_bytes::<PcztRecipient<<DbT as WalletRead>::AccountId>>(v))
-                .transpose()
-                .map_err(|e: postcard::Error| {
-                    PcztError::Invalid(format!(
-                        "Postcard decoding of proprietary output info failed: {e}"
-                    ))
-                })?
-                .map(|pczt_recipient| (pczt_recipient, external_address));
+    let orchard_output_info = orchard_protocol_output_info::<<DbT as WalletRead>::AccountId>(
+        finalized.orchard().actions(),
+        orchard::note::NoteVersion::V2,
+    )?;
 
-            // If the pczt recipient is not present, this is a dummy note; if the note is not
-            // present, then the PCZT has been pruned to make this output unrecoverable and so we
-            // also ignore it.
-            Ok(pczt_recipient.zip(note()))
-        })
-        .collect::<Result<Vec<_>, PcztError>>()?;
+    let ironwood_output_info = orchard_protocol_output_info::<<DbT as WalletRead>::AccountId>(
+        finalized.ironwood().actions(),
+        orchard::note::NoteVersion::V3,
+    )?;
 
     let sapling_output_info = finalized
         .sapling()
@@ -3684,6 +3704,15 @@ where
             MemoBytes::from_bytes(memo_bytes(&m)).expect("Memo is the correct length.")
         });
 
+        // The note commitment tree an output's note is appended to is fully determined by the
+        // pool the output was created in; recording it mirrors the transaction-builder path
+        // (`create_proposed_transactions`), which tags every shielded sent output with its tree.
+        let note_commitment_tree = match output_pool {
+            ShieldedPool::Sapling => NoteCommitmentTree::Sapling,
+            ShieldedPool::Orchard => NoteCommitmentTree::Orchard,
+            ShieldedPool::Ironwood => NoteCommitmentTree::Ironwood,
+        };
+
         let note_value = Zatoshis::try_from(note_value(&note))?;
         let recipient = match (pczt_recipient, external_address) {
             (PcztRecipient::External, Some(addr)) => Ok(Recipient::External {
@@ -3710,7 +3739,8 @@ where
             }
         }?;
 
-        Ok(SentTransactionOutput::from_parts(
+        Ok(SentTransactionOutput::from_parts_in_tree(
+            Some(note_commitment_tree),
             output_index,
             recipient,
             note_value,
@@ -3744,6 +3774,40 @@ where
                             |note| Note::Orchard {
                                 note,
                                 pool: orchard::ValuePool::Orchard,
+                            },
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+
+    #[cfg(feature = "orchard")]
+    let ironwood_outputs = transaction
+        .ironwood_bundle()
+        .map(|bundle| {
+            assert_eq!(bundle.actions().len(), ironwood_output_info.len());
+            bundle
+                .actions()
+                .iter()
+                .zip(ironwood_output_info)
+                .enumerate()
+                .filter_map(|(output_index, (action, output_info))| {
+                    output_info.map(|((pczt_recipient, external_address), note)| {
+                        let domain = IronwoodDomain::for_action(action);
+                        to_sent_transaction_output::<_, _, _, DbT, _>(
+                            domain,
+                            note,
+                            action,
+                            ShieldedPool::Ironwood,
+                            output_index,
+                            pczt_recipient,
+                            external_address,
+                            |note| note.value().inner(),
+                            |memo| memo,
+                            |note| Note::Orchard {
+                                note,
+                                pool: orchard::ValuePool::Ironwood,
                             },
                         )
                     })
@@ -3859,6 +3923,8 @@ where
     let mut outputs: Vec<SentTransactionOutput<_>> = vec![];
     #[cfg(feature = "orchard")]
     outputs.extend(orchard_outputs.into_iter().flatten());
+    #[cfg(feature = "orchard")]
+    outputs.extend(ironwood_outputs.into_iter().flatten());
     outputs.extend(sapling_outputs.into_iter().flatten());
     outputs.extend(transparent_outputs.into_iter().flatten());
 

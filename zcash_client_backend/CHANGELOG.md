@@ -11,6 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Fixed
+- `zcash_client_backend::data_api::wallet::extract_and_store_transaction_from_pczt`
+  now records the transaction's Ironwood outputs in the stored `SentTransaction`.
+  Previously every Ironwood output was silently omitted: for a post-NU6.3 PCZT
+  delivering a payment through the Ironwood pool, the external recipient's
+  address and decrypted memo were never persisted (and are not otherwise
+  recoverable), and wallet-internal Ironwood outputs were invisible to the
+  wallet until the transaction was mined and scanned. The function also now
+  tags every shielded sent output with its note commitment tree, as the
+  transaction-builder spend path does.
 - `zcash_client_backend::data_api::wallet::redact_pczt_for_batch_signer` now
   omits existing Orchard and Ironwood spend authorization signatures from the
   batch signing request. They remain present in the caller's authoritative
