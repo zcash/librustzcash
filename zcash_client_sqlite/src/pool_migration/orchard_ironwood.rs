@@ -32,6 +32,9 @@ use super::store::{self, Store, Tables};
 
 /// A failure reading or writing the pool-migration store.
 pub use super::error::Error;
+/// Why a proven migration PCZT could not be finalized into a `Transaction`.
+#[cfg(feature = "orchard")]
+pub use super::error::FinalizeError;
 
 /// The Orchard -> Ironwood table and index names this store operates over.
 static TABLES: Tables = Tables {
@@ -171,18 +174,43 @@ fn lift_store_error(e: Error) -> SqliteClientError {
 /// connection a [`WalletDb`](crate::WalletDb) uses, so the pool-migration tables share the wallet
 /// database.
 ///
+/// Sharing the wallet database is what lets [`store_proved_transaction`] persist a finalized
+/// migration transaction into the wallet's own transaction tables ATOMICALLY with the migration
+/// state that records it proved; the network parameters and clock are what that wallet-side
+/// record needs (output recovery and the sent-transaction timestamp), carried here for the same
+/// reason [`WalletDb`](crate::WalletDb) carries them.
+///
 /// An account's migration is owned by its row in the wallet's `accounts` table through the
 /// `account_id` foreign key, so deleting the account removes its migration automatically (via
 /// `ON DELETE CASCADE`); no explicit cleanup is required.
-pub struct PoolMigrations<C>(Store<C>);
+///
+/// [`store_proved_transaction`]: zcash_pool_migration::engine::PoolMigrationWrite::store_proved_transaction
+pub struct PoolMigrations<C, P, CL> {
+    store: Store<C>,
+    // The wallet context `PoolMigrationWrite::store_proved_transaction` (an `orchard`-gated capability)
+    // finalizes under; carried unconditionally so the store's type does not change with the
+    // feature.
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    account: AccountUuid,
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    params: P,
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    clock: CL,
+}
 
-impl<C: Borrow<Connection>> PoolMigrations<C> {
+impl<C: Borrow<Connection>, P, CL> PoolMigrations<C, P, CL> {
     /// Wrap a connection borrow as the store, scoped to `account`'s migration.
     ///
     /// The account is resolved to its `accounts` row up front, so the store keys its migration by
     /// that row (the foreign key the schema uses) rather than by the external UUID. Returns
     /// [`Error::AccountUnknown`] if no account with this UUID exists in the wallet.
-    pub fn for_account(conn: C, account: AccountUuid) -> Result<Self, Error> {
+    ///
+    /// `params` and `clock` serve only [`store_proved_transaction`]
+    /// (output recovery and the sent-transaction timestamp); a caller that only reads and writes
+    /// migration state may pass `()` for both.
+    ///
+    /// [`store_proved_transaction`]: zcash_pool_migration::engine::PoolMigrationWrite::store_proved_transaction
+    pub fn for_account(params: P, clock: CL, conn: C, account: AccountUuid) -> Result<Self, Error> {
         let account_id = conn
             .borrow()
             .query_row(
@@ -192,18 +220,23 @@ impl<C: Borrow<Connection>> PoolMigrations<C> {
             )
             .optional()?
             .ok_or(Error::AccountUnknown)?;
-        Ok(Self(Store::new(conn, &TABLES, account_id)))
+        Ok(Self {
+            store: Store::new(conn, &TABLES, account_id),
+            account,
+            params,
+            clock,
+        })
     }
 }
 
-impl<C> PoolMigrations<C> {
+impl<C, P, CL> PoolMigrations<C, P, CL> {
     /// Recover the wrapped connection borrow.
     pub fn into_inner(self) -> C {
-        self.0.into_inner()
+        self.store.into_inner()
     }
 }
 
-impl<C: Borrow<Connection>> PoolMigrations<C> {
+impl<C: Borrow<Connection>, P, CL> PoolMigrations<C, P, CL> {
     /// Returns the set of [`LockOwner`]s under which this account's in-progress pool migration
     /// has locked notes (empty if there is no migration, or it holds no locks).
     ///
@@ -213,15 +246,15 @@ impl<C: Borrow<Connection>> PoolMigrations<C> {
     /// trait is shared with the pool-agnostic migration engine, which has no notion of
     /// [`LockOwner`] (a wallet-level concept).
     pub fn migration_lock_owners(&self) -> Result<BTreeSet<LockOwner>, Error> {
-        self.0.migration_lock_owners()
+        self.store.migration_lock_owners()
     }
 }
 
-impl<C: Borrow<Connection>> PoolMigrationRead for PoolMigrations<C> {
+impl<C: Borrow<Connection>, P, CL> PoolMigrationRead for PoolMigrations<C, P, CL> {
     type Error = Error;
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-        self.0.get_migration()
+        self.store.get_migration()
     }
 
     fn check_step_satisfiability(
@@ -229,19 +262,25 @@ impl<C: Borrow<Connection>> PoolMigrationRead for PoolMigrations<C> {
         tx: &MigrationTransaction,
         settle: ReorgSettleDepth,
     ) -> Result<StepSatisfiability, Self::Error> {
-        self.0.check_step_satisfiability(tx, settle, SOURCE_ROOT_AT)
+        self.store
+            .check_step_satisfiability(tx, settle, SOURCE_ROOT_AT)
     }
 
     /// Pool-independent: a transaction's inclusion is read off the wallet's own `transactions`
     /// table, so unlike the satisfiability oracle this needs no source-pool tree access.
     fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        self.0.mined_height(txid)
+        self.store.mined_height(txid)
     }
 }
 
-impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
+impl<C, P, CL> PoolMigrationWrite for PoolMigrations<C, P, CL>
+where
+    C: BorrowMut<Connection>,
+    P: zcash_protocol::consensus::Parameters,
+    CL: crate::util::Clock,
+{
     fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
-        self.0.replace_migration(state)
+        self.store.replace_migration(state)
     }
 
     fn update_transaction(
@@ -249,7 +288,204 @@ impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
         id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
-        self.0.update_transaction(id, state)
+        self.store.update_transaction(id, state)
+    }
+
+    /// The wallet-database form of the contract: apply the proof to `state`, then — in ONE
+    /// database transaction — persist the migration state and, with it, the finalized
+    /// transaction's wallet record (its raw bytes, fee, sent outputs, and input-spend marks, as
+    /// `store_transactions_to_be_sent` writes for the standard spend flows), so a transaction is
+    /// never durably recorded proved without the wallet knowing about it, nor the reverse. The
+    /// outputs are recovered by trial decryption under the account's unified full viewing key
+    /// (every real migration output is internal to the account; dummies decrypt under no key),
+    /// and the sent record's target height is the successor of the row's scheduled broadcast
+    /// height.
+    #[cfg(feature = "orchard")]
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: zcash_pool_migration::engine::ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        let id = proven.id();
+        proven.apply(state);
+        self.finalize_and_store_proved(state, id)
+    }
+
+    /// Without the `orchard` feature this wallet tracks no Orchard (or Ironwood) notes at all:
+    /// there is nothing the wallet's transaction tables could record about a migration
+    /// transaction, and no wallet-side spend the input marks would protect against. The
+    /// contract's no-wallet-tables form is therefore COMPLETE here, not a degraded stand-in:
+    /// apply the proof and persist the migration state alone.
+    #[cfg(not(feature = "orchard"))]
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: zcash_pool_migration::engine::ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        proven.apply(state);
+        self.replace_migration(state)
+    }
+}
+
+/// Finalization of a proved migration transaction into the wallet's own transaction record.
+#[cfg(feature = "orchard")]
+impl<C, P, CL> PoolMigrations<C, P, CL>
+where
+    C: BorrowMut<Connection>,
+    P: zcash_protocol::consensus::Parameters,
+    CL: crate::util::Clock,
+{
+    /// The body of [`PoolMigrationWrite::store_proved_transaction`], once the proof has been
+    /// applied to `state`: persist `state` and, atomically with it, finalize the
+    /// fully-constructed (proved and signed) migration transaction `proved` into the wallet's
+    /// own transaction tables.
+    ///
+    /// The transaction named by `proved` must be in the [`Proved`](MigrationTxState::Proved)
+    /// lifecycle state in `state`: its stored bytes are then a PCZT carrying both signatures
+    /// (installed at commit) and proofs (installed by the prove step), from which the final
+    /// `Transaction` is extracted mechanically — the PCZT Spend Finalizer and Transaction
+    /// Extractor roles, the latter of which also verifies the proofs and signatures it
+    /// assembles. The wallet-side record is what
+    /// [`WalletWrite::store_transactions_to_be_sent`] writes for the standard spend flows, made
+    /// at the analogous moment: the transaction's raw bytes, fee, creation time, and target
+    /// height in the `transactions` table; its outputs as sent notes; and its input notes marked
+    /// spent — which is what prevents the wallet's OWN later spends from double-spending a
+    /// migration input during the (deliberately long, for a scheduled transfer) window between
+    /// proving and mining.
+    ///
+    /// The transaction's outputs are recovered by trial decryption under the account's unified
+    /// full viewing key rather than from PCZT metadata: every real output of a migration
+    /// transaction is internal to the migrating account, and the padded dummy outputs fail
+    /// decryption, so decryption separates them exactly. The sent-transaction target height is
+    /// the block the transaction aims to mine in: the successor of its scheduled broadcast
+    /// height.
+    ///
+    /// Both writes — the migration state (as [`replace_migration`]) and the wallet transaction
+    /// record — happen in ONE database transaction, so a transaction is never durably recorded
+    /// proved without the wallet record, nor the reverse.
+    ///
+    /// [`WalletWrite::store_transactions_to_be_sent`]:
+    ///     zcash_client_backend::data_api::WalletWrite::store_transactions_to_be_sent
+    /// [`replace_migration`]: PoolMigrationWrite::replace_migration
+    /// [`PoolMigrationWrite::store_proved_transaction`]:
+    ///     zcash_pool_migration::engine::PoolMigrationWrite::store_proved_transaction
+    fn finalize_and_store_proved(
+        &mut self,
+        state: &MigrationState,
+        proved: MigrationTransferId,
+    ) -> Result<(), Error> {
+        use std::collections::HashMap;
+
+        use zcash_client_backend::data_api::{
+            Account as _, SentTransaction, SentTransactionOutput, wallet::TargetHeight,
+        };
+        use zcash_client_backend::decrypt_transaction;
+        use zcash_client_backend::wallet::{Note, Recipient};
+        use zcash_protocol::value::Zatoshis;
+
+        use super::error::FinalizeError;
+
+        let row = state
+            .transactions()
+            .iter()
+            .find(|t| t.id() == proved)
+            .ok_or(Error::UnknownTransaction(proved))?;
+        if !matches!(row.state(), MigrationTxState::Proved) {
+            return Err(Error::NotProved(proved));
+        }
+
+        // Finalize the spend authorizations and extract the transaction. Extraction re-verifies
+        // the proofs and signatures it assembles, so a PCZT that would not survive broadcast is
+        // rejected here rather than recorded.
+        let pczt = ::pczt::Pczt::parse(row.pczt())
+            .map_err(|e| Error::Finalize(FinalizeError::Parse(e)))?;
+        let finalized = ::pczt::roles::spend_finalizer::SpendFinalizer::new(pczt)
+            .finalize_spends()
+            .map_err(|e| Error::Finalize(FinalizeError::Spends(e)))?;
+        let tx = ::pczt::roles::tx_extractor::TransactionExtractor::new(finalized)
+            .extract()
+            .map_err(|e| Error::Finalize(FinalizeError::Extract(e)))?;
+
+        // The fee is fully determined by the shielded value balances: a migration transaction has
+        // no transparent bundle, so the prevout lookup is never consulted.
+        let fee = tx
+            .fee_paid(|_| Ok::<_, zcash_protocol::value::BalanceError>(None))
+            .map_err(|e| Error::Finalize(FinalizeError::Balance(e)))?
+            .ok_or(Error::Corrupt(
+                "migration transaction has transparent inputs",
+            ))?;
+
+        // Recover the outputs by trial decryption under the account's own viewing key. A
+        // migration transaction's real outputs are all internal to the migrating account (feeder
+        // notes, or the value crossing into Ironwood), and its padded dummy outputs decrypt under
+        // no key, so decryption recovers exactly the outputs the wallet must record.
+        let account =
+            crate::wallet::get_account(self.store.connection(), &self.params, self.account)
+                .map_err(|e| Error::Wallet(Box::new(e)))?
+                .ok_or(Error::AccountUnknown)?;
+        let ufvk = account
+            .ufvk()
+            .cloned()
+            .ok_or(Error::ViewingKeyUnavailable)?;
+        let ufvks = HashMap::from([(self.account, ufvk)]);
+        let decrypted = decrypt_transaction(
+            &self.params,
+            None,
+            Some(row.scheduled_height()),
+            &tx,
+            &ufvks,
+        );
+        let outputs = decrypted
+            .orchard_outputs()
+            .iter()
+            .chain(decrypted.ironwood_outputs())
+            .map(|output| {
+                let (note, pool) = *output.note();
+                Zatoshis::from_u64(note.value().inner())
+                    .map(|value| {
+                        SentTransactionOutput::from_parts(
+                            output.index(),
+                            Recipient::InternalShielded {
+                                receiving_account: *output.account(),
+                                external_address: None,
+                                note: Box::new(Note::Orchard { note, pool }),
+                            },
+                            value,
+                            Some(output.memo().clone()),
+                        )
+                    })
+                    .map_err(|e| Error::Finalize(FinalizeError::Balance(e)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // The transaction is built to be broadcast at its scheduled height, so the block it aims
+        // to mine in — the standard flow's construction target — is that height's successor.
+        let target_height = TargetHeight::from(u32::from(row.scheduled_height()) + 1);
+        let created = time::OffsetDateTime::from(self.clock.now());
+        let sent = SentTransaction::new(
+            &tx,
+            created,
+            target_height,
+            self.account,
+            &outputs,
+            fee,
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+        );
+
+        let params = &self.params;
+        self.store.replace_migration_with(state, |dbtx| {
+            crate::wallet::store_transaction_to_be_sent(
+                dbtx,
+                params,
+                // A migration transaction has no transparent outputs, so the gap-limit machinery
+                // this parameterizes is unreachable.
+                #[cfg(feature = "transparent-inputs")]
+                &zcash_keys::keys::transparent::gap_limits::GapLimits::default(),
+                &sent,
+            )
+            .map_err(|e| Error::Wallet(Box::new(e)))
+        })
     }
 }
 
@@ -283,6 +519,7 @@ mod retention_follows_the_committed_migration {
 
     use super::PoolMigrations;
     use crate::testing::{BlockCache, db::TestDbFactory};
+    use crate::util::SystemClock;
 
     /// A migration carrying no transactions, recorded as committed under `interval`. Only the
     /// recorded grid matters here; the retention decision does not look at the transfers.
@@ -340,10 +577,15 @@ mod retention_follows_the_committed_migration {
             .expect("the test account exists")
             .account()
             .id();
-        PoolMigrations::for_account(st.wallet_mut().conn_mut(), account_id)
-            .expect("the account exists")
-            .replace_migration(&migration_committed_under(committed))
-            .expect("persists the migration");
+        PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account_id,
+        )
+        .expect("the account exists")
+        .replace_migration(&migration_committed_under(committed))
+        .expect("persists the migration");
 
         // Scan enough blocks to cross several boundaries of both grids. The account's birthday is
         // the Sapling activation height, so the first generated block sits just above it.
@@ -405,11 +647,16 @@ mod retention_follows_the_committed_migration {
             "the scan must cross at least one boundary of the committed grid",
         );
         assert!(
-            PoolMigrations::for_account(st.wallet_mut().conn_mut(), account_id)
-                .expect("the account exists")
-                .get_migration()
-                .expect("reads the migration")
-                .is_some(),
+            PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account_id
+            )
+            .expect("the account exists")
+            .get_migration()
+            .expect("reads the migration")
+            .is_some(),
             "the migration is still recorded",
         );
     }
@@ -449,6 +696,7 @@ mod check_step_satisfiability {
     use super::{Error, PoolMigrations};
     use crate::AccountUuid;
     use crate::testing::{BlockCache, db::TestDb, db::TestDbFactory};
+    use crate::util::SystemClock;
 
     /// The settle depth the anchor-validity tests hold the oracle to; the input-level tests do not
     /// consult it.
@@ -783,8 +1031,13 @@ mod check_step_satisfiability {
     #[test]
     fn known_unspent_inputs_are_satisfiable() {
         let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
@@ -797,8 +1050,13 @@ mod check_step_satisfiability {
     fn a_mined_spend_marks_inputs_spent() {
         let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         record_mined_spend(&mut st, nf, as_of_height);
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
@@ -825,8 +1083,13 @@ mod check_step_satisfiability {
         // reaches it: the spender sits one block above the fully-scanned height.
         record_mined_spend(&mut st, nf, as_of_height + 1);
         {
-            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-                .expect("the account exists");
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
             assert_eq!(
                 store
                     .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
@@ -843,8 +1106,13 @@ mod check_step_satisfiability {
             as_of_height + 1,
             "the next block is the spender's height"
         );
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
@@ -865,8 +1133,13 @@ mod check_step_satisfiability {
     fn an_unmined_spend_does_not_obstruct() {
         let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
         record_unmined_spend(&mut st, nf);
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
@@ -878,8 +1151,13 @@ mod check_step_satisfiability {
     #[test]
     fn an_unknown_nullifier_is_not_yet_satisfiable() {
         let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![unknown_nullifier()], 0), SETTLE)
@@ -894,8 +1172,13 @@ mod check_step_satisfiability {
     #[test]
     fn expiry_is_judged_at_the_next_block() {
         let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of_height)), SETTLE)
@@ -927,8 +1210,13 @@ mod check_step_satisfiability {
                 .is_none(),
             "nothing is scanned, so no chain state backs an observation",
         );
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert!(matches!(
             store.check_step_satisfiability(&transfer(Vec::new(), 0), SETTLE),
             Err(Error::Corrupt("spend_nullifiers")),
@@ -942,8 +1230,13 @@ mod check_step_satisfiability {
     fn a_mined_row_with_an_empty_cache_answers() {
         let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
         let mined = mined_transfer_with_empty_cache(as_of_height);
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&mined, SETTLE)
@@ -980,8 +1273,13 @@ mod check_step_satisfiability {
             AnchorBucketInterval::ZIP_318,
             ReplanThreshold::DEFAULT,
         );
-        let mut store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let mut store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         store
             .replace_migration(&state)
             .expect("persists the mined row");
@@ -1033,8 +1331,13 @@ mod check_step_satisfiability {
             .expect("reads the Orchard commitment tree")
             .expect("the boundary's checkpoint is retained");
 
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&broadcast_transfer(vec![nf], boundary, anchor), SETTLE)
@@ -1052,8 +1355,13 @@ mod check_step_satisfiability {
     fn an_anchor_displacement_marks_exactly_at_the_settle_depth() {
         let (mut st, account, nf, _) = wallet_with_scanned_note();
         let as_of_height = st.generate_and_scan_empty_blocks(12);
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
 
         assert_eq!(
             store
@@ -1101,8 +1409,13 @@ mod check_step_satisfiability {
             broadcast_transfer(vec![nf], as_of_height - SETTLE.blocks(), no_such_root());
 
         {
-            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-                .expect("the account exists");
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
             assert_eq!(
                 store
                     .check_step_satisfiability(&displaced, SETTLE)
@@ -1129,8 +1442,13 @@ mod check_step_satisfiability {
             )
             .expect("records a checkpoint the tree cannot root");
 
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&displaced, SETTLE)
@@ -1168,8 +1486,13 @@ mod check_step_satisfiability {
 
         let tx = broadcast_transfer(vec![nf], high, no_such_root());
         {
-            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-                .expect("the account exists");
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
             assert_eq!(
                 store
                     .check_step_satisfiability(&tx, IMMEDIATE)
@@ -1186,8 +1509,13 @@ mod check_step_satisfiability {
             as_of_height >= high,
             "the scanned region now reaches the boundary at {high:?}",
         );
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&tx, IMMEDIATE)
@@ -1216,8 +1544,13 @@ mod check_step_satisfiability {
             no_such_root(),
         );
 
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&signed, SETTLE)
@@ -1236,8 +1569,13 @@ mod check_step_satisfiability {
         let as_of_height = st.generate_and_scan_empty_blocks(12);
         record_mined_spend(&mut st, nf, as_of_height);
 
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(
@@ -1274,8 +1612,13 @@ mod check_step_satisfiability {
             no_such_root(),
         );
 
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&prep, SETTLE)
@@ -1298,8 +1641,13 @@ mod check_step_satisfiability {
             ..
         } = scanned_note_fixture(true);
         let other_account = second_account.expect("the fixture created a second account");
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), other_account)
-            .expect("the second account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            other_account,
+        )
+        .expect("the second account exists");
         assert_eq!(
             store
                 .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
@@ -1328,6 +1676,7 @@ mod mined_height {
     use super::PoolMigrations;
     use super::check_step_satisfiability::{unscanned_wallet, wallet_with_scanned_note};
     use crate::testing::{BlockCache, db::TestDb};
+    use crate::util::SystemClock;
 
     /// Insert a transaction the wallet knows of, at `mined_height`, with no spend join: the mining
     /// lookup reads `transactions` alone, so nothing here needs a note or a spender.
@@ -1357,8 +1706,13 @@ mod mined_height {
         let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
         let txid = TxId::from_bytes([3; 32]);
         record_transaction(&mut st, txid, Some(as_of_height));
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store.mined_height(txid).expect("the store answers"),
             Some(as_of_height),
@@ -1375,8 +1729,13 @@ mod mined_height {
         let txid = TxId::from_bytes([4; 32]);
         record_transaction(&mut st, txid, Some(as_of_height + 1));
         {
-            let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-                .expect("the account exists");
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
             assert_eq!(
                 store.mined_height(txid).expect("the store answers"),
                 None,
@@ -1387,8 +1746,13 @@ mod mined_height {
         let (h3, _) = st.generate_empty_block();
         st.scan_cached_blocks(h3, 1);
         assert_eq!(h3, as_of_height + 1, "the next block is the mined height");
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store.mined_height(txid).expect("the store answers"),
             Some(h3)
@@ -1402,8 +1766,13 @@ mod mined_height {
         let (mut st, account, _nf, _as_of_height) = wallet_with_scanned_note();
         let unmined = TxId::from_bytes([5; 32]);
         record_transaction(&mut st, unmined, None);
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(
             store.mined_height(unmined).expect("the store answers"),
             None
@@ -1425,8 +1794,13 @@ mod mined_height {
         let (mut st, account) = unscanned_wallet();
         let txid = TxId::from_bytes([7; 32]);
         record_transaction(&mut st, txid, Some(BlockHeight::from_u32(100)));
-        let store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
         assert_eq!(store.mined_height(txid).expect("the store answers"), None);
     }
 }
@@ -1453,6 +1827,7 @@ mod truncation_follows_the_wallet {
 
     use super::PoolMigrations;
     use crate::testing::{BlockCache, db::TestDbFactory};
+    use crate::util::SystemClock;
 
     /// A migration transaction in `state`, marked at `unsatisfiable_at`; the plan-shaped fields are
     /// immaterial to truncation. A mark is a stamp and a kind together, and truncation treats every
@@ -1548,8 +1923,13 @@ mod truncation_follows_the_wallet {
             height,
         };
         {
-            let mut store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-                .expect("the account exists");
+            let mut store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
             store
                 .replace_migration(&migration(
                     MigrationStatus::Complete,
@@ -1568,11 +1948,16 @@ mod truncation_follows_the_wallet {
             "the truncation moved the chain view back"
         );
 
-        let state = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists")
-            .get_migration()
-            .expect("reads the migration")
-            .expect("the migration is present");
+        let state = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists")
+        .get_migration()
+        .expect("reads the migration")
+        .expect("the migration is present");
         assert_eq!(
             state.transactions()[0].state(),
             mined(0xA0, low),
@@ -1594,8 +1979,13 @@ mod truncation_follows_the_wallet {
         // And the marks: an in-flight transaction marked on evidence above the next truncation
         // loses that mark, while one marked below keeps it.
         {
-            let mut store = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-                .expect("the account exists");
+            let mut store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
             store
                 .replace_migration(&migration(
                     MigrationStatus::InProgress,
@@ -1629,11 +2019,16 @@ mod truncation_follows_the_wallet {
             "the surviving mark rests below the truncation"
         );
 
-        let state = PoolMigrations::for_account(st.wallet_mut().conn_mut(), account)
-            .expect("the account exists")
-            .get_migration()
-            .expect("reads the migration")
-            .expect("the migration is present");
+        let state = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists")
+        .get_migration()
+        .expect("reads the migration")
+        .expect("the migration is present");
         assert_eq!(
             (
                 state.transactions()[0].unsatisfiable_at(),
@@ -1682,10 +2077,17 @@ mod tests {
     };
 
     use crate::AccountUuid;
+    use crate::util::SystemClock;
 
     use std::collections::BTreeSet;
+    use zcash_client_backend::data_api::testing::TestBuilder;
     use zcash_client_backend::wallet::LockOwner;
+    use zcash_protocol::local_consensus::LocalNetwork;
     use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+
+    /// Consensus parameters for stores whose wallet context is carried but never consulted: no
+    /// test in this module finalizes a proved transaction.
+    const NET: LocalNetwork = TestBuilder::<(), ()>::DEFAULT_NETWORK;
 
     /// A fresh in-memory database with a minimal `accounts` table (the `account_id` foreign-key
     /// target) and the migration tables created, but not yet wrapped as a store for any particular
@@ -1720,10 +2122,10 @@ mod tests {
     /// A fresh, empty store over a new in-memory database with the migration tables created, scoped
     /// to a fresh account. Each proptest case and test gets its own database and account, so writes
     /// never bleed between cases.
-    fn fresh_store() -> PoolMigrations<Connection> {
+    fn fresh_store() -> PoolMigrations<Connection, LocalNetwork, SystemClock> {
         let conn = fresh_conn();
         let account = insert_account(&conn);
-        PoolMigrations::for_account(conn, account).expect("account exists")
+        PoolMigrations::for_account(NET, SystemClock, conn, account).expect("account exists")
     }
 
     #[test]
@@ -1965,7 +2367,7 @@ mod tests {
     fn a_cached_nullifier_of_the_wrong_width_cannot_be_stored() {
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
-        PoolMigrations::for_account(&mut conn, account)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
             .expect("account exists")
             .replace_migration(&single_transfer_state())
             .expect("write succeeds");
@@ -1989,7 +2391,7 @@ mod tests {
     fn a_signed_row_whose_cached_nullifiers_are_gone_is_corrupt() {
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
-        PoolMigrations::for_account(&mut conn, account)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
             .expect("account exists")
             .replace_migration(&single_transfer_state())
             .expect("write succeeds");
@@ -1999,7 +2401,8 @@ mod tests {
         )
         .expect("discards the stored cache");
 
-        let store = PoolMigrations::for_account(&conn, account).expect("account exists");
+        let store =
+            PoolMigrations::for_account(NET, SystemClock, &conn, account).expect("account exists");
         let loaded = store
             .get_migration()
             .expect("read succeeds")
@@ -2174,12 +2577,12 @@ mod tests {
         ] {
             let mut conn = fresh_conn();
             let account = insert_account(&conn);
-            PoolMigrations::for_account(&mut conn, account)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
                 .expect("account exists")
                 .replace_migration(&single_transfer_state())
                 .expect("write succeeds");
             conn.execute(sql, []).expect("corrupts the stored row");
-            let err = PoolMigrations::for_account(&conn, account)
+            let err = PoolMigrations::for_account(NET, SystemClock, &conn, account)
                 .expect("account exists")
                 .get_migration()
                 .unwrap_err();
@@ -2194,7 +2597,7 @@ mod tests {
 
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
-        PoolMigrations::for_account(&mut conn, account)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
             .expect("account exists")
             .replace_migration(&single_transfer_state())
             .expect("write succeeds");
@@ -2204,7 +2607,7 @@ mod tests {
             [],
         )
         .expect("stores an unrecognized kind");
-        let err = PoolMigrations::for_account(&conn, account)
+        let err = PoolMigrations::for_account(NET, SystemClock, &conn, account)
             .expect("account exists")
             .get_migration()
             .unwrap_err();
@@ -2217,7 +2620,7 @@ mod tests {
     fn replan_threshold_above_100_is_corrupt() {
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
-        PoolMigrations::for_account(&mut conn, account)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
             .expect("account exists")
             .replace_migration(&single_transfer_state())
             .expect("write succeeds");
@@ -2226,7 +2629,7 @@ mod tests {
             [],
         )
         .expect("corrupts the stored threshold");
-        let err = PoolMigrations::for_account(&conn, account)
+        let err = PoolMigrations::for_account(NET, SystemClock, &conn, account)
             .expect("account exists")
             .get_migration()
             .expect_err("an out-of-range threshold must not decode");
@@ -2268,11 +2671,11 @@ mod tests {
             ReplanThreshold::DEFAULT,
         );
 
-        PoolMigrations::for_account(&mut conn, account_a)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
             .expect("account A exists")
             .replace_migration(&state)
             .expect("write A's migration");
-        PoolMigrations::for_account(&mut conn, account_b)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account_b)
             .expect("account B exists")
             .replace_migration(&state)
             .expect("write B's migration");
@@ -2309,7 +2712,7 @@ mod tests {
             "account A's child rows must cascade away, and only those"
         );
         assert_eq!(
-            PoolMigrations::for_account(&conn, account_b)
+            PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                 .expect("account B exists")
                 .get_migration()
                 .expect("read B"),
@@ -2370,20 +2773,20 @@ mod tests {
             let account_a = insert_account(&conn);
             let account_b = insert_account(&conn);
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state)
                 .expect("write for A");
 
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_b)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                     .expect("account B exists")
                     .get_migration()
                     .expect("read for B"),
                 None
             );
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_a)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_a)
                     .expect("account A exists")
                     .get_migration()
                     .expect("read for A"),
@@ -2403,28 +2806,28 @@ mod tests {
             let account_a = insert_account(&conn);
             let account_b = insert_account(&conn);
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state_a_1)
                 .expect("write A first");
-            PoolMigrations::for_account(&mut conn, account_b)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_b)
                 .expect("account B exists")
                 .replace_migration(&state_b)
                 .expect("write B");
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state_a_2)
                 .expect("write A second");
 
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_a)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_a)
                     .expect("account A exists")
                     .get_migration()
                     .expect("read A"),
                 Some(state_a_2)
             );
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_b)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                     .expect("account B exists")
                     .get_migration()
                     .expect("read B"),
@@ -2442,7 +2845,7 @@ mod tests {
         ) {
             let conn = fresh_conn();
             let account = insert_account(&conn);
-            let mut store = PoolMigrations::for_account(conn, account).expect("account exists");
+            let mut store = PoolMigrations::for_account(NET, SystemClock, conn, account).expect("account exists");
             store.replace_migration(&first).expect("write first");
             store.replace_migration(&second).expect("write second");
             prop_assert_eq!(store.get_migration().expect("read"), Some(second));
@@ -2463,22 +2866,22 @@ mod tests {
             let account_a = insert_account(&conn);
             let account_b = insert_account(&conn);
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state)
                 .expect("write A");
-            PoolMigrations::for_account(&mut conn, account_b)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_b)
                 .expect("account B exists")
                 .replace_migration(&state)
                 .expect("write B");
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .update_transaction(id, new)
                 .expect("update A");
 
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_b)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                     .expect("account B exists")
                     .get_migration()
                     .expect("read B"),

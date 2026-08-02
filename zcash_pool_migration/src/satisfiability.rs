@@ -477,12 +477,14 @@ impl DuenessTargets {
 /// state, persists it, and calls this again; until the state records the step's completion, the
 /// same step is offered again. The steps map onto the crate's operations as follows:
 ///
-/// - [`AdvanceStep::Prove`]: install the transaction's deferred anchor and witnesses and store the
-///   proven PCZT — [`prove_transfer`] / [`prove_preparation`], which also record the
-///   `Signed -> Proved` transition. Proving needs a SYNCED wallet and mutable access to its
-///   commitment trees, but only the account's viewing key. The step carries the transaction's kind
-///   so the consumer can tell, without a lookup, whether the broadcast follows in the same session
-///   (a preparation) or in its own later one (a transfer).
+/// - [`AdvanceStep::Prove`]: install the transaction's deferred anchor and witnesses —
+///   [`prove_transfer`] / [`prove_preparation`] — and hand the returned proof to
+///   [`PoolMigrationWrite::store_proved_transaction`], which records the `Signed -> Proved`
+///   transition and persists it (for a wallet-database store, atomically with the wallet's own
+///   record of the now fully-constructed transaction). Proving needs a SYNCED wallet and mutable
+///   access to its commitment trees, but only the account's viewing key. The step carries the
+///   transaction's kind so the consumer can tell, without a lookup, whether the broadcast follows
+///   in the same session (a preparation) or in its own later one (a transfer).
 /// - [`AdvanceStep::Broadcast`]: submit the stored proven transaction to the network, then record
 ///   it with [`MigrationState::mark_broadcast`]. Its mining is later detected through the
 ///   consumer's own chain view and recorded with [`MigrationState::mark_mined`], which is what
@@ -993,6 +995,16 @@ mod advance_tests {
             Ok(())
         }
 
+        /// The contract's no-wallet-tables form: apply the proof and persist the state alone.
+        fn store_proved_transaction(
+            &mut self,
+            state: &mut MigrationState,
+            proven: crate::engine::ProvedTransaction,
+        ) -> Result<(), Self::Error> {
+            proven.apply(state);
+            self.replace_migration(state)
+        }
+
         fn update_transaction(
             &mut self,
             id: MigrationTransferId,
@@ -1193,6 +1205,17 @@ mod advance_tests {
             }
             self.stored = Some(state.clone());
             Ok(())
+        }
+
+        /// Fails exactly as `replace_migration` does: the proof is applied, and the write is
+        /// subject to the configured failure.
+        fn store_proved_transaction(
+            &mut self,
+            state: &mut MigrationState,
+            proven: crate::engine::ProvedTransaction,
+        ) -> Result<(), Self::Error> {
+            proven.apply(state);
+            self.replace_migration(state)
         }
 
         fn update_transaction(

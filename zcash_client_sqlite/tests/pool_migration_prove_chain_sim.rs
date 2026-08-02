@@ -45,6 +45,7 @@ use zcash_client_backend::data_api::{Account, WalletRead, WalletTest};
 use zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations;
 use zcash_client_sqlite::testing::db::{TestDb, TestDbFactory};
 use zcash_client_sqlite::testing::{BlockCache, highest_rooted_orchard_checkpoint};
+use zcash_client_sqlite::util::SystemClock;
 use zcash_keys::keys::UnifiedSpendingKey;
 
 use zcash_primitives::block::BlockHash;
@@ -158,6 +159,18 @@ impl PoolMigrationWrite for MigrationTestStore {
         // updates all happen against the SQLite store during the drive.
         Ok(())
     }
+
+    /// The contract's no-wallet-tables form; not exercised, for the same reason as
+    /// `update_transaction` — every prove in this file discharges its proof through the SQLite
+    /// store.
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: engine::ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        proven.apply(state);
+        self.replace_migration(state)
+    }
 }
 
 /// An end-to-end migration proving scenario, built fluently: [`Scenario::funded`] /
@@ -230,6 +243,19 @@ struct Committed {
     change: u64,
 }
 
+/// [`Run::perform_prove`]'s summary of the engine's `ProveOutcome`, with a successful proof's
+/// `ProvedTransaction` already discharged through the store (the engine's own outcome carries the
+/// proof by value, so it cannot survive the persistence the helper performs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProveStepOutcome {
+    Proved,
+    NotYetProvable,
+    MarkedUnsatisfiable {
+        #[allow(dead_code)]
+        replan_required: bool,
+    },
+}
+
 impl Run {
     /// Phase 1 (setup): builds an NU6.3 wallet, funds the account with the scenario's source Orchard
     /// notes (one per block), and completes their shards so an anchor is available at the tip.
@@ -279,10 +305,17 @@ impl Run {
     }
 
     /// The account's pool-migration store, over the wallet database's own connection — the same
-    /// borrow an application holding that connection would construct it from.
-    fn store(&mut self) -> PoolMigrations<&mut rusqlite::Connection> {
-        PoolMigrations::for_account(self.st.wallet_mut().conn_mut(), self.account_id)
-            .expect("the account has a pool-migration store")
+    /// borrow an application holding that connection would construct it from, with the wallet
+    /// context (parameters and clock) `store_proved_transaction` finalizes under.
+    fn store(&mut self) -> PoolMigrations<&mut rusqlite::Connection, LocalNetwork, SystemClock> {
+        let params = *self.st.network();
+        PoolMigrations::for_account(
+            params,
+            SystemClock,
+            self.st.wallet_mut().conn_mut(),
+            self.account_id,
+        )
+        .expect("the account has a pool-migration store")
     }
 
     /// Write `state` through to the SQLite store, as a consumer does after performing a step.
@@ -335,7 +368,15 @@ impl Run {
     /// Perform an [`AdvanceStep::Prove`] step: install the transaction's deferred anchor and
     /// witnesses against the wallet's commitment trees, prove it, and persist. A PREPARATION
     /// anchors to a fresh checkpoint at the tip (the caller's choice, as for an ordinary
-    /// transaction); a TRANSFER to the boundary its schedule drew.
+    /// transaction); a TRANSFER to the boundary its schedule drew. Returns [`ProveStepOutcome`]
+    /// rather than the engine's own outcome because a successful proof's `ProvedTransaction` is
+    /// consumed by the persistence this helper performs.
+    ///
+    /// A successful proof is persisted through [`PoolMigrations::store_proved_transaction`]: the
+    /// migration state and the finalized transaction's wallet record (its `transactions` row,
+    /// sent outputs, and input-spend marks) are written as one atomic update, which is the
+    /// moment the wallet's own view starts protecting the migration's inputs from its other
+    /// spends. Any other outcome persists the migration state alone.
     ///
     /// The engine's outcome is returned rather than asserted: a prove attempt whose input the
     /// wallet no longer holds unspent is not an error but a determination, and persisting is
@@ -345,7 +386,7 @@ impl Run {
         state: &mut MigrationState,
         id: MigrationTransferId,
         kind: MigrationTxKind,
-    ) -> engine::ProveOutcome {
+    ) -> ProveStepOutcome {
         let anchor = matches!(kind, MigrationTxKind::Preparation { .. }).then(|| {
             let tip = self.target_height() - 1;
             highest_rooted_orchard_checkpoint(self.st.wallet_mut(), tip)
@@ -374,8 +415,22 @@ impl Run {
                 .expect("the prover answers for the transfer"),
             }
         };
-        self.persist(state);
-        outcome
+        match outcome {
+            engine::ProveOutcome::Proved(proven) => {
+                self.store()
+                    .store_proved_transaction(state, proven)
+                    .expect("finalizes and persists the proved transaction");
+                ProveStepOutcome::Proved
+            }
+            engine::ProveOutcome::NotYetProvable => {
+                self.persist(state);
+                ProveStepOutcome::NotYetProvable
+            }
+            engine::ProveOutcome::MarkedUnsatisfiable { replan_required } => {
+                self.persist(state);
+                ProveStepOutcome::MarkedUnsatisfiable { replan_required }
+            }
+        }
     }
 
     /// Perform an [`AdvanceStep::Broadcast`] step: extract the stored proven transaction and
@@ -440,7 +495,7 @@ impl Run {
                     );
                     assert_eq!(
                         self.perform_prove(&mut committed.state, id, kind),
-                        engine::ProveOutcome::Proved,
+                        ProveStepOutcome::Proved,
                     );
                 }
                 AdvanceStep::Broadcast { id } => {
@@ -504,7 +559,7 @@ impl Run {
                 AdvanceStep::Prove { id, kind } => {
                     assert_eq!(
                         self.perform_prove(&mut committed.state, id, kind),
-                        engine::ProveOutcome::Proved,
+                        ProveStepOutcome::Proved,
                     );
                 }
                 AdvanceStep::Broadcast { id } => {
@@ -615,6 +670,26 @@ impl Run {
         height
     }
 
+    /// Forget the wallet-side spend marks of a proved-but-unbroadcast migration transaction, so
+    /// this wallet's own selection can play the role of a SIBLING wallet on the same seed: the
+    /// sibling shares every note but holds no record of this wallet's unbroadcast crossing, so
+    /// nothing excludes the crossing's inputs from ITS selection. Since
+    /// `store_proved_transaction` records those marks at proving time — which is exactly what
+    /// keeps this wallet's own sweeps off a migration input, the protection under test in
+    /// `proving_persists_the_finalized_transaction_to_the_wallet` — simulating the sibling's
+    /// independent view requires lifting them.
+    fn forget_pending_spend_marks(&mut self, txid: TxId) {
+        self.st
+            .wallet_mut()
+            .conn_mut()
+            .execute(
+                "DELETE FROM orchard_received_note_spends
+                 WHERE transaction_id IN (SELECT id_tx FROM transactions WHERE txid = :txid)",
+                rusqlite::named_params![":txid": txid.as_ref()],
+            )
+            .expect("lifts the pending spend marks");
+    }
+
     /// The wallet's fully-scanned height: the chain state every satisfiability observation the
     /// oracle and the prove seam make rests on.
     fn fully_scanned_height(&self) -> BlockHeight {
@@ -720,7 +795,7 @@ impl Run {
                 AdvanceStep::Prove { id, kind } => {
                     assert_eq!(
                         self.perform_prove(&mut committed.state, id, kind),
-                        engine::ProveOutcome::Proved,
+                        ProveStepOutcome::Proved,
                         "{}: proving {id:?}",
                         scenario.label
                     );
@@ -972,6 +1047,223 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
     scenario.prove_end_to_end();
 }
 
+/// Proving a migration transaction persists its FINALIZED form to the wallet database, atomically
+/// with the migration state that records it proved.
+///
+/// The wallet-side record is the one `store_transactions_to_be_sent` writes for the standard
+/// spend flows: the raw transaction (queryable for broadcast), its outputs as sent notes — here
+/// the Ironwood crossing output carrying the migrated value — and its input notes marked spent,
+/// which is what stops the wallet's OWN later spends from consuming a migration input during the
+/// deliberately long window between proving and broadcast. Atomicity is exercised from the
+/// failure side: with the wallet-side half made to fail, the migration-store half must roll back
+/// with it, so a transaction is never durably `Proved` without the wallet record.
+#[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
+fn proving_persists_the_finalized_transaction_to_the_wallet() {
+    use zcash_client_backend::data_api::InputSource;
+    use zcash_client_backend::data_api::wallet::TargetHeight;
+    use zcash_client_backend::data_api::wallet::input_selection::LockFilter;
+    use zcash_protocol::ShieldedPool;
+
+    // The cheapest scenario with both a preparation and a crossing: one funding note, one
+    // transfer, so the wallet-side record under test is a single transaction's.
+    const SINGLE: &str = "Gwen, 0.0152 ZEC (a single minimum-denomination note)";
+    let scenario = scenarios()
+        .into_iter()
+        .find(|scenario| scenario.label == SINGLE)
+        .expect("the single-crossing scenario exists");
+
+    let mut run = Run::setup(&scenario);
+    let mut committed = run.plan_and_commit(&scenario);
+    let transfer_id = run.drive_to_first_transfer_step(&mut committed);
+
+    let spendable_values = |run: &mut Run| -> Vec<Zatoshis> {
+        let target = TargetHeight::from(u32::from(run.target_height()));
+        run.st
+            .wallet()
+            .select_unspent_notes(
+                run.account_id,
+                &[ShieldedPool::Orchard],
+                target,
+                &[],
+                LockFilter::Unfiltered,
+            )
+            .expect("selects unspent notes")
+            .orchard()
+            .iter()
+            .map(|note| {
+                Zatoshis::from_u64(note.note().value().inner()).expect("a valid note value")
+            })
+            .collect()
+    };
+    let funding_value = committed.funding_notes[0];
+    assert!(
+        spendable_values(&mut run).contains(&funding_value),
+        "premise: the funding note is spendable before the transfer is proved",
+    );
+
+    // Prove through the engine seam alone, so persistence can be exercised separately below. The
+    // engine returns the proof as a value — nothing has moved the state to `Proved` yet.
+    let outcome = {
+        let params = *run.st.network();
+        let scanned_tip = run.fully_scanned_height();
+        let mut redraw_rng = ChaCha8Rng::seed_from_u64(29);
+        let mut prover =
+            WalletMigrationProver::new(run.st.wallet_mut(), run.account_id, run.fvk.clone());
+        engine::prove_transfer(
+            &params,
+            &mut prover,
+            &mut committed.state,
+            transfer_id,
+            scanned_tip,
+            &mut redraw_rng,
+        )
+        .expect("the prover answers for the transfer")
+    };
+    let engine::ProveOutcome::Proved(proven) = outcome else {
+        panic!("expected a proof, got {outcome:?}");
+    };
+    // The proof is consumed by the failure-side attempt below; keep its parts to retry with.
+    let proven_bytes = proven.pczt().to_vec();
+    let txid = committed
+        .state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == transfer_id)
+        .expect("the transfer is present")
+        .txid();
+
+    // FAILURE SIDE: with the wallet-side half unable to write, the migration-store half must
+    // roll back with it — the store keeps saying `Signed`, and the wallet holds no record.
+    run.st
+        .wallet_mut()
+        .conn_mut()
+        .execute_batch("ALTER TABLE sent_notes RENAME TO sent_notes_hidden")
+        .expect("hides the sent-notes table");
+    assert!(
+        run.store()
+            .store_proved_transaction(&mut committed.state, proven)
+            .is_err(),
+        "the wallet-side write cannot succeed without its table",
+    );
+    assert!(
+        matches!(
+            run.stored_migration()
+                .expect("the store holds the migration")
+                .transactions()
+                .iter()
+                .find(|t| t.id() == transfer_id)
+                .expect("the transfer is present")
+                .state(),
+            MigrationTxState::Signed
+        ),
+        "the migration-store half rolled back with the failed wallet-side half",
+    );
+    assert!(
+        run.st
+            .wallet()
+            .get_transaction(txid)
+            .expect("queries the wallet")
+            .is_none(),
+        "no wallet transaction record survives the rollback",
+    );
+    run.st
+        .wallet_mut()
+        .conn_mut()
+        .execute_batch("ALTER TABLE sent_notes_hidden RENAME TO sent_notes")
+        .expect("restores the sent-notes table");
+
+    // SUCCESS SIDE: one atomic write records both halves. (The failure-side attempt consumed the
+    // engine's proof value; the retry reassembles it from the parts kept above, exactly the
+    // resume-and-reprove a real consumer performs more cheaply here.)
+    run.store()
+        .store_proved_transaction(
+            &mut committed.state,
+            engine::ProvedTransaction::from_parts(transfer_id, proven_bytes),
+        )
+        .expect("finalizes and persists the proved transaction");
+    assert!(
+        matches!(
+            run.stored_migration()
+                .expect("the store holds the migration")
+                .transactions()
+                .iter()
+                .find(|t| t.id() == transfer_id)
+                .expect("the transfer is present")
+                .state(),
+            MigrationTxState::Proved
+        ),
+        "the store records the transfer proved",
+    );
+
+    // The wallet holds the raw finalized transaction under the txid the engine derived at build
+    // time, with its Ironwood crossing bundle intact.
+    let tx = run
+        .st
+        .wallet()
+        .get_transaction(txid)
+        .expect("queries the wallet")
+        .expect("the finalized transaction is stored");
+    assert_eq!(tx.txid(), txid);
+    assert!(
+        tx.ironwood_bundle().is_some(),
+        "the crossing carries an Ironwood bundle",
+    );
+
+    // Its sent-output record is exactly the transfer's REAL outputs: the Ironwood crossing
+    // output carrying the migrated value, plus the Orchard change returning the unspent share of
+    // the funding note's fee buffer — together the funding note minus the fee. The padding
+    // dummies decrypt under no key and are exactly what must NOT be recorded.
+    let sent_values: Vec<Zatoshis> = {
+        let conn = run.st.wallet_mut().conn_mut();
+        let mut stmt = conn
+            .prepare(
+                "SELECT sent_notes.value
+                 FROM sent_notes
+                 JOIN transactions ON transactions.id_tx = sent_notes.transaction_id
+                 WHERE transactions.txid = :txid",
+            )
+            .expect("prepares the sent-outputs query");
+        let values = stmt
+            .query_map(rusqlite::named_params![":txid": txid.as_ref()], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("queries the sent outputs")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("reads the sent outputs");
+        values
+            .into_iter()
+            .map(|v| Zatoshis::from_nonnegative_i64(v).expect("a valid recorded value"))
+            .collect()
+    };
+    let fee = tx
+        .fee_paid(|_| Ok::<_, zcash_protocol::value::BalanceError>(None))
+        .expect("computes the fee")
+        .expect("a migration transaction has no transparent inputs");
+    assert!(
+        sent_values.contains(&scenario.expected_migrated),
+        "the Ironwood crossing output is recorded, carrying the migrated value",
+    );
+    assert_eq!(
+        sent_values
+            .iter()
+            .try_fold(Zatoshis::ZERO, |acc, v| acc + *v)
+            .expect("a valid total"),
+        (funding_value - fee).expect("the fee is covered by the funding note"),
+        "the recorded outputs account for the funding note minus the fee",
+    );
+
+    // The funding note is now marked spent, so the wallet's own input selection no longer offers
+    // it: the double-spend window between proving and broadcast is closed.
+    assert!(
+        !spendable_values(&mut run).contains(&funding_value),
+        "the funding note is spent in the wallet's view from the moment the proof is persisted",
+    );
+}
+
 /// The adapter reports the WALLET's anchor retention interval as its anchor bucket interval, and
 /// every anchor a committed migration draws lands on that grid.
 ///
@@ -1088,11 +1380,14 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
             .expect("a rooted Orchard checkpoint exists");
         {
             let mut prover = WalletMigrationProver::new(st.wallet_mut(), account_id, fvk.clone());
-            assert_eq!(
-                engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
-                    .expect("proves the preparation transaction"),
-                engine::ProveOutcome::Proved
-            );
+            match engine::prove_preparation(&mut prover, &mut state, prep_id, anchor)
+                .expect("proves the preparation transaction")
+            {
+                // This test drives raw state with no store; applying the proof directly is the
+                // minimal discharge that puts the proven bytes where the extraction below reads.
+                engine::ProveOutcome::Proved(proven) => proven.apply(&mut state),
+                other => panic!("expected a proof, got {other:?}"),
+            }
         }
         let proven = state
             .transactions()
@@ -1157,7 +1452,10 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
                  grid failed: {e}"
             )
         });
-        assert_eq!(outcome, engine::ProveOutcome::Proved);
+        let engine::ProveOutcome::Proved(proven) = outcome else {
+            panic!("expected a proof, got {outcome:?}");
+        };
+        proven.apply(&mut state);
     }
 }
 
@@ -1489,7 +1787,11 @@ fn a_rejected_broadcast_is_withheld_until_the_wallet_can_adjudicate_it() {
 
     // (2) THE REAL REJECTION. Another wallet on the same seed sweeps the account; the spend is
     // mined in a block this wallet has not scanned, so its own tables still show the funding note
-    // unspent — and the node refuses the crossing that spends it.
+    // unspent — and the node refuses the crossing that spends it. The sibling holds no record of
+    // this wallet's proved-but-unbroadcast crossing, so its selection is free to take the funding
+    // note this wallet's own selection would refuse; lifting the pending spend marks is what
+    // lets this wallet's machinery enact the sibling's sweep.
+    run.forget_pending_spend_marks(transfer(&committed.state).txid());
     let sweep_tip = run.sweep_to_external_unscanned();
     assert!(run.fully_scanned_height() < sweep_tip);
     committed
@@ -1636,7 +1938,7 @@ fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
                 assert_eq!(id, transfer_id);
                 assert_eq!(
                     run.perform_prove(&mut committed.state, id, kind),
-                    engine::ProveOutcome::Proved,
+                    ProveStepOutcome::Proved,
                 );
                 break;
             }

@@ -919,7 +919,7 @@ mod tests {
             "the mined row is exempt from the backfill, so it caches nothing",
         );
 
-        let store = PoolMigrations::for_account(&conn, AccountUuid::from_uuid(account))
+        let store = PoolMigrations::for_account((), (), &conn, AccountUuid::from_uuid(account))
             .expect("the account exists");
         let state = store
             .get_migration()

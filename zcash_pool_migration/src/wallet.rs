@@ -355,6 +355,19 @@ where
             .update_transaction(id, state)
             .map_err(Error::Store)
     }
+
+    /// Delegated to the underlying store, whose implementation owns the wallet-side record (for
+    /// `zcash_client_sqlite`'s store, the atomic finalize-and-persist into the wallet's own
+    /// transaction tables).
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: crate::engine::ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        self.store
+            .store_proved_transaction(state, proven)
+            .map_err(Error::Store)
+    }
 }
 
 /// Why proving a migration transaction through the wallet-backed prover failed. `TE` is the

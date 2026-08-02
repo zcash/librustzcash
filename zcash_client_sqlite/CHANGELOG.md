@@ -24,13 +24,30 @@ workspace.
   with no change to any foreign function interface.
 - `pool_migration::orchard_ironwood::Error::ChainStateUnavailable`, returned
   when a satisfiability check has no fully-scanned height to observe from.
+- `pool_migration::orchard_ironwood::FinalizeError`, and new
+  `pool_migration::orchard_ironwood::Error` variants `UnknownTransaction`,
+  `NotProved`, `ViewingKeyUnavailable`, `Finalize`, and `Wallet`, reporting
+  failures of the store's new proved-transaction finalization.
 - `zcash_client_sqlite::testing::db::TestDb::conn` and `TestDb::conn_mut`, for
   tests that open a sibling store (a `pool_migration` `PoolMigrations`, say)
   over the wallet database's own connection.
 
 ### Changed
-- The pool-migration transfer ordinal is now named `transfer_id` throughout the
-  database schema. The `orchard_ironwood_migration_unsatisfiability` schema
+- `pool_migration::orchard_ironwood::PoolMigrations` now carries the network
+  parameters and a clock — `PoolMigrations::for_account` takes them ahead of
+  the connection (`for_account(params, clock, conn, account)`; a caller that
+  only reads or writes migration state may pass `()` for both, but the
+  `PoolMigrationWrite` implementation requires
+  `zcash_protocol::consensus::Parameters` and `util::Clock` values) — and
+  implements the new `PoolMigrationWrite::store_proved_transaction` (under the
+  `orchard` feature) by finalizing the proved migration transaction and
+  persisting it to the wallet's own transaction tables, atomically with the
+  migration state, in one database transaction: the raw transaction, its fee,
+  its outputs as sent notes, and its input notes marked spent. From the moment
+  a migration transaction is proved, the wallet therefore reports its inputs
+  spent (its own spends can no longer consume them) and its balance reflects
+  the pending transaction, rather than neither until the transaction is mined
+  and scanned. The `orchard_ironwood_migration_unsatisfiability` schema
   migration renames `orchard_ironwood_migration_transactions.tx_id` to
   `transfer_id`, and `orchard_ironwood_migration_transaction_deps`'s `tx_id`
   and `depends_on_tx_id` to `transfer_id` and `depends_on_transfer_id`;

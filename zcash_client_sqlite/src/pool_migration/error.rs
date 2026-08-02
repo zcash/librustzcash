@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use zcash_pool_migration::engine::MigrationTransferId;
+
 /// A failure reading or writing the pool-migration store.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -27,6 +29,56 @@ pub enum Error {
     /// coordinates silently renumbered; a plan produced by the engine never contains these. The
     /// `&'static str` names the offending structure.
     Unrepresentable(&'static str),
+    /// The migration state handed to `store_proved_transaction` contains no transaction with the
+    /// given id, so there is nothing to finalize.
+    UnknownTransaction(MigrationTransferId),
+    /// The transaction handed to `store_proved_transaction` is not in the `Proved` lifecycle
+    /// state, so its stored bytes are not a proven PCZT and no transaction can be finalized from
+    /// them.
+    NotProved(MigrationTransferId),
+    /// The account holds no unified full viewing key, so a finalized migration transaction's
+    /// outputs cannot be recovered for the wallet's sent-transaction record.
+    ViewingKeyUnavailable,
+    /// Finalizing the proven PCZT into a `Transaction` failed.
+    #[cfg(feature = "orchard")]
+    Finalize(FinalizeError),
+    /// Persisting a finalized migration transaction to the wallet's own transaction tables failed.
+    Wallet(Box<crate::error::SqliteClientError>),
+}
+
+/// Why a proven migration PCZT could not be finalized into the `Transaction` the wallet's
+/// sent-transaction record stores.
+#[cfg(feature = "orchard")]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum FinalizeError {
+    /// The stored PCZT could not be parsed.
+    Parse(pczt::ParseError),
+    /// Moving the spend authorizations into their final form (the PCZT Spend Finalizer role)
+    /// failed: some spend lacks its signature.
+    Spends(pczt::roles::spend_finalizer::Error),
+    /// Extracting (and verifying) the final transaction failed: a proof or signature is missing
+    /// or invalid, or a bundle is malformed.
+    Extract(pczt::roles::tx_extractor::Error),
+    /// The transaction's balance could not be computed (a value outside the valid `Zatoshis`
+    /// range).
+    Balance(zcash_protocol::value::BalanceError),
+}
+
+#[cfg(feature = "orchard")]
+impl fmt::Display for FinalizeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FinalizeError::Parse(e) => write!(f, "parsing the stored proven PCZT failed: {e:?}"),
+            FinalizeError::Spends(e) => write!(f, "finalizing the PCZT's spends failed: {e:?}"),
+            FinalizeError::Extract(e) => {
+                write!(f, "extracting the finalized transaction failed: {e:?}")
+            }
+            FinalizeError::Balance(e) => {
+                write!(f, "computing the transaction's fee failed: {e:?}")
+            }
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -48,6 +100,29 @@ impl fmt::Display for Error {
             Error::Unrepresentable(what) => {
                 write!(f, "pool-migration store: cannot represent {what}")
             }
+            Error::UnknownTransaction(id) => write!(
+                f,
+                "pool-migration store: the migration state holds no transaction {}",
+                u32::from(*id)
+            ),
+            Error::NotProved(id) => write!(
+                f,
+                "pool-migration store: transaction {} is not proved, so it cannot be finalized",
+                u32::from(*id)
+            ),
+            Error::ViewingKeyUnavailable => write!(
+                f,
+                "pool-migration store: the account has no unified full viewing key to recover \
+                 the finalized transaction's outputs with"
+            ),
+            #[cfg(feature = "orchard")]
+            Error::Finalize(e) => {
+                write!(f, "pool-migration store: {e}")
+            }
+            Error::Wallet(e) => write!(
+                f,
+                "pool-migration store: persisting the finalized transaction failed: {e}"
+            ),
         }
     }
 }
@@ -56,10 +131,16 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Db(e) => Some(e),
+            Error::Wallet(e) => Some(e),
             Error::AccountUnknown
             | Error::Corrupt(_)
             | Error::ChainStateUnavailable
-            | Error::Unrepresentable(_) => None,
+            | Error::Unrepresentable(_)
+            | Error::UnknownTransaction(_)
+            | Error::NotProved(_)
+            | Error::ViewingKeyUnavailable => None,
+            #[cfg(feature = "orchard")]
+            Error::Finalize(_) => None,
         }
     }
 }

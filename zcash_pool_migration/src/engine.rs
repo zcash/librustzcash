@@ -229,6 +229,38 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
         id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error>;
+
+    /// Record a successfully proved transaction — the [`ProvedTransaction`] carried out of
+    /// [`prove_transfer`] / [`prove_preparation`] — on `state`, and persist.
+    ///
+    /// From the moment the proof exists, the transaction is FULLY CONSTRUCTED: its PCZT carries
+    /// both signatures (installed at commit) and proofs, and extracting the broadcastable
+    /// `Transaction` from it is purely mechanical. This method is where a backend makes the
+    /// wallet aware of that fact. An implementation over a wallet database MUST, atomically with
+    /// recording the proof in the migration store, finalize the transaction and persist it to
+    /// the wallet's own transaction store — the record `store_transactions_to_be_sent` writes
+    /// for the standard spend flows: the raw transaction, its outputs, and its input notes
+    /// marked spent, so the wallet's own later spends cannot consume a migration input during
+    /// the (deliberately long, for a scheduled transfer) window between proving and broadcast.
+    /// A store with no wallet-level transaction records (a mock, or a store deferring the wallet
+    /// side elsewhere) applies the proof and persists the migration state alone:
+    ///
+    /// ```ignore
+    /// proven.apply(state);
+    /// self.replace_migration(state)
+    /// ```
+    ///
+    /// On an error the proof is lost with the value and `state` may or may not carry it (an
+    /// implementation applies it before writing); the caller should re-read the migration from
+    /// the store and retry the prove step, which is cheap relative to the ambiguity of guessing.
+    ///
+    /// [`prove_transfer`]: crate::engine::prove_transfer
+    /// [`prove_preparation`]: crate::engine::prove_preparation
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: ProvedTransaction,
+    ) -> Result<(), Self::Error>;
 }
 
 /// A stable ordinal identifier for a migration transaction within a migration. This is a ROW KEY
@@ -778,11 +810,13 @@ impl MigrationState {
             .and_then(|crossing| self.crossing_values().get(crossing).copied())
     }
 
-    /// Replace transfer `id`'s stored PCZT with its proven bytes and move it to
-    /// [`Proved`](MigrationTxState::Proved). Called after [`prove_transfer`] installs the drawn
-    /// anchor and witnesses and proves the transaction, so the durable artifact becomes the proven,
+    /// Replace transaction `id`'s stored PCZT with its proven bytes and move it to
+    /// [`Proved`](MigrationTxState::Proved), so the artifact becomes the proven,
     /// ready-to-broadcast PCZT.
-    #[cfg(feature = "orchard")]
+    ///
+    /// In the production flow this is reached only through [`ProvedTransaction::apply`], inside
+    /// [`PoolMigrationWrite::store_proved_transaction`]: the proof travels from the prove step to
+    /// the store as a value, and the state records it in the same act that persists it.
     pub fn set_transaction_proved(&mut self, id: MigrationTransferId, proven_pczt: Vec<u8>) {
         for tx in &mut self.transactions {
             if tx.id() == id {
@@ -1550,10 +1584,15 @@ pub enum ProveFailure<E> {
 /// The outcome of a prove attempt the engine HANDLED — an error return would invite blind
 /// retries of conditions that are not errors.
 #[cfg(feature = "orchard")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ProveOutcome {
-    /// The proof was created; the transaction is `Proved` and the proven PCZT stored.
-    Proved,
+    /// The proof was created. The carried [`ProvedTransaction`] is the proven PCZT awaiting its
+    /// persistence: hand it to [`PoolMigrationWrite::store_proved_transaction`], which records
+    /// the transaction `Proved` and persists — for a wallet-database-backed store, atomically
+    /// with the wallet's own record of the finalized transaction. Neither the in-memory state
+    /// nor the store says `Proved` until that call; there is no other way to discharge the
+    /// value.
+    Proved(ProvedTransaction),
     /// An input was not available, and the wallet has not yet scanned past every dependency's
     /// mined height: nothing can be concluded. No state change; retry after further sync.
     NotYetProvable,
@@ -1565,6 +1604,56 @@ pub enum ProveOutcome {
         /// [`MigrationState::replan_required`] as it stands after the mark.
         replan_required: bool,
     },
+}
+
+/// A successfully proved migration transaction awaiting its persistence: the proven PCZT — now
+/// carrying both signatures (installed at commit) and proofs, ready to broadcast — together with
+/// the id of the row it belongs to.
+///
+/// Only a successful [`prove_transfer`] / [`prove_preparation`] produces one, and only
+/// [`PoolMigrationWrite::store_proved_transaction`] consumes one (through
+/// [`apply`](Self::apply), which a store implementation calls to record the proof on the state it
+/// persists). Carrying the proof OUT of the prove step rather than writing it into the state
+/// there is what makes "proved but never persisted to the wallet" unrepresentable: the state
+/// cannot say [`Proved`](MigrationTxState::Proved) until the store method that also owns the
+/// wallet-side record has run. It also keeps the prove seam free of any store borrow — a
+/// wallet-backed prover and a wallet-database store borrow the same wallet mutably, so they can
+/// only ever be used in sequence, never side by side in one call.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use = "a proved transaction is not durable (and its wallet record does not exist) until \
+              it is handed to `PoolMigrationWrite::store_proved_transaction`"]
+pub struct ProvedTransaction {
+    id: MigrationTransferId,
+    pczt: Vec<u8>,
+}
+
+impl ProvedTransaction {
+    /// The id of the migration transaction this proof belongs to.
+    pub fn id(&self) -> MigrationTransferId {
+        self.id
+    }
+
+    /// The proven PCZT's serialized bytes.
+    pub fn pczt(&self) -> &[u8] {
+        &self.pczt
+    }
+
+    /// Record this proof on `state`: the proven PCZT replaces the stored bytes and the
+    /// transaction becomes [`Proved`](MigrationTxState::Proved). This is the sole consumer of
+    /// the value, called by [`PoolMigrationWrite::store_proved_transaction`] implementations on
+    /// the state they are about to persist.
+    pub fn apply(self, state: &mut MigrationState) {
+        state.set_transaction_proved(self.id, self.pczt);
+    }
+
+    /// Reassemble a proved transaction from its parts, for exercising a store's
+    /// [`store_proved_transaction`](PoolMigrationWrite::store_proved_transaction) without
+    /// driving the whole prove pipeline. Test-only: production code obtains these exclusively
+    /// from [`prove_transfer`] / [`prove_preparation`].
+    #[cfg(any(test, feature = "test-dependencies"))]
+    pub fn from_parts(id: MigrationTransferId, pczt: Vec<u8>) -> Self {
+        Self { id, pczt }
+    }
 }
 
 /// The proving seam for a migration transfer: install a transfer's deferred anchors and witnesses
@@ -1817,16 +1906,19 @@ impl<E: fmt::Display> fmt::Display for ProveError<E> {
 #[cfg(feature = "orchard")]
 impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 
-/// Prove a pre-signed migration transfer against the boundary its schedule drew, moving it
-/// `Signed -> Proved`.
+/// Prove a pre-signed migration transfer against the boundary its schedule drew.
 ///
 /// This is the step that finally consults a transfer's PERSISTED
 /// [`anchor_boundary`](MigrationTransaction::anchor_boundary), drawn at scheduling time: it reads
 /// that boundary and hands the stored PCZT and the boundary to
 /// [`MigrationProver::prove_transfer`], which installs the Orchard source anchor and the funding
 /// note's witness against that boundary and the Ironwood destination anchor (through the PCZT
-/// `Updater` role), then proves both bundles. The proven PCZT replaces the stored one and the
-/// transaction becomes [`Proved`](MigrationTxState::Proved), ready to broadcast.
+/// `Updater` role), then proves both bundles. A successful proof is returned as
+/// [`ProveOutcome::Proved`]'s [`ProvedTransaction`], which the caller hands to
+/// [`PoolMigrationWrite::store_proved_transaction`] — the single step that records the
+/// transaction [`Proved`](MigrationTxState::Proved) and persists it, for a wallet-backed store
+/// atomically with the wallet's own record of the finalized transaction. Neither this function
+/// nor anything else moves the state to `Proved`.
 ///
 /// The CALLER decides WHEN to prove each transfer (once its funding note is mined and its drawn
 /// anchor boundary has settled — [`advance_migration`] surfaces this as [`AdvanceStep::Prove`],
@@ -1871,9 +1963,13 @@ impl<E: core::error::Error> core::error::Error for ProveError<E> {}
 /// strand live value behind an observation only a reorg can clear, so the conservative reading is
 /// always a retry.
 ///
-/// The caller PERSISTS the state afterwards, as for a successful proof — a `MarkedUnsatisfiable`
-/// outcome changed the marks and the closure, and an unpersisted mark would be lost on the next
-/// launch.
+/// The caller PERSISTS the outcome: a [`Proved`](ProveOutcome::Proved) answer through
+/// [`PoolMigrationWrite::store_proved_transaction`] (which consumes the carried proof), and a
+/// [`MarkedUnsatisfiable`](ProveOutcome::MarkedUnsatisfiable) one through
+/// [`PoolMigrationWrite::replace_migration`] — the marks and the closure changed, and an
+/// unpersisted mark would be lost on the next launch. (A boundary re-draw rides along with
+/// whichever of the two follows; a [`NotYetProvable`](ProveOutcome::NotYetProvable) answer after
+/// a re-draw is worth persisting for the same reason, though re-deriving it costs only a retry.)
 ///
 /// [`advance_migration`]: crate::satisfiability::advance_migration
 /// [`AdvanceStep::Prove`]: crate::state::AdvanceStep::Prove
@@ -1970,8 +2066,7 @@ where
     match prover.prove_transfer(pczt, anchor_boundary) {
         Ok(proven) => {
             let bytes = proven.serialize().map_err(ProveError::Serialize)?;
-            state.set_transaction_proved(id, bytes);
-            Ok(ProveOutcome::Proved)
+            Ok(ProveOutcome::Proved(ProvedTransaction { id, pczt: bytes }))
         }
         Err(ProveFailure::InputNotAvailable { nullifier, as_of }) => {
             Ok(interpret_input_not_available(state, id, nullifier, as_of))
@@ -2044,7 +2139,7 @@ fn interpret_input_not_available(
 }
 
 /// Prove a pre-signed migration PREPARATION transaction against a checkpoint at which its spent
-/// notes are witnessable, moving it `Signed -> Proved`.
+/// notes are witnessable.
 ///
 /// A preparation transaction carries no drawn
 /// [`anchor_boundary`](MigrationTransaction::anchor_boundary) (it anchors to its already-mined
@@ -2053,8 +2148,10 @@ fn interpret_input_not_available(
 /// (for example the current chain tip). It hands the stored PCZT and the `anchor` to
 /// [`MigrationProver::prove_preparation`], which installs the Orchard source anchor and every real
 /// spend's witness against that checkpoint (through the PCZT `Updater` role) and proves the single
-/// Orchard bundle. The proven PCZT replaces the stored one and the transaction becomes
-/// [`Proved`](MigrationTxState::Proved), ready to broadcast.
+/// Orchard bundle. As for [`prove_transfer`], a successful proof is returned as
+/// [`ProveOutcome::Proved`]'s [`ProvedTransaction`], which the caller hands to
+/// [`PoolMigrationWrite::store_proved_transaction`]; nothing else moves the state to
+/// [`Proved`](MigrationTxState::Proved).
 ///
 /// A transaction not in [`Signed`](MigrationTxState::Signed) is rejected with
 /// [`ProveError::NotReady`] rather than re-proved; a transfer is rejected with
@@ -2064,7 +2161,7 @@ fn interpret_input_not_available(
 /// ([`ProveFailure::InputNotAvailable`]) is answered with a [`ProveOutcome`] rather than an error,
 /// under the same dependency-coverage rule — which a layer-0 preparation, depending on nothing,
 /// satisfies vacuously: the notes it spends were spendable when the migration was committed, hence
-/// long since scanned. The caller PERSISTS the state afterwards, including after
+/// long since scanned. The caller PERSISTS the outcome as for [`prove_transfer`], including after
 /// [`MarkedUnsatisfiable`](ProveOutcome::MarkedUnsatisfiable), which changed the marks and the
 /// dependency closure.
 #[cfg(feature = "orchard")]
@@ -2093,8 +2190,7 @@ where
     match prover.prove_preparation(pczt, anchor) {
         Ok(proven) => {
             let bytes = proven.serialize().map_err(ProveError::Serialize)?;
-            state.set_transaction_proved(id, bytes);
-            Ok(ProveOutcome::Proved)
+            Ok(ProveOutcome::Proved(ProvedTransaction { id, pczt: bytes }))
         }
         Err(ProveFailure::InputNotAvailable { nullifier, as_of }) => {
             Ok(interpret_input_not_available(state, id, nullifier, as_of))
@@ -3740,6 +3836,16 @@ mod tests {
             }
             Ok(())
         }
+
+        /// The contract's no-wallet-tables form: apply the proof and persist the state alone.
+        fn store_proved_transaction(
+            &mut self,
+            state: &mut MigrationState,
+            proven: ProvedTransaction,
+        ) -> Result<(), Self::Error> {
+            proven.apply(state);
+            self.replace_migration(state)
+        }
     }
 
     #[test]
@@ -4124,6 +4230,16 @@ mod commit_tests {
                 tx.state = state;
             }
             Ok(())
+        }
+
+        /// The contract's no-wallet-tables form: apply the proof and persist the state alone.
+        fn store_proved_transaction(
+            &mut self,
+            state: &mut MigrationState,
+            proven: ProvedTransaction,
+        ) -> Result<(), Self::Error> {
+            proven.apply(state);
+            self.replace_migration(state)
         }
     }
 
@@ -4555,20 +4671,24 @@ mod commit_tests {
         assert_eq!(state.transactions.len(), 1, "one directly funded transfer");
         let id = state.transactions[0].id;
 
-        // Prove the transfer: the PROVEN bytes replace the stored ones, and their real spend now
-        // carries a witness, so it is no longer identifiable from the bytes.
-        assert_eq!(
-            prove_transfer(
-                &params,
-                &mut backend,
-                &mut state,
-                id,
-                BlockHeight::from_u32(TARGET_HEIGHT),
-                &mut rng,
-            )
-            .expect("proves the transfer"),
-            ProveOutcome::Proved
-        );
+        // Prove the transfer and discharge the proof through the store, as a consumer does: the
+        // PROVEN bytes replace the stored ones, and their real spend now carries a witness, so it
+        // is no longer identifiable from the bytes.
+        match prove_transfer(
+            &params,
+            &mut backend,
+            &mut state,
+            id,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut rng,
+        )
+        .expect("proves the transfer")
+        {
+            ProveOutcome::Proved(proven) => backend
+                .store_proved_transaction(&mut state, proven)
+                .expect("stores the proof"),
+            other => panic!("expected a proof, got {other:?}"),
+        }
         let old = state.transactions[0].clone();
         assert!(matches!(old.state, MigrationTxState::Proved));
         let proven = pczt::Pczt::parse(&old.pczt).expect("the proven PCZT parses");
@@ -5571,19 +5691,23 @@ mod commit_tests {
             })
             .expect("a committed migration has transfers");
 
-        // Proving reads the persisted boundary, proves, and advances Signed -> Proved.
-        assert_eq!(
-            prove_transfer(
-                &params,
-                &mut backend,
-                &mut state,
-                transfer_id,
-                BlockHeight::from_u32(TARGET_HEIGHT),
-                &mut rng,
-            )
-            .expect("proves the due transfer"),
-            ProveOutcome::Proved
-        );
+        // Proving reads the persisted boundary and proves; discharging the returned proof through
+        // the store is what advances Signed -> Proved.
+        match prove_transfer(
+            &params,
+            &mut backend,
+            &mut state,
+            transfer_id,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut rng,
+        )
+        .expect("proves the due transfer")
+        {
+            ProveOutcome::Proved(proven) => backend
+                .store_proved_transaction(&mut state, proven)
+                .expect("stores the proof"),
+            other => panic!("expected a proof, got {other:?}"),
+        }
         let proved = state
             .transactions
             .iter()
@@ -5688,7 +5812,7 @@ mod commit_tests {
 
         let params = regtest_network(true);
         let mut rng = ChaCha8Rng::seed_from_u64(24);
-        assert_eq!(
+        assert!(matches!(
             prove_transfer(
                 &params,
                 &mut backend,
@@ -5698,8 +5822,8 @@ mod commit_tests {
                 &mut rng,
             )
             .expect("proves the transfer against the re-drawn boundary"),
-            ProveOutcome::Proved
-        );
+            ProveOutcome::Proved(_)
+        ));
 
         let &[proved_against] = backend.prove_anchors.as_slice() else {
             panic!("exactly one prove call reaches the prover");
@@ -5786,7 +5910,7 @@ mod commit_tests {
 
         let params = regtest_network(true);
         let mut rng = ChaCha8Rng::seed_from_u64(32);
-        assert_eq!(
+        assert!(matches!(
             prove_transfer(
                 &params,
                 &mut backend,
@@ -5796,8 +5920,8 @@ mod commit_tests {
                 &mut rng,
             )
             .expect("proves the transfer against the drawn boundary"),
-            ProveOutcome::Proved
-        );
+            ProveOutcome::Proved(_)
+        ));
         assert_eq!(
             backend.prove_anchors,
             vec![drawn_boundary],
@@ -5888,7 +6012,7 @@ mod commit_tests {
 
         // Restoring the committed grid makes the migration provable again.
         backend.sched_params = SchedulingParams::ZIP_318;
-        assert_eq!(
+        assert!(matches!(
             prove_transfer(
                 &params,
                 &mut backend,
@@ -5898,8 +6022,8 @@ mod commit_tests {
                 &mut prove_rng,
             )
             .expect("the transfer proves once the grid matches again"),
-            ProveOutcome::Proved
-        );
+            ProveOutcome::Proved(_)
+        ));
     }
 
     /// The `FailingProver`'s "anything else went wrong" error, which the engine must pass through
