@@ -1796,12 +1796,12 @@ mod tests {
     use proptest::prelude::*;
     use zcash_protocol::consensus::BlockHeight;
 
+    #[cfg(feature = "orchard")]
+    use super::batch_ensure_heights;
     use super::{
         NULLIFIER_MAP_RETENTION_BLOCKS, nullifier_tracking_floor, should_retain_anchor,
         should_track_nullifiers,
     };
-    #[cfg(feature = "orchard")]
-    use super::batch_ensure_heights;
     use crate::data_api::anchor_retention::{AnchorRetention, AnchorRetentionInterval};
 
     /// A range scanned after a gap of unscanned history (or below the frontier, or with no
