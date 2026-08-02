@@ -7,6 +7,28 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Fixed
+- `engine::prove_transfer` now re-validates a transfer's persisted anchor boundary
+  against its funding preparations' REAL mined heights, and re-draws it (via
+  `scheduling::draw_anchor_boundary`, from the funding note's actual creation
+  height and the wallet's scanned tip) when the funding note postdates the drawn
+  boundary. The commit-time draw floors the boundary on an ESTIMATE of when the
+  last preparation layer mines (`EST_PREP_LAYER_MINING_BLOCKS`); a preparation
+  that out-mines the estimate — a wallet asleep through one broadcast window is
+  enough — left the boundary below the funding note's creation height, where the
+  note is absent from the tree state and its witness can NEVER be computed. The
+  prover's failure there is indistinguishable from "not scanned yet", so the
+  transfer deferred forever: reported ready to prove, blocked on nothing, proving
+  nothing, permanently — observed in the field on two testnet wallets, wedging
+  the final transfer of otherwise-complete migrations. The re-draw is sound for a
+  `Signed` transfer because the PCZT's anchor and witnesses are deferred to
+  proving (ZIP 374), so the stored artifact pins nothing; ZIP 318 makes anchor
+  selection a proving-time rule. When no grid boundary at or past the funding
+  note's creation has settled within the scanned tip yet, the answer is the
+  ordinary `NotYetProvable` retry. `prove_transfer` takes the network parameters,
+  the scanned tip, and an rng for this; `MigrationState::set_transfer_anchor_boundary`
+  persists the fresh draw.
+
 ### Added
 - The `satisfiability` module, holding the vocabulary a store answers a
   committed migration's liveness questions in — `StepSatisfiability` and its
