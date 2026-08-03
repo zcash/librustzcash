@@ -934,6 +934,16 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
          WHERE t.txid = :txid",
     )?;
 
+    // The set of account/scope pairs for which to update the gap limit.
+    //
+    // Gap maintenance is idempotent per (account, key scope), and a transaction's outputs and
+    // spends almost always share one such pair, so collect the distinct pairs and maintain each
+    // once after the row loop rather than once per row. Regenerating a gap window is the dominant
+    // cost of recording a transparent output, and doing it per row makes recording an n-output
+    // transaction quadratic in n. `zcash_client_backend::data_api::ll::store_decrypted_tx`
+    // deduplicates its own calls to this function in the same way.
+    let mut gap_update_set = HashSet::new();
+
     let mut rows = scopes_query.query(named_params! {":txid": txid.as_ref() })?;
     while let Some(row) = rows.next()? {
         let addr_id: i64 = row.get("address_id")?;
@@ -941,7 +951,8 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
         let key_scope = KeyScope::decode(row.get("key_scope")?)?;
 
         // Update the exposure height for the address, in case the transaction was mined at a lower
-        // height than the existing exposure height due to a reorg.
+        // height than the existing exposure height due to a reorg. This is keyed on the row, so it
+        // must remain per-row.
         conn.execute(
             "UPDATE addresses
              SET exposed_at_height = MIN(
@@ -956,17 +967,21 @@ pub(crate) fn update_gap_limits<P: consensus::Parameters>(
         )?;
 
         if let Some(t_key_scope) = <Option<TransparentKeyScope>>::from(key_scope) {
-            use zcash_keys::keys::ReceiverRequirement::*;
-            generate_gap_addresses(
-                conn,
-                params,
-                gap_limits,
-                account_id,
-                t_key_scope,
-                UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
-                false,
-            )?;
+            gap_update_set.insert((account_id, t_key_scope));
         }
+    }
+
+    for (account_id, t_key_scope) in gap_update_set {
+        use zcash_keys::keys::ReceiverRequirement::*;
+        generate_gap_addresses(
+            conn,
+            params,
+            gap_limits,
+            account_id,
+            t_key_scope,
+            UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require),
+            false,
+        )?;
     }
 
     Ok(())
@@ -3261,6 +3276,126 @@ mod tests {
             BlockCache::new(),
             GapLimits::default(),
         );
+    }
+
+    /// A transaction with several outputs received at addresses of the same account and key scope
+    /// updates the exposure height of every address involved, and extends that scope's gap window
+    /// past the highest index used — the latter being maintained once for the transaction rather
+    /// than once per output.
+    #[test]
+    fn update_gap_limits_covers_every_address_of_a_multi_output_transaction() {
+        use rusqlite::named_params;
+        use zcash_protocol::{TxId, consensus::BlockHeight};
+
+        use crate::wallet::encoding::KeyScope;
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_uuid = st.test_account().unwrap().id();
+        let network = *st.network();
+        let gap_limits = GapLimits::default();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+        // Account creation generates the external gap window `0..external_gap_limit`.
+        let max_index = |tx: &rusqlite::Transaction| {
+            tx.query_row(
+                "SELECT MAX(transparent_child_index) FROM addresses
+                 WHERE account_id = :account_id AND key_scope = :key_scope",
+                named_params! {
+                    ":account_id": account_id.0,
+                    ":key_scope": KeyScope::EXTERNAL.encode(),
+                },
+                |r| r.get::<_, u32>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(max_index(&tx), gap_limits.external() - 1);
+
+        // A mined transaction with an output received at each of the first two addresses of the
+        // account's external chain.
+        let txid = TxId::from_bytes([7; 32]);
+        let mined_height = 100u32;
+        tx.execute(
+            "INSERT INTO transactions (id_tx, txid, mined_height, min_observed_height)
+             VALUES (1, :txid, :height, :height)",
+            named_params! { ":txid": txid.as_ref(), ":height": mined_height },
+        )
+        .unwrap();
+
+        let mut address_ids = vec![];
+        for child_index in 0..2u32 {
+            let (addr_id, taddr): (i64, String) = tx
+                .query_row(
+                    "SELECT id, cached_transparent_receiver_address FROM addresses
+                     WHERE account_id = :account_id AND key_scope = :key_scope
+                     AND transparent_child_index = :child_index",
+                    named_params! {
+                        ":account_id": account_id.0,
+                        ":key_scope": KeyScope::EXTERNAL.encode(),
+                        ":child_index": child_index,
+                    },
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+
+            tx.execute(
+                "INSERT INTO transparent_received_outputs
+                     (transaction_id, output_index, account_id, address, script, value_zat,
+                      address_id)
+                 VALUES (1, :output_index, :account_id, :taddr, X'00', 100000, :addr_id)",
+                named_params! {
+                    ":output_index": child_index,
+                    ":account_id": account_id.0,
+                    ":taddr": &taddr,
+                    ":addr_id": addr_id,
+                },
+            )
+            .unwrap();
+
+            address_ids.push(addr_id);
+        }
+
+        super::update_gap_limits(
+            &tx,
+            &network,
+            &gap_limits,
+            txid,
+            BlockHeight::from_u32(mined_height),
+        )
+        .unwrap();
+
+        // Every address involved in the transaction is now exposed at its observation height.
+        for addr_id in address_ids {
+            let exposed_at: Option<u32> = tx
+                .query_row(
+                    "SELECT exposed_at_height FROM addresses WHERE id = :addr_id",
+                    named_params! { ":addr_id": addr_id },
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(exposed_at, Some(mined_height));
+        }
+
+        // The external gap window now starts after the highest used index.
+        assert_eq!(
+            find_gap_start(
+                &tx,
+                account_id,
+                TransparentKeyScope::EXTERNAL,
+                gap_limits.external()
+            )
+            .unwrap()
+            .map(|i| i.index()),
+            Some(2)
+        );
+        assert_eq!(max_index(&tx), 2 + gap_limits.external() - 1);
+
+        tx.commit().unwrap();
     }
 
     /// Deriving an address that already exists as a standalone (`Foreign`) import upgrades the
