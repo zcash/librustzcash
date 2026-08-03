@@ -91,39 +91,6 @@ pub struct Bundle {
     pub(crate) bsk: Option<[u8; 32]>,
 }
 
-impl Bundle {
-    /// This bundle's sole action, or `None` if it does not have exactly one.
-    pub fn sole_action(&self) -> Option<&Action> {
-        match self.actions.as_slice() {
-            [action] => Some(action),
-            _ => None,
-        }
-    }
-
-    /// Whether every output of this bundle that carries value pays `recipient`, given as the [raw
-    /// encoding] of an Orchard payment address, which is what makes the bundle a send-to-self.
-    ///
-    /// Zero-valued padding dummies are excluded: a Constructor fabricates them to bring the bundle
-    /// up to a required action count and they pay nobody in particular, so counting them would make
-    /// every padded bundle fail. Returns `None` if any output has had the value or the recipient it
-    /// would be judged on redacted, since the question cannot then be answered rather than answered
-    /// negatively.
-    ///
-    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
-    pub fn value_carrying_outputs_all_pay(&self, recipient: &[u8; 43]) -> Option<bool> {
-        for action in &self.actions {
-            let output = &action.output;
-            if output.value? == 0 {
-                continue;
-            }
-            if &output.recipient? != recipient {
-                return Some(false);
-            }
-        }
-        Some(true)
-    }
-}
-
 /// The default Orchard bundle flags: both spends and outputs enabled (bits 0 and
 /// 1). This is the value the Creator sets on a new bundle, and the flag value of
 /// an empty bundle for serialization purposes.
@@ -1635,6 +1602,37 @@ pub(crate) mod v2 {
 }
 
 impl Bundle {
+    /// This bundle's sole action, or `None` if it does not have exactly one.
+    pub fn sole_action(&self) -> Option<&Action> {
+        match self.actions.as_slice() {
+            [action] => Some(action),
+            _ => None,
+        }
+    }
+
+    /// Whether every output of this bundle that carries value pays `recipient`, given as the [raw
+    /// encoding] of an Orchard payment address, which is what makes the bundle a send-to-self.
+    ///
+    /// Zero-valued padding dummies are excluded: a Constructor fabricates them to bring the bundle
+    /// up to a required action count and they pay nobody in particular, so counting them would make
+    /// every padded bundle fail. Returns `None` if any output has had the value or the recipient it
+    /// would be judged on redacted, since the question cannot then be answered rather than answered
+    /// negatively.
+    ///
+    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
+    pub fn value_carrying_outputs_all_pay(&self, recipient: &[u8; 43]) -> Option<bool> {
+        for action in &self.actions {
+            let output = &action.output;
+            if output.value? == 0 {
+                continue;
+            }
+            if &output.recipient? != recipient {
+                return Some(false);
+            }
+        }
+        Some(true)
+    }
+
     /// Merges this bundle with another.
     ///
     /// Returns `None` if the bundles have conflicting data.
