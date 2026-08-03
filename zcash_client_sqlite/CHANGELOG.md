@@ -31,6 +31,12 @@ workspace.
 - `zcash_client_sqlite::testing::db::TestDb::conn` and `TestDb::conn_mut`, for
   tests that open a sibling store (a `pool_migration` `PoolMigrations`, say)
   over the wallet database's own connection.
+- `zcash_client_sqlite::wallet::init::migrations` release-state constants
+  backfilling every published crate version whose migration-graph state had no
+  constant: `V_0_7_0`, `V_0_8_0_RC1`, `V_0_8_0_RC4`, `V_0_8_0_RC5`, `V_0_8_1`,
+  `V_0_22_0_RC5`, and `V_0_22_0_RC6`. Each backfilled state was computed from
+  the corresponding crate artifact published on crates.io, and the
+  between-releases migration test now walks through all of them.
 
 ### Changed
 - `pool_migration::orchard_ironwood::PoolMigrations` now carries the network
@@ -120,6 +126,20 @@ workspace.
   reports nothing mined rather than erroring. Together with the truncation hook
   above, a stored migration's mined heights now follow the wallet's scan in both
   directions with no consumer hook in either.
+
+### Fixed
+- `zcash_client_sqlite::wallet::init::migrations::V_0_8_0` held the leaf state
+  of the 0.8.1 release rather than 0.8.0's: the published 0.8.0 crate's final
+  migration was `v_transactions_shielding_balance`, with
+  `v_transactions_note_uniqueness` following in 0.8.1. The constant now records
+  the true 0.8.0 state, and the 0.8.1 state it previously held is the new
+  `V_0_8_1`. An external migration anchored on `V_0_8_0` now anchors one
+  migration earlier in the graph, which cannot invalidate its ordering because
+  every migration `V_0_8_0` previously named is still ordered after the
+  corrected state.
+- `V_0_17_0` was missing from the sequence of release states that the
+  between-releases migration test walks, so upgrades passing through the 0.17.0
+  state were never exercised.
 
 ## [0.22.0-rc.6] - 2026-07-29
 

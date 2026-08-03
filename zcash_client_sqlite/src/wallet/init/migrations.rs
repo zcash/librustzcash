@@ -403,7 +403,12 @@ pub(super) fn all_migrations<
 const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
     V_0_4_0,
     V_0_6_0,
+    V_0_7_0,
+    V_0_8_0_RC1,
+    V_0_8_0_RC4,
+    V_0_8_0_RC5,
     V_0_8_0,
+    V_0_8_1,
     V_0_9_0,
     V_0_10_0,
     V_0_10_3,
@@ -417,6 +422,7 @@ const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
     V_0_16_0,
     V_0_16_2,
     V_0_16_4,
+    V_0_17_0,
     V_0_17_2,
     V_0_17_3,
     V_0_18_0,
@@ -425,6 +431,8 @@ const PUBLIC_MIGRATION_STATES: &[&[Uuid]] = &[
     V_0_20_0,
     V_0_22_0_RC1,
     V_0_22_0_RC2,
+    V_0_22_0_RC5,
+    V_0_22_0_RC6,
 ];
 
 /// Leaf migrations in the 0.4.0 release.
@@ -433,8 +441,39 @@ pub const V_0_4_0: &[Uuid] = &[add_transaction_views::MIGRATION_ID];
 /// Leaf migrations in the 0.6.0 release.
 pub const V_0_6_0: &[Uuid] = &[v_transactions_net::MIGRATION_ID];
 
+/// Leaf migrations in the 0.7.0 release.
+pub const V_0_7_0: &[Uuid] = &[received_notes_nullable_nf::MIGRATION_ID];
+
+/// Leaf migrations in the 0.8.0-rc.1 release.
+pub const V_0_8_0_RC1: &[Uuid] = &[
+    nullifier_map::MIGRATION_ID,
+    sapling_memo_consistency::MIGRATION_ID,
+    wallet_summaries::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.8.0-rc.4 release.
+pub const V_0_8_0_RC4: &[Uuid] = &[
+    nullifier_map::MIGRATION_ID,
+    v_transactions_transparent_history::MIGRATION_ID,
+    wallet_summaries::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.8.0-rc.5 release.
+pub const V_0_8_0_RC5: &[Uuid] = &[
+    nullifier_map::MIGRATION_ID,
+    v_tx_outputs_use_legacy_false::MIGRATION_ID,
+    wallet_summaries::MIGRATION_ID,
+];
+
 /// Leaf migrations in the 0.8.0 release.
 pub const V_0_8_0: &[Uuid] = &[
+    nullifier_map::MIGRATION_ID,
+    v_transactions_shielding_balance::MIGRATION_ID,
+    wallet_summaries::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.8.1 release.
+pub const V_0_8_1: &[Uuid] = &[
     nullifier_map::MIGRATION_ID,
     v_transactions_note_uniqueness::MIGRATION_ID,
     wallet_summaries::MIGRATION_ID,
@@ -578,6 +617,34 @@ pub const V_0_22_0_RC2: &[Uuid] = &[
     orchard_ironwood_migration_tables::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     note_locking::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.22.0-rc.5 release.
+pub const V_0_22_0_RC5: &[Uuid] = &[
+    v_tx_outputs_key_scopes::MIGRATION_ID,
+    ivk_item_cache::MIGRATION_ID,
+    add_transparent_receiver_address_index::MIGRATION_ID,
+    add_transparent_value_index::MIGRATION_ID,
+    ironwood_pool_code_views::MIGRATION_ID,
+    orchard_ironwood_migration_tables::MIGRATION_ID,
+    tree_retained_checkpoints::MIGRATION_ID,
+    fix_bad_ironwood_change_flagging::MIGRATION_ID,
+    v_address_uses_ironwood::MIGRATION_ID,
+    tx_status_observation_intent::MIGRATION_ID,
+];
+
+/// Leaf migrations in the 0.22.0-rc.6 release.
+pub const V_0_22_0_RC6: &[Uuid] = &[
+    v_tx_outputs_transparent_addresses::MIGRATION_ID,
+    ivk_item_cache::MIGRATION_ID,
+    add_transparent_receiver_address_index::MIGRATION_ID,
+    add_transparent_value_index::MIGRATION_ID,
+    fix_bad_ironwood_change_flagging::MIGRATION_ID,
+    v_address_uses_ironwood::MIGRATION_ID,
+    v_transactions_pool_crossing::MIGRATION_ID,
+    orchard_ironwood_migration_anchor_interval::MIGRATION_ID,
+    tree_retained_checkpoints::MIGRATION_ID,
+    tx_status_observation_intent::MIGRATION_ID,
 ];
 
 pub(super) fn verify_network_compatibility<P: consensus::Parameters>(
@@ -797,21 +864,23 @@ pub(crate) mod tests {
 
         let seed = [0xab; 32].to_vec();
 
-        let mut prev_state = HashSet::new();
-        let mut ensure_migration_state_changed = |conn: &Connection| {
-            let new_state = conn
-                .prepare_cached("SELECT * FROM schemer_migrations")
+        let read_applied_state = |conn: &Connection| {
+            conn.prepare_cached("SELECT * FROM schemer_migrations")
                 .unwrap()
                 .query_map([], |row| row.get::<_, [u8; 16]>(0).map(Uuid::from_bytes))
                 .unwrap()
                 .collect::<Result<HashSet<Uuid>, _>>()
-                .unwrap();
-            assert!(prev_state != new_state);
-            prev_state = new_state;
+                .unwrap()
         };
 
-        let mut prev_leaves: &[Uuid] = &[];
+        let mut prev_state = HashSet::new();
         for migrations in super::PUBLIC_MIGRATION_STATES {
+            // A release may target a leaf that an earlier release already applied (its
+            // successors having been introduced and later superseded on a parallel branch
+            // of the graph), so novelty is judged against the applied set, not against the
+            // previous release's leaf list.
+            let expect_change = migrations.iter().any(|m| !prev_state.contains(m));
+
             assert_matches!(
                 WalletMigrator::new()
                     .with_seed(Secret::new(seed.clone()))
@@ -820,14 +889,11 @@ pub(crate) mod tests {
                 Ok(_)
             );
 
-            // If we have any new leaves, ensure the migration state changed. This lets us
-            // represent releases that changed the graph edges without introducing any new
-            // migrations.
-            if migrations.iter().any(|m| !prev_leaves.contains(m)) {
-                ensure_migration_state_changed(&db_data.conn);
+            let new_state = read_applied_state(&db_data.conn);
+            if expect_change {
+                assert!(prev_state != new_state);
             }
-
-            prev_leaves = *migrations;
+            prev_state = new_state;
         }
 
         // Now check that we can migrate from the last public release to the current
