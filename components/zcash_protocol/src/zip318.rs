@@ -567,21 +567,16 @@ impl Zip318Evidence {
     /// Whether the source-pool outputs are consistent with a wallet-internal send-to-self, as
     /// precisely as the source that gathered this could tell.
     ///
-    /// The clause names the CLAIM rather than a check, because how tightly it can be established
-    /// depends on what the source can see, and no source can do better than its own view:
+    /// How tightly this can be established depends on the source:
     ///
-    /// - From an unproven transaction the wallet is building, exactly: the values and recipients
-    ///   are all present, so "every value-carrying output pays the account's own internal address"
-    ///   is directly checkable, with zero-valued padding dummies excluded.
-    /// - From a MINED transaction, only loosely, and this is not a shortcoming of the
-    ///   implementation. A padding dummy and an unrelated party's output are equally
-    ///   undecryptable, so the two cannot be told apart at all, which is precisely what the
-    ///   padding is for. The strongest sound reading is "at least one output decrypts to the
-    ///   account's own internal address, none decrypts to one of its external addresses, and no
-    ///   external recipient is otherwise known".
+    /// - From an unproven transaction the wallet is building, exactly: every value-carrying output
+    ///   pays the account's own internal address, with zero-valued padding dummies excluded.
+    /// - From a mined transaction, only that the account received on its own internal address and
+    ///   on no external one. A padding dummy and an unrelated party's output are equally
+    ///   undecryptable, which is what the padding is for, so no source can do better.
     ///
-    /// The looser reading admits strictly more, so it keeps the over-approximation direction
-    /// [`classify`] already has: no false negatives, some admitted look-alikes.
+    /// The looser reading admits strictly more, keeping the direction [`classify`] already has: no
+    /// false negatives, some admitted look-alikes.
     pub fn source_is_send_to_self(&self) -> Option<bool> {
         self.source_is_send_to_self
     }
