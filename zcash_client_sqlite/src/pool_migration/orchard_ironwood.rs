@@ -12,9 +12,6 @@ use std::{
 };
 
 use rusqlite::{Connection, OptionalExtension};
-#[cfg(feature = "orchard")]
-use shardtree::error::ShardTreeError;
-
 use zcash_client_backend::{
     data_api::anchor_retention::AnchorRetentionInterval, wallet::LockOwner,
 };
@@ -25,6 +22,18 @@ use zcash_pool_migration::engine::{
 use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
 use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
+
+#[cfg(feature = "orchard")]
+use {
+    shardtree::error::ShardTreeError,
+    std::collections::HashMap,
+    zcash_client_backend::{
+        data_api::{Account as _, SentTransaction, SentTransactionOutput, wallet::TargetHeight},
+        decrypt_transaction,
+        wallet::{Note, Recipient},
+    },
+    zcash_protocol::value::Zatoshis,
+};
 
 use crate::{AccountRef, AccountUuid, error::SqliteClientError};
 
@@ -374,17 +383,6 @@ where
         state: &MigrationState,
         proved: MigrationTransferId,
     ) -> Result<(), Error> {
-        use std::collections::HashMap;
-
-        use zcash_client_backend::data_api::{
-            Account as _, SentTransaction, SentTransactionOutput, wallet::TargetHeight,
-        };
-        use zcash_client_backend::decrypt_transaction;
-        use zcash_client_backend::wallet::{Note, Recipient};
-        use zcash_protocol::value::Zatoshis;
-
-        use super::error::FinalizeError;
-
         let row = state
             .transactions()
             .iter()
