@@ -342,6 +342,13 @@ pub(crate) fn read_v4_components<R: Read>(
         #[allow(clippy::redundant_closure)]
         let so: Vec<OutputDescription<GrothProofBytes>> =
             Vector::read(&mut reader, |r| read_output_v4(r))?;
+        if ss.is_empty() && so.is_empty() && vb != ZatBalance::zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Sapling v4: nShieldedSpend == 0 && nShieldedOutput == 0 \
+                 but valueBalanceSapling != 0 (consensus rule §7.1.2)",
+            ));
+        }
         Ok((vb, ss, so))
     } else {
         Ok((ZatBalance::zero(), vec![], vec![]))
