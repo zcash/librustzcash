@@ -570,7 +570,6 @@ pub const CURRENT_LEAF_MIGRATIONS: &[Uuid] = &[
     add_transparent_value_index::MIGRATION_ID,
     fix_bad_ironwood_change_flagging::MIGRATION_ID,
     v_address_uses_ironwood::MIGRATION_ID,
-    orchard_ironwood_migration_anchor_interval::MIGRATION_ID,
     orchard_ironwood_migration_unsatisfiability::MIGRATION_ID,
     tree_retained_checkpoints::MIGRATION_ID,
     tx_status_observation_intent::MIGRATION_ID,
