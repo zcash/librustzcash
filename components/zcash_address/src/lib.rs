@@ -348,6 +348,23 @@ impl ZcashAddress {
             _ => false,
         }
     }
+
+    /// Returns whether this address can be used in a Sapling transfer
+    pub fn is_sapling(&self) -> bool {
+        match &self.kind {
+            AddressKind::Sapling(_) => true,
+            AddressKind::Unified(addr) => addr.has_receiver_of_type(PoolType::SAPLING),
+            _ => false,
+        }
+    }
+
+    /// Returns whether this address can be used in an Orchard transfer
+    pub fn is_orchard(&self) -> bool {
+        match &self.kind {
+            AddressKind::Unified(addr) => addr.has_receiver_of_type(PoolType::ORCHARD),
+            _ => false,
+        }
+    }
 }
 
 #[cfg(feature = "test-dependencies")]
