@@ -413,14 +413,6 @@ pub enum Zip318TxKind {
 
 /// The result of classifying a transaction against [ZIP 318].
 ///
-/// [`Unknown`](Self::Unknown) is NOT a third answer alongside the other two: it is the least
-/// element of an information ordering. Evidence about a transaction only ever grows (a compact
-/// scan learns less than an enhanced transaction, which learns less than one whose anchor can also
-/// be resolved), and [`classify`] is monotone with respect to that growth. Because the order on
-/// results is flat, monotonicity says exactly: *once decided, never decided differently*. A
-/// consumer may therefore cache a decision, and must render `Unknown` as "no label yet" rather
-/// than as "not a migration", or rows will visibly relabel themselves as data arrives.
-///
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Zip318Classification {
@@ -429,7 +421,8 @@ pub enum Zip318Classification {
     /// The transaction definitely does not have any ZIP 318 shape. Emitted only when the evidence
     /// needed to refute is actually present.
     Nonconforming,
-    /// Not enough evidence to decide yet.
+    /// Not enough evidence to decide yet. Render this as "no label yet", never as "not a
+    /// migration"; [`Nonconforming`](Self::Nonconforming) is the latter.
     Unknown,
 }
 
