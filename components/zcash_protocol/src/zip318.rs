@@ -408,13 +408,6 @@ pub enum Zip318TxKind {
     Preparation,
     /// A pool crossing: a canonical denomination carried across the turnstile by a transaction of
     /// the canonical shape.
-    ///
-    /// This does NOT say who the crossing pays. The ordinary send path deliberately builds
-    /// payments to third parties in this same shape, so that a payment of a canonical denomination
-    /// joins the migration anonymity set, and nothing observable about the transaction separates
-    /// one from a wallet's own migration transfer. That indistinguishability is the point of the
-    /// shape, so this crate does not offer a distinction it cannot make. A wallet that knows the
-    /// recipient of its OWN transaction may of course draw one from its own records.
     Transfer,
 }
 
