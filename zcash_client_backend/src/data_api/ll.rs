@@ -24,6 +24,7 @@ use zcash_protocol::{
     consensus::{BlockHeight, TxIndex},
     memo::MemoBytes,
     value::{BalanceError, Zatoshis},
+    zip318::Zip318Classification,
 };
 use zip32::Scope;
 
@@ -388,6 +389,28 @@ pub trait LowLevelWalletWrite: LowLevelWalletRead {
         &mut self,
         txid: TxId,
         status: TransactionStatus,
+    ) -> Result<(), Self::Error>;
+
+    /// Records how a transaction classifies against [ZIP 318], so that a wallet can label a
+    /// migration transaction in its history without consulting a migration plan.
+    ///
+    /// A store persists this rather than recomputing it, because the evidence it rests on is only
+    /// all present at once while the transaction is being decrypted. A store that has not been
+    /// given a classification for a transaction MUST report it as
+    /// [`Zip318Classification::Unknown`] rather than as
+    /// [`Nonconforming`](Zip318Classification::Nonconforming): the two mean "we never looked" and
+    /// "we looked and it is not one", and presenting the first as the second asserts a judgement
+    /// the wallet has not made.
+    ///
+    /// This is called at most once per transaction. Every input to the classification is fixed by
+    /// the time a transaction is decrypted, so the value never needs revisiting; in particular it
+    /// does not depend on the mined height, which would otherwise make it change under the store.
+    ///
+    /// [ZIP 318]: https://zips.z.cash/zip-0318
+    fn put_zip318_classification(
+        &mut self,
+        tx_ref: Self::TxRef,
+        classification: Zip318Classification,
     ) -> Result<(), Self::Error>;
 
     /// Adds information about a received Sapling note to the wallet, or updates any existing

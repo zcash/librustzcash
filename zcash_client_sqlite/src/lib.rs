@@ -2724,6 +2724,14 @@ impl<'a, C: Borrow<rusqlite::Transaction<'a>>, P: consensus::Parameters, CL: Clo
         )
     }
 
+    fn put_zip318_classification(
+        &mut self,
+        tx_ref: Self::TxRef,
+        classification: zcash_protocol::zip318::Zip318Classification,
+    ) -> Result<(), Self::Error> {
+        wallet::put_zip318_classification(self.conn.borrow(), tx_ref, classification)
+    }
+
     fn put_received_sapling_note<T: ReceivedSaplingOutput<AccountId = Self::AccountId>>(
         &mut self,
         output: &T,

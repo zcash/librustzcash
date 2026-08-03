@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::zip318`, which assembles ZIP 318 classification
+  evidence from a decrypted transaction and classifies it. What it can observe is
+  weaker than what the same predicate sees on a transaction the wallet is building,
+  because on chain a zero-valued padding dummy and an unrelated party's output are
+  equally undecryptable; the weaker reading admits more, never less.
+- `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_zip318_classification`,
+  called by `store_decrypted_tx`. A store that has not been given a classification
+  for a transaction must report it as unclassified, never as `Nonconforming`.
+
 ### Fixed
 - `zcash_client_backend::data_api::wallet::extract_and_store_transaction_from_pczt`
   now records the transaction's Ironwood outputs in the stored `SentTransaction`.

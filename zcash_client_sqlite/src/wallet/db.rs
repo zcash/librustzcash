@@ -314,6 +314,14 @@ CREATE TABLE blocks (
 /// - `trust_status`: A flag indicating whether the transaction should be considered "trusted".
 ///   When set to `1`, outputs of this transaction will be considered spendable with `trusted`
 ///   confirmations instead of `untrusted` confirmations.
+/// - `zip318_kind`: how the transaction classifies against ZIP 318, encoded by
+///   [`Zip318Classification::to_code`]. The default, `0`, means NOT CLASSIFIED, and is what a row
+///   holds until the wallet has decrypted the transaction; it is deliberately distinct from the
+///   code for "nonconforming", which is a decision that the transaction is not a ZIP 318 one. A
+///   client must render the default as no label, never as "not a migration". Rows written before
+///   this column existed keep the default and need the transaction rescanned.
+///
+/// [`Zip318Classification::to_code`]: zcash_protocol::zip318::Zip318Classification::to_code
 pub(super) const TABLE_TRANSACTIONS: &str = r#"
 CREATE TABLE "transactions" (
     id_tx INTEGER PRIMARY KEY,
@@ -329,6 +337,7 @@ CREATE TABLE "transactions" (
     min_observed_height INTEGER NOT NULL,
     confirmed_unmined_at_height INTEGER,
     trust_status INTEGER,
+    zip318_kind INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (block) REFERENCES blocks(height),
     CONSTRAINT height_consistency CHECK (
         block IS NULL OR mined_height = block
@@ -1477,7 +1486,8 @@ SELECT accounts.uuid                AS account_uuid,
        -- between shielded pools; NULL when it is not such a transfer. A transaction is one
        -- exactly when this column is non-NULL.
        pool_crossings.crossing_value AS pool_crossing_value,
-       transactions.trust_status
+       transactions.trust_status,
+       transactions.zip318_kind
 FROM notes
 JOIN accounts ON accounts.id = notes.account_id
 JOIN transactions ON transactions.id_tx = notes.transaction_id
@@ -1489,7 +1499,8 @@ LEFT JOIN sent_note_counts
 LEFT JOIN pool_crossings
      ON pool_crossings.account_id = notes.account_id
      AND pool_crossings.transaction_id = notes.transaction_id
-GROUP BY notes.account_id, notes.transaction_id";
+GROUP BY notes.account_id, notes.transaction_id
+";
 
 /// Selects all outputs received by the wallet, plus any outputs sent from the wallet to
 /// external recipients.

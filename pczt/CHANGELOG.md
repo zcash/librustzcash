@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `pczt::Pczt::has_data_in_pool`, which reports whether the always-present
+  bundle for a given pool actually holds anything.
+- `pczt::orchard::Bundle::{sole_action, value_carrying_outputs_all_pay}`. The
+  latter returns `None` when a field it judges has been redacted from the PCZT.
+
 ## [0.9.1] - 2026-07-26
 
 ### Fixed
