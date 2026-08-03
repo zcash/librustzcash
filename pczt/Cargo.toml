@@ -56,6 +56,7 @@ document-features = { workspace = true, optional = true }
 [dev-dependencies]
 hex.workspace = true
 incrementalmerkletree.workspace = true
+proptest.workspace = true
 rand_chacha.workspace = true
 ripemd.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }

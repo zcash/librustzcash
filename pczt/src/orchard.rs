@@ -2372,3 +2372,217 @@ impl Bundle {
         }
     }
 }
+
+#[cfg(test)]
+mod shape_tests {
+    use alloc::collections::BTreeMap;
+    use alloc::vec::Vec;
+
+    use proptest::prelude::*;
+    use proptest::sample::Index;
+
+    use super::{
+        Action, Bundle, EncCiphertext, NoteVersion, ORCHARD_SPENDS_AND_OUTPUTS_ENABLED, Output,
+        Spend,
+    };
+
+    /// Two distinguishable payment addresses. Only their inequality matters, so any two distinct
+    /// byte strings do; these are never parsed as addresses.
+    const OURS: [u8; 43] = [1; 43];
+    const THEIRS: [u8; 43] = [2; 43];
+
+    fn output(value: Option<u64>, recipient: Option<[u8; 43]>) -> Output {
+        Output {
+            cmx: None,
+            ephemeral_key: [0; 32],
+            enc_ciphertext: EncCiphertext::Encrypted(Vec::new()),
+            out_ciphertext: Vec::new(),
+            recipient,
+            value,
+            rseed: None,
+            ock: None,
+            zip32_derivation: None,
+            user_address: None,
+            proprietary: BTreeMap::new(),
+        }
+    }
+
+    fn spend() -> Spend {
+        Spend {
+            nullifier: [0; 32],
+            rk: [0; 32],
+            spend_auth_sig: None,
+            recipient: None,
+            value: None,
+            rho: None,
+            rseed: None,
+            fvk: None,
+            witness: None,
+            alpha: None,
+            zip32_derivation: None,
+            dummy_sk: None,
+            proprietary: BTreeMap::new(),
+        }
+    }
+
+    /// An action carrying the given output. Neither method under test reads the spend half or any
+    /// bundle-level field, so those stay at fixed values.
+    fn action(value: Option<u64>, recipient: Option<[u8; 43]>) -> Action {
+        Action {
+            cv_net: None,
+            spend: spend(),
+            output: output(value, recipient),
+            rcv: None,
+        }
+    }
+
+    fn bundle(actions: Vec<Action>) -> Bundle {
+        Bundle {
+            actions,
+            flags: ORCHARD_SPENDS_AND_OUTPUTS_ENABLED,
+            value_sum: (0, false),
+            anchor: None,
+            note_version: NoteVersion::V2,
+            zkproof: None,
+            bsk: None,
+        }
+    }
+
+    fn arb_recipient() -> impl Strategy<Value = [u8; 43]> {
+        prop_oneof![Just(OURS), Just(THEIRS)]
+    }
+
+    /// Zero is drawn as often as any other value, because zero is what separates a padding dummy
+    /// from a real output and so is the case the predicate turns on.
+    fn arb_value() -> impl Strategy<Value = u64> {
+        prop_oneof![Just(0u64), 1u64..1_000]
+    }
+
+    /// An action whose judged fields may each have been redacted, which is the state a Redactor
+    /// can leave a PCZT in.
+    fn arb_action() -> impl Strategy<Value = Action> {
+        (
+            prop_oneof![Just(None), arb_value().prop_map(Some)],
+            prop_oneof![Just(None), arb_recipient().prop_map(Some)],
+        )
+            .prop_map(|(value, recipient)| action(value, recipient))
+    }
+
+    fn arb_bundle() -> impl Strategy<Value = Bundle> {
+        prop::collection::vec(arb_action(), 0..6).prop_map(bundle)
+    }
+
+    /// A bundle with nothing redacted, so the predicate is always able to answer.
+    fn arb_specified_bundle() -> impl Strategy<Value = Bundle> {
+        prop::collection::vec((arb_value(), arb_recipient()), 0..6).prop_map(|outputs| {
+            bundle(
+                outputs
+                    .into_iter()
+                    .map(|(value, recipient)| action(Some(value), Some(recipient)))
+                    .collect(),
+            )
+        })
+    }
+
+    /// A bundle whose value-carrying outputs all pay `OURS`, so the predicate answers
+    /// `Some(true)`. Its zero-valued dummies pay anyone: a Constructor fabricates them to reach an
+    /// action count and does not choose who they name.
+    fn arb_send_to_self_bundle() -> impl Strategy<Value = Bundle> {
+        prop::collection::vec((arb_value(), arb_recipient()), 1..6).prop_map(|outputs| {
+            bundle(
+                outputs
+                    .into_iter()
+                    .map(|(value, dummy_recipient)| {
+                        let recipient = if value == 0 { dummy_recipient } else { OURS };
+                        action(Some(value), Some(recipient))
+                    })
+                    .collect(),
+            )
+        })
+    }
+
+    proptest! {
+        /// `sole_action` is about the count and nothing else.
+        #[test]
+        fn sole_action_answers_exactly_when_there_is_one_action(bundle in arb_bundle()) {
+            match bundle.sole_action() {
+                Some(action) => {
+                    prop_assert_eq!(bundle.actions.len(), 1);
+                    prop_assert_eq!(action, &bundle.actions[0]);
+                }
+                None => prop_assert_ne!(bundle.actions.len(), 1),
+            }
+        }
+
+        /// With nothing redacted the predicate is a direct reading of the outputs: every one that
+        /// carries value pays the recipient asked about.
+        #[test]
+        fn all_pay_reads_the_value_carrying_outputs(bundle in arb_specified_bundle()) {
+            let expected = bundle
+                .actions
+                .iter()
+                .all(|a| a.output.value == Some(0) || a.output.recipient == Some(OURS));
+
+            prop_assert_eq!(bundle.value_carrying_outputs_all_pay(&OURS), Some(expected));
+        }
+
+        /// Padding dummies do not participate, whoever they name and even with that name redacted.
+        /// Counting them would make every padded bundle fail, which is the whole point of the
+        /// zero-value skip.
+        #[test]
+        fn zero_valued_dummies_do_not_change_the_answer(
+            bundle in arb_bundle(),
+            dummy_recipient in prop_oneof![Just(None), arb_recipient().prop_map(Some)],
+            at in any::<Index>(),
+        ) {
+            let expected = bundle.value_carrying_outputs_all_pay(&OURS);
+
+            let mut padded = bundle.clone();
+            let at = at.index(padded.actions.len() + 1);
+            padded.actions.insert(at, action(Some(0), dummy_recipient));
+
+            prop_assert_eq!(padded.value_carrying_outputs_all_pay(&OURS), expected);
+        }
+
+        /// A redacted value leaves the question unanswered rather than answered negatively: the
+        /// output cannot even be sorted into dummy or real.
+        #[test]
+        fn a_redacted_value_is_unanswerable(bundle in arb_send_to_self_bundle(), at in any::<Index>()) {
+            prop_assert_eq!(bundle.value_carrying_outputs_all_pay(&OURS), Some(true));
+
+            let mut redacted = bundle.clone();
+            let at = at.index(redacted.actions.len());
+            redacted.actions[at].output.value = None;
+
+            prop_assert_eq!(redacted.value_carrying_outputs_all_pay(&OURS), None);
+        }
+
+        /// A redacted recipient is unanswerable only where it would have been judged: on an output
+        /// that carries value. On a dummy it is skipped before the recipient is ever read.
+        #[test]
+        fn a_redacted_recipient_is_unanswerable_only_where_it_is_judged(
+            bundle in arb_send_to_self_bundle(),
+            at in any::<Index>(),
+        ) {
+            let mut redacted = bundle.clone();
+            let at = at.index(redacted.actions.len());
+            let carries_value = redacted.actions[at].output.value != Some(0);
+            redacted.actions[at].output.recipient = None;
+
+            let expected = if carries_value { None } else { Some(true) };
+            prop_assert_eq!(redacted.value_carrying_outputs_all_pay(&OURS), expected);
+        }
+
+        /// The recipient asked about is a parameter, not a constant: the same bundle answers
+        /// differently for a recipient it does not pay.
+        #[test]
+        fn all_pay_is_asked_about_a_specific_recipient(bundle in arb_send_to_self_bundle()) {
+            let pays_nobody = bundle
+                .actions
+                .iter()
+                .all(|a| a.output.value == Some(0));
+
+            prop_assert_eq!(bundle.value_carrying_outputs_all_pay(&THEIRS), Some(pays_nobody));
+        }
+    }
+}
