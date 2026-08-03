@@ -20,6 +20,9 @@
 
 #[macro_use]
 extern crate alloc;
+// The crate itself needs only `alloc`; the unit tests lean on `proptest`, which is a `std` crate.
+#[cfg(test)]
+extern crate std;
 
 use alloc::vec::Vec;
 
