@@ -100,21 +100,23 @@ impl Bundle {
         }
     }
 
-    /// Whether every output of this bundle that carries value pays `recipient`, which is what
-    /// makes the bundle a send-to-self.
+    /// Whether every output of this bundle that carries value pays `recipient`, given as the [raw
+    /// encoding] of an Orchard payment address, which is what makes the bundle a send-to-self.
     ///
     /// Zero-valued padding dummies are excluded: a Constructor fabricates them to bring the bundle
     /// up to a required action count and they pay nobody in particular, so counting them would make
     /// every padded bundle fail. Returns `None` if any output has had the value or the recipient it
     /// would be judged on redacted, since the question cannot then be answered rather than answered
     /// negatively.
+    ///
+    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
     pub fn value_carrying_outputs_all_pay(&self, recipient: &[u8; 43]) -> Option<bool> {
         for action in &self.actions {
             let output = &action.output;
             if output.value? == 0 {
                 continue;
             }
-            if !output.pays(recipient)? {
+            if &output.recipient? != recipient {
                 return Some(false);
             }
         }
@@ -704,18 +706,6 @@ pub struct Output {
     /// Proprietary fields related to the note being created.
     #[getset(get = "pub")]
     pub(crate) proprietary: BTreeMap<String, Vec<u8>>,
-}
-
-impl Output {
-    /// Whether this output pays `recipient`, given as the [raw encoding] of an Orchard payment
-    /// address.
-    ///
-    /// Returns `None` if the recipient has been redacted from the PCZT.
-    ///
-    /// [raw encoding]: https://zips.z.cash/protocol/protocol.pdf#orchardpaymentaddrencoding
-    pub fn pays(&self, recipient: &[u8; 43]) -> Option<bool> {
-        self.recipient.map(|paid| &paid == recipient)
-    }
 }
 
 /// Types for the v1 Orchard PCZT encoding.

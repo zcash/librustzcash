@@ -406,34 +406,16 @@ pub enum Zip318TxKind {
     /// [`PoolMigrationConstants::preparation_tx_actions`] actions, restructuring the wallet's
     /// notes into the self-funding notes a migration spends.
     Preparation,
-    /// A pool crossing paying the account's OWN internal destination-pool address: a migration
-    /// transfer.
-    Transfer,
-    /// A pool crossing of the same canonical shape paying an EXTERNAL recipient.
+    /// A pool crossing: a canonical denomination carried across the turnstile by a transaction of
+    /// the canonical shape.
     ///
-    /// The ordinary send path builds these deliberately, so that a payment of a canonical
-    /// denomination across the turnstile joins the migration anonymity set. It is in the set, but
-    /// it is a payment to a third party and MUST NOT be presented as a migration.
-    CanonicalCrossingPayment,
-}
-
-/// Whether a destination-pool output pays the account itself or someone else.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum OutputOwner {
-    /// The account's own internal (change) address.
-    OwnInternal,
-    /// Anything else, including the account's own external address.
-    Other,
-}
-
-/// The single value-carrying output in the destination pool of a pool crossing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DestinationOutput {
-    /// The value crossing the turnstile.
-    pub value: Zatoshis,
-    /// Who the crossing pays, which is what separates a migration transfer from a canonical
-    /// crossing payment.
-    pub owner: OutputOwner,
+    /// This does NOT say who the crossing pays. The ordinary send path deliberately builds
+    /// payments to third parties in this same shape, so that a payment of a canonical denomination
+    /// joins the migration anonymity set, and nothing observable about the transaction separates
+    /// one from a wallet's own migration transfer. That indistinguishability is the point of the
+    /// shape, so this crate does not offer a distinction it cannot make. A wallet that knows the
+    /// recipient of its OWN transaction may of course draw one from its own records.
+    Transfer,
 }
 
 /// The result of classifying a transaction against [ZIP 318].
@@ -478,7 +460,6 @@ impl Zip318Classification {
             Self::Nonconforming => 1,
             Self::Conforms(Zip318TxKind::Preparation) => 2,
             Self::Conforms(Zip318TxKind::Transfer) => 3,
-            Self::Conforms(Zip318TxKind::CanonicalCrossingPayment) => 4,
         }
     }
 
@@ -495,7 +476,6 @@ impl Zip318Classification {
             1 => Self::Nonconforming,
             2 => Self::Conforms(Zip318TxKind::Preparation),
             3 => Self::Conforms(Zip318TxKind::Transfer),
-            4 => Self::Conforms(Zip318TxKind::CanonicalCrossingPayment),
             _ => Self::Unknown,
         }
     }
@@ -504,9 +484,10 @@ impl Zip318Classification {
 /// Everything [`classify`] needs to observe about a transaction, gathered by whichever component
 /// can see it.
 ///
-/// A `None` field means THIS SOURCE CANNOT ANSWER, which is not the same as an answer of `false`.
-/// The struct is therefore a point in the information ordering described on
-/// [`Zip318Classification`], and [`Default::default`] (everything `None`) is its least element.
+/// An unanswered clause means THIS SOURCE CANNOT ANSWER, which is not the same as an answer of
+/// `false`. The struct is therefore a point in the information ordering described on
+/// [`Zip318Classification`], and [`Default::default`] (everything unanswered) is its least element.
+/// A source builds its evidence up from there, one clause at a time, through the `with_` methods.
 ///
 /// Two obligations on whoever fills this in, both of which keep [`classify`] monotone:
 ///
@@ -518,15 +499,87 @@ impl Zip318Classification {
 ///   the next can contradict its own earlier decisions.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Zip318Evidence {
+    source_actions: Option<usize>,
+    destination_actions: Option<usize>,
+    other_bundles_present: Option<bool>,
+    source_is_send_to_self: Option<bool>,
+    sole_destination_value: Option<Zatoshis>,
+    expiry_is_canonical: Option<bool>,
+    anchor_on_grid: Option<bool>,
+    fee_is_canonical: Option<bool>,
+}
+
+impl Zip318Evidence {
+    /// Records the number of actions in the source-pool (Orchard) bundle.
+    pub fn with_source_actions(mut self, source_actions: Option<usize>) -> Self {
+        self.source_actions = source_actions;
+        self
+    }
+
+    /// Records the number of actions in the destination-pool (Ironwood) bundle.
+    pub fn with_destination_actions(mut self, destination_actions: Option<usize>) -> Self {
+        self.destination_actions = destination_actions;
+        self
+    }
+
+    /// Records whether any transparent or Sapling bundle is present.
+    pub fn with_other_bundles_present(mut self, other_bundles_present: Option<bool>) -> Self {
+        self.other_bundles_present = other_bundles_present;
+        self
+    }
+
+    /// Records whether the source-pool outputs are consistent with a send-to-self. See
+    /// [`source_is_send_to_self`](Self::source_is_send_to_self) for how tightly a given source
+    /// may claim this.
+    pub fn with_source_is_send_to_self(mut self, source_is_send_to_self: Option<bool>) -> Self {
+        self.source_is_send_to_self = source_is_send_to_self;
+        self
+    }
+
+    /// Records the value carried by the single value-carrying destination-pool output.
+    pub fn with_sole_destination_value(mut self, sole_destination_value: Option<Zatoshis>) -> Self {
+        self.sole_destination_value = sole_destination_value;
+        self
+    }
+
+    /// Records whether the expiry height is the canonical rolling expiry. See
+    /// [`expiry_is_canonical`](Self::expiry_is_canonical) for the height it must be judged
+    /// against.
+    pub fn with_expiry_is_canonical(mut self, expiry_is_canonical: Option<bool>) -> Self {
+        self.expiry_is_canonical = expiry_is_canonical;
+        self
+    }
+
+    /// Records whether the shielded anchor lies on the retention grid.
+    pub fn with_anchor_on_grid(mut self, anchor_on_grid: Option<bool>) -> Self {
+        self.anchor_on_grid = anchor_on_grid;
+        self
+    }
+
+    /// Records whether the fee is the one the canonical shape pays.
+    pub fn with_fee_is_canonical(mut self, fee_is_canonical: Option<bool>) -> Self {
+        self.fee_is_canonical = fee_is_canonical;
+        self
+    }
+
     /// The number of actions in the source-pool (Orchard) bundle, including padding dummies.
-    pub source_actions: Option<usize>,
+    pub fn source_actions(&self) -> Option<usize> {
+        self.source_actions
+    }
+
     /// The number of actions in the destination-pool (Ironwood) bundle, including padding dummies.
     /// Zero when there is no destination bundle at all.
-    pub destination_actions: Option<usize>,
+    pub fn destination_actions(&self) -> Option<usize> {
+        self.destination_actions
+    }
+
     /// Whether any transparent or Sapling bundle is present. No ZIP 318 transaction carries one.
-    pub other_bundles_present: Option<bool>,
+    pub fn other_bundles_present(&self) -> Option<bool> {
+        self.other_bundles_present
+    }
+
     /// Whether the source-pool outputs are consistent with a wallet-internal send-to-self, as
-    /// precisely as this source can tell.
+    /// precisely as the source that gathered this could tell.
     ///
     /// The clause names the CLAIM rather than a check, because how tightly it can be established
     /// depends on what the source can see, and no source can do better than its own view:
@@ -543,24 +596,40 @@ pub struct Zip318Evidence {
     ///
     /// The looser reading admits strictly more, so it keeps the over-approximation direction
     /// [`classify`] already has: no false negatives, some admitted look-alikes.
-    pub source_is_send_to_self: Option<bool>,
-    /// The single value-carrying destination-pool output, when the transaction has one.
-    pub sole_destination_output: Option<DestinationOutput>,
+    pub fn source_is_send_to_self(&self) -> Option<bool> {
+        self.source_is_send_to_self
+    }
+
+    /// The value carried by the single value-carrying destination-pool output, when the
+    /// transaction has one.
+    pub fn sole_destination_value(&self) -> Option<Zatoshis> {
+        self.sole_destination_value
+    }
+
     /// Whether the expiry height is the canonical rolling expiry, judged against a height the
     /// source considers authoritative: the MINED height once mined, or the target height for a
     /// transaction the wallet is itself building.
     ///
-    /// A source that has neither must leave this `None`. Judging an unmined transaction against
-    /// the chain tip is a monotonicity violation waiting to happen, because the canonical expiry
-    /// is a step function of the height and the answer would change once the transaction is mined
-    /// in the next period.
-    pub expiry_is_canonical: Option<bool>,
+    /// A source that has neither must leave this unanswered. Judging an unmined transaction
+    /// against the chain tip is a monotonicity violation waiting to happen, because the canonical
+    /// expiry is a step function of the height and the answer would change once the transaction is
+    /// mined in the next period.
+    pub fn expiry_is_canonical(&self) -> Option<bool> {
+        self.expiry_is_canonical
+    }
+
     /// Whether the shielded anchor lies on the retention grid. CONFIRMATORY: a source that cannot
-    /// resolve the anchor leaves this `None`, which widens the predicate rather than blocking it.
-    pub anchor_on_grid: Option<bool>,
+    /// resolve the anchor leaves this unanswered, which widens the predicate rather than blocking
+    /// it.
+    pub fn anchor_on_grid(&self) -> Option<bool> {
+        self.anchor_on_grid
+    }
+
     /// Whether the fee is the one the canonical shape pays under the standard rule. CONFIRMATORY,
     /// on the same terms as [`anchor_on_grid`](Self::anchor_on_grid).
-    pub fee_is_canonical: Option<bool>,
+    pub fn fee_is_canonical(&self) -> Option<bool> {
+        self.fee_is_canonical
+    }
 }
 
 /// Classifies a transaction against [ZIP 318] from what `evidence` could observe.
@@ -634,8 +703,8 @@ where
     }
 }
 
-/// The crossing branch of [`classify`]. This is the ONLY place where a transfer and a canonical
-/// crossing payment part company, and they part on the recipient alone.
+/// The crossing branch of [`classify`]: the canonical two-action source bundle carrying a
+/// canonical denomination across the turnstile.
 fn classify_crossing<C>(
     evidence: &Zip318Evidence,
     constants: &C,
@@ -648,18 +717,15 @@ where
         return Zip318Classification::Nonconforming;
     }
 
-    let Some(output) = evidence.sole_destination_output else {
+    let Some(value) = evidence.sole_destination_value else {
         return Zip318Classification::Unknown;
     };
 
-    if !constants.is_canonical_denomination(output.value) {
+    if !constants.is_canonical_denomination(value) {
         return Zip318Classification::Nonconforming;
     }
 
-    Zip318Classification::Conforms(match output.owner {
-        OutputOwner::OwnInternal => Zip318TxKind::Transfer,
-        OutputOwner::Other => Zip318TxKind::CanonicalCrossingPayment,
-    })
+    Zip318Classification::Conforms(Zip318TxKind::Transfer)
 }
 
 #[cfg(test)]
@@ -934,7 +1000,6 @@ mod tests {
             Zip318Classification::Nonconforming,
             Zip318Classification::Conforms(Zip318TxKind::Preparation),
             Zip318Classification::Conforms(Zip318TxKind::Transfer),
-            Zip318Classification::Conforms(Zip318TxKind::CanonicalCrossingPayment),
         ] {
             assert_eq!(
                 Zip318Classification::from_code(classification.to_code()),
@@ -956,7 +1021,7 @@ mod tests {
         );
 
         // A code from a newer version teaches an older consumer nothing, which is `Unknown`.
-        for unrecognised in [5, 99, -1] {
+        for unrecognised in [4, 99, -1] {
             assert_eq!(
                 Zip318Classification::from_code(unrecognised),
                 Zip318Classification::Unknown
@@ -967,30 +1032,26 @@ mod tests {
     /// Evidence for a well-formed preparation transaction, from a source that can answer every
     /// clause. Tests below knock out one field at a time.
     fn prep_evidence() -> Zip318Evidence {
-        Zip318Evidence {
-            source_actions: Some(PREP_TX_ACTIONS),
-            destination_actions: Some(0),
-            other_bundles_present: Some(false),
-            source_is_send_to_self: Some(true),
-            sole_destination_output: None,
-            expiry_is_canonical: Some(true),
-            anchor_on_grid: Some(true),
-            fee_is_canonical: Some(true),
-        }
+        Zip318Evidence::default()
+            .with_source_actions(Some(PREP_TX_ACTIONS))
+            .with_destination_actions(Some(0))
+            .with_other_bundles_present(Some(false))
+            .with_source_is_send_to_self(Some(true))
+            .with_expiry_is_canonical(Some(true))
+            .with_anchor_on_grid(Some(true))
+            .with_fee_is_canonical(Some(true))
     }
 
-    /// Evidence for a well-formed pool crossing carrying `value` to `owner`.
-    fn crossing_evidence(value: Zatoshis, owner: OutputOwner) -> Zip318Evidence {
-        Zip318Evidence {
-            source_actions: Some(CROSSING_SOURCE_ACTIONS),
-            destination_actions: Some(CROSSING_DESTINATION_ACTIONS),
-            other_bundles_present: Some(false),
-            source_is_send_to_self: None,
-            sole_destination_output: Some(DestinationOutput { value, owner }),
-            expiry_is_canonical: Some(true),
-            anchor_on_grid: Some(true),
-            fee_is_canonical: Some(true),
-        }
+    /// Evidence for a well-formed pool crossing carrying `value`.
+    fn crossing_evidence(value: Zatoshis) -> Zip318Evidence {
+        Zip318Evidence::default()
+            .with_source_actions(Some(CROSSING_SOURCE_ACTIONS))
+            .with_destination_actions(Some(CROSSING_DESTINATION_ACTIONS))
+            .with_other_bundles_present(Some(false))
+            .with_sole_destination_value(Some(value))
+            .with_expiry_is_canonical(Some(true))
+            .with_anchor_on_grid(Some(true))
+            .with_fee_is_canonical(Some(true))
     }
 
     /// The least element of the information ordering decides nothing.
@@ -1010,20 +1071,17 @@ mod tests {
         );
     }
 
-    /// The two crossing kinds differ ONLY in who the destination output pays.
+    /// A crossing conforms on its shape and its denomination alone. Nothing here observes the
+    /// recipient, which is exactly the indistinguishability the canonical shape buys: a payment to
+    /// a third party in this shape is the same transaction as a wallet's own migration transfer.
     #[test]
-    fn a_crossing_is_a_transfer_only_when_it_pays_the_account_itself() {
-        let value = Zatoshis::const_from_u64(COIN);
+    fn a_canonical_crossing_conforms() {
         assert_eq!(
             classify(
-                &crossing_evidence(value, OutputOwner::OwnInternal),
+                &crossing_evidence(Zatoshis::const_from_u64(COIN)),
                 &Zip318Params
             ),
             Zip318Classification::Conforms(Zip318TxKind::Transfer)
-        );
-        assert_eq!(
-            classify(&crossing_evidence(value, OutputOwner::Other), &Zip318Params),
-            Zip318Classification::Conforms(Zip318TxKind::CanonicalCrossingPayment)
         );
     }
 
@@ -1035,35 +1093,23 @@ mod tests {
         let cases: [(&str, Zip318Evidence); 5] = [
             (
                 "an ordinary split has a different action count",
-                Zip318Evidence {
-                    source_actions: Some(PREP_TX_ACTIONS + 1),
-                    ..prep_evidence()
-                },
+                prep_evidence().with_source_actions(Some(PREP_TX_ACTIONS + 1)),
             ),
             (
                 "no ZIP 318 transaction carries another bundle",
-                Zip318Evidence {
-                    other_bundles_present: Some(true),
-                    ..prep_evidence()
-                },
+                prep_evidence().with_other_bundles_present(Some(true)),
             ),
             (
                 "an ordinary expiry is not the rolling one",
-                Zip318Evidence {
-                    expiry_is_canonical: Some(false),
-                    ..prep_evidence()
-                },
+                prep_evidence().with_expiry_is_canonical(Some(false)),
             ),
             (
                 "a preparation output paying elsewhere is not a send-to-self",
-                Zip318Evidence {
-                    source_is_send_to_self: Some(false),
-                    ..prep_evidence()
-                },
+                prep_evidence().with_source_is_send_to_self(Some(false)),
             ),
             (
                 "a crossing of an off-series amount joins no anonymity set",
-                crossing_evidence(Zatoshis::const_from_u64(3 * COIN), OutputOwner::OwnInternal),
+                crossing_evidence(Zatoshis::const_from_u64(3 * COIN)),
             ),
         ];
 
@@ -1081,11 +1127,9 @@ mod tests {
     /// because no single one of them is rare enough on its own.
     #[test]
     fn a_coincidental_expiry_alone_does_not_conform() {
-        let evidence = Zip318Evidence {
-            other_bundles_present: Some(true),
-            expiry_is_canonical: Some(true),
-            ..prep_evidence()
-        };
+        let evidence = prep_evidence()
+            .with_other_bundles_present(Some(true))
+            .with_expiry_is_canonical(Some(true));
         assert_eq!(
             classify(&evidence, &Zip318Params),
             Zip318Classification::Nonconforming
@@ -1097,14 +1141,8 @@ mod tests {
     #[test]
     fn confirmatory_clauses_refute_but_do_not_block() {
         for knock_out in [
-            Zip318Evidence {
-                anchor_on_grid: Some(false),
-                ..prep_evidence()
-            },
-            Zip318Evidence {
-                fee_is_canonical: Some(false),
-                ..prep_evidence()
-            },
+            prep_evidence().with_anchor_on_grid(Some(false)),
+            prep_evidence().with_fee_is_canonical(Some(false)),
         ] {
             assert_eq!(
                 classify(&knock_out, &Zip318Params),
@@ -1113,11 +1151,9 @@ mod tests {
         }
 
         // A source that cannot answer either one still decides.
-        let unanswerable = Zip318Evidence {
-            anchor_on_grid: None,
-            fee_is_canonical: None,
-            ..prep_evidence()
-        };
+        let unanswerable = prep_evidence()
+            .with_anchor_on_grid(None)
+            .with_fee_is_canonical(None);
         assert_eq!(
             classify(&unanswerable, &Zip318Params),
             Zip318Classification::Conforms(Zip318TxKind::Preparation)
@@ -1129,26 +1165,11 @@ mod tests {
     #[test]
     fn an_unanswered_required_clause_is_unknown_not_a_refutation() {
         let knock_outs = [
-            Zip318Evidence {
-                source_actions: None,
-                ..prep_evidence()
-            },
-            Zip318Evidence {
-                destination_actions: None,
-                ..prep_evidence()
-            },
-            Zip318Evidence {
-                other_bundles_present: None,
-                ..prep_evidence()
-            },
-            Zip318Evidence {
-                expiry_is_canonical: None,
-                ..prep_evidence()
-            },
-            Zip318Evidence {
-                source_is_send_to_self: None,
-                ..prep_evidence()
-            },
+            prep_evidence().with_source_actions(None),
+            prep_evidence().with_destination_actions(None),
+            prep_evidence().with_other_bundles_present(None),
+            prep_evidence().with_expiry_is_canonical(None),
+            prep_evidence().with_source_is_send_to_self(None),
         ];
 
         for evidence in knock_outs {
@@ -1159,10 +1180,8 @@ mod tests {
         }
 
         // The same for the crossing branch's own required clause.
-        let no_output = Zip318Evidence {
-            sole_destination_output: None,
-            ..crossing_evidence(Zatoshis::const_from_u64(COIN), OutputOwner::OwnInternal)
-        };
+        let no_output =
+            crossing_evidence(Zatoshis::const_from_u64(COIN)).with_sole_destination_value(None);
         assert_eq!(
             classify(&no_output, &Zip318Params),
             Zip318Classification::Unknown
@@ -1179,24 +1198,16 @@ mod tests {
         // conforming and a refuted transaction.
         for full in [
             prep_evidence(),
-            crossing_evidence(Zatoshis::const_from_u64(COIN), OutputOwner::Other),
-            Zip318Evidence {
-                other_bundles_present: Some(true),
-                ..prep_evidence()
-            },
+            crossing_evidence(Zatoshis::const_from_u64(COIN)),
+            prep_evidence().with_other_bundles_present(Some(true)),
         ] {
             let chain = [
                 Zip318Evidence::default(),
-                Zip318Evidence {
-                    source_actions: full.source_actions,
-                    destination_actions: full.destination_actions,
-                    ..Zip318Evidence::default()
-                },
-                Zip318Evidence {
-                    sole_destination_output: None,
-                    expiry_is_canonical: None,
-                    ..full
-                },
+                Zip318Evidence::default()
+                    .with_source_actions(full.source_actions())
+                    .with_destination_actions(full.destination_actions()),
+                full.with_sole_destination_value(None)
+                    .with_expiry_is_canonical(None),
                 full,
             ];
 

@@ -19,9 +19,7 @@
 
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::value::Zatoshis;
-use zcash_protocol::zip318::{
-    DestinationOutput, OutputOwner, PoolMigrationConstants, Zip318Classification, Zip318Evidence,
-};
+use zcash_protocol::zip318::{PoolMigrationConstants, Zip318Classification, Zip318Evidence};
 
 use crate::decrypt::{DecryptedOutput, TransferType};
 
@@ -60,25 +58,28 @@ fn evidence_from_decrypted_tx<AccountId, C>(
 where
     C: PoolMigrationConstants + ?Sized,
 {
-    Zip318Evidence {
-        source_actions: Some(action_count(tx.orchard_bundle().map(|b| b.actions().len()))),
-        destination_actions: Some(action_count(
+    // The expiry clause takes the height-independent form, deliberately. The reference-height form
+    // cannot be evaluated before the transaction is mined, and judging it against the chain tip
+    // instead would let the answer change once the transaction was mined in a later modulus period,
+    // contradicting a decision already recorded.
+    //
+    // Neither confirmatory clause is answerable here, so both are left unanswered. Resolving the
+    // anchor to a height needs the wallet's retained boundary checkpoints, and the fee needs the
+    // value of inputs the wallet may not own; a store that has both may answer them and narrow the
+    // result.
+    Zip318Evidence::default()
+        .with_source_actions(Some(action_count(
+            tx.orchard_bundle().map(|b| b.actions().len()),
+        )))
+        .with_destination_actions(Some(action_count(
             tx.ironwood_bundle().map(|b| b.actions().len()),
-        )),
-        other_bundles_present: Some(other_bundles_present(tx)),
-        source_is_send_to_self: Some(is_send_to_self(orchard_outputs)),
-        sole_destination_output: sole_destination_output(ironwood_outputs),
-        // The height-independent form, deliberately. The reference-height form cannot be evaluated
-        // before the transaction is mined, and judging it against the chain tip instead would let
-        // the answer change once the transaction was mined in a later modulus period, contradicting
-        // a decision already recorded.
-        expiry_is_canonical: Some(constants.is_canonical_expiry_value(tx.expiry_height())),
-        // Neither confirmatory clause is answerable here. Resolving the anchor to a height needs
-        // the wallet's retained boundary checkpoints, and the fee needs the value of inputs the
-        // wallet may not own; a store that has both may answer them and narrow the result.
-        anchor_on_grid: None,
-        fee_is_canonical: None,
-    }
+        )))
+        .with_other_bundles_present(Some(other_bundles_present(tx)))
+        .with_source_is_send_to_self(Some(is_send_to_self(orchard_outputs)))
+        .with_sole_destination_value(sole_destination_value(ironwood_outputs))
+        .with_expiry_is_canonical(Some(
+            constants.is_canonical_expiry_value(tx.expiry_height()),
+        ))
 }
 
 /// An absent bundle contributes no actions, which is what a preparation transaction's destination
@@ -124,26 +125,20 @@ fn is_send_to_self<AccountId>(
     any_internal
 }
 
-/// The sole destination-pool output, when the wallet can attribute exactly one.
+/// The value of the sole destination-pool output, when the wallet can attribute exactly one.
 ///
 /// A crossing the wallet cannot decrypt at all yields `None` (unknown), not a refutation: a
 /// stranger's canonical crossing is invisible here, and claiming otherwise would be a judgement on
 /// evidence we do not have.
 #[cfg(feature = "orchard")]
-fn sole_destination_output<AccountId>(
+fn sole_destination_value<AccountId>(
     ironwood_outputs: &[DecryptedOutput<(orchard::Note, orchard::ValuePool), AccountId>],
-) -> Option<DestinationOutput> {
+) -> Option<Zatoshis> {
     let [output] = ironwood_outputs else {
         return None;
     };
 
     let (note, _pool) = output.note();
 
-    Some(DestinationOutput {
-        value: Zatoshis::from_u64(note.value().inner()).ok()?,
-        owner: match output.transfer_type() {
-            TransferType::AccountInternal => OutputOwner::OwnInternal,
-            _ => OutputOwner::Other,
-        },
-    })
+    Zatoshis::from_u64(note.value().inner()).ok()
 }
