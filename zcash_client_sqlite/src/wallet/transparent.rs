@@ -702,6 +702,72 @@ pub(crate) fn generate_address_range<P: consensus::Parameters>(
     Ok(())
 }
 
+/// Returns the sub-ranges of `range` for which the given account has no address row at the given
+/// key scope, in ascending index order.
+///
+/// The rows that mask an index are exactly those that [`store_address_range`] would decline to
+/// insert: its `ON CONFLICT (account_id, diversifier_index_be, key_scope) DO NOTHING` clause makes
+/// re-deriving such an index a guaranteed no-op. Standalone-imported (`Foreign`) receivers do
+/// *not* mask an index: such a row has no `transparent_child_index` and a different key scope, so
+/// it cannot match here, and the index it would be derived at is therefore still generated. That
+/// is required for correctness, as deriving the address is what upgrades the imported row to its
+/// derived form in [`store_address_range`].
+pub(crate) fn missing_child_index_runs(
+    conn: &rusqlite::Connection,
+    account_id: AccountRef,
+    key_scope: TransparentKeyScope,
+    range: &Range<NonHardenedChildIndex>,
+) -> Result<Vec<Range<NonHardenedChildIndex>>, SqliteClientError> {
+    let start = range.start.index();
+    let end = range.end.index();
+    if start >= end {
+        return Ok(vec![]);
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT transparent_child_index
+         FROM addresses
+         WHERE account_id = :account_id
+         AND key_scope = :key_scope
+         AND transparent_child_index >= :start
+         AND transparent_child_index < :end
+         ORDER BY transparent_child_index",
+    )?;
+
+    let mut rows = stmt.query(named_params![
+        ":account_id": account_id.0,
+        ":key_scope": KeyScope::try_from(key_scope)?.encode(),
+        ":start": start,
+        ":end": end,
+    ])?;
+
+    // Walk the existing indices in ascending order, emitting the gaps between them.
+    let mut runs = Vec::new();
+    let mut run_start = start;
+    while let Some(row) = rows.next()? {
+        let existing = decode_transparent_child_index(row.get::<_, i64>(0)?)?.index();
+        if existing > run_start {
+            runs.push(index_range(run_start, existing));
+        }
+        // `existing < run_start` cannot occur (the query is ordered and each index is distinct),
+        // but use a saturating comparison rather than relying on that for memory safety.
+        run_start = run_start.max(existing.saturating_add(1));
+    }
+    if run_start < end {
+        runs.push(index_range(run_start, end));
+    }
+
+    Ok(runs)
+}
+
+/// Constructs a child index range from raw indices that are known to be valid.
+fn index_range(start: u32, end: u32) -> Range<NonHardenedChildIndex> {
+    let idx = |i: u32| {
+        NonHardenedChildIndex::from_index(i).expect("index is within the non-hardened index range")
+    };
+    idx(start)..idx(end)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
@@ -714,15 +780,43 @@ pub(crate) fn generate_address_range_internal<P: consensus::Parameters>(
     range_to_store: Range<NonHardenedChildIndex>,
     require_key: bool,
 ) -> Result<(), SqliteClientError> {
-    let address_list = generate_address_list(
-        account_uivk,
-        account_ufvk,
+    // Derive only the indices in the range that do not already have address rows. Address
+    // derivation is elliptic-curve work, and this function is called with the full gap window on
+    // every observation of a transparent output or spend; in the steady state the entire window
+    // already exists, in which case nothing is derived at all.
+    let runs = missing_child_index_runs(conn, account_id, key_scope, &range_to_store)?;
+
+    // When nothing is missing, still call `generate_address_list` with an empty range: it
+    // validates the availability of the transparent key before it derives anything, and that
+    // validation must not depend upon whether any addresses happen to need generating.
+    let empty = range_to_store.start..range_to_store.start;
+    let mut derived = 0usize;
+    for run in if runs.is_empty() { vec![empty] } else { runs } {
+        let address_list = generate_address_list(
+            account_uivk,
+            account_ufvk,
+            key_scope,
+            request,
+            run,
+            require_key,
+        )?;
+        derived += address_list.len();
+        store_address_range(conn, params, account_id, key_scope, address_list)?;
+    }
+
+    tracing::trace!(
+        "Derived {} of {} transparent addresses in range {:?}..{:?} for account {:?} scope {:?}",
+        derived,
+        range_to_store
+            .end
+            .index()
+            .saturating_sub(range_to_store.start.index()),
+        range_to_store.start.index(),
+        range_to_store.end.index(),
+        account_id,
         key_scope,
-        request,
-        range_to_store,
-        require_key,
-    )?;
-    store_address_range(conn, params, account_id, key_scope, address_list)?;
+    );
+
     Ok(())
 }
 
@@ -3261,6 +3355,184 @@ mod tests {
             BlockCache::new(),
             GapLimits::default(),
         );
+    }
+
+    /// The runs of indices reported as missing are exactly those not already occupied by an
+    /// address row for the account and key scope, so that address generation over a range that is
+    /// already fully materialized derives nothing.
+    #[test]
+    fn missing_child_index_runs_reports_only_absent_indices() {
+        use core::ops::Range;
+
+        use rusqlite::named_params;
+
+        use crate::wallet::encoding::KeyScope;
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_uuid = st.test_account().unwrap().id();
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+        let idx = |i: u32| NonHardenedChildIndex::from_index(i).unwrap();
+        let runs = |range: Range<NonHardenedChildIndex>| {
+            super::missing_child_index_runs(&tx, account_id, TransparentKeyScope::EXTERNAL, &range)
+                .unwrap()
+                .into_iter()
+                .map(|r| (r.start.index(), r.end.index()))
+                .collect::<Vec<_>>()
+        };
+
+        // Account creation generates the external gap window `0..gap_limit`.
+        let gap_limit = GapLimits::default().external();
+        assert_eq!(runs(idx(0)..idx(gap_limit)), vec![]);
+
+        // Indices beyond the generated window are all missing.
+        assert_eq!(
+            runs(idx(0)..idx(gap_limit + 5)),
+            vec![(gap_limit, gap_limit + 5)]
+        );
+
+        // An empty or inverted range has no missing indices.
+        assert_eq!(runs(idx(0)..idx(0)), vec![]);
+        assert_eq!(runs(idx(5)..idx(2)), vec![]);
+
+        // A hole in the middle of the existing window is reported on its own.
+        tx.execute(
+            "DELETE FROM addresses WHERE transparent_child_index = 3 AND key_scope = :key_scope",
+            named_params![
+                ":key_scope": KeyScope::EXTERNAL.encode(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            runs(idx(0)..idx(gap_limit + 5)),
+            vec![(3, 4), (gap_limit, gap_limit + 5)]
+        );
+
+        // Rows belonging to a different key scope do not mask an external index.
+        assert_eq!(runs(idx(0)..idx(gap_limit)), vec![(3, 4)]);
+        assert_eq!(
+            runs(idx(0)..idx(GapLimits::default().internal())),
+            vec![(3, 4)],
+        );
+
+        tx.commit().unwrap();
+    }
+
+    /// Address generation over a range skips indices that already have rows, but a standalone
+    /// (`Foreign`) import in that range does not mask its index: the address is still derived, so
+    /// that the import is upgraded to its derived form. See [`super::store_address_range`].
+    #[test]
+    #[cfg(feature = "transparent-key-import")]
+    fn generate_address_range_derives_over_imported_receivers() {
+        use rusqlite::named_params;
+        use transparent::keys::IncomingViewingKey;
+        use zcash_keys::{
+            encoding::AddressCodec,
+            keys::{ReceiverRequirement::*, UnifiedAddressRequest},
+        };
+
+        use crate::wallet::encoding::KeyScope;
+
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().unwrap();
+        let account_uuid = account.id();
+        let uivk = account.uivk();
+        let network = *st.network();
+        let request = UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require);
+
+        // An index well beyond the generated gap window, so no derived row occupies it.
+        let child_index = NonHardenedChildIndex::from_index(100).unwrap();
+        let taddr = uivk
+            .transparent()
+            .as_ref()
+            .unwrap()
+            .derive_address(child_index)
+            .unwrap();
+        let taddr_enc = taddr.encode(&network);
+
+        let tx = st.wallet().db().conn.unchecked_transaction().unwrap();
+        let account_id = get_account_ref(&tx, account_uuid).unwrap();
+
+        // Import the receiver standalone, as `import_standalone_transparent_pubkeys` would.
+        tx.execute(
+            "INSERT INTO addresses
+                 (account_id, key_scope, address, cached_transparent_receiver_address,
+                  imported_transparent_receiver_pubkey, receiver_flags)
+             VALUES (:account_id, :foreign, :address, :taddr,
+                  X'020000000000000000000000000000000000000000000000000000000000000001', 1)",
+            named_params! {
+                ":account_id": account_id.0,
+                ":foreign": KeyScope::Foreign.encode(),
+                ":address": &taddr_enc,
+                ":taddr": &taddr_enc,
+            },
+        )
+        .unwrap();
+        let foreign_id = tx.last_insert_rowid();
+
+        // The `Foreign` row does not mask index 100 …
+        let missing = super::missing_child_index_runs(
+            &tx,
+            account_id,
+            TransparentKeyScope::EXTERNAL,
+            &(NonHardenedChildIndex::from_index(95).unwrap()
+                ..NonHardenedChildIndex::from_index(105).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].start.index(), 95);
+        assert_eq!(missing[0].end.index(), 105);
+
+        // … so generating that range upgrades it in place.
+        super::generate_address_range(
+            &tx,
+            &network,
+            account_id,
+            TransparentKeyScope::EXTERNAL,
+            request,
+            NonHardenedChildIndex::from_index(95).unwrap()
+                ..NonHardenedChildIndex::from_index(105).unwrap(),
+            false,
+        )
+        .unwrap();
+
+        let (id, key_scope, child_index_col): (i64, i64, Option<u32>) = tx
+            .query_row(
+                "SELECT id, key_scope, transparent_child_index
+                 FROM addresses WHERE cached_transparent_receiver_address = :taddr",
+                named_params! { ":taddr": &taddr_enc },
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(id, foreign_id, "upgraded in place, same id");
+        assert_eq!(key_scope, KeyScope::EXTERNAL.encode());
+        assert_eq!(child_index_col, Some(100));
+
+        // The whole range is now materialized, so a repeat generation derives nothing.
+        assert_eq!(
+            super::missing_child_index_runs(
+                &tx,
+                account_id,
+                TransparentKeyScope::EXTERNAL,
+                &(NonHardenedChildIndex::from_index(95).unwrap()
+                    ..NonHardenedChildIndex::from_index(105).unwrap()),
+            )
+            .unwrap()
+            .len(),
+            0
+        );
+
+        tx.commit().unwrap();
     }
 
     /// Deriving an address that already exists as a standalone (`Foreign`) import upgrades the

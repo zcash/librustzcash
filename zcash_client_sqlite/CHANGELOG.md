@@ -10,6 +10,16 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- Maintenance of the transparent address gap window no longer re-derives
+  indices at which the account already has an address for the key scope being
+  maintained; only the indices missing from the window are derived. This is not
+  observable in the contents of the wallet database, but it substantially
+  reduces the cost of scanning and enhancement for wallets configured with a
+  large transparent gap limit, where gap maintenance runs once per observed
+  transparent output or spend and previously re-derived the whole window each
+  time.
+
 ## [0.22.0-rc.6] - 2026-07-29
 
 ### Added
