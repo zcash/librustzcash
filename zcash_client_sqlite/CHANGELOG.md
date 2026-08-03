@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Changed
+- `WalletDb` implements the new `WalletWrite::expose_address_range` method,
+  exposing the whole range in a single database transaction and reading the
+  account and the chain tip height once for the range instead of once per
+  address. Exposing a deep range of addresses is substantially faster than the
+  equivalent sequence of `WalletWrite::get_address_for_index` calls.
+
 ## [0.22.0-rc.6] - 2026-07-29
 
 ### Added

@@ -1180,6 +1180,69 @@ where
     assert_eq!(query_height, h0);
 }
 
+/// Tests that [`WalletWrite::expose_address_range`] is equivalent to exposing each index of the
+/// range individually with [`WalletWrite::get_address_for_index`].
+pub fn expose_address_range<DSF>(ds_factory: DSF, cache: impl TestCache)
+where
+    DSF: DataStoreFactory,
+{
+    use transparent::keys::NonHardenedChildIndex;
+    use zcash_keys::keys::ReceiverRequirement::*;
+    use zip32::DiversifierIndex;
+
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(ds_factory)
+        .with_block_cache(cache)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_uuid = st.test_account().unwrap().id();
+    let request = UnifiedAddressRequest::unsafe_custom(Allow, Allow, Require);
+
+    let index = |i: u32| NonHardenedChildIndex::from_index(i).unwrap();
+    let range = index(5)..index(25);
+
+    let exposed = st
+        .wallet_mut()
+        .expose_address_range(account_uuid, range.clone(), request)
+        .unwrap();
+
+    // Every index in the range has a transparent receiver, so every one of them is returned, in
+    // ascending order.
+    assert_eq!(
+        exposed.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+        (5..25).map(index).collect::<Vec<_>>()
+    );
+
+    // Each address is the one that would have been exposed at that index individually. Exposing
+    // an address that has already been exposed at a different address for the same index is an
+    // error, so these calls also assert that the range was recorded as exposed.
+    for (i, address) in &exposed {
+        assert_eq!(
+            st.wallet_mut()
+                .get_address_for_index(account_uuid, DiversifierIndex::from(*i), request)
+                .unwrap()
+                .as_ref(),
+            Some(address)
+        );
+    }
+
+    // The transparent receivers of the exposed addresses are known to the wallet.
+    let external_taddrs = st
+        .wallet()
+        .get_transparent_receivers(account_uuid, false, true)
+        .unwrap();
+    for (i, address) in &exposed {
+        let taddr = address
+            .transparent()
+            .expect("a transparent receiver was required");
+        assert!(
+            external_taddrs.contains_key(taddr),
+            "the address exposed at index {i:?} is a known transparent receiver"
+        );
+    }
+}
+
 /// Builds a test 1-of-1 multisig redeem script from a single keypair.
 #[cfg(feature = "transparent-key-import")]
 fn build_test_redeem_script() -> (script::Redeem, secp256k1::SecretKey) {

@@ -3263,6 +3263,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn expose_address_range() {
+        zcash_client_backend::data_api::testing::transparent::expose_address_range(
+            TestDbFactory::default(),
+            BlockCache::new(),
+        );
+    }
+
     /// Deriving an address that already exists as a standalone (`Foreign`) import upgrades the
     /// existing row in place — same `id`, derived scope, import columns cleared — rather than
     /// inserting a duplicate row for the same transparent receiver, and any UTXO already

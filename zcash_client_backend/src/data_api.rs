@@ -3797,6 +3797,46 @@ pub trait WalletWrite:
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, <Self as WalletRead>::Error>;
 
+    /// Generates, persists, and marks as exposed the addresses of the specified account at each
+    /// transparent child index in the given range, returning them in ascending index order.
+    ///
+    /// This is equivalent to calling [`get_address_for_index`] once per index in the range, with
+    /// the diversifier index corresponding to each transparent child index, and discarding the
+    /// indices for which that method returns `Ok(None)`. Implementations may perform the whole
+    /// range as a single unit of work; the default implementation does not, and simply calls
+    /// [`get_address_for_index`] in a loop.
+    ///
+    /// The primary use for this method is to expose a deep range of addresses ahead of scanning,
+    /// so that a wallet that discovers transparent outputs by scanning blocks (rather than by
+    /// querying an address index) covers every address it has issued. Doing so one address at a
+    /// time can be prohibitively slow: an implementation that commits each address separately
+    /// performs a transaction per address, whereas an implementation of this method may commit
+    /// once for the entire range.
+    ///
+    /// # WARNINGS
+    ///
+    /// The warning on [`get_address_for_index`] concerning transparent receivers outside the
+    /// wallet's gap limit applies to every address produced by this method.
+    ///
+    /// [`get_address_for_index`]: Self::get_address_for_index
+    #[cfg(feature = "transparent-inputs")]
+    fn expose_address_range(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        range: Range<NonHardenedChildIndex>,
+        request: UnifiedAddressRequest,
+    ) -> Result<Vec<(NonHardenedChildIndex, UnifiedAddress)>, <Self as WalletRead>::Error> {
+        let mut result = vec![];
+        for index in transparent::keys::NonHardenedChildRange::from(range) {
+            if let Some(address) =
+                self.get_address_for_index(account, DiversifierIndex::from(index), request)?
+            {
+                result.push((index, address));
+            }
+        }
+        Ok(result)
+    }
+
     /// Updates the wallet's view of the blockchain.
     ///
     /// This method is used to provide the wallet with information about the state of the

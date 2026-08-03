@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::WalletWrite::expose_address_range`, which
+  exposes the addresses at a range of transparent child indices. It has a
+  default implementation in terms of
+  `WalletWrite::get_address_for_index`; backends that can perform the range as a
+  single unit of work should override it.
+- `zcash_client_backend::data_api::testing::transparent::expose_address_range`
+
 ## [0.24.0-rc.6] - 2026-07-29
 
 ### Added

@@ -1803,6 +1803,18 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
         self.transactionally(|wdb| wdb.get_address_for_index(account, diversifier_index, request))
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    fn expose_address_range(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        range: Range<NonHardenedChildIndex>,
+        request: UnifiedAddressRequest,
+    ) -> Result<Vec<(NonHardenedChildIndex, UnifiedAddress)>, <Self as WalletRead>::Error> {
+        // The whole range is exposed in a single transaction; exposing a deep range one
+        // transaction per address is dominated by the per-address commit.
+        self.transactionally(|wdb| wdb.expose_address_range(account, range, request))
+    }
+
     fn update_chain_tip(
         &mut self,
         tip_height: BlockHeight,
@@ -2212,6 +2224,50 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         } else {
             Err(SqliteClientError::AccountUnknown)
         }
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn expose_address_range(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        range: Range<NonHardenedChildIndex>,
+        request: UnifiedAddressRequest,
+    ) -> Result<Vec<(NonHardenedChildIndex, UnifiedAddress)>, <Self as WalletRead>::Error> {
+        use ::transparent::keys::NonHardenedChildRange;
+        use zcash_keys::keys::AddressGenerationError::*;
+
+        // The account (and with it the deserialization of its UIVK) and the chain tip height are
+        // read once for the whole range, instead of once per address as `get_address_for_index`
+        // must do.
+        let account = self
+            .get_account(account)?
+            .ok_or(SqliteClientError::AccountUnknown)?;
+        let chain_tip_height = wallet::chain_tip_height(self.conn.borrow())?;
+        let exposure_height = chain_tip_height.unwrap_or(account.birthday());
+
+        let mut result = vec![];
+        for index in NonHardenedChildRange::from(range) {
+            let diversifier_index = DiversifierIndex::from(index);
+            match account.uivk().address(diversifier_index, request) {
+                Ok(address) => {
+                    upsert_address(
+                        self.conn.borrow(),
+                        &self.params,
+                        account.internal_id(),
+                        diversifier_index,
+                        &address,
+                        Some(exposure_height),
+                        true,
+                    )?;
+
+                    result.push((index, address));
+                }
+                Err(InvalidTransparentChildIndex(_)) | Err(InvalidSaplingDiversifierIndex(_)) => (),
+                Err(e) => return Err(SqliteClientError::AddressGeneration(e)),
+            }
+        }
+
+        Ok(result)
     }
 
     fn update_chain_tip(
