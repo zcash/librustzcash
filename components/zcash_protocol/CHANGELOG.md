@@ -22,10 +22,10 @@ workspace.
   and is meant to be a column's default; it is distinct from the code for
   `Nonconforming`, which is a decision.
 - `zcash_protocol::zip318::{Zip318TxKind, Zip318Classification, Zip318Evidence,
-  DestinationOutput, OutputOwner, classify}`, which recognize the ZIP 318
-  transaction shapes from evidence a caller gathers. `classify` names a
-  conformance class and never a provenance, and is monotone in the evidence, so
-  a decision it reaches is never later contradicted.
+  classify}`, which recognize the ZIP 318 transaction shapes from evidence a
+  caller gathers. `classify` names a conformance class and never a provenance,
+  and is monotone in the evidence, so a decision it reaches is never later
+  contradicted.
 
 ## [0.10.3] - 2026-07-29
 
