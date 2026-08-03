@@ -109,6 +109,18 @@ pub const EXPIRY_MODULUS: u32 = 34_560;
 /// keeps between one and two [`EXPIRY_MODULUS`] periods of validity.
 pub const EXPIRY_WINDOW: u32 = 2 * EXPIRY_MODULUS;
 
+/// Source-pool (Orchard) actions in a canonical [ZIP 318] pool crossing: the spend and its change,
+/// or a padding dummy when the note's value exactly covers the crossing and its fee.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub const CROSSING_SOURCE_ACTIONS: usize = 2;
+
+/// Destination-pool (Ironwood) actions in a canonical [ZIP 318] pool crossing: the single
+/// canonical output, unpadded.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub const CROSSING_DESTINATION_ACTIONS: usize = 1;
+
 /// Returns the largest `{1, 2, 5} * 10^k` value (a multiple of the power-of-radix `floor`) not
 /// exceeding `hi`, or `0` if `hi < floor`.
 ///
@@ -378,18 +390,6 @@ pub trait PoolMigrationConstants {
         expiry >= window && expiry % modulus == 0
     }
 }
-
-/// Source-pool (Orchard) actions in a canonical [ZIP 318] pool crossing: the spend and its change,
-/// or a padding dummy when the note's value exactly covers the crossing and its fee.
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const CROSSING_SOURCE_ACTIONS: usize = 2;
-
-/// Destination-pool (Ironwood) actions in a canonical [ZIP 318] pool crossing: the single
-/// canonical output, unpadded.
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const CROSSING_DESTINATION_ACTIONS: usize = 1;
 
 /// The shape a [ZIP 318]-conforming transaction has.
 ///
