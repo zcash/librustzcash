@@ -44,13 +44,15 @@ use zcash_client_backend::data_api::{
 };
 use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_primitives::transaction::builder::cached_orchard_proving_key;
-use zcash_protocol::{ShieldedPool, consensus::BlockHeight, value::Zatoshis};
+use zcash_protocol::{ShieldedPool, TxId, consensus::BlockHeight, value::Zatoshis};
 
 use crate::build::{AccountDerivation, sign_pczt};
 use crate::engine::{
-    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransferId,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransaction,
+    MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ProveFailure,
 };
+use crate::pczt_spends::RealSpendError;
+use crate::satisfiability::{ReorgSettleDepth, StepSatisfiability};
 use crate::scheduling::{AnchorBucketInterval, DelayDistribution, SchedulingParams};
 
 /// A failure of the wallet-backed migration adapter. Parameterized by the error types of the two
@@ -304,6 +306,34 @@ where
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         self.store.get_migration().map_err(Error::Store)
     }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.store
+            .check_step_satisfiability(tx, settle)
+            .map_err(Error::Store)
+    }
+
+    /// Answered from the WALLET, not the store: inclusion is what the wallet's scan discovers, and
+    /// this adapter is the seam that has one. The fully-scanned bound is applied here rather than
+    /// left to `get_tx_height` — which reports a mined height as soon as the wallet learns it,
+    /// including ahead of scanning — so a promotion cannot rest on a block outside the region a
+    /// rollback would truncate. A wallet that has scanned nothing reports nothing mined.
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        let Some(mined) = self.wallet.get_tx_height(txid).map_err(Error::WalletRead)? else {
+            return Ok(None);
+        };
+        Ok(self
+            .wallet
+            .block_fully_scanned()
+            .map_err(Error::WalletRead)?
+            .map(|meta| meta.block_height())
+            .filter(|scanned| mined <= *scanned)
+            .map(|_| mined))
+    }
 }
 
 impl<'a, W, St> PoolMigrationWrite for WalletMigration<'a, W, St>
@@ -325,6 +355,19 @@ where
             .update_transaction(id, state)
             .map_err(Error::Store)
     }
+
+    /// Delegated to the underlying store, whose implementation owns the wallet-side record (for
+    /// `zcash_client_sqlite`'s store, the atomic finalize-and-persist into the wallet's own
+    /// transaction tables).
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: crate::engine::ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        self.store
+            .store_proved_transaction(state, proven)
+            .map_err(Error::Store)
+    }
 }
 
 /// Why proving a migration transaction through the wallet-backed prover failed. `TE` is the
@@ -333,20 +376,21 @@ where
 /// ([`WalletRead::Error`]).
 #[derive(Debug)]
 pub enum WalletProveError<TE, NE, RE> {
-    /// The PCZT has no real Orchard spend whose witness is still deferred. A migration transfer
-    /// spends one funding note and a preparation transaction one or more, so the Orchard bundle
-    /// carries at least one action with an absent witness (the fabricated dummy spends keep their
-    /// own); none means the PCZT is not a deferred-anchor migration transaction awaiting proof.
-    NoRealSpend,
+    /// The PCZT presents no well-formed set of deferred-witness Orchard spends, so it is not a
+    /// deferred-anchor migration transaction awaiting proof. See [`RealSpendError`].
+    RealSpends(RealSpendError),
     /// No spendable Orchard note in the wallet matches a spend's revealed nullifier, so its tree
     /// position is unknown: the note the transaction spends is not among the account's unspent
     /// notes (it was never scanned, or has already been spent).
     UnknownSpentNote(Nullifier),
-    /// A deferred-witness Orchard spend's nullifier bytes are not a valid Orchard nullifier, so the
-    /// PCZT is not a well-formed migration transaction awaiting proof.
-    MalformedNullifier([u8; 32]),
     /// Looking up the note-selection target height (the chain tip) through the wallet failed.
     TargetHeight(RE),
+    /// The wallet's fully-scanned height could not be read, so a spend absent from the account's
+    /// unspent notes could not be reported as [`ProveFailure::InputNotAvailable`]: that absence is
+    /// only meaningful relative to the chain state it was observed against, and an observation
+    /// with no honest backing height must not reach the engine. Reported only where the missing
+    /// height actually blocked the classification.
+    ScannedHeight(RE),
     /// The wallet knows of no block data, so the note-selection target height (the chain tip) is
     /// unavailable.
     ChainTipUnknown,
@@ -384,8 +428,8 @@ impl<TE, NE, RE> From<ShardTreeError<TE>> for WalletProveError<TE, NE, RE> {
 impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> fmt::Display for WalletProveError<TE, NE, RE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WalletProveError::NoRealSpend => {
-                f.write_str("the PCZT has no deferred-witness Orchard spend to prove")
+            WalletProveError::RealSpends(e) => {
+                write!(f, "the PCZT has no spends to prove: {e}")
             }
             WalletProveError::UnknownSpentNote(nf) => {
                 write!(
@@ -393,16 +437,18 @@ impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> fmt::Display for WalletProv
                     "no spendable Orchard note matches spend nullifier {nf:?}"
                 )
             }
-            WalletProveError::MalformedNullifier(bytes) => {
-                write!(
-                    f,
-                    "a spend's nullifier bytes are not a valid nullifier: {bytes:?}"
-                )
-            }
             WalletProveError::TargetHeight(e) => {
                 write!(
                     f,
                     "looking up the note-selection target height failed: {e:?}"
+                )
+            }
+            WalletProveError::ScannedHeight(e) => {
+                write!(
+                    f,
+                    "a spend's note is not among the account's unspent notes, and the wallet's \
+                     fully-scanned height — the chain state that observation would rest on — could \
+                     not be read: {e:?}"
                 )
             }
             WalletProveError::ChainTipUnknown => {
@@ -511,22 +557,8 @@ where
     ) -> Result<::pczt::Pczt, ProverError<W>> {
         // Every Orchard action whose witness is still deferred is a real spend to witness; the padded
         // dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
-        let real_spends: Vec<(usize, Nullifier)> = pczt
-            .orchard()
-            .actions()
-            .iter()
-            .enumerate()
-            .filter(|(_, action)| action.spend().witness().is_none())
-            .map(|(index, action)| {
-                let bytes = action.spend().nullifier();
-                Option::<Nullifier>::from(Nullifier::from_bytes(bytes))
-                    .map(|nf| (index, nf))
-                    .ok_or(WalletProveError::MalformedNullifier(*bytes))
-            })
-            .collect::<Result<_, _>>()?;
-        if real_spends.is_empty() {
-            return Err(WalletProveError::NoRealSpend);
-        }
+        let real_spends: Vec<(usize, Nullifier)> = crate::pczt_spends::real_spend_nullifiers(&pczt)
+            .map_err(WalletProveError::RealSpends)?;
 
         // Locate each spend in the wallet's note store: map every unspent Orchard note's nullifier
         // (recomputed under the account FVK) to its commitment-tree position, then look up each spend.
@@ -642,6 +674,54 @@ where
         };
         Ok(proven.finish())
     }
+
+    /// [`prove_orchard`](Self::prove_orchard) with its "no unspent note matches this spend"
+    /// failure lifted into the engine's typed [`ProveFailure::InputNotAvailable`], the shared body
+    /// of both [`MigrationProver`] methods.
+    ///
+    /// The observation the engine needs is MEMBERSHIP — the spend's note is not among the
+    /// account's unspent notes — together with the chain state that absence rests on. The honest
+    /// backing height is the wallet's FULLY-SCANNED height ([`WalletRead::block_fully_scanned`]),
+    /// not the chain tip: the tip may run far ahead of what has been trial-decrypted, and the
+    /// engine reads the height as "everything at or below this was scanned" when it decides
+    /// whether an unmined-input explanation is still open. It is read BEFORE the note lookup it
+    /// backs, so it can only understate the scan the observation actually rests on — understating
+    /// costs a retry, whereas overstating could mark a live transaction dead. On the
+    /// reorg-truncation side the trade runs the other way — an understated stamp clears LESS
+    /// readily, retaining a mark whose evidence was rolled back — but reaching that case needs the
+    /// wallet to scan new blocks between two adjacent queries of one prove call, the spend to land
+    /// exactly in that window, and the window to reorg out, whereas an overstated height is the
+    /// NORMAL state of a syncing wallet; the rare stale mark is recoverable by a deeper truncation,
+    /// a false death is not.
+    ///
+    /// A wallet that reports no fully-scanned height at all has scanned nothing, so it can back no
+    /// observation; the membership failure then surfaces unclassified as
+    /// [`ProveFailure::Other`], and a wallet whose height lookup FAILED reports that failure
+    /// ([`WalletProveError::ScannedHeight`]) — but only in this corner, since a proof that
+    /// succeeded never needed the height.
+    fn prove_orchard_classified(
+        &mut self,
+        pczt: ::pczt::Pczt,
+        anchor_height: BlockHeight,
+    ) -> Result<::pczt::Pczt, ProveFailure<ProverError<W>>> {
+        let as_of = self
+            .wallet
+            .block_fully_scanned()
+            .map(|meta| meta.map(|m| m.block_height()));
+        self.prove_orchard(pczt, anchor_height)
+            .map_err(|e| match (e, as_of) {
+                (WalletProveError::UnknownSpentNote(nf), Ok(Some(as_of))) => {
+                    ProveFailure::InputNotAvailable {
+                        nullifier: nf.to_bytes(),
+                        as_of,
+                    }
+                }
+                (WalletProveError::UnknownSpentNote(_), Err(e)) => {
+                    ProveFailure::Other(WalletProveError::ScannedHeight(e))
+                }
+                (e, _) => ProveFailure::Other(e),
+            })
+    }
 }
 
 impl<'a, W> MigrationProver for WalletMigrationProver<'a, W>
@@ -655,16 +735,16 @@ where
         &mut self,
         pczt: ::pczt::Pczt,
         anchor_boundary: BlockHeight,
-    ) -> Result<::pczt::Pczt, Self::Error> {
-        self.prove_orchard(pczt, anchor_boundary)
+    ) -> Result<::pczt::Pczt, ProveFailure<Self::Error>> {
+        self.prove_orchard_classified(pczt, anchor_boundary)
     }
 
     fn prove_preparation(
         &mut self,
         pczt: ::pczt::Pczt,
         anchor: BlockHeight,
-    ) -> Result<::pczt::Pczt, Self::Error> {
-        self.prove_orchard(pczt, anchor)
+    ) -> Result<::pczt::Pczt, ProveFailure<Self::Error>> {
+        self.prove_orchard_classified(pczt, anchor)
     }
 
     /// The grid the wallet this prover reads its commitment trees from currently retains anchor

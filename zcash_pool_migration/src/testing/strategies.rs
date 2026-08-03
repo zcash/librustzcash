@@ -10,6 +10,7 @@ use core::num::NonZeroU32;
 use proptest::prelude::*;
 
 use zcash_primitives::transaction::testing::arb_txid;
+use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::consensus::testing::arb_block_height;
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::value::testing::arb_zatoshis;
@@ -20,6 +21,7 @@ use crate::engine::{
     MigrationTxState,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
+use crate::satisfiability::{ReplanThreshold, UnsatisfiableKind};
 use crate::scheduling::AnchorBucketInterval;
 use crate::signing_rounds::{PlannedTx, SigningRoundBudget};
 
@@ -138,15 +140,16 @@ pub fn arb_migration_tx_kind() -> impl Strategy<Value = MigrationTxKind> {
 }
 
 /// An arbitrary [`MigrationTxState`], covering every variant (including the
-/// [`Broadcast`](MigrationTxState::Broadcast) txid and [`Mined`](MigrationTxState::Mined) height
-/// payloads).
+/// [`Broadcast`](MigrationTxState::Broadcast) txid and the [`Mined`](MigrationTxState::Mined) txid
+/// and height payloads).
 pub fn arb_migration_tx_state() -> impl Strategy<Value = MigrationTxState> {
     prop_oneof![
         Just(MigrationTxState::AwaitingSignature),
         Just(MigrationTxState::Signed),
         Just(MigrationTxState::Proved),
         arb_txid().prop_map(|txid| MigrationTxState::Broadcast { txid }),
-        arb_block_height().prop_map(|height| MigrationTxState::Mined { height }),
+        (arb_txid(), arb_block_height())
+            .prop_map(|(txid, height)| MigrationTxState::Mined { txid, height }),
     ]
 }
 
@@ -158,6 +161,7 @@ pub fn arb_migration_status() -> impl Strategy<Value = MigrationStatus> {
         Just(MigrationStatus::InProgress),
         Just(MigrationStatus::Complete),
         Just(MigrationStatus::Failed),
+        Just(MigrationStatus::Superseded),
     ]
 }
 
@@ -168,9 +172,62 @@ pub fn arb_lock_owner() -> impl Strategy<Value = Option<[u8; 32]>> {
     prop::option::of(any::<[u8; 32]>())
 }
 
-/// An arbitrary [`MigrationTransaction`], built through [`MigrationTransaction::from_parts`]. Its id
-/// is arbitrary here; [`arb_migration_state`] re-keys the transactions it holds so their ids stay
-/// unique within a migration.
+/// An arbitrary lifecycle state paired with a real-spend nullifier cache the state ADMITS.
+///
+/// The two are not independent. An empty cache on a non-mined transaction is corruption, not a
+/// value a store must round-trip: it would read as "no inputs to observe" to the unsatisfiability
+/// machinery, silently exempting the transaction from detection, and every read path treats it as
+/// a loud error rather than an answer. Generating it would hold stores to round-tripping a shape
+/// they are required to reject. A MINED transaction is the one exemption — the schema migration
+/// that introduced the cache leaves such rows empty, because a mined transaction's disposition no
+/// longer turns on its inputs — so the empty cache is generated there and only there.
+pub fn arb_state_and_spend_nullifiers() -> impl Strategy<Value = (MigrationTxState, Vec<[u8; 32]>)>
+{
+    arb_migration_tx_state().prop_flat_map(|state| {
+        let admits_empty = matches!(state, MigrationTxState::Mined { .. });
+        let count = if admits_empty { 0..3usize } else { 1..3usize };
+        (
+            Just(state),
+            prop::collection::vec(prop::array::uniform32(any::<u8>()), count),
+        )
+    })
+}
+
+/// An arbitrary [`UnsatisfiableKind`], covering every variant — the directly observed causes and
+/// the [`Inherited`](UnsatisfiableKind::Inherited) mark the dependency closure applies.
+pub fn arb_unsatisfiable_kind() -> impl Strategy<Value = UnsatisfiableKind> {
+    prop_oneof![
+        Just(UnsatisfiableKind::InputsSpent),
+        Just(UnsatisfiableKind::InputsInvalidated),
+        Just(UnsatisfiableKind::AnchorInvalidated),
+        Just(UnsatisfiableKind::Inherited),
+    ]
+}
+
+/// An arbitrary unsatisfiability mark: the stamp-and-kind pair a [`MigrationTransaction`] carries,
+/// or `None` for a transaction under no such determination. A store persisting the halves
+/// separately is required to REJECT a row holding one without the other rather than round-trip it,
+/// so no half-written mark is generated here.
+pub fn arb_unsatisfiability_mark() -> impl Strategy<Value = Option<(BlockHeight, UnsatisfiableKind)>>
+{
+    prop::option::of((arb_block_height(), arb_unsatisfiable_kind()))
+}
+
+/// An arbitrary broadcast-failure report: the chain tip an application observed from a node that
+/// rejected a broadcast, or `None` for a transaction under no outstanding rejection.
+///
+/// Drawn INDEPENDENTLY of the unsatisfiability mark, because the two are independent: a rejection
+/// the wallet cannot yet explain carries no mark, an adjudicated one carries a mark and no report,
+/// and a store must round-trip every combination it is handed.
+pub fn arb_broadcast_failure() -> impl Strategy<Value = Option<BlockHeight>> {
+    prop::option::of(arb_block_height())
+}
+
+/// An arbitrary [`MigrationTransaction`], built through [`MigrationTransaction::from_parts`]. Its
+/// id is arbitrary here; [`arb_migration_state`] re-keys the transactions it holds so their ids
+/// stay unique within a migration. Its lifecycle state and nullifier cache are drawn TOGETHER (see
+/// [`arb_state_and_spend_nullifiers`]), because not every pairing of the two is a value a store is
+/// required to round-trip.
 pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction> {
     (
         arb_migration_transfer_id(),
@@ -180,8 +237,11 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
         arb_block_height(),
         arb_block_height(),
         prop::option::of(arb_block_height()),
-        arb_migration_tx_state(),
+        arb_txid(),
+        arb_state_and_spend_nullifiers(),
         arb_lock_owner(),
+        arb_unsatisfiability_mark(),
+        arb_broadcast_failure(),
     )
         .prop_map(
             |(
@@ -192,9 +252,23 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                 scheduled_height,
                 expiry_height,
                 anchor_boundary,
-                state,
+                txid,
+                (drawn_state, spend_nullifiers),
                 lock_owner,
+                unsatisfiable,
+                broadcast_failure_at,
             )| {
+                // A lifecycle state that carries a txid carries THIS transaction's: the row's id
+                // and the copy the state holds are one value, written to one column, so a store is
+                // not asked to round-trip a pairing it cannot represent. Same reason
+                // `arb_state_and_spend_nullifiers` draws its two together.
+                let state = match drawn_state {
+                    MigrationTxState::Broadcast { .. } => MigrationTxState::Broadcast { txid },
+                    MigrationTxState::Mined { height, .. } => {
+                        MigrationTxState::Mined { txid, height }
+                    }
+                    other => other,
+                };
                 MigrationTransaction::from_parts(
                     id,
                     kind,
@@ -203,8 +277,12 @@ pub fn arb_migration_transaction() -> impl Strategy<Value = MigrationTransaction
                     scheduled_height,
                     expiry_height,
                     anchor_boundary,
+                    txid,
                     state,
                     lock_owner,
+                    unsatisfiable,
+                    spend_nullifiers,
+                    broadcast_failure_at,
                 )
             },
         )
@@ -221,11 +299,17 @@ pub fn arb_anchor_bucket_interval() -> impl Strategy<Value = AnchorBucketInterva
     ]
 }
 
+/// An arbitrary [`ReplanThreshold`]: any valid percent, so a store is exercised across the whole
+/// stamped-policy range and not just the [`ReplanThreshold::DEFAULT`].
+pub fn arb_replan_threshold() -> impl Strategy<Value = ReplanThreshold> {
+    (0u8..=100).prop_map(|p| ReplanThreshold::new(p).expect("<=100"))
+}
+
 /// An arbitrary whole [`MigrationState`], built through [`MigrationState::from_parts`]: a status, a
 /// denomination plan (from which the funding-note values derive), a preparation plan, a small set of
 /// transactions re-keyed with sequential [`MigrationTransferId`]s (so their row keys are unique, as a
-/// store requires), and the anchor bucket grid it was committed under. Generated values are
-/// self-consistent enough to persist and read back unchanged.
+/// store requires), the anchor bucket grid it was committed under, and the replan threshold it was
+/// stamped with. Generated values are self-consistent enough to persist and read back unchanged.
 pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
     (
         arb_migration_status(),
@@ -233,9 +317,17 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
         arb_preparation_plan(),
         prop::collection::vec(arb_migration_transaction(), 0..6),
         arb_anchor_bucket_interval(),
+        arb_replan_threshold(),
     )
         .prop_map(
-            |(status, denominations, preparation, txs, anchor_bucket_interval)| {
+            |(
+                status,
+                denominations,
+                preparation,
+                txs,
+                anchor_bucket_interval,
+                replan_threshold,
+            )| {
                 // Re-key the transactions with sequential ids so their row keys are unique; a store
                 // keys transaction rows by id and returns them in id order.
                 let transactions = txs
@@ -250,8 +342,12 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                             tx.scheduled_height(),
                             tx.expiry_height(),
                             tx.anchor_boundary(),
+                            tx.txid(),
                             tx.state(),
                             tx.lock_owner(),
+                            tx.unsatisfiable(),
+                            tx.spend_nullifiers().clone(),
+                            tx.broadcast_failure_at(),
                         )
                     })
                     .collect();
@@ -261,6 +357,7 @@ pub fn arb_migration_state() -> impl Strategy<Value = MigrationState> {
                     preparation,
                     transactions,
                     anchor_bucket_interval,
+                    replan_threshold,
                 )
             },
         )

@@ -622,6 +622,41 @@ impl<Cache, DataStore: WalletTest, Network: consensus::Parameters>
     }
 }
 
+impl<Cache, DataStore, Network> TestState<Cache, DataStore, Network>
+where
+    DataStore: WalletTest + WalletWrite,
+    Network: consensus::Parameters,
+{
+    /// Creates a FURTHER account under the test seed, at the test account's birthday, and returns
+    /// its id and spending key.
+    ///
+    /// The wallet assigns the next unused ZIP 32 account index, so this is a sibling of the
+    /// account [`TestBuilder`] configured — the shape a test needs to check that some answer is
+    /// scoped to the account it was asked of, rather than to the wallet.
+    ///
+    /// Create every account a test needs BEFORE scanning anything: account creation adjusts the
+    /// scan queue, which clears the wallet's fully-scanned height.
+    pub fn create_account_from_test_seed(
+        &mut self,
+        account_name: &str,
+    ) -> (<DataStore as WalletRead>::AccountId, UnifiedSpendingKey) {
+        let seed = SecretVec::new(
+            self.test_seed()
+                .expect("the test state was built with a seed")
+                .expose_secret()
+                .clone(),
+        );
+        let birthday = self
+            .test_account()
+            .expect("the test state was built with an account")
+            .birthday()
+            .clone();
+        self.wallet_mut()
+            .create_account(account_name, &seed, &birthday, None)
+            .expect("creates a further account under the test seed")
+    }
+}
+
 impl<Cache: TestCache, DataStore, Network> TestState<Cache, DataStore, Network>
 where
     Network: consensus::Parameters,
@@ -1034,6 +1069,40 @@ where
             .put_orchard_subtree_roots(orchard_start_index, orchard_roots)?;
 
         Ok(())
+    }
+
+    /// Generates `n` empty blocks, scans each, and returns the wallet's resulting fully-scanned
+    /// height.
+    ///
+    /// This is the "let the chain advance" step of a test that needs the scanned region to reach a
+    /// chosen depth above some earlier height — an anchor boundary a fixed number of blocks below
+    /// the tip, say — with none of the intervening blocks carrying wallet-relevant data.
+    pub fn generate_and_scan_empty_blocks(&mut self, n: usize) -> BlockHeight {
+        for _ in 0..n {
+            let (height, _) = self.generate_empty_block();
+            self.scan_cached_blocks(height, 1);
+        }
+        self.wallet()
+            .block_fully_scanned()
+            .expect("the wallet reports its fully-scanned block")
+            .expect("the wallet is fully scanned")
+            .block_height()
+    }
+
+    /// The root of the wallet's own Orchard note commitment tree at the checkpoint `height`, as an
+    /// anchor: the value a transaction proved against that height would have installed.
+    ///
+    /// `None` when the tree holds no checkpoint there; the tree's own error when it holds one but
+    /// cannot complete a root over the shard data it retains.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_anchor_at(
+        &mut self,
+        height: BlockHeight,
+    ) -> Result<Option<::orchard::Anchor>, ShardTreeError<<DbT as WalletCommitmentTrees>::Error>>
+    {
+        self.wallet_mut()
+            .with_orchard_tree_mut(|tree| tree.root_at_checkpoint_id(&height))
+            .map(|root| root.map(::orchard::Anchor::from))
     }
 }
 

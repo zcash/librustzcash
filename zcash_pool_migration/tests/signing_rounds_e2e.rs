@@ -35,6 +35,7 @@ use zcash_pool_migration::{
         MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
         UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
     },
+    satisfiability::ReplanThreshold,
     signing_rounds::{MinRounds, NextFit, SigningRoundBudget},
 };
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network};
@@ -120,6 +121,7 @@ fn keystone_external_signing_end_to_end() {
         &mut backend,
         &plan,
         &mut rng,
+        ReplanThreshold::DEFAULT,
     )
     .expect("builds the migration unsigned");
     assert_eq!(unsigned.len(), plan.total_transactions());

@@ -107,15 +107,14 @@ impl TestDb {
         &mut self.wallet_db
     }
 
-    // Used only by this crate's own `#[cfg(test)]` tests, not by the harness exposed under
-    // `test-dependencies`, so it is dead in a non-test `test-dependencies` build.
-    #[allow(dead_code)]
-    pub(crate) fn conn(&self) -> &Connection {
+    /// The wallet database's own SQLite connection, over which a sibling store (a
+    /// `pool_migration` store, say) is opened.
+    pub fn conn(&self) -> &Connection {
         &self.wallet_db.conn
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+    /// The wallet database's own SQLite connection, mutably. See [`Self::conn`].
+    pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.wallet_db.conn
     }
 

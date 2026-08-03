@@ -22,6 +22,9 @@
 //! [`MigrationCrypto`]: zcash_pool_migration::engine::MigrationCrypto
 //! [`zcash_client_memory`]: https://docs.rs/zcash_client_memory
 
+use core::cell::Cell;
+use std::collections::BTreeMap;
+
 use incrementalmerkletree::{Hashable, Level};
 use orchard::keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey};
 use orchard::note::{ExtractedNoteCommitment, Note, NoteVersion, RandomSeed, Rho};
@@ -30,6 +33,7 @@ use orchard::value::NoteValue;
 use orchard::{Anchor, NOTE_COMMITMENT_TREE_DEPTH};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::Zatoshis;
@@ -37,8 +41,9 @@ use zcash_protocol::value::Zatoshis;
 use zcash_pool_migration::build::{AccountDerivation, sign_pczt};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationCrypto, MigrationState, MigrationTransaction, MigrationTransferId,
-    MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ProvedTransaction,
 };
+use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
 use zcash_pool_migration::scheduling::SchedulingParams;
 
 /// A post-NU6.3 height (past the regtest NU6.3 activation) at which the migration transactions are
@@ -224,6 +229,11 @@ pub fn shared_anchor_witnesses(
 /// untouched. The engine's [`MigrationState`] keeps its transactions behind read-only accessors, so
 /// an external test backend advances one transaction's lifecycle by reconstructing the state from
 /// its public parts.
+///
+/// Every other part is carried across verbatim, including the determinations a transaction row
+/// carries (its unsatisfiability mark, its broadcast-failure report): a store advancing a
+/// lifecycle state records exactly that, and dropping a field here would silently erase a
+/// determination the engine is relying on.
 fn set_transaction_state(
     stored: &mut MigrationState,
     id: MigrationTransferId,
@@ -242,8 +252,12 @@ fn set_transaction_state(
                     t.scheduled_height(),
                     t.expiry_height(),
                     t.anchor_boundary(),
+                    t.txid(),
                     state,
                     t.lock_owner(),
+                    t.unsatisfiable(),
+                    t.spend_nullifiers().clone(),
+                    t.broadcast_failure_at(),
                 )
             } else {
                 t.clone()
@@ -256,6 +270,7 @@ fn set_transaction_state(
         stored.preparation().clone(),
         transactions,
         stored.anchor_bucket_interval(),
+        stored.replan_threshold(),
     );
 }
 
@@ -267,6 +282,18 @@ pub struct MockBackend {
     tip: BlockHeight,
     stored: Option<MigrationState>,
     sched_params: SchedulingParams,
+    /// Configured per-transaction answers for
+    /// [`check_step_satisfiability`](PoolMigrationRead::check_step_satisfiability); a transaction
+    /// with no entry answers `Satisfiable` at the mock's chain tip.
+    pub satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
+    /// How many times `check_step_satisfiability` has been called, for tests asserting that a
+    /// consumer queries the oracle lazily.
+    pub satisfiability_queries: Cell<usize>,
+    /// Configured mined heights by transaction id, for
+    /// [`mined_height`](PoolMigrationRead::mined_height): a txid with no entry is not observed
+    /// mined. The engine's in-flight sweep promotes a broadcast transaction listed here, so a test
+    /// models mining by adding its txid rather than by calling `mark_mined`.
+    pub mined: BTreeMap<TxId, BlockHeight>,
 }
 
 impl MockBackend {
@@ -281,6 +308,9 @@ impl MockBackend {
             tip: BlockHeight::from_u32(tip),
             stored: None,
             sched_params: SchedulingParams::ZIP_318,
+            satisfiability: BTreeMap::new(),
+            satisfiability_queries: Cell::new(0),
+            mined: BTreeMap::new(),
         }
     }
 
@@ -315,6 +345,30 @@ impl PoolMigrationRead for MockBackend {
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         Ok(self.stored.clone())
     }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        _settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.satisfiability_queries
+            .set(self.satisfiability_queries.get() + 1);
+        // The empty-cache-is-corruption contract cannot be honored here: this mock's `Error` is
+        // `Infallible`, so there is no error to surface. The mock answers the configured value
+        // (or `Satisfiable` at its tip) regardless; tests that need the corruption path use the
+        // SQLite implementation.
+        Ok(self
+            .satisfiability
+            .get(&tx.id())
+            .cloned()
+            .unwrap_or(StepSatisfiability::Satisfiable {
+                as_of_height: self.tip,
+            }))
+    }
+
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        Ok(self.mined.get(&txid).copied())
+    }
 }
 
 impl PoolMigrationWrite for MockBackend {
@@ -333,7 +387,22 @@ impl PoolMigrationWrite for MockBackend {
         }
         Ok(())
     }
+
+    /// The contract's no-wallet-tables form: this mock maintains no wallet-level transaction
+    /// records, so it applies the proof to the state and persists that alone.
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        proven.apply(state);
+        self.replace_migration(state)
+    }
 }
+
+/// The fixed chain-tip height [`CommitMock`] reports (and the height its default
+/// satisfiability answers rest on).
+const COMMIT_MOCK_TIP: u32 = 2_000_000;
 
 /// A wallet mock holding the account's key and its spendable notes' PLAINTEXTS, nothing more: with
 /// anchors and witnesses deferred to proving time (ZIP 374), building and signing an entire
@@ -353,6 +422,18 @@ pub struct CommitMock {
     pub account_derivation: Option<AccountDerivation>,
     /// The in-memory migration state (`None` until a migration is committed).
     pub stored: Option<MigrationState>,
+    /// Configured per-transaction answers for
+    /// [`check_step_satisfiability`](PoolMigrationRead::check_step_satisfiability); a transaction
+    /// with no entry answers `Satisfiable` at the mock's chain tip.
+    pub satisfiability: BTreeMap<MigrationTransferId, StepSatisfiability>,
+    /// How many times `check_step_satisfiability` has been called, for tests asserting that a
+    /// consumer queries the oracle lazily.
+    pub satisfiability_queries: Cell<usize>,
+    /// Configured mined heights by transaction id, for
+    /// [`mined_height`](PoolMigrationRead::mined_height): a txid with no entry is not observed
+    /// mined. The engine's in-flight sweep promotes a broadcast transaction listed here, so a test
+    /// models mining by adding its txid rather than by calling `mark_mined`.
+    pub mined: BTreeMap<TxId, BlockHeight>,
     /// The scheduling parameters this backend reports to the engine.
     sched_params: SchedulingParams,
 }
@@ -373,6 +454,9 @@ impl CommitMock {
             ask: SpendAuthorizingKey::from(&sk),
             account_derivation: Some(account_derivation(seed)),
             stored: None,
+            satisfiability: BTreeMap::new(),
+            satisfiability_queries: Cell::new(0),
+            mined: BTreeMap::new(),
             sched_params: SchedulingParams::ZIP_318,
         }
     }
@@ -405,7 +489,7 @@ impl MigrationBackend for CommitMock {
     }
 
     fn chain_tip_height(&self) -> Result<BlockHeight, Self::Error> {
-        Ok(BlockHeight::from_u32(2_000_000))
+        Ok(BlockHeight::from_u32(COMMIT_MOCK_TIP))
     }
 
     fn scheduling_params(&self) -> SchedulingParams {
@@ -418,6 +502,30 @@ impl PoolMigrationRead for CommitMock {
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
         Ok(self.stored.clone())
+    }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        _settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.satisfiability_queries
+            .set(self.satisfiability_queries.get() + 1);
+        // The empty-cache-is-corruption contract cannot be honored here: this mock's `Error` is
+        // `Infallible`, so there is no error to surface. The mock answers the configured value
+        // (or `Satisfiable` at its tip) regardless; tests that need the corruption path use the
+        // SQLite implementation.
+        Ok(self
+            .satisfiability
+            .get(&tx.id())
+            .cloned()
+            .unwrap_or(StepSatisfiability::Satisfiable {
+                as_of_height: BlockHeight::from_u32(COMMIT_MOCK_TIP),
+            }))
+    }
+
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        Ok(self.mined.get(&txid).copied())
     }
 }
 
@@ -436,6 +544,17 @@ impl PoolMigrationWrite for CommitMock {
             set_transaction_state(stored, id, state);
         }
         Ok(())
+    }
+
+    /// The contract's no-wallet-tables form: this mock maintains no wallet-level transaction
+    /// records, so it applies the proof to the state and persists that alone.
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        proven.apply(state);
+        self.replace_migration(state)
     }
 }
 

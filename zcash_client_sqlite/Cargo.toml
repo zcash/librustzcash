@@ -91,6 +91,7 @@ regex = { workspace = true }
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
 maybe-rayon.workspace = true
+pczt.workspace = true
 rand_core.workspace = true
 rand_distr.workspace = true
 rand.workspace = true
@@ -150,6 +151,11 @@ orchard = [
     "zcash_client_backend/orchard",
     "zcash_keys/orchard",
     "zcash_pool_migration/wallet",
+    # The pool-migration store finalizes a proved migration PCZT into a `Transaction` when it
+    # persists it to the wallet's transaction tables (`PoolMigrations::store_proved_transaction`).
+    "pczt/orchard",
+    "pczt/spend-finalizer",
+    "pczt/tx-extractor",
 ]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.

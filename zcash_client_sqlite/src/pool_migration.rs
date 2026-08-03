@@ -33,10 +33,40 @@
 //!
 //! # Schema registration
 //!
-//! Each pool submodule exposes its table DDL as an idempotent `init_migration_tables`; the
-//! corresponding `schemerz` migration in `crate::wallet::init::migrations` (for Orchard ->
-//! Ironwood, `orchard_ironwood_migration_tables`) runs that DDL inside the wallet schema, so the
-//! pool-migration tables live in the same `wallet.db` and share its schema versioning.
+//! The pool-migration tables live in the same `wallet.db` as everything else and share its schema
+//! versioning: a `schemerz` migration in `crate::wallet::init::migrations` (for Orchard ->
+//! Ironwood, `orchard_ironwood_migration_tables`) creates them, and later migrations evolve them.
+//!
+//! Each pool submodule also exposes its tables' CURRENT shape as an idempotent
+//! `init_migration_tables`. That is the shape a wallet has once every migration has run — not the
+//! DDL any released migration executes, since a published migration's effect on an existing
+//! database must not change when the schema does. A pool whose creating migration has not shipped
+//! yet can be created from it directly.
+//!
+//! # Chain-derived state, in both directions
+//!
+//! A stored migration's chain-derived state — the unsatisfiability marks, and which of its
+//! transactions are mined — follows this wallet's scan, and neither direction is the consumer's
+//! to drive.
+//!
+//! FORWARD, a transaction is recorded mined because the scan has seen it: the store answers
+//! [`PoolMigrationRead::mined_height`] from the wallet's own `transactions` table, bounded by the
+//! fully-scanned height, and [`advance_migration`] promotes every in-flight transaction it sweeps.
+//! A consumer records that it BROADCAST — testimony no scan can supply — and nothing more.
+//!
+//! BACKWARD, it is rolled back with the wallet: [`WalletWrite::truncate_to_height`] (and
+//! everything routed through it) drives each stored migration's own
+//! [`MigrationState::truncate_to_height`] at the height it ACTUALLY truncated to, in the same
+//! database transaction.
+//!
+//! So a consumer has no hook to remember in either direction: a mark can never rest on an
+//! observation the wallet has discarded, and a transaction can neither stay recorded mined above
+//! the wallet's own view of the chain nor lag behind it.
+//!
+//! [`WalletWrite::truncate_to_height`]: zcash_client_backend::data_api::WalletWrite::truncate_to_height
+//! [`MigrationState::truncate_to_height`]: zcash_pool_migration::engine::MigrationState::truncate_to_height
+//! [`PoolMigrationRead::mined_height`]: zcash_pool_migration::engine::PoolMigrationRead::mined_height
+//! [`advance_migration`]: zcash_pool_migration::satisfiability::advance_migration
 //!
 //! # Model
 //!

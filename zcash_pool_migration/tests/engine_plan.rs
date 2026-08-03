@@ -10,6 +10,7 @@
 
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
+use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{COIN, Zatoshis};
 
@@ -22,6 +23,7 @@ use zcash_pool_migration::engine::{
 use zcash_pool_migration::preparation::{
     FUNDING_OUTPUTS_PER_TX, PreparationPlan, plan_preparation,
 };
+use zcash_pool_migration::satisfiability::ReplanThreshold;
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
@@ -237,7 +239,11 @@ fn stores_loads_and_updates_a_migration() {
         BlockHeight::from_u32(2_000_100),
         BlockHeight::from_u32(2_069_220),
         None,
+        TxId::from_bytes([0; 32]),
         MigrationTxState::Signed,
+        None,
+        None,
+        Vec::new(),
         None,
     );
     let state = MigrationState::from_parts(
@@ -246,6 +252,7 @@ fn stores_loads_and_updates_a_migration() {
         PreparationPlan::from_parts(Vec::new(), Vec::new()),
         vec![tx],
         AnchorBucketInterval::ZIP_318,
+        ReplanThreshold::DEFAULT,
     );
     backend.replace_migration(&state).unwrap();
 
@@ -257,19 +264,15 @@ fn stores_loads_and_updates_a_migration() {
     assert_eq!(loaded.status(), MigrationStatus::Committed);
     assert_eq!(loaded.transactions(), state.transactions());
 
+    // One binding for the state written and the state expected back, under a distinctive txid, so
+    // the round-trip cannot pass on a zeroed or absent stored value.
+    let mined = MigrationTxState::Mined {
+        txid: TxId::from_bytes([0xA7; 32]),
+        height: BlockHeight::from_u32(2_000_105),
+    };
     backend
-        .update_transaction(
-            MigrationTransferId::new(0),
-            MigrationTxState::Mined {
-                height: BlockHeight::from_u32(2_000_105),
-            },
-        )
+        .update_transaction(MigrationTransferId::new(0), mined)
         .unwrap();
     let loaded = backend.get_migration().unwrap().unwrap();
-    assert_eq!(
-        loaded.transactions()[0].state(),
-        MigrationTxState::Mined {
-            height: BlockHeight::from_u32(2_000_105)
-        }
-    );
+    assert_eq!(loaded.transactions()[0].state(), mined);
 }

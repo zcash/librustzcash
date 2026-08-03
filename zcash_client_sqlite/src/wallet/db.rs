@@ -624,7 +624,15 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 /// `orchard_ironwood_migration_anchor_interval` `ADD COLUMN` share this schema text; the store
 /// always writes the column explicitly.
 ///
+/// `replan_threshold` is the integer percent above which unsatisfiable planned transfer value
+/// triggers an immediate replan, stamped at commit. Its `DEFAULT` is
+/// [`ReplanThreshold::DEFAULT`]'s percent (20), present only so that a table created by the
+/// `orchard_ironwood_migration_tables` DDL and one repaired by the
+/// `orchard_ironwood_migration_unsatisfiability` `ADD COLUMN` share this schema text; the store
+/// always writes the column explicitly.
+///
 /// [`AnchorBucketInterval::ZIP_318`]: zcash_protocol::zip318::AnchorBucketInterval::ZIP_318
+/// [`ReplanThreshold::DEFAULT`]: zcash_pool_migration::satisfiability::ReplanThreshold::DEFAULT
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATIONS: &str = "
 CREATE TABLE orchard_ironwood_migrations (
     id INTEGER PRIMARY KEY,
@@ -635,7 +643,8 @@ CREATE TABLE orchard_ironwood_migrations (
     note_split_prep_fees INTEGER NOT NULL,
     note_split_total_input INTEGER NOT NULL,
     note_split_total_migratable INTEGER NOT NULL,
-    anchor_bucket_interval INTEGER NOT NULL DEFAULT 144
+    anchor_bucket_interval INTEGER NOT NULL DEFAULT 144,
+    replan_threshold INTEGER NOT NULL DEFAULT 20
 )";
 /// The denomination crossing values (an ordered list of zatoshi amounts). The funding-note values
 /// have no table of their own: each is its crossing value plus the denomination fee buffer.
@@ -685,15 +694,29 @@ CREATE TABLE orchard_ironwood_migration_prep_direct_funding (
     value INTEGER NOT NULL,
     PRIMARY KEY (migration_id, ordinal)
 )";
-/// One row per migration transaction. `kind` is `preparation` or `transfer`; `pczt` is the pre-signed
-/// transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle discriminant, with the
-/// hex broadcast `txid` and `mined_height`. `lock_owner` records the `LockOwner` under which this
-/// transaction's notes are locked, if any. Dependencies are edges in
-/// `orchard_ironwood_migration_transaction_deps`.
+/// One row per migration transaction. `transfer_id` is the transaction's ordinal WITHIN its
+/// migration (a `MigrationTransferId`), not a transaction ID — it is created as `tx_id` by the
+/// released `orchard_ironwood_migration_tables` DDL and renamed here by the
+/// `orchard_ironwood_migration_unsatisfiability` schema migration, which is why this text is the
+/// renamed one rather than the created one. `kind` is `preparation` or `transfer`; `pczt` is
+/// the pre-signed transaction (an opaque, already-versioned `BLOB`); `state` is the lifecycle
+/// discriminant, with the hex consensus transaction ID in `txid` (`NULL` until broadcast) and
+/// `mined_height`. `lock_owner` records the `LockOwner` under which this
+/// transaction's notes are locked, if any. `unsatisfiable_at` is the height of the chain state a
+/// spent-input observation rests on, when the transaction has been determined unsatisfiable, and
+/// `unsatisfiable_kind` the wire name of WHICH observation that was (`inputs_spent`,
+/// `inputs_invalidated`, `anchor_invalidated`, or `inherited` for a mark that arrived through the
+/// dependency closure); the two are `NULL` together or non-`NULL` together, and a row where they
+/// disagree is rejected as corrupt. `broadcast_failure_at` is the chain tip an application
+/// observed from a node that REJECTED a broadcast of this transaction, standing until the engine
+/// adjudicates that rejection against the wallet's own view, and independent of the
+/// unsatisfiability columns in both directions. Dependencies are edges in
+/// `orchard_ironwood_migration_transaction_deps`, and the real-spend nullifiers cached from the
+/// stored PCZT are rows of `orchard_ironwood_migration_spend_nullifiers`.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTIONS: &str = "
 CREATE TABLE orchard_ironwood_migration_transactions (
     migration_id INTEGER NOT NULL REFERENCES orchard_ironwood_migrations(id) ON DELETE CASCADE,
-    tx_id INTEGER NOT NULL,
+    transfer_id INTEGER NOT NULL,
     kind TEXT NOT NULL,
     kind_layer INTEGER,
     kind_index INTEGER,
@@ -706,18 +729,42 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     txid TEXT,
     mined_height INTEGER,
     lock_owner BLOB,
-    PRIMARY KEY (migration_id, tx_id)
+    unsatisfiable_at INTEGER,
+    unsatisfiable_kind TEXT,
+    broadcast_failure_at INTEGER,
+    PRIMARY KEY (migration_id, transfer_id)
 )";
-/// The dependency edges between migration transactions.
+/// The dependency edges between migration transactions: `transfer_id` depends on
+/// `depends_on_transfer_id`, in `ordinal` order. Both columns are ordinals within the migration
+/// named by `migration_id`, and both were created as `tx_id` / `depends_on_tx_id` by the released
+/// `orchard_ironwood_migration_tables` DDL and renamed by the
+/// `orchard_ironwood_migration_unsatisfiability` schema migration.
 pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_TRANSACTION_DEPS: &str = "
 CREATE TABLE orchard_ironwood_migration_transaction_deps (
     migration_id INTEGER NOT NULL,
-    tx_id INTEGER NOT NULL,
+    transfer_id INTEGER NOT NULL,
     ordinal INTEGER NOT NULL,
-    depends_on_tx_id INTEGER NOT NULL,
-    PRIMARY KEY (migration_id, tx_id, ordinal),
-    FOREIGN KEY (migration_id, tx_id)
-        REFERENCES orchard_ironwood_migration_transactions(migration_id, tx_id) ON DELETE CASCADE
+    depends_on_transfer_id INTEGER NOT NULL,
+    PRIMARY KEY (migration_id, transfer_id, ordinal),
+    FOREIGN KEY (migration_id, transfer_id)
+        REFERENCES orchard_ironwood_migration_transactions(migration_id, transfer_id) ON DELETE CASCADE
+)";
+/// The nullifiers of each migration transaction's REAL spends, cached from its stored PCZT so the
+/// pool-migration state machine never has to parse one: `transfer_id` names the transaction within
+/// the migration, `ordinal` the nullifier's position in that transaction's list, and `nullifier`
+/// the 32-byte value (the width is a `CHECK`, since no other length can have been written here). A
+/// transaction with no rows here has an empty cache, which only a `mined` transaction may have:
+/// the `orchard_ironwood_migration_unsatisfiability` schema migration, which populates this table
+/// for transactions committed before it existed, exempts exactly those rows.
+pub(super) const TABLE_ORCHARD_IRONWOOD_MIGRATION_SPEND_NULLIFIERS: &str = "
+CREATE TABLE orchard_ironwood_migration_spend_nullifiers (
+    migration_id INTEGER NOT NULL,
+    transfer_id INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL,
+    nullifier BLOB NOT NULL CHECK (length(nullifier) = 32),
+    PRIMARY KEY (migration_id, transfer_id, ordinal),
+    FOREIGN KEY (migration_id, transfer_id)
+        REFERENCES orchard_ironwood_migration_transactions(migration_id, transfer_id) ON DELETE CASCADE
 )";
 pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATION_TX_DUE: &str = "
 CREATE INDEX idx_orchard_ironwood_migration_tx_due ON orchard_ironwood_migration_transactions (

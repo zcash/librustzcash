@@ -36,6 +36,25 @@ workspace.
   PCZT, so the response only contains new signatures. This restores
   compatibility with batch Signers that reject pre-signed requests.
 
+### Added
+- `zcash_client_backend::data_api::testing::TestState::generate_and_scan_empty_blocks`
+- `zcash_client_backend::data_api::testing::TestState::create_account_from_test_seed`
+- `zcash_client_backend::data_api::testing::TestState::orchard_anchor_at` (requires
+  the `orchard` feature)
+- `zcash_client_backend::data_api::ll::wallet::batch_ensure_heights`, the complete set
+  of checkpoint heights a batch of scanned blocks must ensure: cross-pool alignment
+  unioned with the heights an `AnchorRetention` policy retains within the batch's
+  range. `put_blocks` now composes its ensure sets through it; behaviour is unchanged.
+
+  Both obligations are required, and satisfying only the first is a silent correctness
+  bug. Scanning checkpoints a block only at its last note commitment, so a
+  retention-grid boundary landing on a block with no shielded output in any pool is
+  not checkpointed by cross-pool alignment either — and `AnchorRetention` preserves
+  checkpoints, it never creates them. A consumer maintaining its note commitment trees
+  by other means that composes only the cross-pool set therefore marks boundary heights
+  which never materialize, leaving anything pre-signed against them (e.g. a ZIP 318
+  pool-migration transfer) permanently unprovable.
+
 ## [0.24.0-rc.6] - 2026-07-29
 
 ### Added
@@ -142,7 +161,7 @@ workspace.
   at that boundary. `AnchorRetentionInterval::custom` is no longer gated behind
   `unstable`, and `AnchorRetentionInterval::from_stored_block_count` is removed — use
   `custom`.
-- Every public error enum in this crate is now `#[non_exhaustive]` 
+- Every public error enum in this crate is now `#[non_exhaustive]`
   so that future variants can be added without a breaking release. A
   `match` over any of them must now include a wildcard arm:
   `data_api::chain::Error`, `data_api::error::{Error, RewindError, PcztError,
@@ -770,7 +789,7 @@ workspace.
 - Migrated to `lightwallet-protocol v0.5.0`, `zcash_protocol 0.10.0`,
   `zcash_address 0.13.0`, `zcash_transparent 0.9.0`, `zip321 0.9.0-rc.1`,
   `zcash_keys 0.15.0`, `orchard 0.15`, `zcash_primitives 0.29.0`,
-  `zcash_proofs 0.29.0`, `zip321 0.9.0-rc.1`, `pczt 0.8.0-rc.1`, `shardtree 0.7`. 
+  `zcash_proofs 0.29.0`, `zip321 0.9.0-rc.1`, `pczt 0.8.0-rc.1`, `shardtree 0.7`.
 - `zcash_client_backend::data_api::ll::LowLevelWalletRead` has an added
   `block_fully_scanned_height` method, returning the height to which the wallet
   has been fully scanned.

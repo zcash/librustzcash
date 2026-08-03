@@ -580,7 +580,7 @@ pub use zcash_protocol::zip318::expiry_height;
 /// freshly committed schedule, the commit height); a wake-up at exactly `current_tip` means
 /// "right now". A transfer whose deadline is already below the tip but which still needs a proof
 /// joins an immediate wake-up at exactly `current_tip` instead (mirroring
-/// [`MigrationState::next_step`], which offers `Prove` for it now); this is not an error. That
+/// [`advance_migration`], which offers `Prove` for it now); this is not an error. That
 /// immediate wake-up also absorbs any transfer whose proving window CONTAINS `current_tip` (i.e.
 /// whose clamped ready height is exactly `current_tip`): its mandatory piercing point covers them
 /// for free, which is what keeps the schedule minimal whenever overdue transfers are present.
@@ -590,7 +590,7 @@ pub use zcash_protocol::zip318::expiry_height;
 /// no schedule produced by this crate contains.
 ///
 /// [`MigrationTransaction::anchor_boundary`]: crate::engine::MigrationTransaction::anchor_boundary
-/// [`MigrationState::next_step`]: crate::engine::MigrationState::next_step
+/// [`advance_migration`]: crate::satisfiability::advance_migration
 pub fn schedule_sync_wakeups<T: Copy, R: RngCore + CryptoRng>(
     params: &WakeupParams,
     current_tip: BlockHeight,

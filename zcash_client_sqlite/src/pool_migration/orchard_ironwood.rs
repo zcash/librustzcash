@@ -12,12 +12,27 @@ use std::{
 };
 
 use rusqlite::{Connection, OptionalExtension};
-
 use zcash_client_backend::{
     data_api::anchor_retention::AnchorRetentionInterval, wallet::LockOwner,
 };
 use zcash_pool_migration::engine::{
-    MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationState, MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
+    PoolMigrationWrite,
+};
+use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
+use zcash_protocol::TxId;
+use zcash_protocol::consensus::BlockHeight;
+
+#[cfg(feature = "orchard")]
+use {
+    shardtree::error::ShardTreeError,
+    std::collections::HashMap,
+    zcash_client_backend::{
+        data_api::{Account as _, SentTransaction, SentTransactionOutput, wallet::TargetHeight},
+        decrypt_transaction,
+        wallet::{Note, Recipient},
+    },
+    zcash_protocol::value::Zatoshis,
 };
 
 use crate::{AccountRef, AccountUuid, error::SqliteClientError};
@@ -26,6 +41,9 @@ use super::store::{self, Store, Tables};
 
 /// A failure reading or writing the pool-migration store.
 pub use super::error::Error;
+/// Why a proven migration PCZT could not be finalized into a `Transaction`.
+#[cfg(feature = "orchard")]
+pub use super::error::FinalizeError;
 
 /// The Orchard -> Ironwood table and index names this store operates over.
 static TABLES: Tables = Tables {
@@ -36,13 +54,85 @@ static TABLES: Tables = Tables {
     prep_direct_funding: "orchard_ironwood_migration_prep_direct_funding",
     transactions: "orchard_ironwood_migration_transactions",
     transaction_deps: "orchard_ironwood_migration_transaction_deps",
+    spend_nullifiers: "orchard_ironwood_migration_spend_nullifiers",
     tx_due_index: "idx_orchard_ironwood_migration_tx_due",
     account_index: "idx_orchard_ironwood_migrations_account",
+    source_notes: "orchard_received_notes",
+    source_note_spends: "orchard_received_note_spends",
+    source_note_spends_note_fk: "orchard_received_note_id",
+    source_tree_checkpoints: "orchard_tree_checkpoints",
 };
 
+/// The Orchard note commitment tree anchor at the checkpoint `height`, as the anchor-validity
+/// judgment consumes it: `None` when the tree can produce no root there.
+///
+/// `None` covers both "no checkpoint at that height" (never created, or pruned without being
+/// retained) and a tree too incomplete to compute one from the shard data actually held — both of
+/// which leave the judgment unable to conclude, which is exactly what `None` tells it. Only a
+/// genuine database or deserialization failure is an error; those are conditions the caller cannot
+/// act on by waiting.
+///
+/// This reads the tree through the same `rusqlite::Transaction` the rest of the satisfiability
+/// answer is computed in, so every root compared and the `as_of_height` it is compared under come
+/// from one database snapshot.
+#[cfg(feature = "orchard")]
+fn orchard_anchor_at(
+    view: &rusqlite::Transaction<'_>,
+    height: zcash_protocol::consensus::BlockHeight,
+) -> Result<Option<::orchard::Anchor>, Error> {
+    /// A tree failure that is NOT "no root here": a database error surfaces as itself, and
+    /// anything else means the stored tree cannot be read back as it was written.
+    fn lift(e: ShardTreeError<crate::wallet::commitment_tree::Error>) -> Error {
+        match e {
+            ShardTreeError::Storage(crate::wallet::commitment_tree::Error::Query(e)) => {
+                Error::Db(e)
+            }
+            _ => Error::Corrupt("orchard commitment tree"),
+        }
+    }
+
+    let tree = crate::orchard_tree(view).map_err(lift)?;
+    match tree.root_at_checkpoint_id(&height) {
+        Ok(root) => Ok(root.map(::orchard::Anchor::from)),
+        // A QUERY-level failure is the tree reporting that it cannot answer for this height — the
+        // shard data it holds does not complete a root, or the checkpoint has been pruned — which
+        // is what `None` already expresses: the judgment cannot conclude.
+        Err(ShardTreeError::Query(_)) => Ok(None),
+        Err(e) => Err(lift(e)),
+    }
+}
+
+/// [`orchard_anchor_at`] in the byte encoding the pool-agnostic store compares roots in: a shard
+/// tree is typed by its hash, so the generic store cannot name [`orchard::Anchor`] and the
+/// conversion happens here, at the facade boundary.
+#[cfg(feature = "orchard")]
+fn orchard_root_at(
+    view: &rusqlite::Transaction<'_>,
+    height: zcash_protocol::consensus::BlockHeight,
+) -> Result<Option<[u8; 32]>, Error> {
+    orchard_anchor_at(view, height).map(|anchor| anchor.map(|anchor| anchor.to_bytes()))
+}
+
+/// The source-pool tree access the satisfiability oracle's anchor-validity judgment needs, or
+/// `None` in a build that cannot read the Orchard commitment tree at all — in which case the
+/// judgment declines and the oracle keeps its conservative answer.
+#[cfg(feature = "orchard")]
+const SOURCE_ROOT_AT: Option<store::SourceRootAt> = Some(orchard_root_at);
+#[cfg(not(feature = "orchard"))]
+const SOURCE_ROOT_AT: Option<store::SourceRootAt> = None;
+
 /// Create the Orchard -> Ironwood pool-migration tables (and the due-transaction and account
-/// indexes) on `conn`. This is the body the `orchard_ironwood_migration_tables` schema migration's
-/// `up()` calls; it is idempotent (`IF NOT EXISTS`).
+/// indexes) on `conn` in their CURRENT shape, as a wallet has them once every schema migration has
+/// run; idempotent (`IF NOT EXISTS`).
+///
+/// No production code calls this. The `orchard_ironwood_migration_tables` schema migration is
+/// published, so it creates these tables from a frozen copy of the DDL it shipped with, and the
+/// migrations after it evolve that into the shape here (see [`store::init`]). What remains is the
+/// canonical statement of that shape: the fixtures that build a store directly build it from here,
+/// and `canonical_pool_migration_ddl_matches_the_migration_path` holds it to what the migrations
+/// actually produce. The attribute keeps that statement — and everything it reaches, including the
+/// index names no query needs — alive for a pool whose creating migration has yet to ship.
+#[allow(dead_code)]
 pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
@@ -65,10 +155,26 @@ pub(crate) fn active_anchor_bucket_intervals(
                 .map(AnchorRetentionInterval::custom)
                 .collect()
         })
-        .map_err(|e| match e {
-            Error::Db(e) => SqliteClientError::DbError(e),
-            other => SqliteClientError::CorruptedData(other.to_string()),
-        })
+        .map_err(lift_store_error)
+}
+
+/// Roll every stored Orchard -> Ironwood migration back to `height`, which the wallet's own
+/// truncation calls so that a migration's chain-derived state cannot outlive the chain state it
+/// was derived from. See [`store::truncate_to_height`].
+pub(crate) fn truncate_to_height(
+    tx: &rusqlite::Transaction,
+    height: zcash_protocol::consensus::BlockHeight,
+) -> Result<(), SqliteClientError> {
+    store::truncate_to_height(tx, &TABLES, height).map_err(lift_store_error)
+}
+
+/// A store failure as the wallet's own error type reports it: a database error surfaces as itself,
+/// and everything else is data the store could not reconstruct.
+fn lift_store_error(e: Error) -> SqliteClientError {
+    match e {
+        Error::Db(e) => SqliteClientError::DbError(e),
+        other => SqliteClientError::CorruptedData(other.to_string()),
+    }
 }
 
 /// The Orchard -> Ironwood pool-migration store: a [`PoolMigrationRead`] / [`PoolMigrationWrite`]
@@ -77,18 +183,43 @@ pub(crate) fn active_anchor_bucket_intervals(
 /// connection a [`WalletDb`](crate::WalletDb) uses, so the pool-migration tables share the wallet
 /// database.
 ///
+/// Sharing the wallet database is what lets [`store_proved_transaction`] persist a finalized
+/// migration transaction into the wallet's own transaction tables ATOMICALLY with the migration
+/// state that records it proved; the network parameters and clock are what that wallet-side
+/// record needs (output recovery and the sent-transaction timestamp), carried here for the same
+/// reason [`WalletDb`](crate::WalletDb) carries them.
+///
 /// An account's migration is owned by its row in the wallet's `accounts` table through the
 /// `account_id` foreign key, so deleting the account removes its migration automatically (via
 /// `ON DELETE CASCADE`); no explicit cleanup is required.
-pub struct PoolMigrations<C>(Store<C>);
+///
+/// [`store_proved_transaction`]: zcash_pool_migration::engine::PoolMigrationWrite::store_proved_transaction
+pub struct PoolMigrations<C, P, CL> {
+    store: Store<C>,
+    // The wallet context `PoolMigrationWrite::store_proved_transaction` (an `orchard`-gated capability)
+    // finalizes under; carried unconditionally so the store's type does not change with the
+    // feature.
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    account: AccountUuid,
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    params: P,
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    clock: CL,
+}
 
-impl<C: Borrow<Connection>> PoolMigrations<C> {
+impl<C: Borrow<Connection>, P, CL> PoolMigrations<C, P, CL> {
     /// Wrap a connection borrow as the store, scoped to `account`'s migration.
     ///
     /// The account is resolved to its `accounts` row up front, so the store keys its migration by
     /// that row (the foreign key the schema uses) rather than by the external UUID. Returns
     /// [`Error::AccountUnknown`] if no account with this UUID exists in the wallet.
-    pub fn for_account(conn: C, account: AccountUuid) -> Result<Self, Error> {
+    ///
+    /// `params` and `clock` serve only [`store_proved_transaction`]
+    /// (output recovery and the sent-transaction timestamp); a caller that only reads and writes
+    /// migration state may pass `()` for both.
+    ///
+    /// [`store_proved_transaction`]: zcash_pool_migration::engine::PoolMigrationWrite::store_proved_transaction
+    pub fn for_account(params: P, clock: CL, conn: C, account: AccountUuid) -> Result<Self, Error> {
         let account_id = conn
             .borrow()
             .query_row(
@@ -98,18 +229,23 @@ impl<C: Borrow<Connection>> PoolMigrations<C> {
             )
             .optional()?
             .ok_or(Error::AccountUnknown)?;
-        Ok(Self(Store::new(conn, &TABLES, account_id)))
+        Ok(Self {
+            store: Store::new(conn, &TABLES, account_id),
+            account,
+            params,
+            clock,
+        })
     }
 }
 
-impl<C> PoolMigrations<C> {
+impl<C, P, CL> PoolMigrations<C, P, CL> {
     /// Recover the wrapped connection borrow.
     pub fn into_inner(self) -> C {
-        self.0.into_inner()
+        self.store.into_inner()
     }
 }
 
-impl<C: Borrow<Connection>> PoolMigrations<C> {
+impl<C: Borrow<Connection>, P, CL> PoolMigrations<C, P, CL> {
     /// Returns the set of [`LockOwner`]s under which this account's in-progress pool migration
     /// has locked notes (empty if there is no migration, or it holds no locks).
     ///
@@ -119,21 +255,41 @@ impl<C: Borrow<Connection>> PoolMigrations<C> {
     /// trait is shared with the pool-agnostic migration engine, which has no notion of
     /// [`LockOwner`] (a wallet-level concept).
     pub fn migration_lock_owners(&self) -> Result<BTreeSet<LockOwner>, Error> {
-        self.0.migration_lock_owners()
+        self.store.migration_lock_owners()
     }
 }
 
-impl<C: Borrow<Connection>> PoolMigrationRead for PoolMigrations<C> {
+impl<C: Borrow<Connection>, P, CL> PoolMigrationRead for PoolMigrations<C, P, CL> {
     type Error = Error;
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-        self.0.get_migration()
+        self.store.get_migration()
+    }
+
+    fn check_step_satisfiability(
+        &self,
+        tx: &MigrationTransaction,
+        settle: ReorgSettleDepth,
+    ) -> Result<StepSatisfiability, Self::Error> {
+        self.store
+            .check_step_satisfiability(tx, settle, SOURCE_ROOT_AT)
+    }
+
+    /// Pool-independent: a transaction's inclusion is read off the wallet's own `transactions`
+    /// table, so unlike the satisfiability oracle this needs no source-pool tree access.
+    fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+        self.store.mined_height(txid)
     }
 }
 
-impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
+impl<C, P, CL> PoolMigrationWrite for PoolMigrations<C, P, CL>
+where
+    C: BorrowMut<Connection>,
+    P: zcash_protocol::consensus::Parameters,
+    CL: crate::util::Clock,
+{
     fn replace_migration(&mut self, state: &MigrationState) -> Result<(), Self::Error> {
-        self.0.replace_migration(state)
+        self.store.replace_migration(state)
     }
 
     fn update_transaction(
@@ -141,7 +297,193 @@ impl<C: BorrowMut<Connection>> PoolMigrationWrite for PoolMigrations<C> {
         id: MigrationTransferId,
         state: MigrationTxState,
     ) -> Result<(), Self::Error> {
-        self.0.update_transaction(id, state)
+        self.store.update_transaction(id, state)
+    }
+
+    /// The wallet-database form of the contract: apply the proof to `state`, then — in ONE
+    /// database transaction — persist the migration state and, with it, the finalized
+    /// transaction's wallet record (its raw bytes, fee, sent outputs, and input-spend marks, as
+    /// `store_transactions_to_be_sent` writes for the standard spend flows), so a transaction is
+    /// never durably recorded proved without the wallet knowing about it, nor the reverse. The
+    /// outputs are recovered by trial decryption under the account's unified full viewing key
+    /// (every real migration output is internal to the account; dummies decrypt under no key),
+    /// and the sent record's target height is the successor of the row's scheduled broadcast
+    /// height.
+    #[cfg(feature = "orchard")]
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: zcash_pool_migration::engine::ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        let id = proven.id();
+        proven.apply(state);
+        self.finalize_and_store_proved(state, id)
+    }
+
+    /// Without the `orchard` feature this wallet tracks no Orchard (or Ironwood) notes at all:
+    /// there is nothing the wallet's transaction tables could record about a migration
+    /// transaction, and no wallet-side spend the input marks would protect against. The
+    /// contract's no-wallet-tables form is therefore COMPLETE here, not a degraded stand-in:
+    /// apply the proof and persist the migration state alone.
+    #[cfg(not(feature = "orchard"))]
+    fn store_proved_transaction(
+        &mut self,
+        state: &mut MigrationState,
+        proven: zcash_pool_migration::engine::ProvedTransaction,
+    ) -> Result<(), Self::Error> {
+        proven.apply(state);
+        self.replace_migration(state)
+    }
+}
+
+/// Finalization of a proved migration transaction into the wallet's own transaction record.
+#[cfg(feature = "orchard")]
+impl<C, P, CL> PoolMigrations<C, P, CL>
+where
+    C: BorrowMut<Connection>,
+    P: zcash_protocol::consensus::Parameters,
+    CL: crate::util::Clock,
+{
+    /// The body of [`PoolMigrationWrite::store_proved_transaction`], once the proof has been
+    /// applied to `state`: persist `state` and, atomically with it, finalize the
+    /// fully-constructed (proved and signed) migration transaction `proved` into the wallet's
+    /// own transaction tables.
+    ///
+    /// The transaction named by `proved` must be in the [`Proved`](MigrationTxState::Proved)
+    /// lifecycle state in `state`: its stored bytes are then a PCZT carrying both signatures
+    /// (installed at commit) and proofs (installed by the prove step), from which the final
+    /// `Transaction` is extracted mechanically — the PCZT Spend Finalizer and Transaction
+    /// Extractor roles, the latter of which also verifies the proofs and signatures it
+    /// assembles. The wallet-side record is what
+    /// [`WalletWrite::store_transactions_to_be_sent`] writes for the standard spend flows, made
+    /// at the analogous moment: the transaction's raw bytes, fee, creation time, and target
+    /// height in the `transactions` table; its outputs as sent notes; and its input notes marked
+    /// spent — which is what prevents the wallet's OWN later spends from double-spending a
+    /// migration input during the (deliberately long, for a scheduled transfer) window between
+    /// proving and mining.
+    ///
+    /// The transaction's outputs are recovered by trial decryption under the account's unified
+    /// full viewing key rather than from PCZT metadata: every real output of a migration
+    /// transaction is internal to the migrating account, and the padded dummy outputs fail
+    /// decryption, so decryption separates them exactly. The sent-transaction target height is
+    /// the block the transaction aims to mine in: the successor of its scheduled broadcast
+    /// height.
+    ///
+    /// Both writes — the migration state (as [`replace_migration`]) and the wallet transaction
+    /// record — happen in ONE database transaction, so a transaction is never durably recorded
+    /// proved without the wallet record, nor the reverse.
+    ///
+    /// [`WalletWrite::store_transactions_to_be_sent`]:
+    ///     zcash_client_backend::data_api::WalletWrite::store_transactions_to_be_sent
+    /// [`replace_migration`]: PoolMigrationWrite::replace_migration
+    /// [`PoolMigrationWrite::store_proved_transaction`]:
+    ///     zcash_pool_migration::engine::PoolMigrationWrite::store_proved_transaction
+    fn finalize_and_store_proved(
+        &mut self,
+        state: &MigrationState,
+        proved: MigrationTransferId,
+    ) -> Result<(), Error> {
+        let row = state
+            .transactions()
+            .iter()
+            .find(|t| t.id() == proved)
+            .ok_or(Error::UnknownTransaction(proved))?;
+        if !matches!(row.state(), MigrationTxState::Proved) {
+            return Err(Error::NotProved(proved));
+        }
+
+        // Finalize the spend authorizations and extract the transaction. Extraction re-verifies
+        // the proofs and signatures it assembles, so a PCZT that would not survive broadcast is
+        // rejected here rather than recorded.
+        let pczt = ::pczt::Pczt::parse(row.pczt())
+            .map_err(|e| Error::Finalize(FinalizeError::Parse(e)))?;
+        let finalized = ::pczt::roles::spend_finalizer::SpendFinalizer::new(pczt)
+            .finalize_spends()
+            .map_err(|e| Error::Finalize(FinalizeError::Spends(e)))?;
+        let tx = ::pczt::roles::tx_extractor::TransactionExtractor::new(finalized)
+            .extract()
+            .map_err(|e| Error::Finalize(FinalizeError::Extract(e)))?;
+
+        // The fee is fully determined by the shielded value balances: a migration transaction has
+        // no transparent bundle, so the prevout lookup is never consulted.
+        let fee = tx
+            .fee_paid(|_| Ok::<_, zcash_protocol::value::BalanceError>(None))
+            .map_err(|e| Error::Finalize(FinalizeError::Balance(e)))?
+            .ok_or(Error::Corrupt(
+                "migration transaction has transparent inputs",
+            ))?;
+
+        // Recover the outputs by trial decryption under the account's own viewing key. A
+        // migration transaction's real outputs are all internal to the migrating account (feeder
+        // notes, or the value crossing into Ironwood), and its padded dummy outputs decrypt under
+        // no key, so decryption recovers exactly the outputs the wallet must record.
+        let account =
+            crate::wallet::get_account(self.store.connection(), &self.params, self.account)
+                .map_err(|e| Error::Wallet(Box::new(e)))?
+                .ok_or(Error::AccountUnknown)?;
+        let ufvk = account
+            .ufvk()
+            .cloned()
+            .ok_or(Error::ViewingKeyUnavailable)?;
+        let ufvks = HashMap::from([(self.account, ufvk)]);
+        let decrypted = decrypt_transaction(
+            &self.params,
+            None,
+            Some(row.scheduled_height()),
+            &tx,
+            &ufvks,
+        );
+        let outputs = decrypted
+            .orchard_outputs()
+            .iter()
+            .chain(decrypted.ironwood_outputs())
+            .map(|output| {
+                let (note, pool) = *output.note();
+                Zatoshis::from_u64(note.value().inner())
+                    .map(|value| {
+                        SentTransactionOutput::from_parts(
+                            output.index(),
+                            Recipient::InternalShielded {
+                                receiving_account: *output.account(),
+                                external_address: None,
+                                note: Box::new(Note::Orchard { note, pool }),
+                            },
+                            value,
+                            Some(output.memo().clone()),
+                        )
+                    })
+                    .map_err(|e| Error::Finalize(FinalizeError::Balance(e)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // The transaction is built to be broadcast at its scheduled height, so the block it aims
+        // to mine in — the standard flow's construction target — is that height's successor.
+        let target_height = TargetHeight::from(u32::from(row.scheduled_height()) + 1);
+        let created = time::OffsetDateTime::from(self.clock.now());
+        let sent = SentTransaction::new(
+            &tx,
+            created,
+            target_height,
+            self.account,
+            &outputs,
+            fee,
+            #[cfg(feature = "transparent-inputs")]
+            &[],
+        );
+
+        let params = &self.params;
+        self.store.replace_migration_with(state, |dbtx| {
+            crate::wallet::store_transaction_to_be_sent(
+                dbtx,
+                params,
+                // A migration transaction has no transparent outputs, so the gap-limit machinery
+                // this parameterizes is unreachable.
+                #[cfg(feature = "transparent-inputs")]
+                &zcash_keys::keys::transparent::gap_limits::GapLimits::default(),
+                &sent,
+            )
+            .map_err(|e| Error::Wallet(Box::new(e)))
+        })
     }
 }
 
@@ -167,6 +509,7 @@ mod retention_follows_the_committed_migration {
         denomination::DenominationPlan,
         engine::{MigrationState, MigrationStatus, PoolMigrationRead, PoolMigrationWrite},
         preparation::PreparationPlan,
+        satisfiability::ReplanThreshold,
         scheduling::AnchorBucketInterval,
     };
     use zcash_primitives::block::BlockHash;
@@ -174,9 +517,13 @@ mod retention_follows_the_committed_migration {
 
     use super::PoolMigrations;
     use crate::testing::{BlockCache, db::TestDbFactory};
+    use crate::util::SystemClock;
 
     /// A migration carrying no transactions, recorded as committed under `interval`. Only the
     /// recorded grid matters here; the retention decision does not look at the transfers.
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s `arb_migration_state`:
+    /// the grid IS the subject, and that strategy draws it arbitrarily.
     fn migration_committed_under(interval: AnchorBucketInterval) -> MigrationState {
         MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -192,6 +539,7 @@ mod retention_follows_the_committed_migration {
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             Vec::new(),
             interval,
+            ReplanThreshold::DEFAULT,
         )
     }
 
@@ -227,10 +575,15 @@ mod retention_follows_the_committed_migration {
             .expect("the test account exists")
             .account()
             .id();
-        PoolMigrations::for_account(st.wallet_mut().conn_mut(), account_id)
-            .expect("the account exists")
-            .replace_migration(&migration_committed_under(committed))
-            .expect("persists the migration");
+        PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account_id,
+        )
+        .expect("the account exists")
+        .replace_migration(&migration_committed_under(committed))
+        .expect("persists the migration");
 
         // Scan enough blocks to cross several boundaries of both grids. The account's birthday is
         // the Sapling activation height, so the first generated block sits just above it.
@@ -292,12 +645,1403 @@ mod retention_follows_the_committed_migration {
             "the scan must cross at least one boundary of the committed grid",
         );
         assert!(
-            PoolMigrations::for_account(st.wallet_mut().conn_mut(), account_id)
-                .expect("the account exists")
-                .get_migration()
-                .expect("reads the migration")
-                .is_some(),
+            PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account_id
+            )
+            .expect("the account exists")
+            .get_migration()
+            .expect("reads the migration")
+            .is_some(),
             "the migration is still recorded",
+        );
+    }
+}
+
+/// The satisfiability oracle over a REAL wallet database: each cached real-spend nullifier is
+/// answered from the wallet's Orchard note and note-spend tables, expiry from the fully-scanned
+/// height, and a broadcast transfer's installed anchor from the wallet's own Orchard commitment
+/// tree; an empty nullifier cache on a non-mined row is corruption. The wallet fixture scans a
+/// genuine received note, so the nullifier under test is one the production scanner recorded, not
+/// a hand-computed stand-in, and the roots the anchor judgment compares are the tree's own.
+#[cfg(all(test, feature = "orchard"))]
+mod check_step_satisfiability {
+    use rusqlite::named_params;
+
+    use ::orchard::{Anchor, note::Nullifier};
+    use zcash_client_backend::data_api::testing::{
+        AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+    };
+    use zcash_client_backend::data_api::{Account as _, WalletRead};
+    use zcash_pool_migration::denomination::DenominationPlan;
+    use zcash_pool_migration::engine::{
+        MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    };
+    use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_pool_migration::satisfiability::{
+        ReorgSettleDepth, ReplanThreshold, StepSatisfiability, UnsatisfiableCause,
+    };
+    use zcash_pool_migration::scheduling::AnchorBucketInterval;
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::TxId;
+    use zcash_protocol::consensus::{BlockHeight, BranchId};
+    use zcash_protocol::local_consensus::LocalNetwork;
+    use zcash_protocol::value::Zatoshis;
+
+    use super::{Error, PoolMigrations};
+    use crate::AccountUuid;
+    use crate::testing::{BlockCache, db::TestDb, db::TestDbFactory};
+    use crate::util::SystemClock;
+
+    /// The settle depth the anchor-validity tests hold the oracle to; the input-level tests do not
+    /// consult it.
+    const SETTLE: ReorgSettleDepth = ReorgSettleDepth::new(10);
+
+    /// The repeated byte `b` as a canonical Pallas base element. The top byte is cleared, because
+    /// a canonical encoding must be numerically below the field modulus and `0xbb…bb` need not be;
+    /// both `Anchor` and `Nullifier` reject anything else.
+    fn field_pattern(b: u8) -> [u8; 32] {
+        let mut bytes = [b; 32];
+        bytes[31] = 0;
+        bytes
+    }
+
+    /// A root value the wallet's Orchard tree never takes, so an anchor carrying it is displaced
+    /// at every checkpoint.
+    fn no_such_root() -> Anchor {
+        Option::from(Anchor::from_bytes(field_pattern(0xA5)))
+            .expect("the pattern is a canonical field element")
+    }
+
+    /// The nullifier of no note this wallet has ever seen.
+    fn unknown_nullifier() -> Nullifier {
+        Option::from(Nullifier::from_bytes(&field_pattern(0xEE)))
+            .expect("the pattern is a canonical field element")
+    }
+
+    /// A wallet with one scanned Orchard note, assembled by [`scanned_note_fixture`].
+    struct ScannedNoteFixture {
+        /// The test state holding the wallet.
+        st: TestState<BlockCache, TestDb, LocalNetwork>,
+        /// The account that received the note.
+        account: AccountUuid,
+        /// A SECOND account's UUID when requested (same seed, next ZIP 32 index — created
+        /// BEFORE anything is scanned, since account creation adjusts the scan queue and would
+        /// clear the fully-scanned height afterwards).
+        second_account: Option<AccountUuid>,
+        /// The note's nullifier, exactly as the scanner recorded it.
+        nf: Nullifier,
+        /// The wallet's fully-scanned height: the observation basis every answer must carry.
+        as_of_height: BlockHeight,
+    }
+
+    fn scanned_note_fixture(with_second_account: bool) -> ScannedNoteFixture {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account_id = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        let second_account = with_second_account.then(|| st.create_account_from_test_seed("").0);
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        // The first generated block sits AT the account birthday, so scanning contiguously from
+        // it leaves the wallet fully scanned to the last scanned height.
+        let (h, _, _) = st.generate_next_block(
+            &fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(100_000),
+        );
+        st.scan_cached_blocks(h, 1);
+        let (h2, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h2, 1);
+        let as_of_height = st
+            .wallet()
+            .block_fully_scanned()
+            .expect("reads the fully-scanned block")
+            .expect("the wallet is fully scanned")
+            .block_height();
+        assert_eq!(
+            as_of_height, h2,
+            "the wallet is fully scanned to the last block"
+        );
+        let nf_bytes: [u8; 32] = st
+            .wallet()
+            .conn()
+            .query_row(
+                "SELECT nf FROM orchard_received_notes WHERE nf IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("the scanned note has a recorded nullifier");
+        let nf = Option::from(Nullifier::from_bytes(&nf_bytes))
+            .expect("the scanner records a well-formed nullifier");
+        ScannedNoteFixture {
+            st,
+            account: account_id,
+            second_account,
+            nf,
+            as_of_height,
+        }
+    }
+
+    /// [`scanned_note_fixture`] without the second account (the common case).
+    pub(super) fn wallet_with_scanned_note() -> (
+        TestState<BlockCache, TestDb, LocalNetwork>,
+        AccountUuid,
+        Nullifier,
+        BlockHeight,
+    ) {
+        let ScannedNoteFixture {
+            st,
+            account,
+            nf,
+            as_of_height,
+            ..
+        } = scanned_note_fixture(false);
+        (st, account, nf, as_of_height)
+    }
+
+    /// A wallet holding an account but having scanned NOTHING: it has no fully-scanned height at
+    /// all, so no chain state backs an observation. The counterpart to [`wallet_with_scanned_note`]
+    /// for tests whose subject is what the oracle does without a scanned frontier; each such test
+    /// asserts the unscanned precondition itself, since that is what its claim rests on.
+    pub(super) fn unscanned_wallet() -> (TestState<BlockCache, TestDb, LocalNetwork>, AccountUuid) {
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        (st, account)
+    }
+
+    /// The real-spend nullifier cache a [`MigrationTransaction`] carries: the engine's persisted
+    /// shape is pool-agnostic bytes, so the typed nullifiers a test names are encoded here.
+    fn cache(nfs: Vec<Nullifier>) -> Vec<[u8; 32]> {
+        nfs.into_iter().map(|nf| nf.to_bytes()).collect()
+    }
+
+    /// A pre-signed transfer caching `nfs` as its real-spend nullifiers, in the `Signed` state,
+    /// with expiry height `expiry` (`0` disables expiry, per ZIP 203).
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s
+    /// `arb_migration_transaction`, like every constructor in this module: the four fields the
+    /// oracle's input-level judgment reads — the cache, the expiry, the non-`mined` lifecycle
+    /// state, and the absent anchor boundary that keeps the anchor path out of it — are all
+    /// pinned by an assertion here. `an_empty_cache_on_a_signed_row_is_corrupt` goes further and
+    /// asks for the one pairing `arb_state_and_spend_nullifiers` is written never to generate.
+    fn transfer(nfs: Vec<Nullifier>, expiry: u32) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(expiry),
+            None,
+            TxId::from_bytes([0; 32]),
+            MigrationTxState::Signed,
+            None,
+            None,
+            cache(nfs),
+            None,
+        )
+    }
+
+    /// A transfer recorded MINED at `height` with an EMPTY real-spend nullifier cache: the shape
+    /// the schema migration that introduced the cache leaves behind, since a mined transaction's
+    /// disposition no longer turns on its inputs.
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s
+    /// `arb_migration_transaction`: every field the assertions turn on is pinned here (the mined
+    /// height must be the wallet's own `as_of_height`, and the cache must be empty), which is
+    /// precisely what an arbitrary transaction does not give.
+    fn mined_transfer_with_empty_cache(height: BlockHeight) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            MigrationTxKind::Transfer { crossing: 0 },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            TxId::from_bytes([9; 32]),
+            MigrationTxState::Mined {
+                txid: TxId::from_bytes([9; 32]),
+                height,
+            },
+            None,
+            None,
+            Vec::new(),
+            None,
+        )
+    }
+
+    /// A PCZT whose Orchard bundle carries `anchor` as its installed anchor, serialized as the
+    /// store holds it.
+    ///
+    /// The anchor judgment reads exactly one field out of a proven transaction's bytes, and the
+    /// Creator role installs that field directly, so this stands in for a real proof without a
+    /// Halo2 proving run — the whole-migration chain simulation covers the genuinely proven
+    /// article.
+    fn pczt_anchored_at(anchor: Anchor) -> Vec<u8> {
+        pczt::roles::creator::Creator::new(
+            BranchId::Nu6_3.into(),
+            0,
+            133,
+            None,
+            Some(anchor.to_bytes()),
+        )
+        .expect("NU6.3 is a supported branch")
+        .build()
+        .expect("a v6 PCZT may carry an Orchard anchor with no actions")
+        .serialize()
+        .expect("the PCZT serializes")
+    }
+
+    /// A transaction of `kind` in lifecycle state `state`, storing a PCZT with `anchor` installed,
+    /// recording `boundary` as the anchor boundary it was proven against, and caching `nfs` as its
+    /// real-spend nullifiers.
+    ///
+    /// `kind`, `state`, and `boundary` are the three fields the anchor-validity tests vary against
+    /// one another, so they are the parameters; the rest is filler no assertion reads. The stored
+    /// PCZT is why no strategy can stand in here at all: `arb_migration_transaction` draws its
+    /// `pczt` as arbitrary bytes, which do not deserialize as a PCZT — let alone carry a chosen
+    /// anchor, which is the whole subject of these tests.
+    fn anchored_transaction(
+        kind: MigrationTxKind,
+        state: MigrationTxState,
+        boundary: Option<BlockHeight>,
+        nfs: Vec<Nullifier>,
+        anchor: Anchor,
+    ) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(0),
+            kind,
+            pczt_anchored_at(anchor),
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            boundary,
+            // The row's id is the one its lifecycle state carries, where the state has one: the
+            // store keeps a single txid column, so a fixture stating two different ones would
+            // describe a row it cannot represent.
+            match state {
+                MigrationTxState::Broadcast { txid } | MigrationTxState::Mined { txid, .. } => txid,
+                _ => TxId::from_bytes([0; 32]),
+            },
+            state,
+            None,
+            None,
+            cache(nfs),
+            None,
+        )
+    }
+
+    /// A pre-signed transfer that has been BROADCAST and not yet mined, proven against `boundary`
+    /// with `anchor` installed, and caching `nfs` as its real-spend nullifiers. This is the only
+    /// shape the anchor-validity judgment applies to.
+    fn broadcast_transfer(
+        nfs: Vec<Nullifier>,
+        boundary: BlockHeight,
+        anchor: Anchor,
+    ) -> MigrationTransaction {
+        anchored_transaction(
+            MigrationTxKind::Transfer { crossing: 0 },
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([7; 32]),
+            },
+            Some(boundary),
+            nfs,
+            anchor,
+        )
+    }
+
+    /// Record a spend of the note with nullifier `nf` by a transaction MINED at `height`, directly
+    /// in the wallet tables. This is the definitive on-chain fact the oracle marks on.
+    fn record_mined_spend(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        nf: Nullifier,
+        height: BlockHeight,
+    ) {
+        record_spend(st, nf, Some(height));
+    }
+
+    /// Record a spend of the note with nullifier `nf` by a transaction the wallet knows of but has
+    /// not seen mined, directly in the wallet tables. The pre-signed transaction and this spender
+    /// are then merely competing for the note, so the oracle must not mark on it.
+    fn record_unmined_spend(st: &mut TestState<BlockCache, TestDb, LocalNetwork>, nf: Nullifier) {
+        record_spend(st, nf, None);
+    }
+
+    /// The shared body behind [`record_mined_spend`] and [`record_unmined_spend`]: insert a
+    /// spending transaction with mined height `mined_height` and join it to the note with
+    /// nullifier `nf`. The oracle reads only the spend join and the spender's mined height, so
+    /// nothing here requires a fully-formed spending transaction.
+    ///
+    /// The spender's txid is the SPENT NOTE'S NULLIFIER, a test-only fabrication: no transaction
+    /// is built here, so there is nothing to hash. Deriving it keeps each spender's txid distinct
+    /// per note without introducing randomness, which `transactions.txid` (unique) requires and a
+    /// repeated constant would violate the moment a test records two spends.
+    fn record_spend(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        nf: Nullifier,
+        mined_height: Option<BlockHeight>,
+    ) {
+        let conn = st.wallet_mut().conn_mut();
+        conn.execute(
+            "INSERT INTO transactions (txid, mined_height, min_observed_height)
+             VALUES (:txid, :mined_height, :min_observed_height)",
+            named_params! {
+                ":txid": nf.to_bytes(),
+                ":mined_height": mined_height.map(u32::from),
+                // An arbitrary observation height; the constraint only requires it at or below
+                // the mined height when one exists.
+                ":min_observed_height": mined_height.map_or(1, u32::from),
+            },
+        )
+        .expect("inserts the spending transaction");
+        let tx_ref = conn.last_insert_rowid();
+        let spends = conn
+            .execute(
+                "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
+                 SELECT id, :tx_ref FROM orchard_received_notes WHERE nf = :nf",
+                named_params! {":tx_ref": tx_ref, ":nf": nf.to_bytes()},
+            )
+            .expect("records the spend");
+        assert_eq!(
+            spends, 1,
+            "exactly the one note with this nullifier is spent"
+        );
+    }
+
+    #[test]
+    fn known_unspent_inputs_are_satisfiable() {
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+    }
+
+    #[test]
+    fn a_mined_spend_marks_inputs_spent() {
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
+        record_mined_spend(&mut st, nf, as_of_height);
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![nf.to_bytes()]
+                },
+                as_of_height,
+            },
+            "the answer carries exactly the spent nullifier",
+        );
+    }
+
+    /// Spend evidence recorded AHEAD of the scanned region does not obstruct yet: a mark's
+    /// evidence must lie at or below the `as_of_height` backing it, because reorg truncation
+    /// clears marks by their stamped height — evidence at height <= `as_of_height` guarantees a
+    /// rollback of the evidence forces a truncation below the mark, so no false mark can survive.
+    /// Once scanning catches up to the evidence, the same stored state obstructs.
+    #[test]
+    fn evidence_ahead_of_the_scanned_region_does_not_obstruct_yet() {
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
+        // Transaction-status polling can record a spender's mined height before scanning
+        // reaches it: the spender sits one block above the fully-scanned height.
+        record_mined_spend(&mut st, nf, as_of_height + 1);
+        {
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
+            assert_eq!(
+                store
+                    .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                    .expect("the oracle answers"),
+                StepSatisfiability::Satisfiable { as_of_height },
+                "evidence above the scanned region must not obstruct yet",
+            );
+        }
+        // Scan past the spender's height; the evidence now lies inside the scanned region.
+        let (h3, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h3, 1);
+        assert_eq!(
+            h3,
+            as_of_height + 1,
+            "the next block is the spender's height"
+        );
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![nf.to_bytes()]
+                },
+                as_of_height: h3,
+            },
+        );
+    }
+
+    /// A recorded but UNMINED spender does not obstruct: the pre-signed transaction and the
+    /// recorded spender are then merely competing for the note, and only a mined spend is the
+    /// definitive on-chain fact.
+    #[test]
+    fn an_unmined_spend_does_not_obstruct() {
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
+        record_unmined_spend(&mut st, nf);
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+    }
+
+    #[test]
+    fn an_unknown_nullifier_is_not_yet_satisfiable() {
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![unknown_nullifier()], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::NotYetSatisfiable { as_of_height },
+        );
+    }
+
+    /// Expiry is judged at the next block a mined observation could extend (`as_of_height + 1`),
+    /// mirroring the engine's `is_expired`: an expiry AT the fully-scanned height can no longer
+    /// mine, one just above it still can.
+    #[test]
+    fn expiry_is_judged_at_the_next_block() {
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of_height)), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::Expired,
+                as_of_height,
+            },
+        );
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], u32::from(as_of_height) + 1), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+    }
+
+    /// An empty nullifier cache on a non-mined row is CORRUPTION, never vacuous satisfiability:
+    /// every validly committed transaction caches its real-spend nullifiers. The wallet here has
+    /// scanned NOTHING (no fully-scanned height at all): corruption needs no chain state, so it
+    /// is reported ahead of [`Error::ChainStateUnavailable`], never masked by it.
+    #[test]
+    fn an_empty_cache_on_a_signed_row_is_corrupt() {
+        let (mut st, account) = unscanned_wallet();
+        assert!(
+            st.wallet()
+                .block_fully_scanned()
+                .expect("reads the fully-scanned block")
+                .is_none(),
+            "nothing is scanned, so no chain state backs an observation",
+        );
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert!(matches!(
+            store.check_step_satisfiability(&transfer(Vec::new(), 0), SETTLE),
+            Err(Error::Corrupt("spend_nullifiers")),
+        ));
+    }
+
+    /// A MINED row is exempt from the nullifier backfill, so its empty cache is not corruption:
+    /// the oracle answers (vacuously satisfiable over zero observations — a mined transaction's
+    /// disposition no longer turns on its inputs) rather than erroring.
+    #[test]
+    fn a_mined_row_with_an_empty_cache_answers() {
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let mined = mined_transfer_with_empty_cache(as_of_height);
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&mined, SETTLE)
+                .expect("the oracle answers rather than erroring"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+    }
+
+    /// Reorg truncation composes with the empty-cache corruption guard: a MINED row is exempt
+    /// from the nullifier backfill, so its empty cache answers (the mined exemption above), but
+    /// once `MigrationState::truncate_to_height` demotes it to `Broadcast` — driven through the
+    /// pool-migration API exactly as a consumer's reorg hook would (load, truncate, replace) —
+    /// the SAME row is non-mined with an empty cache: loud corruption at its next check, never
+    /// vacuous satisfiability.
+    #[test]
+    fn truncation_demotes_a_backfill_exempt_row_into_the_corruption_guard() {
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let mined = mined_transfer_with_empty_cache(as_of_height);
+        // Hand-built for `mined_transfer_with_empty_cache`'s reason: nothing outside the mined row
+        // is read, so the envelope around it is the minimum a store will accept.
+        let state = MigrationState::from_parts(
+            MigrationStatus::InProgress,
+            DenominationPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![mined],
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        );
+        let mut store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        store
+            .replace_migration(&state)
+            .expect("persists the mined row");
+
+        // The mined exemption: the empty cache answers rather than erroring.
+        let loaded = store
+            .get_migration()
+            .expect("reads the migration")
+            .expect("the migration is present");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&loaded.transactions()[0], SETTLE)
+                .expect("a mined row with an empty cache answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+
+        // A rewind below the mined height: load, truncate, replace.
+        let mut truncated = loaded;
+        truncated.truncate_to_height(as_of_height - 1);
+        assert!(matches!(
+            truncated.transactions()[0].state(),
+            MigrationTxState::Broadcast { txid } if txid == TxId::from_bytes([9; 32])
+        ));
+        store
+            .replace_migration(&truncated)
+            .expect("persists the demoted row");
+
+        // The SAME row, demoted, hits the empty-cache corruption guard.
+        let reloaded = store
+            .get_migration()
+            .expect("reads the migration")
+            .expect("the migration is present");
+        assert!(matches!(
+            store.check_step_satisfiability(&reloaded.transactions()[0], SETTLE),
+            Err(Error::Corrupt("spend_nullifiers")),
+        ));
+    }
+
+    /// An in-flight transfer whose installed anchor is still the tree's root at the boundary it
+    /// was proven against is not obstructed: the chain the wallet has scanned still contains the
+    /// state the proof was made over.
+    #[test]
+    fn an_anchor_still_rooted_at_its_boundary_is_satisfiable() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        let boundary = as_of_height - SETTLE.blocks();
+        let anchor = st
+            .orchard_anchor_at(boundary)
+            .expect("reads the Orchard commitment tree")
+            .expect("the boundary's checkpoint is retained");
+
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&broadcast_transfer(vec![nf], boundary, anchor), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+    }
+
+    /// The settlement boundary, exactly. A displacement is definitive only once the scanned chain
+    /// has built `settle` blocks on top of the boundary whose content changed: one block short of
+    /// that depth nothing is concluded, and AT that depth the transfer is unsatisfiable through
+    /// `AnchorInvalidated`. Both answers come from the same stored transaction and the same
+    /// wallet; only the boundary's distance below the fully-scanned height differs.
+    #[test]
+    fn an_anchor_displacement_marks_exactly_at_the_settle_depth() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+
+        assert_eq!(
+            store
+                .check_step_satisfiability(
+                    &broadcast_transfer(
+                        vec![nf],
+                        as_of_height - (SETTLE.blocks() - 1),
+                        no_such_root()
+                    ),
+                    SETTLE,
+                )
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+            "one block short of the settle depth concludes nothing",
+        );
+        assert_eq!(
+            store
+                .check_step_satisfiability(
+                    &broadcast_transfer(vec![nf], as_of_height - SETTLE.blocks(), no_such_root()),
+                    SETTLE,
+                )
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::AnchorInvalidated,
+                as_of_height,
+            },
+            "at the settle depth the displacement is definitive",
+        );
+    }
+
+    /// A tree state the search cannot produce a root for is a state that was NOT ruled out, so it
+    /// ends the search without concluding: the mark rests on an EXHAUSTIVE negative, and a search
+    /// that skipped an unreadable state would not be one.
+    ///
+    /// The fixture is the marking case from
+    /// [`an_anchor_displacement_marks_exactly_at_the_settle_depth`] — asserted first, so the
+    /// difference is exactly the unreadable state — plus one checkpoint whose recorded tree
+    /// position lies beyond any shard data the wallet holds, which is how a retained checkpoint
+    /// the tree can no longer complete a root for presents itself.
+    #[test]
+    fn an_unreadable_tree_state_ends_the_search_without_marking() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        let displaced =
+            broadcast_transfer(vec![nf], as_of_height - SETTLE.blocks(), no_such_root());
+
+        {
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
+            assert_eq!(
+                store
+                    .check_step_satisfiability(&displaced, SETTLE)
+                    .expect("the oracle answers"),
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::AnchorInvalidated,
+                    as_of_height,
+                },
+                "without the unreadable state, this displacement is definitive",
+            );
+        }
+
+        // A checkpoint below the scanned region whose position is past everything the tree holds:
+        // the tree finds the checkpoint but cannot complete a root over that many commitments.
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO orchard_tree_checkpoints (checkpoint_id, position)
+                 VALUES (:checkpoint_id, :position)",
+                named_params! {
+                    ":checkpoint_id": u32::from(as_of_height) - 50,
+                    ":position": u64::from(u32::MAX),
+                },
+            )
+            .expect("records a checkpoint the tree cannot root");
+
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&displaced, SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+            "a state the search could not read is a state it did not rule out",
+        );
+    }
+
+    /// Evidence-height discipline for the anchor judgment, isolated from settlement by asking at
+    /// depth zero: a boundary ABOVE the fully-scanned height is outside the region backing the
+    /// answer — its checkpoint may still be rewritten by scanning that has not happened — so it
+    /// concludes nothing, however displaced the anchor looks. Once scanning closes the gap, the
+    /// SAME stored transaction is marked.
+    #[test]
+    fn an_anchor_displacement_above_the_scanned_region_does_not_mark() {
+        const IMMEDIATE: ReorgSettleDepth = ReorgSettleDepth::new(0);
+
+        let (mut st, account, nf, as_of_height) = wallet_with_scanned_note();
+        // Three further blocks, of which only the last is scanned: the commitment tree gains a
+        // checkpoint at that height while the fully-scanned height stays below the gap.
+        let (gap, _) = st.generate_empty_block();
+        let (_, _) = st.generate_empty_block();
+        let (high, _) = st.generate_empty_block();
+        st.scan_cached_blocks(high, 1);
+        assert_eq!(
+            st.wallet()
+                .block_fully_scanned()
+                .expect("reads the fully-scanned block")
+                .expect("the wallet is fully scanned to the pre-gap height")
+                .block_height(),
+            as_of_height,
+            "the unscanned gap holds the fully-scanned height below the new checkpoint",
+        );
+
+        let tx = broadcast_transfer(vec![nf], high, no_such_root());
+        {
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
+            assert_eq!(
+                store
+                    .check_step_satisfiability(&tx, IMMEDIATE)
+                    .expect("the oracle answers"),
+                StepSatisfiability::Satisfiable { as_of_height },
+                "a boundary above the scanned region must not obstruct yet",
+            );
+        }
+
+        // Close the gap; the boundary now lies inside the region backing the answer.
+        st.scan_cached_blocks(gap, 2);
+        let as_of_height = st.generate_and_scan_empty_blocks(1);
+        assert!(
+            as_of_height >= high,
+            "the scanned region now reaches the boundary at {high:?}",
+        );
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&tx, IMMEDIATE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::AnchorInvalidated,
+                as_of_height,
+            },
+        );
+    }
+
+    /// The anchor judgment applies only to a BROADCAST transaction. The same displaced anchor on a
+    /// still-`Signed` transfer concludes nothing: nothing has been committed to the network, so
+    /// the transfer will simply be proven afresh against a live boundary.
+    #[test]
+    fn a_displaced_anchor_on_an_unbroadcast_transfer_does_not_mark() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        // Exactly `broadcast_transfer`'s shape but for the lifecycle state: the boundary still
+        // sits at the settle depth, so only the state can be what prevents the mark.
+        let signed = anchored_transaction(
+            MigrationTxKind::Transfer { crossing: 0 },
+            MigrationTxState::Signed,
+            Some(as_of_height - SETTLE.blocks()),
+            vec![nf],
+            no_such_root(),
+        );
+
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&signed, SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+    }
+
+    /// A spent input outranks a dead anchor: the answer precedence puts `InputsSpent` above the
+    /// anchor-level cause, and the in-flight sweep acts only on the latter, so an in-flight
+    /// transaction seen spending its own inputs (most often because it is mining) is not marked
+    /// by this route.
+    #[test]
+    fn a_spent_input_outranks_a_displaced_anchor() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        record_mined_spend(&mut st, nf, as_of_height);
+
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(
+                    &broadcast_transfer(vec![nf], as_of_height - SETTLE.blocks(), no_such_root()),
+                    SETTLE,
+                )
+                .expect("the oracle answers"),
+            StepSatisfiability::Unsatisfiable {
+                cause: UnsatisfiableCause::InputsSpent {
+                    nullifiers: vec![nf.to_bytes()]
+                },
+                as_of_height,
+            },
+        );
+    }
+
+    /// A PREPARATION is not judged: it records no anchor boundary — its proving height is chosen
+    /// by the caller and persisted nowhere — so there is neither a root to compare against nor a
+    /// reference height to settle a comparison at. It reads as unobstructed however displaced its
+    /// installed anchor is.
+    #[test]
+    fn a_broadcast_preparation_is_not_anchor_judged() {
+        let (mut st, account, nf, _) = wallet_with_scanned_note();
+        let as_of_height = st.generate_and_scan_empty_blocks(12);
+        // `broadcast_transfer`'s shape but for the kind, and the absent boundary that follows from
+        // it: a preparation records none.
+        let prep = anchored_transaction(
+            MigrationTxKind::Preparation { layer: 0, index: 0 },
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([7; 32]),
+            },
+            None,
+            vec![nf],
+            no_such_root(),
+        );
+
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&prep, SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::Satisfiable { as_of_height },
+        );
+    }
+
+    /// The observations are scoped to the store's account: the same nullifier, asked about
+    /// through a DIFFERENT account's store over the same wallet database, reads as `Unknown`
+    /// (that account has seen no such note), so the answer is not-yet-satisfiable rather than
+    /// anything derived from another account's notes.
+    #[test]
+    fn observations_are_scoped_to_the_stores_account() {
+        let ScannedNoteFixture {
+            mut st,
+            second_account,
+            nf,
+            as_of_height,
+            ..
+        } = scanned_note_fixture(true);
+        let other_account = second_account.expect("the fixture created a second account");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            other_account,
+        )
+        .expect("the second account exists");
+        assert_eq!(
+            store
+                .check_step_satisfiability(&transfer(vec![nf], 0), SETTLE)
+                .expect("the oracle answers"),
+            StepSatisfiability::NotYetSatisfiable { as_of_height },
+        );
+    }
+}
+
+/// The wallet's own truncation drives every stored migration's, at the height it ACTUALLY
+/// truncated to: a migration's chain-derived state is exactly as revocable as the wallet's, and a
+/// The store's MINING lookup (`PoolMigrationRead::mined_height`) — the forward half of
+/// chain-derived state, answered from the wallet's own `transactions` table and bounded by the
+/// fully-scanned height, on which `advance_migration` promotes an in-flight transaction to `Mined`
+/// with no consumer involvement.
+#[cfg(all(test, feature = "orchard"))]
+mod mined_height {
+    use rusqlite::named_params;
+
+    use zcash_client_backend::data_api::testing::TestState;
+    use zcash_pool_migration::engine::PoolMigrationRead;
+    use zcash_protocol::TxId;
+    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::local_consensus::LocalNetwork;
+
+    use super::PoolMigrations;
+    use super::check_step_satisfiability::{unscanned_wallet, wallet_with_scanned_note};
+    use crate::testing::{BlockCache, db::TestDb};
+    use crate::util::SystemClock;
+
+    /// Insert a transaction the wallet knows of, at `mined_height`, with no spend join: the mining
+    /// lookup reads `transactions` alone, so nothing here needs a note or a spender.
+    fn record_transaction(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        txid: TxId,
+        mined_height: Option<BlockHeight>,
+    ) {
+        st.wallet_mut()
+            .conn_mut()
+            .execute(
+                "INSERT INTO transactions (txid, mined_height, min_observed_height)
+                 VALUES (:txid, :mined_height, :min_observed_height)",
+                named_params! {
+                    ":txid": txid.as_ref(),
+                    ":mined_height": mined_height.map(u32::from),
+                    ":min_observed_height": mined_height.map_or(1, u32::from),
+                },
+            )
+            .expect("inserts the transaction");
+    }
+
+    /// The forward half of chain-derived state: a transaction the scan has seen mined inside the
+    /// scanned region reports its height, and that is what the drive loop promotes on.
+    #[test]
+    fn mined_height_reports_a_transaction_inside_the_scanned_region() {
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let txid = TxId::from_bytes([3; 32]);
+        record_transaction(&mut st, txid, Some(as_of_height));
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store.mined_height(txid).expect("the store answers"),
+            Some(as_of_height),
+        );
+    }
+
+    /// The same discipline the unsatisfiability marks rest on, applied to inclusion:
+    /// `transactions.mined_height` is also written by transaction-status retrieval, which can
+    /// learn a transaction mined before scanning reaches its block. Promoting on that would stamp
+    /// `Mined` above the region a rollback truncates, so it is withheld until the scan arrives.
+    #[test]
+    fn mined_height_withholds_a_transaction_above_the_scanned_region() {
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+        let txid = TxId::from_bytes([4; 32]);
+        record_transaction(&mut st, txid, Some(as_of_height + 1));
+        {
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
+            assert_eq!(
+                store.mined_height(txid).expect("the store answers"),
+                None,
+                "a mined height above the scanned region is not yet promotable",
+            );
+        }
+        // Scan past it; the inclusion now lies inside the scanned region.
+        let (h3, _) = st.generate_empty_block();
+        st.scan_cached_blocks(h3, 1);
+        assert_eq!(h3, as_of_height + 1, "the next block is the mined height");
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store.mined_height(txid).expect("the store answers"),
+            Some(h3)
+        );
+    }
+
+    /// The two ways there is nothing to promote: a transaction the wallet has never heard of, and
+    /// one it knows of but has not seen mined (in the mempool, or awaiting retrieval).
+    #[test]
+    fn mined_height_is_none_for_an_unknown_or_unmined_transaction() {
+        let (mut st, account, _nf, _as_of_height) = wallet_with_scanned_note();
+        let unmined = TxId::from_bytes([5; 32]);
+        record_transaction(&mut st, unmined, None);
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(
+            store.mined_height(unmined).expect("the store answers"),
+            None
+        );
+        assert_eq!(
+            store
+                .mined_height(TxId::from_bytes([6; 32]))
+                .expect("the store answers"),
+            None,
+            "a transaction the wallet has never heard of",
+        );
+    }
+
+    /// A wallet that has scanned nothing has no view to answer from, so it reports nothing mined
+    /// rather than erroring: the sweep this serves runs on every drive call, including before a
+    /// wallet has ever synced.
+    #[test]
+    fn mined_height_on_an_unscanned_wallet_is_none() {
+        let (mut st, account) = unscanned_wallet();
+        let txid = TxId::from_bytes([7; 32]);
+        record_transaction(&mut st, txid, Some(BlockHeight::from_u32(100)));
+        let store = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists");
+        assert_eq!(store.mined_height(txid).expect("the store answers"), None);
+    }
+}
+
+/// consumer has no reorg hook to remember.
+#[cfg(all(test, feature = "orchard"))]
+mod truncation_follows_the_wallet {
+    use zcash_client_backend::data_api::testing::{
+        AddressType, TestBuilder, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
+    };
+    use zcash_client_backend::data_api::{Account as _, WalletRead, WalletWrite};
+    use zcash_pool_migration::denomination::DenominationPlan;
+    use zcash_pool_migration::engine::{
+        MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+        MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    };
+    use zcash_pool_migration::preparation::PreparationPlan;
+    use zcash_pool_migration::satisfiability::{ReplanThreshold, UnsatisfiableKind};
+    use zcash_pool_migration::scheduling::AnchorBucketInterval;
+    use zcash_primitives::block::BlockHash;
+    use zcash_protocol::TxId;
+    use zcash_protocol::consensus::BlockHeight;
+    use zcash_protocol::value::Zatoshis;
+
+    use super::PoolMigrations;
+    use crate::testing::{BlockCache, db::TestDbFactory};
+    use crate::util::SystemClock;
+
+    /// A migration transaction in `state`, marked at `unsatisfiable_at`; the plan-shaped fields are
+    /// immaterial to truncation. A mark is a stamp and a kind together, and truncation treats every
+    /// kind alike, so the kind is FIXED at an observed spend — which is what lets the surviving
+    /// mark be asserted whole, stamp and kind, rather than only by its height.
+    ///
+    /// Hand-built rather than drawn from `zcash_pool_migration::testing`'s
+    /// `arb_migration_transaction`: the id orders the rows the assertions index by, and the
+    /// lifecycle state and the mark are the two things truncation acts on, so all three are
+    /// caller-chosen here.
+    fn tx(
+        id: u32,
+        state: MigrationTxState,
+        unsatisfiable_at: Option<BlockHeight>,
+    ) -> MigrationTransaction {
+        MigrationTransaction::from_parts(
+            MigrationTransferId::new(id),
+            MigrationTxKind::Transfer {
+                crossing: id as usize,
+            },
+            vec![0xAB],
+            Vec::new(),
+            BlockHeight::from_u32(0),
+            BlockHeight::from_u32(0),
+            None,
+            // One txid per row: where the lifecycle state carries one, that IS the row's.
+            match state {
+                MigrationTxState::Broadcast { txid } | MigrationTxState::Mined { txid, .. } => txid,
+                _ => TxId::from_bytes([id as u8; 32]),
+            },
+            state,
+            None,
+            unsatisfiable_at.map(|at| (at, UnsatisfiableKind::InputsSpent)),
+            vec![[id as u8; 32]],
+            None,
+        )
+    }
+
+    /// A migration in `status` carrying `transactions`.
+    fn migration(
+        status: MigrationStatus,
+        transactions: Vec<MigrationTransaction>,
+    ) -> MigrationState {
+        MigrationState::from_parts(
+            status,
+            DenominationPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            transactions,
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        )
+    }
+
+    #[test]
+    fn wallet_truncation_rolls_back_marks_mined_heights_and_status() {
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+        let account = st
+            .test_account()
+            .expect("the test account exists")
+            .account()
+            .id();
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        let (h, _, _) = st.generate_next_block(
+            &fvk,
+            AddressType::DefaultExternal,
+            Zatoshis::const_from_u64(100_000),
+        );
+        st.scan_cached_blocks(h, 1);
+        st.generate_and_scan_empty_blocks(12);
+        let tip = st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+
+        // A COMPLETE migration: one transaction mined well below the coming truncation, one mined
+        // above it.
+        let low = tip - 6;
+        let mined = |txid: u8, height: BlockHeight| MigrationTxState::Mined {
+            txid: TxId::from_bytes([txid; 32]),
+            height,
+        };
+        {
+            let mut store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
+            store
+                .replace_migration(&migration(
+                    MigrationStatus::Complete,
+                    vec![tx(0, mined(0xA0, low), None), tx(1, mined(0xA1, tip), None)],
+                ))
+                .expect("persists the migration");
+        }
+
+        // Truncate the WALLET; nothing tells the migration store directly.
+        let truncated_to = st
+            .wallet_mut()
+            .truncate_to_height(tip - 3)
+            .expect("the wallet truncates");
+        assert!(
+            truncated_to < tip,
+            "the truncation moved the chain view back"
+        );
+
+        let state = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists")
+        .get_migration()
+        .expect("reads the migration")
+        .expect("the migration is present");
+        assert_eq!(
+            state.transactions()[0].state(),
+            mined(0xA0, low),
+            "a transaction mined below the truncation stays mined",
+        );
+        assert_eq!(
+            state.transactions()[1].state(),
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([0xA1; 32])
+            },
+            "a transaction mined above the truncation is demoted, keeping its txid",
+        );
+        assert_eq!(
+            state.status(),
+            MigrationStatus::InProgress,
+            "a Complete status the demotion unsettles reverts",
+        );
+
+        // And the marks: an in-flight transaction marked on evidence above the next truncation
+        // loses that mark, while one marked below keeps it.
+        {
+            let mut store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
+            store
+                .replace_migration(&migration(
+                    MigrationStatus::InProgress,
+                    vec![
+                        tx(
+                            0,
+                            MigrationTxState::Broadcast {
+                                txid: TxId::from_bytes([0xB0; 32]),
+                            },
+                            Some(truncated_to),
+                        ),
+                        tx(
+                            1,
+                            MigrationTxState::Broadcast {
+                                txid: TxId::from_bytes([0xB1; 32]),
+                            },
+                            Some(low),
+                        ),
+                    ],
+                ))
+                .expect("persists the marked migration");
+        }
+
+        let deeper = st
+            .wallet_mut()
+            .truncate_to_height(truncated_to - 2)
+            .expect("the wallet truncates again");
+        assert!(deeper < truncated_to);
+        assert!(
+            low <= deeper,
+            "the surviving mark rests below the truncation"
+        );
+
+        let state = PoolMigrations::for_account(
+            *st.network(),
+            SystemClock,
+            st.wallet_mut().conn_mut(),
+            account,
+        )
+        .expect("the account exists")
+        .get_migration()
+        .expect("reads the migration")
+        .expect("the migration is present");
+        assert_eq!(
+            (
+                state.transactions()[0].unsatisfiable_at(),
+                state.transactions()[0].unsatisfiable_kind()
+            ),
+            (None, None),
+            "a mark resting on chain state the truncation discarded is cleared, kind and all",
+        );
+        assert_eq!(
+            (
+                state.transactions()[1].unsatisfiable_at(),
+                state.transactions()[1].unsatisfiable_kind()
+            ),
+            (Some(low), Some(UnsatisfiableKind::InputsSpent)),
+            "a mark resting on retained chain state stands, keeping what it recorded",
         );
     }
 }
@@ -305,6 +2049,7 @@ mod retention_follows_the_committed_migration {
 #[cfg(test)]
 mod tests {
     use super::{Error, PoolMigrations, init_migration_tables};
+    use zcash_protocol::TxId;
 
     use proptest::prelude::*;
     use rusqlite::Connection;
@@ -317,6 +2062,10 @@ mod tests {
             MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
         },
         preparation::PreparationPlan,
+        satisfiability::{
+            DuenessTargets, ReorgSettleDepth, ReplanThreshold, StepSatisfiability,
+            UnsatisfiableCause, UnsatisfiableKind,
+        },
         scheduling::AnchorBucketInterval,
         testing::{
             arb_migration_state, arb_migration_tx_state, assert_empty_is_none,
@@ -326,10 +2075,17 @@ mod tests {
     };
 
     use crate::AccountUuid;
+    use crate::util::SystemClock;
 
     use std::collections::BTreeSet;
+    use zcash_client_backend::data_api::testing::TestBuilder;
     use zcash_client_backend::wallet::LockOwner;
+    use zcash_protocol::local_consensus::LocalNetwork;
     use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+
+    /// Consensus parameters for stores whose wallet context is carried but never consulted: no
+    /// test in this module finalizes a proved transaction.
+    const NET: LocalNetwork = TestBuilder::<(), ()>::DEFAULT_NETWORK;
 
     /// A fresh in-memory database with a minimal `accounts` table (the `account_id` foreign-key
     /// target) and the migration tables created, but not yet wrapped as a store for any particular
@@ -364,10 +2120,10 @@ mod tests {
     /// A fresh, empty store over a new in-memory database with the migration tables created, scoped
     /// to a fresh account. Each proptest case and test gets its own database and account, so writes
     /// never bleed between cases.
-    fn fresh_store() -> PoolMigrations<Connection> {
+    fn fresh_store() -> PoolMigrations<Connection, LocalNetwork, SystemClock> {
         let conn = fresh_conn();
         let account = insert_account(&conn);
-        PoolMigrations::for_account(conn, account).expect("account exists")
+        PoolMigrations::for_account(NET, SystemClock, conn, account).expect("account exists")
     }
 
     #[test]
@@ -392,28 +2148,45 @@ mod tests {
         )
         .expect("an empty stored plan reconstructs");
 
+        // The `from_parts` slots this test does not exercise, named so the positional argument
+        // lists below read as what they are: both transactions are identical filler apart from the
+        // `lock_owner` slot that is the subject.
+        let depends_on: Vec<MigrationTransferId> = Vec::new();
+        let anchor_boundary: Option<BlockHeight> = None;
+        let unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)> = None;
+        let spend_nullifiers: Vec<[u8; 32]> = Vec::new();
+        let broadcast_failure_at: Option<BlockHeight> = None;
+
         let owner_bytes = [7u8; 32];
         let locked = MigrationTransaction::from_parts(
             MigrationTransferId::new(0),
             MigrationTxKind::Preparation { layer: 0, index: 0 },
             vec![1, 2, 3],
-            Vec::new(),
+            depends_on.clone(),
             BlockHeight::from_u32(100),
             BlockHeight::from_u32(200),
-            None,
+            anchor_boundary,
+            TxId::from_bytes([0; 32]),
             MigrationTxState::Signed,
             Some(owner_bytes),
+            unsatisfiable,
+            spend_nullifiers.clone(),
+            broadcast_failure_at,
         );
         let unlocked = MigrationTransaction::from_parts(
             MigrationTransferId::new(1),
             MigrationTxKind::Transfer { crossing: 0 },
             vec![4, 5, 6],
-            Vec::new(),
+            depends_on,
             BlockHeight::from_u32(100),
             BlockHeight::from_u32(200),
-            None,
+            anchor_boundary,
+            TxId::from_bytes([1; 32]),
             MigrationTxState::Signed,
             None,
+            unsatisfiable,
+            spend_nullifiers,
+            broadcast_failure_at,
         );
         let state = MigrationState::from_parts(
             MigrationStatus::Committed,
@@ -421,6 +2194,7 @@ mod tests {
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             vec![locked, unlocked],
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
 
         let mut store = fresh_store();
@@ -480,8 +2254,12 @@ mod tests {
                 BlockHeight::from_u32(100),
                 BlockHeight::from_u32(200),
                 None,
+                TxId::from_bytes([0; 32]),
                 MigrationTxState::Signed,
                 lock_owner,
+                None,
+                Vec::new(),
+                None,
             )
         };
 
@@ -497,6 +2275,7 @@ mod tests {
                 tx(3, 3, Some(owner_a_bytes)),
             ],
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
 
         store.replace_migration(&state).expect("write succeeds");
@@ -529,11 +2308,330 @@ mod tests {
             PreparationPlan::from_parts(vec![Vec::new()], Vec::new()),
             Vec::new(),
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
         let err = fresh_store()
             .replace_migration(&state)
             .expect_err("an empty layer cannot be persisted");
         assert!(matches!(err, Error::Unrepresentable(_)));
+    }
+
+    /// A minimal committed migration holding one signed transfer with a one-entry nullifier
+    /// cache, for tests that corrupt its stored row directly.
+    ///
+    /// Hand-built rather than drawn from `arb_migration_state`, because its users need exactly one
+    /// transaction to EXIST: a blanket `UPDATE` that corrupts every stored row would pass
+    /// vacuously against a zero-transaction draw, and the round-trip tests address
+    /// `MigrationTransferId::new(0)` by name.
+    fn single_transfer_state() -> MigrationState {
+        let denominations = DenominationPlan::from_stored_parts(
+            Vec::new(),
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+            Zatoshis::ZERO,
+        )
+        .expect("an empty stored plan reconstructs");
+        MigrationState::from_parts(
+            MigrationStatus::Committed,
+            denominations,
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![MigrationTransaction::from_parts(
+                MigrationTransferId::new(0),
+                MigrationTxKind::Transfer { crossing: 0 },
+                vec![1, 2, 3],
+                Vec::new(),
+                BlockHeight::from_u32(100),
+                BlockHeight::from_u32(200),
+                None,
+                TxId::from_bytes([0; 32]),
+                MigrationTxState::Signed,
+                None,
+                None,
+                vec![[7u8; 32]],
+                None,
+            )],
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        )
+    }
+
+    /// The 32-byte stride of the nullifier cache is a `CHECK` on the table that holds it, so a
+    /// value of any other width is refused at the point of storage. This is the guard that
+    /// replaced a read-side length check over a concatenated blob: the ragged cache that check
+    /// existed to catch is no longer a state this schema can be put into.
+    #[test]
+    fn a_cached_nullifier_of_the_wrong_width_cannot_be_stored() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        assert!(
+            conn.execute(
+                "UPDATE orchard_ironwood_migration_spend_nullifiers SET nullifier = X'0102030405'",
+                [],
+            )
+            .is_err(),
+            "the stride CHECK refuses a nullifier that is not 32 bytes",
+        );
+    }
+
+    /// What the schema can still lose is the cache itself: a transaction whose nullifier rows are
+    /// gone reads back with an EMPTY cache, which is corruption on any row that is not `mined`
+    /// (only a mined row is exempt from the backfill that supplies it). The satisfiability oracle
+    /// reports that before it consults any chain state, which is why this store — over a database
+    /// with no scanned chain at all — reaches the corruption rather than a missing fully-scanned
+    /// height.
+    #[test]
+    fn a_signed_row_whose_cached_nullifiers_are_gone_is_corrupt() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        conn.execute(
+            "DELETE FROM orchard_ironwood_migration_spend_nullifiers",
+            [],
+        )
+        .expect("discards the stored cache");
+
+        let store =
+            PoolMigrations::for_account(NET, SystemClock, &conn, account).expect("account exists");
+        let loaded = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        let transfer = &loaded.transactions()[0];
+        assert!(
+            transfer.spend_nullifiers().is_empty(),
+            "the rows are gone, so the transaction reads back caching nothing",
+        );
+        assert!(matches!(
+            store.check_step_satisfiability(transfer, ReorgSettleDepth::new(10)),
+            Err(Error::Corrupt("spend_nullifiers")),
+        ));
+    }
+
+    /// A mark recorded through the engine's single door survives the store: the stamp AND the
+    /// kind that says why come back exactly, for a direct observation and for the mark the
+    /// dependency closure applies behind it.
+    #[test]
+    fn recorded_unsatisfiability_kinds_round_trip() {
+        // Hand-built rather than drawn from `arb_migration_transaction`, because the subject is
+        // the specific tx1 -> tx0 dependency edge the mark's closure travels along: that strategy
+        // draws `depends_on` arbitrarily, and `arb_migration_state` re-keys transaction ids
+        // sequentially without remapping it, so a drawn edge can dangle.
+        let transfer = |id: u32, depends_on: Vec<MigrationTransferId>| {
+            MigrationTransaction::from_parts(
+                MigrationTransferId::new(id),
+                MigrationTxKind::Transfer {
+                    crossing: id as usize,
+                },
+                vec![1, 2, 3],
+                depends_on,
+                BlockHeight::from_u32(100),
+                BlockHeight::from_u32(0),
+                None,
+                TxId::from_bytes([0; 32]),
+                MigrationTxState::Signed,
+                None,
+                None,
+                vec![[id as u8; 32]],
+                None,
+            )
+        };
+        let mut state = MigrationState::from_parts(
+            MigrationStatus::Committed,
+            DenominationPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![
+                transfer(0, Vec::new()),
+                transfer(1, vec![MigrationTransferId::new(0)]),
+            ],
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        );
+        let as_of_height = BlockHeight::from_u32(500);
+        state.record_satisfiability(
+            DuenessTargets::at(BlockHeight::from_u32(600)),
+            &[(
+                MigrationTransferId::new(0),
+                StepSatisfiability::Unsatisfiable {
+                    cause: UnsatisfiableCause::InputsSpent {
+                        nullifiers: vec![[9u8; 32]],
+                    },
+                    as_of_height,
+                },
+            )],
+        );
+
+        let mut store = fresh_store();
+        store.replace_migration(&state).expect("write succeeds");
+        let loaded = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        assert_eq!(loaded, state, "the whole migration round-trips unchanged");
+        assert_eq!(
+            (
+                loaded.transactions()[0].unsatisfiable_at(),
+                loaded.transactions()[0].unsatisfiable_kind()
+            ),
+            (Some(as_of_height), Some(UnsatisfiableKind::InputsSpent)),
+            "the observed cause's kind is stored beside its stamp",
+        );
+        assert_eq!(
+            (
+                loaded.transactions()[1].unsatisfiable_at(),
+                loaded.transactions()[1].unsatisfiable_kind()
+            ),
+            (Some(as_of_height), Some(UnsatisfiableKind::Inherited)),
+            "a closure-applied mark is stored as inherited",
+        );
+    }
+
+    /// A broadcast-failure report survives the store: it is written and read back as its own
+    /// column, independently of the unsatisfiability mark, and an unreported transaction reads
+    /// back as unreported.
+    #[test]
+    fn a_broadcast_failure_report_round_trips() {
+        let mut store = fresh_store();
+        store
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        // The report applies only to a `Proved` transaction, which is the state a broadcast the
+        // node refused is left in.
+        store
+            .update_transaction(MigrationTransferId::new(0), MigrationTxState::Proved)
+            .expect("the row advances");
+        let mut state = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        let observed_tip = BlockHeight::from_u32(1700);
+        state.report_broadcast_failure(MigrationTransferId::new(0), observed_tip);
+        store.replace_migration(&state).expect("write succeeds");
+        let loaded = store
+            .get_migration()
+            .expect("read succeeds")
+            .expect("a migration is stored");
+        assert_eq!(loaded, state, "the whole migration round-trips unchanged");
+        assert_eq!(
+            (
+                loaded.transactions()[0].broadcast_failure_at(),
+                loaded.transactions()[0].unsatisfiable(),
+            ),
+            (Some(observed_tip), None),
+            "the report is stored on its own, carrying no mark with it",
+        );
+
+        // Discharging the report writes the column back to NULL rather than leaving the stale
+        // tip standing.
+        let mut discharged = loaded;
+        discharged.truncate_to_height(BlockHeight::from_u32(1699));
+        store
+            .replace_migration(&discharged)
+            .expect("write succeeds");
+        assert_eq!(
+            store
+                .get_migration()
+                .expect("read succeeds")
+                .expect("a migration is stored")
+                .transactions()[0]
+                .broadcast_failure_at(),
+            None,
+        );
+    }
+
+    /// The unsatisfiability columns are one value in two places: a stamp without a kind cannot be
+    /// rendered and a kind without a stamp has no height for reorg truncation to judge it against,
+    /// so a row holding either half alone was not written by this store. A kind name this build
+    /// does not know is corruption for the same reason an unrecognized `state` discriminant is:
+    /// reading it as "unmarked" would return a dead transaction to the prove and broadcast queues.
+    #[test]
+    fn a_half_written_or_unknown_unsatisfiability_mark_is_corrupt() {
+        for (sql, what) in [
+            (
+                "UPDATE orchard_ironwood_migration_transactions SET unsatisfiable_at = 500",
+                "a stamp with no kind",
+            ),
+            (
+                "UPDATE orchard_ironwood_migration_transactions
+                    SET unsatisfiable_kind = 'inputs_spent'",
+                "a kind with no stamp",
+            ),
+        ] {
+            let mut conn = fresh_conn();
+            let account = insert_account(&conn);
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+                .expect("account exists")
+                .replace_migration(&single_transfer_state())
+                .expect("write succeeds");
+            conn.execute(sql, []).expect("corrupts the stored row");
+            let err = PoolMigrations::for_account(NET, SystemClock, &conn, account)
+                .expect("account exists")
+                .get_migration()
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::Corrupt("unsatisfiable_at / unsatisfiable_kind disagree")
+                ),
+                "{what} must not decode, got {err:?}"
+            );
+        }
+
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        conn.execute(
+            "UPDATE orchard_ironwood_migration_transactions
+                SET unsatisfiable_at = 500, unsatisfiable_kind = 'from_the_future'",
+            [],
+        )
+        .expect("stores an unrecognized kind");
+        let err = PoolMigrations::for_account(NET, SystemClock, &conn, account)
+            .expect("account exists")
+            .get_migration()
+            .unwrap_err();
+        assert!(matches!(err, Error::Corrupt("unsatisfiable_kind")));
+    }
+
+    /// A stored `replan_threshold` above 100 names no valid percent; reading it back is
+    /// corruption, never a silently clamped policy.
+    #[test]
+    fn replan_threshold_above_100_is_corrupt() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&single_transfer_state())
+            .expect("write succeeds");
+        conn.execute(
+            "UPDATE orchard_ironwood_migrations SET replan_threshold = 101",
+            [],
+        )
+        .expect("corrupts the stored threshold");
+        let err = PoolMigrations::for_account(NET, SystemClock, &conn, account)
+            .expect("account exists")
+            .get_migration()
+            .expect_err("an out-of-range threshold must not decode");
+        assert!(matches!(err, Error::Corrupt("replan_threshold")));
     }
 
     /// Deleting an account cascades to its in-progress migration: the `account_id` foreign key
@@ -568,13 +2666,14 @@ mod tests {
             PreparationPlan::from_parts(Vec::new(), Vec::new()),
             Vec::new(),
             AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
         );
 
-        PoolMigrations::for_account(&mut conn, account_a)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
             .expect("account A exists")
             .replace_migration(&state)
             .expect("write A's migration");
-        PoolMigrations::for_account(&mut conn, account_b)
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account_b)
             .expect("account B exists")
             .replace_migration(&state)
             .expect("write B's migration");
@@ -611,7 +2710,7 @@ mod tests {
             "account A's child rows must cascade away, and only those"
         );
         assert_eq!(
-            PoolMigrations::for_account(&conn, account_b)
+            PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                 .expect("account B exists")
                 .get_migration()
                 .expect("read B"),
@@ -672,20 +2771,20 @@ mod tests {
             let account_a = insert_account(&conn);
             let account_b = insert_account(&conn);
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state)
                 .expect("write for A");
 
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_b)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                     .expect("account B exists")
                     .get_migration()
                     .expect("read for B"),
                 None
             );
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_a)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_a)
                     .expect("account A exists")
                     .get_migration()
                     .expect("read for A"),
@@ -705,28 +2804,28 @@ mod tests {
             let account_a = insert_account(&conn);
             let account_b = insert_account(&conn);
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state_a_1)
                 .expect("write A first");
-            PoolMigrations::for_account(&mut conn, account_b)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_b)
                 .expect("account B exists")
                 .replace_migration(&state_b)
                 .expect("write B");
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state_a_2)
                 .expect("write A second");
 
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_a)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_a)
                     .expect("account A exists")
                     .get_migration()
                     .expect("read A"),
                 Some(state_a_2)
             );
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_b)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                     .expect("account B exists")
                     .get_migration()
                     .expect("read B"),
@@ -744,7 +2843,7 @@ mod tests {
         ) {
             let conn = fresh_conn();
             let account = insert_account(&conn);
-            let mut store = PoolMigrations::for_account(conn, account).expect("account exists");
+            let mut store = PoolMigrations::for_account(NET, SystemClock, conn, account).expect("account exists");
             store.replace_migration(&first).expect("write first");
             store.replace_migration(&second).expect("write second");
             prop_assert_eq!(store.get_migration().expect("read"), Some(second));
@@ -752,7 +2851,7 @@ mod tests {
 
         /// `update_transaction` is scoped to its account: advancing a transaction's state for
         /// account A does not affect account B's migration on the same connection, even when both
-        /// accounts started from the same migration state (and so share the updated `tx_id`).
+        /// accounts started from the same migration state (and so share the updated `transfer_id`).
         #[test]
         fn update_transaction_is_scoped_to_its_account(
             state in arb_migration_state(),
@@ -765,22 +2864,22 @@ mod tests {
             let account_a = insert_account(&conn);
             let account_b = insert_account(&conn);
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .replace_migration(&state)
                 .expect("write A");
-            PoolMigrations::for_account(&mut conn, account_b)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_b)
                 .expect("account B exists")
                 .replace_migration(&state)
                 .expect("write B");
 
-            PoolMigrations::for_account(&mut conn, account_a)
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account_a)
                 .expect("account A exists")
                 .update_transaction(id, new)
                 .expect("update A");
 
             prop_assert_eq!(
-                PoolMigrations::for_account(&conn, account_b)
+                PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                     .expect("account B exists")
                     .get_migration()
                     .expect("read B"),

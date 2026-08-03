@@ -7,18 +7,324 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `engine::ProvedTransaction`: the proof carried out of a successful
+  `engine::prove_transfer` / `engine::prove_preparation` call — the proven PCZT
+  bytes and the row id they belong to — consumed only by
+  `engine::PoolMigrationWrite::store_proved_transaction` (via its
+  `ProvedTransaction::apply`).
+- `engine::PoolMigrationWrite::store_proved_transaction` (required): records a
+  successfully proved transaction on the migration state and persists it. An implementation over a wallet database
+  must, atomically with that write, finalize the now fully-constructed
+  transaction and persist it to the wallet's own transaction store (as
+  `store_transactions_to_be_sent` records the standard spend flows), so the
+  wallet's view protects the migration's inputs from its own spends between
+  proving and broadcast. A store with no wallet-level transaction records
+  implements it as `proven.apply(state)` followed by `replace_migration`.
+
 ### Changed
-- `engine::MigrationState::next_step` now returns a due `AdvanceStep::Broadcast`
-  in preference to `AdvanceStep::Prove` (previously the reverse), so a wallet
-  that wakes to find a transaction ready to broadcast can submit it and end the
-  session without syncing; proving work is surfaced only once no broadcast is
-  due.
+- `engine::ProveOutcome::Proved` now carries the `ProvedTransaction`, and
+  `engine::prove_transfer` / `engine::prove_preparation` no longer write the
+  proof into the migration state themselves: a caller discharges the returned
+  proof through `PoolMigrationWrite::store_proved_transaction` (nothing else
+  moves a transaction to `Proved`), and persists a `MarkedUnsatisfiable`
+  outcome with `replace_migration` as before. `ProveOutcome` no longer
+  implements `Clone`/`Copy`.
+
+### Fixed
+- `engine::prove_transfer` now re-validates a transfer's persisted anchor boundary
+  against its funding preparations' REAL mined heights, and re-draws it (via
+  `scheduling::draw_anchor_boundary`, from the funding note's actual creation
+  height and the wallet's scanned tip) when the funding note postdates the drawn
+  boundary. The commit-time draw floors the boundary on an ESTIMATE of when the
+  last preparation layer mines (`EST_PREP_LAYER_MINING_BLOCKS`); a preparation
+  that out-mines the estimate — a wallet asleep through one broadcast window is
+  enough — left the boundary below the funding note's creation height, where the
+  note is absent from the tree state and its witness can NEVER be computed. The
+  prover's failure there is indistinguishable from "not scanned yet", so the
+  transfer deferred forever: reported ready to prove, blocked on nothing, proving
+  nothing, permanently — observed in the field on two testnet wallets, wedging
+  the final transfer of otherwise-complete migrations. The re-draw is sound for a
+  `Signed` transfer because the PCZT's anchor and witnesses are deferred to
+  proving (ZIP 374), so the stored artifact pins nothing; ZIP 318 makes anchor
+  selection a proving-time rule. When no grid boundary at or past the funding
+  note's creation has settled within the scanned tip yet, the answer is the
+  ordinary `NotYetProvable` retry. `prove_transfer` takes the network parameters,
+  the scanned tip, and an rng for this; `MigrationState::set_transfer_anchor_boundary`
+  persists the fresh draw.
+
+### Added
+- The `satisfiability` module, holding the vocabulary a store answers a
+  committed migration's liveness questions in — `StepSatisfiability` and its
+  causes, the observations they are folded from, and the caller policies they
+  are judged under — together with the drive API built on those answers.
+- `satisfiability::{AdvanceConfig, advance_migration}`, the API to drive a
+  committed migration with. Call it at each wake-up with the
+  `satisfiability::DuenessTargets` for the next `state::AdvanceStep`, perform
+  that step, record the outcome, and call it again; every step it returns has
+  been checked against the store's satisfiability oracle, and every
+  determination it makes is persisted before the step is surfaced.
+- `engine::PoolMigrationRead::mined_height`, answering whether this wallet's scan
+  has observed a transaction mined, at or below its fully-scanned height.
+  `satisfiability::advance_migration` asks it about every broadcast-but-unmined
+  transaction it sweeps and promotes the ones that have mined, so which of a
+  migration's transactions are mined now follows the wallet's scan in both
+  directions: forward here, and backward through
+  `MigrationState::truncate_to_height`. A consumer driving through
+  `advance_migration` records only what it alone can know — that it broadcast —
+  and no longer calls `MigrationState::mark_mined`, which remains for a consumer
+  standing outside that loop. The promotion precedes every check that could
+  record a verdict, so chain inclusion outranks an unsatisfiability mark and an
+  open broadcast-failure report without a special case; a transaction seen mined
+  costs the lookup alone and no longer reaches the satisfiability oracle. The sweep also now
+  records `satisfiability::UnsatisfiableCause::InputsSpent` for a broadcast transaction, which it
+  previously dropped: having asked the mining question first and been told the wallet has not seen
+  this transaction mine, a spend of its inputs in a mined transaction is necessarily some OTHER
+  transaction's, so the transfer is known dead now rather than at its expiry — weeks earlier on a
+  privacy-preserving broadcast schedule, and that much sooner to a replan.
+  `PoolMigrationRead::mined_height` documents the store-side consistency this rests on: it and
+  `check_step_satisfiability` must answer from one view of the wallet's scan.
+- `pczt_txid`, deriving a migration transaction's `TxId` from its PCZT (`orchard` feature). A
+  migration transaction's id exists from the moment its PCZT is PREPARED — computing it is a
+  prerequisite of signing, since the signature hash is derived from it — and never moves
+  afterwards: signing, and the anchor and witnesses ZIP 374 defers to proving, are all authorizing
+  data, outside the effecting data the txid digest covers.
+- `engine::MigrationTransaction::txid`, that id, recorded on every transaction when it is built and
+  supplied to `MigrationTransaction::from_parts`. Only `rebuild_expired_transfer` changes it, and
+  only because a rebuild is a genuinely different transaction.
+- `satisfiability::advance_migration` additionally sweeps `Proved` transactions, promoting any the
+  wallet's scan has seen mine — through `Broadcast`, since that is the state the missing record
+  would have written. This closes the gap a recorded-txid sweep cannot see: a consumer that
+  submitted a transaction to a node and then crashed, or failed to persist, before
+  `MigrationState::mark_broadcast` leaves a `Proved` row whose transaction is on chain, which
+  nothing else would ever promote. Consumers that carried their own submit-crash probe can delete
+  it.
+- `satisfiability::DuenessTargets`, the pair of heights a migration's dueness is
+  judged against: the wallet's fully-scanned frontier and its estimate of where
+  the chain tip has reached, both carrying this crate's target convention
+  (`height + 1`). Construct it with `DuenessTargets::new(scanned, estimated)`,
+  which clamps the effective target up to the scanned one, or with
+  `DuenessTargets::at(target)` when the caller's estimate IS its chain view (a
+  server that follows the chain continuously). ZIP 318 forbids contacting
+  lightwalletd before the next-step decision, so a wallet holds only a local
+  scanned frontier and a wall-clock estimate at that moment; the estimate serves
+  the broadcast and proving SCHEDULE, while every judgment that persists a
+  verdict or destroys work — expiry as a determination, the dead set, rebuild
+  eligibility, the drain-time replan, the durable dependency closure, and a
+  transfer's anchor-boundary settledness — is made at the scanned target alone.
+- `state::Blocker::ExpiryImminent`, reported for a transaction whose expiry
+  height is at or above the caller's scanned target and below its effective one:
+  the wallet cannot yet observe whether it lapsed, so nothing is determined, but
+  its broadcast and its proof are withheld. Reported behind `Blocker::Expired`
+  (the same fact once the wallet can see it) and ahead of the state-derived
+  blockers, and never `ready` or carrying an action, so a consumer's
+  `ready() && action() == Some(NextAction::Broadcast)` sync gate agrees exactly
+  with what `satisfiability::advance_migration` will offer. Nothing is recorded,
+  so the transaction returns to the ordinary queues if the estimate overstated
+  the lapse.
+- `engine::MigrationStatus::Superseded` (wire name `"superseded"`) and
+  `engine::MigrationState::mark_superseded`, the terminal status and transition
+  recording that a migration's remaining value is being re-planned; a superseded
+  migration is terminal, so the commit guard accepts a replacement.
+- `satisfiability::ReplanThreshold`, the integer percent of planned transfer
+  value, unsatisfiable, above which a migration is re-planned immediately rather
+  than after satisfiable work drains; stamped on the migration at commit.
+- `engine::MigrationState::{replan_threshold, replan_required}`: the accessor
+  for the stamped threshold, and the derived determination of whether the
+  unsatisfiable share of planned transfer value strictly exceeds it.
+- `satisfiability::ReorgSettleDepth`, the caller-supplied number of blocks the
+  chain must advance past a divergence before a displacement is treated as
+  permanent.
+- `satisfiability::StepSatisfiability` and `satisfiability::UnsatisfiableCause`:
+  a store's answer to whether the environment obstructs a pre-signed
+  transaction — executable now, not yet, or never (and why).
+- `satisfiability::InputObservation` and
+  `satisfiability::classify_input_observations`, the pure fold from
+  per-nullifier observations plus the transaction-level expiry judgment into a
+  `StepSatisfiability`, so every store implementation shares one classification
+  and precedence.
+- `engine::MigrationTransferId` now implements `PartialOrd` and `Ord`.
+- `state::AdvanceStep::Replan`, the step directing the consumer to mark the
+  migration superseded and re-plan its remaining balance through the ordinary
+  planning flow.
+- `state::Blocker::Unsatisfiable`, reported (ahead of `Blocker::Expired`) for a
+  transaction whose inputs can never again all exist unspent on chain, directly
+  observed or inherited from a dead dependency.
+- `engine::MigrationState::record_satisfiability`, recording satisfiability
+  answers as durable `unsatisfiable_at` marks: input-level and anchor-level
+  causes mark the checked transaction at the observation's height, and the
+  dependency closure marks the dependents stranded behind a dead transaction.
+  Its `satisfiability::DuenessTargets` argument supplies the height that
+  closure judges its expired sources at — the scanned target, since the marks
+  it writes are durable and only a reorg truncation clears one.
+- `engine::ProveFailure`, a prover's typed failure: an input not among the
+  account's unspent notes (with the nullifier and the fully-scanned height that
+  observation rests on), or any other prover error.
+- `engine::ProveOutcome`, the outcome of a prove attempt the engine handled:
+  proved, not yet provable, or marked unsatisfiable (carrying
+  `replan_required` as it stands after the mark).
+- `wallet::WalletProveError::ScannedHeight`, reported when the wallet's
+  fully-scanned height could not be read and so a spend's absence from the
+  unspent notes could not be classified.
+- `engine::MigrationState::truncate_to_height`, which the consumer calls
+  wherever it truncates its wallet on a reorg: clears every unsatisfiability
+  mark above the given height, demotes mined transactions above it back to
+  broadcast (keeping their txids), and reverts a `Complete` status to
+  `InProgress`.
+- `satisfiability::UnsatisfiableKind` and
+  `satisfiability::ParseUnsatisfiableKindError`: the persisted, renderable
+  discriminant of an unsatisfiability mark — `InputsSpent`,
+  `InputsInvalidated`, `AnchorInvalidated`, or `Inherited` for a mark applied by
+  the dependency closure — with `AsRef<str>` / `TryFrom<&str>` over its
+  lowercase wire names. A store persists the name and reports an unrecognized
+  one as corruption.
+- `satisfiability::UnsatisfiableCause::kind`, the `UnsatisfiableKind` a cause
+  records, or `None` for a cause that applies no mark (`Expired`).
+- `engine::MigrationTransaction::unsatisfiable`, the unsatisfiability mark as
+  one optional `(BlockHeight, UnsatisfiableKind)` pair — the chain height the
+  observation rests on and which observation it was — with `unsatisfiable_at`
+  and `unsatisfiable_kind` projecting its halves. A store that persists the
+  halves separately must reject a row holding one without the other as corrupt
+  on read.
+- `state::TransactionStatus::unsatisfiable_kind`, populated exactly when
+  `state::Blocker::Unsatisfiable` is reported. A transaction stranded behind a
+  dependency whose deadness is merely derived (expired and unmined) carries no
+  stored mark and reports `UnsatisfiableKind::Inherited`.
+- `engine::RebuildError::Unsatisfiable`, returned by
+  `engine::rebuild_expired_transfer` and
+  `engine::rebuild_expired_transfer_unsigned` for a transfer that is itself
+  marked `unsatisfiable_at`, or that depends on a transaction which is; it is
+  reported ahead of `RebuildError::NotExpired`. Re-plan the migration's
+  remaining balance rather than retrying the rebuild.
+- `engine::MigrationState::report_broadcast_failure`, recording that a node
+  REJECTED a broadcast of a `Proved` transaction, together with the chain tip
+  that node reported. The report is testimony rather than evidence, so it
+  records no unsatisfiability mark: it withholds the transaction from the
+  broadcast queue until `satisfiability::advance_migration` can adjudicate the
+  rejection against the wallet's own view. A re-report overwrites; a report on
+  a transaction in any other state, or on an unknown id, is a no-op.
+- `engine::MigrationTransaction::broadcast_failure_at`, the chain tip carried by
+  a standing broadcast-failure report, or `None` when none stands. A store
+  persists it independently of the unsatisfiability mark.
+- `state::AdvanceStep::Reevaluate`, returned by
+  `satisfiability::advance_migration` while a broadcast-failure report stands
+  that the store's oracle cannot yet answer (its fully-scanned height is below
+  the reported tip). Sync the wallet to at least that tip and call
+  `advance_migration` again; it outranks every step but `Complete`, and no other
+  work is offered while it stands.
+- `state::Blocker::AwaitingReevaluation`, reported for a transaction carrying an
+  unadjudicated broadcast-failure report — behind `Blocker::Unsatisfiable` and
+  ahead of `Blocker::Expired`.
+- The `pczt_spends` module (`orchard` feature), holding
+  `pczt_spends::real_spend_nullifiers` — the `(action index,
+  orchard::note::Nullifier)` of each real spend of an unproven migration PCZT's
+  Orchard bundle — and its `pczt_spends::RealSpendError`. A store crate that
+  reconstructs the real-spend nullifier cache from stored PCZT bytes can use
+  this instead of restating the rule.
+
+### Changed
+- `engine::MigrationState::mark_broadcast` and `mark_mined` no longer take a `TxId`. The id is
+  read off the row (`MigrationTransaction::txid`), which is the transaction's own and cannot have
+  changed: a consumer broadcasting a stored transaction has nothing to tell the engine that the
+  engine does not already know, and being able to pass a mismatched id was a way to lose track of
+  a transaction that is on chain.
+- `engine::MigrationTransaction::from_parts` takes the transaction's `TxId`, after
+  `anchor_boundary`.
+- `engine::{CommitError, RebuildError}` gain a `TxId` variant, for a built PCZT whose transaction
+  id cannot be derived.
+- `engine::MigrationState::{transaction_statuses, expired_transactions}` take an
+  `satisfiability::DuenessTargets` in place of a single target height; pass
+  `DuenessTargets::at(target_height)` for the previous behavior. Under a pair
+  whose estimate runs ahead of the scan, `expired_transactions` and
+  `state::Blocker::Expired` report only the expiries the wallet's own chain data
+  supports, a transaction due only by the estimate is reported ready to
+  broadcast, and one whose expiry the estimate has passed is reported under the
+  new `state::Blocker::ExpiryImminent`.
+- `engine::MigrationState::truncate_to_height` also discharges every
+  broadcast-failure report whose observed tip is strictly above the given
+  height, alongside the unsatisfiability marks it already cleared.
 - `state::AdvanceStep::Prove` now also carries the transaction's
   `engine::MigrationTxKind`, so a consumer can tell without a lookup whether it
   is proving a preparation transaction — by construction due on its broadcast
   schedule, so broadcastable at the same wake-up once proved — or a transfer,
   whose broadcast follows at its own scheduled height. Match with
   `AdvanceStep::Prove { id, kind }`.
+- `engine::MigrationState::mark_mined` also clears the transaction's
+  unsatisfiability mark and its broadcast-failure report: chain inclusion
+  outranks either judgment about whether it could ever mine, so neither can
+  stand on a mined transaction. A consumer that read `unsatisfiable` or
+  `broadcast_failure_at` off a mined transaction gets `None` where it may
+  previously have seen a stale value; the derived `replan_required` share is
+  unaffected, having always excluded mined transfers.
+- `engine::MigrationTxState::Mined` now carries the mined transaction's txid
+  alongside its height, and `engine::MigrationState::mark_mined` takes it;
+  `MigrationTxState::from_stored` requires the txid payload for `"mined"` rows,
+  and `broadcast_txid` also answers for mined transactions.
+- `state::TransactionStatus::txid` is now populated for a MINED transaction as
+  well as a broadcast one; it previously lapsed to `None` once the transaction
+  mined. A transaction keeps the txid it was broadcast under, so a consumer
+  rendering progress no longer has to hold one from an earlier status view.
+- `engine::MigrationTransaction::from_parts` takes three further parameters,
+  `unsatisfiable` (the unsatisfiability mark, when the transaction has been
+  determined unsatisfiable), `spend_nullifiers` (the transaction's real-spend
+  nullifiers, cached from the built PCZT), and `broadcast_failure_at` (the
+  standing broadcast-failure report); all three have accessors.
+- `engine::MigrationState::from_parts` and the `engine::commit_preparation`,
+  `engine::build_preparation_unsigned`, and
+  `engine::commit_preparation_with_funding` entry points each take a further
+  `satisfiability::ReplanThreshold` parameter, stamped on the committed
+  migration.
+- `engine::MigrationState::sync_wakeup_schedule` also excludes transfers marked
+  unsatisfiable or dependent on a transaction that can never mine, alongside
+  the expired transfers it already excluded.
+- `engine::PoolMigrationRead` has a new required method,
+  `check_step_satisfiability`: an implementation reports, for each cached
+  real-spend nullifier of the given transaction, whether the note is unspent,
+  seen spent in a mined transaction, known with a dead unmined creator, or
+  unknown — plus the transaction-level expiry judgment and, for a
+  broadcast-unmined transaction, whether its installed anchor survives on the
+  chain judged settled per the supplied `satisfiability::ReorgSettleDepth` —
+  and composes `satisfiability::classify_input_observations` into a
+  `satisfiability::StepSatisfiability`. An empty nullifier cache on a non-mined
+  transaction must surface the store's own error, never an answer.
+- `engine::MigrationProver::{prove_transfer, prove_preparation}` now return
+  `Result<pczt::Pczt, engine::ProveFailure<Self::Error>>`. An implementation
+  reports a spend whose nullifier matches no note in the account's unspent set
+  as `ProveFailure::InputNotAvailable`, carrying that nullifier and the
+  fully-scanned height the absence rests on, and every other failure as
+  `ProveFailure::Other`.
+- `engine::{prove_transfer, prove_preparation}` now return
+  `Result<engine::ProveOutcome, engine::ProveError<..>>`. An input reported
+  unavailable is no longer an error: with every dependency's mined height
+  covered by the wallet's scan it is recorded as a spent-input observation (the
+  transaction is marked unsatisfiable and the dependency closure applied) and
+  answered `ProveOutcome::MarkedUnsatisfiable`, and otherwise
+  `ProveOutcome::NotYetProvable` with no state change. Match on the outcome,
+  and persist the state after `MarkedUnsatisfiable` as after a successful
+  proof.
+- `engine::CommitError` and `engine::RebuildError` have a new variant,
+  `RealSpends`, reported when a built (or rebuilt) migration PCZT presents no
+  well-formed set of real spends to cache nullifiers from.
+
+### Removed
+- `engine::MigrationState::{next_step, next_provable, next_broadcastable}`. The
+  planning kernel is internal to the crate now;
+  `satisfiability::advance_migration` is the API to drive a committed migration
+  with, and every step it returns has been checked against the store's
+  satisfiability oracle, which calling the kernel directly bypassed. Replace
+  `state.next_step(target_height)` with
+  `advance_migration(&mut store, &mut state, targets, &config)`, which returns
+  the same `state::AdvanceStep`.
+- `wallet::WalletProveError::{NoRealSpend, MalformedNullifier}`, replaced by the
+  single `wallet::WalletProveError::RealSpends`, which carries the
+  `pczt_spends::RealSpendError` describing which of the two conditions held.
+
+### Fixed
+- `engine::rebuild_expired_transfer` and
+  `engine::rebuild_expired_transfer_unsigned` no longer fail for a transfer
+  that was proved or broadcast before it expired; the rebuild now identifies
+  the funding note from the persisted real-spend nullifier cache instead of
+  the stored (by then proven) PCZT.
 
 ## [0.1.0-rc.5] - 2026-07-29
 
