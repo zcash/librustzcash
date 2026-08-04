@@ -102,6 +102,24 @@ workspace.
 - The `orchard` feature is now enabled by default. Consumers that require a
   smaller feature set should disable default features and enable only the
   features they need.
+- A migration transaction is now classified against ZIP 318 when proving stores
+  it, in the same database transaction as the record itself, rather than only
+  once it has mined and been enhanced. A scheduled transfer is stored UNMINED
+  until its broadcast height, which may be days away, and through that whole
+  window `transactions.zip318_kind` previously read as the NOT CLASSIFIED
+  default. A wallet that labels, or holds back, its own in-flight migration
+  traffic now has the classification available from the moment the transaction
+  is recorded. The enhance path writes the same value again after the
+  transaction mines.
+- `WalletWrite::store_transactions_to_be_sent` now likewise classifies each
+  transaction as it stores it, so a transaction the wallet built is labelled
+  without waiting for it to mine. This covers canonical crossings built through
+  the ordinary proposal flow, not only those the pool-migration engine
+  constructs.
+- Neither change makes the NOT CLASSIFIED default safe to read as a decision.
+  Clients must still render it as "no label yet" rather than as "not a migration
+  transaction": rows written before the column existed keep that default, and
+  need the transaction rescanned before they can be labelled.
 
 ## [0.22.0-rc.7] - 2026-08-03
 
