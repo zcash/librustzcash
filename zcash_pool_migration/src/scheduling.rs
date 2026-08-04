@@ -2030,12 +2030,22 @@ mod tests {
     fn redraw_anchor_boundary_window_endpoints() {
         // Broadcast 1_900: most recent boundary 1_872, highest candidate 1_728.
         assert_eq!(
-            redraw_anchor_boundary(modulus(), bh(1_872), bh(1_900), &mut rng(1)),
+            redraw_anchor_boundary(
+                AnchorBucketInterval::ZIP_318,
+                bh(1_872),
+                bh(1_900),
+                &mut rng(1)
+            ),
             None,
             "a prior at the most recent boundary has no strictly-older candidate to move to"
         );
         assert_eq!(
-            redraw_anchor_boundary(modulus(), bh(1_728), bh(1_900), &mut rng(1)),
+            redraw_anchor_boundary(
+                AnchorBucketInterval::ZIP_318,
+                bh(1_728),
+                bh(1_900),
+                &mut rng(1)
+            ),
             Some(bh(1_728)),
             "a single-candidate window is deterministic"
         );
