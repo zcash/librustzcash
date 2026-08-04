@@ -129,6 +129,7 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
     use zcash_protocol::value::COIN;
+    use zcash_protocol::zip318::{CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS};
 
     use crate::build::test_util::{
         account, account_derivation, assert_every_spend_is_identifiable, regtest_network,
@@ -136,9 +137,7 @@ mod tests {
     };
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::denomination::{
-        DESTINATION_ACTIONS_PER_TRANSFER, MAX_RESIDUAL_VALUE, SOURCE_ACTIONS_PER_TRANSFER, zat,
-    };
+    use crate::denomination::{MAX_RESIDUAL_VALUE, zat};
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
@@ -155,7 +154,7 @@ mod tests {
             note_seed in any::<u64>(),
         ) {
             let fvk = account(account_seed);
-            let buffer = (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER)
+            let buffer = (CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS)
                 as u64
                 * MARGINAL_FEE.into_u64();
             let note_value = crossing_value + buffer;
@@ -202,7 +201,7 @@ mod tests {
     fn stamps_derivation_on_the_spend_needing_a_signature() {
         let fvk = account(13);
         let derivation = account_derivation(13);
-        let buffer = (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER) as u64
+        let buffer = (CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS) as u64
             * MARGINAL_FEE.into_u64();
         let crossing_value = 5 * COIN;
         let (note, _path, _anchor) = single_note_witness(&fvk, crossing_value + buffer, 13);

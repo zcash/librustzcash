@@ -16,10 +16,9 @@ use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
+use zcash_protocol::zip318::{CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS};
 
-use crate::denomination::{
-    DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER, plan_denominations,
-};
+use crate::denomination::plan_denominations;
 use crate::preparation::{PREP_TX_ACTIONS, PrepInput, plan_preparation};
 
 /// denomination plan -> preparation plan -> build + sign a preparation transaction -> build + sign a
@@ -39,8 +38,7 @@ fn migration_pipeline_end_to_end() {
     //    the true preparation cost (via the real preparation planner) at each step.
     let prep_fee = Zatoshis::const_from_u64(PREP_TX_ACTIONS as u64 * MARGINAL_FEE.into_u64());
     let buffer = Zatoshis::const_from_u64(
-        (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER) as u64
-            * MARGINAL_FEE.into_u64(),
+        (CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS) as u64 * MARGINAL_FEE.into_u64(),
     );
     let balance_zats = [Zatoshis::const_from_u64(balance)];
     let prep_tx_count = |funding: &[Zatoshis]| {
@@ -165,8 +163,8 @@ fn migration_pipeline_end_to_end() {
             core::iter::empty::<usize>(),
             0,
             0,
-            SOURCE_ACTIONS_PER_TRANSFER,
-            DESTINATION_ACTIONS_PER_TRANSFER,
+            CROSSING_SOURCE_ACTIONS,
+            CROSSING_DESTINATION_ACTIONS,
         )
         .expect("the canonical transfer fee computes");
     assert_eq!(
@@ -179,12 +177,12 @@ fn migration_pipeline_end_to_end() {
     let ironwood_out = bundle_output_value(transfer_pczt.ironwood());
     assert_eq!(
         transfer_pczt.orchard().actions().len(),
-        SOURCE_ACTIONS_PER_TRANSFER,
+        CROSSING_SOURCE_ACTIONS,
         "the transfer's Orchard bundle is padded to the canonical two actions"
     );
     assert_eq!(
         transfer_pczt.ironwood().actions().len(),
-        DESTINATION_ACTIONS_PER_TRANSFER,
+        CROSSING_DESTINATION_ACTIONS,
         "the transfer's Ironwood bundle is a single unpadded action"
     );
     assert_eq!(
