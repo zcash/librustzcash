@@ -138,6 +138,7 @@ migration_modules!(
     ivk_item_cache,
     note_locking,
     nullifier_map,
+    orchard_ironwood_broadcast_binding,
     orchard_ironwood_migration_anchor_interval,
     orchard_ironwood_migration_history,
     orchard_ironwood_migration_tables,
@@ -393,6 +394,7 @@ pub(super) fn all_migrations<
         Box::new(v_tx_outputs_transparent_addresses::Migration),
         Box::new(orchard_ironwood_migration_unsatisfiability::Migration),
         Box::new(orchard_ironwood_migration_history::Migration),
+        Box::new(orchard_ironwood_broadcast_binding::Migration),
     ]
 }
 
