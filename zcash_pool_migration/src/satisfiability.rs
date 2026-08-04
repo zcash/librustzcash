@@ -23,7 +23,8 @@ use rand_core::{CryptoRng, RngCore};
 use zcash_protocol::consensus::BlockHeight;
 
 use crate::engine::{
-    MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+    MigrationState, MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
+    PoolMigrationWrite,
 };
 use crate::scheduling::{DelayDistribution, SchedulingParams};
 use crate::state::AdvanceStep;
@@ -366,25 +367,109 @@ pub fn overdue_shift_tolerance(transfer_delay: &DelayDistribution) -> u32 {
 }
 
 /// Drive-level policy for [`advance_migration`]: a struct, so future knobs join without signature
-/// churn.
+/// churn — [`Self::with_compressed_schedule_floors`] is exactly such a knob, added after the fact
+/// without touching [`Self::new`].
 #[derive(Clone, Copy, Debug)]
 pub struct AdvanceConfig {
     reorg_settle_depth: ReorgSettleDepth,
+    overdue_tolerance_floor: u32,
+    release_spacing_floor: u32,
 }
 
 impl AdvanceConfig {
-    /// Drive-level policy under the caller's reorg-settlement policy.
+    /// Drive-level policy under the caller's reorg-settlement policy, with both
+    /// compressed-schedule floors ([`Self::with_compressed_schedule_floors`]) at their default of
+    /// zero.
     ///
     /// The settle depth is explicitly required — no `Default` — because the right value tracks the
     /// chain's block spacing, and keeping it current is the caller's responsibility, not this
     /// crate's.
     pub const fn new(reorg_settle_depth: ReorgSettleDepth) -> Self {
-        Self { reorg_settle_depth }
+        Self {
+            reorg_settle_depth,
+            overdue_tolerance_floor: 0,
+            release_spacing_floor: 0,
+        }
     }
 
     /// The caller's reorg-settlement policy; see [`ReorgSettleDepth`].
     pub const fn reorg_settle_depth(&self) -> ReorgSettleDepth {
         self.reorg_settle_depth
+    }
+
+    /// Sets both compressed-schedule floors, replacing the zero defaults [`Self::new`] starts
+    /// from.
+    ///
+    /// ZIP 318's missed-schedule policy draws its numbers from the committed schedule's OWN
+    /// scale: [`overdue_shift_tolerance`] is a quarter of the mean inter-broadcast gap, and the
+    /// deferred gaps the re-spread preserves are whatever that same schedule drew. On a
+    /// mainnet-paced schedule that scale comfortably clears a wallet's wall-clock privacy buffer
+    /// — the stretch after a broadcast during which it would rather not be forced to sync again —
+    /// so the two never compete. Compress the whole schedule, as a shortened test-network anchor
+    /// bucket interval does, and both shrink in proportion while the buffer stays
+    /// wall-clock-fixed: the tolerance can clamp to nearly nothing, re-arming the re-spread on
+    /// every drive, and the preserved gaps can land below the buffer, starving sync for the
+    /// length of the proved backlog.
+    ///
+    /// These floors exist for exactly that consumer — one whose committed schedule is compressed
+    /// below its own privacy buffer — and for no other reason. `overdue_tolerance_floor` is a
+    /// lower bound under [`overdue_shift_tolerance`]'s output at the re-spread's trigger (applied
+    /// in [`advance_migration`]).
+    ///
+    /// `release_spacing_floor` is a lower bound on the deferred set's gap to the SERVED target
+    /// ([`DuenessTargets::effective`]) — the height THIS drive judges dueness at, not the
+    /// release's own landing — GUARANTEED for every deferred row scheduled at or after the
+    /// released candidate: the earliest of them lands at least the floor past the served target,
+    /// handing a compressed-schedule consumer that much wall clock before the next row can come
+    /// due. This in particular covers every [`Proved`](MigrationTxState::Proved) row eligible to
+    /// be the candidate this call: the only state a transaction is ever served for BROADCAST
+    /// from, and the kernel's height-ordered candidate selection always makes an earlier-scheduled
+    /// `Proved` row the candidate itself rather than a deferred sibling — UNLESS that row is
+    /// excluded from candidacy this call (dead-set, set aside, or withheld as expired), in which
+    /// case it defers like any other sibling and sits outside the guarantee; acceptable, since
+    /// none of them can be served for broadcast while so excluded. A row scheduled BEFORE the
+    /// released candidate receives the identical widened delta too, measured from its own —
+    /// earlier — height, short of that bound. Closing that gap unconditionally would need
+    /// non-saturating arithmetic that is nonzero at a floor of zero for precisely such orderings —
+    /// the one trade this crate refuses.
+    ///
+    /// Both floors default to zero, and at zero every path through that arithmetic is
+    /// STRUCTURALLY identical to the floor-free form — not merely tested to agree, but built so
+    /// that subtracting a zero floor always saturates to zero regardless of the surrounding
+    /// heights — so a production mainnet consumer passing zero is unaffected by this method
+    /// existing at all, and the existing test suite is the proof: every test built without this
+    /// method still passes.
+    ///
+    /// Converting a wall-clock privacy buffer into a block count — and any slack or doubling to
+    /// cover a round-trip sync window rather than a single one-way gap — is the CALLER's
+    /// judgment: it rests on the caller's own target block spacing and sync latency, neither of
+    /// which this crate observes. This crate stays a pure mechanism: two numbers in, applied as
+    /// floors, nothing more.
+    pub const fn with_compressed_schedule_floors(
+        mut self,
+        overdue_tolerance_floor: u32,
+        release_spacing_floor: u32,
+    ) -> Self {
+        self.overdue_tolerance_floor = overdue_tolerance_floor;
+        self.release_spacing_floor = release_spacing_floor;
+        self
+    }
+
+    /// The floor under [`overdue_shift_tolerance`]'s output at the re-spread's trigger; see
+    /// [`Self::with_compressed_schedule_floors`]. Zero (the default) applies no floor: the
+    /// trigger fires at exactly [`overdue_shift_tolerance`]'s schedule-derived value, as ZIP 318
+    /// documents.
+    pub const fn overdue_tolerance_floor(&self) -> u32 {
+        self.overdue_tolerance_floor
+    }
+
+    /// The floor under the gap between the SERVED target this drive judges dueness at and the
+    /// deferred rows scheduled at or after the released candidate — see
+    /// [`Self::with_compressed_schedule_floors`] for exactly which rows that guarantee covers.
+    /// Zero (the default) applies no floor: every deferred row lands exactly the overdue amount
+    /// past its original schedule, as ZIP 318 documents.
+    pub const fn release_spacing_floor(&self) -> u32 {
+        self.release_spacing_floor
     }
 }
 
@@ -846,11 +931,15 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
     // bucket interval is the state's own record of its schedule's scale, and the default ZIP 318
     // ratio recovers the transfer delay it was (absent a hand-override) drawn from. Judging
     // overdueness by the committed scale rather than a caller-supplied current one is what keeps
-    // the tolerance meaningful for a migration committed under different parameters.
+    // the tolerance meaningful for a migration committed under different parameters. Floored at
+    // the caller's `overdue_tolerance_floor` — zero by default, and so a no-op by default — for a
+    // consumer whose schedule is compressed enough that the schedule-derived value alone would
+    // clamp to almost nothing and re-arm the re-spread on every drive.
     let overdue_tolerance = overdue_shift_tolerance(
         &SchedulingParams::new_with_default_distributions(state.anchor_bucket_interval())
             .transfer_delay(),
-    );
+    )
+    .max(config.overdue_tolerance_floor());
 
     // The call's one overdue re-spread, if it runs (see the shift below): at most one, because
     // the released candidate lands at the SCANNED target, which can sit more than the tolerance
@@ -921,6 +1010,28 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
         // trigger: the rebuild redraws its own transfer's schedule from the target, and sizing a
         // shift by an expired candidate's stale height would overstate it for everything still
         // live.
+        //
+        // A caller whose committed schedule is compressed below its own wall-clock privacy
+        // buffer — a shortened test-network anchor bucket interval is the case this exists for —
+        // may set `AdvanceConfig`'s `release_spacing_floor`. The floor guarantees the spacing for
+        // every deferred row scheduled AT OR AFTER the released one, measured from the served
+        // target this drive judges dueness at rather than the release's own landing: the earliest
+        // such row lands at least the floor past the served target, buying a compressed-schedule
+        // consumer that much wall clock before the next row can come due. This in particular
+        // covers every `Proved` row eligible to be the candidate this call — the ONLY state a
+        // transaction is ever served for BROADCAST from — since this kernel always makes an
+        // earlier-scheduled `Proved` row the candidate itself rather than a deferred sibling
+        // sitting behind the bound, UNLESS that row is excluded from candidacy this call
+        // (dead-set, set aside, or withheld as expired), in which case it defers like any other
+        // sibling and sits outside the guarantee; acceptable, since none of them can be served
+        // for broadcast while so excluded. A row scheduled BEFORE the released one gets the same
+        // widened delta too, measured from its OWN — earlier — height, short of the floor above
+        // the served target. An unconditional bound over every ordering would need non-saturating
+        // arithmetic that is nonzero at a floor of zero for precisely such orderings; this crate
+        // keeps the zero-floor identity instead. At the default of zero the deferral is exactly
+        // the overdue amount, as ZIP 318 documents — a property this arithmetic holds
+        // STRUCTURALLY (subtracting a zero floor always saturates to zero, whatever the
+        // surrounding heights), not merely one the test suite happens to confirm.
         if !shifted
             && matches!(
                 step,
@@ -929,20 +1040,62 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
         {
             let scheduled = u32::from(tx.scheduled_height());
             let served = u32::from(targets.effective());
+            // The pending set this shift moves when it runs — every OTHER transaction still
+            // `AwaitingSignature`, `Signed`, or `Proved` — EXACTLY the rows `shift_schedule_releasing`
+            // moves (see its match arms). Both the cluster trigger just below and the deferral
+            // floor's `earliest` search need this same predicate, so it is factored out once
+            // rather than risking the two drifting apart.
+            let is_deferred_sibling = |other: &MigrationTransaction| {
+                other.id() != candidate
+                    && matches!(
+                        other.state(),
+                        MigrationTxState::AwaitingSignature
+                            | MigrationTxState::Signed
+                            | MigrationTxState::Proved
+                    )
+            };
             if scheduled.saturating_add(overdue_tolerance) < served
                 && state.transactions().iter().any(|other| {
-                    other.id() != candidate
-                        && matches!(
-                            other.state(),
-                            MigrationTxState::AwaitingSignature
-                                | MigrationTxState::Signed
-                                | MigrationTxState::Proved
-                        )
-                        && u32::from(other.scheduled_height()) <= served
+                    is_deferred_sibling(other) && u32::from(other.scheduled_height()) <= served
                 })
             {
-                let release_at = BlockHeight::from_u32(scheduled.max(u32::from(targets.scanned())));
-                state.shift_schedule_releasing(candidate, release_at, served - scheduled, rng);
+                let release_at = scheduled.max(u32::from(targets.scanned()));
+                let lag = served - scheduled;
+                // The cluster condition just above already found at least one deferred sibling,
+                // so `None` here is unreachable — but a spacing floor with no row to space is
+                // meaningless rather than a panic, so this stays total instead of resting on that
+                // reachability argument.
+                let earliest = state
+                    .transactions()
+                    .iter()
+                    .filter(|other| is_deferred_sibling(other))
+                    .map(|other| u32::from(other.scheduled_height()))
+                    .min();
+                // `extra` is a floor MINUS a gap, both saturating: at the default floor of zero
+                // it is zero on every path — `0.saturating_sub(_)` is always `0`, regardless of
+                // how `earliest` and `scheduled` happen to relate — so a caller passing zero
+                // drives exactly the delta ZIP 318 specifies, byte for byte. (The
+                // equivalent-looking `lag.max(floor + served - earliest)` does NOT have this
+                // property: in odd orderings it can exceed `lag` even at floor zero.)
+                let extra = match earliest {
+                    Some(earliest) => {
+                        // The ORIGINAL drawn gap from the candidate to its nearest deferred
+                        // sibling — equivalently `(earliest + lag).saturating_sub(served)`, since
+                        // `served == scheduled + lag`. Measured directly against `scheduled`
+                        // because dueness — and so the window this floor buys — is judged at
+                        // `served`, not at `release_at`; the two coincide only when the release
+                        // lands exactly on its own schedule.
+                        let gap_now = earliest.saturating_sub(scheduled);
+                        config.release_spacing_floor().saturating_sub(gap_now)
+                    }
+                    None => 0,
+                };
+                state.shift_schedule_releasing(
+                    candidate,
+                    BlockHeight::from_u32(release_at),
+                    lag.saturating_add(extra),
+                    rng,
+                );
                 shifted = true;
                 dirty = true;
                 continue;
@@ -1261,6 +1414,15 @@ mod advance_tests {
 
     fn config() -> AdvanceConfig {
         AdvanceConfig::new(ReorgSettleDepth::new(10))
+    }
+
+    /// [`config`], with both compressed-schedule floors set — for the floor-specific tests alone;
+    /// every other test drives the floor-free default.
+    fn config_with_floors(
+        overdue_tolerance_floor: u32,
+        release_spacing_floor: u32,
+    ) -> AdvanceConfig {
+        config().with_compressed_schedule_floors(overdue_tolerance_floor, release_spacing_floor)
     }
 
     /// A fresh seeded RNG per drive call; only the overdue shift's anchor redraw consumes it, so
@@ -2822,5 +2984,310 @@ mod advance_tests {
             "the sibling that armed the re-spread defers behind the served target too"
         );
         assert_eq!(store.replaced.get(), 1);
+    }
+
+    /// The regression the compressed-schedule floors rest on: a config built through [`config`]
+    /// (no floors set, so both default to zero) must drive the SAME arithmetic every shift test
+    /// above already exercises, producing the SAME numbers. Deliberately a fresh, larger fixture —
+    /// three deferred rows spanning all three pending states
+    /// ([`AwaitingSignature`](MigrationTxState::AwaitingSignature),
+    /// [`Signed`](MigrationTxState::Signed), [`Proved`](MigrationTxState::Proved)) at three
+    /// different original heights — so the new `earliest`/`gap_now`/`extra` computation actually
+    /// runs over a nontrivial set on every call and still comes out to zero every time, rather
+    /// than trivially skipping it.
+    #[test]
+    fn default_config_shifts_the_schedule_by_exactly_the_overdue_lag() {
+        let mut state = state_with_crossings(
+            &[25_000_000, 25_000_000, 25_000_000, 25_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+                scheduled_transfer(2, 1, 720, 1_200, MigrationTxState::AwaitingSignature),
+                scheduled_transfer(3, 2, 720, 1_100, MigrationTxState::Signed),
+                scheduled_transfer(4, 3, 720, 1_300, MigrationTxState::Proved),
+            ],
+        );
+        let mut store = TestStore::new(1_010, []);
+        // Scanned target 1_011; estimated target 2_001: the candidate is 1_001 blocks overdue by
+        // the estimate, well past the 16-block ZIP 318 tolerance, with three other pending rows —
+        // one in each pending state — all due behind it.
+        let targets =
+            DuenessTargets::new(BlockHeight::from_u32(1_011), BlockHeight::from_u32(2_001));
+
+        let step = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+            "the earliest Proved row is still released in this call"
+        );
+        let scheduled: Vec<u32> = state
+            .transactions()
+            .iter()
+            .map(|t| u32::from(t.scheduled_height()))
+            .collect();
+        assert_eq!(
+            scheduled,
+            vec![0, 1_011, 2_201, 2_101, 2_301],
+            "the release lands at max(scheduled, scanned); every deferred row, whichever pending \
+             state it is in, lands at exactly its original height plus the overdue lag — the zero \
+             floors add nothing"
+        );
+        assert_eq!(store.replaced.get(), 1, "the shifted schedule is persisted");
+    }
+
+    /// TOLERANCE FLOOR: a floor set above the schedule-derived tolerance blocks the trigger
+    /// outright, holding the schedule where an unfloored call would shift it. Without the floor
+    /// this exact fixture shifts (the 50-block lag clears the 16-block ZIP 318 tolerance, and a
+    /// sibling is due), so the schedule holding here is solely the floor's doing — the case a
+    /// floored `overdue_tolerance` is meant to prevent: a re-spread re-triggering on every drive
+    /// once a compressed schedule's raw tolerance has clamped down near nothing.
+    #[test]
+    fn tolerance_floor_holds_the_schedule_when_the_lag_is_within_it() {
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+                // Due, arming the cluster condition the trigger also needs.
+                scheduled_transfer(2, 1, 720, 1_040, MigrationTxState::Signed),
+            ],
+        );
+        let mut store = TestStore::new(1_050, []);
+        // Lag 50: above the raw 16-block tolerance, at (not above) the 100-block floor.
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            DuenessTargets::at(BlockHeight::from_u32(1_050)),
+            &config_with_floors(100, 0),
+            &mut rng(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+            "the candidate is served at its own height: the floored tolerance suppresses the shift"
+        );
+        assert_eq!(
+            u32::from(state.transactions()[1].scheduled_height()),
+            1_000,
+            "unchanged"
+        );
+        assert_eq!(
+            u32::from(state.transactions()[2].scheduled_height()),
+            1_040,
+            "unchanged"
+        );
+        assert_eq!(
+            store.replaced.get(),
+            0,
+            "nothing is written: there was nothing to shift"
+        );
+    }
+
+    /// DEFERRAL FLOOR, BINDING: a spacing floor wider than the candidate's ORIGINAL drawn gap to
+    /// its nearest deferred row widens the deferral so that row lands the full floor above the
+    /// SERVED target — the height this drive judges dueness at — while the uniform shift keeps
+    /// every deferred row's PAIRWISE gap to its siblings exactly what it was before the shift,
+    /// since the same widened delta moves all of them.
+    #[test]
+    fn release_spacing_floor_extends_the_deferral_when_it_binds() {
+        let mut state = state_with_crossings(
+            &[40_000_000, 30_000_000, 30_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+                // The nearest deferred row: 10 blocks ahead of the candidate in the ORIGINAL
+                // schedule.
+                scheduled_transfer(2, 1, 720, 1_010, MigrationTxState::Signed),
+                scheduled_transfer(3, 2, 720, 1_030, MigrationTxState::Proved),
+            ],
+        );
+        let mut store = TestStore::new(1_010, []);
+        // Scanned target 1_011; served (effective) target 1_051: lag 51, comfortably past the
+        // 16-block tolerance. The nearest deferred row's ORIGINAL drawn gap to the candidate is
+        // 1_010 - 1_000 = 10 blocks — well below the 80-block floor — so the floor binds and tops
+        // the delta up by 70 (80 - 10), landing that row 121 blocks (51 + 70) past its original
+        // height.
+        let targets =
+            DuenessTargets::new(BlockHeight::from_u32(1_011), BlockHeight::from_u32(1_051));
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            targets,
+            &config_with_floors(0, 80),
+            &mut rng(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            }
+        );
+        let scheduled: Vec<u32> = state
+            .transactions()
+            .iter()
+            .map(|t| u32::from(t.scheduled_height()))
+            .collect();
+        assert_eq!(
+            scheduled,
+            vec![0, 1_011, 1_131, 1_151],
+            "release at max(scheduled, scanned) = 1_011; both deferred rows carry the same \
+             widened delta of 121 (the 51-block lag plus the 70-block floor top-up)"
+        );
+        assert!(
+            scheduled[2] >= 1_051 + 80,
+            "the earliest deferred landing sits at least the floor above the served target \
+             (1_051) — the guarantee this floor actually makes, since dueness is judged there, \
+             not at the release landing"
+        );
+        assert_eq!(
+            scheduled[3] - scheduled[2],
+            1_030 - 1_010,
+            "the pairwise gap between the deferred rows survives the shift unchanged"
+        );
+    }
+
+    /// DEFERRAL FLOOR, ALREADY CLEARED: a spacing floor no wider than the candidate's ORIGINAL
+    /// drawn gap to its nearest deferred row changes nothing — the deferred row lands at exactly
+    /// its original height plus the lag, same as an unfloored shift — proving the floor is inert
+    /// once the schedule's own spacing already satisfies it, with no dependence on the estimate
+    /// that sizes the lag. The mirror image of the binding case above.
+    #[test]
+    fn release_spacing_floor_adds_nothing_once_the_gap_already_clears_it() {
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+                scheduled_transfer(2, 1, 720, 1_010, MigrationTxState::Signed),
+            ],
+        );
+        let mut store = TestStore::new(1_010, []);
+        // The same 51-block lag as the binding case above, but here the nearest deferred row's
+        // ORIGINAL drawn gap to the candidate (1_010 - 1_000 = 10) already clears an 8-block
+        // floor — measured purely from the committed schedule, with no estimate involved.
+        let targets =
+            DuenessTargets::new(BlockHeight::from_u32(1_011), BlockHeight::from_u32(1_051));
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            targets,
+            &config_with_floors(0, 8),
+            &mut rng(),
+        )
+        .expect("the store never fails");
+
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            }
+        );
+        assert_eq!(
+            u32::from(state.transactions()[1].scheduled_height()),
+            1_011,
+            "released at max(scheduled, scanned)"
+        );
+        assert_eq!(
+            u32::from(state.transactions()[2].scheduled_height()),
+            1_061,
+            "deferred by exactly the 51-block lag: 1_010 + 51 — the 8-block floor, already \
+             cleared by the schedule's own 10-block gap, contributes nothing"
+        );
+    }
+
+    /// THE SCOPED GUARANTEE'S BOUNDARY: a `Proved` candidate at 1_000 with an EARLIER-scheduled
+    /// `AwaitingSignature` sibling at 970 — reachable only because the prove and broadcast queues
+    /// are independent, so a due broadcast can be named ahead of an earlier-scheduled row still
+    /// waiting to be proved. Here `earliest` (970) sits BELOW `scheduled` (1_000), the candidate's
+    /// own original height: `gap_now` — the ORIGINAL drawn gap — saturates to zero, so a binding
+    /// floor is added in FULL rather than topped up from a natural gap, landing the sibling short
+    /// of the served target plus the floor (1_020 + 50 = 1_070) — exactly the case
+    /// `with_compressed_schedule_floors`'s doc now scopes the guarantee around: rows scheduled
+    /// BEFORE the released candidate, not a silent gap in it. A `Proved` sibling can never sit on
+    /// this side of the bound while eligible for candidacy: the kernel's height-ordered selection
+    /// would have made it the candidate instead.
+    ///
+    /// The floor-zero drive pins the other half: this is also the one ordering that would tell
+    /// the forbidden `lag.max(floor + served - earliest)` rewrite apart from the saturating
+    /// form actually used. The forbidden form computes `20.max(0 + 1_020 - 970) == 50` here — a
+    /// nonzero top-up at floor zero — while the saturating form's `extra` is zero unconditionally,
+    /// landing the sibling at exactly `970 + 20 == 990`, the untouched overdue lag.
+    #[test]
+    fn release_spacing_floor_is_short_of_the_guarantee_when_a_sibling_precedes_the_candidate() {
+        let make = || {
+            state_with_crossings(
+                &[50_000_000, 50_000_000],
+                vec![
+                    tx(0, prep(0, 0), mined(10)),
+                    scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+                    scheduled_transfer(2, 1, 720, 970, MigrationTxState::AwaitingSignature),
+                ],
+            )
+        };
+        // Scanned target 1_000 (so the release lands in place at `max(1_000, 1_000)`); served
+        // (effective) target 1_020: lag 20, past the 16-block ZIP 318 tolerance, with the earlier
+        // sibling due (970 <= 1_020) arming the cluster condition.
+        let targets =
+            DuenessTargets::new(BlockHeight::from_u32(1_000), BlockHeight::from_u32(1_020));
+
+        // Floor 50: binds (gap_now saturates to 0), added in full — short of the served target
+        // plus the floor.
+        let mut state = make();
+        let mut store = TestStore::new(999, []);
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            targets,
+            &config_with_floors(0, 50),
+            &mut rng(),
+        )
+        .expect("the store never fails");
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            }
+        );
+        assert_eq!(
+            u32::from(state.transactions()[1].scheduled_height()),
+            1_000,
+            "released in place: max(scheduled, scanned) moves nothing here"
+        );
+        assert_eq!(
+            u32::from(state.transactions()[2].scheduled_height()),
+            1_040,
+            "970 + 20 (lag) + 50 (floor, added in full since gap_now saturated to zero) — short \
+             of the served target plus the floor (1_020 + 50 = 1_070): the guarantee is scoped \
+             to rows scheduled at or after the candidate, and this sibling precedes it"
+        );
+
+        // Floor 0: the zero-identity holds even in this ordering — precisely where the forbidden
+        // non-saturating rewrite would have disagreed.
+        let mut state = make();
+        let mut store = TestStore::new(999, []);
+        let step = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert_eq!(
+            step,
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            }
+        );
+        assert_eq!(
+            u32::from(state.transactions()[2].scheduled_height()),
+            990,
+            "exactly the overdue lag (970 + 20), not the 1_020 the forbidden \
+             lag.max(floor + served - earliest) form would have produced"
+        );
     }
 }

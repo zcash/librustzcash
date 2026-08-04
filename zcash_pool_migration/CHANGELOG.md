@@ -15,6 +15,23 @@ and this library adheres to Rust's notion of
 - `scheduling::redraw_anchor_boundary`: the recency-weighted anchor draw for a
   transfer whose broadcast schedule has moved, floored at the boundary being
   replaced.
+- `satisfiability::AdvanceConfig::with_compressed_schedule_floors` (with its
+  `overdue_tolerance_floor` and `release_spacing_floor` accessors): two
+  opt-in knobs, each defaulting to zero, for a consumer whose committed
+  schedule is compressed below its own wall-clock privacy buffer — a
+  shortened test-network anchor bucket interval, most often.
+  `overdue_tolerance_floor` floors `satisfiability::advance_migration`'s
+  overdue-shift trigger, so a compressed schedule's tolerance can no longer
+  clamp down near nothing and re-arm the re-spread on every drive.
+  `release_spacing_floor` floors the gap the re-spread's deferral leaves
+  between the served target the drive judges dueness at and the deferred
+  rows scheduled at or after the released step — in particular every
+  `Proved` row, the only state ever served for broadcast — giving such a
+  consumer a post-release window to sync before its next transfer comes
+  due. At the zero default both are no-ops,
+  byte-for-byte — the existing test suite, unmodified, is the proof — so a
+  production mainnet consumer is unaffected. Converting a wall-clock privacy
+  buffer into a block count is left to the caller.
 
 ### Changed
 - `satisfiability::advance_migration` now re-spreads a missed broadcast

@@ -727,12 +727,16 @@ impl MigrationState {
     /// [`advance_migration`](crate::satisfiability::advance_migration) when the step it would
     /// surface lags the served target by more than the schedule-scaled tolerance
     /// ([`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)) with more
-    /// of the schedule due behind it. The
-    /// deferred rows move by one shared delta, so the gaps between broadcasts — the observable
-    /// the drawn exponential delays exist to shape — survive the wallet's absence unchanged. The
-    /// RELEASED row is the one being served: it lands where the caller says the wallet can
-    /// actually EXECUTE it. The caller upholds `release_at >= scheduled_height(released)`, so a
-    /// release only ever moves forward or stays.
+    /// of the schedule due behind it. There, `delta` is the overdue amount — extended to the
+    /// caller's spacing floor when one is set (see
+    /// [`AdvanceConfig`](crate::satisfiability::AdvanceConfig)); the default floor of zero
+    /// defers by exactly the overdue amount, as ZIP 318 documents. This function itself takes
+    /// `delta` as given, agnostic to how its caller arrived at it. The deferred rows move by one
+    /// shared delta, so the gaps between broadcasts — the observable the drawn exponential
+    /// delays exist to shape — survive the wallet's absence unchanged. The RELEASED row is the
+    /// one being served: it lands where the caller says the wallet can actually EXECUTE it. The
+    /// caller upholds `release_at >= scheduled_height(released)`, so a release only ever moves
+    /// forward or stays.
     ///
     /// Only PENDING transactions move ([`AwaitingSignature`](MigrationTxState::AwaitingSignature),
     /// [`Signed`](MigrationTxState::Signed), [`Proved`](MigrationTxState::Proved)): an in-flight
