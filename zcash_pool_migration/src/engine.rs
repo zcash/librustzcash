@@ -4090,16 +4090,14 @@ mod tests {
 mod commit_tests {
     use super::*;
     use crate::{
-        build::{
-            sign_pczt,
-            test_util::{
-                TARGET_HEIGHT, account_derivation, assert_every_spend_is_identifiable,
-                regtest_network, single_note_witness, spend_signability, spending_key,
-            },
-        },
+        build::sign_pczt,
         denomination::DenominationPlan,
         preparation::{PREP_TX_ACTIONS, plan_preparation},
         scheduling::{AnchorBucketInterval, SchedulingParams},
+        testing::fixtures::{
+            TARGET_HEIGHT, account_derivation, assert_every_spend_is_identifiable, regtest_network,
+            single_note_witness, spend_signability, spending_key,
+        },
     };
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;

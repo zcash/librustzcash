@@ -7,11 +7,11 @@ use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
 use zcash_protocol::value::COIN;
 
-use super::test_util::{
+use super::{build_prep_tx, build_transfer_pczt, sign_pczt};
+use crate::testing::fixtures::{
     TARGET_HEIGHT, account_derivation, assert_every_spend_is_identifiable, regtest_network,
     single_note_witness, spending_key,
 };
-use super::{build_prep_tx, build_transfer_pczt, sign_pczt};
 use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 use zcash_protocol::consensus::BlockHeight;

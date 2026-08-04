@@ -249,7 +249,7 @@ mod tests {
     use rand_core::SeedableRng;
     use zcash_protocol::value::COIN;
 
-    use crate::build::test_util::{
+    use crate::testing::fixtures::{
         TARGET_HEIGHT, account, account_derivation, assert_every_spend_is_identifiable,
         regtest_network, shared_anchor_witnesses, single_note_witness,
     };
