@@ -10,11 +10,18 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-03
+
 ### Added
 - `pczt::Pczt::has_data_in_pool`, which reports whether the always-present
   bundle for a given pool actually holds anything.
 - `pczt::orchard::Bundle::{sole_action, value_carrying_outputs_all_pay}`. The
   latter returns `None` when a field it judges has been redacted from the PCZT.
+
+### Fixed
+- The `zcp-builder` feature now also enables the `orchard`, `sapling`, and
+  `transparent` features that its code requires; enabling it alone no longer
+  fails to compile.
 
 ## [0.9.1] - 2026-07-26
 
