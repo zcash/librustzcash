@@ -171,6 +171,7 @@ migration_modules!(
     v_transactions_pool_crossing,
     v_transactions_shielding_balance,
     v_transactions_transparent_history,
+    v_transactions_trust_status_ifnull,
     v_transactions_zip318_kind,
     v_tx_outputs_key_scopes,
     v_tx_outputs_return_addrs,
@@ -391,6 +392,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_anchor_interval::Migration),
         Box::new(v_tx_outputs_transparent_addresses::Migration),
         Box::new(orchard_ironwood_migration_unsatisfiability::Migration),
+        Box::new(v_transactions_trust_status_ifnull::Migration),
     ]
 }
 

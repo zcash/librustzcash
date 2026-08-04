@@ -15,6 +15,15 @@ workspace.
   smaller feature set should disable default features and enable only the
   features they need.
 
+### Fixed
+- `v_transactions` now exposes `trust_status` as `IFNULL(trust_status, 0)`,
+  the same interpretation every reader inside this crate already applies. The
+  raw column is NULL for any transaction no caller has explicitly marked via
+  `set_tx_trust` — today, every transaction — and exposing that NULL caused a
+  foreign consumer decoding the column strictly to fail its entire history
+  query. The underlying column is unchanged, so "never evaluated" remains
+  distinguishable from an explicit mark for readers that want the distinction.
+
 ## [0.22.0-rc.7] - 2026-08-03
 
 ### Added

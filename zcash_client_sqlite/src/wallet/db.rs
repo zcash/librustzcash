@@ -1533,7 +1533,7 @@ SELECT accounts.uuid                AS account_uuid,
        -- between shielded pools; NULL when it is not such a transfer. A transaction is one
        -- exactly when this column is non-NULL.
        pool_crossings.crossing_value AS pool_crossing_value,
-       transactions.trust_status,
+       IFNULL(transactions.trust_status, 0) AS trust_status,
        transactions.zip318_kind
 FROM notes
 JOIN accounts ON accounts.id = notes.account_id
