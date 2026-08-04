@@ -33,6 +33,7 @@ workspace.
   over the wallet database's own connection.
 
 ### Changed
+- Migrated to `zcash_client_backend 0.24.0-rc.7`.
 - `pool_migration::orchard_ironwood::PoolMigrations` now carries the network
   parameters and a clock — `PoolMigrations::for_account` takes them ahead of
   the connection (`for_account(params, clock, conn, account)`; a caller that
