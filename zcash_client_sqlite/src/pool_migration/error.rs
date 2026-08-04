@@ -69,7 +69,7 @@ pub enum FinalizeError {
 impl fmt::Display for FinalizeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FinalizeError::Parse(e) => write!(f, "parsing the stored proven PCZT failed: {e:?}"),
+            FinalizeError::Parse(e) => write!(f, "parsing the stored proven PCZT failed: {e}"),
             FinalizeError::Spends(e) => write!(f, "finalizing the PCZT's spends failed: {e:?}"),
             FinalizeError::Extract(e) => {
                 write!(f, "extracting the finalized transaction failed: {e:?}")
