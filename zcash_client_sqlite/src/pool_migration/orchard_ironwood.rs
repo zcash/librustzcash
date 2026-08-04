@@ -28,7 +28,11 @@ use {
     shardtree::error::ShardTreeError,
     std::collections::HashMap,
     zcash_client_backend::{
-        data_api::{Account as _, SentTransaction, SentTransactionOutput, wallet::TargetHeight},
+        data_api::{
+            Account as _, SentTransaction, SentTransactionOutput,
+            anchor_retention::PoolMigrationParams, wallet::TargetHeight,
+            zip318::classify_decrypted_tx,
+        },
         decrypt_transaction,
         wallet::{Note, Recipient},
     },
@@ -473,7 +477,7 @@ where
 
         let params = &self.params;
         self.store.replace_migration_with(state, |dbtx| {
-            crate::wallet::store_transaction_to_be_sent(
+            let tx_ref = crate::wallet::store_transaction_to_be_sent(
                 dbtx,
                 params,
                 // A migration transaction has no transparent outputs, so the gap-limit machinery
@@ -482,7 +486,30 @@ where
                 &zcash_keys::keys::transparent::gap_limits::GapLimits::default(),
                 &sent,
             )
-            .map_err(|e| Error::Wallet(Box::new(e)))
+            .map_err(|e| Error::Wallet(Box::new(e)))?;
+
+            // Record how the transaction classifies against ZIP 318, in the same database
+            // transaction as the record itself. The enhance path stamps this for transactions the
+            // wallet learns about by scanning, but a scheduled migration transaction sits stored
+            // and UNMINED from proving until its broadcast height — up to days — and during that
+            // window a wallet that wants to label (or hold back) its own migration traffic would
+            // otherwise read "not classified". This is the same one-moment argument the enhance
+            // path documents: the parsed transaction and its decrypted outputs are both in hand
+            // right here, and nowhere later. The enhance path re-stamps the same answer after the
+            // transaction mines, which is idempotent.
+            //
+            // Parameters are the SPECIFIED defaults, exactly as the enhance path reasons: the only
+            // wallet-overridable value is the anchor bucket interval, and this evidence source
+            // cannot evaluate the anchor clause at all, so the override cannot change the answer.
+            let migration_params = PoolMigrationParams::from(AnchorRetentionInterval::default());
+            let classification = classify_decrypted_tx(
+                &tx,
+                decrypted.orchard_outputs(),
+                decrypted.ironwood_outputs(),
+                &migration_params,
+            );
+            crate::wallet::put_zip318_classification(dbtx, tx_ref, classification)
+                .map_err(|e| Error::Wallet(Box::new(e)))
         })
     }
 }
