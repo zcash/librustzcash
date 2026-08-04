@@ -3521,12 +3521,14 @@ pub(crate) fn get_max_height_hash(
     .optional()
 }
 
+/// Returns the [`TxRef`] of the stored transaction row, so a caller can attach further
+/// per-transaction facts (e.g. its ZIP 318 classification) in the same database transaction.
 pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     #[cfg(feature = "transparent-inputs")] gap_limits: &GapLimits,
     sent_tx: &SentTransaction<AccountUuid>,
-) -> Result<(), SqliteClientError> {
+) -> Result<TxRef, SqliteClientError> {
     let tx_ref = put_tx_data(
         conn,
         sent_tx.tx(),
@@ -3766,7 +3768,7 @@ pub(crate) fn store_transaction_to_be_sent<P: consensus::Parameters>(
         queue_tx_status(conn, sent_tx.tx().txid())?;
     }
 
-    Ok(())
+    Ok(tx_ref)
 }
 
 pub(crate) fn set_transaction_status<P: consensus::Parameters>(

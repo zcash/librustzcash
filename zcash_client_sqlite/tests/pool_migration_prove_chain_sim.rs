@@ -1262,6 +1262,34 @@ fn proving_persists_the_finalized_transaction_to_the_wallet() {
         !spendable_values(&mut run).contains(&funding_value),
         "the funding note is spent in the wallet's view from the moment the proof is persisted",
     );
+
+    // The stored row carries its ZIP 318 classification from this same atomic write — while the
+    // transaction is still UNMINED. The enhance path only stamps classifications for transactions
+    // the wallet learns about by scanning, i.e. after they mine; a scheduled transfer sits stored
+    // and unmined until its broadcast height, and a wallet labeling (or holding back) its own
+    // migration traffic during that window must not read "not classified" there.
+    let (zip318_kind, mined_height): (i64, Option<i64>) = run
+        .st
+        .wallet_mut()
+        .conn_mut()
+        .query_row(
+            "SELECT zip318_kind, mined_height FROM transactions WHERE txid = :txid",
+            rusqlite::named_params![":txid": txid.as_ref()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("reads the stored transaction's classification");
+    assert_eq!(
+        mined_height, None,
+        "premise: the transfer is still unmined when the classification must already be present",
+    );
+    assert_eq!(
+        zip318_kind,
+        zcash_protocol::zip318::Zip318Classification::Conforms(
+            zcash_protocol::zip318::Zip318TxKind::Transfer
+        )
+        .to_code(),
+        "the stored transfer is classified as a ZIP 318 transfer at store time",
+    );
 }
 
 /// The adapter reports the WALLET's anchor retention interval as its anchor bucket interval, and
