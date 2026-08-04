@@ -2104,6 +2104,7 @@ mod tests {
     use crate::AccountUuid;
     use crate::util::SystemClock;
 
+    use core::num::NonZeroU32;
     use std::collections::BTreeSet;
     use zcash_client_backend::data_api::testing::TestBuilder;
     use zcash_client_backend::wallet::LockOwner;
@@ -2156,6 +2157,95 @@ mod tests {
     #[test]
     fn get_migration_empty_is_none() {
         assert_empty_is_none(&fresh_store());
+    }
+
+    /// A migration in `status`, recorded under `interval`. The plan itself is empty filler: the
+    /// test using this is about which grids a status still owes retention to, and nothing else.
+    fn migration_under(status: MigrationStatus, interval: AnchorBucketInterval) -> MigrationState {
+        MigrationState::from_parts(
+            status,
+            DenominationPlan::from_stored_parts(
+                Vec::new(),
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+                Zatoshis::ZERO,
+            )
+            .expect("an empty stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            Vec::new(),
+            interval,
+            ReplanThreshold::DEFAULT,
+        )
+    }
+
+    /// Anchor-checkpoint retention is owed by every NON-TERMINAL migration, and by no terminal one
+    /// — not merely by every migration that is not `complete`.
+    ///
+    /// The distinction is the point: `complete` is the only terminal status a migration reaches by
+    /// finishing its work, so a query written against it alone lets a `failed`, `superseded`, or
+    /// `cancelled` migration pin its grid for the lifetime of the wallet. Nothing will ever drive
+    /// those migrations again, so the checkpoints are kept for proofs that will never be requested,
+    /// and being terminal they are never revisited to notice.
+    ///
+    /// One account per status, each under its own grid, so the surviving intervals name exactly
+    /// which statuses still owe retention.
+    #[test]
+    fn anchor_retention_is_owed_by_every_non_terminal_status() {
+        /// Grid width recorded for the first status; each subsequent one takes the next block
+        /// count, so an interval identifies the status that was recorded under it.
+        const FIRST_GRID_BLOCKS: u32 = 10;
+
+        let mut conn = fresh_conn();
+        let mut expected: BTreeSet<u32> = BTreeSet::new();
+
+        for (i, status) in MigrationStatus::ALL.iter().copied().enumerate() {
+            let blocks = FIRST_GRID_BLOCKS + u32::try_from(i).expect("a handful of statuses");
+            let interval =
+                AnchorBucketInterval::custom(NonZeroU32::new(blocks).expect("nonzero grid"));
+            let account = insert_account(&conn);
+            let mut store = PoolMigrations::for_account(NET, SystemClock, conn, account)
+                .expect("the account exists");
+            store
+                .replace_migration(&migration_under(status, interval))
+                .expect("persists the migration");
+            conn = store.into_inner();
+
+            if !status.is_terminal() {
+                expected.insert(blocks);
+            }
+        }
+
+        let active: BTreeSet<u32> = super::active_anchor_bucket_intervals(&conn)
+            .expect("reads the active grids")
+            .into_iter()
+            .map(|interval| interval.block_count().get())
+            .collect();
+
+        assert_eq!(
+            active, expected,
+            "exactly the non-terminal migrations' grids are still retained"
+        );
+
+        // Spelled out for the three statuses the previous `status <> 'complete'` query retained
+        // forever, since that is the regression this pins.
+        for status in [
+            MigrationStatus::Failed,
+            MigrationStatus::Superseded,
+            MigrationStatus::Cancelled,
+        ] {
+            let position = MigrationStatus::ALL
+                .iter()
+                .position(|s| *s == status)
+                .expect("every status is in ALL");
+            let blocks =
+                FIRST_GRID_BLOCKS + u32::try_from(position).expect("a handful of statuses");
+            assert!(
+                !active.contains(&blocks),
+                "{status:?} must not pin its {blocks}-block grid",
+            );
+        }
     }
 
     /// A transaction's `lock_owner` round-trips exactly through the store's `BLOB` column: a

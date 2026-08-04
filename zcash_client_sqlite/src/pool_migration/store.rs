@@ -508,8 +508,8 @@ fn resolve_migration_id(
         .optional()?)
 }
 
-/// The distinct anchor bucket intervals, in blocks, of every migration in `t.migrations` that is
-/// not yet complete — the grids the wallet still owes anchor-checkpoint retention to.
+/// The distinct anchor bucket intervals, in blocks, of every migration in `t.migrations` that has
+/// not reached a terminal status — the grids the wallet still owes anchor-checkpoint retention to.
 ///
 /// This is read from the database rather than from any in-memory configuration on purpose. A
 /// migration's transfers are anchored to boundaries of the grid it was COMMITTED under, and are
@@ -518,18 +518,29 @@ fn resolve_migration_id(
 /// a boundary the migration still needs without retaining it — unrecoverably, since the checkpoint
 /// is gone by the time anything notices.
 ///
-/// A `complete` migration has no transfer left to prove, so its grid is dropped.
+/// A TERMINAL migration has no transfer left to prove, so its grid is dropped. For `complete` that
+/// is because every transfer mined; for the policy determinations (`failed`, `superseded`,
+/// `cancelled`) it is because nothing will drive the migration further, so retaining checkpoints
+/// for proofs that will never be requested costs storage to no purpose — and, since a terminal
+/// migration is never revisited, costs it forever.
+///
+/// The excluded set is [`MigrationStatus::terminal`], not a list of literals written out here: a
+/// second list is a second place for a new status to be forgotten, and forgetting it here fails
+/// silently, as unbounded retention rather than as an error.
 pub(crate) fn active_anchor_bucket_intervals(
     conn: &Connection,
     t: &Tables,
 ) -> Result<BTreeSet<NonZeroU32>, Error> {
+    let terminal: Vec<MigrationStatus> = MigrationStatus::terminal().collect();
+    let placeholders = vec!["?"; terminal.len()].join(", ");
     let mut stmt = conn.prepare(&format!(
-        "SELECT DISTINCT anchor_bucket_interval FROM {} WHERE status <> ?",
+        "SELECT DISTINCT anchor_bucket_interval FROM {} WHERE status NOT IN ({placeholders})",
         t.migrations
     ))?;
-    let rows = stmt.query_map(params![MigrationStatus::Complete.as_ref()], |row| {
-        row.get::<_, u32>(0)
-    })?;
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(terminal.iter().map(AsRef::<str>::as_ref)),
+        |row| row.get::<_, u32>(0),
+    )?;
     rows.map(|blocks| NonZeroU32::new(blocks?).ok_or(Error::Corrupt("anchor_bucket_interval")))
         .collect()
 }
