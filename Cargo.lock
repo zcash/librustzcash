@@ -7332,7 +7332,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_pool_migration"
-version = "0.1.0-rc.5"
+version = "0.1.0-rc.6"
 dependencies = [
  "corez",
  "getset",

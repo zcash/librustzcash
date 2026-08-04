@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.6] - 2026-08-03
+
 ### Added
 - `engine::ProvedTransaction`: the proof carried out of a successful
   `engine::prove_transfer` / `engine::prove_preparation` call — the proven PCZT
