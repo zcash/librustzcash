@@ -16,7 +16,7 @@ use super::account_delete_cascade;
 /// index.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x944f8a1e_bdfa_4d52_90ca_663dee8efc62);
 
-const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[account_delete_cascade::MIGRATION_ID];
 
 pub(super) struct Migration;
 

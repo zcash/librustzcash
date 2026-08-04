@@ -22,7 +22,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x64925567_65ae_495e_b6cf_d5f56e9
 // column of the `blocks` table; that column is added by `ironwood_shardtree`, so this migration
 // must run after it. (The analogous Orchard column is covered because `orchard_shardtree` is
 // already a transitive dependency.)
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     account_delete_cascade::MIGRATION_ID,
     ironwood_shardtree::MIGRATION_ID,
 ];

@@ -34,7 +34,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x856ecde7_c670_47c1_9345_b80ba5b
 /// `v_tx_outputs_key_scopes` is the prior owner of the `v_tx_outputs` definition this
 /// migration recreates; `ironwood_pool_code_views` supplies the current `v_received_outputs`
 /// definition whose pool codes the transparent-receiver case discriminates on.
-const DEPENDENCIES: &[Uuid] = &[
+pub(super) const DEPENDENCIES: &[Uuid] = &[
     v_tx_outputs_key_scopes::MIGRATION_ID,
     ironwood_pool_code_views::MIGRATION_ID,
 ];

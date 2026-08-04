@@ -97,7 +97,7 @@ use crate::wallet::init::WalletMigrationError;
 /// real-spend nullifiers in a table of their own.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd334a9fa_b9dc_46bd_9b31_1fba6aa47f55);
 
-const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_migration_anchor_interval::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[orchard_ironwood_migration_anchor_interval::MIGRATION_ID];
 
 /// The nullifier-cache table this migration introduces, which no published migration creates.
 ///

@@ -48,7 +48,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x7b2f6a41_9c3d_4e58_8a17_2f6b9d0
 // under the codebase's minimal-frontier convention. If a future migration reshuffles the DAG such that
 // `ironwood_received_notes` no longer pulls in the Orchard source infrastructure, add the Orchard
 // dependencies here explicitly.
-const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
 
 /// The pool-migration table and index DDL byte-for-byte as `zcash_client_sqlite 0.22.0-rc.6` ran
 /// it — the store's `init` batch of that release, rendered for this pool's table names, down to the

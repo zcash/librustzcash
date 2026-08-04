@@ -91,6 +91,7 @@ regex = { workspace = true }
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
 maybe-rayon.workspace = true
+pastey = { workspace = true, optional = true }
 pczt.workspace = true
 rand_core.workspace = true
 rand_distr.workspace = true
@@ -221,7 +222,7 @@ serde = ["dep:serde", "uuid/serde"]
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
-unstable = ["zcash_client_backend/unstable"]
+unstable = ["dep:pastey", "zcash_client_backend/unstable"]
 
 ## A feature used to isolate tests that are expensive to run. Test-only.
 expensive-tests = []

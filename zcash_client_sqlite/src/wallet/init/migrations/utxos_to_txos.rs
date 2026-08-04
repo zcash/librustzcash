@@ -11,7 +11,7 @@ use crate::wallet::init::{WalletMigrationError, migrations::orchard_received_not
 /// adds `spent_note_count` and `is_shielding` to `v_transactions`.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x3a2562b3_f174_46a1_aa8c_1d122ca2e884);
 
-const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[orchard_received_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
 

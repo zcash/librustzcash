@@ -14,7 +14,7 @@ use super::fix_transparent_received_outputs;
 /// Adds support for storing key material required for zcashd wallet import.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x254d4f20_f0f6_4635_80ed_9d52c536d5df);
 
-const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[fix_transparent_received_outputs::MIGRATION_ID];
 
 pub(super) struct Migration;
 

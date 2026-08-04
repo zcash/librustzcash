@@ -20,7 +20,8 @@ use crate::wallet::{
 /// removes status requests whose transactions have wallet-observable shielded spends or outputs.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xd7ab0ab2_1487_4cb7_ba74_72ece5fdba2f);
 
-const DEPENDENCIES: &[Uuid] = &[note_locking::MIGRATION_ID, tx_retrieval_queue::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] =
+    &[note_locking::MIGRATION_ID, tx_retrieval_queue::MIGRATION_ID];
 
 pub(super) struct Migration;
 

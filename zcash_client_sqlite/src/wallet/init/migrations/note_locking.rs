@@ -19,7 +19,7 @@ pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xa1d4a28c_7582_4457_b0f4_d3f297b
 // migration that creates or rebuilds any of the four tables (the sapling/orchard/transparent
 // rebuilds all precede it via `orchard_note_version` -> `witness_stabilized_notes` ->
 // `account_delete_cascade`), and it creates the `ironwood_received_notes` table itself.
-const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[ironwood_received_notes::MIGRATION_ID];
 
 pub(super) struct Migration;
 

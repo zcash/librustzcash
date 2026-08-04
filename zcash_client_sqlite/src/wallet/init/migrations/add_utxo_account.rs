@@ -26,7 +26,8 @@ use {
 /// This migration adds an account identifier column to the UTXOs table.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x761884d6_30d8_44ef_b204_0b82551c4ca1);
 
-const DEPENDENCIES: &[Uuid] = &[utxos_table::MIGRATION_ID, addresses_table::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] =
+    &[utxos_table::MIGRATION_ID, addresses_table::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) _params: P,

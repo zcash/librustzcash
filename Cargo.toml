@@ -92,6 +92,7 @@ zeroize = { version = "1.7", default-features = false }
 getset = "0.1"
 libm = "0.2"
 nonempty = { version = "0.11", default-features = false }
+pastey = "0.2"
 
 # CSPRNG
 rand = { version = "0.8", default-features = false }

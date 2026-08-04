@@ -17,7 +17,7 @@ use super::add_account_birthdays;
 /// commitment tree shard.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0xfa934bdc_97b6_4980_8a83_b2cb1ac465fd);
 
-const DEPENDENCIES: &[Uuid] = &[add_account_birthdays::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[add_account_birthdays::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,

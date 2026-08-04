@@ -26,7 +26,7 @@ use crate::GapLimits;
 /// reorg handling.
 pub const MIGRATION_ID: Uuid = Uuid::from_u128(0x9fa43ce0_a387_45d1_be03_57a3edc76d01);
 
-const DEPENDENCIES: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
+pub(super) const DEPENDENCIES: &[Uuid] = &[support_legacy_sqlite::MIGRATION_ID];
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
