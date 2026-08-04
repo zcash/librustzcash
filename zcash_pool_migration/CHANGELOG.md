@@ -15,6 +15,10 @@ and this library adheres to Rust's notion of
 - `engine::MigrationStatus::ALL`, `engine::MigrationStatus::is_terminal`, and
   `engine::MigrationStatus::terminal`, so that a store can express terminality
   as a query without restating which statuses are terminal.
+- `engine::MigrationStatus::wire_name`, the stable lowercase wire name as a
+  `&'static str` (which `AsRef<str>` cannot provide), for stores that embed
+  status names in DDL or other `'static` text. `AsRef<str>` now delegates to
+  it.
 - `satisfiability::overdue_shift_tolerance`: how many blocks a step may lag the
   served target before `satisfiability::advance_migration` re-spreads the
   remaining broadcast schedule, as a function of the schedule's transfer delay

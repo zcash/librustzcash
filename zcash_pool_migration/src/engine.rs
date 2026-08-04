@@ -649,13 +649,12 @@ impl MigrationStatus {
     pub fn terminal() -> impl Iterator<Item = MigrationStatus> {
         Self::ALL.iter().copied().filter(|s| s.is_terminal())
     }
-}
 
-impl AsRef<str> for MigrationStatus {
     /// The stable lowercase wire name of the status, as stored by a backend and parsed back with
-    /// [`TryFrom<&str>`](Self). Borrow-free: it returns a `&'static str`, so encoding a status
-    /// allocates nothing.
-    fn as_ref(&self) -> &str {
+    /// [`TryFrom<&str>`](Self): a `&'static str`, so a store can embed it in DDL or other
+    /// `'static` text — which the [`AsRef<str>`](AsRef) impl cannot provide, its return lifetime
+    /// being tied to `&self` by the trait's signature.
+    pub const fn wire_name(self) -> &'static str {
         match self {
             MigrationStatus::Planning => "planning",
             MigrationStatus::Committed => "committed",
@@ -665,6 +664,15 @@ impl AsRef<str> for MigrationStatus {
             MigrationStatus::Superseded => "superseded",
             MigrationStatus::Cancelled => "cancelled",
         }
+    }
+}
+
+impl AsRef<str> for MigrationStatus {
+    /// The stable lowercase wire name of the status ([`wire_name`](MigrationStatus::wire_name)),
+    /// for callers generic over `AsRef<str>`. Borrow-free: the delegate returns a `&'static str`,
+    /// so encoding a status allocates nothing.
+    fn as_ref(&self) -> &str {
+        self.wire_name()
     }
 }
 
