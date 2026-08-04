@@ -826,7 +826,8 @@ impl MigrationState {
     /// released immediately; the rest are re-spread — applied by
     /// [`advance_migration`](crate::satisfiability::advance_migration) when the step it would
     /// surface lags the served target by more than the schedule-scaled tolerance
-    /// ([`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)). The
+    /// ([`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)) with more
+    /// of the schedule due behind it. The
     /// deferred rows move by one shared delta, so the gaps between broadcasts — the observable
     /// the drawn exponential delays exist to shape — survive the wallet's absence unchanged. The
     /// RELEASED row is the one being served: it lands where the caller says the wallet can
@@ -1336,10 +1337,11 @@ impl MigrationState {
     /// slept through a transfer's proving wake-ups and its broadcast height is simply offered
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
     /// has expired. The drive layer adds the RE-SPREAD on top:
-    /// [`advance_migration`](crate::satisfiability::advance_migration) shifts the whole pending
-    /// schedule forward ([`Self::shift_schedule_releasing`]) before serving a step overdue by more than
-    /// [`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance) allows, so this
-    /// kernel judges the shifted schedule and at most one overdue step is ever released at once.
+    /// [`advance_migration`](crate::satisfiability::advance_migration) defers the rest of the
+    /// pending schedule ([`Self::shift_schedule_releasing`]) and lands the served step where the
+    /// wallet can execute it when a step with more of the schedule due behind it lags beyond
+    /// [`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance), so this kernel
+    /// judges the shifted schedule and at most one overdue step is ever released at once.
     pub(crate) fn next_step(
         &self,
         targets: DuenessTargets,
@@ -2325,7 +2327,7 @@ mod tests {
     /// boundary REDRAWN in-distribution against its shifted schedule; a proved transfer's proof
     /// pins its anchor, and a preparation carries none.
     #[test]
-    fn shift_schedule_moves_only_pending_schedules() {
+    fn shift_schedule_releasing_moves_only_pending_schedules() {
         let mut s = state_with(vec![
             tx(0, prep(0, 0), MigrationTxState::AwaitingSignature),
             tx(1, prep(0, 1), MigrationTxState::Signed),
@@ -2418,8 +2420,7 @@ mod tests {
     /// `shift_schedule_releasing` defers every PENDING schedule by the delta EXCEPT the released
     /// row, which lands exactly at `release_at` — the executable landing `advance_migration`
     /// computes — with served (Broadcast/Mined) schedules untouched either way. A Proved release
-    /// keeps the boundary its proof pinned, and a released row whose landing equals its current
-    /// schedule moves nothing.
+    /// keeps the boundary its proof pinned.
     #[test]
     fn shift_schedule_releasing_exempts_the_released_row() {
         let mut s = state_with(vec![
@@ -2479,6 +2480,40 @@ mod tests {
         assert!(
             (720..1_008).contains(&boundary),
             "boundary {boundary} is in [prior, most_recent)"
+        );
+    }
+
+    /// A released SIGNED transfer whose landing equals its current schedule moves nothing and
+    /// KEEPS its boundary undrawn-anew: the boundary was drawn for exactly the height being
+    /// served, and a redraw against that same height could only move it — reintroducing, for an
+    /// in-place release, the boundary climb the release exemption exists to prevent.
+    #[test]
+    fn shift_schedule_releasing_keeps_an_unmoved_release_untouched() {
+        let mut s = state_with(vec![
+            tx(0, prep(0, 0), mined(10)),
+            scheduled_transfer(1, 0, 720, 1_500, MigrationTxState::Signed),
+            scheduled_transfer(2, 1, 720, 1_566, MigrationTxState::Signed),
+        ]);
+        s.shift_schedule_releasing(
+            MigrationTransferId(1),
+            BlockHeight::from_u32(1_500),
+            401,
+            &mut ChaCha8Rng::seed_from_u64(7),
+        );
+        assert_eq!(
+            u32::from(s.transactions[1].scheduled_height),
+            1_500,
+            "released in place"
+        );
+        assert_eq!(
+            s.transactions[1].anchor_boundary,
+            Some(BlockHeight::from_u32(720)),
+            "an unmoved release keeps the boundary drawn for its height"
+        );
+        assert_eq!(
+            u32::from(s.transactions[2].scheduled_height),
+            1_967,
+            "the rest still defers"
         );
     }
 

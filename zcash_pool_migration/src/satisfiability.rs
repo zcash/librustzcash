@@ -344,10 +344,11 @@ pub fn classify_input_observations(
 /// A lag within the tolerance is ordinary wake-up slop (an OS timer delivered late, a block or
 /// two of estimation error), and the step is served as scheduled. A larger lag means the wallet
 /// slept through part of its broadcast schedule, and serving the backlog as-is would cluster
-/// broadcasts the drawn delays exist to spread apart — so every pending transaction but the
-/// released one is deferred by the overdue amount instead, the release itself landing no higher
-/// than the scanned target (see the overdue-shift step in the flow [`advance_migration`]
-/// documents).
+/// broadcasts the drawn delays exist to spread apart — so, when more of the schedule is due
+/// behind it, every pending transaction but the released one is deferred by the overdue amount
+/// instead — the release is never deferred above the scanned target; an already-due step keeps
+/// its own height (see the overdue-shift step in the flow [`advance_migration`] documents). A
+/// lone overdue step is served as scheduled.
 ///
 /// The tolerance is a FUNCTION of the schedule's own scale rather than a constant, because
 /// "late" only means anything relative to the gaps the schedule draws: a lag that is noise
@@ -417,7 +418,7 @@ impl AdvanceConfig {
 /// | schedule dueness in the prove and broadcast queues | expiry as a DECISION: the kernel's dead set, [`MigrationState::expired_transactions`] and [`AdvanceStep::Rebuild`] eligibility, the drain-time [`Replan`](crate::state::AdvanceStep::Replan) gate |
 /// | the doomed-broadcast withhold — a transfer whose expiry has probably passed is not offered, and [`transaction_statuses`](MigrationState::transaction_statuses) reports [`Blocker::ExpiryImminent`](crate::state::Blocker::ExpiryImminent); protective and reversible, since the scanned path still owns the verdict | the dependency closure of [`MigrationState::record_satisfiability`], which writes `Inherited` marks into the store |
 /// | the prove-side expiry skip: proving a transfer that has probably lapsed is wasted work, and skipping it is reversible | anchor-boundary settledness, since an estimate cannot conjure a commitment-tree checkpoint |
-/// | the overdue re-spread's TRIGGER, and the deferral of the rest ([`overdue_shift_tolerance`]): a step lagging the served target by more than the tolerance defers every other pending schedule by the lag. The deferral PERSISTS, but it persists a schedule for steps NOT being served, never a verdict, so an overshooting estimate can only push deferred work later | the overdue re-spread's RELEASE: the triggering step is never deferred above the scanned target — it lands there when the chain has passed its schedule, and an already-due step keeps its own height — because release means EXECUTABLE — proving rests on scanned chain data, and a release parked at the estimate would be found overdue and re-deferred by every wake; the estimate must never manufacture dueness the wallet cannot act on. Also the [`Expired`](crate::state::Blocker::Expired) blocker in `transaction_statuses`, a rendered determination |
+/// | the overdue re-spread's TRIGGER, and the deferral of the rest ([`overdue_shift_tolerance`]): a step lagging the served target by more than the tolerance — with more of the schedule due behind it — defers every other pending schedule by the lag. The deferral PERSISTS, but it persists a schedule for steps NOT being served, never a verdict, so an overshooting estimate can only push deferred work later | the overdue re-spread's RELEASE: the triggering step is never deferred above the scanned target — it lands there when the chain has passed its schedule, and an already-due step keeps its own height — because release means EXECUTABLE — proving rests on scanned chain data, and a release parked at the estimate would be found overdue and re-deferred by every wake; the estimate must never manufacture dueness the wallet cannot act on. Also the [`Expired`](crate::state::Blocker::Expired) blocker in `transaction_statuses`, a rendered determination |
 ///
 /// The clamp in [`new`](Self::new) guarantees `effective >= scanned`, so the transposition
 /// hazard — an estimate reaching a destructive check — is unrepresentable by construction rather
@@ -531,31 +532,32 @@ impl Advance {
 /// 1. It asks the planning kernel what to do next, decided purely from the persisted state.
 /// 2. A named `Prove` or `Broadcast` candidate whose scheduled height lags the SERVED target
 ///    ([`DuenessTargets::effective`]) by more than the schedule-scaled tolerance
-///    ([`overdue_shift_tolerance`], sized from the transfer delay the migration's persisted
-///    anchor bucket interval implies) means the wallet slept through part of its broadcast
-///    schedule (for a transfer's `Prove` the overdueness clock starts no earlier than the
-///    anchor-depth gate's own floor, `boundary + `[`PROVABLE_ANCHOR_DEPTH`]` + 1`, so a proof
-///    the gate itself held back never reads as wallet sleep), and the whole pending schedule
+///    ([`overdue_shift_tolerance`], sized from the transfer delay the migration's persisted anchor
+///    bucket interval implies) means the wallet slept through part of its broadcast schedule (for a
+///    transfer's `Prove` the overdueness clock starts no earlier than the anchor-depth gate's own
+///    floor, `boundary + `[`PROVABLE_ANCHOR_DEPTH`]` + 1`, so a proof the gate itself held back
+///    never reads as wallet sleep); when more of the schedule is due behind it (a lone overdue step
+///    is simply served as scheduled — there is no cluster to prevent), the whole pending schedule
 ///    re-spreads before anything else happens — at most once per call: every OTHER
-///    not-yet-broadcast transaction defers by the lag with its drawn gaps intact, instead of
-///    the missed steps broadcasting as a cluster, while the candidate itself lands at the
-///    SCANNED target when the chain has passed its schedule (else it keeps its own, already-due
-///    height). The candidate is therefore still due — so it is still released in this call,
-///    which is ZIP 318's "at most one overdue transfer is released immediately" — and the
-///    release is EXECUTABLE where it lands: proving rests on scanned chain data, so a release
-///    parked at the estimate would be a step no wallet could act on, found overdue and
-///    re-deferred by every subsequent wake. A moved transfer whose PROOF is still to come also
-///    has its anchor boundary redrawn against its new schedule — the released one against its
-///    landing —
-///    ([`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)): its stored
-///    boundary was in-distribution for the original broadcast height, and broadcasting it late
-///    — with every deferred sibling late by the SAME amount — would carry an anchor age no
-///    honest draw produces, a linkable fingerprint. (A `Proved` transfer's proof pins its
-///    anchor, so its boundary is kept; a preparation draws none.) The anchor redraw is why this
-///    function takes a [`CryptoRng`]: the drawn boundaries are privacy-relevant observables. A
-///    `Rebuild` candidate never triggers the shift: the rebuild itself redraws its transfer's
-///    schedule from the target, and an expired candidate's stale height would overstate the
-///    shift for the still-live remainder.
+///    not-yet-broadcast transaction defers by the lag with its drawn gaps intact, instead of the
+///    missed steps broadcasting as a cluster, while the candidate itself lands at the SCANNED
+///    target when the chain has passed its schedule (else it keeps its own, already-due height).
+///    The candidate therefore stays due — its release survives this call, served in it or the pass
+///    after (a boundary redraw can reorder the prove queue) — which is ZIP 318's "at most one
+///    overdue transfer is released immediately" — and the release is EXECUTABLE where it lands:
+///    proving rests on scanned chain data, so a release parked at the estimate would be a step no
+///    wallet could act on, found overdue and re-deferred by every subsequent wake. A moved transfer
+///    whose PROOF is still to come also has its anchor boundary redrawn against its new schedule —
+///    the released one against its landing —
+///    ([`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)): its stored boundary
+///    was in-distribution for the original broadcast height, and broadcasting it late — with every
+///    deferred sibling late by the SAME amount — would carry an anchor age no honest draw produces,
+///    a linkable fingerprint. (A `Proved` transfer's proof pins its anchor, so its boundary is
+///    kept; a preparation draws none.) The anchor redraw is why this function takes a
+///    [`CryptoRng`]: the drawn boundaries are privacy-relevant observables. A `Rebuild` candidate
+///    never triggers the shift: the rebuild itself redraws its transfer's schedule from the target,
+///    and an expired candidate's stale height would overstate the shift for the still-live
+///    remainder.
 /// 3. It puts the transaction the kernel names to the store's satisfiability oracle
 ///    ([`PoolMigrationRead::check_step_satisfiability`]) — the wallet's live view of whether that
 ///    pre-signed artifact can still execute.
@@ -981,11 +983,19 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
         // EXECUTABLE: proving rests on scanned chain data, so a release parked at the estimate
         // is a step no wallet can act on — each wake would find it overdue again and re-defer
         // it, and the run would stall forever behind a schedule that outruns the scan. The next
-        // planning pass names the candidate again, still due, so it is released in this call. A
-        // moved not-yet-proved transfer's anchor boundary is redrawn against its new schedule —
+        // planning pass finds it still due — served in this call, or the next when a boundary
+        // redraw reorders the prove queue. A moved not-yet-proved transfer's anchor boundary is
+        // redrawn against its new schedule —
         // the released one's against its landing, keeping the release provable where it is
         // served (see `shift_schedule_releasing`) — so deferral never broadcasts an anchor whose
         // age is out of the ZIP 318 draw's distribution.
+        //
+        // The re-spread fires only when a CLUSTER is possible: some OTHER pending transaction
+        // is itself due at the served target. A lone overdue step broadcasts nothing early by
+        // being served as scheduled — there is no backlog behind it to spread — and once a
+        // release is pinned at the scanned target awaiting execution, this is what keeps later
+        // calls from re-deferring the rest by the full estimate lag on every drive (the trigger
+        // would otherwise stay armed until the release executes).
         //
         // The trigger and the deferral are judged and sized at the ESTIMATE
         // (`targets.effective()`), which is what lets a wall-clock-woken wallet re-spread a
@@ -1027,7 +1037,18 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
                 .min();
             if let Some((overdue_from, scheduled, candidate)) = most_overdue {
                 let served = u32::from(targets.effective());
-                if overdue_from.saturating_add(overdue_tolerance) < served {
+                if overdue_from.saturating_add(overdue_tolerance) < served
+                    && state.transactions().iter().any(|other| {
+                        other.id() != candidate
+                            && matches!(
+                                other.state(),
+                                MigrationTxState::AwaitingSignature
+                                    | MigrationTxState::Signed
+                                    | MigrationTxState::Proved
+                            )
+                            && u32::from(other.scheduled_height()) <= served
+                    })
+                {
                     let release_at =
                         BlockHeight::from_u32(scheduled.max(u32::from(targets.scanned())));
                     state.shift_schedule_releasing(candidate, release_at, served - scheduled, rng);
@@ -2618,14 +2639,13 @@ mod advance_tests {
         );
     }
 
-    /// A step overdue by more than the schedule-scaled tolerance ([`overdue_shift_tolerance`])
-    /// shifts the WHOLE pending schedule
-    /// forward by the overdue amount before it is surfaced: the trigger comes due exactly at the
-    /// served target — ZIP 318's one immediately-released overdue transfer — every other pending
-    /// transaction keeps its drawn gap behind it, served schedules stay put, and the shifted
-    /// state is persisted by the time the step is returned. The trigger and the deferral are
-    /// judged at the ESTIMATE; the released trigger itself lands at the SCANNED target — the
-    /// executable one.
+    /// A step overdue by more than the schedule-scaled tolerance ([`overdue_shift_tolerance`]),
+    /// with more of the schedule due behind it, defers every OTHER pending transaction by the
+    /// overdue amount before it is surfaced and itself lands at the SCANNED target — ZIP 318's one
+    /// immediately-released overdue transfer — drawn gaps kept behind it, served schedules staying
+    /// put, and the shifted state persisted by the time the step is returned. The trigger and the
+    /// deferral are judged at the ESTIMATE; the released trigger itself lands at the SCANNED
+    /// target — the executable one.
     #[test]
     fn overdue_step_shifts_the_pending_schedule() {
         let mut state = state_with_crossings(
@@ -2717,6 +2737,9 @@ mod advance_tests {
     /// This test also proves the one-shift-per-call latch: without it, the released landing —
     /// more than the tolerance below the effective target here — re-arms the trigger and the
     /// first call never terminates.
+    ///
+    /// The second call also pins the cluster condition: with the rest deferred beyond even the
+    /// fresh estimate, nothing re-spreads.
     #[test]
     fn released_overdue_step_lands_on_scanned_chain_data() {
         use crate::state::NextAction;
@@ -2766,8 +2789,8 @@ mod advance_tests {
             .expect("the head has a status");
         assert!(head_status.ready(), "prove-ready at the scanned frame");
         assert_eq!(head_status.action(), Some(NextAction::Prove));
-        // A later wake, scan unmoved, estimate further ahead: the release must NOT re-defer —
-        // the rest does (the backlog is still being missed), the release holds its ground.
+        // A later wake, scan unmoved, estimate further ahead: the release must NOT re-defer, and
+        // the rest — no longer due itself — holds too: no cluster, no re-spread.
         let step = advance_migration(
             &mut store,
             &mut state,
@@ -2789,8 +2812,8 @@ mod advance_tests {
         );
         assert_eq!(
             state.transactions()[2].scheduled_height(),
-            BlockHeight::from_u32(4_151),
-            "an unexecuted release re-defers the rest behind each fresh estimate"
+            BlockHeight::from_u32(2_701),
+            "a rest that is not itself due is never re-deferred: the re-spread fires only when a cluster is possible"
         );
     }
 
@@ -2865,10 +2888,13 @@ mod advance_tests {
     #[test]
     fn released_transfer_boundary_lands_provable() {
         let mut state = state_with_crossings(
-            &[100_000_000],
+            &[50_000_000, 50_000_000],
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Signed),
+                // Due at the estimate (arms the re-spread) but outside the prove queue: its boundary is
+                // unsettled at the scan.
+                scheduled_transfer(2, 1, 1_440, 1_900, MigrationTxState::Signed),
             ],
         );
         let mut store = TestStore::new(1_050, []);
@@ -2896,13 +2922,18 @@ mod advance_tests {
             "boundary {boundary} sits below the scanned target: provable where served"
         );
         assert_eq!(boundary % 144, 0, "and on the grid");
+        assert_eq!(
+            state.transactions()[2].scheduled_height(),
+            BlockHeight::from_u32(2_901),
+            "the due sibling that armed the re-spread defers behind the estimate"
+        );
     }
 
     /// The tolerance boundary: a step at most [`overdue_shift_tolerance`] blocks past its
     /// schedule is ordinary wake-up slop, served as scheduled with nothing rescheduled or
-    /// written; one block further and the whole pending schedule moves. The fixture's committed
-    /// interval is the ZIP 318 one, so the tolerance under test is the mainnet value the drive
-    /// call derives from the persisted state.
+    /// written; one block further — with more of the schedule due behind it — the whole pending
+    /// schedule moves. The fixture's committed interval is the ZIP 318 one, so the tolerance
+    /// under test is the mainnet value the drive call derives from the persisted state.
     #[test]
     fn overdue_shift_tolerance_boundary() {
         // A quarter of the ZIP 318 mean of 66: the value `advance_migration` derives from the
@@ -2915,7 +2946,8 @@ mod advance_tests {
                 vec![
                     tx(0, prep(0, 0), mined(10)),
                     scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
-                    scheduled_transfer(2, 1, 720, 1_050, MigrationTxState::Signed),
+                    // Due behind the trigger, arming the cluster condition either side of the boundary.
+                    scheduled_transfer(2, 1, 720, 1_010, MigrationTxState::Signed),
                 ],
             )
         };
@@ -2972,7 +3004,7 @@ mod advance_tests {
         );
         assert_eq!(
             u32::from(state.transactions()[2].scheduled_height()),
-            1_050 + tolerance + 1,
+            1_010 + tolerance + 1,
         );
         assert_eq!(store.replaced.get(), 1);
     }
@@ -3010,10 +3042,13 @@ mod advance_tests {
     #[test]
     fn overdue_prove_shifts_the_pending_schedule() {
         let mut state = state_with_crossings(
-            &[100_000_000],
+            &[50_000_000, 50_000_000],
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Signed),
+                // Same boundary, so id breaks the prove-readiness tie in the trigger's favor;
+                // due by the served target, so it arms the cluster condition.
+                scheduled_transfer(2, 1, 720, 1_900, MigrationTxState::Signed),
             ],
         );
         let mut store = TestStore::new(2_000, []);
@@ -3037,6 +3072,11 @@ mod advance_tests {
             u32::from(state.transactions()[1].scheduled_height()),
             2_001,
             "its broadcast window re-spread to the served target"
+        );
+        assert_eq!(
+            u32::from(state.transactions()[2].scheduled_height()),
+            2_901,
+            "the sibling that armed the re-spread defers behind the served target too"
         );
         assert_eq!(store.replaced.get(), 1);
     }
