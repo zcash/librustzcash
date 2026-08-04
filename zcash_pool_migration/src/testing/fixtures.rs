@@ -16,6 +16,7 @@ use crate::engine::{
     MigrationTxState,
 };
 use crate::preparation::PreparationPlan;
+use crate::satisfiability::DuenessTargets;
 
 #[cfg(feature = "orchard")]
 pub(crate) use zcash_pool_migration_memory::{
@@ -119,4 +120,38 @@ pub(crate) fn state_with_crossings(
         anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
         replan_threshold: crate::satisfiability::ReplanThreshold::DEFAULT,
     }
+}
+
+/// Dueness targets at a single settled height, the common case: scanned and estimated agree.
+pub(crate) fn at(height: u32) -> DuenessTargets {
+    DuenessTargets::at(BlockHeight::from_u32(height))
+}
+
+/// Dueness targets whose scan has reached `scanned` while the chain is estimated at `estimated`.
+pub(crate) fn est(scanned: u32, estimated: u32) -> DuenessTargets {
+    DuenessTargets::new(
+        BlockHeight::from_u32(scanned),
+        BlockHeight::from_u32(estimated),
+    )
+}
+
+/// Broadcast. The txid is a placeholder: [`tx`] replaces it with the row's own, so a fixture never
+/// states one production could not have produced.
+pub(crate) fn broadcast() -> MigrationTxState {
+    MigrationTxState::Broadcast {
+        txid: TxId::from_bytes([0; 32]),
+    }
+}
+
+/// Moves the transaction at `index` to Broadcast, carrying the txid that row already has. Assigning
+/// the variant directly invites a fixture to state a different one, which production cannot reach:
+/// both copies derive from the built PCZT.
+pub(crate) fn go_broadcast(state: &mut MigrationState, index: usize) {
+    let txid = state.transactions[index].txid;
+    state.transactions[index].state = MigrationTxState::Broadcast { txid };
+}
+
+/// A migration transfer id, matching the ids [`tx`] assigns.
+pub(crate) fn id(n: u32) -> MigrationTransferId {
+    MigrationTransferId(n)
 }

@@ -909,7 +909,9 @@ fn broaden_after_discovery<St: PoolMigrationRead>(
 #[cfg(test)]
 mod advance_tests {
     use super::*;
-    use crate::testing::fixtures::{mined, prep, scheduled_transfer, state_with_crossings, tx};
+    use crate::testing::fixtures::{
+        at, broadcast, est, mined, prep, scheduled_transfer, state_with_crossings, tx,
+    };
     use alloc::collections::BTreeMap;
     use core::cell::Cell;
     use zcash_protocol::TxId;
@@ -1015,14 +1017,6 @@ mod advance_tests {
                 tx.state = state;
             }
             Ok(())
-        }
-    }
-
-    /// Broadcast. The txid is a placeholder: `tx` replaces it with the row's own id, so a
-    /// fixture never states one that production could not have produced.
-    fn broadcast() -> MigrationTxState {
-        MigrationTxState::Broadcast {
-            txid: TxId::from_bytes([0; 32]),
         }
     }
 
@@ -1167,13 +1161,8 @@ mod advance_tests {
             ],
         );
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert!(
             matches!(step, AdvanceStep::Prove { id, .. } if id == MigrationTransferId(2)),
@@ -1230,13 +1219,8 @@ mod advance_tests {
             ],
         );
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             step,
@@ -1277,13 +1261,8 @@ mod advance_tests {
             )],
         );
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             step,
@@ -1313,13 +1292,8 @@ mod advance_tests {
                 as_of_height: BlockHeight::from_u32(1700),
             },
         );
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1701)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1701), &config())
+            .expect("the store never fails");
         assert_eq!(
             step,
             AdvanceStep::Broadcast {
@@ -1344,13 +1318,8 @@ mod advance_tests {
         );
         let mut store = TestStore::new(1600, []);
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             step,
@@ -1372,13 +1341,8 @@ mod advance_tests {
             ],
         );
         let mut store = TestStore::new(1600, []);
-        let step = advance_migration(
-            &mut store,
-            &mut waiting,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut waiting, at(1601), &config())
+            .expect("the store never fails");
         assert_eq!(step, AdvanceStep::Waiting);
         assert_eq!(store.queries.get(), 0, "a waiting call asks nothing");
         assert_eq!(store.replaced.get(), 0);
@@ -1422,13 +1386,8 @@ mod advance_tests {
             ],
         );
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             step,
@@ -1484,13 +1443,8 @@ mod advance_tests {
         let mut store = TestStore::new(1600, []);
         store.set_mined(TxId::from_bytes([0; 32]), 1550);
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             state.transactions()[0].state(),
@@ -1541,13 +1495,8 @@ mod advance_tests {
         let mut store = TestStore::new(1600, []);
         store.set_mined(TxId::from_bytes([1; 32]), 1590);
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             step,
@@ -1577,13 +1526,8 @@ mod advance_tests {
         let mut store = TestStore::new(1600, []);
         store.set_mined(TxId::from_bytes([0; 32]), 1550);
 
-        advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             store.mined_queries.get(),
@@ -1621,13 +1565,8 @@ mod advance_tests {
             )],
         );
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             step,
@@ -1688,13 +1627,8 @@ mod advance_tests {
             ],
         );
 
-        let step = advance_migration(
-            &mut store,
-            &mut state,
-            DuenessTargets::at(BlockHeight::from_u32(1601)),
-            &config(),
-        )
-        .expect("the store never fails");
+        let step = advance_migration(&mut store, &mut state, at(1601), &config())
+            .expect("the store never fails");
 
         assert_eq!(
             step,
@@ -1740,12 +1674,7 @@ mod advance_tests {
         let mut state = migration();
         let mut store = FailingStore::new(Failure::Oracle, 1600, []);
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
-                &config()
-            ),
+            advance_migration(&mut store, &mut state, at(1601), &config()),
             Err(StoreFailed)
         );
         assert!(
@@ -1770,12 +1699,7 @@ mod advance_tests {
             [(MigrationTransferId(1), spent(1600))],
         );
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
-                &config()
-            ),
+            advance_migration(&mut store, &mut state, at(1601), &config()),
             Err(StoreFailed)
         );
         assert_eq!(
@@ -1815,13 +1739,8 @@ mod advance_tests {
         let mut store = TestStore::new(1600, []);
 
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
-                &config()
-            )
-            .expect("the store never fails"),
+            advance_migration(&mut store, &mut state, at(1601), &config())
+                .expect("the store never fails"),
             AdvanceStep::Reevaluate,
             "the sibling's due broadcast waits behind the unanswered rejection",
         );
@@ -1840,8 +1759,7 @@ mod advance_tests {
             "testimony never marks",
         );
         assert_eq!(
-            state.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(1601)))[1]
-                .blocked_on(),
+            state.transaction_statuses(at(1601))[1].blocked_on(),
             Some(crate::state::Blocker::AwaitingReevaluation),
         );
 
@@ -1850,13 +1768,8 @@ mod advance_tests {
         // broadcast is offered again IN THIS CALL.
         store.as_of_height = BlockHeight::from_u32(1700);
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1701)),
-                &config()
-            )
-            .expect("the store never fails"),
+            advance_migration(&mut store, &mut state, at(1701), &config())
+                .expect("the store never fails"),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
@@ -1899,13 +1812,8 @@ mod advance_tests {
         // the wallet has now scanned the block that did it.
         let mut store = TestStore::new(1700, [(MigrationTransferId(1), spent(1700))]);
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1701)),
-                &config()
-            )
-            .expect("the store never fails"),
+            advance_migration(&mut store, &mut state, at(1701), &config())
+                .expect("the store never fails"),
             AdvanceStep::Replan,
         );
 
@@ -1958,13 +1866,8 @@ mod advance_tests {
         let mut store = TestStore::new(1600, []);
 
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
-                &config()
-            )
-            .expect("the store never fails"),
+            advance_migration(&mut store, &mut state, at(1601), &config())
+                .expect("the store never fails"),
             AdvanceStep::Complete,
         );
         assert_eq!(store.queries.get(), 0);
@@ -2011,13 +1914,8 @@ mod advance_tests {
         );
 
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
-                &config()
-            )
-            .expect("the store never fails"),
+            advance_migration(&mut store, &mut state, at(1601), &config())
+                .expect("the store never fails"),
             AdvanceStep::Reevaluate,
         );
         let marked = BlockHeight::from_u32(1600);
@@ -2064,13 +1962,8 @@ mod advance_tests {
         let mut store = TestStore::new(1600, []);
 
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1601)),
-                &config()
-            )
-            .expect("the store never fails"),
+            advance_migration(&mut store, &mut state, at(1601), &config())
+                .expect("the store never fails"),
             AdvanceStep::Reevaluate,
             "one unanswerable rejection still holds the whole loop",
         );
@@ -2121,7 +2014,7 @@ mod advance_tests {
         // Scanned to 1500 (target 1501), estimated tip 1700 (target 1701): both transfers are due
         // by the estimate and neither is due by the scan, and the first one's expiry lies in the
         // doomed window `1501 <= 1600 < 1701`.
-        let targets = DuenessTargets::new(BlockHeight::from_u32(1501), BlockHeight::from_u32(1701));
+        let targets = est(1501, 1701);
 
         assert_eq!(
             advance_migration(&mut store, &mut state, targets, &config())
@@ -2146,13 +2039,8 @@ mod advance_tests {
         // synced, and the transfer had not lapsed after all — offers the same broadcast.
         state.mark_broadcast(MigrationTransferId(2));
         assert_eq!(
-            advance_migration(
-                &mut store,
-                &mut state,
-                DuenessTargets::at(BlockHeight::from_u32(1501)),
-                &config(),
-            )
-            .expect("the store never fails"),
+            advance_migration(&mut store, &mut state, at(1501), &config(),)
+                .expect("the store never fails"),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
