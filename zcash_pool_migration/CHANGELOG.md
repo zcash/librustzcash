@@ -8,6 +8,13 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `state::MigrationState::mark_cancelled`, which moves a non-terminal migration
+  to that status. A no-op on an already-terminal migration, so terminality is
+  never overwritten. This is a status change only: it does not release any hold
+  the migration's transactions have on the wallet's notes.
+- `engine::MigrationStatus::ALL`, `engine::MigrationStatus::is_terminal`, and
+  `engine::MigrationStatus::terminal`, so that a store can express terminality
+  as a query without restating which statuses are terminal.
 - `satisfiability::overdue_shift_tolerance`: how many blocks a step may lag the
   served target before `satisfiability::advance_migration` re-spreads the
   remaining broadcast schedule, as a function of the schedule's transfer delay
@@ -17,6 +24,9 @@ and this library adheres to Rust's notion of
   replaced.
 
 ### Changed
+- `engine::MigrationStatus` has added variant `Cancelled`: a terminal status
+  recording that the user abandoned the migration, distinct from `Failed` so
+  that a deliberate abandonment is distinguishable from a migration that broke. 
 - `satisfiability::advance_migration` now re-spreads a missed broadcast
   schedule: when the `Prove` or `Broadcast` step it would surface is more than
   `satisfiability::overdue_shift_tolerance` blocks past its scheduled height at

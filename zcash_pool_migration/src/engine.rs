@@ -597,6 +597,60 @@ pub enum MigrationStatus {
     /// remaining value must be carried by a new plan. Like `Failed`, a POLICY determination —
     /// never revisited by chain state.
     Superseded,
+    /// Abandoned at the user's request: terminal, set by [`MigrationState::mark_cancelled`] as the
+    /// consumer's response to a migration the user has chosen not to carry out. Like `Failed` and
+    /// `Superseded`, a POLICY determination — never revisited by chain state, unlike the
+    /// chain-derived `Complete`.
+    ///
+    /// Distinct from `Failed` on purpose: the two record different histories, and only this one
+    /// says the wallet was working as intended. Collapsing them would leave nothing able to tell a
+    /// deliberate abandonment from a migration that broke.
+    Cancelled,
+}
+
+impl MigrationStatus {
+    /// Every status, in lifecycle order. The enumeration a caller needs in order to talk about the
+    /// status SET rather than one status: a store expressing terminality as a query
+    /// (`WHERE status NOT IN (..)`) derives its list from here through [`is_terminal`], so the
+    /// database's notion of terminal cannot drift from this crate's.
+    ///
+    /// [`is_terminal`]: Self::is_terminal
+    pub const ALL: &'static [MigrationStatus] = &[
+        MigrationStatus::Planning,
+        MigrationStatus::Committed,
+        MigrationStatus::InProgress,
+        MigrationStatus::Complete,
+        MigrationStatus::Failed,
+        MigrationStatus::Superseded,
+        MigrationStatus::Cancelled,
+    ];
+
+    /// Whether this status is TERMINAL: the migration has finished, one way or another, and a new
+    /// migration may replace it. A non-terminal migration is still in progress.
+    ///
+    /// Written as an exhaustive match rather than a set lookup so that adding a status fails to
+    /// compile until its terminality is decided here. That decision is load-bearing well beyond
+    /// this function: it is what the commit guard admits a replacement on, and what a store
+    /// excludes from anchor-checkpoint retention.
+    pub fn is_terminal(self) -> bool {
+        match self {
+            MigrationStatus::Planning
+            | MigrationStatus::Committed
+            | MigrationStatus::InProgress => false,
+            MigrationStatus::Complete
+            | MigrationStatus::Failed
+            | MigrationStatus::Superseded
+            | MigrationStatus::Cancelled => true,
+        }
+    }
+
+    /// The terminal statuses, for a caller that must name the whole set at once — a store
+    /// restricting a query to migrations that are still live, for instance. Derived from
+    /// [`is_terminal`](Self::is_terminal) over [`ALL`](Self::ALL) rather than listed again, so
+    /// there is one place where terminality is decided.
+    pub fn terminal() -> impl Iterator<Item = MigrationStatus> {
+        Self::ALL.iter().copied().filter(|s| s.is_terminal())
+    }
 }
 
 impl AsRef<str> for MigrationStatus {
@@ -611,6 +665,7 @@ impl AsRef<str> for MigrationStatus {
             MigrationStatus::Complete => "complete",
             MigrationStatus::Failed => "failed",
             MigrationStatus::Superseded => "superseded",
+            MigrationStatus::Cancelled => "cancelled",
         }
     }
 }
@@ -637,6 +692,7 @@ impl TryFrom<&str> for MigrationStatus {
             "complete" => MigrationStatus::Complete,
             "failed" => MigrationStatus::Failed,
             "superseded" => MigrationStatus::Superseded,
+            "cancelled" => MigrationStatus::Cancelled,
             _ => return Err(ParseMigrationStatusError),
         })
     }
@@ -3466,19 +3522,65 @@ mod tests {
         assert_eq!(MigrationStatus::Complete.as_ref(), "complete");
         assert_eq!(MigrationStatus::Failed.as_ref(), "failed");
         assert_eq!(MigrationStatus::Superseded.as_ref(), "superseded");
+        assert_eq!(MigrationStatus::Cancelled.as_ref(), "cancelled");
 
-        for status in [
-            MigrationStatus::Planning,
-            MigrationStatus::Committed,
-            MigrationStatus::InProgress,
-            MigrationStatus::Complete,
-            MigrationStatus::Failed,
-            MigrationStatus::Superseded,
-        ] {
+        for status in MigrationStatus::ALL.iter().copied() {
             assert_eq!(MigrationStatus::try_from(status.as_ref()), Ok(status));
         }
 
         assert!(MigrationStatus::try_from("not_a_status").is_err());
+    }
+
+    /// [`MigrationStatus::ALL`] really lists every variant, in the positions the exhaustive match
+    /// below assigns. This matters beyond tidiness: a store derives the set of terminal statuses by
+    /// filtering `ALL`, so a variant missing from it would be treated as non-terminal by every
+    /// query built that way, however carefully [`MigrationStatus::is_terminal`] was written.
+    ///
+    /// The match is exhaustive, so adding a variant fails to compile here until it is given a
+    /// position, and the assertions then check `ALL` agrees.
+    #[test]
+    fn migration_status_all_lists_every_variant() {
+        fn position(status: MigrationStatus) -> usize {
+            match status {
+                MigrationStatus::Planning => 0,
+                MigrationStatus::Committed => 1,
+                MigrationStatus::InProgress => 2,
+                MigrationStatus::Complete => 3,
+                MigrationStatus::Failed => 4,
+                MigrationStatus::Superseded => 5,
+                MigrationStatus::Cancelled => 6,
+            }
+        }
+        // Every entry sits where the match says it does. A variant omitted from `ALL` shifts each
+        // later entry off its position, so this catches the omission rather than the count alone.
+        for (i, status) in MigrationStatus::ALL.iter().copied().enumerate() {
+            assert_eq!(position(status), i, "{status:?} is out of place in ALL");
+        }
+        // And nothing is missing from the END, where a shift would leave the survivors in place.
+        assert_eq!(
+            MigrationStatus::ALL.len(),
+            position(MigrationStatus::Cancelled) + 1
+        );
+    }
+
+    /// The terminal set is exactly the four finished statuses, and `terminal()` agrees with
+    /// `is_terminal` (it is derived from it, so this pins the DERIVATION, and with it the set a
+    /// store excludes from anchor-checkpoint retention).
+    #[test]
+    fn migration_status_terminal_set_is_the_finished_statuses() {
+        let terminal: Vec<MigrationStatus> = MigrationStatus::terminal().collect();
+        assert_eq!(
+            terminal,
+            vec![
+                MigrationStatus::Complete,
+                MigrationStatus::Failed,
+                MigrationStatus::Superseded,
+                MigrationStatus::Cancelled,
+            ]
+        );
+        for status in MigrationStatus::ALL.iter().copied() {
+            assert_eq!(status.is_terminal(), terminal.contains(&status));
+        }
     }
 
     /// Every `UnsatisfiableKind` variant's wire name is pinned to its literal string, and
