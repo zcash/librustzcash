@@ -125,17 +125,24 @@ and this library adheres to Rust's notion of
   schedule: when the `Prove` or `Broadcast` step it would surface is more than
   `satisfiability::overdue_shift_tolerance` blocks past its scheduled height at
   the served (estimated-tip) target — the tolerance derived from the transfer
-  delay the migration's persisted anchor bucket interval implies — the
-  scheduled height of every not-yet-broadcast transaction is first shifted
-  forward by the overdue amount, and the shifted state is persisted with the
-  call's other writes. After wallet downtime, at most one overdue step is
-  released immediately; the rest keep their drawn inter-broadcast gaps instead
-  of broadcasting as a cluster. A deferred transfer whose proof is still to
-  come also has its anchor boundary redrawn against its shifted schedule
-  (`scheduling::redraw_anchor_boundary`), keeping deferred anchors within the
-  ZIP 318 age distribution; a proved transfer keeps the boundary its proof was
-  built against. The function now takes a `CryptoRng` for those draws — pass
-  the same RNG the other engine entry points use.
+  delay the migration's persisted anchor bucket interval implies — every OTHER
+  not-yet-broadcast transaction's scheduled height is first deferred by the
+  overdue amount, while the triggering step itself is never
+  deferred above the SCANNED target — it lands there when the chain has passed
+  its schedule, and an already-due step keeps its own height — so the release
+  it represents stays executable against the wallet's own chain data in the
+  same session (proving rests on scanned state;
+  a release parked at the estimate could be found overdue and re-deferred by
+  every wake, stalling the run). The re-spread runs at most once per call, and
+  the shifted state is persisted with the call's other writes. After wallet
+  downtime, at most one overdue step is released immediately; the rest keep
+  their drawn inter-broadcast gaps instead of broadcasting as a cluster. A
+  moved transfer whose proof is still to come also has its anchor boundary
+  redrawn against its new schedule (`scheduling::redraw_anchor_boundary`) —
+  the released one against its landing, keeping it provable where it is
+  served — while a proved transfer keeps the boundary its proof was built
+  against. The function now takes a `CryptoRng` for those draws — pass the
+  same RNG the other engine entry points use.
 - `state::AdvanceStep` selection now offers, within each queue, the candidate
   that has been ready longest rather than the first one in storage order: the
   earliest scheduled height for a broadcast or a rebuild, and the earliest
