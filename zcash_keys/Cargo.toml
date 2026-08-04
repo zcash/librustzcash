@@ -89,7 +89,7 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_script.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "orchard", "sapling"]
 std = [
     "dep:document-features",
     "orchard?/std",
