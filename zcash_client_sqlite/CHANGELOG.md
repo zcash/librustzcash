@@ -92,6 +92,21 @@ workspace.
   migration's transfers demotes that record exactly as it always demoted a
   pending migration's state. `failed`, `superseded`, and `cancelled` records
   are policy determinations and are not revisited.
+- The `orchard` feature is now enabled by default. Consumers that require a
+  smaller feature set should disable default features and enable only the
+  features they need.
+- A migration transaction is now classified against ZIP 318 when broadcast stores
+  it, in the same database transaction as the record itself, rather than only
+  once it has mined and been enhanced.
+- `WalletWrite::store_transactions_to_be_sent` now likewise classifies each
+  transaction as it stores it, so a transaction the wallet built is labelled
+  without waiting for it to mine. This covers canonical crossings built through
+  the ordinary proposal flow, not only those the pool-migration engine
+  constructs.
+- Neither change makes the NOT CLASSIFIED default safe to read as a decision.
+  Clients must still render it as "no label yet" rather than as "not a migration
+  transaction": rows written before the column existed keep that default, and
+  need the transaction rescanned before they can be labelled.
 
 ### Fixed
 - Anchor-checkpoint retention is no longer owed to a migration that has reached
@@ -100,11 +115,6 @@ workspace.
   excluded only `complete` migrations; nothing will drive a terminal migration
   further, so those checkpoints were kept for proofs that will never be
   requested and, the migration being terminal, were never revisited.
-
-### Changed
-- The `orchard` feature is now enabled by default. Consumers that require a
-  smaller feature set should disable default features and enable only the
-  features they need.
 
 ## [0.22.0-rc.7] - 2026-08-03
 
