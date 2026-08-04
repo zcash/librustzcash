@@ -31,6 +31,12 @@ and this library adheres to Rust's notion of
 - `engine::MigrationStatus` has added variant `Cancelled`: a terminal status
   recording that the user abandoned the migration, distinct from `Failed` so
   that a deliberate abandonment is distinguishable from a migration that broke. 
+- `engine::PoolMigrationRead::get_migration` is now explicitly PENDING-ONLY: a
+  migration whose status is terminal is retained history and is not reported.
+  A store implementation must filter terminal states out of this read (the
+  shared conformance suite in `testing::conformance` now asserts it), and a
+  consumer that used `get_migration` to render a finished migration should use
+  its store's history accessors instead.
 - `satisfiability::advance_migration` now re-spreads a missed broadcast
   schedule: when the `Prove` or `Broadcast` step it would surface is more than
   `satisfiability::overdue_shift_tolerance` blocks past its scheduled height at

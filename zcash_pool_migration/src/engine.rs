@@ -140,7 +140,11 @@ pub trait PoolMigrationRead {
     /// The store's own error type.
     type Error;
 
-    /// The migration currently in progress, if any.
+    /// The migration currently in progress, if any: PENDING-ONLY. A migration whose status is
+    /// terminal ([`MigrationStatus::is_terminal`]) is retained history and is NOT reported here —
+    /// persisting a terminal state through
+    /// [`replace_migration`](PoolMigrationWrite::replace_migration) is precisely how a migration
+    /// leaves this accessor and enters whatever history reads the store offers.
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error>;
 
     /// Report whether the environment this store lives in obstructs the given pre-signed
@@ -3902,7 +3906,8 @@ mod tests {
         type Error = core::convert::Infallible;
 
         fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-            Ok(self.stored.clone())
+            // Pending-only, per the trait contract: a terminal state is history.
+            Ok(self.stored.clone().filter(|s| !s.is_terminal()))
         }
 
         fn check_step_satisfiability(
@@ -4295,7 +4300,8 @@ mod commit_tests {
         type Error = core::convert::Infallible;
 
         fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-            Ok(self.stored.clone())
+            // Pending-only, per the trait contract: a terminal state is history.
+            Ok(self.stored.clone().filter(|s| !s.is_terminal()))
         }
 
         fn check_step_satisfiability(

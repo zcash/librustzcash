@@ -613,8 +613,8 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 /// denomination plan. The crossing values are the ordered list in
 /// `orchard_ironwood_migration_crossing_values`.
 ///
-/// - `id`: the key the child tables join on. Rewritten with the record and never exposed
-///   outside the store; external identity is `uuid`.
+/// - `id`: the key the child tables join on; stable for the record's life (the parent row is
+///   updated in place) and never exposed outside the store. External identity is `uuid`.
 /// - `account_id`: the owning `accounts` row (`ON DELETE CASCADE`). Unique among NON-TERMINAL
 ///   rows (`INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`): at most one migration is in progress
 ///   per account, while terminal records accumulate as retained history.
