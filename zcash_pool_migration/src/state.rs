@@ -397,6 +397,10 @@ impl MigrationState {
     /// out of THIS queue as well — a loop that set a candidate aside only to be re-offered the
     /// identical `Rebuild` step would spin forever. [`Self::next_step`] supplies both exclusions.
     ///
+    /// Among the expired candidates the earliest SCHEDULED one is returned, judged on the CURRENT
+    /// schedule: a transfer already rebuilt once, and so rescheduled later, falls behind those
+    /// still holding their original windows.
+    ///
     /// Expiry is judged at [`targets.scanned()`](DuenessTargets::scanned): a rebuild discards a
     /// pre-signed artifact and demands a fresh signature, so it is offered only for a lapse the
     /// wallet's own chain data supports. A transfer merely BELIEVED lapsed by the estimate is
@@ -411,12 +415,13 @@ impl MigrationState {
         self.transactions
             .iter()
             .filter(|t| matches!(t.kind, MigrationTxKind::Transfer { .. }))
-            .find(|t| {
+            .filter(|t| {
                 Self::is_expired(t, targets.scanned())
                     && t.unsatisfiable.is_none()
                     && !t.depends_on.iter().any(|d| dead.contains(d))
                     && !set_aside.contains(&t.id)
             })
+            .min_by_key(|t| (t.scheduled_height, t.id))
             .map(|t| t.id)
     }
 
@@ -468,6 +473,12 @@ impl MigrationState {
     /// broadcast in separate waking sessions. The whole transaction is returned, not just its id,
     /// so [`Self::next_step`] can also surface its kind.
     ///
+    /// Among the ready candidates the one that became ready EARLIEST is returned: a transfer's
+    /// anchor boundary, a preparation's scheduled height (it carries no boundary), ties broken by
+    /// id. Everything ready is proved before the loop reports `Waiting`, so this only orders the
+    /// work within a session — longest-waiting first, which is also oldest-anchor first, retiring
+    /// the checkpoints the wallet has been retaining longest.
+    ///
     /// Transactions in `dead` — the ids judged unable to ever mine, at the SCANNED target — and in
     /// `set_aside` — the drive loop's call-local exclusions — are never offered;
     /// [`Self::next_step`] supplies both. Readiness itself splits the pair as
@@ -478,18 +489,28 @@ impl MigrationState {
         dead: &BTreeSet<MigrationTransferId>,
         set_aside: &[MigrationTransferId],
     ) -> Option<&MigrationTransaction> {
-        self.transactions.iter().find(|t| {
-            matches!(t.state, MigrationTxState::Signed)
-                && !dead.contains(&t.id)
-                && !set_aside.contains(&t.id)
-                && self.prove_ready(t, targets)
-        })
+        self.transactions
+            .iter()
+            .filter(|t| {
+                matches!(t.state, MigrationTxState::Signed)
+                    && !dead.contains(&t.id)
+                    && !set_aside.contains(&t.id)
+                    && self.prove_ready(t, targets)
+            })
+            // The height each became provable at: a transfer's drawn boundary, a preparation's
+            // schedule.
+            .min_by_key(|t| (t.anchor_boundary.unwrap_or(t.scheduled_height), t.id))
     }
 
     /// The id of the next transaction ready to BROADCAST: already `Proved`, its dependencies mined,
     /// and scheduled at or before [`targets.effective()`](DuenessTargets::effective) — the served
     /// target, so a wallet woken by wall-clock estimate submits a due transfer without first
     /// synchronizing.
+    ///
+    /// Among the due candidates the earliest SCHEDULED one is returned — for this queue that is
+    /// the same as longest-due, the schedule being what makes a transaction broadcastable — so a
+    /// wallet waking with several windows open submits them in the order those windows opened.
+    /// Everything due is broadcast before the loop moves on to proving.
     ///
     /// Transactions in `dead` — the ids judged unable to ever mine, at the SCANNED target — and in
     /// `set_aside` — the drive loop's call-local exclusions — are never offered;
@@ -505,7 +526,7 @@ impl MigrationState {
     ) -> Option<MigrationTransferId> {
         self.transactions
             .iter()
-            .find(|t| {
+            .filter(|t| {
                 matches!(t.state, MigrationTxState::Proved)
                     && t.scheduled_height <= targets.effective()
                     && !dead.contains(&t.id)
@@ -531,6 +552,7 @@ impl MigrationState {
                     // queue exactly.
                     && !Self::is_expired(t, targets.effective())
             })
+            .min_by_key(|t| (t.scheduled_height, t.id))
             .map(|t| t.id)
     }
 
@@ -1054,6 +1076,12 @@ impl MigrationState {
     /// When several actions are available at once the priority is BROADCAST, then REPLAN when
     /// the committed threshold is exceeded, then PROVE, then REBUILD, then REPLAN once dead
     /// value is all that remains.
+    ///
+    /// Within each queue the longest-READY candidate is offered first, ties broken by id — never
+    /// the first by position in [`transactions`](MigrationState::transactions). Readiness is what
+    /// each queue itself waits on: the scheduled height for a broadcast or a rebuild, the anchor
+    /// boundary (a preparation: its scheduled height) for a proof. The whole queue is drained
+    /// before the next one is consulted, so this orders work within a session, not across them.
     ///
     /// [`Reevaluate`](AdvanceStep::Reevaluate) is NOT among the steps decided here: adjudicating
     /// a broadcast-failure report needs the oracle, so the drive API owns that slot. What this
@@ -1695,6 +1723,77 @@ mod tests {
                 &[]
             ),
             None
+        );
+    }
+
+    /// Each queue offers the candidate that has been READY longest, not the first one stored: the
+    /// vector is in dependency order, which a rebuild breaks by rescheduling a transfer in place.
+    /// Readiness differs per queue, so the two transfers here are deliberately ordered one way by
+    /// anchor boundary and the other way by schedule.
+    #[test]
+    fn queues_offer_the_longest_ready_candidate() {
+        let mut s = state_with(vec![
+            scheduled_transfer(0, 0, 100, 500, MigrationTxState::Proved),
+            scheduled_transfer(1, 1, 150, 200, MigrationTxState::Proved),
+        ]);
+        let due = DuenessTargets::at(BlockHeight::from_u32(600));
+
+        // Broadcast: due longest, so by schedule (transfer 1), though it is stored second.
+        assert_eq!(
+            s.next_broadcastable(due, &BTreeSet::new(), &[]),
+            Some(MigrationTransferId(1))
+        );
+        // Setting it aside falls through by schedule, not by position.
+        assert_eq!(
+            s.next_broadcastable(due, &BTreeSet::new(), &[MigrationTransferId(1)]),
+            Some(MigrationTransferId(0))
+        );
+
+        // Prove: provable longest, so by ANCHOR BOUNDARY (transfer 0) — the opposite order.
+        s.transactions[0].state = MigrationTxState::Signed;
+        s.transactions[1].state = MigrationTxState::Signed;
+        assert_eq!(
+            s.next_provable_tx(due, &BTreeSet::new(), &[]).map(|t| t.id),
+            Some(MigrationTransferId(0))
+        );
+        assert_eq!(
+            s.next_provable_tx(due, &BTreeSet::new(), &[MigrationTransferId(0)])
+                .map(|t| t.id),
+            Some(MigrationTransferId(1))
+        );
+
+        // Rebuild: expired longest, so by schedule again. Give both an expiry the target passed.
+        s.transactions[0].expiry_height = BlockHeight::from_u32(550);
+        s.transactions[1].expiry_height = BlockHeight::from_u32(250);
+        assert_eq!(
+            s.next_rebuildable(due, &BTreeSet::new(), &[]),
+            Some(MigrationTransferId(1))
+        );
+        // Rebuilding transfer 1 reschedules it past transfer 0 while keeping its slot, so the
+        // stored-order candidate and the schedule-order candidate now differ.
+        s.transactions[1].scheduled_height = BlockHeight::from_u32(900);
+        s.transactions[1].expiry_height = BlockHeight::from_u32(950);
+        assert_eq!(
+            s.next_rebuildable(due, &BTreeSet::new(), &[]),
+            Some(MigrationTransferId(0))
+        );
+    }
+
+    /// Equal scheduled heights tie-break on id, so the decision does not depend on the order a
+    /// store read the transactions back in.
+    #[test]
+    fn equal_schedules_tie_break_on_id() {
+        let s = state_with(vec![
+            scheduled_transfer(7, 0, 10, 200, MigrationTxState::Proved),
+            scheduled_transfer(3, 1, 10, 200, MigrationTxState::Proved),
+        ]);
+        assert_eq!(
+            s.next_broadcastable(
+                DuenessTargets::at(BlockHeight::from_u32(600)),
+                &BTreeSet::new(),
+                &[]
+            ),
+            Some(MigrationTransferId(3))
         );
     }
 
