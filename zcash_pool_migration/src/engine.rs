@@ -237,20 +237,25 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
     ///
     /// From the moment the proof exists, the transaction is FULLY CONSTRUCTED: its PCZT carries
     /// both signatures (installed at commit) and proofs, and extracting the broadcastable
-    /// `Transaction` from it is purely mechanical. This method is where a backend makes the
-    /// wallet aware of that fact. An implementation over a wallet database MUST, atomically with
-    /// recording the proof in the migration store, finalize the transaction and persist it to
-    /// the wallet's own transaction store — the record `store_transactions_to_be_sent` writes
-    /// for the standard spend flows: the raw transaction, its outputs, and its input notes
-    /// marked spent, so the wallet's own later spends cannot consume a migration input during
-    /// the (deliberately long, for a scheduled transfer) window between proving and broadcast.
-    /// A store with no wallet-level transaction records (a mock, or a store deferring the wallet
-    /// side elsewhere) applies the proof and persists the migration state alone:
+    /// `Transaction` from it is purely mechanical. Every implementation applies the proof and
+    /// persists the migration state:
     ///
     /// ```ignore
     /// proven.apply(state);
     /// self.replace_migration(state)
     /// ```
+    ///
+    /// Deliberately NOT here: any record in the wallet's own transaction store. A
+    /// proved-but-unbroadcast transaction is in no mempool and is scheduled future intent, not
+    /// in-flight outgoing intent, so recording it wallet-side at prove would freeze its input
+    /// notes out of the user's balance for the whole prove-to-broadcast window — days to weeks
+    /// on the ZIP 318 schedule — in violation of the rule that the user always has full access
+    /// to their funds. The prove-to-broadcast reservation is the ADVISORY lock taken by
+    /// [`MigrationProver::lock_spent_notes`] (overridable, expiring with the transaction), and
+    /// the wallet-side record is written by the store's own broadcast seam, atomically with
+    /// handing the broadcastable bytes out (for `zcash_client_sqlite`, its
+    /// `take_transaction_for_broadcast`), which is also the moment its transaction-status
+    /// retrieval may begin without disclosing a never-broadcast txid.
     ///
     /// On an error the proof is lost with the value and `state` may or may not carry it (an
     /// implementation applies it before writing); the caller should re-read the migration from

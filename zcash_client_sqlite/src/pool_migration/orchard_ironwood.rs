@@ -354,9 +354,13 @@ where
         state: &mut MigrationState,
         proven: zcash_pool_migration::engine::ProvedTransaction,
     ) -> Result<(), Self::Error> {
-        let id = proven.id();
+        // Migration-store only, per the trait contract: the prove-to-broadcast reservation is
+        // the advisory lock the proof arrived with, and the wallet's own transaction record —
+        // with its hard spend marks and its status-retrieval queue entry — is written by
+        // [`take_transaction_for_broadcast`](Self::take_transaction_for_broadcast), atomically
+        // with handing the broadcastable bytes out.
         proven.apply(state);
-        self.finalize_and_store_proved(state, id)
+        self.replace_migration(state)
     }
 
     /// Without the `orchard` feature this wallet tracks no Orchard (or Ironwood) notes at all:
@@ -383,45 +387,45 @@ where
     P: zcash_protocol::consensus::Parameters,
     CL: crate::util::Clock,
 {
-    /// The body of [`PoolMigrationWrite::store_proved_transaction`], once the proof has been
-    /// applied to `state`: persist `state` and, atomically with it, finalize the
-    /// fully-constructed (proved and signed) migration transaction `proved` into the wallet's
-    /// own transaction tables.
+    /// The BROADCAST seam: finalize the proved migration transaction `proved` into its
+    /// broadcastable [`Transaction`](zcash_primitives::transaction::Transaction), record it in
+    /// the wallet's own transaction tables, and hand
+    /// it back for submission — one call, one database transaction, so the wallet record binds
+    /// at the ATTEMPT. A consumer that obtains bytes here and dies mid-submit has already left
+    /// the wallet record that the drive loop's `Proved`-row promotion sweep and the
+    /// status-retrieval queue rely on; there is no way to hold broadcastable bytes the wallet
+    /// does not know about.
     ///
-    /// The transaction named by `proved` must be in the [`Proved`](MigrationTxState::Proved)
-    /// lifecycle state in `state`: its stored bytes are then a PCZT carrying both signatures
-    /// (installed at commit) and proofs (installed by the prove step), from which the final
-    /// `Transaction` is extracted mechanically — the PCZT Spend Finalizer and Transaction
-    /// Extractor roles, the latter of which also verifies the proofs and signatures it
-    /// assembles. The wallet-side record is what
-    /// [`WalletWrite::store_transactions_to_be_sent`] writes for the standard spend flows, made
-    /// at the analogous moment: the transaction's raw bytes, fee, creation time, and target
-    /// height in the `transactions` table; its outputs as sent notes; and its input notes marked
-    /// spent — which is what prevents the wallet's OWN later spends from double-spending a
-    /// migration input during the (deliberately long, for a scheduled transfer) window between
-    /// proving and mining.
+    /// This — not proving — is where the transaction enters the wallet's view. From here its
+    /// input notes are HARD-spent (a mempool may mine it whatever the wallet does next), its
+    /// outputs are recorded as sent, and its txid may be asked after: the status-retrieval queue
+    /// entry is made here, so a never-broadcast txid is never disclosed to a light wallet
+    /// server. Before this call the only reservation on its inputs is the advisory lock taken at
+    /// proving, which is what keeps the user's full balance spendable through the deliberately
+    /// long prove-to-broadcast window.
     ///
-    /// The transaction's outputs are recovered by trial decryption under the account's unified
-    /// full viewing key rather than from PCZT metadata: every real output of a migration
-    /// transaction is internal to the migrating account, and the padded dummy outputs fail
-    /// decryption, so decryption separates them exactly. The sent-transaction target height is
-    /// the block the transaction aims to mine in: the successor of its scheduled broadcast
-    /// height.
+    /// The transaction named by `proved` must be [`Proved`](MigrationTxState::Proved) in
+    /// `state`: its stored bytes are then a PCZT carrying both signatures (installed at commit)
+    /// and proofs, from which the final `Transaction` is extracted mechanically — the PCZT Spend
+    /// Finalizer and Transaction Extractor roles, the latter of which re-verifies the proofs and
+    /// signatures it assembles, so a PCZT that would not survive broadcast is rejected here
+    /// rather than recorded. The outputs are recovered by trial decryption under the account's
+    /// unified full viewing key (every real output of a migration transaction is internal to the
+    /// migrating account; the padded dummies decrypt under no key). Idempotent at the wallet
+    /// layer: re-fetching after a crashed submission upserts the same record.
     ///
-    /// Both writes — the migration state (as [`replace_migration`]) and the wallet transaction
-    /// record — happen in ONE database transaction, so a transaction is never durably recorded
-    /// proved without the wallet record, nor the reverse.
+    /// After submitting, the consumer records the outcome exactly as before:
+    /// [`MigrationState::mark_broadcast`] on success, or
+    /// [`MigrationState::report_broadcast_failure`] on a rejection, then persists.
     ///
-    /// [`WalletWrite::store_transactions_to_be_sent`]:
-    ///     zcash_client_backend::data_api::WalletWrite::store_transactions_to_be_sent
-    /// [`replace_migration`]: PoolMigrationWrite::replace_migration
-    /// [`PoolMigrationWrite::store_proved_transaction`]:
-    ///     zcash_pool_migration::engine::PoolMigrationWrite::store_proved_transaction
-    fn finalize_and_store_proved(
+    /// [`MigrationState::mark_broadcast`]: zcash_pool_migration::engine::MigrationState::mark_broadcast
+    /// [`MigrationState::report_broadcast_failure`]:
+    ///     zcash_pool_migration::engine::MigrationState::report_broadcast_failure
+    pub fn take_transaction_for_broadcast(
         &mut self,
         state: &MigrationState,
         proved: MigrationTransferId,
-    ) -> Result<(), Error> {
+    ) -> Result<zcash_primitives::transaction::Transaction, Error> {
         let row = state
             .transactions()
             .iter()
@@ -545,7 +549,8 @@ where
             );
             crate::wallet::put_zip318_classification(dbtx, tx_ref, classification)
                 .map_err(|e| Error::Wallet(Box::new(e)))
-        })
+        })?;
+        Ok(tx)
     }
 }
 

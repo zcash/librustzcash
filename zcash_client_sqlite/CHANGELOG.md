@@ -11,6 +11,17 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `pool_migration::orchard_ironwood::PoolMigrations::take_transaction_for_broadcast`:
+  finalizes a proved migration transaction, records it in the wallet's own
+  transaction tables, and returns the broadcastable `Transaction`, in one
+  database transaction. This — not proving — is now where a migration
+  transaction enters the wallet's view (see the Changed entries).
+- A schema migration removing the wallet-side transaction records of
+  never-broadcast transactions belonging to TERMINAL pool migrations, which
+  earlier releases wrote at prove time: their spend marks froze the input
+  notes out of the user's balance until each transaction's expiry, with
+  nothing left to broadcast them.
+
 - `pool_migration::MigrationUuid`: the stable external identity of one
   pool-migration record, safe to hand across an FFI (row ids are not stable
   across a restore).
@@ -29,6 +40,18 @@ workspace.
   one in progress.
 
 ### Changed
+- Proving a migration transaction no longer writes it into the wallet's own
+  transaction tables: `store_proved_transaction` records the proof in the
+  migration store alone, and the wallet-side record (raw transaction, sent
+  outputs, input spend marks, status-retrieval queue entry) is written by
+  `take_transaction_for_broadcast`, atomically with handing out the
+  broadcastable bytes. Consequences a consumer can observe: the user's full
+  balance remains spendable through the prove-to-broadcast window (the
+  reservation is the advisory note lock taken at proving, overridable via a
+  `LockedInputPolicy` naming the migration's lock owners); a never-broadcast
+  txid is no longer queued for status retrieval (previously disclosed to the
+  light wallet server before broadcast); and a pending migration transaction
+  no longer appears in `v_transactions` before broadcast.
 - `pool_migration::PoolMigrations::get_migration` now reports only the
   migration IN PROGRESS: a migration persisted with a terminal status is
   retained as history rather than returned here, and committing a replacement

@@ -436,28 +436,27 @@ impl Run {
         }
     }
 
-    /// Perform an [`AdvanceStep::Broadcast`] step: extract the stored proven transaction and
-    /// submit it, which in this simulation means mining and scanning it, then record both
-    /// lifecycle transitions a consumer records (broadcast, then mined) and persist. Returns the
-    /// extracted transaction and the height it mined at.
+    /// Perform an [`AdvanceStep::Broadcast`] step: obtain the broadcastable transaction through
+    /// the store's broadcast seam — which finalizes the stored proven PCZT and records the
+    /// wallet-side transaction in the same atomic step — and submit it, which in this simulation
+    /// means mining and scanning it, then record both lifecycle transitions a consumer records
+    /// (broadcast, then mined) and persist. Returns the extracted transaction and the height it
+    /// mined at.
     fn perform_broadcast(
         &mut self,
         state: &mut MigrationState,
         id: MigrationTransferId,
     ) -> (Transaction, BlockHeight) {
-        let (tx, stored_txid) = {
-            let proven = state
-                .transactions()
-                .iter()
-                .find(|t| t.id() == id)
-                .expect("the broadcast candidate is present");
-            let extracted = TransactionExtractor::new(
-                pczt::Pczt::parse(proven.pczt()).expect("parses the proven PCZT"),
-            )
-            .extract()
-            .expect("extracts and verifies the transaction's proofs");
-            (extracted, proven.txid())
-        };
+        let stored_txid = state
+            .transactions()
+            .iter()
+            .find(|t| t.id() == id)
+            .expect("the broadcast candidate is present")
+            .txid();
+        let tx = self
+            .store()
+            .take_transaction_for_broadcast(state, id)
+            .expect("finalizes and records the broadcastable transaction");
         // The id the engine derived from the PCZT when it BUILT this transaction, against the id
         // the real extracted transaction actually has. This is the claim the stored txid rests
         // on — that deriving before signing and proving gives the same answer as extracting
@@ -1075,7 +1074,7 @@ fn migration_proves_end_to_end_against_a_funded_wallet() {
     feature = "ignore-expensive-tests",
     ignore = "covered by the expensive-test CI matrix"
 )]
-fn proving_persists_the_finalized_transaction_to_the_wallet() {
+fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     use zcash_client_backend::data_api::InputSource;
     use zcash_client_backend::data_api::wallet::TargetHeight;
     use zcash_client_backend::data_api::wallet::input_selection::LockFilter;
@@ -1139,8 +1138,6 @@ fn proving_persists_the_finalized_transaction_to_the_wallet() {
     let engine::ProveOutcome::Proved(proven) = outcome else {
         panic!("expected a proof, got {outcome:?}");
     };
-    // The proof is consumed by the failure-side attempt below; keep its parts to retry with.
-    let proven_bytes = proven.pczt().to_vec();
     let txid = committed
         .state
         .transactions()
@@ -1149,19 +1146,14 @@ fn proving_persists_the_finalized_transaction_to_the_wallet() {
         .expect("the transfer is present")
         .txid();
 
-    // FAILURE SIDE: with the wallet-side half unable to write, the migration-store half must
-    // roll back with it — the store keeps saying `Signed`, and the wallet holds no record.
-    run.st
-        .wallet_mut()
-        .conn_mut()
-        .execute_batch("ALTER TABLE sent_notes RENAME TO sent_notes_hidden")
-        .expect("hides the sent-notes table");
-    assert!(
-        run.store()
-            .store_proved_transaction(&mut committed.state, proven)
-            .is_err(),
-        "the wallet-side write cannot succeed without its table",
-    );
+    // PROVE persists the migration store's half ONLY: the transfer is durably `Proved`, and the
+    // wallet's transaction tables know nothing — the user's balance is untouched by a
+    // transaction that is in no mempool, and the never-broadcast txid enters no retrieval
+    // queue. The prove-to-broadcast reservation is the advisory lock, exercised by the locking
+    // tests above.
+    run.store()
+        .store_proved_transaction(&mut committed.state, proven)
+        .expect("records the proof in the migration store");
     assert!(
         matches!(
             run.stored_migration()
@@ -1171,9 +1163,33 @@ fn proving_persists_the_finalized_transaction_to_the_wallet() {
                 .find(|t| t.id() == transfer_id)
                 .expect("the transfer is present")
                 .state(),
-            MigrationTxState::Signed
+            MigrationTxState::Proved
         ),
-        "the migration-store half rolled back with the failed wallet-side half",
+        "the store records the transfer proved",
+    );
+    assert!(
+        run.st
+            .wallet()
+            .get_transaction(txid)
+            .expect("queries the wallet")
+            .is_none(),
+        "proving leaves no record in the wallet's transaction tables",
+    );
+
+    // FAILURE SIDE of the BROADCAST seam: with the wallet-side half unable to write, no
+    // broadcastable bytes are handed out and no partial record survives — the bytes bind to the
+    // record, so there is no crash prefix in which the consumer holds a transaction the wallet
+    // does not know about.
+    run.st
+        .wallet_mut()
+        .conn_mut()
+        .execute_batch("ALTER TABLE sent_notes RENAME TO sent_notes_hidden")
+        .expect("hides the sent-notes table");
+    assert!(
+        run.store()
+            .take_transaction_for_broadcast(&committed.state, transfer_id)
+            .is_err(),
+        "the wallet-side write cannot succeed without its table",
     );
     assert!(
         run.st
@@ -1189,28 +1205,12 @@ fn proving_persists_the_finalized_transaction_to_the_wallet() {
         .execute_batch("ALTER TABLE sent_notes_hidden RENAME TO sent_notes")
         .expect("restores the sent-notes table");
 
-    // SUCCESS SIDE: one atomic write records both halves. (The failure-side attempt consumed the
-    // engine's proof value; the retry reassembles it from the parts kept above, exactly the
-    // resume-and-reprove a real consumer performs more cheaply here.)
-    run.store()
-        .store_proved_transaction(
-            &mut committed.state,
-            engine::ProvedTransaction::from_parts(transfer_id, proven_bytes),
-        )
-        .expect("finalizes and persists the proved transaction");
-    assert!(
-        matches!(
-            run.stored_migration()
-                .expect("the store holds the migration")
-                .transactions()
-                .iter()
-                .find(|t| t.id() == transfer_id)
-                .expect("the transfer is present")
-                .state(),
-            MigrationTxState::Proved
-        ),
-        "the store records the transfer proved",
-    );
+    // SUCCESS SIDE: one atomic step records the wallet-side half and returns the transaction.
+    let extracted = run
+        .store()
+        .take_transaction_for_broadcast(&committed.state, transfer_id)
+        .expect("finalizes, records, and returns the broadcastable transaction");
+    assert_eq!(extracted.txid(), txid);
 
     // The wallet holds the raw finalized transaction under the txid the engine derived at build
     // time, with its Ironwood crossing bundle intact.
