@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Anchor-checkpoint retention is no longer owed to a migration that has reached
+  any terminal status. The grids of `failed`, `superseded`, and `cancelled`
+  migrations were retained for the lifetime of the wallet, because retention
+  excluded only `complete` migrations; nothing will drive a terminal migration
+  further, so those checkpoints were kept for proofs that will never be
+  requested and, the migration being terminal, were never revisited.
+
 ### Changed
 - The `orchard` feature is now enabled by default. Consumers that require a
   smaller feature set should disable default features and enable only the
