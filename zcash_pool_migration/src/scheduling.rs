@@ -851,6 +851,7 @@ mod tests {
     use proptest::prelude::*;
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
+    use zcash_protocol::zip318::{PREP_DELAY_CAP, TRANSFER_DELAY_CAP};
 
     /// A seeded deterministic RNG for a proptest-drawn seed.
     fn rng(seed: u64) -> ChaCha8Rng {
@@ -864,20 +865,6 @@ mod tests {
 
     /// The ZIP 318 parameters, under which every golden vector in this module was captured.
     const P: SchedulingParams = SchedulingParams::ZIP_318;
-
-    /// The ZIP 318 anchor bucket interval as a raw block count, for arithmetic in test expectations.
-    const MODULUS: u32 = 144;
-
-    /// The ZIP 318 transfer delay cap, as a raw block count.
-    const MAX_DELAY: u32 = 576;
-
-    /// The ZIP 318 preparation delay cap, as a raw block count.
-    const PREP_MAX_DELAY: u32 = 96;
-
-    /// The ZIP 318 anchor bucket interval.
-    fn modulus() -> AnchorBucketInterval {
-        AnchorBucketInterval::ZIP_318
-    }
 
     /// An anchor bucket interval of `blocks` blocks.
     fn interval(blocks: u32) -> AnchorBucketInterval {
@@ -918,12 +905,13 @@ mod tests {
     /// Assert one hand-derived [`AnchorBucketInterval::boundary_at_or_below`] value plus its
     /// invariants (a boundary, `<= height`, and within one interval of it) at the ZIP 318 interval.
     fn check_most_recent_boundary_golden(height: u32, expected: u32) {
-        let b = u32::from(modulus().boundary_at_or_below(bh(height)));
+        let i = P.anchor_bucket_interval();
+        let b = u32::from(i.boundary_at_or_below(bh(height)));
         assert_eq!(b, expected, "boundary_at_or_below({height})");
-        assert!(modulus().is_boundary(bh(b)), "not a boundary");
+        assert!(i.is_boundary(bh(b)), "not a boundary");
         assert!(b <= height, "boundary {b} above height {height}");
         assert!(
-            height - b < MODULUS,
+            height - b < i.block_count().get(),
             "boundary {b} more than an interval below {height}"
         );
     }
@@ -1056,7 +1044,8 @@ mod tests {
     #[test]
     fn delay_mean_is_near_expected() {
         // Sanity on the distribution: the truncated-exponential mean sits below MEAN_DELAY (the
-        // tail past MAX_DELAY is removed). Large sample keeps this deterministic and robust.
+        // tail past TRANSFER_DELAY_CAP is removed). Large sample keeps this deterministic and
+        // robust.
         let mut r = rng(42);
         let n = 20_000u64;
         let mut sum = 0u64;
@@ -1081,8 +1070,9 @@ mod tests {
             .map(|_| P.transfer_delay().draw(&mut r))
             .collect();
         assert_eq!(got, expected, "transfer_delay().draw(seed={seed})");
+        let cap = TRANSFER_DELAY_CAP.get();
         for &d in &got {
-            assert!(d <= MAX_DELAY, "delay {d} exceeds the cap {MAX_DELAY}");
+            assert!(d <= cap, "delay {d} exceeds the cap {cap}");
         }
     }
 
@@ -1578,7 +1568,7 @@ mod tests {
     /// `(commit, n, seed)`, plus the structural invariants they must satisfy. The heights are captured
     /// from the deterministic [`ChaCha8Rng`], so they pin the exact delay draws as a regression guard;
     /// the invariant checks keep each vector auditable by eye, since each per-step GAP is the drawn
-    /// inter-arrival delay and must be a valid `[0, MAX_DELAY]` value.
+    /// inter-arrival delay and must be a valid `[0, TRANSFER_DELAY_CAP]` value.
     fn check_schedule_golden(commit: u32, n: usize, seed: u64, expected: &[u32]) {
         let hs: Vec<u32> = schedule_broadcast_heights(&P, bh(commit), n, &mut rng(seed))
             .into_iter()
@@ -1586,6 +1576,7 @@ mod tests {
             .collect();
         assert_eq!(hs, expected, "schedule({commit}, {n}, seed={seed})");
         assert_eq!(hs.len(), n);
+        let cap = TRANSFER_DELAY_CAP.get();
         let mut prev = commit;
         for &h in &hs {
             assert!(
@@ -1593,7 +1584,7 @@ mod tests {
                 "heights must be non-decreasing (commit {commit})"
             );
             let gap = h - prev;
-            assert!(gap <= MAX_DELAY, "delay {gap} exceeds the cap {MAX_DELAY}");
+            assert!(gap <= cap, "delay {gap} exceeds the cap {cap}");
             prev = h;
         }
     }
@@ -1642,7 +1633,7 @@ mod tests {
             let mut prev = bh(start);
             for h in hs {
                 prop_assert!(h >= prev);
-                prop_assert!(u32::from(h) - u32::from(prev) <= PREP_MAX_DELAY);
+                prop_assert!(u32::from(h) - u32::from(prev) <= PREP_DELAY_CAP.get());
                 prev = h;
             }
         }
@@ -1662,7 +1653,10 @@ mod tests {
                 .collect();
             assert_eq!(got, expected, "preparation_delay().draw(seed={seed})");
             for &d in &got {
-                assert!(d <= PREP_MAX_DELAY, "delay {d} exceeds the preparation cap");
+                assert!(
+                    d <= PREP_DELAY_CAP.get(),
+                    "delay {d} exceeds the preparation cap"
+                );
             }
         }
         let exp_seed1 = [8, 1, 15, 4, 5, 20, 10, 3];
@@ -1797,7 +1791,7 @@ mod tests {
 
     #[test]
     fn anchor_empty_candidate_set_is_none() {
-        for blocks in [MODULUS, 12] {
+        for blocks in [AnchorBucketInterval::ZIP_318.block_count().get(), 12] {
             let i = interval(blocks);
             let mut r = rng(1);
             // Chain tip below the second boundary: no candidate strictly below the derived boundary
@@ -1841,7 +1835,7 @@ mod tests {
 
     #[test]
     fn anchor_funding_after_most_recent_is_none() {
-        for blocks in [MODULUS, 12] {
+        for blocks in [AnchorBucketInterval::ZIP_318.block_count().get(), 12] {
             let i = interval(blocks);
             let mut r = rng(2);
             // Funding note created after the tip's most recent boundary: nothing at/after it can be
@@ -1861,7 +1855,7 @@ mod tests {
     /// boundary derived from `chain_tip`, at/after `funding`, and with an age in
     /// `[1, ANCHOR_AGE_CAP]`.
     fn check_anchor_golden(act: u32, funding: u32, chain_tip: u32, seed: u64, expected: &[u32]) {
-        let i = modulus();
+        let i = P.anchor_bucket_interval();
         let most_recent = boundary_at_or_below_u32(&i, chain_tip);
         let mut r = rng(seed);
         let got: Vec<u32> = (0..expected.len())
@@ -1889,7 +1883,7 @@ mod tests {
                 b >= funding,
                 "boundary {b} must be at/after funding {funding}"
             );
-            let age = (most_recent - b) / MODULUS;
+            let age = (most_recent - b) / i.block_count().get();
             assert!(
                 (1..=ANCHOR_AGE_CAP).contains(&age),
                 "age {age} out of [1, cap]"
@@ -1906,7 +1900,8 @@ mod tests {
     /// vectors.
     #[test]
     fn draw_anchor_boundary_golden() {
-        let (act, funding, tip) = (MODULUS, 2 * MODULUS, 20 * MODULUS);
+        let m = AnchorBucketInterval::ZIP_318.block_count().get();
+        let (act, funding, tip) = (m, 2 * m, 20 * m);
         let exp_seed1 = [2736, 2736, 2736, 2592, 2736, 2304];
         let exp_seed42 = [2736, 2304, 2448, 2592, 2592, 2448];
         let exp_seed7 = [2736, 2592, 2736, 2736, 2304, 2592];
@@ -1917,7 +1912,7 @@ mod tests {
         check_anchor_golden(act, funding, tip, 100, &exp_seed100);
         // A mid-interval tip (not itself a boundary) must yield identical draws.
         check_anchor_golden(act, funding, tip + 100, 1, &exp_seed1);
-        check_anchor_golden(act, funding, tip + MODULUS - 1, 42, &exp_seed42);
+        check_anchor_golden(act, funding, tip + m - 1, 42, &exp_seed42);
     }
 
     /// The two axes of [`SchedulingParams`] are independent: changing only the anchor bucket
@@ -1961,7 +1956,7 @@ mod tests {
 
     #[test]
     fn anchor_tiny_range_single_candidate() {
-        for blocks in [MODULUS, 12] {
+        for blocks in [AnchorBucketInterval::ZIP_318.block_count().get(), 12] {
             let i = interval(blocks);
             // Exactly one candidate: the boundary below the tip's, and it satisfies all bounds.
             let mut r = rng(3);
