@@ -1894,7 +1894,7 @@ impl<E: fmt::Display> fmt::Display for ProveError<E> {
                 committed.block_count(),
                 configured.block_count()
             ),
-            ProveError::Parse(e) => write!(f, "parsing the stored PCZT failed: {e:?}"),
+            ProveError::Parse(e) => write!(f, "parsing the stored PCZT failed: {e}"),
             ProveError::Serialize(e) => write!(f, "serializing the proven PCZT failed: {e:?}"),
             ProveError::Prover(e) => write!(f, "proving the transfer failed: {e}"),
         }

@@ -151,7 +151,7 @@ impl schemerz::Migration<Uuid> for Migration {
 fn real_spend_nullifiers(pczt_bytes: &[u8]) -> Result<Vec<[u8; 32]>, WalletMigrationError> {
     let pczt = pczt::Pczt::parse(pczt_bytes).map_err(|e| {
         WalletMigrationError::CorruptedData(format!(
-            "stored pool-migration PCZT does not parse: {e:?}"
+            "stored pool-migration PCZT does not parse: {e}"
         ))
     })?;
     Ok(pczt
