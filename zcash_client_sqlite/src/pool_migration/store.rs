@@ -136,21 +136,28 @@ const ANCHOR_PROBE_LIMIT: usize = 1024;
 // DDL
 // ---------------------------------------------------------------------------
 
+/// The terminal statuses as a parenthesizable SQL literal list (`'complete', 'failed', ...`),
+/// generated from [`MigrationStatus::terminal`] so the database's notion of terminal cannot drift
+/// from the crate's. Used wherever terminality must appear in SQL TEXT rather than as bound
+/// parameters — the partial unique index's predicate, which SQLite stores as DDL — and by the
+/// pending-only read queries, so every site derives from the one decision in `is_terminal`.
+pub(crate) fn terminal_status_sql_list() -> String {
+    MigrationStatus::terminal()
+        .map(|s| format!("'{}'", s.wire_name()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn create_migrations_sql(t: &Tables) -> String {
-    // `anchor_bucket_interval` carries a `DEFAULT` only so that this DDL and the `ADD COLUMN` in
-    // the `orchard_ironwood_migration_anchor_interval` schema migration produce the same stored
-    // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
-    // column explicitly, so no insert ever falls back to it.
+    // Column semantics are documented on the golden copy,
+    // `crate::wallet::db::TABLE_ORCHARD_IRONWOOD_MIGRATIONS`. Constraints shaping this DDL:
     //
-    // `replan_threshold` carries a `DEFAULT` for the same reason, matching the `ADD COLUMN` in the
-    // `orchard_ironwood_migration_unsatisfiability` schema migration; its default is
-    // `ReplanThreshold::DEFAULT`'s percent.
-    //
-    // `account_id` is a foreign key into the wallet's `accounts` table: the pool-migration tables
-    // live in the wallet database alongside `accounts`, so an account's migration is owned by its
-    // account row and removed with it. Deleting an account cascades to its migration here, whose
-    // child rows in turn cascade from the parent migration row. The `accounts` table name is the
-    // same for every pool, so it is referenced directly rather than through `Tables`.
+    // - `account_id` references the wallet's `accounts` table directly (its name is the same for
+    //   every pool), so an account's migrations and their child rows are removed with it.
+    // - The `DEFAULT`s on `anchor_bucket_interval`, `replan_threshold`, and `uuid` exist only so
+    //   this DDL and the corresponding schema migrations' `ADD COLUMN`s produce identical stored
+    //   schema text (SQLite cannot add a `NOT NULL` column without one); the store binds all
+    //   three explicitly.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             id INTEGER PRIMARY KEY,
@@ -162,7 +169,9 @@ fn create_migrations_sql(t: &Tables) -> String {
             note_split_total_input INTEGER NOT NULL,
             note_split_total_migratable INTEGER NOT NULL,
             anchor_bucket_interval INTEGER NOT NULL DEFAULT {},
-            replan_threshold INTEGER NOT NULL DEFAULT {}
+            replan_threshold INTEGER NOT NULL DEFAULT {},
+            uuid BLOB NOT NULL DEFAULT X'',
+            committed_height INTEGER
         )",
         t.migrations,
         AnchorBucketInterval::ZIP_318.block_count(),
@@ -309,10 +318,24 @@ fn create_tx_due_index_sql(t: &Tables) -> String {
     )
 }
 
-fn create_account_index_sql(t: &Tables) -> String {
+/// The at-most-one-PENDING-migration-per-account invariant, as a database constraint: a PARTIAL
+/// unique index over the non-terminal rows. An account accumulates terminal migrations without
+/// limit — they are the history the store retains — while the engine's commit guard admits a new
+/// migration only once the outstanding one is terminal, and this index makes the database uphold
+/// the same rule, so a logic bug surfaces as a constraint violation rather than as two live
+/// migrations racing. The predicate is generated from [`MigrationStatus::terminal`]
+/// ([`terminal_status_sql_list`]), never restated as literals.
+///
+/// `pub(crate)` because the `orchard_ironwood_migration_history` schema migration creates the
+/// index from this same generator, so the migration path and the canonical DDL cannot disagree
+/// about the predicate.
+pub(crate) fn create_account_index_sql(t: &Tables) -> String {
     format!(
-        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} (account_id)",
-        t.account_index, t.migrations
+        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} (account_id)
+            WHERE status NOT IN ({})",
+        t.account_index,
+        t.migrations,
+        terminal_status_sql_list()
     )
 }
 

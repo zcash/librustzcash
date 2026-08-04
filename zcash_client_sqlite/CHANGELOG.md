@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- A schema migration giving each pool-migration record a durable identity — a
+  `uuid` column (random per row, backfilled for existing rows) and a nullable
+  `committed_height` column (`NULL` for rows that predate it) — and rescoping
+  the per-account uniqueness of `orchard_ironwood_migrations` to NON-TERMINAL
+  rows, so an account retains every finished migration while holding at most
+  one in progress.
+
 ### Fixed
 - Anchor-checkpoint retention is no longer owed to a migration that has reached
   any terminal status. The grids of `failed`, `superseded`, and `cancelled`

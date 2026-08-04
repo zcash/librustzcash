@@ -141,6 +141,14 @@ pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
 
+/// The Orchard -> Ironwood per-account uniqueness index DDL, from the store's one generator, for
+/// the `orchard_ironwood_migration_history` schema migration: the migration path and the canonical
+/// DDL create the index from the same text, so its non-terminal predicate cannot drift between
+/// them.
+pub(crate) fn account_index_sql() -> String {
+    store::create_account_index_sql(&TABLES)
+}
+
 /// The anchor bucket grids, in blocks, of every Orchard -> Ironwood migration in this database
 /// that is not yet complete.
 ///

@@ -609,27 +609,32 @@ CREATE INDEX idx_ironwood_received_note_spends_transaction_id ON ironwood_receiv
 // install into `wallet.db`. Every structured value is stored in typed columns and child tables; the
 // only `BLOB` is the pre-signed transaction (`pczt`), which is already-versioned, unstructured bytes.
 
-/// One row per account's active migration: its status and the scalar fields of its denomination
-/// plan. The crossing values are an ordered list in `orchard_ironwood_migration_crossing_values`.
-/// `account_id` is enforced unique by `INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`, so an account
-/// has at most one migration in progress. It is a foreign key into `accounts` with `ON DELETE
-/// CASCADE`, so deleting an account removes its migration (and its child rows cascade in turn).
+/// One row per migration an account has run: its status, identity, and the scalar fields of its
+/// denomination plan. The crossing values are the ordered list in
+/// `orchard_ironwood_migration_crossing_values`.
 ///
-/// `anchor_bucket_interval` records the anchor retention grid the migration was committed against,
-/// in blocks. Every transfer's `anchor_boundary` lies on that grid, and it is provable only while
-/// the wallet still retains those checkpoints, so a mismatch against the wallet's current interval
-/// is reported as an error rather than left to surface as a missing checkpoint at proving time. Its
-/// `DEFAULT` is [`AnchorBucketInterval::ZIP_318`] (144 blocks), present only so that a table created
-/// by the `orchard_ironwood_migration_tables` DDL and one repaired by the
-/// `orchard_ironwood_migration_anchor_interval` `ADD COLUMN` share this schema text; the store
-/// always writes the column explicitly.
+/// - `id`: the key the child tables join on. Rewritten with the record and never exposed
+///   outside the store; external identity is `uuid`.
+/// - `account_id`: the owning `accounts` row (`ON DELETE CASCADE`). Unique among NON-TERMINAL
+///   rows (`INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT`): at most one migration is in progress
+///   per account, while terminal records accumulate as retained history.
+/// - `status`: the migration's lifecycle status, by wire name.
+/// - `note_split_*`: the denomination plan's scalar fields, in zatoshis.
+/// - `anchor_bucket_interval`: the anchor-retention grid, in blocks, the migration was committed
+///   against. Its transfers anchor to boundaries of this grid and are provable only while the
+///   wallet retains those checkpoints.
+/// - `replan_threshold`: the integer percent of planned transfer value above which
+///   unsatisfiable value triggers an immediate replan; stamped at commit.
+/// - `uuid`: the migration's stable identity, distinct per record and preserved across every
+///   rewrite; the only identifier exposed outside the store.
+/// - `committed_height`: the chain height known to the wallet when the record was first
+///   persisted; `NULL` when there was none, or for rows that predate the column.
 ///
-/// `replan_threshold` is the integer percent above which unsatisfiable planned transfer value
-/// triggers an immediate replan, stamped at commit. Its `DEFAULT` is
-/// [`ReplanThreshold::DEFAULT`]'s percent (20), present only so that a table created by the
-/// `orchard_ironwood_migration_tables` DDL and one repaired by the
-/// `orchard_ironwood_migration_unsatisfiability` `ADD COLUMN` share this schema text; the store
-/// always writes the column explicitly.
+/// The `DEFAULT`s on `anchor_bucket_interval` (144, [`AnchorBucketInterval::ZIP_318`]),
+/// `replan_threshold` (20, [`ReplanThreshold::DEFAULT`]), and `uuid` (empty blob, backfilled by
+/// the `orchard_ironwood_migration_history` migration) exist only so this DDL matches the stored
+/// schema text left by the `ADD COLUMN` migrations that introduced those columns; the store
+/// binds all three explicitly.
 ///
 /// [`AnchorBucketInterval::ZIP_318`]: zcash_protocol::zip318::AnchorBucketInterval::ZIP_318
 /// [`ReplanThreshold::DEFAULT`]: zcash_pool_migration::satisfiability::ReplanThreshold::DEFAULT
@@ -644,7 +649,9 @@ CREATE TABLE orchard_ironwood_migrations (
     note_split_total_input INTEGER NOT NULL,
     note_split_total_migratable INTEGER NOT NULL,
     anchor_bucket_interval INTEGER NOT NULL DEFAULT 144,
-    replan_threshold INTEGER NOT NULL DEFAULT 20
+    replan_threshold INTEGER NOT NULL DEFAULT 20,
+    uuid BLOB NOT NULL DEFAULT X'',
+    committed_height INTEGER
 )";
 /// The denomination crossing values (an ordered list of zatoshi amounts). The funding-note values
 /// have no table of their own: each is its crossing value plus the denomination fee buffer.
@@ -770,11 +777,14 @@ pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATION_TX_DUE: &str = "
 CREATE INDEX idx_orchard_ironwood_migration_tx_due ON orchard_ironwood_migration_transactions (
     state, scheduled_height
 )";
-/// Enforces at most one migration per account.
+/// Enforces at most one PENDING migration per account: uniqueness is scoped to the non-terminal
+/// rows, so terminal migrations accumulate as retained history. The predicate's status list is
+/// generated from `MigrationStatus::terminal` wherever this index is created; this golden copy is
+/// held to it by `canonical_pool_migration_ddl_matches_the_migration_path`.
 pub(super) const INDEX_ORCHARD_IRONWOOD_MIGRATIONS_ACCOUNT: &str = "
 CREATE UNIQUE INDEX idx_orchard_ironwood_migrations_account ON orchard_ironwood_migrations (
     account_id
-)";
+) WHERE status NOT IN ('complete', 'failed', 'superseded', 'cancelled')";
 
 /// Stores the transparent outputs received by the wallet.
 ///
