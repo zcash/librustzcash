@@ -167,14 +167,13 @@ mod tests {
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
     use zcash_protocol::value::{COIN, MAX_MONEY};
 
-    use crate::denomination::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER};
     use crate::preparation::FUNDING_OUTPUTS_PER_TX;
+    use zcash_protocol::zip318::{CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS};
 
     /// The ZIP-317 transfer-fee buffer of the canonical transfer shape (all four actions exceed the
     /// grace allowance, so each pays the marginal fee).
     fn zip317_buffer() -> u64 {
-        (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER) as u64
-            * MARGINAL_FEE.into_u64()
+        (CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS) as u64 * MARGINAL_FEE.into_u64()
     }
 
     /// A count-only preparation-layout stub: one padded transaction per [`FUNDING_OUTPUTS_PER_TX`]

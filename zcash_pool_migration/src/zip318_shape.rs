@@ -93,11 +93,14 @@ mod tests {
     use rand_core::SeedableRng;
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
     use zcash_protocol::value::COIN;
-    use zcash_protocol::zip318::{PREP_TX_ACTIONS, Zip318Classification, Zip318TxKind};
+    use zcash_protocol::zip318::{
+        CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS, PREP_TX_ACTIONS,
+        Zip318Classification, Zip318TxKind,
+    };
 
     use crate::build::test_util::{TARGET_HEIGHT, account, regtest_network, single_note_witness};
     use crate::build::{build_prep_tx, build_transfer_pczt};
-    use crate::denomination::{DESTINATION_ACTIONS_PER_TRANSFER, SOURCE_ACTIONS_PER_TRANSFER, zat};
+    use crate::denomination::zat;
     use crate::preparation::PrepOutput;
 
     /// A wallet on the specified ZIP 318 parameters.
@@ -128,7 +131,7 @@ mod tests {
     /// Builds a transfer crossing `crossing_value`, with the given expiry.
     fn transfer(crossing_value: u64, expiry: u32) -> (pczt::Pczt, FullViewingKey) {
         let fvk = account(7);
-        let buffer = (SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER) as u64
+        let buffer = (CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS) as u64
             * MARGINAL_FEE.into_u64();
         let (note, _path, _anchor) = single_note_witness(&fvk, crossing_value + buffer, 11);
 
@@ -215,10 +218,10 @@ mod tests {
             BlockHeight::from_u32(TARGET_HEIGHT),
             &Zip318Params,
         );
-        assert_eq!(evidence.source_actions(), Some(SOURCE_ACTIONS_PER_TRANSFER));
+        assert_eq!(evidence.source_actions(), Some(CROSSING_SOURCE_ACTIONS));
         assert_eq!(
             evidence.destination_actions(),
-            Some(DESTINATION_ACTIONS_PER_TRANSFER)
+            Some(CROSSING_DESTINATION_ACTIONS)
         );
         assert_eq!(
             evidence.sole_destination_value(),
