@@ -1340,6 +1340,144 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
     );
 }
 
+/// Recording a PREPARATION transaction at the broadcast seam classifies it against ZIP 318 too,
+/// and that classification survives the transaction being mined and scanned.
+///
+/// The transfer's case is covered by `broadcast_persists_the_finalized_transaction_to_the_wallet`;
+/// the preparation is the other half, and it is not the same assertion twice. A preparation takes
+/// the OTHER branch of the classifier — it carries no destination-pool action at all, so it is
+/// judged as a padded Orchard-only send-to-self rather than as a crossing carrying a canonical
+/// denomination — and nothing in the transfer's case would notice that branch answering wrongly
+/// (or answering `Nonconforming` because the built transaction's action count drifted from the
+/// specified padding).
+///
+/// The post-mining half pins what the write's durability actually rests on: the classification is
+/// written by a plain `UPDATE` of a column that `put_tx_data` does not mention, and scanning the
+/// mined transaction re-upserts that very row. The re-upsert must not reset it.
+///
+/// Note what this does NOT cover: nothing here runs the enhance path, so the record written at the
+/// broadcast seam is the only thing that ever classifies these transactions in this simulation.
+/// That is the point rather than a gap — it is why recording must classify at all — but it means
+/// the commit-time claim that the enhance path later re-stamps the same value is pinned by
+/// `store_decrypted_tx`'s own tests, not by this one.
+#[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
+fn broadcast_persists_a_preparations_zip318_classification() {
+    // The same single-crossing scenario the transfer's case uses, for the same reason: it is the
+    // cheapest shape that has a preparation at all.
+    const SINGLE: &str = "Gwen, 0.0152 ZEC (a single minimum-denomination note)";
+    let scenario = scenarios()
+        .into_iter()
+        .find(|scenario| scenario.label == SINGLE)
+        .expect("the single-crossing scenario exists");
+
+    let mut run = Run::setup(&scenario);
+    let mut committed = run.plan_and_commit(&scenario);
+
+    // The first step a healthy migration names is a preparation's proof: no crossing is provable
+    // while a preparation it depends on is unmined. The batch is earliest-ready first, so its
+    // head is that preparation; proving the one is all this test needs.
+    let mut waited = 0u32;
+    let (prep_id, kind) = loop {
+        match run.advance(&mut committed.state) {
+            AdvanceStep::Prove { transactions } => {
+                break (transactions[0].id(), transactions[0].kind());
+            }
+            AdvanceStep::Waiting => {
+                assert!(
+                    waited < MAX_WAITING_BLOCKS,
+                    "no preparation came due within {MAX_WAITING_BLOCKS} blocks",
+                );
+                waited += 1;
+                run.mine_empty_block();
+            }
+            other => panic!("a healthy migration never needs {other:?} before its preparations"),
+        }
+    };
+    assert!(
+        matches!(kind, MigrationTxKind::Preparation { .. }),
+        "premise: the first provable transaction is a preparation, not a crossing",
+    );
+    assert_eq!(
+        run.perform_prove(&mut committed.state, prep_id, kind),
+        ProveStepOutcome::Proved,
+    );
+
+    let txid = committed
+        .state
+        .transactions()
+        .iter()
+        .find(|t| t.id() == prep_id)
+        .expect("the preparation is present")
+        .txid();
+    let stored_classification = |run: &mut Run| -> (i64, Option<i64>) {
+        run.st
+            .wallet_mut()
+            .conn_mut()
+            .query_row(
+                "SELECT zip318_kind, mined_height FROM transactions WHERE txid = :txid",
+                rusqlite::named_params![":txid": txid.as_ref()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("reads the stored transaction's classification")
+    };
+    let expected = zcash_protocol::zip318::Zip318Classification::Conforms(
+        zcash_protocol::zip318::Zip318TxKind::Preparation,
+    )
+    .to_code();
+
+    // Proving alone leaves no wallet-side record to classify: the migration store's half is all
+    // that is written, and the transaction enters the wallet's view at the broadcast seam.
+    assert!(
+        run.st
+            .wallet()
+            .get_transaction(txid)
+            .expect("queries the wallet")
+            .is_none(),
+        "premise: proving leaves no record in the wallet's transaction tables",
+    );
+
+    // Taking the transaction for broadcast is the write under test, and it is called here rather
+    // than through `perform_broadcast` so that the record can be observed in the window the seam
+    // opens: recorded, but not yet submitted and so still UNMINED.
+    let tx = run
+        .store()
+        .take_transaction_for_broadcast(&committed.state, prep_id)
+        .expect("finalizes and records the broadcastable preparation");
+
+    let (zip318_kind, mined_height) = stored_classification(&mut run);
+    assert_eq!(
+        mined_height, None,
+        "premise: the preparation is still unmined when the classification must already be present",
+    );
+    assert_eq!(
+        zip318_kind, expected,
+        "the recorded preparation is classified as a ZIP 318 preparation before it mines",
+    );
+
+    // Submitting mines and scans the transaction, so the wallet now re-learns it the way it learns
+    // about any transaction: through `put_tx_data` and the enhance path. This is the tail of
+    // `perform_broadcast`, the transaction having already been taken above.
+    let (height, _) = run.st.generate_next_block_from_tx(1, &tx);
+    run.st.scan_cached_blocks(height, 1);
+    committed.state.mark_broadcast(prep_id);
+    committed.state.mark_mined(prep_id, height);
+    run.persist(&committed.state);
+
+    let (zip318_kind, mined_height) = stored_classification(&mut run);
+    assert!(
+        mined_height.is_some(),
+        "premise: the preparation is mined once it has been broadcast and scanned",
+    );
+    assert_eq!(
+        zip318_kind, expected,
+        "mining and rescanning the preparation leaves its recorded classification intact",
+    );
+}
+
 /// The adapter reports the WALLET's anchor retention interval as its anchor bucket interval, and
 /// every anchor a committed migration draws lands on that grid.
 ///
