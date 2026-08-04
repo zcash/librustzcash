@@ -412,6 +412,129 @@ impl<C: Borrow<Connection>> Store<C> {
         read_migration(self.conn.borrow(), self.tables, self.account_id)
     }
 
+    /// The account's most recent migration WHATEVER its status — the record a UI renders, where a
+    /// finished migration must remain visible after [`get_migration`](Self::get_migration) (the
+    /// pending-only drive read) has moved on to `None`. Recency is row order: rows are only ever
+    /// inserted, and the identity-preserving rewrite re-inserts a migration in place of itself,
+    /// so a later row id is a later migration.
+    pub(crate) fn latest_migration(&self) -> Result<Option<MigrationState>, Error> {
+        let conn = self.conn.borrow();
+        let row: Option<i64> = conn
+            .query_row(
+                &format!(
+                    "SELECT id FROM {} WHERE account_id = ? ORDER BY id DESC LIMIT 1",
+                    self.tables.migrations
+                ),
+                params![self.account_id.0],
+                |row| row.get(0),
+            )
+            .optional()?;
+        row.map(|id| read_migration_row(conn, self.tables, id))
+            .transpose()
+    }
+
+    /// The full state of the account's migration identified by `uuid` — historical or pending —
+    /// or `None` when the account has no such migration.
+    pub(crate) fn get_migration_by_id(
+        &self,
+        id: crate::pool_migration::MigrationUuid,
+    ) -> Result<Option<MigrationState>, Error> {
+        let conn = self.conn.borrow();
+        let row: Option<i64> = conn
+            .query_row(
+                &format!(
+                    "SELECT id FROM {} WHERE account_id = ? AND uuid = ?",
+                    self.tables.migrations
+                ),
+                params![self.account_id.0, id.expose_uuid()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        row.map(|id| read_migration_row(conn, self.tables, id))
+            .transpose()
+    }
+
+    /// Every migration the account has run, newest first, PROJECTED IN SQL: the aggregate counts
+    /// and mined value are computed by the database over the typed columns, and no stored PCZT is
+    /// ever read, let alone parsed — a full [`MigrationState`] runs to megabytes of proofs, and a
+    /// history listing must render without deserializing any of them.
+    pub(crate) fn list_migrations(
+        &self,
+    ) -> Result<Vec<crate::pool_migration::MigrationSummary>, Error> {
+        let conn = self.conn.borrow();
+        let t = self.tables;
+        // The lifecycle discriminants and the transfer kind are the engine's wire names, written
+        // through `AsRef<str>` on the way in; stated here via the same constants' values rather
+        // than re-derived per row.
+        let mut stmt = conn.prepare(&format!(
+            "SELECT m.uuid, m.status, m.committed_height,
+                    m.note_split_total_input, m.note_split_total_migratable, m.note_split_change,
+                    (SELECT COUNT(*) FROM {tx} t WHERE t.migration_id = m.id),
+                    (SELECT COUNT(*) FROM {tx} t
+                      WHERE t.migration_id = m.id AND t.state = 'mined'),
+                    (SELECT COUNT(*) FROM {tx} t
+                      WHERE t.migration_id = m.id AND t.state = 'broadcast'),
+                    (SELECT COUNT(*) FROM {tx} t
+                      WHERE t.migration_id = m.id AND t.unsatisfiable_at IS NOT NULL),
+                    (SELECT IFNULL(SUM(cv.value), 0)
+                       FROM {tx} t
+                       JOIN {cv} cv
+                         ON cv.migration_id = t.migration_id AND cv.ordinal = t.kind_crossing
+                      WHERE t.migration_id = m.id AND t.kind = 'transfer' AND t.state = 'mined')
+               FROM {m} m
+              WHERE m.account_id = ?
+              ORDER BY m.id DESC",
+            m = t.migrations,
+            tx = t.transactions,
+            cv = t.crossing_values,
+        ))?;
+        let rows = stmt.query_map(params![self.account_id.0], |row| {
+            Ok((
+                row.get::<_, uuid::Uuid>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<u32>>(2)?,
+                row.get::<_, u64>(3)?,
+                row.get::<_, u64>(4)?,
+                row.get::<_, Option<u64>>(5)?,
+                row.get::<_, u64>(6)?,
+                row.get::<_, u64>(7)?,
+                row.get::<_, u64>(8)?,
+                row.get::<_, u64>(9)?,
+                row.get::<_, u64>(10)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (
+                uuid,
+                status,
+                committed_height,
+                total_input,
+                total_migratable,
+                change,
+                total,
+                mined,
+                in_flight,
+                unsatisfiable,
+                value_migrated,
+            ) = row?;
+            Ok(crate::pool_migration::MigrationSummary {
+                id: crate::pool_migration::MigrationUuid::from_uuid(uuid),
+                status: MigrationStatus::try_from(status.as_str())
+                    .map_err(|_| Error::Corrupt("status"))?,
+                committed_height: committed_height.map(BlockHeight::from_u32),
+                total_input: Zatoshis::from_u64(total_input)?,
+                total_migratable: Zatoshis::from_u64(total_migratable)?,
+                change: change.map(Zatoshis::from_u64).transpose()?,
+                transaction_count: total as usize,
+                mined_count: mined as usize,
+                in_flight_count: in_flight as usize,
+                unsatisfiable_count: unsatisfiable as usize,
+                value_migrated: Zatoshis::from_u64(value_migrated)?,
+            })
+        })
+        .collect()
+    }
+
     /// Returns the set of [`LockOwner`]s under which this account's in-progress migration has
     /// locked notes (empty if the account has no migration, or none of its transactions hold a
     /// lock).
@@ -1537,8 +1660,10 @@ fn replace_migration_row(
             migration_id
         }
         None => {
-            // A fresh record: mint its identity. `committed_height` is not stamped here; rows
-            // created before the stamping existed carry NULL, and no value is invented.
+            // A fresh record: mint its identity, and stamp the chain height the wallet
+            // currently knows as its commit height — the "when" a history listing sorts by.
+            // `None` when the wallet has no chain view yet (a fixture, a wallet before first
+            // sync); the column is nullable and no value is invented.
             tx.execute(
                 &format!(
                     "INSERT INTO {} (account_id, status, note_split_fee_buffer, note_split_change,
@@ -1551,7 +1676,7 @@ fn replace_migration_row(
                 named_params! {
                     ":account_id": account_id.0,
                     ":uuid": uuid::Uuid::new_v4(),
-                    ":committed_height": None::<u32>,
+                    ":committed_height": crate::wallet::chain_tip_height(tx)?.map(u32::from),
                     ":status": state.status().as_ref(),
                     ":fee_buffer": ns.note_fee_buffer().into_u64(),
                     ":change": ns.change().map(Zatoshis::into_u64),

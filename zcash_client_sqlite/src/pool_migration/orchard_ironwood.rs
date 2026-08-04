@@ -269,6 +269,33 @@ impl<C: Borrow<Connection>, P, CL> PoolMigrations<C, P, CL> {
     pub fn migration_lock_owners(&self) -> Result<BTreeSet<LockOwner>, Error> {
         self.store.migration_lock_owners()
     }
+
+    /// The account's most recent migration WHATEVER its status: what a UI renders, where a
+    /// finished migration must stay visible after the pending-only
+    /// [`get_migration`](zcash_pool_migration::engine::PoolMigrationRead::get_migration) has
+    /// moved on to `None`.
+    ///
+    /// Inherent rather than on [`PoolMigrationRead`]: the engine never reads history, so the
+    /// trait would tax every store implementation with a method the engine never calls.
+    pub fn latest_migration(&self) -> Result<Option<MigrationState>, Error> {
+        self.store.latest_migration()
+    }
+
+    /// Every migration this account has run, newest first, as cheap SQL-projected summaries: no
+    /// stored PCZT is read or parsed. Resolve a row to its full state with
+    /// [`get_migration_by_id`](Self::get_migration_by_id).
+    pub fn list_migrations(&self) -> Result<Vec<crate::pool_migration::MigrationSummary>, Error> {
+        self.store.list_migrations()
+    }
+
+    /// The full state of the migration identified by `id` — historical or pending — or `None`
+    /// when this account has no such migration.
+    pub fn get_migration_by_id(
+        &self,
+        id: crate::pool_migration::MigrationUuid,
+    ) -> Result<Option<MigrationState>, Error> {
+        self.store.get_migration_by_id(id)
+    }
 }
 
 impl<C: Borrow<Connection>, P, CL> PoolMigrationRead for PoolMigrations<C, P, CL> {
@@ -2134,7 +2161,14 @@ mod tests {
         // row through `accounts(uuid)`.
         conn.execute_batch(
             "CREATE TABLE accounts (id INTEGER PRIMARY KEY, uuid BLOB NOT NULL);
-             CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid);",
+             CREATE UNIQUE INDEX accounts_uuid ON accounts (uuid);
+             -- A minimal stand-in for the wallet's scan queue, which the identity-stamping half
+             -- of `replace_migration` reads the chain tip from (empty: no chain view yet).
+             CREATE TABLE scan_queue (
+                block_range_start INTEGER NOT NULL,
+                block_range_end INTEGER NOT NULL,
+                priority INTEGER NOT NULL
+             );",
         )
         .expect("create accounts table");
         init_migration_tables(&conn).expect("create tables");
@@ -2244,6 +2278,182 @@ mod tests {
             Some(successor),
             "the successor is the migration in progress"
         );
+    }
+
+    /// A migration with one crossing of `value` zatoshis carried by one transfer in `tx_state`,
+    /// for exercising the history projections: the crossing list is what `value_migrated` sums
+    /// over, and the transfer's lifecycle state is what gates that sum.
+    fn migration_with_transfer(
+        status: MigrationStatus,
+        value: u64,
+        tx_state: MigrationTxState,
+    ) -> MigrationState {
+        let value = Zatoshis::const_from_u64(value);
+        let txid = match tx_state {
+            MigrationTxState::Broadcast { txid } | MigrationTxState::Mined { txid, .. } => txid,
+            _ => TxId::from_bytes([7; 32]),
+        };
+        MigrationState::from_parts(
+            status,
+            DenominationPlan::from_stored_parts(
+                vec![value],
+                Zatoshis::ZERO,
+                None,
+                Zatoshis::ZERO,
+                value,
+                value,
+            )
+            .expect("a consistent stored plan reconstructs"),
+            PreparationPlan::from_parts(Vec::new(), Vec::new()),
+            vec![MigrationTransaction::from_parts(
+                MigrationTransferId::new(0),
+                MigrationTxKind::Transfer { crossing: 0 },
+                vec![0xAB; 4],
+                Vec::new(),
+                BlockHeight::from_u32(10),
+                BlockHeight::from_u32(0),
+                None,
+                txid,
+                tx_state,
+                None,
+                None,
+                vec![[9; 32]],
+                None,
+            )],
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        )
+    }
+
+    /// The history reads: `latest_migration` keeps a finished migration visible after the
+    /// pending-only `get_migration` has moved on; `list_migrations` projects newest-first
+    /// summaries IN SQL — proven by corrupting every stored PCZT first, which a projection that
+    /// parsed them could not survive — and `get_migration_by_id` resolves a summary's identity
+    /// back to the full state, historical or pending.
+    #[test]
+    fn history_reads_survive_replacement() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+
+        // A finished migration: one 40k crossing, mined.
+        let mined = MigrationTxState::Mined {
+            txid: TxId::from_bytes([0xA0; 32]),
+            height: BlockHeight::from_u32(90),
+        };
+        let finished = migration_with_transfer(MigrationStatus::Complete, 40_000, mined);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&finished)
+            .expect("persist finished");
+
+        // Its successor: pending, one 25k crossing, proved but not yet broadcast.
+        let successor =
+            migration_with_transfer(MigrationStatus::Committed, 25_000, MigrationTxState::Proved);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&successor)
+            .expect("persist successor");
+
+        // The listing never touches the stored PCZTs: corrupt them all, and it must not notice.
+        conn.execute(
+            "UPDATE orchard_ironwood_migration_transactions SET pczt = X'DEAD'",
+            [],
+        )
+        .expect("corrupt every stored pczt");
+
+        let store =
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account).expect("account");
+        let summaries = store.list_migrations().expect("list");
+        assert_eq!(summaries.len(), 2, "history retains both migrations");
+
+        let newest = &summaries[0];
+        assert_eq!(newest.status(), MigrationStatus::Committed);
+        assert_eq!(newest.total_migratable(), Zatoshis::const_from_u64(25_000));
+        assert_eq!(newest.transaction_count(), 1);
+        assert_eq!(newest.mined_count(), 0);
+        assert_eq!(newest.value_migrated(), Zatoshis::ZERO);
+
+        let history = &summaries[1];
+        assert_eq!(history.status(), MigrationStatus::Complete);
+        assert_eq!(history.transaction_count(), 1);
+        assert_eq!(history.mined_count(), 1);
+        assert_eq!(
+            history.value_migrated(),
+            Zatoshis::const_from_u64(40_000),
+            "the mined transfer's crossing value has crossed"
+        );
+        assert_ne!(newest.id(), history.id());
+
+        // The latest migration is the successor, whatever `get_migration` says; the identities
+        // resolve to the full states (with the corrupted bytes read back verbatim, unparsed).
+        let latest = store.latest_migration().expect("latest");
+        assert_eq!(
+            latest.as_ref().map(|s| s.status()),
+            Some(MigrationStatus::Committed)
+        );
+        assert_eq!(
+            store
+                .get_migration_by_id(history.id())
+                .expect("by id")
+                .map(|s| s.status()),
+            Some(MigrationStatus::Complete),
+            "a historical record resolves by identity"
+        );
+        assert_eq!(
+            store
+                .get_migration_by_id(crate::pool_migration::MigrationUuid::from_uuid(
+                    Uuid::new_v4()
+                ))
+                .expect("by unknown id"),
+            None,
+            "an unknown identity resolves to nothing"
+        );
+    }
+
+    /// A freshly committed migration is stamped with the chain height the wallet knew at first
+    /// persistence — the "when" a history listing sorts by — and the stamp never moves with the
+    /// tip afterwards. With no chain view at all, no value is invented.
+    #[test]
+    fn committed_height_is_stamped_at_first_persistence() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+
+        // No chain view: nothing to stamp.
+        let first = migration_under(MigrationStatus::Committed, AnchorBucketInterval::ZIP_318);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&first)
+            .expect("persist without a chain view");
+        let committed = |conn: &Connection| -> Vec<Option<u32>> {
+            conn.prepare("SELECT committed_height FROM orchard_ironwood_migrations ORDER BY id")
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(committed(&conn), vec![None]);
+
+        // The wallet learns a chain tip; re-persisting the SAME migration does not invent a
+        // stamp for it retroactively, but its successor is stamped at first persistence.
+        conn.execute(
+            "INSERT INTO scan_queue (block_range_start, block_range_end, priority)
+             VALUES (0, 1001, 0)",
+            [],
+        )
+        .expect("record a scan range");
+        let mut ended = first.clone();
+        ended.mark_superseded();
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&ended)
+            .expect("re-persist");
+        let second = migration_under(MigrationStatus::Committed, AnchorBucketInterval::ZIP_318);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&second)
+            .expect("persist successor");
+        assert_eq!(committed(&conn), vec![None, Some(1_000)]);
     }
 
     /// A migration in `status`, recorded under `interval`. The plan itself is empty filler: the
