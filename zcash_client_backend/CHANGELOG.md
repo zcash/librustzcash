@@ -10,15 +10,33 @@ workspace.
 
 ## [Unreleased]
 
+## [0.24.0-rc.7] - 2026-08-03
+
 ### Added
-- `zcash_client_backend::data_api::zip318`, which assembles ZIP 318 classification
-  evidence from a decrypted transaction and classifies it. What it can observe is
-  weaker than what the same predicate sees on a transaction the wallet is building,
-  because on chain a zero-valued padding dummy and an unrelated party's output are
-  equally undecryptable; the weaker reading admits more, never less.
+- `zcash_client_backend::data_api::zip318` (requires the `orchard` feature), which
+  assembles ZIP 318 classification evidence from a decrypted transaction and
+  classifies it. What it can observe is weaker than what the same predicate sees on
+  a transaction the wallet is building, because on chain a zero-valued padding dummy
+  and an unrelated party's output are equally undecryptable; the weaker reading
+  admits more, never less.
 - `zcash_client_backend::data_api::ll::LowLevelWalletWrite::put_zip318_classification`,
-  called by `store_decrypted_tx`. A store that has not been given a classification
-  for a transaction must report it as unclassified, never as `Nonconforming`.
+  a required method, called by `store_decrypted_tx` under the `orchard` feature. A
+  store that has not been given a classification for a transaction must report it as
+  unclassified, never as `Nonconforming`.
+- `zcash_client_backend::data_api::testing::TestState::generate_and_scan_empty_blocks`
+- `zcash_client_backend::data_api::testing::TestState::create_account_from_test_seed`
+- `zcash_client_backend::data_api::testing::TestState::orchard_anchor_at` (requires
+  the `orchard` feature)
+- `zcash_client_backend::data_api::ll::wallet::batch_ensure_heights`, the complete set
+  of checkpoint heights a batch of scanned blocks must ensure: cross-pool alignment
+  unioned with the heights an `AnchorRetention` policy retains within the batch's
+  range. `put_blocks` now composes its ensure sets through it; behaviour is unchanged.
+  A consumer maintaining its note commitment trees by other means must compose both
+  obligations. Scanning checkpoints a block only at its last note commitment, so a
+  retention-grid boundary landing on a block with no shielded output in any pool is
+  not checkpointed by cross-pool alignment; marking such a boundary without ensuring
+  it leaves anything pre-signed against that height (for example a ZIP 318
+  pool-migration transfer) permanently unprovable.
 
 ### Fixed
 - `zcash_client_backend::data_api::wallet::extract_and_store_transaction_from_pczt`
@@ -35,25 +53,6 @@ workspace.
   batch signing request. They remain present in the caller's authoritative
   PCZT, so the response only contains new signatures. This restores
   compatibility with batch Signers that reject pre-signed requests.
-
-### Added
-- `zcash_client_backend::data_api::testing::TestState::generate_and_scan_empty_blocks`
-- `zcash_client_backend::data_api::testing::TestState::create_account_from_test_seed`
-- `zcash_client_backend::data_api::testing::TestState::orchard_anchor_at` (requires
-  the `orchard` feature)
-- `zcash_client_backend::data_api::ll::wallet::batch_ensure_heights`, the complete set
-  of checkpoint heights a batch of scanned blocks must ensure: cross-pool alignment
-  unioned with the heights an `AnchorRetention` policy retains within the batch's
-  range. `put_blocks` now composes its ensure sets through it; behaviour is unchanged.
-
-  Both obligations are required, and satisfying only the first is a silent correctness
-  bug. Scanning checkpoints a block only at its last note commitment, so a
-  retention-grid boundary landing on a block with no shielded output in any pool is
-  not checkpointed by cross-pool alignment either — and `AnchorRetention` preserves
-  checkpoints, it never creates them. A consumer maintaining its note commitment trees
-  by other means that composes only the cross-pool set therefore marks boundary heights
-  which never materialize, leaving anything pre-signed against them (e.g. a ZIP 318
-  pool-migration transfer) permanently unprovable.
 
 ## [0.24.0-rc.6] - 2026-07-29
 

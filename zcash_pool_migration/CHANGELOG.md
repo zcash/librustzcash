@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.6] - 2026-08-03
+
 ### Added
 - `engine::ProvedTransaction`: the proof carried out of a successful
   `engine::prove_transfer` / `engine::prove_preparation` call — the proven PCZT
@@ -21,39 +23,6 @@ and this library adheres to Rust's notion of
   wallet's view protects the migration's inputs from its own spends between
   proving and broadcast. A store with no wallet-level transaction records
   implements it as `proven.apply(state)` followed by `replace_migration`.
-
-### Changed
-- `engine::ProveOutcome::Proved` now carries the `ProvedTransaction`, and
-  `engine::prove_transfer` / `engine::prove_preparation` no longer write the
-  proof into the migration state themselves: a caller discharges the returned
-  proof through `PoolMigrationWrite::store_proved_transaction` (nothing else
-  moves a transaction to `Proved`), and persists a `MarkedUnsatisfiable`
-  outcome with `replace_migration` as before. `ProveOutcome` no longer
-  implements `Clone`/`Copy`.
-
-### Fixed
-- `engine::prove_transfer` now re-validates a transfer's persisted anchor boundary
-  against its funding preparations' REAL mined heights, and re-draws it (via
-  `scheduling::draw_anchor_boundary`, from the funding note's actual creation
-  height and the wallet's scanned tip) when the funding note postdates the drawn
-  boundary. The commit-time draw floors the boundary on an ESTIMATE of when the
-  last preparation layer mines (`EST_PREP_LAYER_MINING_BLOCKS`); a preparation
-  that out-mines the estimate — a wallet asleep through one broadcast window is
-  enough — left the boundary below the funding note's creation height, where the
-  note is absent from the tree state and its witness can NEVER be computed. The
-  prover's failure there is indistinguishable from "not scanned yet", so the
-  transfer deferred forever: reported ready to prove, blocked on nothing, proving
-  nothing, permanently — observed in the field on two testnet wallets, wedging
-  the final transfer of otherwise-complete migrations. The re-draw is sound for a
-  `Signed` transfer because the PCZT's anchor and witnesses are deferred to
-  proving (ZIP 374), so the stored artifact pins nothing; ZIP 318 makes anchor
-  selection a proving-time rule. When no grid boundary at or past the funding
-  note's creation has settled within the scanned tip yet, the answer is the
-  ordinary `NotYetProvable` retry. `prove_transfer` takes the network parameters,
-  the scanned tip, and an rng for this; `MigrationState::set_transfer_anchor_boundary`
-  persists the fresh draw.
-
-### Added
 - The `satisfiability` module, holding the vocabulary a store answers a
   committed migration's liveness questions in — `StepSatisfiability` and its
   causes, the observations they are folded from, and the caller policies they
@@ -64,26 +33,22 @@ and this library adheres to Rust's notion of
   that step, record the outcome, and call it again; every step it returns has
   been checked against the store's satisfiability oracle, and every
   determination it makes is persisted before the step is surfaced.
-- `engine::PoolMigrationRead::mined_height`, answering whether this wallet's scan
-  has observed a transaction mined, at or below its fully-scanned height.
-  `satisfiability::advance_migration` asks it about every broadcast-but-unmined
-  transaction it sweeps and promotes the ones that have mined, so which of a
-  migration's transactions are mined now follows the wallet's scan in both
-  directions: forward here, and backward through
+- `engine::PoolMigrationRead::mined_height` (required), answering whether this
+  wallet's scan has observed a transaction mined, at or below its fully-scanned
+  height. It and `check_step_satisfiability` must answer from one view of the
+  wallet's scan. `satisfiability::advance_migration` asks it about every
+  broadcast-but-unmined transaction it sweeps and promotes the ones that have
+  mined, so which of a migration's transactions are mined now follows the wallet's
+  scan in both directions: forward here, and backward through
   `MigrationState::truncate_to_height`. A consumer driving through
   `advance_migration` records only what it alone can know — that it broadcast —
   and no longer calls `MigrationState::mark_mined`, which remains for a consumer
   standing outside that loop. The promotion precedes every check that could
   record a verdict, so chain inclusion outranks an unsatisfiability mark and an
-  open broadcast-failure report without a special case; a transaction seen mined
-  costs the lookup alone and no longer reaches the satisfiability oracle. The sweep also now
-  records `satisfiability::UnsatisfiableCause::InputsSpent` for a broadcast transaction, which it
-  previously dropped: having asked the mining question first and been told the wallet has not seen
-  this transaction mine, a spend of its inputs in a mined transaction is necessarily some OTHER
-  transaction's, so the transfer is known dead now rather than at its expiry — weeks earlier on a
-  privacy-preserving broadcast schedule, and that much sooner to a replan.
-  `PoolMigrationRead::mined_height` documents the store-side consistency this rests on: it and
-  `check_step_satisfiability` must answer from one view of the wallet's scan.
+  open broadcast-failure report. The sweep also now records
+  `satisfiability::UnsatisfiableCause::InputsSpent` for a broadcast transaction
+  whose inputs it sees spent in some other mined transaction, which it previously
+  dropped; such a transfer is known dead at that point rather than at its expiry.
 - `pczt_txid`, deriving a migration transaction's `TxId` from its PCZT (`orchard` feature). A
   migration transaction's id exists from the moment its PCZT is PREPARED — computing it is a
   prerequisite of signing, since the signature hash is derived from it — and never moves
@@ -223,15 +188,19 @@ and this library adheres to Rust's notion of
   this instead of restating the rule.
 
 ### Changed
-- `engine::MigrationState::mark_broadcast` and `mark_mined` no longer take a `TxId`. The id is
+- Migrated to `zcash_client_backend 0.24.0-rc.7`.
+- `engine::ProveOutcome::Proved` now carries the `ProvedTransaction`, and
+  `engine::prove_transfer` / `engine::prove_preparation` no longer write the
+  proof into the migration state themselves: a caller discharges the returned
+  proof through `PoolMigrationWrite::store_proved_transaction` (nothing else
+  moves a transaction to `Proved`), and persists a `MarkedUnsatisfiable`
+  outcome with `replace_migration` as before. `ProveOutcome` no longer
+  implements `Clone`/`Copy`.
+- `engine::MigrationState::mark_broadcast` no longer takes a `TxId`. The id is
   read off the row (`MigrationTransaction::txid`), which is the transaction's own and cannot have
   changed: a consumer broadcasting a stored transaction has nothing to tell the engine that the
   engine does not already know, and being able to pass a mismatched id was a way to lose track of
   a transaction that is on chain.
-- `engine::MigrationTransaction::from_parts` takes the transaction's `TxId`, after
-  `anchor_boundary`.
-- `engine::{CommitError, RebuildError}` gain a `TxId` variant, for a built PCZT whose transaction
-  id cannot be derived.
 - `engine::MigrationState::{transaction_statuses, expired_transactions}` take an
   `satisfiability::DuenessTargets` in place of a single target height; pass
   `DuenessTargets::at(target_height)` for the previous behavior. Under a pair
@@ -257,18 +226,19 @@ and this library adheres to Rust's notion of
   previously have seen a stale value; the derived `replan_required` share is
   unaffected, having always excluded mined transfers.
 - `engine::MigrationTxState::Mined` now carries the mined transaction's txid
-  alongside its height, and `engine::MigrationState::mark_mined` takes it;
-  `MigrationTxState::from_stored` requires the txid payload for `"mined"` rows,
-  and `broadcast_txid` also answers for mined transactions.
+  alongside its height; `MigrationTxState::from_stored` requires the txid
+  payload for `"mined"` rows, and `broadcast_txid` also answers for mined
+  transactions.
 - `state::TransactionStatus::txid` is now populated for a MINED transaction as
   well as a broadcast one; it previously lapsed to `None` once the transaction
   mined. A transaction keeps the txid it was broadcast under, so a consumer
   rendering progress no longer has to hold one from an earlier status view.
-- `engine::MigrationTransaction::from_parts` takes three further parameters,
-  `unsatisfiable` (the unsatisfiability mark, when the transaction has been
-  determined unsatisfiable), `spend_nullifiers` (the transaction's real-spend
-  nullifiers, cached from the built PCZT), and `broadcast_failure_at` (the
-  standing broadcast-failure report); all three have accessors.
+- `engine::MigrationTransaction::from_parts` takes four further parameters: the
+  transaction's `TxId` (after `anchor_boundary`), `unsatisfiable` (the
+  unsatisfiability mark, when the transaction has been determined
+  unsatisfiable), `spend_nullifiers` (the transaction's real-spend nullifiers,
+  cached from the built PCZT), and `broadcast_failure_at` (the standing
+  broadcast-failure report); all four have accessors.
 - `engine::MigrationState::from_parts` and the `engine::commit_preparation`,
   `engine::build_preparation_unsigned`, and
   `engine::commit_preparation_with_funding` entry points each take a further
@@ -302,9 +272,10 @@ and this library adheres to Rust's notion of
   `ProveOutcome::NotYetProvable` with no state change. Match on the outcome,
   and persist the state after `MarkedUnsatisfiable` as after a successful
   proof.
-- `engine::CommitError` and `engine::RebuildError` have a new variant,
+- `engine::CommitError` and `engine::RebuildError` have two new variants:
   `RealSpends`, reported when a built (or rebuilt) migration PCZT presents no
-  well-formed set of real spends to cache nullifiers from.
+  well-formed set of real spends to cache nullifiers from, and `TxId`, for a
+  built PCZT whose transaction id cannot be derived.
 
 ### Removed
 - `engine::MigrationState::{next_step, next_provable, next_broadcastable}`. The
@@ -320,6 +291,18 @@ and this library adheres to Rust's notion of
   `pczt_spends::RealSpendError` describing which of the two conditions held.
 
 ### Fixed
+- `engine::prove_transfer` now re-validates a transfer's persisted anchor boundary
+  against its funding preparations' REAL mined heights, and re-draws it (via
+  `scheduling::draw_anchor_boundary`, from the funding note's actual creation
+  height and the wallet's scanned tip) when the funding note postdates the drawn
+  boundary. Previously a preparation that mined later than the commit-time
+  estimate left the boundary below the funding note's creation height, where the
+  note's witness can never be computed and the transfer deferred forever: reported
+  ready to prove, blocked on nothing, proving nothing. When no grid boundary at or
+  past the funding note's creation has settled within the scanned tip yet, the
+  answer is the ordinary `NotYetProvable` retry. `prove_transfer` takes the network
+  parameters, the scanned tip, and an rng for this;
+  `MigrationState::set_transfer_anchor_boundary` persists the fresh draw.
 - `engine::rebuild_expired_transfer` and
   `engine::rebuild_expired_transfer_unsigned` no longer fail for a transfer
   that was proved or broadcast before it expired; the rebuild now identifies

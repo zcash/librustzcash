@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "pczt"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "blake2b_simd",
  "bls12_381",
@@ -7111,7 +7111,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.24.0-rc.6"
+version = "0.24.0-rc.7"
 dependencies = [
  "ambassador",
  "arti-client",
@@ -7186,7 +7186,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.22.0-rc.6"
+version = "0.22.0-rc.7"
 dependencies = [
  "ambassador",
  "assert_matches",
@@ -7332,7 +7332,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_pool_migration"
-version = "0.1.0-rc.5"
+version = "0.1.0-rc.6"
 dependencies = [
  "corez",
  "getset",
@@ -7428,7 +7428,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.10.3"
+version = "0.10.4"
 dependencies = [
  "corez",
  "document-features",
