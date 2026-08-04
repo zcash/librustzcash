@@ -1745,7 +1745,7 @@ pub enum CommitError<E> {
     RealSpends(crate::pczt_spends::RealSpendError),
     /// A built PCZT's transaction id could not be derived, so the transaction could not be
     /// identified for the life of the migration.
-    TxId(crate::pczt_txid::TxIdError),
+    TxId(pczt::ExtractError),
     /// Serializing a built migration PCZT (for storage or an external signer) failed.
     Serialize(pczt::EncodingError),
     /// NU6.3 is not active on this network, so there is no destination pool to migrate into. The
@@ -2262,7 +2262,7 @@ pub enum RebuildError<E> {
     RealSpends(crate::pczt_spends::RealSpendError),
     /// A built PCZT's transaction id could not be derived, so the transaction could not be
     /// identified for the life of the migration.
-    TxId(crate::pczt_txid::TxIdError),
+    TxId(pczt::ExtractError),
     /// Serializing the rebuilt PCZT failed.
     Serialize(pczt::EncodingError),
     /// A wallet backend or signing operation failed.
@@ -2599,8 +2599,8 @@ where
         .map(|(_, nf)| nf.to_bytes())
         .collect();
     // The rebuilt transaction's own id, derived before signing consumes the PCZT (signing does
-    // not affect it — see `crate::pczt_txid`).
-    let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(RebuildError::TxId)?;
+    // not affect it — see `pczt::Pczt::txid`).
+    let txid = pczt.txid().map_err(RebuildError::TxId)?;
     let (bytes, new_state, unsigned) = match signing {
         Signing::InProcess => {
             let signed = backend.sign(pczt).map_err(RebuildError::Backend)?;
@@ -2772,7 +2772,7 @@ where
     // build its signature hash, so the id exists ahead of either arm below and neither can change
     // it. A migration built for an external signer is therefore as identifiable as one signed in
     // process, and stays so once the returned signature is applied.
-    let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(CommitError::TxId)?;
+    let txid = pczt.txid().map_err(CommitError::TxId)?;
     match signing {
         Signing::InProcess => {
             let signed = backend.sign(pczt).map_err(CommitError::Backend)?;

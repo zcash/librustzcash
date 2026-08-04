@@ -22,7 +22,6 @@ use zcash_pool_migration::engine::{
     PoolMigrationWrite, batch_unsigned_by_action_budget, build_preparation_unsigned,
     commit_preparation, plan_migration,
 };
-use zcash_pool_migration::pczt_txid::{pczt_txid, stored_pczt_txid};
 use zcash_pool_migration::preparation::PREP_TX_ACTIONS;
 use zcash_pool_migration::satisfiability::{
     AdvanceConfig, DuenessTargets, ReorgSettleDepth, ReplanThreshold, advance_migration,
@@ -334,9 +333,14 @@ fn every_committed_transaction_has_a_derivable_txid() {
             parsed.orchard().anchor().is_none(),
             "the anchor is still deferred, which is the point",
         );
-        let txid = pczt_txid(&parsed).expect("a signed migration PCZT yields its txid");
+        let txid = parsed
+            .txid()
+            .expect("a signed migration PCZT yields its txid");
         assert_eq!(
-            stored_pczt_txid(tx.pczt()).expect("and so do the stored bytes"),
+            pczt::Pczt::parse(tx.pczt())
+                .expect("the stored bytes parse")
+                .txid()
+                .expect("and so do the stored bytes"),
             txid,
             "the bytes-level helper agrees with the parsed one",
         );
@@ -373,7 +377,7 @@ fn advance_promotes_a_proved_transaction_whose_broadcast_was_never_recorded() {
     // The crashed submission: a preparation was proved, submitted, and mined, but the process
     // died before `mark_broadcast` — so the stored row still says `Proved` and carries no txid.
     let victim = state.transactions()[0].id();
-    let victim_txid = stored_pczt_txid(
+    let victim_txid = pczt::Pczt::parse(
         state
             .transactions()
             .iter()
@@ -381,6 +385,8 @@ fn advance_promotes_a_proved_transaction_whose_broadcast_was_never_recorded() {
             .expect("the row is stored")
             .pczt(),
     )
+    .expect("the stored bytes parse")
+    .txid()
     .expect("the stored PCZT yields its txid");
     state.set_transaction_proved(victim, state.transactions()[0].pczt().to_vec());
     assert_eq!(
