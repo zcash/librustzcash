@@ -131,7 +131,7 @@ mod tests {
     use zcash_protocol::value::COIN;
     use zcash_protocol::zip318::{CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS};
 
-    use crate::build::test_util::{
+    use crate::testing::fixtures::{
         account, account_derivation, assert_every_spend_is_identifiable, regtest_network,
         single_note_witness,
     };

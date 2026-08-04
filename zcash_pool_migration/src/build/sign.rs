@@ -47,10 +47,10 @@ mod tests {
     use zcash_protocol::value::COIN;
 
     use crate::build::build_prep_tx;
-    use crate::build::test_util::{
+    use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
+    use crate::testing::fixtures::{
         TARGET_HEIGHT, regtest_network, single_note_witness, spending_key,
     };
-    use crate::preparation::{PREP_TX_ACTIONS, PrepOutput};
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
     use crate::denomination::zat;

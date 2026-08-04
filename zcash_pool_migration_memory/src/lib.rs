@@ -69,6 +69,71 @@ pub fn spending_key(seed: u64) -> SpendingKey {
     }
 }
 
+/// An account's Orchard full viewing key (see [`spending_key`]).
+///
+/// This and [`spending_key`] belong upstream in `orchard::keys::testing`, next to
+/// `arb_spending_key`; neither has anything to do with pool migration. They are here because this
+/// is the only test-support crate the migration tests share.
+pub fn account(seed: u64) -> FullViewingKey {
+    FullViewingKey::from(&spending_key(seed))
+}
+
+/// How signable a built migration PCZT is, across both its Orchard and Ironwood bundles, as
+/// `(needing a signature, of those, unidentifiable)`.
+///
+/// An action needs a signature unless it is ALREADY SIGNED (a protocol padding dummy, which the IO
+/// Finalizer signs with its throwaway key and then clears). One that needs a signature is
+/// IDENTIFIABLE if it carries ZIP 32 derivation metadata, which is what lets an external Signer
+/// that matches spends by derivation path recognize it as the account's. An action that needs a
+/// signature and carries no derivation is one such a Signer skips as "not ours", nothing else can
+/// sign, and whose transaction therefore fails to extract.
+///
+/// The first count guards against a vacuous pass: a bundle of nothing but pre-signed dummies has
+/// no unidentifiable spends while exercising nothing.
+///
+/// This reads the bundles through the Verifier role rather than off `pczt::orchard::Bundle`
+/// directly, because `zip32_derivation` is not part of that type's public surface; only the
+/// `orchard::pczt` view exposes it.
+pub fn spend_signability(pczt: &pczt::Pczt) -> (usize, usize) {
+    fn count(bundle: &orchard::pczt::Bundle, unsigned: &mut usize, unidentifiable: &mut usize) {
+        for action in bundle.actions() {
+            if action.spend().spend_auth_sig().is_some() {
+                continue;
+            }
+            *unsigned += 1;
+            if action.spend().zip32_derivation().is_none() {
+                *unidentifiable += 1;
+            }
+        }
+    }
+
+    let (mut unsigned, mut unidentifiable) = (0, 0);
+    pczt::roles::verifier::Verifier::new(pczt.clone())
+        .with_orchard::<core::convert::Infallible, _>(|bundle| {
+            count(bundle, &mut unsigned, &mut unidentifiable);
+            Ok(())
+        })
+        .expect("the Orchard bundle parses")
+        .with_ironwood::<core::convert::Infallible, _>(|bundle| {
+            count(bundle, &mut unsigned, &mut unidentifiable);
+            Ok(())
+        })
+        .expect("the Ironwood bundle parses");
+    (unsigned, unidentifiable)
+}
+
+/// Asserts that every spend of `pczt` still needing a signature is identifiable to an external
+/// Signer (see [`spend_signability`]), and returns how many such spends there are.
+pub fn assert_every_spend_is_identifiable(pczt: &pczt::Pczt) -> usize {
+    let (unsigned, unidentifiable) = spend_signability(pczt);
+    assert_eq!(
+        unidentifiable, 0,
+        "{unidentifiable} of {unsigned} spends awaiting a signature carry no ZIP 32 \
+         derivation, so no external Signer can identify them as the account's",
+    );
+    unsigned
+}
+
 /// The ZIP 32 account derivation a wallet seeded with `seed` would report, matching the account
 /// [`spending_key`] derives. The seed fingerprint is a stand-in, not a real ZIP 32 fingerprint of
 /// the test seed: nothing downstream re-derives keys from it, and an external Signer only needs the

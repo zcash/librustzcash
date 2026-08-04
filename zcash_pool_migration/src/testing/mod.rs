@@ -21,6 +21,8 @@
 //! means, and `scenarios` holds the fixed data both of the above speak about.
 
 mod conformance;
+#[cfg(all(test, feature = "orchard"))]
+pub(crate) mod fixtures;
 mod scenarios;
 mod strategies;
 
