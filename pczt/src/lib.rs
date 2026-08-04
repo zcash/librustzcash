@@ -53,8 +53,12 @@ use zcash_primitives::transaction::sighash_v6::v6_signature_hash;
 use {
     blake2b_simd::Hash as Blake2bHash,
     zcash_primitives::transaction::{
-        TxDigests, sighash::SignableInput, sighash_v5::v5_signature_hash,
+        TxDigests,
+        sighash::SignableInput,
+        sighash_v5::v5_signature_hash,
+        txid::{TxIdDigester, to_txid},
     },
+    zcash_protocol::TxId,
 };
 
 pub mod roles;
@@ -639,6 +643,30 @@ impl Pczt {
             |i| i.extract_effects().map_err(ExtractError::IronwoodExtract),
         )
         .map(|parsed| parsed.tx_data)
+    }
+
+    /// The [`TxId`] of the transaction this PCZT describes.
+    ///
+    /// Answerable as soon as the PCZT is PREPARED, and stable from there: the txid has to be
+    /// computed in order to derive the signature hash, so producing one is a prerequisite of
+    /// signing rather than a consequence of it. Everything later is AUTHORIZING data (the
+    /// signatures, and the anchor and spend witnesses [ZIP 374] defers to proving), none of which
+    /// enters the effecting data the txid digest covers. So an unsigned PCZT, the signed PCZT it
+    /// becomes, and the proven PCZT after that all yield the same answer: the id the transaction
+    /// carries once broadcast and mined.
+    ///
+    /// [ZIP 374]: https://zips.z.cash/zip-0374
+    #[cfg(any(feature = "io-finalizer", feature = "signer"))]
+    pub fn txid(&self) -> Result<TxId, ExtractError> {
+        // `into_effects` consumes the PCZT, and a caller holding stored bytes may still need
+        // them; the clone is one parse's worth of owned data, not a proof-sized copy.
+        let tx_data = self.clone().into_effects()?;
+        let digests = tx_data.digest(TxIdDigester);
+        Ok(to_txid(
+            tx_data.version(),
+            tx_data.consensus_branch_id(),
+            &digests,
+        ))
     }
 }
 

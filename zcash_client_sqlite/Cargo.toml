@@ -155,6 +155,7 @@ orchard = [
     # The pool-migration store finalizes a proved migration PCZT into a `Transaction` when it
     # persists it to the wallet's transaction tables (`PoolMigrations::store_proved_transaction`).
     "pczt/orchard",
+    "pczt/signer",
     "pczt/spend-finalizer",
     "pczt/tx-extractor",
 ]

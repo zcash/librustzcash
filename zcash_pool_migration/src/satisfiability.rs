@@ -562,7 +562,7 @@ impl DuenessTargets {
 ///   none to two transactions sit between broadcast and mining), and it is the only check for
 ///   transactions the kernel will never name as a step;
 /// - per PROVED transaction, one PCZT parse and txid derivation
-///   ([`pczt_txid`](crate::pczt_txid::pczt_txid)) plus the same indexed lookup, catching a
+///   ([`pczt::Pczt::txid`]) plus the same indexed lookup, catching a
 ///   broadcast the consumer failed to record. This is the sweep's only per-row cost that is not a
 ///   database query, and it is paid on a set that empties as transactions are broadcast. A store
 ///   that persists each transaction's derived id could answer from there instead; nothing here
@@ -639,7 +639,7 @@ pub fn advance_migration<St: PoolMigrationWrite>(
     // indistinguishable, to every check that follows, from one still competing for its inputs.
     //
     // A `Proved` row is asked the same question against the txid derived from its stored PCZT
-    // (`pczt_txid`, stable from signing because the anchor is authorizing rather than effecting
+    // (`pczt::Pczt::txid`, stable from signing because the anchor is authorizing rather than effecting
     // data for these transactions). That closes the one gap a recorded-txid sweep cannot see: a
     // consumer that submitted to a node and then died — or failed to persist — before
     // `mark_broadcast` leaves a `Proved` row whose transaction is on chain, which nothing else

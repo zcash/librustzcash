@@ -13,6 +13,10 @@ workspace.
 ### Added
 - `impl {core::fmt::Display, core::error::Error} for pczt::ParseError`
 - `impl {core::fmt::Display, core::error::Error} for pczt::ExtractError`
+- `pczt::Pczt::txid` (behind the `io-finalizer` or `signer` feature), the
+  `TxId` of the transaction a PCZT describes. Answerable once the PCZT is
+  prepared and stable from there, since everything added later is authorizing
+  data and does not enter the txid digest.
 
 ### Changed
 - The `orchard` and `sapling` features are now enabled by default. Consumers

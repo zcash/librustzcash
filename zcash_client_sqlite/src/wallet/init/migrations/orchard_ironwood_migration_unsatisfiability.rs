@@ -81,9 +81,6 @@
 
 use std::collections::HashSet;
 
-#[cfg(feature = "orchard")]
-use zcash_pool_migration::pczt_txid::stored_pczt_txid;
-
 use rusqlite::named_params;
 use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
@@ -177,6 +174,13 @@ fn real_spend_nullifiers(pczt_bytes: &[u8]) -> Result<Vec<[u8; 32]>, WalletMigra
 /// wallet's own records — does not depend on the wallet still holding evidence of the spend.
 #[cfg(feature = "orchard")]
 fn backfill_txids(conn: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
+    fn undecodable(migration_id: i64, transfer_id: u32, e: impl core::error::Error) -> WalletMigrationError {
+        WalletMigrationError::CorruptedData(format!(
+            "pool-migration transaction (migration {migration_id}, transfer {transfer_id}) \
+             stores a PCZT whose transaction id cannot be derived: {e}"
+        ))
+    }
+
     let rows: Vec<(i64, u32, Vec<u8>)> = {
         let mut stmt = conn.prepare(
             "SELECT migration_id, transfer_id, pczt
@@ -190,12 +194,10 @@ fn backfill_txids(conn: &rusqlite::Transaction) -> Result<(), WalletMigrationErr
     };
 
     for (migration_id, transfer_id, pczt_bytes) in rows {
-        let txid = stored_pczt_txid(&pczt_bytes).map_err(|e| {
-            WalletMigrationError::CorruptedData(format!(
-                "pool-migration transaction (migration {migration_id}, transfer {transfer_id}) \
-                 stores a PCZT whose transaction id cannot be derived: {e}"
-            ))
-        })?;
+        let txid = pczt::Pczt::parse(&pczt_bytes)
+            .map_err(|e| undecodable(migration_id, transfer_id, e))?
+            .txid()
+            .map_err(|e| undecodable(migration_id, transfer_id, e))?;
         conn.execute(
             "UPDATE orchard_ironwood_migration_transactions
                 SET txid = :txid
@@ -925,7 +927,10 @@ mod tests {
             .get_migration()
             .expect("the repaired store reads back")
             .expect("the migration is present");
-        let derived = stored_pczt_txid(&proven).expect("the stored PCZT yields its id");
+        let derived = pczt::Pczt::parse(&proven)
+            .expect("the stored PCZT parses")
+            .txid()
+            .expect("the stored PCZT yields its id");
         assert_ne!(
             derived,
             TxId::from_bytes(MINED_TXID),

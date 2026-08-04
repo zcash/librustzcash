@@ -7,6 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Removed
+- `pczt_txid`, the whole module. `pczt_txid::pczt_txid` is now
+  `pczt::Pczt::txid`, and `pczt_txid::stored_pczt_txid` is `pczt::Pczt::parse`
+  followed by it. `pczt_txid::TxIdError` is gone with them: the errors of both
+  steps, `pczt::ParseError` and `pczt::ExtractError`, now implement `Display`
+  and `Error` themselves and carry the detail the local type discarded.
+- `engine::{CommitError, RebuildError}::TxId` now carries a
+  `pczt::ExtractError` instead of the removed `pczt_txid::TxIdError`.
+
 ## [0.1.0-rc.6] - 2026-08-03
 
 ### Added
