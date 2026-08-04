@@ -721,6 +721,57 @@ pub enum ExtractError {
     UnsupportedTxVersion { version: u32, version_group_id: u32 },
 }
 
+#[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+impl core::fmt::Display for ExtractError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ExtractError::IncompatibleLockTimes => {
+                write!(f, "the transparent inputs have incompatible lock times")
+            }
+            ExtractError::IronwoodExtract(e) => {
+                write!(f, "could not extract the Ironwood bundle: {e}")
+            }
+            ExtractError::IronwoodNotSupported => write!(
+                f,
+                "the PCZT carries Ironwood bundle data, but its transaction version has no \
+                 Ironwood bundle"
+            ),
+            ExtractError::IronwoodParse(e) => {
+                write!(f, "could not parse the Ironwood bundle: {e:?}")
+            }
+            ExtractError::OrchardExtract(e) => {
+                write!(f, "could not extract the Orchard bundle: {e}")
+            }
+            ExtractError::OrchardParse(e) => write!(f, "could not parse the Orchard bundle: {e:?}"),
+            ExtractError::SaplingExtract(e) => {
+                write!(f, "could not extract the Sapling bundle: {e}")
+            }
+            ExtractError::SaplingParse(e) => write!(f, "could not parse the Sapling bundle: {e:?}"),
+            ExtractError::TransparentExtract(e) => {
+                write!(f, "could not extract the transparent bundle: {e:?}")
+            }
+            ExtractError::TransparentParse(e) => {
+                write!(f, "could not parse the transparent bundle: {e:?}")
+            }
+            ExtractError::UnknownConsensusBranchId => write!(f, "unknown consensus branch ID"),
+            ExtractError::UnsupportedConsensusBranchId => write!(
+                f,
+                "the consensus branch ID predates the v5 transaction format"
+            ),
+            ExtractError::UnsupportedTxVersion {
+                version,
+                version_group_id,
+            } => write!(
+                f,
+                "unsupported transaction version {version} (version group ID {version_group_id})"
+            ),
+        }
+    }
+}
+
+#[cfg(any(feature = "io-finalizer", feature = "signer", feature = "tx-extractor"))]
+impl core::error::Error for ExtractError {}
+
 /// Errors that can occur while parsing a PCZT.
 #[derive(Debug)]
 pub enum ParseError {
@@ -736,6 +787,22 @@ pub enum ParseError {
     /// The PCZT has an unknown version.
     UnknownVersion(u32),
 }
+
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseError::NotPczt => write!(f, "the bytes do not contain a PCZT"),
+            ParseError::Invalid(e) => write!(f, "invalid PCZT encoding: {e}"),
+            ParseError::MissingRequiredField(field) => {
+                write!(f, "the PCZT encoding omitted the required field {field}")
+            }
+            ParseError::TooShort => write!(f, "the bytes are too short to contain a PCZT"),
+            ParseError::UnknownVersion(v) => write!(f, "unknown PCZT version {v}"),
+        }
+    }
+}
+
+impl core::error::Error for ParseError {}
 
 #[cfg(all(test, any(feature = "io-finalizer", feature = "signer")))]
 mod extraction_tests {

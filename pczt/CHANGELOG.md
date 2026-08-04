@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `impl {core::fmt::Display, core::error::Error} for pczt::ParseError`
+- `impl {core::fmt::Display, core::error::Error} for pczt::ExtractError`
+
 ### Changed
 - The `orchard` and `sapling` features are now enabled by default. Consumers
   that require a smaller feature set (such as `no_std` signers) should disable
