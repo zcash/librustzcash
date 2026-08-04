@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.22.0-rc.7] - 2026-08-03
+
 ### Added
 - A `zip318_kind` column on the `transactions` table, recording how each transaction
   classifies against ZIP 318 so that a wallet can label a pool-migration transaction
@@ -79,11 +81,7 @@ workspace.
   row's cache empty — and `replan_threshold` to the default policy;
   `unsatisfiable_kind` and `broadcast_failure_at` need no backfill, since a
   database lacking `unsatisfiable_at` carried neither marks nor
-  broadcast-failure reports. It also restores the `txid` of
-  every `mined` pool-migration transaction stored without one (which is every
-  such row written by a previous release), recovering it from the wallet's own
-  record of the spend and failing with a corrupted-data error naming any row
-  for which no such record exists.
+  broadcast-failure reports.
 - `WalletWrite::truncate_to_height` (and everything routed through it) now also
   rolls every stored pool migration back to the height it actually truncated
   to, clearing unsatisfiability marks and broadcast-failure reports that rest on
@@ -107,10 +105,10 @@ workspace.
   `InputObservation::Invalidated` observations are likewise not produced.
 - The pool-migration transactions table's `txid` column now holds EVERY row's transaction id,
   recorded when the transaction is built, rather than appearing only once a transaction is
-  broadcast. The still-unshipped `orchard_ironwood_migration_unsatisfiability` migration fills it
-  for existing rows by DERIVING each id from that row's own stored PCZT — which works whatever the
-  row's lifecycle state, and, unlike the mined-row recovery it replaces, needs no surviving record
-  of the transaction's spends in the wallet's own tables.
+  broadcast. The `orchard_ironwood_migration_unsatisfiability` migration fills it for existing
+  rows by DERIVING each id from that row's own stored PCZT, which works whatever the row's
+  lifecycle state; it fails with a corrupted-data error naming any row whose stored PCZT yields
+  no id.
 - `pool_migration::orchard_ironwood::PoolMigrations` implements the new
   `zcash_pool_migration` `PoolMigrationRead::mined_height` method, answering
   from the wallet's own `transactions` table. The answer is bounded by the
