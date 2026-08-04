@@ -63,6 +63,7 @@ use zcash_protocol::{
     TxId,
     consensus::BlockHeight,
     value::{BalanceError, Zatoshis},
+    zip318::{CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS},
 };
 
 use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
@@ -70,10 +71,7 @@ use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 #[cfg(feature = "orchard")]
 use crate::satisfiability::{DuenessTargets, UnsatisfiableCause};
 use crate::{
-    denomination::{
-        DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
-        plan_denominations,
-    },
+    denomination::{DenominationPlan, plan_denominations},
     preparation::{PREP_TX_ACTIONS, PrepError, PrepInput, PreparationPlan, plan_preparation},
     satisfiability::{ReorgSettleDepth, ReplanThreshold, StepSatisfiability, UnsatisfiableKind},
     scheduling::{self, Schedule},
@@ -1094,8 +1092,8 @@ fn canonical_fees<P: zcash_protocol::consensus::Parameters>(
         core::iter::empty::<usize>(),
         0,
         0,
-        SOURCE_ACTIONS_PER_TRANSFER,
-        DESTINATION_ACTIONS_PER_TRANSFER,
+        CROSSING_SOURCE_ACTIONS,
+        CROSSING_DESTINATION_ACTIONS,
     )?;
     Ok((prep_tx_fee, transfer_fee_buffer))
 }
@@ -2614,8 +2612,7 @@ where
             let unsigned = UnsignedMigrationTx {
                 id,
                 pczt: bytes.clone(),
-                actions: crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
-                    + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER,
+                actions: CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS,
             };
             (bytes, MigrationTxState::AwaitingSignature, Some(unsigned))
         }
@@ -3368,8 +3365,7 @@ where
                 self.unsigned.push(UnsignedMigrationTx {
                     id,
                     pczt: bytes.clone(),
-                    actions: crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
-                        + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER,
+                    actions: CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS,
                 });
             }
             self.transactions.push(MigrationTransaction {
@@ -4101,9 +4097,7 @@ mod commit_tests {
                 regtest_network, single_note_witness, spend_signability, spending_key,
             },
         },
-        denomination::{
-            DESTINATION_ACTIONS_PER_TRANSFER, DenominationPlan, SOURCE_ACTIONS_PER_TRANSFER,
-        },
+        denomination::DenominationPlan,
         preparation::{PREP_TX_ACTIONS, plan_preparation},
         scheduling::{AnchorBucketInterval, SchedulingParams},
     };
@@ -4889,7 +4883,7 @@ mod commit_tests {
         assert_eq!(*unsigned_rebuild.pczt(), rebuilt.pczt);
         assert_eq!(
             unsigned_rebuild.actions(),
-            SOURCE_ACTIONS_PER_TRANSFER + DESTINATION_ACTIONS_PER_TRANSFER
+            CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS
         );
         let parsed = pczt::Pczt::parse(&rebuilt.pczt).expect("the rebuilt PCZT parses");
         assert_eq!(
@@ -5468,9 +5462,8 @@ mod commit_tests {
         // Rounds are consecutive prefixes bounded by the action budget; a preparation is
         // PREP_TX_ACTIONS actions, so a budget of one preparation plus one transfer splits the
         // list without ever exceeding the budget (every round is non-empty and within budget).
-        let budget_actions = PREP_TX_ACTIONS
-            + crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
-            + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER;
+        let budget_actions =
+            PREP_TX_ACTIONS + CROSSING_SOURCE_ACTIONS + CROSSING_DESTINATION_ACTIONS;
         let budget = crate::signing_rounds::SigningRoundBudget::new(
             core::num::NonZeroU32::new(budget_actions as u32).unwrap(),
         );

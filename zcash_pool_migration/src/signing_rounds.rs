@@ -32,8 +32,8 @@ use crate::engine::{MigrationTransferId, MigrationTxKind};
 pub const PREPARATION_ACTIONS: u32 = crate::preparation::PREP_TX_ACTIONS as u32;
 
 /// The Orchard-family actions a canonical migration transfer carries (2 source + 1 destination).
-pub const TRANSFER_ACTIONS: u32 = (crate::denomination::SOURCE_ACTIONS_PER_TRANSFER
-    + crate::denomination::DESTINATION_ACTIONS_PER_TRANSFER)
+pub const TRANSFER_ACTIONS: u32 = (zcash_protocol::zip318::CROSSING_SOURCE_ACTIONS
+    + zcash_protocol::zip318::CROSSING_DESTINATION_ACTIONS)
     as u32;
 
 /// The number of Orchard-family actions a signer processes for a migration transaction of `kind`.

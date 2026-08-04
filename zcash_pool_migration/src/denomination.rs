@@ -148,18 +148,6 @@ pub use zcash_protocol::zip318::{DENOM_CAP, MAX_RESIDUAL_VALUE};
 /// This is a policy default of this crate, not a ZIP 318 constant.
 pub const MIGRATION_MAX_PREPARED_NOTES_PER_RUN: usize = 50;
 
-/// Source-pool (Orchard) logical actions in a canonical migration transfer: the spend and its
-/// change. With [`DESTINATION_ACTIONS_PER_TRANSFER`], this is the canonical transfer shape whose
-/// ZIP-317 fee is the per-note transfer-fee buffer.
-pub(crate) const SOURCE_ACTIONS_PER_TRANSFER: usize = 2;
-
-/// Destination-pool (Ironwood) logical actions in a canonical migration transfer: the single
-/// canonical output, UNPADDED. The Ironwood builder permits a one-action bundle (no padding dummy),
-/// which the migration uses to save proving bandwidth on hardware signers; every migration transfer
-/// shares this shape, so the action count reveals nothing a canonical transfer does not already
-/// reveal.
-pub(crate) const DESTINATION_ACTIONS_PER_TRANSFER: usize = 1;
-
 /// The outcome of denomination planning: the self-funding notes to create, the values that will
 /// cross the turnstile, and the residual kept in the source pool. Produced by a
 /// [`DenominationStrategy`].
