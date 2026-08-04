@@ -62,7 +62,11 @@
 //!   with its broadcasts. That is a scheduling-engine runtime policy over live network activity.
 //! - AT MOST ONE OVERDUE TRANSFER at wallet open: when a wallet reopens after being offline past
 //!   several scheduled heights, at most one overdue transfer is released immediately (the rest are
-//!   re-spread). That requires the persisted schedule and wall-clock state the engine owns.
+//!   re-spread). That requires the persisted schedule and wall-clock state the engine owns; the
+//!   drive API implements it as the overdue shift (see
+//!   [`advance_migration`](crate::satisfiability::advance_migration) and
+//!   [`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)), which moves the
+//!   whole pending schedule forward by the overdue amount rather than redrawing it.
 //!
 //! This module supplies the heights and anchors those policies act on; it does not enact them.
 //!
@@ -771,8 +775,74 @@ pub fn draw_anchor_boundary<R: RngCore + CryptoRng>(
         u32::from(funding_creation_height),
         most_recent,
     )?;
+    Some(BlockHeight::from_u32(sample_recency_weighted_boundary(
+        interval,
+        lowest,
+        highest,
+        most_recent,
+        rng,
+    )))
+}
 
-    // Rejection-sample the geometric age until the candidate lands in [lowest, highest].
+/// Select a REPLACEMENT boundary for a transfer whose broadcast schedule has moved out from under
+/// its drawn anchor — the overdue shift
+/// ([`advance_migration`](crate::satisfiability::advance_migration)) defers every pending
+/// broadcast when a wallet resumes after downtime, and a boundary that was in-distribution for
+/// the ORIGINAL schedule sits `delta` blocks too old against the shifted one. With
+/// [`ANCHOR_AGE_CAP`] at 4 buckets, even a modest shift leaves an anchor age no honest draw
+/// produces, and every deferred transfer of one wallet would carry the SAME excess age — a
+/// linkable fingerprint. Redrawing against the new schedule restores the age distribution the
+/// anchor cohorts rely on.
+///
+/// The draw is [`draw_anchor_boundary`]'s recency-weighted draw against the NEW
+/// `broadcast_height`, with the candidate set floored at `prior_boundary` — the boundary being
+/// replaced — instead of the funding constraints: every note witnessable in the prior boundary's
+/// tree state is witnessable in every later one, so the floor preserves provability without the
+/// funding-note heights this crate's state does not hold. (A funding note that POSTDATES the
+/// prior boundary is the separate staleness `prove_transfer` re-validates and re-draws for at
+/// proving time, with the real mined heights in hand.) The prior boundary also subsumes the
+/// NU6.3-activation bound, which it satisfies by construction.
+///
+/// Returns `None` when no candidate at or above `prior_boundary` lies strictly below the most
+/// recent boundary at `broadcast_height` — possible only when the prior boundary was itself
+/// drawn against a tip past the new schedule (a proving-time re-draw followed by a small shift);
+/// the caller keeps the prior boundary, which remains provable.
+///
+/// [`prove_transfer`]: crate::engine::prove_transfer
+pub fn redraw_anchor_boundary<R: RngCore + CryptoRng>(
+    interval: AnchorBucketInterval,
+    prior_boundary: BlockHeight,
+    broadcast_height: BlockHeight,
+    rng: &mut R,
+) -> Option<BlockHeight> {
+    let most_recent = boundary_at_or_below_u32(&interval, u32::from(broadcast_height));
+    // Highest candidate: strictly below the most recent boundary (age >= 1), one interval down.
+    let highest = most_recent.checked_sub(interval.block_count().get())?;
+    let lowest = boundary_at_or_above_u32(&interval, u32::from(prior_boundary));
+    if lowest > highest {
+        return None;
+    }
+    Some(BlockHeight::from_u32(sample_recency_weighted_boundary(
+        interval,
+        lowest,
+        highest,
+        most_recent,
+        rng,
+    )))
+}
+
+/// The rejection-sampling core shared by [`draw_anchor_boundary`] and
+/// [`redraw_anchor_boundary`]: draw recency-weighted ages until `most_recent - age * interval`
+/// lands in `[lowest, highest]`, and return that candidate. The caller guarantees
+/// `lowest <= highest` and `highest = most_recent - interval` (both grid boundaries), so age 1
+/// always yields `highest` and the loop terminates.
+fn sample_recency_weighted_boundary<R: RngCore>(
+    interval: AnchorBucketInterval,
+    lowest: u32,
+    highest: u32,
+    most_recent: u32,
+    rng: &mut R,
+) -> u32 {
     loop {
         let age = draw_anchor_age(rng);
         if age > ANCHOR_AGE_CAP {
@@ -788,7 +858,7 @@ pub fn draw_anchor_boundary<R: RngCore + CryptoRng>(
             None => continue,
         };
         if candidate >= lowest && candidate <= highest {
-            return Some(BlockHeight::from_u32(candidate));
+            return candidate;
         }
     }
 }
@@ -1913,6 +1983,62 @@ mod tests {
         // A mid-interval tip (not itself a boundary) must yield identical draws.
         check_anchor_golden(act, funding, tip + 100, 1, &exp_seed1);
         check_anchor_golden(act, funding, tip + m - 1, 42, &exp_seed42);
+    }
+
+    // --- redraw_anchor_boundary ---------------------------------------------------------------
+
+    proptest! {
+        /// A replacement boundary, when one exists, is on the grid, at or above the boundary it
+        /// replaces, and in-distribution against the NEW broadcast height: within
+        /// [`ANCHOR_AGE_CAP`] buckets strictly below its most recent grid boundary. `None` arises
+        /// exactly when no candidate at or above the prior boundary lies strictly below that
+        /// most recent boundary.
+        #[test]
+        fn redraw_anchor_boundary_props(
+            seed in any::<u64>(),
+            prior_bucket in 0u32..100,
+            broadcast in 0u32..5_000_000,
+            blocks in 2u32..10_000,
+        ) {
+            let i = interval(blocks);
+            let prior = prior_bucket.saturating_mul(blocks);
+            let chosen = redraw_anchor_boundary(i, bh(prior), bh(broadcast), &mut rng(seed));
+            let most_recent = broadcast - (broadcast % blocks);
+            match chosen {
+                Some(b) => {
+                    let b = u32::from(b);
+                    prop_assert!(i.is_boundary(bh(b)));
+                    prop_assert!(b >= prior, "replacement {b} regressed below the prior {prior}");
+                    prop_assert!(b < most_recent, "age >= 1: strictly below {most_recent}");
+                    prop_assert!(
+                        b + ANCHOR_AGE_CAP * blocks >= most_recent,
+                        "replacement {b} is older than the age cap allows"
+                    );
+                }
+                None => prop_assert!(
+                    most_recent < blocks || prior > most_recent - blocks,
+                    "a non-empty candidate window must yield a draw"
+                ),
+            }
+        }
+    }
+
+    /// The endpoints of the replacement window: a prior boundary above the window keeps its
+    /// (still-provable) anchor by yielding `None`, and a prior boundary AT the window's single
+    /// candidate returns that candidate deterministically.
+    #[test]
+    fn redraw_anchor_boundary_window_endpoints() {
+        // Broadcast 1_900: most recent boundary 1_872, highest candidate 1_728.
+        assert_eq!(
+            redraw_anchor_boundary(modulus(), bh(1_872), bh(1_900), &mut rng(1)),
+            None,
+            "a prior at the most recent boundary has no strictly-older candidate to move to"
+        );
+        assert_eq!(
+            redraw_anchor_boundary(modulus(), bh(1_728), bh(1_900), &mut rng(1)),
+            Some(bh(1_728)),
+            "a single-candidate window is deterministic"
+        );
     }
 
     /// The two axes of [`SchedulingParams`] are independent: changing only the anchor bucket

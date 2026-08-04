@@ -354,7 +354,10 @@ impl Run {
     fn advance(&mut self, state: &mut MigrationState) -> AdvanceStep {
         let targets = self.targets();
         let mut store = self.store();
-        satisfiability::advance_migration(&mut store, state, targets, &ADVANCE)
+        // A seeded RNG per drive call (only the overdue shift's anchor redraw consumes it), so
+        // the simulation stays deterministic.
+        let mut rng = ChaCha8Rng::seed_from_u64(0x318);
+        satisfiability::advance_migration(&mut store, state, targets, &ADVANCE, &mut rng)
             .expect("the store and its satisfiability oracle answer")
     }
 
