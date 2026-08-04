@@ -7,6 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `state::AdvanceStep` selection now offers, within each queue, the candidate
+  that has been ready longest rather than the first one in storage order: the
+  earliest scheduled height for a broadcast or a rebuild, and the earliest
+  anchor boundary (a preparation: its scheduled height) for a proof, with ties
+  broken by transaction id. Storage order is dependency order, which diverges
+  from the schedule once `engine::rebuild_expired_transfer` reschedules a
+  transfer in place.
+
 ## [0.1.0-rc.6] - 2026-08-03
 
 ### Added
