@@ -578,6 +578,34 @@ impl<C: BorrowMut<Connection>> Store<C> {
         self.replace_migration_with(state, |_| Ok(()))
     }
 
+    /// Cancel the account's migration: release every note reservation its never-broadcast
+    /// transactions hold, then move its record to the terminal `cancelled` status — in that
+    /// order, in one database transaction, so every crash prefix leaves a still-pending
+    /// migration that a retried cancel finishes (the reverse order could leave a terminal
+    /// record nothing will revisit while its reservations stand).
+    ///
+    /// Deliberately performed WITHOUT deserializing the migration state: the primary use case is
+    /// an unrecoverable wallet, and a record that will not parse is one of the ways to get
+    /// there. Everything needed — each transaction's lifecycle state and lock-owner token — is
+    /// readable from typed columns.
+    ///
+    /// When the account has no PENDING migration, the latest retained record (if any) gets the
+    /// REPAIR half only: its never-broadcast transactions' reservations are released, and its
+    /// terminal status is left exactly as recorded — cancel never rewrites history, but a
+    /// stranded reservation is not history, and the field contains terminal records (the mobile
+    /// SDK's hand-rolled cancel persisted `failed`) whose locks nothing else will release before
+    /// they expire.
+    pub(crate) fn cancel_migration(
+        &mut self,
+    ) -> Result<crate::pool_migration::CancelOutcome, Error> {
+        let tables = self.tables;
+        let account_id = self.account_id;
+        let tx = self.conn.borrow_mut().transaction()?;
+        let outcome = cancel_migration(&tx, tables, account_id)?;
+        tx.commit()?;
+        Ok(outcome)
+    }
+
     /// Replace the migration as [`replace_migration`](Self::replace_migration) does, then run
     /// `and_then` inside the SAME database transaction, so the store update and whatever the
     /// caller must record alongside it commit or roll back as one atomic write. This is the seam a
@@ -758,6 +786,102 @@ pub(crate) fn truncate_to_height(
         }
     }
     Ok(())
+}
+
+/// The classification a cancel makes of one migration transaction, straight off its lifecycle
+/// column: everything before broadcast is releasable (its reservation can be cleared and it will
+/// never be submitted), everything at or past broadcast is chain reality to report, not undo.
+fn classify_for_cancel(
+    conn: &Connection,
+    t: &Tables,
+    migration_id: i64,
+) -> Result<(crate::pool_migration::CancelOutcome, Vec<[u8; 32]>), Error> {
+    let mut outcome = crate::pool_migration::CancelOutcome::default();
+    let mut owners: Vec<[u8; 32]> = Vec::new();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT transfer_id, state, lock_owner FROM {} WHERE migration_id = ? ORDER BY transfer_id",
+        t.transactions
+    ))?;
+    let rows = stmt.query_map(params![migration_id], |row| {
+        Ok((
+            row.get::<_, u32>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<[u8; 32]>>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (transfer_id, state, lock_owner) = row?;
+        let id = MigrationTransferId::new(transfer_id);
+        match state.as_str() {
+            "broadcast" => outcome.in_flight.push(id),
+            "mined" => outcome.mined.push(id),
+            // `awaiting_signature`, `signed`, `proved` — and, defensively, anything a future
+            // release might add before broadcast: never submitted, so releasable.
+            _ => {
+                outcome.released.push(id);
+                if let Some(owner) = lock_owner {
+                    owners.push(owner);
+                }
+            }
+        }
+    }
+    Ok((outcome, owners))
+}
+
+/// Release the note reservations held under `owners` on the migration's SOURCE pool: the lock
+/// columns note locking records on the received-note rows are cleared wherever they name one of
+/// these tokens. Scoped strictly by owner token — which the prover derived from each
+/// transaction's own spent notes — so no other flow's reservation can be touched.
+fn release_lock_owners(conn: &Connection, t: &Tables, owners: &[[u8; 32]]) -> Result<(), Error> {
+    let mut stmt = conn.prepare(&format!(
+        "UPDATE {} SET lock_expiry_height = NULL, lock_owner = NULL WHERE lock_owner = ?",
+        t.source_notes
+    ))?;
+    for owner in owners {
+        stmt.execute(params![owner])?;
+    }
+    Ok(())
+}
+
+/// The body of [`Store::cancel_migration`]; see its documentation for the contract, the ordering
+/// argument, and the no-pending repair behavior.
+fn cancel_migration(
+    tx: &rusqlite::Transaction,
+    t: &Tables,
+    account_id: AccountRef,
+) -> Result<crate::pool_migration::CancelOutcome, Error> {
+    let (migration_id, is_pending) = match resolve_migration_id(tx, t, account_id)? {
+        Some(id) => (Some(id), true),
+        None => {
+            // No pending migration: the repair half only, on the latest retained record.
+            let latest: Option<i64> = tx
+                .query_row(
+                    &format!(
+                        "SELECT id FROM {} WHERE account_id = ? ORDER BY id DESC LIMIT 1",
+                        t.migrations
+                    ),
+                    params![account_id.0],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            (latest, false)
+        }
+    };
+    let Some(migration_id) = migration_id else {
+        return Ok(crate::pool_migration::CancelOutcome::default());
+    };
+
+    let (outcome, owners) = classify_for_cancel(tx, t, migration_id)?;
+    // Release BEFORE the status flip (and in the same transaction): a crash between the two
+    // leaves a still-pending migration a retried cancel finishes.
+    release_lock_owners(tx, t, &owners)?;
+    if is_pending {
+        tx.execute(
+            &format!("UPDATE {} SET status = ? WHERE id = ?", t.migrations),
+            params![MigrationStatus::Cancelled.wire_name(), migration_id],
+        )?;
+    }
+    Ok(outcome)
 }
 
 /// The account's migration IN PROGRESS, if any: resolves the pending row (see
@@ -1615,6 +1739,28 @@ fn replace_migration_row(
     // ever addresses it as "the account's migration" again — which is how a migration enters the
     // retained history. Children are deleted explicitly in case foreign-key cascades are not
     // enabled.
+    // A state persisted as TERMINAL is leaving service: nothing will ever broadcast its pending
+    // transactions, so the reservations they hold are released here, in the same write that
+    // records the terminal status. This is what discharges the release obligation for EVERY
+    // terminal transition that flows through the ordinary persist path — the consumer's
+    // `mark_superseded` response to `Replan`, an engine-side `mark_cancelled`, a `Failed`
+    // post-mortem — not only the store-level cancel (which exists for records this path cannot
+    // read).
+    if state.is_terminal() {
+        let owners: Vec<[u8; 32]> = state
+            .transactions()
+            .iter()
+            .filter(|t| {
+                !matches!(
+                    t.state(),
+                    MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. }
+                )
+            })
+            .filter_map(|t| t.lock_owner().map(|o| *o.as_bytes()))
+            .collect();
+        release_lock_owners(tx, t, &owners)?;
+    }
+
     let ns = state.denominations();
     let migration_id = match prior {
         Some(migration_id) => {

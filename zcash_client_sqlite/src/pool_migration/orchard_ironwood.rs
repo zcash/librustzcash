@@ -298,6 +298,29 @@ impl<C: Borrow<Connection>, P, CL> PoolMigrations<C, P, CL> {
     }
 }
 
+impl<C: BorrowMut<Connection>, P, CL> PoolMigrations<C, P, CL> {
+    /// Cancel this account's migration at the user's request: release every note reservation its
+    /// never-broadcast transactions hold, then move the record to the terminal `Cancelled`
+    /// status — in that order, in one database transaction, so a crash between the two leaves a
+    /// still-pending migration that a retried cancel finishes. After this returns, the engine
+    /// drives nothing, the released notes are back in DEFAULT note selection immediately (rather
+    /// than at lock expiry), and a replacement migration may be planned and committed over the
+    /// full balance; the cancelled record remains readable through
+    /// [`latest_migration`](Self::latest_migration) and its siblings.
+    ///
+    /// Works WITHOUT deserializing the migration state — the primary use case is an
+    /// unrecoverable wallet, and a record that will not parse is one of the ways to get there —
+    /// and is honest about what it cannot undo: transactions already broadcast may still mine,
+    /// and the returned [`CancelOutcome`](crate::pool_migration::CancelOutcome) reports them
+    /// rather than refusing (a refusal would reintroduce the stuck state cancel exists to
+    /// remove). Calling with no pending migration performs only the REPAIR half on the latest
+    /// retained record, releasing reservations a terminal record may still hold (for instance
+    /// one recorded `Failed` by an older client) without rewriting its status.
+    pub fn cancel_migration(&mut self) -> Result<crate::pool_migration::CancelOutcome, Error> {
+        self.store.cancel_migration()
+    }
+}
+
 impl<C: Borrow<Connection>, P, CL> PoolMigrationRead for PoolMigrations<C, P, CL> {
     type Error = Error;
 
@@ -2173,6 +2196,13 @@ mod tests {
                 block_range_start INTEGER NOT NULL,
                 block_range_end INTEGER NOT NULL,
                 priority INTEGER NOT NULL
+             );
+             -- A minimal stand-in for the source pool's received-note rows: the columns note
+             -- locking records on them, which cancel and every terminal transition release.
+             CREATE TABLE orchard_received_notes (
+                id INTEGER PRIMARY KEY,
+                lock_expiry_height INTEGER,
+                lock_owner BLOB
              );",
         )
         .expect("create accounts table");
@@ -2459,6 +2489,317 @@ mod tests {
             .replace_migration(&second)
             .expect("persist successor");
         assert_eq!(committed(&conn), vec![None, Some(1_000)]);
+    }
+
+    /// A locked source-note row under `owner`, standing in for the reservation the prover takes.
+    fn lock_note(conn: &Connection, id: u32, owner: [u8; 32]) {
+        conn.execute(
+            "INSERT INTO orchard_received_notes (id, lock_expiry_height, lock_owner)
+             VALUES (:id, 99999, :owner)",
+            rusqlite::named_params![":id": id, ":owner": owner],
+        )
+        .unwrap();
+    }
+
+    /// The owners currently holding locks in the stand-in note table.
+    fn locked_owners(conn: &Connection) -> Vec<[u8; 32]> {
+        conn.prepare(
+            "SELECT lock_owner FROM orchard_received_notes
+              WHERE lock_owner IS NOT NULL ORDER BY id",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    /// Cancel classifies every transaction off its lifecycle column, releases exactly the
+    /// never-broadcast transactions' reservations (another flow's lock is untouched), flips the
+    /// record to `Cancelled`, and leaves it readable as history while `get_migration` moves on.
+    #[test]
+    fn cancel_releases_reservations_and_terminates() {
+        use zcash_pool_migration::engine::MigrationLockOwner;
+
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+
+        let owner = [7u8; 32];
+        let rival = [9u8; 32];
+        lock_note(&conn, 1, owner);
+        lock_note(&conn, 2, rival);
+
+        // One transaction per disposition: proved-and-locked (released), broadcast (in flight),
+        // mined (history).
+        let mined_state = MigrationTxState::Mined {
+            txid: TxId::from_bytes([0xC0; 32]),
+            height: BlockHeight::from_u32(50),
+        };
+        let mut proved = migration_with_transfer(
+            MigrationStatus::InProgress,
+            40_000,
+            MigrationTxState::Proved,
+        );
+        let mut txs = proved.transactions().to_vec();
+        txs[0] = MigrationTransaction::from_parts(
+            txs[0].id(),
+            txs[0].kind(),
+            txs[0].pczt().to_vec(),
+            txs[0].depends_on().to_vec(),
+            txs[0].scheduled_height(),
+            txs[0].expiry_height(),
+            txs[0].anchor_boundary(),
+            txs[0].txid(),
+            MigrationTxState::Proved,
+            Some(MigrationLockOwner::from_bytes(owner)),
+            None,
+            txs[0].spend_nullifiers().to_vec(),
+            None,
+        );
+        txs.push(MigrationTransaction::from_parts(
+            MigrationTransferId::new(1),
+            MigrationTxKind::Preparation { layer: 0, index: 0 },
+            vec![1],
+            Vec::new(),
+            BlockHeight::from_u32(5),
+            BlockHeight::from_u32(0),
+            None,
+            TxId::from_bytes([0xB0; 32]),
+            MigrationTxState::Broadcast {
+                txid: TxId::from_bytes([0xB0; 32]),
+            },
+            None,
+            None,
+            Vec::new(),
+            None,
+        ));
+        txs.push(MigrationTransaction::from_parts(
+            MigrationTransferId::new(2),
+            MigrationTxKind::Preparation { layer: 0, index: 1 },
+            vec![2],
+            Vec::new(),
+            BlockHeight::from_u32(5),
+            BlockHeight::from_u32(0),
+            None,
+            TxId::from_bytes([0xC0; 32]),
+            mined_state,
+            None,
+            None,
+            Vec::new(),
+            None,
+        ));
+        proved = MigrationState::from_parts(
+            MigrationStatus::InProgress,
+            proved.denominations().clone(),
+            proved.preparation().clone(),
+            txs,
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        );
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&proved)
+            .expect("persist");
+
+        let outcome = PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .cancel_migration()
+            .expect("cancel succeeds");
+
+        assert_eq!(outcome.released(), &[MigrationTransferId::new(0)]);
+        assert_eq!(outcome.in_flight(), &[MigrationTransferId::new(1)]);
+        assert_eq!(outcome.mined(), &[MigrationTransferId::new(2)]);
+        assert_eq!(
+            locked_owners(&conn),
+            vec![rival],
+            "the migration's reservation is released; the rival flow's is untouched"
+        );
+
+        let store =
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account).expect("account");
+        assert_eq!(store.get_migration().expect("read"), None);
+        assert_eq!(
+            store
+                .latest_migration()
+                .expect("history reads back")
+                .map(|s| s.status()),
+            Some(MigrationStatus::Cancelled),
+            "the cancelled record is retained history"
+        );
+        // A replacement commits over it.
+        let successor = migration_under(MigrationStatus::Committed, AnchorBucketInterval::ZIP_318);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&successor)
+            .expect("the commit guard's terminality requirement is satisfied");
+    }
+
+    /// Cancel succeeds against a migration whose STATE will not deserialize: it never parses the
+    /// record — the primary use case is an unrecoverable wallet, and a corrupt row is one of the
+    /// ways to get there.
+    #[test]
+    fn cancel_survives_a_corrupt_migration() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        let live =
+            migration_with_transfer(MigrationStatus::Committed, 40_000, MigrationTxState::Proved);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&live)
+            .expect("persist");
+
+        // Corrupt the transaction row's KIND, which the state reader must parse and cancel must
+        // not.
+        conn.execute(
+            "UPDATE orchard_ironwood_migration_transactions SET kind = 'garbage'",
+            [],
+        )
+        .expect("corrupts the row");
+        assert!(
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+                .expect("account exists")
+                .get_migration()
+                .is_err(),
+            "premise: the state no longer deserializes"
+        );
+
+        let outcome = PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .cancel_migration()
+            .expect("cancel does not read what it does not need");
+        assert_eq!(outcome.released(), &[MigrationTransferId::new(0)]);
+        let status: String = conn
+            .query_row("SELECT status FROM orchard_ironwood_migrations", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "cancelled");
+    }
+
+    /// Cancel with no PENDING migration performs the repair half only: the latest retained
+    /// record's reservations are released, and its recorded status — history — is untouched.
+    #[test]
+    fn cancel_repairs_an_already_terminal_record_without_rewriting_it() {
+        use zcash_pool_migration::engine::MigrationLockOwner;
+
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        let owner = [4u8; 32];
+        lock_note(&conn, 1, owner);
+
+        let mut txs =
+            migration_with_transfer(MigrationStatus::Failed, 40_000, MigrationTxState::Proved)
+                .transactions()
+                .to_vec();
+        txs[0] = MigrationTransaction::from_parts(
+            txs[0].id(),
+            txs[0].kind(),
+            txs[0].pczt().to_vec(),
+            txs[0].depends_on().to_vec(),
+            txs[0].scheduled_height(),
+            txs[0].expiry_height(),
+            txs[0].anchor_boundary(),
+            txs[0].txid(),
+            MigrationTxState::Proved,
+            Some(MigrationLockOwner::from_bytes(owner)),
+            None,
+            txs[0].spend_nullifiers().to_vec(),
+            None,
+        );
+        let failed =
+            migration_with_transfer(MigrationStatus::Failed, 40_000, MigrationTxState::Proved);
+        let failed = MigrationState::from_parts(
+            MigrationStatus::Failed,
+            failed.denominations().clone(),
+            failed.preparation().clone(),
+            txs,
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        );
+        // Insert the terminal record DIRECTLY as an old client would have left it (the
+        // terminal-transition release in `replace_migration` would otherwise discharge the lock
+        // on the way in, which is itself the behavior `supersede_releases_reservations` pins).
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&failed)
+            .expect("persist");
+        // Re-take the lock, modeling the stranded field state.
+        conn.execute(
+            "UPDATE orchard_received_notes SET lock_owner = :owner, lock_expiry_height = 99999",
+            rusqlite::named_params![":owner": owner],
+        )
+        .unwrap();
+
+        let outcome = PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .cancel_migration()
+            .expect("repair succeeds");
+        assert_eq!(outcome.released(), &[MigrationTransferId::new(0)]);
+        assert!(locked_owners(&conn).is_empty(), "the stranded lock is gone");
+        let status: String = conn
+            .query_row("SELECT status FROM orchard_ironwood_migrations", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "failed", "history is never rewritten");
+    }
+
+    /// EVERY terminal transition that flows through the ordinary persist path releases the
+    /// never-broadcast reservations: the consumer's `mark_superseded` response to `Replan` must
+    /// not strand the live transfers' locks behind a record nothing will revisit.
+    #[test]
+    fn supersede_releases_reservations_on_persist() {
+        use zcash_pool_migration::engine::MigrationLockOwner;
+
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        let owner = [5u8; 32];
+        lock_note(&conn, 1, owner);
+
+        let live = migration_with_transfer(
+            MigrationStatus::InProgress,
+            40_000,
+            MigrationTxState::Proved,
+        );
+        let mut txs = live.transactions().to_vec();
+        txs[0] = MigrationTransaction::from_parts(
+            txs[0].id(),
+            txs[0].kind(),
+            txs[0].pczt().to_vec(),
+            txs[0].depends_on().to_vec(),
+            txs[0].scheduled_height(),
+            txs[0].expiry_height(),
+            txs[0].anchor_boundary(),
+            txs[0].txid(),
+            MigrationTxState::Proved,
+            Some(MigrationLockOwner::from_bytes(owner)),
+            None,
+            txs[0].spend_nullifiers().to_vec(),
+            None,
+        );
+        let mut live = MigrationState::from_parts(
+            MigrationStatus::InProgress,
+            live.denominations().clone(),
+            live.preparation().clone(),
+            txs,
+            AnchorBucketInterval::ZIP_318,
+            ReplanThreshold::DEFAULT,
+        );
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&live)
+            .expect("persist live");
+        assert_eq!(locked_owners(&conn), vec![owner]);
+
+        live.mark_superseded();
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&live)
+            .expect("persist superseded");
+        assert!(
+            locked_owners(&conn).is_empty(),
+            "persisting the terminal state released the reservation"
+        );
     }
 
     /// A migration in `status`, recorded under `interval`. The plan itself is empty filler: the
