@@ -7,7 +7,31 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `satisfiability::overdue_shift_tolerance`: how many blocks a step may lag the
+  served target before `satisfiability::advance_migration` re-spreads the
+  remaining broadcast schedule, as a function of the schedule's transfer delay
+  distribution (a quarter of its mean; 16 blocks under the ZIP 318 parameters).
+- `scheduling::redraw_anchor_boundary`: the recency-weighted anchor draw for a
+  transfer whose broadcast schedule has moved, floored at the boundary being
+  replaced.
+
 ### Changed
+- `satisfiability::advance_migration` now re-spreads a missed broadcast
+  schedule: when the `Prove` or `Broadcast` step it would surface is more than
+  `satisfiability::overdue_shift_tolerance` blocks past its scheduled height at
+  the served (estimated-tip) target — the tolerance derived from the transfer
+  delay the migration's persisted anchor bucket interval implies — the
+  scheduled height of every not-yet-broadcast transaction is first shifted
+  forward by the overdue amount, and the shifted state is persisted with the
+  call's other writes. After wallet downtime, at most one overdue step is
+  released immediately; the rest keep their drawn inter-broadcast gaps instead
+  of broadcasting as a cluster. A deferred transfer whose proof is still to
+  come also has its anchor boundary redrawn against its shifted schedule
+  (`scheduling::redraw_anchor_boundary`), keeping deferred anchors within the
+  ZIP 318 age distribution; a proved transfer keeps the boundary its proof was
+  built against. The function now takes a `CryptoRng` for those draws — pass
+  the same RNG the other engine entry points use.
 - `state::AdvanceStep` selection now offers, within each queue, the candidate
   that has been ready longest rather than the first one in storage order: the
   earliest scheduled height for a broadcast or a rebuild, and the earliest

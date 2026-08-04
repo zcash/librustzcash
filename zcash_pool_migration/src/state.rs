@@ -718,6 +718,68 @@ impl MigrationState {
         self.recompute_status();
     }
 
+    /// Shifts the scheduled height of every transaction that has not yet been broadcast forward
+    /// by `delta` blocks, preserving the schedule's inter-broadcast gaps.
+    ///
+    /// This is the RE-SPREAD half of ZIP 318's missed-schedule policy — at most one overdue
+    /// transfer is released immediately; the rest are re-spread — applied by
+    /// [`advance_migration`](crate::satisfiability::advance_migration) when the step it would
+    /// surface lags the served target by more than
+    /// the schedule-scaled tolerance
+    /// ([`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)). Shifting
+    /// every pending transaction by the same delta moves the whole remaining schedule forward in
+    /// block-time without redrawing it, so the gaps between broadcasts — the observable the drawn
+    /// exponential delays exist to shape — survive the wallet's absence unchanged, instead of the
+    /// missed steps piling up and broadcasting as a cluster.
+    ///
+    /// Only PENDING transactions shift ([`AwaitingSignature`](MigrationTxState::AwaitingSignature),
+    /// [`Signed`](MigrationTxState::Signed), [`Proved`](MigrationTxState::Proved)): an in-flight
+    /// or mined transaction's schedule has already been served, and moving it would only distort
+    /// the record of when it was due. Expiry heights are untouched — a pre-signed transaction's
+    /// expiry is effecting data under ZIP 203, fixed at signing — so a large enough shift can move
+    /// a pending schedule past its own expiry; such a transaction self-heals through the ordinary
+    /// expiry path (its rebuild redraws both schedule and expiry). Heights saturate rather than
+    /// overflow.
+    ///
+    /// A shifted TRANSFER whose proof is still to come ([`AwaitingSignature`](MigrationTxState::AwaitingSignature)
+    /// or [`Signed`](MigrationTxState::Signed)) also gets its anchor boundary REDRAWN against the
+    /// shifted schedule ([`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)):
+    /// the stored boundary was drawn to be in-distribution relative to the ORIGINAL broadcast
+    /// height, so keeping it would broadcast an anchor `delta` blocks older than any honest draw —
+    /// and every deferred transfer of this wallet older by the SAME `delta`, a linkable
+    /// fingerprint. The redraw is sound exactly as `prove_transfer`'s proving-time redraw is:
+    /// ZIP 374 defers the anchor and witnesses to proving, so nothing in the stored artifact pins
+    /// the old boundary. A [`Proved`](MigrationTxState::Proved) transfer's proof DOES pin its
+    /// anchor, so its boundary is kept (re-anchoring it would mean discarding the proof), and a
+    /// preparation carries no drawn boundary at all. In the rare case where no candidate exists at
+    /// or above the prior boundary (see [`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)),
+    /// the prior — still provable — boundary is kept.
+    pub(crate) fn shift_schedule<R: RngCore + CryptoRng>(&mut self, delta: u32, rng: &mut R) {
+        let interval = self.anchor_bucket_interval;
+        for tx in &mut self.transactions {
+            match tx.state {
+                MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. } => continue,
+                MigrationTxState::AwaitingSignature | MigrationTxState::Signed => {
+                    tx.scheduled_height = tx.scheduled_height + delta;
+                    if matches!(tx.kind, MigrationTxKind::Transfer { .. })
+                        && let Some(prior) = tx.anchor_boundary
+                        && let Some(fresh) = crate::scheduling::redraw_anchor_boundary(
+                            interval,
+                            prior,
+                            tx.scheduled_height,
+                            rng,
+                        )
+                    {
+                        tx.anchor_boundary = Some(fresh);
+                    }
+                }
+                MigrationTxState::Proved => {
+                    tx.scheduled_height = tx.scheduled_height + delta;
+                }
+            }
+        }
+    }
+
     /// Records that the transaction `id` was mined under `txid` at `height`, then recomputes the
     /// overall status. This is what lets a later preparation layer or the transfers become
     /// actionable. Recording the txid on `Mined` (rather than dropping it once broadcast is
@@ -1150,7 +1212,11 @@ impl MigrationState {
     /// A missed schedule degrades gracefully rather than requiring reconciliation: a wallet that
     /// slept through a transfer's proving wake-ups and its broadcast height is simply offered
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
-    /// has expired.
+    /// has expired. The drive layer adds the RE-SPREAD on top:
+    /// [`advance_migration`](crate::satisfiability::advance_migration) shifts the whole pending
+    /// schedule forward ([`Self::shift_schedule`]) before serving a step overdue by more than
+    /// [`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance) allows, so this
+    /// kernel judges the shifted schedule and at most one overdue step is ever released at once.
     pub(crate) fn next_step(
         &self,
         targets: DuenessTargets,
@@ -1975,6 +2041,96 @@ mod tests {
                 kind: transfer(0),
             }
         );
+    }
+
+    /// `shift_schedule` moves every PENDING schedule forward by the same delta — preserving the
+    /// inter-broadcast gaps — and leaves served schedules (in-flight and mined rows) and every
+    /// expiry height untouched. A deferred transfer whose proof is still to come has its anchor
+    /// boundary REDRAWN in-distribution against its shifted schedule; a proved transfer's proof
+    /// pins its anchor, and a preparation carries none.
+    #[test]
+    fn shift_schedule_moves_only_pending_schedules() {
+        let mut s = state_with(vec![
+            tx(0, prep(0, 0), MigrationTxState::AwaitingSignature),
+            tx(1, prep(0, 1), MigrationTxState::Signed),
+            tx(2, transfer(0), MigrationTxState::Proved),
+            tx(
+                3,
+                transfer(1),
+                MigrationTxState::Broadcast {
+                    txid: TxId::from_bytes([3; 32]),
+                },
+            ),
+            tx(4, transfer(2), mined(500)),
+            tx(5, transfer(3), MigrationTxState::Signed),
+            tx(6, transfer(4), MigrationTxState::AwaitingSignature),
+        ]);
+        for (i, h) in [
+            (0usize, 100u32),
+            (1, 200),
+            (2, 300),
+            (3, 400),
+            (4, 500),
+            (5, 600),
+            (6, 700),
+        ] {
+            s.transactions[i].scheduled_height = BlockHeight::from_u32(h);
+            s.transactions[i].expiry_height = BlockHeight::from_u32(h + 140_000);
+        }
+        // The transfers carry drawn boundaries on the ZIP 318 grid (the state's interval);
+        // 144 = 1 * 144.
+        for i in [2usize, 5, 6] {
+            s.transactions[i].anchor_boundary = Some(BlockHeight::from_u32(144));
+        }
+
+        s.shift_schedule(100_000, &mut ChaCha8Rng::seed_from_u64(7));
+
+        let scheduled: Vec<u32> = s
+            .transactions
+            .iter()
+            .map(|t| u32::from(t.scheduled_height))
+            .collect();
+        assert_eq!(
+            scheduled,
+            vec![100_100, 100_200, 100_300, 400, 500, 100_600, 100_700],
+            "pending schedules shift; served ones stay put"
+        );
+        // Expiry is effecting data, fixed at signing: no shift may touch it.
+        let expiries: Vec<u32> = s
+            .transactions
+            .iter()
+            .map(|t| u32::from(t.expiry_height))
+            .collect();
+        assert_eq!(
+            expiries,
+            vec![
+                140_100, 140_200, 140_300, 140_400, 140_500, 140_600, 140_700
+            ]
+        );
+
+        // The proved transfer's proof pins its anchor: the boundary is untouched.
+        assert_eq!(
+            s.transactions[2].anchor_boundary,
+            Some(BlockHeight::from_u32(144)),
+            "a proved transfer keeps the boundary its proof was built against"
+        );
+        // The unproved transfers' boundaries are redrawn in-distribution against the SHIFTED
+        // schedule: within `ANCHOR_AGE_CAP` (4) buckets strictly below the most recent grid
+        // boundary at the new scheduled height. The old boundary sits far outside that window,
+        // so the redraw is guaranteed to have replaced it.
+        for i in [5usize, 6] {
+            let new_schedule = u32::from(s.transactions[i].scheduled_height);
+            let most_recent = new_schedule - (new_schedule % 144);
+            let boundary = u32::from(s.transactions[i].anchor_boundary.expect("still a transfer"));
+            assert_eq!(boundary % 144, 0, "the redrawn boundary is on the grid");
+            assert!(
+                boundary >= most_recent - 4 * 144 && boundary < most_recent,
+                "boundary {boundary} is in-distribution for schedule {new_schedule}"
+            );
+        }
+        // The preparations never carry a boundary, before or after.
+        assert_eq!(s.transactions[0].anchor_boundary, None);
+        assert_eq!(s.transactions[1].anchor_boundary, None);
     }
 
     #[test]
