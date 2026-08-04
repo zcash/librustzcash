@@ -680,14 +680,13 @@ impl MigrationState {
             > u128::from(self.replan_threshold.percent()) * u128::from(total)
     }
 
-    /// Whether this migration has reached a terminal status (`Complete`, `Failed`, or
-    /// `Superseded`), so a new migration may replace it. A non-terminal migration is still in
-    /// progress and must not be overwritten.
+    /// Whether this migration has reached a terminal status, so a new migration may replace it. A
+    /// non-terminal migration is still in progress and must not be overwritten.
+    ///
+    /// Delegates to [`MigrationStatus::is_terminal`], which is where terminality is decided; a
+    /// second list here could disagree with the one a store queries on.
     pub fn is_terminal(&self) -> bool {
-        matches!(
-            self.status,
-            MigrationStatus::Complete | MigrationStatus::Failed | MigrationStatus::Superseded
-        )
+        self.status.is_terminal()
     }
 
     /// Moves a non-terminal migration to [`MigrationStatus::Superseded`], the consumer's response
@@ -697,6 +696,22 @@ impl MigrationState {
     pub fn mark_superseded(&mut self) {
         if !self.is_terminal() {
             self.status = MigrationStatus::Superseded;
+        }
+    }
+
+    /// Moves a non-terminal migration to [`MigrationStatus::Cancelled`], the consumer's response to
+    /// a user who has chosen to abandon the migration: after this, the commit guard accepts a
+    /// replacement migration. A no-op on an already-terminal migration — terminality is never
+    /// overwritten by policy, so whichever terminal status got there first remains the truthful
+    /// history.
+    ///
+    /// Cancelling is a STATUS change and nothing more. It does not release any hold the migration's
+    /// transactions have on the wallet's notes, so a consumer that has proved transactions is not
+    /// done after calling this; see the pool-migration cancel flow for what else a wallet-backed
+    /// store must do.
+    pub fn mark_cancelled(&mut self) {
+        if !self.is_terminal() {
+            self.status = MigrationStatus::Cancelled;
         }
     }
 
@@ -2213,6 +2228,63 @@ mod tests {
         failed.status = MigrationStatus::Failed;
         failed.mark_superseded();
         assert_eq!(failed.status, MigrationStatus::Failed);
+    }
+
+    /// `mark_cancelled` is a closure operator on the status order: idempotent, landing in the
+    /// terminal set, and fixing every status already in it. The three assertions below are those
+    /// three laws in order.
+    #[test]
+    fn mark_cancelled_is_terminal_and_policy_stable() {
+        // LANDS IN THE TERMINAL SET.
+        let mut s = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
+        s.mark_cancelled();
+        assert_eq!(s.status, MigrationStatus::Cancelled);
+        assert!(s.is_terminal());
+
+        // IDEMPOTENT, and a recompute does not resurrect it either.
+        s.mark_cancelled();
+        s.recompute_status();
+        assert_eq!(s.status, MigrationStatus::Cancelled);
+
+        // TERMINALITY-PRESERVING: a completed migration is not cancelled over. Its transfers are
+        // mined, so saying otherwise would deny work the chain has already accepted.
+        let mut done = state_with(vec![tx(0, transfer(0), mined(10))]);
+        done.recompute_status();
+        assert_eq!(done.status, MigrationStatus::Complete);
+        done.mark_cancelled();
+        assert_eq!(done.status, MigrationStatus::Complete);
+
+        // Nor a failed one: the post-mortem is the truthful history, and rewriting it to look like
+        // a deliberate user action would lose exactly the distinction `Cancelled` exists to draw.
+        let mut failed = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
+        failed.status = MigrationStatus::Failed;
+        failed.mark_cancelled();
+        assert_eq!(failed.status, MigrationStatus::Failed);
+
+        // Nor a superseded one, symmetrically; and cancelling is not superseded over in turn.
+        let mut superseded = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
+        superseded.mark_superseded();
+        superseded.mark_cancelled();
+        assert_eq!(superseded.status, MigrationStatus::Superseded);
+        let mut cancelled = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
+        cancelled.mark_cancelled();
+        cancelled.mark_superseded();
+        assert_eq!(cancelled.status, MigrationStatus::Cancelled);
+    }
+
+    /// A cancelled migration whose transactions were already broadcast is not resurrected to
+    /// `InProgress` by a status recompute, and detecting one of them mined does not resurrect it
+    /// either. This is the case `recompute_status`'s terminal guard exists for, and it is
+    /// reachable for `Cancelled` in a way it is not for `Superseded`: the user cancels precisely
+    /// when transactions are already in flight.
+    #[test]
+    fn cancelled_survives_broadcast_and_mining() {
+        let mut s = state_with(vec![tx(0, transfer(0), MigrationTxState::Signed)]);
+        s.mark_cancelled();
+        s.mark_broadcast(MigrationTransferId(0));
+        assert_eq!(s.status, MigrationStatus::Cancelled);
+        s.mark_mined(MigrationTransferId(0), BlockHeight::from_u32(10));
+        assert_eq!(s.status, MigrationStatus::Cancelled);
     }
 
     #[test]
