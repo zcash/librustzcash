@@ -909,13 +909,12 @@ fn broaden_after_discovery<St: PoolMigrationRead>(
 #[cfg(test)]
 mod advance_tests {
     use super::*;
+    use crate::testing::fixtures::{mined, prep, scheduled_transfer, state_with_crossings, tx};
     use alloc::collections::BTreeMap;
     use core::cell::Cell;
-    use zcash_protocol::{TxId, value::Zatoshis};
+    use zcash_protocol::TxId;
 
-    use crate::denomination::DenominationPlan;
-    use crate::engine::{MigrationStatus, MigrationTransaction, MigrationTxKind};
-    use crate::preparation::PreparationPlan;
+    use crate::engine::MigrationTransaction;
 
     /// A store that answers satisfiability from a fixed table — anything absent is satisfiable at
     /// `as_of_height`, the healthy default — and counts what the drive loop asks of it.
@@ -1019,97 +1018,11 @@ mod advance_tests {
         }
     }
 
-    // The state constructors mirror `state.rs`'s test helpers, so a drive-loop test and a kernel
-    // test describe the same migration the same way.
-
-    fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
-        // The row's id, and the copy any lifecycle state carries, are one value by construction:
-        // production derives both from the built PCZT, so a fixture that let them differ would be
-        // describing a state the engine cannot produce.
-        let txid = TxId::from_bytes([id as u8; 32]);
-        let state = match state {
-            MigrationTxState::Broadcast { .. } => MigrationTxState::Broadcast { txid },
-            MigrationTxState::Mined { height, .. } => MigrationTxState::Mined { txid, height },
-            other => other,
-        };
-        MigrationTransaction {
-            id: MigrationTransferId(id),
-            kind,
-            pczt: Vec::new(),
-            depends_on: Vec::new(),
-            scheduled_height: BlockHeight::from_u32(0),
-            expiry_height: BlockHeight::from_u32(0),
-            anchor_boundary: None,
-            txid,
-            state,
-            lock_owner: None,
-            unsatisfiable: None,
-            spend_nullifiers: Vec::new(),
-            broadcast_failure_at: None,
-        }
-    }
-
-    fn prep(layer: usize, index: usize) -> MigrationTxKind {
-        MigrationTxKind::Preparation { layer, index }
-    }
-
-    fn transfer(crossing: usize) -> MigrationTxKind {
-        MigrationTxKind::Transfer { crossing }
-    }
-
-    fn mined(height: u32) -> MigrationTxState {
-        MigrationTxState::Mined {
-            txid: TxId::from_bytes([0; 32]),
-            height: BlockHeight::from_u32(height),
-        }
-    }
-
     /// Broadcast. The txid is a placeholder: `tx` replaces it with the row's own id, so a
     /// fixture never states one that production could not have produced.
     fn broadcast() -> MigrationTxState {
         MigrationTxState::Broadcast {
             txid: TxId::from_bytes([0; 32]),
-        }
-    }
-
-    /// A transfer with the given anchor boundary and scheduled broadcast height, in the given
-    /// lifecycle state (never expiring, like `tx`).
-    fn scheduled_transfer(
-        id: u32,
-        crossing: usize,
-        anchor: u32,
-        broadcast: u32,
-        state: MigrationTxState,
-    ) -> MigrationTransaction {
-        let mut t = tx(id, transfer(crossing), state);
-        t.anchor_boundary = Some(BlockHeight::from_u32(anchor));
-        t.scheduled_height = BlockHeight::from_u32(broadcast);
-        t
-    }
-
-    /// A state whose denomination plan carries the given crossing values, so each transfer's
-    /// contribution to the replan threshold is exactly the value at its crossing index.
-    fn state_with_crossings(
-        crossings: &[u64],
-        transactions: Vec<MigrationTransaction>,
-    ) -> MigrationState {
-        let zats = |v: u64| Zatoshis::from_u64(v).expect("test values are valid");
-        let total = zats(crossings.iter().sum());
-        MigrationState {
-            status: MigrationStatus::Committed,
-            denominations: DenominationPlan::from_stored_parts(
-                crossings.iter().copied().map(zats).collect(),
-                zats(15_000),
-                None,
-                Zatoshis::ZERO,
-                total,
-                total,
-            )
-            .expect("a consistent stored plan reconstructs"),
-            preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
-            transactions,
-            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
-            replan_threshold: ReplanThreshold::DEFAULT,
         }
     }
 
@@ -1236,6 +1149,7 @@ mod advance_tests {
     fn advance_never_surfaces_a_dead_candidate_and_broadens_on_discovery() {
         let mut state = state_with_crossings(
             &[5_000_000, 90_000_000, 5_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 // A: proved and due at the target height.
@@ -1300,6 +1214,7 @@ mod advance_tests {
     fn advance_replan_when_threshold_crossed() {
         let mut state = state_with_crossings(
             &[30_000_000, 40_000_000, 30_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
@@ -1345,6 +1260,7 @@ mod advance_tests {
     fn advance_not_yet_satisfiable_sets_aside_without_marking() {
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
@@ -1420,6 +1336,7 @@ mod advance_tests {
     fn advance_is_lazy_when_healthy() {
         let mut state = state_with_crossings(
             &[100_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
@@ -1448,6 +1365,7 @@ mod advance_tests {
         // so there is nothing to check at all.
         let mut waiting = state_with_crossings(
             &[100_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 1700, 90_000, MigrationTxState::Signed),
@@ -1480,6 +1398,7 @@ mod advance_tests {
         dependent_b.depends_on = vec![MigrationTransferId(0)];
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000, 10_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), broadcast()),
                 dependent_a,
@@ -1559,6 +1478,7 @@ mod advance_tests {
         };
         let mut state = state_with_crossings(
             &[100_000_000],
+            15_000,
             vec![tx(0, prep(0, 0), broadcast()), dependent],
         );
         let mut store = TestStore::new(1600, []);
@@ -1609,6 +1529,7 @@ mod advance_tests {
     fn advance_promotion_discharges_a_broadcast_failure_report() {
         let mut state = state_with_crossings(
             &[100_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
@@ -1647,6 +1568,7 @@ mod advance_tests {
     fn advance_mined_transaction_skips_the_satisfiability_query() {
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), broadcast()),
                 scheduled_transfer(1, 0, 1440, 1500, broadcast()),
@@ -1683,8 +1605,11 @@ mod advance_tests {
     fn advance_expired_answer_never_overrides_the_kernel() {
         let mut expired = scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Signed);
         expired.expiry_height = BlockHeight::from_u32(1550);
-        let mut state =
-            state_with_crossings(&[100_000_000], vec![tx(0, prep(0, 0), mined(10)), expired]);
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            15_000,
+            vec![tx(0, prep(0, 0), mined(10)), expired],
+        );
         let mut store = TestStore::new(
             1600,
             [(
@@ -1738,6 +1663,7 @@ mod advance_tests {
         unblocked.depends_on = vec![MigrationTransferId(0)];
         let mut state = state_with_crossings(
             &[5_000_000, 90_000_000, 5_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 // The candidate: proved, due, and dead.
@@ -1802,6 +1728,7 @@ mod advance_tests {
         let migration = || {
             state_with_crossings(
                 &[100_000_000],
+                15_000,
                 vec![
                     tx(0, prep(0, 0), mined(10)),
                     scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
@@ -1875,6 +1802,7 @@ mod advance_tests {
     fn advance_holds_at_reevaluate_until_the_oracle_reaches_the_reported_tip() {
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
@@ -1962,6 +1890,7 @@ mod advance_tests {
 
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
+            15_000,
             vec![tx(0, prep(0, 0), mined(10)), prep_layer_1, first, second],
         );
         state.report_broadcast_failure(MigrationTransferId(1), BlockHeight::from_u32(1700));
@@ -2018,6 +1947,7 @@ mod advance_tests {
     fn advance_ignores_a_report_on_a_terminal_migration() {
         let mut state = state_with_crossings(
             &[100_000_000],
+            15_000,
             vec![
                 tx(0, prep(0, 0), mined(10)),
                 scheduled_transfer(1, 0, 1440, 1500, MigrationTxState::Proved),
@@ -2064,6 +1994,7 @@ mod advance_tests {
 
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
+            15_000,
             vec![tx(0, prep(0, 0), mined(10)), in_flight, reported],
         );
         state.report_broadcast_failure(MigrationTransferId(2), BlockHeight::from_u32(1700));
@@ -2123,6 +2054,7 @@ mod advance_tests {
 
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
+            15_000,
             vec![tx(0, prep(0, 0), mined(10)), answerable, pending],
         );
         // The first rejection came from a node whose tip the wallet has since scanned past; the
@@ -2182,6 +2114,7 @@ mod advance_tests {
 
         let mut state = state_with_crossings(
             &[50_000_000, 50_000_000],
+            15_000,
             vec![tx(0, prep(0, 0), mined(10)), doomed, live],
         );
         let mut store = TestStore::new(1501, []);

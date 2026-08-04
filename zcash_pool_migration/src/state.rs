@@ -1358,6 +1358,9 @@ mod tests {
     use super::*;
     use crate::engine::MigrationTransaction;
     use crate::satisfiability::UnsatisfiableCause;
+    use crate::testing::fixtures::{
+        mined, prep, scheduled_transfer, state_with_crossings, transfer, tx,
+    };
     use zcash_protocol::value::Zatoshis;
 
     use crate::denomination::DenominationPlan;
@@ -1378,42 +1381,6 @@ mod tests {
         ))
     }
 
-    // A migration transaction with the given id/kind/state, no dependencies, scheduled at height 0.
-    fn tx(id: u32, kind: MigrationTxKind, state: MigrationTxState) -> MigrationTransaction {
-        // The row's id, and the copy any lifecycle state carries, are one value by construction:
-        // production derives both from the built PCZT, so a fixture that let them differ would be
-        // describing a state the engine cannot produce.
-        let txid = TxId::from_bytes([id as u8; 32]);
-        let state = match state {
-            MigrationTxState::Broadcast { .. } => MigrationTxState::Broadcast { txid },
-            MigrationTxState::Mined { height, .. } => MigrationTxState::Mined { txid, height },
-            other => other,
-        };
-        MigrationTransaction {
-            id: MigrationTransferId(id),
-            kind,
-            pczt: Vec::new(),
-            depends_on: Vec::new(),
-            scheduled_height: BlockHeight::from_u32(0),
-            expiry_height: BlockHeight::from_u32(0),
-            anchor_boundary: None,
-            txid,
-            state,
-            lock_owner: None,
-            unsatisfiable: None,
-            spend_nullifiers: Vec::new(),
-            broadcast_failure_at: None,
-        }
-    }
-
-    fn prep(layer: usize, index: usize) -> MigrationTxKind {
-        MigrationTxKind::Preparation { layer, index }
-    }
-
-    fn transfer(crossing: usize) -> MigrationTxKind {
-        MigrationTxKind::Transfer { crossing }
-    }
-
     // A state wrapping the given transactions; the plan pieces are empty (unused by state logic).
     fn state_with(transactions: Vec<MigrationTransaction>) -> MigrationState {
         MigrationState {
@@ -1427,40 +1394,6 @@ mod tests {
                 Zatoshis::ZERO,
             )
             .expect("an empty stored plan reconstructs"),
-            preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
-            transactions,
-            anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
-            replan_threshold: crate::satisfiability::ReplanThreshold::DEFAULT,
-        }
-    }
-
-    fn mined(height: u32) -> MigrationTxState {
-        MigrationTxState::Mined {
-            txid: TxId::from_bytes([0; 32]),
-            height: BlockHeight::from_u32(height),
-        }
-    }
-
-    /// A state whose denomination plan carries the given crossing values and fee buffer, so the
-    /// funding notes are each crossing plus the buffer.
-    fn state_with_crossings(
-        crossings: &[u64],
-        buffer: u64,
-        transactions: Vec<MigrationTransaction>,
-    ) -> MigrationState {
-        let zats = |v: u64| Zatoshis::from_u64(v).expect("test values are valid");
-        let total = zats(crossings.iter().sum());
-        MigrationState {
-            status: MigrationStatus::Committed,
-            denominations: DenominationPlan::from_stored_parts(
-                crossings.iter().copied().map(zats).collect(),
-                zats(buffer),
-                None,
-                Zatoshis::ZERO,
-                total,
-                total,
-            )
-            .expect("a consistent stored plan reconstructs"),
             preparation: PreparationPlan::from_parts(Vec::new(), Vec::new()),
             transactions,
             anchor_bucket_interval: crate::scheduling::AnchorBucketInterval::ZIP_318,
@@ -1696,21 +1629,6 @@ mod tests {
             ),
             None
         );
-    }
-
-    /// A transfer with the given anchor boundary and scheduled broadcast height, in the given
-    /// lifecycle state (never expiring, like `tx`).
-    fn scheduled_transfer(
-        id: u32,
-        crossing: usize,
-        anchor: u32,
-        broadcast: u32,
-        state: MigrationTxState,
-    ) -> MigrationTransaction {
-        let mut t = tx(id, transfer(crossing), state);
-        t.anchor_boundary = Some(BlockHeight::from_u32(anchor));
-        t.scheduled_height = BlockHeight::from_u32(broadcast);
-        t
     }
 
     /// Only transfers still needing a proof are scheduled: preparations and already-proved,
