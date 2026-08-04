@@ -818,68 +818,6 @@ impl MigrationState {
         self.recompute_status();
     }
 
-    /// Shifts the scheduled height of every transaction that has not yet been broadcast forward
-    /// by `delta` blocks, preserving the schedule's inter-broadcast gaps.
-    ///
-    /// This is the RE-SPREAD half of ZIP 318's missed-schedule policy — at most one overdue
-    /// transfer is released immediately; the rest are re-spread — applied by
-    /// [`advance_migration`](crate::satisfiability::advance_migration) when the step it would
-    /// surface lags the served target by more than
-    /// the schedule-scaled tolerance
-    /// ([`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)). Shifting
-    /// every pending transaction by the same delta moves the whole remaining schedule forward in
-    /// block-time without redrawing it, so the gaps between broadcasts — the observable the drawn
-    /// exponential delays exist to shape — survive the wallet's absence unchanged, instead of the
-    /// missed steps piling up and broadcasting as a cluster.
-    ///
-    /// Only PENDING transactions shift ([`AwaitingSignature`](MigrationTxState::AwaitingSignature),
-    /// [`Signed`](MigrationTxState::Signed), [`Proved`](MigrationTxState::Proved)): an in-flight
-    /// or mined transaction's schedule has already been served, and moving it would only distort
-    /// the record of when it was due. Expiry heights are untouched — a pre-signed transaction's
-    /// expiry is effecting data under ZIP 203, fixed at signing — so a large enough shift can move
-    /// a pending schedule past its own expiry; such a transaction self-heals through the ordinary
-    /// expiry path (its rebuild redraws both schedule and expiry). Heights saturate rather than
-    /// overflow.
-    ///
-    /// A shifted TRANSFER whose proof is still to come ([`AwaitingSignature`](MigrationTxState::AwaitingSignature)
-    /// or [`Signed`](MigrationTxState::Signed)) also gets its anchor boundary REDRAWN against the
-    /// shifted schedule ([`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)):
-    /// the stored boundary was drawn to be in-distribution relative to the ORIGINAL broadcast
-    /// height, so keeping it would broadcast an anchor `delta` blocks older than any honest draw —
-    /// and every deferred transfer of this wallet older by the SAME `delta`, a linkable
-    /// fingerprint. The redraw is sound exactly as `prove_transfer`'s proving-time redraw is:
-    /// ZIP 374 defers the anchor and witnesses to proving, so nothing in the stored artifact pins
-    /// the old boundary. A [`Proved`](MigrationTxState::Proved) transfer's proof DOES pin its
-    /// anchor, so its boundary is kept (re-anchoring it would mean discarding the proof), and a
-    /// preparation carries no drawn boundary at all. In the rare case where no candidate exists at
-    /// or above the prior boundary (see [`redraw_anchor_boundary`](crate::scheduling::redraw_anchor_boundary)),
-    /// the prior — still provable — boundary is kept.
-    pub(crate) fn shift_schedule<R: RngCore + CryptoRng>(&mut self, delta: u32, rng: &mut R) {
-        let interval = self.anchor_bucket_interval;
-        for tx in &mut self.transactions {
-            match tx.state {
-                MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. } => continue,
-                MigrationTxState::AwaitingSignature | MigrationTxState::Signed => {
-                    tx.scheduled_height = tx.scheduled_height + delta;
-                    if matches!(tx.kind, MigrationTxKind::Transfer { .. })
-                        && let Some(prior) = tx.anchor_boundary
-                        && let Some(fresh) = crate::scheduling::redraw_anchor_boundary(
-                            interval,
-                            prior,
-                            tx.scheduled_height,
-                            rng,
-                        )
-                    {
-                        tx.anchor_boundary = Some(fresh);
-                    }
-                }
-                MigrationTxState::Proved => {
-                    tx.scheduled_height = tx.scheduled_height + delta;
-                }
-            }
-        }
-    }
-
     /// Defers the scheduled height of every not-yet-broadcast transaction EXCEPT `released` by
     /// `delta` blocks — preserving the schedule's inter-broadcast gaps — while `released` itself
     /// lands exactly at `release_at`.
@@ -1399,7 +1337,7 @@ impl MigrationState {
     /// `Prove` and then `Broadcast` for it as soon as it wakes — or `Rebuild`, once the transfer
     /// has expired. The drive layer adds the RE-SPREAD on top:
     /// [`advance_migration`](crate::satisfiability::advance_migration) shifts the whole pending
-    /// schedule forward ([`Self::shift_schedule`]) before serving a step overdue by more than
+    /// schedule forward ([`Self::shift_schedule_releasing`]) before serving a step overdue by more than
     /// [`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance) allows, so this
     /// kernel judges the shifted schedule and at most one overdue step is ever released at once.
     pub(crate) fn next_step(
@@ -2380,7 +2318,8 @@ mod tests {
         );
     }
 
-    /// `shift_schedule` moves every PENDING schedule forward by the same delta — preserving the
+    /// A uniform `shift_schedule_releasing` (released landing = its own schedule + delta) moves
+    /// every PENDING schedule forward by the same delta — preserving the
     /// inter-broadcast gaps — and leaves served schedules (in-flight and mined rows) and every
     /// expiry height untouched. A deferred transfer whose proof is still to come has its anchor
     /// boundary REDRAWN in-distribution against its shifted schedule; a proved transfer's proof
@@ -2420,7 +2359,13 @@ mod tests {
             s.transactions[i].anchor_boundary = Some(BlockHeight::from_u32(144));
         }
 
-        s.shift_schedule(100_000, &mut ChaCha8Rng::seed_from_u64(7));
+        let landing = s.transactions[1].scheduled_height + 100_000;
+        s.shift_schedule_releasing(
+            MigrationTransferId(1),
+            landing,
+            100_000,
+            &mut ChaCha8Rng::seed_from_u64(7),
+        );
 
         let scheduled: Vec<u32> = s
             .transactions
