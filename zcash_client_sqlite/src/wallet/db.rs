@@ -733,7 +733,7 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     expiry_height INTEGER NOT NULL,
     anchor_boundary INTEGER,
     state TEXT NOT NULL,
-    txid TEXT,
+    txid BLOB,
     mined_height INTEGER,
     lock_owner BLOB,
     unsatisfiable_at INTEGER,

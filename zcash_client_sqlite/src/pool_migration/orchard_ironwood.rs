@@ -149,6 +149,17 @@ pub(crate) fn account_index_sql() -> String {
     store::create_account_index_sql(&TABLES)
 }
 
+/// The Orchard -> Ironwood transactions-table DDL, from the store's one generator, for the
+/// `orchard_ironwood_migration_txid_blob` schema migration's table rebuild.
+pub(crate) fn transactions_table_sql() -> String {
+    store::create_transactions_sql(&TABLES)
+}
+
+/// The due-transactions index DDL, from the store's one generator, recreated by the same rebuild.
+pub(crate) fn tx_due_index_sql() -> String {
+    store::create_tx_due_index_sql(&TABLES)
+}
+
 /// The anchor bucket grids, in blocks, of every Orchard -> Ironwood migration in this database
 /// that is not yet complete.
 ///

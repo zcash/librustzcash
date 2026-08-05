@@ -141,6 +141,7 @@ migration_modules!(
     orchard_ironwood_broadcast_binding,
     orchard_ironwood_migration_anchor_interval,
     orchard_ironwood_migration_history,
+    orchard_ironwood_migration_txid_blob,
     orchard_ironwood_migration_tables,
     orchard_ironwood_migration_unsatisfiability,
     orchard_note_version,
@@ -395,6 +396,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_migration_unsatisfiability::Migration),
         Box::new(orchard_ironwood_migration_history::Migration),
         Box::new(orchard_ironwood_broadcast_binding::Migration),
+        Box::new(orchard_ironwood_migration_txid_blob::Migration),
     ]
 }
 

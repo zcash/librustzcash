@@ -11,7 +11,7 @@
 //! and reject a non-NULL blob that is not exactly 32 bytes); and each cached real-spend
 //! `nullifier`, one per row of the spend-nullifier child table, held to its 32-byte width by a
 //! `CHECK` and read back through those same fixed-size impls. All amounts are zatoshi `INTEGER`
-//! columns; the broadcast `txid` is stored as hex `TEXT`.
+//! columns; the `txid` is stored as the transaction id's raw internal bytes (`TxId::as_ref`).
 //!
 //! The preparation plan's layers/transactions grid has no tables of its own: each input and output
 //! row carries its transaction's `(layer, tx_index)` coordinate, and every transaction a real plan
@@ -238,7 +238,7 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
     )
 }
 
-fn create_transactions_sql(t: &Tables) -> String {
+pub(crate) fn create_transactions_sql(t: &Tables) -> String {
     // `unsatisfiable_at` and `unsatisfiable_kind` are one value in two columns — the height an
     // unsatisfiability observation rests on, and which observation it was — so they are `NULL`
     // together or non-`NULL` together, and the read path rejects a row where they disagree.
@@ -260,7 +260,7 @@ fn create_transactions_sql(t: &Tables) -> String {
             expiry_height INTEGER NOT NULL,
             anchor_boundary INTEGER,
             state TEXT NOT NULL,
-            txid TEXT,
+            txid BLOB,
             mined_height INTEGER,
             lock_owner BLOB,
             unsatisfiable_at INTEGER,
@@ -311,7 +311,7 @@ fn create_spend_nullifiers_sql(t: &Tables) -> String {
     )
 }
 
-fn create_tx_due_index_sql(t: &Tables) -> String {
+pub(crate) fn create_tx_due_index_sql(t: &Tables) -> String {
     format!(
         "CREATE INDEX IF NOT EXISTS {} ON {} (state, scheduled_height)",
         t.tx_due_index, t.transactions
@@ -1210,16 +1210,7 @@ fn read_transactions(
         // is required rather than optional — and it is the SAME value the lifecycle state carries
         // once broadcast, which is why the state is reassembled from it below rather than from a
         // separately stored copy that could disagree.
-        let txid = r
-            .txid
-            .ok_or(Error::Corrupt("txid"))
-            .and_then(|s| {
-                hex::decode(&s)
-                    .ok()
-                    .and_then(|v| <[u8; 32]>::try_from(v).ok())
-                    .ok_or(Error::Corrupt("txid"))
-            })
-            .map(TxId::from_bytes)?;
+        let txid = r.txid.map(TxId::from_bytes).ok_or(Error::Corrupt("txid"))?;
         let state = MigrationTxState::from_stored(
             &r.state,
             Some(<[u8; 32]>::from(txid)),
@@ -1318,7 +1309,7 @@ struct TxRow {
     state: String,
     /// The hex-encoded consensus transaction ID the transaction was broadcast under; `NULL` until
     /// it is broadcast. Unrelated to `transfer_id` above.
-    txid: Option<String>,
+    txid: Option<[u8; 32]>,
     mined_height: Option<u32>,
     /// The stored lock-owner token, read directly as a fixed-size blob: `rusqlite`'s `[u8; 32]`
     /// `FromSql` impl errors cleanly (`InvalidBlobSize`) if a non-NULL blob is not exactly 32
@@ -1982,7 +1973,7 @@ fn replace_migration_row(
                 ":expiry_height": u32::from(mtx.expiry_height()),
                 ":anchor_boundary": mtx.anchor_boundary().map(u32::from),
                 ":state": tx_state.as_ref(),
-                ":txid": hex::encode(mtx.txid().as_ref()),
+                ":txid": mtx.txid().as_ref(),
                 ":mined_height": tx_state.mined_height().map(u32::from),
                 ":lock_owner": mtx.lock_owner().map(|o| *o.as_bytes()),
                 ":unsatisfiable_at": unsatisfiable_at.map(u32::from),
