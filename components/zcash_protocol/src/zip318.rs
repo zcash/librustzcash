@@ -109,6 +109,18 @@ pub const EXPIRY_MODULUS: u32 = 34_560;
 /// keeps between one and two [`EXPIRY_MODULUS`] periods of validity.
 pub const EXPIRY_WINDOW: u32 = 2 * EXPIRY_MODULUS;
 
+/// Source-pool (Orchard) actions in a canonical [ZIP 318] pool crossing: the spend and its change,
+/// or a padding dummy when the note's value exactly covers the crossing and its fee.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub const CROSSING_SOURCE_ACTIONS: usize = 2;
+
+/// Destination-pool (Ironwood) actions in a canonical [ZIP 318] pool crossing: the single
+/// canonical output, unpadded.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+pub const CROSSING_DESTINATION_ACTIONS: usize = 1;
+
 /// Returns the largest `{1, 2, 5} * 10^k` value (a multiple of the power-of-radix `floor`) not
 /// exceeding `hi`, or `0` if `hi < floor`.
 ///
@@ -379,18 +391,6 @@ pub trait PoolMigrationConstants {
     }
 }
 
-/// Source-pool (Orchard) actions in a canonical [ZIP 318] pool crossing: the spend and its change,
-/// or a padding dummy when the note's value exactly covers the crossing and its fee.
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const CROSSING_SOURCE_ACTIONS: usize = 2;
-
-/// Destination-pool (Ironwood) actions in a canonical [ZIP 318] pool crossing: the single
-/// canonical output, unpadded.
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
-pub const CROSSING_DESTINATION_ACTIONS: usize = 1;
-
 /// The shape a [ZIP 318]-conforming transaction has.
 ///
 /// This names a CONFORMANCE CLASS, never a provenance. ZIP 318's privacy argument is that every
@@ -408,25 +408,10 @@ pub enum Zip318TxKind {
     Preparation,
     /// A pool crossing: a canonical denomination carried across the turnstile by a transaction of
     /// the canonical shape.
-    ///
-    /// This does NOT say who the crossing pays. The ordinary send path deliberately builds
-    /// payments to third parties in this same shape, so that a payment of a canonical denomination
-    /// joins the migration anonymity set, and nothing observable about the transaction separates
-    /// one from a wallet's own migration transfer. That indistinguishability is the point of the
-    /// shape, so this crate does not offer a distinction it cannot make. A wallet that knows the
-    /// recipient of its OWN transaction may of course draw one from its own records.
     Transfer,
 }
 
 /// The result of classifying a transaction against [ZIP 318].
-///
-/// [`Unknown`](Self::Unknown) is NOT a third answer alongside the other two: it is the least
-/// element of an information ordering. Evidence about a transaction only ever grows (a compact
-/// scan learns less than an enhanced transaction, which learns less than one whose anchor can also
-/// be resolved), and [`classify`] is monotone with respect to that growth. Because the order on
-/// results is flat, monotonicity says exactly: *once decided, never decided differently*. A
-/// consumer may therefore cache a decision, and must render `Unknown` as "no label yet" rather
-/// than as "not a migration", or rows will visibly relabel themselves as data arrives.
 ///
 /// [ZIP 318]: https://zips.z.cash/zip-0318
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -436,7 +421,8 @@ pub enum Zip318Classification {
     /// The transaction definitely does not have any ZIP 318 shape. Emitted only when the evidence
     /// needed to refute is actually present.
     Nonconforming,
-    /// Not enough evidence to decide yet.
+    /// Not enough evidence to decide yet. Render this as "no label yet", never as "not a
+    /// migration"; [`Nonconforming`](Self::Nonconforming) is the latter.
     Unknown,
 }
 
@@ -581,21 +567,16 @@ impl Zip318Evidence {
     /// Whether the source-pool outputs are consistent with a wallet-internal send-to-self, as
     /// precisely as the source that gathered this could tell.
     ///
-    /// The clause names the CLAIM rather than a check, because how tightly it can be established
-    /// depends on what the source can see, and no source can do better than its own view:
+    /// How tightly this can be established depends on the source:
     ///
-    /// - From an unproven transaction the wallet is building, exactly: the values and recipients
-    ///   are all present, so "every value-carrying output pays the account's own internal address"
-    ///   is directly checkable, with zero-valued padding dummies excluded.
-    /// - From a MINED transaction, only loosely, and this is not a shortcoming of the
-    ///   implementation. A padding dummy and an unrelated party's output are equally
-    ///   undecryptable, so the two cannot be told apart at all, which is precisely what the
-    ///   padding is for. The strongest sound reading is "at least one output decrypts to the
-    ///   account's own internal address, none decrypts to one of its external addresses, and no
-    ///   external recipient is otherwise known".
+    /// - From an unproven transaction the wallet is building, exactly: every value-carrying output
+    ///   pays the account's own internal address, with zero-valued padding dummies excluded.
+    /// - From a mined transaction, only that the account received on its own internal address and
+    ///   on no external one. A padding dummy and an unrelated party's output are equally
+    ///   undecryptable, which is what the padding is for, so no source can do better.
     ///
-    /// The looser reading admits strictly more, so it keeps the over-approximation direction
-    /// [`classify`] already has: no false negatives, some admitted look-alikes.
+    /// The looser reading admits strictly more, keeping the direction [`classify`] already has: no
+    /// false negatives, some admitted look-alikes.
     pub fn source_is_send_to_self(&self) -> Option<bool> {
         self.source_is_send_to_self
     }

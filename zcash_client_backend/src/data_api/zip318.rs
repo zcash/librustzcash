@@ -67,26 +67,17 @@ where
     // anchor to a height needs the wallet's retained boundary checkpoints, and the fee needs the
     // value of inputs the wallet may not own; a store that has both may answer them and narrow the
     // result.
+    // An absent bundle contributes no actions, which is what a preparation transaction's
+    // destination pool looks like.
     Zip318Evidence::default()
-        .with_source_actions(Some(action_count(
-            tx.orchard_bundle().map(|b| b.actions().len()),
-        )))
-        .with_destination_actions(Some(action_count(
-            tx.ironwood_bundle().map(|b| b.actions().len()),
-        )))
+        .with_source_actions(Some(tx.orchard_bundle().map_or(0, |b| b.actions().len())))
+        .with_destination_actions(Some(tx.ironwood_bundle().map_or(0, |b| b.actions().len())))
         .with_other_bundles_present(Some(other_bundles_present(tx)))
         .with_source_is_send_to_self(Some(is_send_to_self(orchard_outputs)))
         .with_sole_destination_value(sole_destination_value(ironwood_outputs))
         .with_expiry_is_canonical(Some(
             constants.is_canonical_expiry_value(tx.expiry_height()),
         ))
-}
-
-/// An absent bundle contributes no actions, which is what a preparation transaction's destination
-/// pool looks like.
-#[cfg(feature = "orchard")]
-fn action_count(bundle_actions: Option<usize>) -> usize {
-    bundle_actions.unwrap_or(0)
 }
 
 /// Whether the transaction carries a transparent or Sapling bundle. No ZIP 318 transaction carries
