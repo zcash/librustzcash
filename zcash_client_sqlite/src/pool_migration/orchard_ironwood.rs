@@ -458,8 +458,10 @@ where
     /// signatures it assembles, so a PCZT that would not survive broadcast is rejected here
     /// rather than recorded. The outputs are recovered by trial decryption under the account's
     /// unified full viewing key (every real output of a migration transaction is internal to the
-    /// migrating account; the padded dummies decrypt under no key). Idempotent at the wallet
-    /// layer: re-fetching after a crashed submission upserts the same record.
+    /// migrating account; the padded dummies decrypt under no key). Idempotent: every write it
+    /// makes upserts, so a consumer that crashed between obtaining these bytes and submitting
+    /// them obtains the same bytes, over the same record, when the drive loop offers the
+    /// broadcast again.
     ///
     /// After submitting, the consumer records the outcome exactly as before:
     /// [`MigrationState::mark_broadcast`] on success, or

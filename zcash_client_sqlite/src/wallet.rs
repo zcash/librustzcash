@@ -5355,8 +5355,7 @@ fn delete_retrieval_queue_entry(
     Ok(())
 }
 
-// A utility function for creation of parameters for use in `insert_sent_output`
-// and `put_sent_output`
+// A utility function for creation of parameters for use in `put_sent_output`
 fn recipient_params<P: consensus::Parameters>(
     conn: &Connection,
     _params: &P,
@@ -5457,6 +5456,10 @@ fn flag_previously_received_change(
 }
 
 /// Records information about a transaction output that your wallet created.
+///
+/// Upserting, via [`put_sent_output`]: re-storing a transaction the wallet already recorded —
+/// a flow that obtains a transaction's bytes, dies before submitting them, and is handed the
+/// same transaction again — overwrites that output's row instead of failing on it.
 pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -5464,32 +5467,16 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     from_account_uuid: AccountUuid,
     output: &SentTransactionOutput<AccountUuid>,
 ) -> Result<(), SqliteClientError> {
-    let mut stmt_insert_sent_output = conn.prepare_cached(
-        "INSERT INTO sent_notes (
-            transaction_id, output_pool, output_index, from_account_id,
-            to_address, to_account_id, value, memo)
-         VALUES (
-            :transaction_id, :output_pool, :output_index, :from_account_id,
-            :to_address, :to_account_id, :value, :memo)",
-    )?;
-
-    let (from_account_id, to_address, to_account_id, pool_type) =
-        recipient_params(conn, params, from_account_uuid, output.recipient())?;
-    let sql_args = named_params![
-        ":transaction_id": tx_ref.0,
-        ":output_pool": &pool_code(pool_type),
-        ":output_index": &i64::try_from(output.output_index()).unwrap(),
-        ":from_account_id": from_account_id.0,
-        ":to_address": &to_address,
-        ":to_account_id": to_account_id.map(|a| a.0),
-        ":value": &i64::from(ZatBalance::from(output.value())),
-        ":memo": memo_repr(output.memo())
-    ];
-
-    stmt_insert_sent_output.execute(sql_args)?;
-    flag_previously_received_change(conn, tx_ref)?;
-
-    Ok(())
+    put_sent_output(
+        conn,
+        params,
+        from_account_uuid,
+        tx_ref,
+        output.output_index(),
+        output.recipient(),
+        output.value(),
+        output.memo(),
+    )
 }
 
 /// Records information about a transaction output that your wallet created, from the constituent

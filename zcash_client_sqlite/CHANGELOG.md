@@ -57,6 +57,9 @@ workspace.
   one in progress.
 
 ### Changed
+- `WalletWrite::store_transactions_to_be_sent` now upserts each transaction's
+  sent-output records, so storing a transaction the wallet has already
+  recorded replaces that record instead of failing.
 - Persisting a pool-migration state with any terminal status through
   `replace_migration` now releases the note reservations held by its
   never-broadcast transactions, in the same write: a migration superseded in
