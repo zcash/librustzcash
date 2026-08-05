@@ -5483,8 +5483,13 @@ mod commit_tests {
             .max()
             .expect("the committed migration has transactions");
         match state.next_step(DuenessTargets::at(target), &[]) {
-            crate::state::AdvanceStep::Prove { id, .. }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::state::AdvanceStep::Prove { transactions } => {
+                assert!(
+                    transactions.iter().all(|t| layer0_ids.contains(&t.id())),
+                    "layer 0 proves first"
+                )
+            }
+            crate::state::AdvanceStep::Broadcast { id } => {
                 assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
             }
             other => panic!("expected a broadcast step, got {other:?}"),
@@ -5499,8 +5504,13 @@ mod commit_tests {
             .map(|t| t.id)
             .collect();
         match state.next_step(DuenessTargets::at(target), &[]) {
-            crate::state::AdvanceStep::Prove { id, .. }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            crate::state::AdvanceStep::Prove { transactions } => {
+                assert!(
+                    transactions.iter().all(|t| layer1_ids.contains(&t.id())),
+                    "layer 1 proves once layer 0 mines"
+                )
+            }
+            crate::state::AdvanceStep::Broadcast { id } => {
                 assert!(
                     layer1_ids.contains(&id),
                     "layer 1 broadcasts once layer 0 mines"
@@ -5512,8 +5522,13 @@ mod commit_tests {
             state.mark_mined(*id, BlockHeight::from_u32(2_000_020));
         }
         match state.next_step(DuenessTargets::at(target), &[]) {
-            crate::state::AdvanceStep::Prove { id, .. }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            step @ (crate::state::AdvanceStep::Prove { .. }
+            | crate::state::AdvanceStep::Broadcast { .. }) => {
+                let id = match &step {
+                    crate::state::AdvanceStep::Prove { transactions } => transactions[0].id(),
+                    crate::state::AdvanceStep::Broadcast { id } => *id,
+                    _ => unreachable!(),
+                };
                 let tx = state
                     .transactions
                     .iter()
@@ -5668,8 +5683,20 @@ mod commit_tests {
         for layer in 0..layer_count {
             let ids = layer_ids(&state, layer);
             match state.next_step(DuenessTargets::at(target), &[]) {
-                crate::state::AdvanceStep::Prove { id, .. }
-                | crate::state::AdvanceStep::Broadcast { id } => assert!(
+                // The batch carries EVERYTHING provable: the newly unblocked layer, and any
+                // transfer whose funding producer has already mined. What the dependency walk
+                // guarantees is that no LATER preparation layer proves before its predecessor
+                // mines.
+                crate::state::AdvanceStep::Prove {
+                    transactions: named,
+                } => assert!(
+                    named.iter().all(|t| {
+                        matches!(t.kind(), MigrationTxKind::Transfer { .. })
+                            || ids.contains(&t.id())
+                    }),
+                    "layer {layer} (with any ready transfers) is proved once its predecessor has mined"
+                ),
+                crate::state::AdvanceStep::Broadcast { id } => assert!(
                     ids.contains(&id),
                     "layer {layer} is proved or broadcast once its predecessor has mined"
                 ),
@@ -5698,8 +5725,13 @@ mod commit_tests {
             }
         }
         match state.next_step(DuenessTargets::at(target), &[]) {
-            crate::state::AdvanceStep::Prove { id, .. }
-            | crate::state::AdvanceStep::Broadcast { id } => {
+            step @ (crate::state::AdvanceStep::Prove { .. }
+            | crate::state::AdvanceStep::Broadcast { .. }) => {
+                let id = match &step {
+                    crate::state::AdvanceStep::Prove { transactions } => transactions[0].id(),
+                    crate::state::AdvanceStep::Broadcast { id } => *id,
+                    _ => unreachable!(),
+                };
                 let tx = state.transactions.iter().find(|t| t.id == id).unwrap();
                 assert!(
                     matches!(tx.kind, MigrationTxKind::Transfer { .. }),

@@ -277,6 +277,24 @@ impl Default for SchedulingParams {
     }
 }
 
+/// How deep below the wallet's fully-scanned tip a transfer's drawn anchor boundary must sit —
+/// AT LEAST this many blocks — before the planning kernel offers the transfer's proof: about
+/// 12.5 minutes of reorg stability at the target block spacing, so the boundary checkpoint
+/// proved against is one a reorg can no longer plausibly displace. This is the same settling
+/// judgment [`WakeupParams::DEFAULT`] expresses as a wake-up margin — that margin IS this
+/// constant, so a zero-jitter wake-up landing exactly on its scheduled height syncs to the
+/// first tip at which the kernel offers the proofs the wake-up exists to produce — and it
+/// matches the conventional [`ReorgSettleDepth`](crate::satisfiability::ReorgSettleDepth).
+/// Not specified by ZIP 318; provisional.
+///
+/// Proving a shallower boundary would cost correctness nothing — the satisfiability oracle
+/// detects an anchor a settled reorg invalidated, and the proof is simply redone — but it
+/// spends the proving work exactly when a reorg is most plausible, so the kernel holds the
+/// proof until the boundary is this deep. The gate is judged only against the SCANNED target
+/// ([`DuenessTargets::scanned`](crate::satisfiability::DuenessTargets::scanned)): an estimate
+/// cannot conjure the checkpoint, nor its depth.
+pub const PROVABLE_ANCHOR_DEPTH: u32 = 10;
+
 /// Parameters shaping the sync/proving wake-up schedule ([`schedule_sync_wakeups`]): how many
 /// blocks past an anchor boundary a wake-up waits for that boundary to settle, and how much random
 /// jitter spreads independent wallets' wake-ups apart as a thundering-herd defense. These values
@@ -288,9 +306,11 @@ pub struct WakeupParams {
 }
 
 impl WakeupParams {
-    /// The provisional defaults: a 10-block settle margin (about 12.5 minutes at the target block
-    /// spacing, so the synced boundary is one a reorg can no longer plausibly displace) and a
-    /// 12-block jitter cap (about 15 minutes).
+    /// The provisional defaults: a settle margin of [`PROVABLE_ANCHOR_DEPTH`] blocks (10 —
+    /// about 12.5 minutes at the target block spacing; the kernel's provability gate and this
+    /// margin are the SAME depth, so a zero-jitter wake-up syncs to the first tip at which the
+    /// kernel offers the proofs the wake-up exists to produce) and a 12-block jitter cap (about
+    /// 15 minutes).
     ///
     /// The jitter cap exists as a THUNDERING-HERD defense, and for nothing else: anchor
     /// boundaries sit on a GLOBAL grid shared by every migrating wallet, so un-jittered wake-ups
@@ -307,7 +327,7 @@ impl WakeupParams {
     /// same-height wallets WITHIN a block, so the jitter only needs to spread wallets ACROSS
     /// blocks.
     pub const DEFAULT: Self = Self {
-        settle_margin: 10,
+        settle_margin: PROVABLE_ANCHOR_DEPTH,
         jitter_cap: 12,
     };
 
