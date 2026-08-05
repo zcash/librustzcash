@@ -28,7 +28,10 @@ use zcash_protocol::{consensus::BlockHeight, value::COIN};
 #[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::{
     denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
-    testing::{MIGRATION_SCENARIOS, MULTI_RUN_EVOLUTION, SIGNING_ROUND_EVOLUTION},
+    testing::{
+        LARGE_BALANCE_CASES, MIGRATION_SCENARIOS, MULTI_RUN_EVOLUTION, REPORTED_LARGE_BALANCE,
+        SIGNING_ROUND_EVOLUTION,
+    },
 };
 use zcash_pool_migration::{
     engine::{
@@ -407,5 +410,136 @@ fn keystone_rounds_evolve_with_actions() {
     for pair in SIGNING_ROUND_EVOLUTION.windows(2) {
         assert!(pair[0].expected_actions <= pair[1].expected_actions);
         assert!(pair[0].expected_keystone_rounds <= pair[1].expected_keystone_rounds);
+    }
+}
+
+/// What a LARGE balance actually plans, and how much of that is the balance versus the NOTE SHAPE
+/// holding it. One balance (5887.842 ZEC, from a user report of an unexpectedly large plan) is
+/// planned from five different note shapes, and every headline figure a wallet shows is asserted:
+/// the crossings, the preparation transactions, the transaction total, the actions, the Keystone
+/// (96-action) rounds, and the value migrated. Reuses the plan-only `LARGE_BALANCE_CASES` table.
+///
+/// The shape, not the balance, is what moves the numbers: the crossings are pinned by the balance's
+/// `{1,2,5}x10^k` decomposition (fourteen of them, near-constant across the table), while the
+/// preparations scale with the note count, taking one shape to three Keystone rounds where another
+/// needs one. The two-note shape is the outlier: no note reaches the leading 5000 ZEC denomination,
+/// so its first run migrates that single crossing and defers the rest to a second run.
+#[cfg(feature = "test-dependencies")]
+#[test]
+fn large_balance_plans_by_note_shape() {
+    let seed = 7;
+
+    for case in LARGE_BALANCE_CASES {
+        // Every shape holds the SAME balance, so any difference below is the shape's doing.
+        assert_eq!(
+            case.source_notes.iter().sum::<u64>(),
+            REPORTED_LARGE_BALANCE,
+            "{}: source notes sum to the reported balance",
+            case.label
+        );
+
+        // The whole-migration estimate: what the user is committing to in total.
+        let backend = CommitMock::new(seed, case.source_notes);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let est = estimate_migration_runs(&regtest_network(true), &backend, &mut rng)
+            .expect("estimates the large-balance migration");
+        assert_eq!(est.run_count(), case.expected_runs, "{}: runs", case.label);
+        assert_eq!(
+            est.total_crossings(),
+            case.expected_total_crossings,
+            "{}: total quanta",
+            case.label
+        );
+        assert_eq!(
+            est.total_actions(),
+            case.expected_total_actions,
+            "{}: total actions to sign",
+            case.label
+        );
+        assert_eq!(
+            est.total_signing_rounds(SigningRoundBudget::KEYSTONE),
+            case.expected_total_keystone_rounds,
+            "{}: total Keystone rounds",
+            case.label
+        );
+
+        // The first run: the plan `plan_migration` hands back, and the transactions a wallet lists.
+        let (_backend, plan) = plan_notes(seed, case.source_notes);
+        assert_eq!(
+            plan.preparation_tx_count(),
+            case.expected_preparations,
+            "{}: preparation transactions",
+            case.label
+        );
+        assert_eq!(
+            plan.transfer_tx_count(),
+            case.expected_transfers,
+            "{}: quanta (crossings)",
+            case.label
+        );
+        assert_eq!(
+            plan.total_transactions(),
+            case.expected_transactions,
+            "{}: transactions in the first run",
+            case.label
+        );
+        assert_eq!(
+            plan.total_actions(),
+            case.expected_actions,
+            "{}: actions in the first run",
+            case.label
+        );
+        assert_eq!(
+            u64::from(plan.value_migrated()),
+            case.expected_migrated,
+            "{}: value migrated by the first run",
+            case.label
+        );
+        assert_eq!(
+            u64::from(plan.residual()),
+            case.expected_residual,
+            "{}: value the first run leaves behind",
+            case.label
+        );
+
+        // The Keystone signing rounds: what the user physically confirms on the device.
+        assert_eq!(
+            plan.signing_round_count(SigningRoundBudget::KEYSTONE),
+            case.expected_keystone_rounds,
+            "{}: Keystone signing rounds",
+            case.label
+        );
+        // The preview a consent screen renders, and its budget invariant.
+        let preview = plan.signing_rounds(SigningRoundBudget::KEYSTONE);
+        assert_eq!(preview.len(), case.expected_keystone_rounds);
+        let mut previewed = 0;
+        for round in &preview {
+            assert!(
+                round.total_actions() <= SigningRoundBudget::KEYSTONE.max_actions(),
+                "{}: a round exceeds the Keystone budget",
+                case.label
+            );
+            previewed += round.len();
+        }
+        assert_eq!(
+            previewed, case.expected_transactions,
+            "{}: the rounds cover every planned transaction",
+            case.label
+        );
+        // Even the widest of these runs signs in one default-budget (software signer) round.
+        assert_eq!(
+            plan.signing_round_count(SigningRoundBudget::DEFAULT),
+            1,
+            "{}: one default-budget round",
+            case.label
+        );
+
+        // A run that leaves a large residual is exactly a run that needs a successor.
+        assert_eq!(
+            case.expected_runs > 1,
+            u64::from(plan.residual()) >= u64::from(zcash_protocol::zip318::MAX_RESIDUAL_VALUE),
+            "{}: a migratable residual is what forces a second run",
+            case.label
+        );
     }
 }

@@ -385,3 +385,184 @@ pub const MULTI_RUN_EVOLUTION: &[MultiRunEvolutionCase] = {
         m(5_000_000, 11, 517, 2399, 32), // ten full runs of 3, then a tail of 2
     ]
 };
+
+// --- what a large balance actually plans, as a function of its NOTE SHAPE ---
+//
+// The two tables above vary the balance and hold the note shape fixed (one note). This one does the
+// opposite: it fixes a single large balance and varies how the wallet holds it. That is the
+// dimension a user actually notices, because the crossing count is set by the balance's
+// {1,2,5}x10^k decomposition (essentially constant here) while the PREPARATION count is set by how
+// many notes must be consolidated, so the plan grows with the note count even though the amount
+// migrated does not.
+//
+// The balance is the one from a user report of an unexpectedly large plan. Plan-only (nothing is
+// built or proved): funding a wallet with thousands of ZEC is out of reach for the regtest
+// proving simulation, which is why these do not live in `MIGRATION_SCENARIOS`.
+
+/// One thousandth of a ZEC, the unit the reported balance is quoted in.
+const MILLI: u64 = COIN / 1_000;
+
+/// The balance from the user report: 5887.842 ZEC, in zatoshi.
+pub const REPORTED_LARGE_BALANCE: u64 = 5_887_842 * MILLI;
+
+/// One row of the large-balance table: a note shape holding [`REPORTED_LARGE_BALANCE`], and the plan
+/// it produces. The whole-migration figures (`expected_runs` and the `expected_total_*` fields) come
+/// from the estimate; the rest describe the FIRST run, which is the one `plan_migration` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LargeBalanceCase {
+    /// A short description of the note shape.
+    pub label: &'static str,
+    /// The wallet's source Orchard note values, in zatoshi. These sum to
+    /// [`REPORTED_LARGE_BALANCE`].
+    pub source_notes: &'static [u64],
+    /// The expected number of migration runs the whole balance takes.
+    pub expected_runs: usize,
+    /// The expected number of crossings (quanta) across all runs.
+    pub expected_total_crossings: usize,
+    /// The expected total Orchard actions to sign across all runs.
+    pub expected_total_actions: u32,
+    /// The expected total Keystone signing rounds, summed per run.
+    pub expected_total_keystone_rounds: usize,
+    /// The expected number of preparation transactions in the first run.
+    pub expected_preparations: usize,
+    /// The expected number of crossings in the first run.
+    pub expected_transfers: usize,
+    /// The expected number of transactions in the first run: preparations plus crossings. This is
+    /// the "how many transactions is this migration" figure a wallet shows.
+    pub expected_transactions: usize,
+    /// The expected Orchard actions in the first run
+    /// (`preparations * 16 + transfers * 3`).
+    pub expected_actions: u32,
+    /// The expected number of Keystone ([`SigningRoundBudget::KEYSTONE`], 96 actions) signing rounds
+    /// for the first run.
+    pub expected_keystone_rounds: usize,
+    /// The expected value the first run migrates, in zatoshi.
+    pub expected_migrated: u64,
+    /// The expected value the first run leaves behind, in zatoshi. A large residual is what forces a
+    /// second run.
+    pub expected_residual: u64,
+}
+
+/// How the plan for [`REPORTED_LARGE_BALANCE`] (5887.842 ZEC) varies with the note shape holding it.
+/// Plan-only (never built or proved). Captured from the canonical planner on the regtest network.
+pub const LARGE_BALANCE_CASES: &[LargeBalanceCase] = {
+    #[allow(clippy::too_many_arguments)]
+    const fn c(
+        label: &'static str,
+        source_notes: &'static [u64],
+        expected_runs: usize,
+        expected_total_crossings: usize,
+        expected_total_actions: u32,
+        expected_total_keystone_rounds: usize,
+        expected_preparations: usize,
+        expected_transfers: usize,
+        expected_keystone_rounds: usize,
+        expected_migrated: u64,
+        expected_residual: u64,
+    ) -> LargeBalanceCase {
+        LargeBalanceCase {
+            label,
+            source_notes,
+            expected_runs,
+            expected_total_crossings,
+            expected_total_actions,
+            expected_total_keystone_rounds,
+            expected_preparations,
+            expected_transfers,
+            expected_transactions: expected_preparations + expected_transfers,
+            expected_actions: (expected_preparations as u32) * PREPARATION_ACTIONS
+                + (expected_transfers as u32) * TRANSFER_ACTIONS,
+            expected_keystone_rounds,
+            expected_migrated,
+            expected_residual,
+        }
+    }
+    // The balance divides exactly by each of these, so every note carries the same value.
+    const ONE_NOTE: &[u64] = &[REPORTED_LARGE_BALANCE];
+    const TWO_NOTES: &[u64] = &[REPORTED_LARGE_BALANCE / 2; 2];
+    const FIVE_NOTES: &[u64] = &[REPORTED_LARGE_BALANCE / 5; 5];
+    const TEN_NOTES: &[u64] = &[REPORTED_LARGE_BALANCE / 10; 10];
+    const HUNDRED_NOTES: &[u64] = &[REPORTED_LARGE_BALANCE / 100; 100];
+    // One hundredth of a ZEC: the minimum denomination, and the unit the migrated totals fall on.
+    const H: u64 = COIN / 100;
+    &[
+        // The balance decomposes into fourteen {1,2,5}x10^k crossings
+        // (5000 + 500 + 200 + 100 + 50 + 20 + 10 + 5 + 2 + 0.5 + 0.2 + 0.1 + 0.02 + 0.01), and a
+        // single source note funds them all from one preparation transaction: 15 transactions, 58
+        // actions, ONE Keystone round.
+        c(
+            "5887.842 ZEC in a single note",
+            ONE_NOTE,
+            1,
+            14,
+            58,
+            1,
+            1,
+            14,
+            1,
+            588_783 * H,
+            910_000,
+        ),
+        // THE DEGENERATE SHAPE. Neither note reaches the leading 5000 ZEC denomination, so funding
+        // that one crossing consumes BOTH notes across two preparation layers, and the run ends
+        // having migrated only the 5000. The remaining ~887.84 ZEC is left as residual for a whole
+        // SECOND run, which is why the same balance costs 90 actions here against 58 above.
+        c(
+            "5887.842 ZEC in two equal notes",
+            TWO_NOTES,
+            2,
+            14,
+            90,
+            2,
+            2,
+            1,
+            1,
+            500_000 * H,
+            88_784_025_000,
+        ),
+        // From three notes upward the leading crossing is fundable within one run again, so the full
+        // fourteen crossings return; only the preparation count (and with it the Keystone rounds)
+        // grows with the note count.
+        c(
+            "5887.842 ZEC in five equal notes",
+            FIVE_NOTES,
+            1,
+            14,
+            106,
+            2,
+            4,
+            14,
+            2,
+            588_783 * H,
+            670_000,
+        ),
+        c(
+            "5887.842 ZEC in ten equal notes",
+            TEN_NOTES,
+            1,
+            14,
+            122,
+            2,
+            5,
+            14,
+            2,
+            588_783 * H,
+            590_000,
+        ),
+        // A hundred notes cost thirteen preparation transactions, so preparation now dominates:
+        // 247 actions, of which only 39 are the crossings themselves.
+        c(
+            "5887.842 ZEC in one hundred equal notes",
+            HUNDRED_NOTES,
+            1,
+            13,
+            247,
+            3,
+            13,
+            13,
+            3,
+            588_782 * H,
+            965_000,
+        ),
+    ]
+};
