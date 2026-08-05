@@ -47,6 +47,7 @@ zcash_client_backend = { workspace = true, optional = true, features = ["orchard
 zcash_keys = { workspace = true, optional = true, features = ["orchard"] }
 shardtree = { workspace = true, optional = true }
 incrementalmerkletree = { workspace = true, optional = true }
+blake2b_simd = { workspace = true, optional = true }
 
 [dev-dependencies]
 incrementalmerkletree.workspace = true
@@ -83,6 +84,7 @@ orchard = ["dep:orchard", "dep:pczt", "dep:zip32"]
 ## migration wallet with no hand-wired crypto. Implies `orchard`.
 wallet = [
     "orchard",
+    "dep:blake2b_simd",
     "dep:zcash_client_backend",
     "dep:zcash_keys",
     "dep:shardtree",

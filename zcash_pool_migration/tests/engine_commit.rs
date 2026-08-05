@@ -375,7 +375,7 @@ fn advance_promotes_a_proved_transaction_whose_broadcast_was_never_recorded() {
             .pczt(),
     )
     .expect("the stored PCZT yields its txid");
-    state.set_transaction_proved(victim, state.transactions()[0].pczt().to_vec());
+    state.set_transaction_proved(victim, state.transactions()[0].pczt().to_vec(), None);
     assert_eq!(
         state
             .transactions()

@@ -37,19 +37,23 @@ use ::pczt::roles::prover::Prover;
 use ::pczt::roles::updater::{AnchorUpdateError, SpendWitnessUpdateError, Updater};
 use zcash_client_backend::data_api::{
     Account as _, InputSource, WalletCommitmentTrees, WalletRead,
+    locking::{LockError, LockOwner, OutputLockStore},
     wallet::{
         TargetHeight,
         input_selection::{LockFilter, LockedInputPolicy},
     },
 };
+use zcash_client_backend::wallet::OutputRef;
 use zcash_keys::keys::UnifiedSpendingKey;
+use zcash_primitives::transaction::TxId;
 use zcash_primitives::transaction::builder::cached_orchard_proving_key;
-use zcash_protocol::{ShieldedPool, TxId, consensus::BlockHeight, value::Zatoshis};
+use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
 
 use crate::build::{AccountDerivation, sign_pczt};
 use crate::engine::{
-    MigrationBackend, MigrationCrypto, MigrationProver, MigrationState, MigrationTransaction,
-    MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite, ProveFailure,
+    MigrationBackend, MigrationCrypto, MigrationLockOwner, MigrationProver, MigrationState,
+    MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
+    PoolMigrationWrite, ProveFailure,
 };
 use crate::pczt_spends::RealSpendError;
 use crate::satisfiability::{ReorgSettleDepth, StepSatisfiability};
@@ -375,7 +379,7 @@ where
 /// error type ([`InputSource::Error`]); `RE` is its chain-state error type
 /// ([`WalletRead::Error`]).
 #[derive(Debug)]
-pub enum WalletProveError<TE, NE, RE> {
+pub enum WalletProveError<TE, NE, RE, LE> {
     /// The PCZT presents no well-formed set of deferred-witness Orchard spends, so it is not a
     /// deferred-anchor migration transaction awaiting proof. See [`RealSpendError`].
     RealSpends(RealSpendError),
@@ -417,15 +421,27 @@ pub enum WalletProveError<TE, NE, RE> {
     /// types and `pczt` does not export the Ironwood one, so the failure is carried as a labeled
     /// diagnostic string rather than a typed value.
     Prove(alloc::string::String),
+    /// Reserving the notes this transaction spends failed, so it did not become `Proved`.
+    ///
+    /// [`LockError::LockFailure`] is the interesting case: the named note is already locked by a
+    /// DIFFERENT owner, so another flow (typically a user payment proposed while this transaction
+    /// was being proved) has committed to spending it. That is a conflict this transaction cannot
+    /// win, because the notes it spends were fixed by its signature. It is not necessarily fatal:
+    /// the other flow may release its lock or let it expire without broadcasting, in which case a
+    /// later proving attempt succeeds. It IS fatal once the other flow's transaction mines, which
+    /// the next attempt reports as [`Self::UnknownSpentNote`].
+    Lock(LockError<LE>),
 }
 
-impl<TE, NE, RE> From<ShardTreeError<TE>> for WalletProveError<TE, NE, RE> {
+impl<TE, NE, RE, LE> From<ShardTreeError<TE>> for WalletProveError<TE, NE, RE, LE> {
     fn from(e: ShardTreeError<TE>) -> Self {
         WalletProveError::Tree(e)
     }
 }
 
-impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> fmt::Display for WalletProveError<TE, NE, RE> {
+impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug, LE: fmt::Debug> fmt::Display
+    for WalletProveError<TE, NE, RE, LE>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WalletProveError::RealSpends(e) => {
@@ -474,12 +490,18 @@ impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> fmt::Display for WalletProv
             WalletProveError::Anchor(e) => write!(f, "installing an anchor failed: {e:?}"),
             WalletProveError::Witness(e) => write!(f, "installing a spend witness failed: {e:?}"),
             WalletProveError::Prove(msg) => write!(f, "creating a bundle proof failed: {msg}"),
+            WalletProveError::Lock(e) => {
+                write!(
+                    f,
+                    "reserving the notes this transaction spends failed: {e:?}"
+                )
+            }
         }
     }
 }
 
-impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug> core::error::Error
-    for WalletProveError<TE, NE, RE>
+impl<TE: fmt::Debug, NE: fmt::Debug, RE: fmt::Debug, LE: fmt::Debug> core::error::Error
+    for WalletProveError<TE, NE, RE, LE>
 {
 }
 
@@ -489,6 +511,7 @@ type ProverError<W> = WalletProveError<
     <W as WalletCommitmentTrees>::Error,
     <W as InputSource>::Error,
     <W as WalletRead>::Error,
+    <W as OutputLockStore>::Error,
 >;
 
 /// A wallet-backed prover for migration transactions: the mutable counterpart to [`WalletMigration`].
@@ -514,6 +537,57 @@ where
     fvk: FullViewingKey,
 }
 
+/// One deferred-witness Orchard spend of a migration transaction, resolved against the account's
+/// unspent notes: which action it is, where the note sits in the commitment tree (to witness it),
+/// and how the wallet refers to the note (to lock it).
+struct ResolvedSpend {
+    /// The index of the Orchard action this spend belongs to, as the PCZT `Updater` role addresses
+    /// it when installing the witness.
+    action_index: usize,
+    /// The spent note's position in the Orchard note commitment tree.
+    position: Position,
+    /// The spent note as the wallet's lock tables key it: the output its creating transaction
+    /// produced.
+    output: OutputRef,
+}
+
+/// The BLAKE2b personalization for [`migration_lock_owner`]. Sixteen bytes, as BLAKE2b requires.
+const LOCK_OWNER_PERSONALIZATION: &[u8; 16] = b"ZcashMigLockOwnr";
+
+/// Derive the lock-owner token for a migration transaction from the notes it spends.
+///
+/// The token is the BLAKE2b-256 hash of the transaction's spent-note references, sorted so the
+/// result does not depend on action order. Deriving it rather than drawing it at random makes it
+/// RECOVERABLE: the notes a transaction spends are fixed once it is signed, so a wallet that
+/// crashed between taking the locks and persisting the token can re-derive exactly the same token
+/// from the stored PCZT and release them. A random token would be lost with the crash, stranding
+/// the reservation until the lock expiry passed or the account's locks were cleared wholesale.
+///
+/// Distinct migration transactions spend disjoint note sets (each funding note is spent once), so
+/// distinct transactions get distinct tokens; and a 256-bit hash will not collide with the random
+/// tokens other flows use.
+fn migration_lock_owner(spends: &[ResolvedSpend]) -> MigrationLockOwner {
+    let mut refs: Vec<(TxId, u32)> = spends
+        .iter()
+        .map(|s| (*s.output.txid(), s.output.output_index()))
+        .collect();
+    refs.sort_unstable();
+    refs.dedup();
+
+    let mut hasher = blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(LOCK_OWNER_PERSONALIZATION)
+        .to_state();
+    for (txid, output_index) in refs {
+        hasher.update(txid.as_ref());
+        hasher.update(&output_index.to_le_bytes());
+    }
+
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(hasher.finalize().as_bytes());
+    MigrationLockOwner::from_bytes(bytes)
+}
+
 impl<'a, W> WalletMigrationProver<'a, W>
 where
     W: InputSource,
@@ -536,7 +610,7 @@ where
 
 impl<'a, W> WalletMigrationProver<'a, W>
 where
-    W: WalletCommitmentTrees + InputSource + WalletRead,
+    W: WalletCommitmentTrees + InputSource + WalletRead + OutputLockStore,
     <W as InputSource>::AccountId: Copy,
 {
     /// Prove one migration transaction's Orchard bundle (and its Ironwood bundle, when it has one)
@@ -550,22 +624,31 @@ where
     /// the wallet's standard note-selection target height (the chain tip, from
     /// [`WalletRead::get_target_and_anchor_heights`]), so a note already spent by a mined migration
     /// transaction is excluded from the candidate set.
-    fn prove_orchard(
-        &mut self,
-        pczt: ::pczt::Pczt,
-        anchor_height: BlockHeight,
-    ) -> Result<::pczt::Pczt, ProverError<W>> {
+    /// Locate every deferred-witness Orchard spend of `pczt` among the account's unspent notes.
+    ///
+    /// Each such spend reveals a nullifier; recomputing every unspent note's nullifier under the
+    /// account's full viewing key identifies which note it spends, yielding both the tree position
+    /// the witness is taken at and the reference the wallet locks the note by. Shared by
+    /// [`prove_orchard`](Self::prove_orchard) and
+    /// [`lock_spent_notes`](MigrationProver::lock_spent_notes), which need the two halves of the
+    /// same lookup.
+    ///
+    /// Notes are selected at the wallet's standard note-selection target height (the chain tip,
+    /// from [`WalletRead::get_target_and_anchor_heights`]), so a note already spent by a mined
+    /// migration transaction is excluded from the candidate set and its spend is reported as
+    /// [`WalletProveError::UnknownSpentNote`] rather than silently resolved. Only the target is
+    /// needed; `min_confirmations` bounds only the (unused) anchor height, so the minimum is
+    /// passed to avoid a spurious absence near genesis.
+    ///
+    /// Lock state is deliberately NOT filtered ([`LockFilter::Unfiltered`]): this resolves notes
+    /// the transaction already commits to spending rather than choosing new ones, so a note locked
+    /// by this very transaction's earlier proof attempt, or by any other flow, must still be found.
+    fn resolve_spends(&self, pczt: &::pczt::Pczt) -> Result<Vec<ResolvedSpend>, ProverError<W>> {
         // Every Orchard action whose witness is still deferred is a real spend to witness; the padded
         // dummy spends keep their (arbitrary) witnesses from build time (ZIP 374).
-        let real_spends: Vec<(usize, Nullifier)> = crate::pczt_spends::real_spend_nullifiers(&pczt)
+        let real_spends: Vec<(usize, Nullifier)> = crate::pczt_spends::real_spend_nullifiers(pczt)
             .map_err(WalletProveError::RealSpends)?;
 
-        // Locate each spend in the wallet's note store: map every unspent Orchard note's nullifier
-        // (recomputed under the account FVK) to its commitment-tree position, then look up each spend.
-        // Select notes at the wallet's standard note-selection target height (the chain tip), not the
-        // witness anchor, so a note already spent by a mined migration transaction is excluded from
-        // consideration. Only the target is needed here; `min_confirmations` bounds only the (unused)
-        // anchor height, so the minimum is passed to avoid a spurious absence near genesis.
         let (target, _anchor) = self
             .wallet
             .get_target_and_anchor_heights(NonZeroU32::MIN)
@@ -581,25 +664,47 @@ where
                 LockFilter::Unfiltered,
             )
             .map_err(WalletProveError::Notes)?;
-        let positions: BTreeMap<Nullifier, Position> = received
+        let by_nullifier: BTreeMap<Nullifier, (Position, OutputRef)> = received
             .orchard()
             .iter()
             .map(|rn| {
+                let output = OutputRef::new(
+                    *rn.txid(),
+                    PoolType::Shielded(ShieldedPool::Orchard),
+                    rn.output_index().into(),
+                );
                 (
                     rn.note().nullifier(&self.fvk),
-                    rn.note_commitment_tree_position(),
+                    (rn.note_commitment_tree_position(), output),
                 )
             })
             .collect();
-        let spend_positions: Vec<(usize, Position)> = real_spends
+
+        real_spends
             .iter()
-            .map(|(index, nf)| {
-                positions
+            .map(|(action_index, nf)| {
+                by_nullifier
                     .get(nf)
-                    .map(|pos| (*index, *pos))
+                    .map(|(position, output)| ResolvedSpend {
+                        action_index: *action_index,
+                        position: *position,
+                        output: *output,
+                    })
                     .ok_or(WalletProveError::UnknownSpentNote(*nf))
             })
-            .collect::<Result<_, _>>()?;
+            .collect()
+    }
+
+    fn prove_orchard(
+        &mut self,
+        pczt: ::pczt::Pczt,
+        anchor_height: BlockHeight,
+    ) -> Result<::pczt::Pczt, ProverError<W>> {
+        let spend_positions: Vec<(usize, Position)> = self
+            .resolve_spends(&pczt)?
+            .into_iter()
+            .map(|s| (s.action_index, s.position))
+            .collect();
 
         // A transfer carries an Ironwood output bundle; a preparation transaction is Orchard-only.
         let has_ironwood = !pczt.ironwood().actions().is_empty();
@@ -726,7 +831,7 @@ where
 
 impl<'a, W> MigrationProver for WalletMigrationProver<'a, W>
 where
-    W: WalletCommitmentTrees + InputSource + WalletRead,
+    W: WalletCommitmentTrees + InputSource + WalletRead + OutputLockStore,
     <W as InputSource>::AccountId: Copy,
 {
     type Error = ProverError<W>;
@@ -752,6 +857,40 @@ where
     /// (by then pruned) checkpoint is looked up.
     fn anchor_bucket_interval(&self) -> AnchorBucketInterval {
         self.wallet.anchor_retention_interval()
+    }
+
+    /// Lock the account's notes that this proven transaction spends, under a token derived from
+    /// those very notes, until `lock_expiry_height`.
+    ///
+    /// Locking is all-or-nothing at the storage layer, and re-locking under the same owner is
+    /// idempotent, so re-proving a transaction (after a crash, or a rebuild that reuses the same
+    /// funding note) simply extends its own locks rather than failing.
+    ///
+    /// A note already locked by a DIFFERENT owner means another flow has committed to spending it,
+    /// most likely a user payment created while this transaction was being proved. That is a real
+    /// conflict this transaction cannot win: the notes it spends are fixed by its signature, so
+    /// the failure is surfaced as [`WalletProveError::Lock`] and the transaction stays
+    /// `Signed`. The proof just computed is discarded, which is the correct trade: the user's
+    /// payment takes precedence, and a proof over a note the wallet has promised elsewhere is
+    /// worth nothing.
+    fn lock_spent_notes(
+        &mut self,
+        pczt: &::pczt::Pczt,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<Option<MigrationLockOwner>, Self::Error> {
+        let spends = self.resolve_spends(pczt)?;
+        let owner = migration_lock_owner(&spends);
+        let outputs: Vec<OutputRef> = spends.iter().map(|s| s.output).collect();
+
+        self.wallet
+            .lock_outputs(
+                &outputs,
+                LockOwner::new(*owner.as_bytes()),
+                lock_expiry_height,
+            )
+            .map_err(WalletProveError::Lock)?;
+
+        Ok(Some(owner))
     }
 }
 

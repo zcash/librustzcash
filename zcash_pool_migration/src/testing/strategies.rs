@@ -17,8 +17,8 @@ use zcash_protocol::value::testing::arb_zatoshis;
 
 use crate::denomination::DenominationPlan;
 use crate::engine::{
-    MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId, MigrationTxKind,
-    MigrationTxState,
+    MigrationLockOwner, MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
+    MigrationTxKind, MigrationTxState,
 };
 use crate::preparation::{PrepInput, PrepOutput, PrepTransaction, PreparationPlan};
 use crate::satisfiability::{ReplanThreshold, UnsatisfiableKind};
@@ -166,11 +166,9 @@ pub fn arb_migration_status() -> impl Strategy<Value = MigrationStatus> {
     ]
 }
 
-/// An arbitrary lock-owner token: `None` (no lock held) or the raw bytes of a
-/// `zcash_client_backend::wallet::LockOwner` (opaque here — this crate does not depend on
-/// `zcash_client_backend`).
-pub fn arb_lock_owner() -> impl Strategy<Value = Option<[u8; 32]>> {
-    prop::option::of(any::<[u8; 32]>())
+/// An arbitrary lock-owner token: `None` (no lock held) or an arbitrary [`MigrationLockOwner`].
+pub fn arb_lock_owner() -> impl Strategy<Value = Option<MigrationLockOwner>> {
+    prop::option::of(any::<[u8; 32]>().prop_map(MigrationLockOwner::from_bytes))
 }
 
 /// An arbitrary lifecycle state paired with a real-spend nullifier cache the state ADMITS.

@@ -237,20 +237,21 @@ pub trait PoolMigrationWrite: PoolMigrationRead {
     ///
     /// From the moment the proof exists, the transaction is FULLY CONSTRUCTED: its PCZT carries
     /// both signatures (installed at commit) and proofs, and extracting the broadcastable
-    /// `Transaction` from it is purely mechanical. This method is where a backend makes the
-    /// wallet aware of that fact. An implementation over a wallet database MUST, atomically with
-    /// recording the proof in the migration store, finalize the transaction and persist it to
-    /// the wallet's own transaction store — the record `store_transactions_to_be_sent` writes
-    /// for the standard spend flows: the raw transaction, its outputs, and its input notes
-    /// marked spent, so the wallet's own later spends cannot consume a migration input during
-    /// the (deliberately long, for a scheduled transfer) window between proving and broadcast.
-    /// A store with no wallet-level transaction records (a mock, or a store deferring the wallet
-    /// side elsewhere) applies the proof and persists the migration state alone:
+    /// `Transaction` from it is purely mechanical. Every implementation does the same two things
+    /// and nothing else: apply the proof to `state` with [`ProvedTransaction::apply`], then
+    /// persist it with [`replace_migration`](Self::replace_migration).
     ///
-    /// ```ignore
-    /// proven.apply(state);
-    /// self.replace_migration(state)
-    /// ```
+    /// Deliberately NOT here: any record in the wallet's own transaction store. A
+    /// proved-but-unbroadcast transaction is in no mempool and is scheduled future intent, not
+    /// in-flight outgoing intent, so recording it wallet-side at prove would freeze its input
+    /// notes out of the user's balance for the whole prove-to-broadcast window — days to weeks
+    /// on the ZIP 318 schedule — in violation of the rule that the user always has full access
+    /// to their funds. The prove-to-broadcast reservation is the ADVISORY lock taken by
+    /// [`MigrationProver::lock_spent_notes`] (overridable, expiring with the transaction), and
+    /// the wallet-side record is written by the store's own broadcast seam, atomically with
+    /// handing the broadcastable bytes out (for `zcash_client_sqlite`, its
+    /// `take_transaction_for_broadcast`), which is also the moment its transaction-status
+    /// retrieval may begin without disclosing a never-broadcast txid.
     ///
     /// On an error the proof is lost with the value and `state` may or may not carry it (an
     /// implementation applies it before writing); the caller should re-read the migration from
@@ -399,6 +400,47 @@ pub enum MigrationTxState {
     Mined { txid: TxId, height: BlockHeight },
 }
 
+/// The opaque token identifying the holder of the wallet-side locks on a migration transaction's
+/// input notes.
+///
+/// This is the engine's mirror of `zcash_client_backend::wallet::LockOwner`, carried as its own
+/// type because this pool-agnostic engine must not depend on `zcash_client_backend` (only
+/// `wallet`-feature code does). The two are byte-identical and round-trip through
+/// [`from_bytes`](Self::from_bytes) / [`as_bytes`](Self::as_bytes); a wallet adapter converts at
+/// that boundary, and a store persists the bytes.
+///
+/// The token is not a secret: anything that can read the wallet database can read it. It exists so
+/// that one flow cannot release, or accidentally reuse, another's reservation, and so that a
+/// wallet can name the migration's own locks when it deliberately spends through them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MigrationLockOwner([u8; 32]);
+
+impl MigrationLockOwner {
+    /// Wrap raw token bytes, for a store reading a persisted lock owner back or a wallet adapter
+    /// converting from its own lock-owner type.
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// The raw token bytes, for a store persisting the lock owner or a wallet adapter converting to
+    /// its own lock-owner type.
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl From<[u8; 32]> for MigrationLockOwner {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self::from_bytes(bytes)
+    }
+}
+
+impl From<MigrationLockOwner> for [u8; 32] {
+    fn from(owner: MigrationLockOwner) -> Self {
+        owner.0
+    }
+}
+
 /// One transaction of a committed migration: its pre-signed PCZT plus the metadata the consuming
 /// application needs to prove it against a fresh anchor, wait for its dependencies, broadcast it at
 /// its scheduled height, and track its state.
@@ -508,11 +550,15 @@ pub struct MigrationTransaction {
     /// `LockOwner::new()` round-trip) — carried here as an opaque `[u8; 32]` rather than the typed
     /// `LockOwner` because this `orchard`-gated engine module must not depend on
     /// `zcash_client_backend` (only `wallet`-feature code does); the conversion to/from `LockOwner`
-    /// happens at that boundary, not here. The migration flow does not yet acquire locks, so every
-    /// transaction the engine itself builds carries `None`; a store still round-trips whatever a
-    /// caller sets.
+    /// happens at that boundary, not here.
+    ///
+    /// Set when the transaction is PROVED: [`prove_transfer`] and [`prove_preparation`] ask the
+    /// prover to lock the notes the transaction spends ([`MigrationProver::lock_spent_notes`]) and
+    /// record the token it returns here, so a transaction holds a lock exactly while it is proved
+    /// and awaiting broadcast. A transaction that is merely built and signed carries `None`, as
+    /// does one proved by a prover that models no lock state.
     #[getset(get_copy = "pub")]
-    pub(crate) lock_owner: Option<[u8; 32]>,
+    pub(crate) lock_owner: Option<MigrationLockOwner>,
 }
 
 impl MigrationTransaction {
@@ -557,7 +603,7 @@ impl MigrationTransaction {
         anchor_boundary: Option<BlockHeight>,
         txid: TxId,
         state: MigrationTxState,
-        lock_owner: Option<[u8; 32]>,
+        lock_owner: Option<MigrationLockOwner>,
         unsatisfiable: Option<(BlockHeight, UnsatisfiableKind)>,
         spend_nullifiers: Vec<[u8; 32]>,
         broadcast_failure_at: Option<BlockHeight>,
@@ -876,18 +922,30 @@ impl MigrationState {
             .and_then(|crossing| self.crossing_values().get(crossing).copied())
     }
 
-    /// Replace transaction `id`'s stored PCZT with its proven bytes and move it to
-    /// [`Proved`](MigrationTxState::Proved), so the artifact becomes the proven,
-    /// ready-to-broadcast PCZT.
+    /// Replace transaction `id`'s stored PCZT with its proven bytes, record the lock owner its
+    /// spent notes were reserved under, and move it to [`Proved`](MigrationTxState::Proved), so
+    /// the artifact becomes the proven, ready-to-broadcast PCZT together with the token that
+    /// releases its reservation.
     ///
     /// In the production flow this is reached only through [`ProvedTransaction::apply`], inside
     /// [`PoolMigrationWrite::store_proved_transaction`]: the proof travels from the prove step to
     /// the store as a value, and the state records it in the same act that persists it.
-    pub fn set_transaction_proved(&mut self, id: MigrationTransferId, proven_pczt: Vec<u8>) {
+    ///
+    /// `lock_owner` is `None` when the prover took no locks (see
+    /// [`MigrationProver::lock_spent_notes`]). It is recorded in the same pass as the proven bytes
+    /// so a store write persists the artifact and its lock token together: a caller that persists
+    /// after proving can never end up with a proved transaction whose locks it can no longer name.
+    pub fn set_transaction_proved(
+        &mut self,
+        id: MigrationTransferId,
+        proven_pczt: Vec<u8>,
+        lock_owner: Option<MigrationLockOwner>,
+    ) {
         for tx in &mut self.transactions {
             if tx.id() == id {
                 tx.pczt = proven_pczt;
                 tx.state = MigrationTxState::Proved;
+                tx.lock_owner = lock_owner;
                 break;
             }
         }
@@ -1674,7 +1732,7 @@ pub enum ProveOutcome {
 
 /// A successfully proved migration transaction awaiting its persistence: the proven PCZT — now
 /// carrying both signatures (installed at commit) and proofs, ready to broadcast — together with
-/// the id of the row it belongs to.
+/// the id of the row it belongs to and the token its spent notes were reserved under.
 ///
 /// Only a successful [`prove_transfer`] / [`prove_preparation`] produces one, and only
 /// [`PoolMigrationWrite::store_proved_transaction`] consumes one (through
@@ -1691,6 +1749,7 @@ pub enum ProveOutcome {
 pub struct ProvedTransaction {
     id: MigrationTransferId,
     pczt: Vec<u8>,
+    lock_owner: Option<MigrationLockOwner>,
 }
 
 impl ProvedTransaction {
@@ -1704,12 +1763,23 @@ impl ProvedTransaction {
         &self.pczt
     }
 
-    /// Record this proof on `state`: the proven PCZT replaces the stored bytes and the
-    /// transaction becomes [`Proved`](MigrationTxState::Proved). This is the sole consumer of
-    /// the value, called by [`PoolMigrationWrite::store_proved_transaction`] implementations on
-    /// the state they are about to persist.
+    /// The token the transaction's spent notes were reserved under at proving
+    /// ([`MigrationProver::lock_spent_notes`]), or `None` when the prover models no lock state.
+    ///
+    /// Carried with the proof so the artifact and its reservation are recorded — and persisted —
+    /// in the same act: a caller that persists after proving can never end up with a proved
+    /// transaction whose locks it can no longer name.
+    pub fn lock_owner(&self) -> Option<MigrationLockOwner> {
+        self.lock_owner
+    }
+
+    /// Record this proof on `state`: the proven PCZT replaces the stored bytes, the lock-owner
+    /// token is recorded beside it, and the transaction becomes
+    /// [`Proved`](MigrationTxState::Proved). This is the sole consumer of the value, called by
+    /// [`PoolMigrationWrite::store_proved_transaction`] implementations on the state they are
+    /// about to persist.
     pub fn apply(self, state: &mut MigrationState) {
-        state.set_transaction_proved(self.id, self.pczt);
+        state.set_transaction_proved(self.id, self.pczt, self.lock_owner);
     }
 
     /// Reassemble a proved transaction from its parts, for exercising a store's
@@ -1718,7 +1788,11 @@ impl ProvedTransaction {
     /// from [`prove_transfer`] / [`prove_preparation`].
     #[cfg(any(test, feature = "test-dependencies"))]
     pub fn from_parts(id: MigrationTransferId, pczt: Vec<u8>) -> Self {
-        Self { id, pczt }
+        Self {
+            id,
+            pczt,
+            lock_owner: None,
+        }
     }
 }
 
@@ -1798,6 +1872,44 @@ pub trait MigrationProver {
     /// mid-migration surfaces as [`ProveError::AnchorIntervalMismatch`] rather than as a bare
     /// missing checkpoint at witness-resolution time.
     fn anchor_bucket_interval(&self) -> crate::scheduling::AnchorBucketInterval;
+
+    /// Lock, on the wallet side, the notes `pczt` spends, so that ordinary note selection does not
+    /// hand them to another transaction while this one is proved and awaiting broadcast.
+    ///
+    /// [`prove_transfer`] and [`prove_preparation`] call this once the proof succeeds and record
+    /// the returned token on the transaction, so the window in which the locks are held is exactly
+    /// the window in which a broadcastable artifact exists that nothing else has yet invalidated:
+    /// a `Signed` transaction still has no proof and may never acquire one, and a `Broadcast` one
+    /// has already claimed its notes on the network.
+    ///
+    /// `pczt` is the transaction as STORED, with its witnesses still deferred, not the proven one
+    /// returned by the prove call. The two commit to the same spends, but an implementation that
+    /// picks out the real (non-padding) spends by their absent witnesses can only do so before
+    /// proving installs them.
+    ///
+    /// `lock_expiry_height` is the transaction's own
+    /// [`expiry_height`](MigrationTransaction::expiry_height): the notes are reserved for exactly
+    /// as long as the transaction that spends them can still be mined (ZIP 203), so a migration
+    /// that dies unbroadcast releases its claim on its own rather than stranding the balance.
+    ///
+    /// The locks are ADVISORY, which is what keeps the user in control: excluding them is only the
+    /// DEFAULT of note selection, and a wallet that wants to spend the migration's notes anyway
+    /// passes an owner-scoped override naming these tokens. The user is never blocked from
+    /// spending by a migration in flight; they are only steered away from it by default. The
+    /// migration discovers such a spend at its next prove or broadcast rather than being consulted
+    /// about it.
+    ///
+    /// Returns the opaque owner token the locks were taken under, recorded on the transaction as
+    /// [`MigrationTransaction::lock_owner`] so that a later cancel, or a restart, can release
+    /// exactly these locks. An implementation over a wallet that models no lock state (a test
+    /// mock, or a signing-only backend) returns `None`, and must do so deliberately: there is no
+    /// default, because silently taking no locks would leave a prover's migration inputs
+    /// spendable out from under it with nothing at the type level to say so.
+    fn lock_spent_notes(
+        &mut self,
+        pczt: &pczt::Pczt,
+        lock_expiry_height: BlockHeight,
+    ) -> Result<Option<MigrationLockOwner>, Self::Error>;
 }
 
 /// Why committing a migration's preparation failed.
@@ -2121,7 +2233,14 @@ where
         _ => None,
     };
 
+    // Read before the PCZT parse ends the borrow of `tx`: the locks on the spent notes live
+    // exactly as long as the transaction that spends them can still be mined.
+    let lock_expiry_height = tx.expiry_height();
+
     let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
+    // Retained for the lock step below: proving installs the spend witnesses, which is exactly the
+    // marker `lock_spent_notes` reads to tell a real spend from a padding dummy.
+    let unproven = pczt.clone();
     let anchor_boundary = if let Some(fresh) = new_anchor_boundary {
         state.set_transfer_anchor_boundary(id, fresh);
         fresh
@@ -2131,8 +2250,19 @@ where
 
     match prover.prove_transfer(pczt, anchor_boundary) {
         Ok(proven) => {
+            // The reservation is taken only once a broadcastable artifact exists: a proof that
+            // fails takes no locks, and a lock that fails (a rival owner: another flow committed
+            // to one of these notes first) discards the proof and leaves the transaction
+            // `Signed`.
+            let lock_owner = prover
+                .lock_spent_notes(&unproven, lock_expiry_height)
+                .map_err(ProveError::Prover)?;
             let bytes = proven.serialize().map_err(ProveError::Serialize)?;
-            Ok(ProveOutcome::Proved(ProvedTransaction { id, pczt: bytes }))
+            Ok(ProveOutcome::Proved(ProvedTransaction {
+                id,
+                pczt: bytes,
+                lock_owner,
+            }))
         }
         Err(ProveFailure::InputNotAvailable { nullifier, as_of }) => {
             Ok(interpret_input_not_available(state, id, nullifier, as_of))
@@ -2252,11 +2382,29 @@ where
         return Err(ProveError::NotReady(id));
     }
 
+    // Read before the PCZT parse ends the borrow of `tx`: the locks on the spent notes live exactly
+    // as long as the preparation that spends them can still be mined.
+    let lock_expiry_height = tx.expiry_height();
+
     let pczt = pczt::Pczt::parse(tx.pczt()).map_err(ProveError::Parse)?;
+    // Retained for the lock step below: proving installs the spend witnesses, which is exactly the
+    // marker `lock_spent_notes` reads to tell a real spend from a padding dummy.
+    let unproven = pczt.clone();
     match prover.prove_preparation(pczt, anchor) {
         Ok(proven) => {
+            // The reservation is taken only once a broadcastable artifact exists: a proof that
+            // fails takes no locks, and a lock that fails (a rival owner: another flow committed
+            // to one of these notes first) discards the proof and leaves the transaction
+            // `Signed`.
+            let lock_owner = prover
+                .lock_spent_notes(&unproven, lock_expiry_height)
+                .map_err(ProveError::Prover)?;
             let bytes = proven.serialize().map_err(ProveError::Serialize)?;
-            Ok(ProveOutcome::Proved(ProvedTransaction { id, pczt: bytes }))
+            Ok(ProveOutcome::Proved(ProvedTransaction {
+                id,
+                pczt: bytes,
+                lock_owner,
+            }))
         }
         Err(ProveFailure::InputNotAvailable { nullifier, as_of }) => {
             Ok(interpret_input_not_available(state, id, nullifier, as_of))
@@ -2487,7 +2635,7 @@ where
 }
 
 /// Shared body of [`rebuild_expired_transfer`] (with [`Signing::InProcess`]) and
-/// [`rebuild_expired_transfer_unsigned`] (with [`Signing::External`]). Returns the
+/// [`rebuild_expired_transfer_unsigned`] (which defers signing to an external signer). Returns the
 /// [`UnsignedMigrationTx`] for the external path, `None` for the in-process path.
 #[cfg(feature = "orchard")]
 fn rebuild_expired_transfer_inner<P, B, R>(
@@ -4436,6 +4584,17 @@ mod commit_tests {
             // tests exercise.
             Ok(install_stand_in_witnesses(pczt))
         }
+
+        /// This mock models no note-lock state, so it reserves nothing and reports no owner; a
+        /// transaction it proves therefore carries `lock_owner == None`. The prove-step tests
+        /// below exercise the engine's orchestration, not the reservation.
+        fn lock_spent_notes(
+            &mut self,
+            _pczt: &pczt::Pczt,
+            _lock_expiry_height: BlockHeight,
+        ) -> Result<Option<MigrationLockOwner>, Self::Error> {
+            Ok(None)
+        }
     }
 
     /// A planned single-note migration and the mock wallet that holds the note.
@@ -6197,6 +6356,16 @@ mod commit_tests {
 
         fn anchor_bucket_interval(&self) -> crate::scheduling::AnchorBucketInterval {
             crate::scheduling::SchedulingParams::ZIP_318.anchor_bucket_interval()
+        }
+
+        /// Never reached: every prove call above fails first, which is precisely the ordering
+        /// these tests pin — a failed proof takes no locks.
+        fn lock_spent_notes(
+            &mut self,
+            _pczt: &pczt::Pczt,
+            _lock_expiry_height: BlockHeight,
+        ) -> Result<Option<MigrationLockOwner>, Self::Error> {
+            Ok(None)
         }
     }
 
