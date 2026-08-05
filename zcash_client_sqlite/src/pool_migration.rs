@@ -87,7 +87,7 @@ mod store;
 pub mod orchard_ironwood;
 
 use uuid::Uuid;
-use zcash_pool_migration::engine::MigrationStatus;
+use zcash_pool_migration::engine::{MigrationStatus, MigrationTransferId};
 use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 
 /// The stable external identity of one pool-migration record, following the
@@ -193,5 +193,38 @@ impl MigrationSummary {
     /// whose transfer has been observed mined.
     pub fn value_migrated(&self) -> Zatoshis {
         self.value_migrated
+    }
+}
+
+/// What a [`cancel_migration`](orchard_ironwood::PoolMigrations::cancel_migration) call found and
+/// did, transaction by transaction: cancel is honest about what it cannot undo, so it SUCCEEDS
+/// and reports rather than refusing once something is in flight (refusal would reintroduce the
+/// stuck state cancel exists to remove).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CancelOutcome {
+    pub(crate) in_flight: Vec<MigrationTransferId>,
+    pub(crate) mined: Vec<MigrationTransferId>,
+    pub(crate) released: Vec<MigrationTransferId>,
+}
+
+impl CancelOutcome {
+    /// Transactions already BROADCAST when cancel ran: they cannot be recalled, and coins may
+    /// still land. Their wallet-side records (spend marks included) are untouched — a mempool may
+    /// mine them whatever the wallet does next — and their inclusion or expiry plays out on
+    /// chain. A UI renders these as "N transactions are already on their way".
+    pub fn in_flight(&self) -> &[MigrationTransferId] {
+        &self.in_flight
+    }
+
+    /// Transactions already MINED: part of chain history, reported for completeness.
+    pub fn mined(&self) -> &[MigrationTransferId] {
+        &self.mined
+    }
+
+    /// Never-broadcast transactions whose note reservations were released: their advisory locks
+    /// are cleared, so the notes they would have spent return to DEFAULT note selection
+    /// immediately rather than at lock expiry.
+    pub fn released(&self) -> &[MigrationTransferId] {
+        &self.released
     }
 }

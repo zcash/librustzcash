@@ -1773,6 +1773,155 @@ fn proving_refuses_to_take_a_note_another_flow_has_reserved() {
     );
 }
 
+/// The whole cancel affordance, end to end against a funded wallet: a committed-and-proved
+/// migration is cancelled at the user's request, its reservation is released so the account's
+/// notes return to DEFAULT selection immediately, the record is terminal-but-retained, and a
+/// replacement migration plans over the FULL spendable balance — the assertion that fails for
+/// the wrong reason if any cleanup is skipped (a plan over a shrunken balance still "succeeds").
+#[test]
+#[cfg_attr(
+    feature = "ignore-expensive-tests",
+    ignore = "covered by the expensive-test CI matrix"
+)]
+fn cancel_returns_the_balance_and_retains_the_record() {
+    let scenario = scenario_named(SMALLEST);
+    let mut run = Run::setup(&scenario);
+    let mut committed = run.plan_and_commit(&scenario);
+
+    // Prove the (single) preparation, taking the reservation on the account's only note.
+    let prep_id = committed
+        .state
+        .transactions()
+        .iter()
+        .find(|t| matches!(t.kind(), MigrationTxKind::Preparation { .. }))
+        .expect("the migration has a preparation transaction")
+        .id();
+    let account_id = run.account_id;
+    let anchor = {
+        let tip = run
+            .st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+        highest_rooted_orchard_checkpoint(run.st.wallet_mut(), tip)
+            .expect("a rooted Orchard checkpoint exists")
+    };
+    let outcome = {
+        let mut prover =
+            WalletMigrationProver::new(run.st.wallet_mut(), account_id, run.fvk.clone());
+        engine::prove_preparation(&mut prover, &mut committed.state, prep_id, anchor)
+            .expect("proves the preparation transaction")
+    };
+    let engine::ProveOutcome::Proved(proven) = outcome else {
+        panic!("expected a proof, got {outcome:?}");
+    };
+    run.store()
+        .store_proved_transaction(&mut committed.state, proven)
+        .expect("records the proof");
+    assert!(
+        !run.st
+            .wallet()
+            .get_locked_outputs(account_id)
+            .expect("reads the locked outputs")
+            .is_empty(),
+        "premise: the proved preparation holds a reservation"
+    );
+
+    // CANCEL. One call: reservations released, record terminal, outcome reported.
+    let outcome = run.store().cancel_migration().expect("cancel succeeds");
+    let never_broadcast: Vec<_> = committed
+        .state
+        .transactions()
+        .iter()
+        .map(|t| t.id())
+        .collect();
+    assert_eq!(
+        outcome.released(),
+        never_broadcast.as_slice(),
+        "every never-broadcast transaction — the proved preparation and the still-signed \
+         transfer alike — is released"
+    );
+    assert!(outcome.in_flight().is_empty());
+
+    // The reservation is gone NOW — not at lock expiry — so default selection sees every note.
+    assert!(
+        run.st
+            .wallet()
+            .get_locked_outputs(account_id)
+            .expect("reads the locked outputs")
+            .is_empty(),
+        "cancel released the reservation"
+    );
+    let target = {
+        let tip = run
+            .st
+            .wallet()
+            .chain_height()
+            .expect("reads the chain height")
+            .expect("the wallet has a chain tip");
+        TargetHeight::from(u32::from(tip) + 1)
+    };
+    let default_selectable: u64 = run
+        .st
+        .wallet()
+        .select_unspent_notes(
+            account_id,
+            &[ShieldedPool::Orchard],
+            target,
+            &[],
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .expect("selects under the DEFAULT lock policy")
+        .orchard()
+        .iter()
+        .map(|note| note.note().value().inner())
+        .sum();
+    assert!(
+        default_selectable > 0,
+        "the account's notes are back in default selection"
+    );
+
+    // The record is terminal-but-retained; the drive read has moved on.
+    {
+        let store = run.store();
+        assert_eq!(store.get_migration().expect("read"), None);
+        assert_eq!(
+            store
+                .latest_migration()
+                .expect("history reads back")
+                .map(|s| s.status()),
+            Some(MigrationStatus::Cancelled),
+        );
+    }
+
+    // A replacement migration plans over the FULL balance — not a shrunken one. Planning reads
+    // the wallet's spendable notes, so this is the assertion that fails for the wrong reason if
+    // any cleanup were skipped: a plan over a shrunken balance still "succeeds".
+    let migratable = {
+        let stored = run.store().latest_migration().expect("history reads back");
+        let adapter = WalletMigration::new(
+            run.st.wallet(),
+            run.account_id,
+            run.usk.clone(),
+            MigrationTestStore::holding(stored),
+        );
+        let mut rng = ChaCha8Rng::seed_from_u64(0xCA);
+        let plan = engine::plan_migration(&run.network, &adapter, &mut rng)
+            .expect("a replacement migration plans over the released balance");
+        plan.denominations().total_migratable()
+    };
+    assert!(
+        migratable > Zatoshis::ZERO,
+        "the replacement plan migrates a nonzero balance"
+    );
+    assert_eq!(
+        migratable, scenario.expected_migrated,
+        "the replacement plan covers exactly what the original planned — the full balance, \
+         not the fraction a stranded reservation would leave"
+    );
+}
+
 /// The scenario the unsatisfiability machinery exists for: while a committed migration waits out
 /// its privacy schedule, the user spends the whole balance — a "send max" to an external address —
 /// consuming the very funding notes the pre-signed crossings were built to spend.

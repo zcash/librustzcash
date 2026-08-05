@@ -11,6 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `pool_migration::orchard_ironwood::PoolMigrations::cancel_migration` and
+  `pool_migration::CancelOutcome`: cancel the account's migration at the
+  user's request. Releases the note reservations of its never-broadcast
+  transactions (returning them to default note selection immediately), then
+  records the terminal `cancelled` status, without deserializing the migration
+  state — so it works on a record that no longer parses. Transactions already
+  broadcast cannot be recalled; the outcome reports them rather than refusing.
+  With no pending migration, only the repair half runs: the latest retained
+  record's reservations are released and its status is untouched.
 - `pool_migration::orchard_ironwood::PoolMigrations::take_transaction_for_broadcast`:
   finalizes a proved migration transaction, records it in the wallet's own
   transaction tables, and returns the broadcastable `Transaction`, in one
@@ -40,6 +49,11 @@ workspace.
   one in progress.
 
 ### Changed
+- Persisting a pool-migration state with any terminal status through
+  `replace_migration` now releases the note reservations held by its
+  never-broadcast transactions, in the same write: a migration superseded in
+  response to `Replan` (or marked failed or cancelled through the engine) no
+  longer strands its live transfers' locks until they expire.
 - Proving a migration transaction no longer writes it into the wallet's own
   transaction tables: `store_proved_transaction` records the proof in the
   migration store alone, and the wallet-side record (raw transaction, sent
