@@ -32,6 +32,12 @@ and this library adheres to Rust's notion of
   serviceable, assuming the returned step is executed.
 - `state::StepKind` and `state::AdvanceStep::kind`: an `AdvanceStep`'s variant
   without its payload.
+- `preparation::PreparationStrategy`.
+- `preparation::strategies::LayeredGreedy`, re-exported as
+  `preparation::LayeredGreedy`.
+- `preparation::PreparationPlan::is_valid`.
+- `preparation::PlanQuality`.
+- `preparation::best_plan`.
 
 ### Changed
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`

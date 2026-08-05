@@ -64,6 +64,10 @@ use zcash_protocol::value::Zatoshis;
 
 use core::fmt;
 
+pub mod strategies;
+
+pub use strategies::LayeredGreedy;
+
 /// The exact number of Orchard actions in every note-preparation transaction ([ZIP 318]): each is
 /// padded up to this count, so no preparation transaction is distinguishable from another by its
 /// action count, and one transaction handles at most this many notes in total (spends plus outputs).
@@ -281,6 +285,276 @@ impl PreparationPlan {
     pub fn residual_count(&self) -> usize {
         self.residual_notes().len()
     }
+
+    /// Whether this plan is a valid solution of the preparation problem for the given inputs: it
+    /// mints exactly the requested `funding` multiset, no transaction exceeds the
+    /// [`PREP_TX_ACTIONS`] budget, every transaction conserves value net of `fee_per_tx`, and every
+    /// note it spends exists, carries the value claimed for it, comes from a strictly earlier layer
+    /// when it is a [`PrepInput::Prior`], and is spent at most once.
+    ///
+    /// This is the certificate a plan carries with it. A portfolio ([`best_plan`]) checks it before
+    /// ranking, so a strategy cannot win by returning something cheaper-looking but unbuildable, and
+    /// a new [`PreparationStrategy`] inherits the check rather than restating it.
+    pub fn is_valid(
+        &self,
+        available: &[Zatoshis],
+        funding: &[Zatoshis],
+        fee_per_tx: Zatoshis,
+    ) -> bool {
+        // Mints exactly the requested funding notes, as a multiset. Zero-valued requests are
+        // dropped, matching `plan_preparation`, which never mints a note worth nothing.
+        let mut minted = self.funding_notes();
+        let mut requested: Vec<Zatoshis> = funding
+            .iter()
+            .copied()
+            .filter(|&v| v != Zatoshis::ZERO)
+            .collect();
+        minted.sort_unstable();
+        requested.sort_unstable();
+        if minted != requested {
+            return false;
+        }
+
+        let fee = u64::from(fee_per_tx);
+        // Which source notes and which earlier-layer outputs have been consumed, so a plan that
+        // spends one note twice is rejected rather than ranked.
+        let mut spent_source = vec![false; available.len()];
+        let mut spent_prior: Vec<(usize, usize, usize)> = Vec::new();
+
+        for (layer_index, layer) in self.layers.iter().enumerate() {
+            for tx in layer {
+                if tx.inputs.is_empty()
+                    || tx.outputs.is_empty()
+                    || tx.action_count() > PREP_TX_ACTIONS
+                {
+                    return false;
+                }
+                let inputs: u64 = tx.inputs.iter().map(|i| u64::from(i.value())).sum();
+                let outputs: u64 = tx.outputs.iter().map(|o| u64::from(o.value())).sum();
+                if inputs != outputs + fee {
+                    return false;
+                }
+                for input in &tx.inputs {
+                    match *input {
+                        PrepInput::Wallet { index, value } => {
+                            if available.get(index) != Some(&value) {
+                                return false;
+                            }
+                            if core::mem::replace(&mut spent_source[index], true) {
+                                return false;
+                            }
+                        }
+                        PrepInput::Prior {
+                            layer,
+                            transaction,
+                            output,
+                            value,
+                        } => {
+                            // A dependency must point strictly backwards, or the layers do not
+                            // describe a broadcast order at all.
+                            if layer >= layer_index {
+                                return false;
+                            }
+                            let produced = self
+                                .layers
+                                .get(layer)
+                                .and_then(|l| l.get(transaction))
+                                .and_then(|t| t.outputs.get(output));
+                            if produced.map(PrepOutput::value) != Some(value) {
+                                return false;
+                            }
+                            if spent_prior.contains(&(layer, transaction, output)) {
+                                return false;
+                            }
+                            spent_prior.push((layer, transaction, output));
+                        }
+                    }
+                }
+            }
+        }
+
+        // A note used directly as a funding note must exist, be worth the value claimed, and not
+        // also be spent by a transaction.
+        for &(index, value) in &self.direct_funding {
+            if available.get(index) != Some(&value) {
+                return false;
+            }
+            if core::mem::replace(&mut spent_source[index], true) {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+/// A rule for turning the wallet's source notes into the funding notes a migration run needs. The
+/// [module docs](self) state the problem it solves and why the general form is NP-hard; an
+/// implementation is one named solution of it, exactly as [`DenominationStrategy`] and
+/// [`SigningRoundStrategy`] are for their problems.
+///
+/// The trait is deliberately object-safe (no generic methods, no RNG), so a caller can hold a
+/// `&[&dyn PreparationStrategy]` and rank the plans they produce; see [`best_plan`].
+///
+/// An implementation must be a DETERMINISTIC function of its arguments. [`best_plan`] folds the
+/// strategies with a commutative, associative, idempotent join, which makes the portfolio's result
+/// independent of evaluation order and monotone as strategies are added — properties that hold only
+/// if each strategy is a function of the instance alone.
+///
+/// [`DenominationStrategy`]: crate::denomination::DenominationStrategy
+/// [`SigningRoundStrategy`]: crate::signing_rounds::SigningRoundStrategy
+pub trait PreparationStrategy {
+    /// A stable, human-readable name, used in diagnostics and recorded alongside a plan so a
+    /// migration that is resumed after the strategy set changed can say which rule produced it.
+    fn name(&self) -> &'static str;
+
+    /// Plan the transactions that mint `funding` from `available`, reserving `fee_per_tx` per
+    /// transaction. Same contract as [`plan_preparation`].
+    fn plan(
+        &self,
+        available: &[Zatoshis],
+        funding: &[Zatoshis],
+        fee_per_tx: Zatoshis,
+    ) -> Result<PreparationPlan, PrepError>;
+}
+
+/// How good a [`PreparationPlan`] is, as a TOTAL order: smaller is better.
+///
+/// The order belongs to the PROBLEM, not to any strategy. Were each strategy to rank its own
+/// output, the relation would lose transitivity and the fold in [`best_plan`] would depend on the
+/// order the strategies were listed in.
+///
+/// The fields are compared lexicographically, in the order the problem prioritises them:
+///
+/// 1. `layers`: the wall-clock depth. Layers are serialized (a later layer spends notes an earlier
+///    one must first have mined), so depth dominates how long a migration takes, and [ZIP 318] asks
+///    for transactions "with disjoint input notes wherever possible, so that the transactions can
+///    confirm in parallel rather than chaining through one another's outputs".
+/// 2. `transactions`: the total fee, one per transaction.
+/// 3. `residual_notes`: how many leftover notes are stranded in the source pool; ZIP 318 asks for
+///    one note per part plus at most one residual note.
+/// 4. `shape`: a faithful encoding of the plan, which never decides anything a caller cares about.
+///    It is here so that two plans equal on every criterion above still compare deterministically,
+///    rather than by whichever strategy happened to be evaluated first.
+///
+/// [ZIP 318]: https://zips.z.cash/zip-0318
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PlanQuality {
+    layers: usize,
+    transactions: usize,
+    residual_notes: usize,
+    shape: Vec<u64>,
+}
+
+impl PlanQuality {
+    /// Measure `plan`.
+    pub fn of(plan: &PreparationPlan) -> Self {
+        PlanQuality {
+            layers: plan.layer_count(),
+            transactions: plan.transaction_count(),
+            residual_notes: plan.residual_count(),
+            shape: encode_shape(plan),
+        }
+    }
+
+    /// The number of sequential layers, the criterion compared first.
+    pub fn layers(&self) -> usize {
+        self.layers
+    }
+
+    /// The number of preparation transactions, the criterion compared second.
+    pub fn transactions(&self) -> usize {
+        self.transactions
+    }
+
+    /// The number of residual notes left in the source pool, the criterion compared third.
+    pub fn residual_notes(&self) -> usize {
+        self.residual_notes
+    }
+}
+
+/// A faithful encoding of a plan as a sequence of integers, injective up to plan equality: two plans
+/// encode identically exactly when they are equal. Used only as [`PlanQuality`]'s final tie-break,
+/// so that the total order is antisymmetric and the portfolio's choice never depends on the order
+/// its strategies were listed in.
+fn encode_shape(plan: &PreparationPlan) -> Vec<u64> {
+    let mut out = Vec::new();
+    out.push(plan.direct_funding.len() as u64);
+    for &(index, value) in &plan.direct_funding {
+        out.push(index as u64);
+        out.push(u64::from(value));
+    }
+    out.push(plan.layers.len() as u64);
+    for layer in &plan.layers {
+        out.push(layer.len() as u64);
+        for tx in layer {
+            out.push(tx.inputs.len() as u64);
+            for input in &tx.inputs {
+                match *input {
+                    PrepInput::Wallet { index, value } => {
+                        out.extend_from_slice(&[0, index as u64, u64::from(value)]);
+                    }
+                    PrepInput::Prior {
+                        layer,
+                        transaction,
+                        output,
+                        value,
+                    } => out.extend_from_slice(&[
+                        1,
+                        layer as u64,
+                        transaction as u64,
+                        output as u64,
+                        u64::from(value),
+                    ]),
+                }
+            }
+            out.push(tx.outputs.len() as u64);
+            for output in &tx.outputs {
+                let role = match output {
+                    PrepOutput::Funding(_) => 0,
+                    PrepOutput::Intermediate(_) => 1,
+                    PrepOutput::Change(_) => 2,
+                };
+                out.extend_from_slice(&[role, u64::from(output.value())]);
+            }
+        }
+    }
+    out
+}
+
+/// Run every strategy in `strategies` on the same instance and return the best VALID plan it
+/// produced, together with the name of the strategy that produced it; `None` when none of them
+/// returned a plan that passes [`PreparationPlan::is_valid`].
+///
+/// The combining operation is a join in a bounded semilattice ordered by [`PlanQuality`], with "no
+/// plan" as its bottom: it is idempotent, commutative and associative. Three consequences, which
+/// together are the reason to hold the strategies as a list rather than picking one:
+///
+/// - the result does not depend on the order of `strategies`, nor on grouping, nor on repeats;
+/// - it is MONOTONE in the strategy set, so adding a strategy can never make the result worse, and
+///   the set can therefore grow over time without re-validating what is already there;
+/// - `best_plan(S ++ T)` equals the join of `best_plan(S)` and `best_plan(T)`, so a caller may
+///   evaluate strategies incrementally, cache per-strategy results, or split the work, and get the
+///   same answer as running them all at once.
+///
+/// Those properties hold only while every strategy is a deterministic function of the instance, as
+/// [`PreparationStrategy`] requires.
+pub fn best_plan(
+    strategies: &[&dyn PreparationStrategy],
+    available: &[Zatoshis],
+    funding: &[Zatoshis],
+    fee_per_tx: Zatoshis,
+) -> Option<(&'static str, PreparationPlan)> {
+    strategies
+        .iter()
+        .filter_map(|strategy| {
+            let plan = strategy.plan(available, funding, fee_per_tx).ok()?;
+            plan.is_valid(available, funding, fee_per_tx)
+                .then(|| (strategy.name(), plan))
+        })
+        // `min_by_key` keeps the FIRST minimum, which would make a tie resolve by position in
+        // `strategies`; `PlanQuality`'s trailing shape encoding is what stops ties from arising.
+        .min_by_key(|(_, plan)| PlanQuality::of(plan))
 }
 
 /// Why a preparation plan could not be produced.
@@ -1422,5 +1696,344 @@ mod tests {
             0,
             "each note funds exactly, no residual"
         );
+    }
+
+    // --- the strategy seam: the certificate, the order, and the portfolio ---
+
+    /// A deliberately WORSE but valid strategy for the one-note, one-funding-note instance: it
+    /// detours through a pointless consolidation, so its plan takes two layers where one suffices.
+    /// It exists to check that the portfolio ranks the PLANS, not the strategies.
+    struct Detour;
+
+    impl PreparationStrategy for Detour {
+        fn name(&self) -> &'static str {
+            "detour"
+        }
+
+        fn plan(
+            &self,
+            available: &[Zatoshis],
+            funding: &[Zatoshis],
+            fee_per_tx: Zatoshis,
+        ) -> Result<PreparationPlan, PrepError> {
+            let ([note], [want]) = (available, funding) else {
+                return Err(PrepError::InsufficientFunds);
+            };
+            let (note, want, fee) = (u64::from(*note), u64::from(*want), u64::from(fee_per_tx));
+            let feeder = note.checked_sub(fee).ok_or(PrepError::InsufficientFunds)?;
+            let change = feeder
+                .checked_sub(fee + want)
+                .ok_or(PrepError::InsufficientFunds)?;
+            let mut split = vec![PrepOutput::Funding(zat(want))];
+            if change > 0 {
+                split.push(PrepOutput::Change(zat(change)));
+            }
+            Ok(PreparationPlan::from_parts(
+                vec![
+                    vec![PrepTransaction::from_parts(
+                        vec![PrepInput::Wallet {
+                            index: 0,
+                            value: zat(note),
+                        }],
+                        vec![PrepOutput::Intermediate(zat(feeder))],
+                    )],
+                    vec![PrepTransaction::from_parts(
+                        vec![PrepInput::Prior {
+                            layer: 0,
+                            transaction: 0,
+                            output: 0,
+                            value: zat(feeder),
+                        }],
+                        split,
+                    )],
+                ],
+                Vec::new(),
+            ))
+        }
+    }
+
+    /// A strategy that returns a plan minting the WRONG notes. The portfolio must reject it on the
+    /// certificate rather than rank it.
+    struct Bogus;
+
+    impl PreparationStrategy for Bogus {
+        fn name(&self) -> &'static str {
+            "bogus"
+        }
+
+        fn plan(
+            &self,
+            available: &[Zatoshis],
+            _funding: &[Zatoshis],
+            fee_per_tx: Zatoshis,
+        ) -> Result<PreparationPlan, PrepError> {
+            let [note] = available else {
+                return Err(PrepError::InsufficientFunds);
+            };
+            let minted = u64::from(*note)
+                .checked_sub(u64::from(fee_per_tx))
+                .ok_or(PrepError::InsufficientFunds)?;
+            // One output, worth whatever is left: value-conserving, but not what was asked for.
+            Ok(PreparationPlan::from_parts(
+                vec![vec![PrepTransaction::from_parts(
+                    vec![PrepInput::Wallet {
+                        index: 0,
+                        value: *note,
+                    }],
+                    vec![PrepOutput::Funding(zat(minted))],
+                )]],
+                Vec::new(),
+            ))
+        }
+    }
+
+    /// A strategy that never produces a plan, standing for the bottom of the lattice.
+    struct NeverPlans;
+
+    impl PreparationStrategy for NeverPlans {
+        fn name(&self) -> &'static str {
+            "never-plans"
+        }
+
+        fn plan(
+            &self,
+            _available: &[Zatoshis],
+            _funding: &[Zatoshis],
+            _fee_per_tx: Zatoshis,
+        ) -> Result<PreparationPlan, PrepError> {
+            Err(PrepError::InsufficientFunds)
+        }
+    }
+
+    /// The one-note instance the portfolio tests share: a single source note worth the funding note
+    /// plus three fees, so both the greedy (one layer) and the `Detour` (two layers, the second
+    /// leaving a fee-sized change note) can fund it.
+    fn portfolio_instance() -> (Vec<Zatoshis>, Vec<Zatoshis>, Zatoshis) {
+        let fee = fee_per_tx();
+        let want = 100_000u64;
+        (zats(&[want + 3 * fee]), zats(&[want]), zat(fee))
+    }
+
+    /// Naming the rule changes nothing: `LayeredGreedy` IS `plan_preparation`, so the refactor is
+    /// behaviour-preserving on every shape the other tests in this module cover.
+    #[test]
+    fn layered_greedy_is_plan_preparation() {
+        let fee = fee_per_tx();
+        let cases: &[(&[u64], &[u64])] = &[
+            (&[1_000_000], &[100_000]),
+            (&[1_000_000], &[100_000, 100_000, 50_000]),
+            (&[500_000, 500_000], &[100_000, 50_000]),
+            (&[100_000 + 16 * MARGINAL_FEE.into_u64()], &[100_000]),
+            (&[10_000; 12], &[50_000]),
+            (&[1_000_000], &[]),
+            (&[], &[100_000]),
+        ];
+        for (available, funding) in cases {
+            let (available, funding) = (zats(available), zats(funding));
+            assert_eq!(
+                LayeredGreedy.plan(&available, &funding, zat(fee)),
+                plan_preparation(&available, &funding, zat(fee)),
+                "{available:?} -> {funding:?}",
+            );
+        }
+    }
+
+    /// The portfolio ranks PLANS, not strategies: the greedy's one-layer plan beats the `Detour`'s
+    /// two-layer plan, whichever order the two are listed in.
+    #[test]
+    fn best_plan_prefers_the_shallower_plan() {
+        let (available, funding, fee) = portfolio_instance();
+        let greedy = plan_preparation(&available, &funding, fee).expect("the greedy plans");
+        let detour = Detour
+            .plan(&available, &funding, fee)
+            .expect("the detour plans");
+        assert_eq!(greedy.layer_count(), 1);
+        assert_eq!(detour.layer_count(), 2);
+        assert!(
+            detour.is_valid(&available, &funding, fee),
+            "the detour is valid, just worse"
+        );
+        assert!(PlanQuality::of(&greedy) < PlanQuality::of(&detour));
+
+        for strategies in [
+            [&LayeredGreedy as &dyn PreparationStrategy, &Detour],
+            [&Detour, &LayeredGreedy],
+        ] {
+            assert_eq!(
+                best_plan(&strategies, &available, &funding, fee),
+                Some(("layered-greedy", greedy.clone())),
+            );
+        }
+    }
+
+    /// `best_plan` is a join in a bounded semilattice: idempotent, commutative, associative, with
+    /// "no plan" as bottom. Observably, the result is the same for any ordering, grouping or
+    /// repetition of the strategy list, which is what makes the list safe to extend over time.
+    #[test]
+    fn best_plan_is_a_semilattice_join() {
+        let (available, funding, fee) = portfolio_instance();
+        let best = |strategies: &[&dyn PreparationStrategy]| {
+            best_plan(strategies, &available, &funding, fee)
+        };
+        let g = &LayeredGreedy as &dyn PreparationStrategy;
+        let d = &Detour as &dyn PreparationStrategy;
+        let n = &NeverPlans as &dyn PreparationStrategy;
+
+        // Bottom: no strategies, and a strategy that never plans, are both the identity.
+        assert_eq!(best(&[]), None);
+        assert_eq!(best(&[n]), None);
+        assert_eq!(best(&[g, n]), best(&[g]));
+
+        // Idempotent, commutative, and independent of order across the whole list.
+        assert_eq!(best(&[g, g]), best(&[g]));
+        assert_eq!(best(&[g, d]), best(&[d, g]));
+        let expected = best(&[g, d, n]);
+        for permutation in [
+            [g, d, n],
+            [g, n, d],
+            [d, g, n],
+            [d, n, g],
+            [n, g, d],
+            [n, d, g],
+        ] {
+            assert_eq!(best(&permutation), expected, "order must not matter");
+        }
+
+        // Associative: folding a concatenation equals folding the parts and joining the results.
+        // With a total order, joining two results is taking the better of them.
+        let joined = [best(&[g]), best(&[d, n])]
+            .into_iter()
+            .flatten()
+            .min_by(|(_, a), (_, b)| PlanQuality::of(a).cmp(&PlanQuality::of(b)));
+        assert_eq!(joined, best(&[g, d, n]));
+    }
+
+    /// An invalid plan is bottom, not a winner: a strategy that mints the wrong notes is rejected on
+    /// the certificate, and cannot displace a valid plan by looking cheaper.
+    #[test]
+    fn best_plan_rejects_an_invalid_plan() {
+        let (available, funding, fee) = portfolio_instance();
+        let bogus = Bogus.plan(&available, &funding, fee).expect("bogus plans");
+        // It would otherwise WIN: one layer, one transaction, no residual.
+        assert!(
+            PlanQuality::of(&bogus)
+                < PlanQuality::of(&Detour.plan(&available, &funding, fee).unwrap())
+        );
+        assert!(!bogus.is_valid(&available, &funding, fee));
+
+        assert_eq!(best_plan(&[&Bogus], &available, &funding, fee), None);
+        assert_eq!(
+            best_plan(&[&Bogus, &LayeredGreedy], &available, &funding, fee).map(|(name, _)| name),
+            Some("layered-greedy"),
+        );
+    }
+
+    /// The certificate has teeth: each way of corrupting a valid plan is caught.
+    #[test]
+    fn is_valid_rejects_a_tampered_plan() {
+        let fee = zat(fee_per_tx());
+        let available = zats(&[1_000_000]);
+        let funding = zats(&[100_000, 50_000]);
+        let plan = plan_preparation(&available, &funding, fee).expect("plans");
+        assert!(plan.is_valid(&available, &funding, fee));
+
+        // A funding note that is not minted.
+        let mut short = plan.clone();
+        short.layers[0][0]
+            .outputs
+            .retain(|o| !matches!(o, PrepOutput::Funding(_)));
+        assert!(
+            !short.is_valid(&available, &funding, fee),
+            "missing funding output"
+        );
+
+        // Value created out of nothing.
+        let mut inflated = plan.clone();
+        inflated.layers[0][0]
+            .outputs
+            .push(PrepOutput::Change(zat(1)));
+        assert!(
+            !inflated.is_valid(&available, &funding, fee),
+            "value not conserved"
+        );
+
+        // The same source note spent twice.
+        let doubled = PreparationPlan::from_parts(
+            vec![vec![plan.layers[0][0].clone(), plan.layers[0][0].clone()]],
+            Vec::new(),
+        );
+        assert!(!doubled.is_valid(&available, &funding, fee), "double spend");
+
+        // A source note that does not exist at that index.
+        let mut off_index = plan.clone();
+        off_index.layers[0][0].inputs = vec![PrepInput::Wallet {
+            index: 7,
+            value: available[0],
+        }];
+        assert!(
+            !off_index.is_valid(&available, &funding, fee),
+            "unknown source note"
+        );
+
+        // A dependency that does not point strictly backwards, so the layers are not a broadcast
+        // order at all.
+        let self_referential = PreparationPlan::from_parts(
+            vec![vec![PrepTransaction::from_parts(
+                vec![PrepInput::Prior {
+                    layer: 0,
+                    transaction: 0,
+                    output: 0,
+                    value: available[0],
+                }],
+                plan.layers[0][0].outputs.clone(),
+            )]],
+            Vec::new(),
+        );
+        assert!(
+            !self_referential.is_valid(&available, &funding, fee),
+            "a transaction cannot spend its own layer",
+        );
+
+        // More notes than the action budget allows.
+        let oversized = PreparationPlan::from_parts(
+            vec![vec![PrepTransaction::from_parts(
+                vec![PrepInput::Wallet {
+                    index: 0,
+                    value: available[0],
+                }],
+                (0..PREP_TX_ACTIONS)
+                    .map(|_| PrepOutput::Change(zat(1)))
+                    .collect(),
+            )]],
+            Vec::new(),
+        );
+        assert!(
+            !oversized.is_valid(&available, &funding, fee),
+            "over the action budget"
+        );
+    }
+
+    proptest! {
+        /// Every plan the greedy produces passes its own certificate, so the portfolio never
+        /// discards a real plan on a technicality.
+        #[test]
+        fn planned_plans_carry_a_valid_certificate((available, funding) in arb_input()) {
+            let (available, funding, fee) = (zats(&available), zats(&funding), zat(fee_per_tx()));
+            if let Ok(plan) = plan_preparation(&available, &funding, fee) {
+                prop_assert!(plan.is_valid(&available, &funding, fee));
+            }
+        }
+
+        /// A one-strategy portfolio is exactly that strategy: the seam adds no behaviour.
+        #[test]
+        fn a_singleton_portfolio_is_the_strategy((available, funding) in arb_input()) {
+            let (available, funding, fee) = (zats(&available), zats(&funding), zat(fee_per_tx()));
+            prop_assert_eq!(
+                best_plan(&[&LayeredGreedy], &available, &funding, fee),
+                plan_preparation(&available, &funding, fee)
+                    .ok()
+                    .map(|plan| ("layered-greedy", plan))
+            );
+        }
     }
 }
