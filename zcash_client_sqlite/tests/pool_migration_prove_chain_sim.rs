@@ -29,6 +29,7 @@
     feature = "expensive-tests"
 ))]
 
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 
 use rand_chacha::ChaCha8Rng;
@@ -36,10 +37,16 @@ use rand_core::SeedableRng;
 
 use pczt::roles::tx_extractor::TransactionExtractor;
 
+use zcash_client_backend::data_api::locking::{LockOwner, OutputLockStore};
 use zcash_client_backend::data_api::testing::{
     AddressType, TestBuilder, TestState, orchard::OrchardPoolTester, pool::ShieldedPoolTester,
 };
-use zcash_client_backend::data_api::{Account, WalletRead, WalletTest};
+use zcash_client_backend::data_api::wallet::TargetHeight;
+use zcash_client_backend::data_api::wallet::input_selection::{
+    LockFilter, LockedInputPolicy, NonEmptyBTreeSet,
+};
+use zcash_client_backend::data_api::{Account, InputSource, WalletRead, WalletTest};
+use zcash_client_backend::wallet::OutputRef;
 // The wallet, block cache, DB factory, and Orchard-checkpoint helper come from this crate's own
 // test harness, exposed under its `test-dependencies` feature.
 use zcash_client_sqlite::pool_migration::orchard_ironwood::PoolMigrations;
@@ -50,11 +57,11 @@ use zcash_keys::keys::UnifiedSpendingKey;
 
 use zcash_primitives::block::BlockHash;
 use zcash_primitives::transaction::Transaction;
-use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::local_consensus::LocalNetwork;
 use zcash_protocol::value::testing::zats;
 use zcash_protocol::value::{COIN, ZatBalance, Zatoshis};
+use zcash_protocol::{PoolType, ShieldedPool, TxId};
 
 use zcash_pool_migration::engine::{
     self, MigrationState, MigrationStatus, MigrationTransferId, MigrationTxKind, MigrationTxState,
@@ -64,7 +71,7 @@ use zcash_pool_migration::satisfiability::{
     self, AdvanceConfig, DuenessTargets, ReorgSettleDepth, ReplanThreshold,
 };
 use zcash_pool_migration::state::{AdvanceStep, Blocker};
-use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver};
+use zcash_pool_migration::wallet::{WalletMigration, WalletMigrationProver, WalletProveError};
 
 /// The drive policy every scenario here uses: a ten-block reorg settle depth, the caller policy
 /// the satisfiability oracle judges anchor displacements under.
@@ -1524,16 +1531,6 @@ fn scenario_named(label: &str) -> Scenario {
 /// owners in a [`LockedInputPolicy`] override. Locking is a DEFAULT, never a veto.
 #[test]
 fn proving_locks_the_spent_notes_without_taking_them_from_the_user() {
-    use std::collections::BTreeSet;
-
-    use zcash_client_backend::data_api::InputSource;
-    use zcash_client_backend::data_api::locking::{LockOwner, OutputLockStore};
-    use zcash_client_backend::data_api::wallet::TargetHeight;
-    use zcash_client_backend::data_api::wallet::input_selection::{
-        LockFilter, LockedInputPolicy, NonEmptyBTreeSet,
-    };
-    use zcash_protocol::ShieldedPool;
-
     // One source note keeps the migration to a single preparation layer, so the first prove is the
     // one that reserves the account's only spendable note.
     let scenario = scenario_named(SMALLEST);
@@ -1690,14 +1687,6 @@ fn proving_locks_the_spent_notes_without_taking_them_from_the_user() {
 /// around the conflict and must wait (or die at its expiry) instead.
 #[test]
 fn proving_refuses_to_take_a_note_another_flow_has_reserved() {
-    use zcash_client_backend::data_api::InputSource;
-    use zcash_client_backend::data_api::locking::{LockOwner, OutputLockStore};
-    use zcash_client_backend::data_api::wallet::TargetHeight;
-    use zcash_client_backend::data_api::wallet::input_selection::LockFilter;
-    use zcash_client_backend::wallet::OutputRef;
-    use zcash_pool_migration::wallet::WalletProveError;
-    use zcash_protocol::{PoolType, ShieldedPool};
-
     let scenario = scenario_named(SMALLEST);
     let mut run = Run::setup(&scenario);
     let mut committed = run.plan_and_commit(&scenario);

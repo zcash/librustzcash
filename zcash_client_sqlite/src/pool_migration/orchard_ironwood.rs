@@ -339,26 +339,25 @@ where
         self.store.update_transaction(id, state)
     }
 
-    /// The wallet-database form of the contract: apply the proof to `state`, then — in ONE
-    /// database transaction — persist the migration state and, with it, the finalized
-    /// transaction's wallet record (its raw bytes, fee, sent outputs, and input-spend marks, as
-    /// `store_transactions_to_be_sent` writes for the standard spend flows), so a transaction is
-    /// never durably recorded proved without the wallet knowing about it, nor the reverse. The
-    /// outputs are recovered by trial decryption under the account's unified full viewing key
-    /// (every real migration output is internal to the account; dummies decrypt under no key),
-    /// and the sent record's target height is the successor of the row's scheduled broadcast
-    /// height.
+    /// The wallet-database form of the contract: apply the proof to `state` and persist the
+    /// migration state, and nothing else.
+    ///
+    /// Deliberately NO wallet-side transaction record. The reservation that keeps another flow
+    /// off this transaction's inputs through the prove-to-broadcast window is the ADVISORY note
+    /// lock the proof arrived with ([`ProvedTransaction::lock_owner`]), which leaves the notes in
+    /// the user's spendable balance; the wallet's own record — raw bytes, sent outputs, hard
+    /// input-spend marks, and the status-retrieval queue entry — is written at the broadcast seam
+    /// by [`take_transaction_for_broadcast`](Self::take_transaction_for_broadcast), atomically
+    /// with handing the broadcastable bytes out.
+    ///
+    /// [`ProvedTransaction::lock_owner`]:
+    ///     zcash_pool_migration::engine::ProvedTransaction::lock_owner
     #[cfg(feature = "orchard")]
     fn store_proved_transaction(
         &mut self,
         state: &mut MigrationState,
         proven: zcash_pool_migration::engine::ProvedTransaction,
     ) -> Result<(), Self::Error> {
-        // Migration-store only, per the trait contract: the prove-to-broadcast reservation is
-        // the advisory lock the proof arrived with, and the wallet's own transaction record —
-        // with its hard spend marks and its status-retrieval queue entry — is written by
-        // [`take_transaction_for_broadcast`](Self::take_transaction_for_broadcast), atomically
-        // with handing the broadcastable bytes out.
         proven.apply(state);
         self.replace_migration(state)
     }
@@ -2125,8 +2124,9 @@ mod tests {
     use zcash_pool_migration::{
         denomination::DenominationPlan,
         engine::{
-            MigrationState, MigrationStatus, MigrationTransaction, MigrationTransferId,
-            MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
+            MigrationLockOwner, MigrationState, MigrationStatus, MigrationTransaction,
+            MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead,
+            PoolMigrationWrite,
         },
         preparation::PreparationPlan,
         satisfiability::{
@@ -2557,8 +2557,6 @@ mod tests {
     /// covers the type more broadly.
     #[test]
     fn lock_owner_round_trips() {
-        use zcash_pool_migration::engine::MigrationLockOwner;
-
         let denominations = DenominationPlan::from_stored_parts(
             Vec::new(),
             Zatoshis::ZERO,
@@ -2646,8 +2644,6 @@ mod tests {
     /// a `None` lock_owner contributes nothing, and repeated owners collapse to one entry.
     #[test]
     fn migration_lock_owners_collects_distinct_non_none_owners() {
-        use zcash_pool_migration::engine::MigrationLockOwner;
-
         let mut store = fresh_store();
         assert_eq!(
             store.migration_lock_owners().expect("read succeeds"),
