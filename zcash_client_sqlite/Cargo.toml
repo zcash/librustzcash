@@ -129,6 +129,16 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 # feature below enables; see the note there for why it may not be enabled from here.
 zcash_pool_migration = { workspace = true, features = ["test-dependencies"] }
 zip321 = { workspace = true }
+# A dev-dependency on this crate itself, so that building any test target turns this crate's
+# `test-dependencies` feature on. The line above enables `zcash_client_backend/test-dependencies`,
+# and dev-dependency features unify into the whole build, so without this the backend gains its
+# test-only trait items while this crate's impls, gated on the same-named feature *here*, do not.
+# `OutputLockStore::get_locked_outputs` is declared under that gate, so
+# `cargo check -p zcash_client_sqlite --no-default-features --tests` would otherwise fail with
+# E0046. This is the `test-dependencies` counterpart of the coupling the `orchard` feature below
+# documents: a feature that gates both a backend trait item and this crate's impl of it has to be
+# turned on for both crates together.
+zcash_client_sqlite = { path = ".", features = ["test-dependencies"] }
 
 [features]
 default = ["multicore", "orchard"]
