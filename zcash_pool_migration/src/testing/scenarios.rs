@@ -299,6 +299,57 @@ pub const MIGRATION_SCENARIOS: &[MigrationScenario] = {
     ]
 };
 
+/// The crossing values one [`MigrationScenario`] publishes, for the note-shape family: the same
+/// balance held several ways, which the canonical quantization alone would give identical splits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NoteShapeSplit {
+    /// The [`MigrationScenario::label`] this row is the split of.
+    pub scenario_label: &'static str,
+    /// The crossing values published, in units of 0.01 ZEC (the minimum denomination), in the
+    /// order the planner emits them.
+    pub crossings: &'static [u64],
+    /// The number of preparation transactions that mint them.
+    pub preparations: usize,
+}
+
+/// What each 10 ZEC note shape actually publishes.
+///
+/// Canonical quantization of the migratable 9.99 ZEC is `500, 200, 200, 50, 20, 20, 5, 2, 2` in
+/// units of 0.01 ZEC, which is what the single-note wallet emits. The other shapes diverge from
+/// it — a defect, since the split should be a function of the balance alone — and by how much is
+/// the measurement this table exists to hold.
+pub const NOTE_SHAPE_SPLITS: &[NoteShapeSplit] = {
+    const fn s(
+        scenario_label: &'static str,
+        crossings: &'static [u64],
+        preparations: usize,
+    ) -> NoteShapeSplit {
+        NoteShapeSplit {
+            scenario_label,
+            crossings,
+            preparations,
+        }
+    }
+    &[
+        s(
+            "10 ZEC in a single note",
+            &[500, 200, 200, 50, 20, 20, 5, 2, 2],
+            1,
+        ),
+        s(
+            "10 ZEC as 1 + 9",
+            &[500, 200, 100, 50, 50, 50, 20, 20, 5, 2, 2],
+            4,
+        ),
+        s(
+            "10 ZEC as 2 + 8",
+            &[500, 200, 100, 100, 50, 20, 20, 5, 2, 2],
+            4,
+        ),
+        s("10 ZEC as 5 + 5", &[500], 2),
+    ]
+};
+
 /// One row of the note-shape budget sweep: a [`MigrationScenario`] (named by its `scenario_label`)
 /// evaluated for a signer whose per-round capacity is `budget_actions`, and the number of signing
 /// interactions that signer needs. The budget is a QUERY parameter of a plan, so the same migration

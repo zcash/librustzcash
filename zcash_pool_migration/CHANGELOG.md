@@ -45,9 +45,6 @@ and this library adheres to Rust's notion of
 - `preparation::Portfolio`, implemented for `()` and for `(H, T)` where `H:
   PreparationStrategy` and `T: Portfolio`, so a set of strategies is written
   `(A, (B, (C, ())))`.
-- `testing::NoteShapeBudgetCase` and `testing::NOTE_SHAPE_BUDGET_ROUNDS`.
-- Four scenarios in `testing::MIGRATION_SCENARIOS`, covering one 10 ZEC balance
-  held as a single note, as 1 + 9, as 2 + 8, and as 5 + 5.
 
 ### Changed
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`

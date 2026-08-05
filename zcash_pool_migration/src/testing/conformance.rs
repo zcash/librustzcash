@@ -16,6 +16,7 @@ use core::num::NonZeroU32;
 use crate::engine::{
     MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
+use crate::preparation::PreparationStrategy;
 use crate::signing_rounds::{
     PREPARATION_ACTIONS, PlannedTx, SigningRoundBudget, SigningRoundStrategy, TRANSFER_ACTIONS,
     min_signing_rounds,
@@ -25,6 +26,7 @@ use alloc::vec::Vec;
 
 // The suites assert ABOUT the fixed data next door: the golden vectors they replay, and the
 // workload builder they use to construct a run of a given shape.
+use super::preparation_vectors::{Fundability, PREPARATION_VECTORS, preparation_fee_per_tx, zats};
 use super::scenarios::{SIGNING_ROUND_GOLDEN_VECTORS, planned_txs};
 
 /// Assert that an empty store reports no migration: [`get_migration`](PoolMigrationRead::get_migration)
@@ -159,6 +161,79 @@ pub fn assert_update_transaction<S: PoolMigrationWrite>(
 /// for driving [`assert_update_transaction`] from a generated [`MigrationState`].
 pub fn first_transaction_id(state: &MigrationState) -> Option<MigrationTransferId> {
     state.transactions().first().map(|t| t.id())
+}
+
+// --- preparation strategies: the corpus every implementation is measured on ---
+
+/// Assert what every [`PreparationStrategy`] must satisfy on the shared [`PREPARATION_VECTORS`]
+/// corpus, whatever rule it implements:
+///
+/// - a plan it returns passes its own certificate ([`PreparationPlan::is_valid`]), which covers the
+///   funding multiset, the action budget, value conservation, and single-spending;
+/// - it plans every [`Fundability::Always`] instance and no [`Fundability::Never`] one;
+/// - a [`Fundability::Depends`] instance may go either way, since that is what distinguishes one
+///   rule from another.
+///
+/// A new strategy inherits the whole corpus by calling this, rather than restating the properties.
+/// The plan SHAPE a rule produces is deliberately not asserted here; that belongs with the rule.
+pub fn assert_strategy_conformance<S: PreparationStrategy>(strategy: &S) {
+    let name = strategy.name();
+    let fee = preparation_fee_per_tx();
+    for vector in PREPARATION_VECTORS {
+        let (available, funding) = (zats(vector.available), zats(vector.funding));
+        let planned = strategy.plan(&available, &funding, fee);
+        let label = vector.label;
+
+        if let Ok(plan) = &planned {
+            assert!(
+                plan.is_valid(&available, &funding, fee),
+                "[{name}] `{label}`: planned an invalid plan",
+            );
+        }
+        match vector.fundability {
+            Fundability::Always => assert!(
+                planned.is_ok(),
+                "[{name}] `{label}`: must plan, got {:?}",
+                planned.err(),
+            ),
+            Fundability::Never => assert!(
+                planned.is_err(),
+                "[{name}] `{label}`: must not plan, the value is not there",
+            ),
+            Fundability::Depends => {}
+        }
+    }
+}
+
+/// Assert that `candidate` funds every instance `baseline` funds, and report any it funds that the
+/// baseline does not. Use it to show a new strategy DOMINATES an existing one: the portfolio's
+/// result can then only improve, since [`Portfolio::best_plan`] is monotone in the strategy set.
+///
+/// Returns the labels the candidate funds and the baseline does not, so a caller can assert the
+/// improvement is the one it expected rather than merely non-empty.
+pub fn assert_dominates<A, B>(candidate: &A, baseline: &B) -> Vec<&'static str>
+where
+    A: PreparationStrategy,
+    B: PreparationStrategy,
+{
+    let fee = preparation_fee_per_tx();
+    let mut gained = Vec::new();
+    for vector in PREPARATION_VECTORS {
+        let (available, funding) = (zats(vector.available), zats(vector.funding));
+        let candidate_planned = candidate.plan(&available, &funding, fee).is_ok();
+        let baseline_planned = baseline.plan(&available, &funding, fee).is_ok();
+        assert!(
+            candidate_planned || !baseline_planned,
+            "[{}] must fund everything [{}] funds, but did not fund `{}`",
+            candidate.name(),
+            baseline.name(),
+            vector.label,
+        );
+        if candidate_planned && !baseline_planned {
+            gained.push(vector.label);
+        }
+    }
+    gained
 }
 
 // --- signing-round packing: reusable strategies + conformance suite ---

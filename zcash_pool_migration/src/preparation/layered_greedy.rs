@@ -520,6 +520,7 @@ mod tests {
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
     use crate::preparation::{PREP_TX_ACTIONS, Portfolio, plan_preparation};
+    use crate::testing::{Fundability, PREPARATION_VECTORS, preparation_fee_per_tx};
 
     /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
     /// action costs one ZIP-317 marginal fee). The planner treats it opaquely.
@@ -1151,6 +1152,44 @@ mod tests {
             "each note funds exactly, no residual"
         );
     }
+    /// Everything the shared corpus requires of ANY strategy holds for this one: whenever it plans,
+    /// the plan passes its certificate; it plans every instance whose value is amply present in a
+    /// single note; and it never plans one whose value is not there.
+    #[test]
+    fn conforms_to_the_shared_preparation_corpus() {
+        crate::testing::assert_strategy_conformance(&LayeredGreedy);
+    }
+
+    /// Which of the corpus's `Fundability::Depends` instances THIS rule funds, and which it turns
+    /// away. Those it turns away are the ones whose funding notes need a transaction that both
+    /// spends several notes and produces several, the shape this rule cannot build; a strategy that
+    /// can will fund them, and the diff to this list is what will show it.
+    #[test]
+    fn which_shape_dependent_instances_the_greedy_funds() {
+        let fee = preparation_fee_per_tx();
+        let mut funded = Vec::new();
+        let mut turned_away = Vec::new();
+        for vector in PREPARATION_VECTORS
+            .iter()
+            .filter(|v| v.fundability == Fundability::Depends)
+        {
+            let planned = LayeredGreedy
+                .plan(&zats(vector.available), &zats(vector.funding), fee)
+                .is_ok();
+            if planned {
+                funded.push(vector.label);
+            } else {
+                turned_away.push(vector.label);
+            }
+        }
+
+        assert_eq!(funded, vec!["ten equal notes", "twelve sub-quantum notes"]);
+        assert_eq!(
+            turned_away,
+            vec!["10 ZEC as 1 + 9", "10 ZEC as 2 + 8", "10 ZEC as 5 + 5"],
+        );
+    }
+
     /// Naming the rule changes nothing: `LayeredGreedy` IS `plan_preparation`, so the refactor is
     /// behaviour-preserving on every shape the other tests in this module cover.
     #[test]

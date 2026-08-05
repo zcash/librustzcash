@@ -25,6 +25,7 @@ use zcash_pool_migration::preparation::{
 };
 use zcash_pool_migration::satisfiability::ReplanThreshold;
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
+use zcash_pool_migration::testing::{MIGRATION_SCENARIOS, NOTE_SHAPE_SPLITS};
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
 /// Wrap a raw zatoshi amount as [`Zatoshis`] for the tests.
@@ -242,56 +243,36 @@ fn note_shape_changes_the_split_of_a_ten_zec_balance() {
     // One hundredth of a ZEC: the minimum denomination, and the unit every crossing falls on.
     const H: u64 = COIN / 100;
 
-    // Columns: the wallet's source notes, the crossings the plan publishes (in units of `H`), and
-    // the number of preparation transactions that mint them.
-    let shapes: &[(&str, Vec<u64>, Vec<u64>, usize)] = &[
-        (
-            "one note",
-            vec![10 * COIN],
-            vec![500, 200, 200, 50, 20, 20, 5, 2, 2],
-            1,
-        ),
-        (
-            "1 + 9",
-            vec![COIN, 9 * COIN],
-            vec![500, 200, 100, 50, 50, 50, 20, 20, 5, 2, 2],
-            4,
-        ),
-        (
-            "2 + 8",
-            vec![2 * COIN, 8 * COIN],
-            vec![500, 200, 100, 100, 50, 20, 20, 5, 2, 2],
-            4,
-        ),
-        ("5 + 5", vec![5 * COIN, 5 * COIN], vec![500], 2),
-    ];
-
-    for (label, notes, expected_crossings, expected_preparations) in shapes {
-        let backend = MockBackend::new(notes.clone(), 2_000_000);
+    for split in NOTE_SHAPE_SPLITS {
+        let scenario = MIGRATION_SCENARIOS
+            .iter()
+            .find(|sc| sc.label == split.scenario_label)
+            .expect("every split names a scenario");
+        let backend = MockBackend::new(scenario.source_notes.to_vec(), 2_000_000);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         let plan = plan_migration(&regtest_network(true), &backend, &mut rng)
             .expect("a fundable balance plans");
+        let label = scenario.label;
 
         assert_eq!(
             plan.crossing_values()
                 .iter()
                 .map(|&v| u64::from(v) / H)
                 .collect::<Vec<u64>>(),
-            *expected_crossings,
-            "10 ZEC as {label}: crossings (in 0.01 ZEC)",
+            split.crossings,
+            "{label}: crossings (in 0.01 ZEC)",
         );
         assert_eq!(
             plan.preparation_tx_count(),
-            *expected_preparations,
-            "10 ZEC as {label}: preparation transactions",
+            split.preparations,
+            "{label}: preparation transactions",
         );
 
-        // Whatever the shape, the plan never publishes a non-canonical crossing and never spends
-        // more than the balance.
-        let balance: u64 = notes.iter().sum();
+        // Whatever the shape, the plan never spends more than the balance.
+        let balance: u64 = scenario.source_notes.iter().sum();
         assert!(
             u64::from(plan.value_migrated()) + u64::from(plan.residual()) <= balance,
-            "10 ZEC as {label}: the plan cannot create value",
+            "{label}: the plan cannot create value",
         );
     }
 

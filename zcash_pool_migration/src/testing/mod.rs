@@ -16,14 +16,19 @@
 //! Enabled by the `test-dependencies` feature (and by the crate's own `test` build), so a
 //! downstream crate reuses these directly rather than duplicating them.
 //!
-//! The three groups are split into submodules and re-exported here, so every existing path
-//! resolves unchanged: `strategies` generates values, `conformance` says what correctness
-//! means, and `scenarios` holds the fixed data both of the above speak about.
+//! The groups are split into submodules and re-exported here, so every path resolves at
+//! `testing::`: `generators` builds values, `conformance` says what correctness means, and
+//! `scenarios` and `preparation_vectors` hold the fixed data the suites speak about. The
+//! generators are NOT called `strategies`, which in this crate names a solution to one of the
+//! planning problems ([`PreparationStrategy`](crate::preparation::PreparationStrategy) and
+//! friends) rather than a `proptest` value source.
 
 mod conformance;
+mod generators;
+mod preparation_vectors;
 mod scenarios;
-mod strategies;
 
 pub use conformance::*;
+pub use generators::*;
+pub use preparation_vectors::*;
 pub use scenarios::*;
-pub use strategies::*;
