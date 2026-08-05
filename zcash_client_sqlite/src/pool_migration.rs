@@ -85,3 +85,113 @@ mod error;
 mod store;
 
 pub mod orchard_ironwood;
+
+use uuid::Uuid;
+use zcash_pool_migration::engine::MigrationStatus;
+use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+
+/// The stable external identity of one pool-migration record, following the
+/// [`AccountUuid`](crate::AccountUuid) precedent: random per record, preserved across every
+/// rewrite of the record's state, and safe to hand across an FFI — unlike the store's row ids,
+/// which are not stable across a restore or an export. Obtained from
+/// [`MigrationSummary::id`], and resolved back through a pool facade's `get_migration_by_id`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MigrationUuid(Uuid);
+
+impl MigrationUuid {
+    /// Constructs a `MigrationUuid` from a bare [`Uuid`] value.
+    ///
+    /// The resulting identifier is not guaranteed to correspond to any migration stored in a
+    /// [`WalletDb`](crate::WalletDb).
+    pub fn from_uuid(value: Uuid) -> Self {
+        MigrationUuid(value)
+    }
+
+    /// Exposes the underlying [`Uuid`] value.
+    pub fn expose_uuid(&self) -> Uuid {
+        self.0
+    }
+}
+
+/// One row of a migration-history listing: the identity, status, and aggregate progress of a
+/// single migration an account has run, PROJECTED IN SQL from the store's typed columns.
+///
+/// Deliberately not a [`MigrationState`](zcash_pool_migration::engine::MigrationState): a full
+/// state carries every transaction's (proven) PCZT and runs to megabytes, so a list of states
+/// would deserialize every proof the account ever produced in order to render a history screen.
+/// A summary is what the screen needs; the full state of one migration is a follow-up
+/// `get_migration_by_id` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationSummary {
+    pub(crate) id: MigrationUuid,
+    pub(crate) status: MigrationStatus,
+    pub(crate) committed_height: Option<BlockHeight>,
+    pub(crate) total_input: Zatoshis,
+    pub(crate) total_migratable: Zatoshis,
+    pub(crate) change: Option<Zatoshis>,
+    pub(crate) transaction_count: usize,
+    pub(crate) mined_count: usize,
+    pub(crate) in_flight_count: usize,
+    pub(crate) unsatisfiable_count: usize,
+    pub(crate) value_migrated: Zatoshis,
+}
+
+impl MigrationSummary {
+    /// The migration's stable identity, resolvable to its full state through the pool facade's
+    /// `get_migration_by_id`.
+    pub fn id(&self) -> MigrationUuid {
+        self.id
+    }
+
+    /// The migration's lifecycle status.
+    pub fn status(&self) -> MigrationStatus {
+        self.status
+    }
+
+    /// The chain height the migration was committed at, if recorded (`None` for records that
+    /// predate the column).
+    pub fn committed_height(&self) -> Option<BlockHeight> {
+        self.committed_height
+    }
+
+    /// The total value of the notes the migration's plan drew on.
+    pub fn total_input(&self) -> Zatoshis {
+        self.total_input
+    }
+
+    /// The total value the plan set out to migrate across the pool boundary.
+    pub fn total_migratable(&self) -> Zatoshis {
+        self.total_migratable
+    }
+
+    /// The value returned to the source pool as change by the plan, when any.
+    pub fn change(&self) -> Option<Zatoshis> {
+        self.change
+    }
+
+    /// How many transactions the migration comprises, whatever their state.
+    pub fn transaction_count(&self) -> usize {
+        self.transaction_count
+    }
+
+    /// How many of its transactions have been observed mined.
+    pub fn mined_count(&self) -> usize {
+        self.mined_count
+    }
+
+    /// How many of its transactions are broadcast but not yet observed mined.
+    pub fn in_flight_count(&self) -> usize {
+        self.in_flight_count
+    }
+
+    /// How many of its transactions carry a standing unsatisfiability determination.
+    pub fn unsatisfiable_count(&self) -> usize {
+        self.unsatisfiable_count
+    }
+
+    /// The value that has actually crossed the pool boundary: the sum of the crossing values
+    /// whose transfer has been observed mined.
+    pub fn value_migrated(&self) -> Zatoshis {
+        self.value_migrated
+    }
+}

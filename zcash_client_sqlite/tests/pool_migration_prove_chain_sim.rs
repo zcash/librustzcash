@@ -682,15 +682,22 @@ impl Run {
     /// `proving_persists_the_finalized_transaction_to_the_wallet` — simulating the sibling's
     /// independent view requires lifting them.
     fn forget_pending_spend_marks(&mut self, txid: TxId) {
-        self.st
-            .wallet_mut()
-            .conn_mut()
-            .execute(
-                "DELETE FROM orchard_received_note_spends
-                 WHERE transaction_id IN (SELECT id_tx FROM transactions WHERE txid = :txid)",
-                rusqlite::named_params![":txid": txid.as_ref()],
-            )
-            .expect("lifts the pending spend marks");
+        let conn = self.st.wallet_mut().conn_mut();
+        conn.execute(
+            "DELETE FROM orchard_received_note_spends
+             WHERE transaction_id IN (SELECT id_tx FROM transactions WHERE txid = :txid)",
+            rusqlite::named_params![":txid": txid.as_ref()],
+        )
+        .expect("lifts the pending spend marks");
+        // The sibling also knows nothing of THIS wallet's advisory note locks — they are local
+        // database state, not chain state — so simulating its spend through this wallet's own
+        // machinery must lift them too.
+        conn.execute_batch(
+            "UPDATE orchard_received_notes
+                SET lock_expiry_height = NULL, lock_owner = NULL
+              WHERE lock_owner IS NOT NULL",
+        )
+        .expect("lifts the advisory locks a sibling would not see");
     }
 
     /// The wallet's fully-scanned height: the chain state every satisfiability observation the
@@ -896,11 +903,14 @@ impl Run {
         // The drive's determinations are durable: what the store holds agrees with what the drive
         // returned.
         assert_eq!(
-            self.stored_migration()
+            self.store()
+                .latest_migration()
+                .expect("the history reads back")
                 .expect("the migration is in the store")
                 .status(),
             MigrationStatus::Complete,
-            "{}: the store agrees the migration is complete",
+            "{}: the store agrees the migration is complete (as retained history: a terminal \
+             migration leaves the pending-only read)",
             scenario.label
         );
 
@@ -1669,10 +1679,13 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
     committed.state.mark_superseded();
     run.persist(&committed.state);
     assert!(
-        run.stored_migration()
-            .expect("the store holds the migration")
+        run.store()
+            .latest_migration()
+            .expect("the history reads back")
+            .expect("the store retains the migration")
             .is_terminal(),
-        "the persisted migration is terminal, so a replacement may take its place",
+        "the persisted migration is terminal (retained history, gone from the pending-only \
+         read), so a replacement may take its place",
     );
 
     // Now the guard accepts, and the remaining balance is committed to a fresh migration.

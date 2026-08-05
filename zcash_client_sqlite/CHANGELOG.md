@@ -11,6 +11,16 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `pool_migration::MigrationUuid`: the stable external identity of one
+  pool-migration record, safe to hand across an FFI (row ids are not stable
+  across a restore).
+- `pool_migration::MigrationSummary` and, on each pool facade
+  (`pool_migration::orchard_ironwood::PoolMigrations`), the history read API:
+  `latest_migration` (the most recent record whatever its status — what a UI
+  renders once `get_migration` reports `None` for a finished migration),
+  `list_migrations` (newest-first summaries projected in SQL, reading no
+  stored PCZTs), and `get_migration_by_id` (one record's full state,
+  historical or pending).
 - A schema migration giving each pool-migration record a durable identity — a
   `uuid` column (random per row, backfilled for existing rows) and a nullable
   `committed_height` column (`NULL` for rows that predate it) — and rescoping
@@ -24,8 +34,11 @@ workspace.
   retained as history rather than returned here, and committing a replacement
   migration no longer destroys the record of the one it replaces. A caller
   that rendered a finished migration from `get_migration` (which now returns
-  `None` for it) should read the retained record instead once the history
-  accessors land; until then the rows are present but unexposed.
+  `None` for it) should use `latest_migration` (or `list_migrations` /
+  `get_migration_by_id`) instead.
+- A newly committed pool migration's record is stamped with the wallet's chain
+  height at first persistence (`MigrationSummary::committed_height`); records
+  that predate the column report `None`.
 - Wallet truncation now revisits every retained `complete` pool-migration
   record as well as the pending one, so a reorg that un-mines a PREVIOUS
   migration's transfers demotes that record exactly as it always demoted a
