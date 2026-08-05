@@ -216,6 +216,101 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
     );
 }
 
+/// How far the wallet's NOTE SHAPE moves the split of a fixed balance.
+///
+/// The crossing values are meant to be a function of the BALANCE alone (ZIP 318 canonical
+/// quantization of 10 ZEC is `5 + 2 + 2 + 0.5 + 0.2 + 0.2 + 0.05 + 0.02 + 0.02`), which is what
+/// makes them collide across wallets. But every funding note has to be minted out of the wallet's
+/// actual notes, so the split is reconciled inline against the preparation planner, and one balance
+/// held four ways produces four different migrations. This is a CHARACTERIZATION test: it pins the
+/// current behavior, DEFECTS INCLUDED, so that a planner change moves this table instead of
+/// passing silently. The expectations below are not endorsements; two of them record behavior
+/// that is undesirable and slated to change.
+///
+/// Defect 1 (`1 + 9`): the split is not merely a reconciled sub-multiset of the single-note
+/// split. It is a DIFFERENT decomposition: `2 + 2` becomes `1 + 0.5 + 0.5 + 0.5`, so 11 crossings
+/// are published instead of 9. This is a privacy regression: the published values become a
+/// function of the wallet's private note shape, weakening the cross-wallet value collision the
+/// canonical quantization exists to provide.
+///
+/// Defect 2 (`5 + 5`): only 5 ZEC of the 10 migrates. Neither source note can self-fund a 5 ZEC
+/// crossing (a 5 ZEC funding note is `5 ZEC + buffer`, more than a 5 ZEC note holds), so the two
+/// notes consolidate into one, and that consolidated note funds a single 5 ZEC crossing, leaving
+/// 4.99825 ZEC stranded in the source pool.
+#[test]
+fn note_shape_changes_the_split_of_a_ten_zec_balance() {
+    // One hundredth of a ZEC: the minimum denomination, and the unit every crossing falls on.
+    const H: u64 = COIN / 100;
+
+    // Columns: the wallet's source notes, the crossings the plan publishes (in units of `H`), and
+    // the number of preparation transactions that mint them.
+    let shapes: &[(&str, Vec<u64>, Vec<u64>, usize)] = &[
+        (
+            "one note",
+            vec![10 * COIN],
+            vec![500, 200, 200, 50, 20, 20, 5, 2, 2],
+            1,
+        ),
+        (
+            "1 + 9",
+            vec![COIN, 9 * COIN],
+            vec![500, 200, 100, 50, 50, 50, 20, 20, 5, 2, 2],
+            4,
+        ),
+        (
+            "2 + 8",
+            vec![2 * COIN, 8 * COIN],
+            vec![500, 200, 100, 100, 50, 20, 20, 5, 2, 2],
+            4,
+        ),
+        ("5 + 5", vec![5 * COIN, 5 * COIN], vec![500], 2),
+    ];
+
+    for (label, notes, expected_crossings, expected_preparations) in shapes {
+        let backend = MockBackend::new(notes.clone(), 2_000_000);
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let plan = plan_migration(&regtest_network(true), &backend, &mut rng)
+            .expect("a fundable balance plans");
+
+        assert_eq!(
+            plan.crossing_values()
+                .iter()
+                .map(|&v| u64::from(v) / H)
+                .collect::<Vec<u64>>(),
+            *expected_crossings,
+            "10 ZEC as {label}: crossings (in 0.01 ZEC)",
+        );
+        assert_eq!(
+            plan.preparation_tx_count(),
+            *expected_preparations,
+            "10 ZEC as {label}: preparation transactions",
+        );
+
+        // Whatever the shape, the plan never publishes a non-canonical crossing and never spends
+        // more than the balance.
+        let balance: u64 = notes.iter().sum();
+        assert!(
+            u64::from(plan.value_migrated()) + u64::from(plan.residual()) <= balance,
+            "10 ZEC as {label}: the plan cannot create value",
+        );
+    }
+
+    // The two shapes that differ most: the same balance, half of it stranded.
+    let one_note = MockBackend::new(vec![10 * COIN], 2_000_000);
+    let five_plus_five = MockBackend::new(vec![5 * COIN, 5 * COIN], 2_000_000);
+    let mut rng = ChaCha8Rng::seed_from_u64(1);
+    let one_note = plan_migration(&regtest_network(true), &one_note, &mut rng).expect("plans");
+    let mut rng = ChaCha8Rng::seed_from_u64(1);
+    let five_plus_five =
+        plan_migration(&regtest_network(true), &five_plus_five, &mut rng).expect("plans");
+    assert_eq!(u64::from(one_note.value_migrated()), 999 * H);
+    assert_eq!(u64::from(five_plus_five.value_migrated()), 500 * H);
+    assert!(
+        u64::from(five_plus_five.residual()) > u64::from(one_note.residual()),
+        "the equal-note shape strands value the single-note shape migrates"
+    );
+}
+
 #[test]
 fn stores_loads_and_updates_a_migration() {
     let mut backend = MockBackend::new(Vec::new(), 0);

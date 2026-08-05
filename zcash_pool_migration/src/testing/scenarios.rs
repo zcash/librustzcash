@@ -226,6 +226,16 @@ pub const MIGRATION_SCENARIOS: &[MigrationScenario] = {
         COIN / 10,
         COIN / 10,
     ];
+    // One 10 ZEC balance held four ways. The crossing values are supposed to be a function of the
+    // BALANCE (canonical quantization), but the preparation planner has to mint each funding note
+    // out of the wallet's actual notes, and the split is reconciled against that inline. These four
+    // rows pin how far the note shape moves the result; see
+    // `note_shape_changes_the_split_of_a_ten_zec_balance` in `tests/engine_plan.rs` for the
+    // crossing-by-crossing comparison.
+    const TEN_AS_ONE: &[u64] = &[10 * COIN];
+    const ONE_PLUS_NINE: &[u64] = &[COIN, 9 * COIN];
+    const TWO_PLUS_EIGHT: &[u64] = &[2 * COIN, 8 * COIN];
+    const FIVE_PLUS_FIVE: &[u64] = &[5 * COIN, 5 * COIN];
     // Columns: label, source notes, preparations, transfers (quanta), Keystone rounds, migrated.
     &[
         // Single-note balances.
@@ -277,6 +287,102 @@ pub const MIGRATION_SCENARIOS: &[MigrationScenario] = {
             1,
             4_033 * H,
         ),
+        // The same 10 ZEC balance, four note shapes. Held as one note it splits into 9 crossings in
+        // a single preparation; held as 1 + 9 the reconciled split has 11 crossings, needs 4
+        // preparations across 3 layers, and tips the run over a second Keystone round; held as
+        // 5 + 5 only 5 ZEC migrates at all, because neither 5 ZEC note can self-fund a 5 ZEC
+        // crossing and the consolidated note funds only one.
+        s("10 ZEC in a single note", TEN_AS_ONE, 1, 9, 1, 999 * H),
+        s("10 ZEC as 1 + 9", ONE_PLUS_NINE, 4, 11, 2, 999 * H),
+        s("10 ZEC as 2 + 8", TWO_PLUS_EIGHT, 4, 10, 1, 999 * H),
+        s("10 ZEC as 5 + 5", FIVE_PLUS_FIVE, 2, 1, 1, 500 * H),
+    ]
+};
+
+/// One row of the note-shape budget sweep: a [`MigrationScenario`] (named by its `scenario_label`)
+/// evaluated for a signer whose per-round capacity is `budget_actions`, and the number of signing
+/// interactions that signer needs. The budget is a QUERY parameter of a plan, so the same migration
+/// is priced for every signer without re-planning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NoteShapeBudgetCase {
+    /// The [`MigrationScenario::label`] this row prices (the wallet's note shape).
+    pub scenario_label: &'static str,
+    /// The signer's per-round budget, in total Orchard actions.
+    pub budget_actions: u32,
+    /// The expected number of signing rounds (the optimal `MinRounds` packing).
+    pub expected_rounds: usize,
+}
+
+/// What the note shape costs the USER AT THE SIGNER: one 10 ZEC balance, four note shapes, priced
+/// for five signer budgets.
+///
+/// The action total a shape produces is `preparations * 16 + crossings * 3`, so the note shape
+/// decides the signing workload as much as the balance does:
+///
+/// | 10 ZEC held as | preparations | crossings | actions |
+/// |----------------|--------------|-----------|---------|
+/// | one note       | 1            | 9         | 43      |
+/// | 1 + 9          | 4            | 11        | 97      |
+/// | 2 + 8          | 4            | 10        | 94      |
+/// | 5 + 5          | 2            | 1         | 35      |
+///
+/// The consequence a user feels: `1 + 9` is 97 actions, ONE over a Keystone round, so that wallet
+/// signs twice where the single-note wallet signs once, and `2 + 8` (94 actions, the same 4
+/// preparations) still signs once. On a tighter 48-action signer the same shape costs 3 rounds
+/// against the single-note wallet's 1.
+///
+/// Every row is hand-derived from the two-item-size packing (16-action preparations, 3-action
+/// transfers) and cross-checked against `min_signing_rounds` by the test that replays it.
+pub const NOTE_SHAPE_BUDGET_ROUNDS: &[NoteShapeBudgetCase] = {
+    const fn b(
+        scenario_label: &'static str,
+        budget_actions: u32,
+        expected_rounds: usize,
+    ) -> NoteShapeBudgetCase {
+        NoteShapeBudgetCase {
+            scenario_label,
+            budget_actions,
+            expected_rounds,
+        }
+    }
+    // The budgets swept, named from the real constants rather than magic numbers. `MIN` is the
+    // smallest budget any signer must support (one preparation transaction, with no room left for a
+    // transfer); `TIGHT` and `MODEST` stand for devices between that floor and a Keystone.
+    const MIN: u32 = SigningRoundBudget::minimum_feasible().get();
+    const TIGHT: u32 = 2 * PREPARATION_ACTIONS; // 32: two preparations, or one plus five transfers
+    const MODEST: u32 = 3 * PREPARATION_ACTIONS; // 48: three preparations, or sixteen transfers
+    const KEYSTONE: u32 = SigningRoundBudget::KEYSTONE.max_actions();
+    const DEFAULT: u32 = SigningRoundBudget::DEFAULT.max_actions();
+    const ONE_NOTE: &str = "10 ZEC in a single note";
+    const ONE_PLUS_NINE: &str = "10 ZEC as 1 + 9";
+    const TWO_PLUS_EIGHT: &str = "10 ZEC as 2 + 8";
+    const FIVE_PLUS_FIVE: &str = "10 ZEC as 5 + 5";
+    &[
+        // At the floor every preparation fills a round alone and transfers pack five to a round.
+        b(ONE_NOTE, MIN, 3),       // 1 prep + ceil(9/5)
+        b(ONE_PLUS_NINE, MIN, 7),  // 4 preps + ceil(11/5)
+        b(TWO_PLUS_EIGHT, MIN, 6), // 4 preps + ceil(10/5)
+        b(FIVE_PLUS_FIVE, MIN, 3), // 2 preps + 1
+        // 32 actions: one preparation plus five transfers per round (31), or two preparations (32).
+        b(ONE_NOTE, TIGHT, 2),
+        b(ONE_PLUS_NINE, TIGHT, 4), // 97 actions cannot beat ceil(97/32)
+        b(TWO_PLUS_EIGHT, TIGHT, 3),
+        b(FIVE_PLUS_FIVE, TIGHT, 2),
+        // 48 actions: the single-note wallet signs once; the 1 + 9 wallet signs three times.
+        b(ONE_NOTE, MODEST, 1),
+        b(ONE_PLUS_NINE, MODEST, 3),
+        b(TWO_PLUS_EIGHT, MODEST, 2),
+        b(FIVE_PLUS_FIVE, MODEST, 1),
+        // Keystone: 1 + 9 is one action over a single round, so it costs a second interaction.
+        b(ONE_NOTE, KEYSTONE, 1),
+        b(ONE_PLUS_NINE, KEYSTONE, 2),
+        b(TWO_PLUS_EIGHT, KEYSTONE, 1), // 94 actions still fit
+        b(FIVE_PLUS_FIVE, KEYSTONE, 1),
+        // A software signer takes every shape in one round.
+        b(ONE_NOTE, DEFAULT, 1),
+        b(ONE_PLUS_NINE, DEFAULT, 1),
+        b(TWO_PLUS_EIGHT, DEFAULT, 1),
+        b(FIVE_PLUS_FIVE, DEFAULT, 1),
     ]
 };
 
