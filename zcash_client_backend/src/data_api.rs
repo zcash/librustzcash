@@ -3686,6 +3686,32 @@ pub trait WalletWrite:
         account: <Self as WalletRead>::AccountId,
     ) -> Result<(), <Self as WalletRead>::Error>;
 
+    /// Imports the given transparent address into the account as a watch-only address, without
+    /// any associated key material.
+    ///
+    /// The imported address will contribute to the balance of the account, but the wallet holds
+    /// neither the public key (P2PKH) nor the redeem script (P2SH) from which the address was
+    /// derived, so funds received by it cannot be spent — its outputs are excluded from spendable
+    /// input selection, and it must not be included in the addresses passed to
+    /// [`propose_shielding`]. Subsequently importing the corresponding key material with
+    /// [`import_standalone_transparent_pubkey`] or [`import_standalone_transparent_script`]
+    /// upgrades the address in place, after which the spending limitations of those methods
+    /// apply instead.
+    ///
+    /// [`import_standalone_transparent_pubkey`]: Self::import_standalone_transparent_pubkey
+    /// [`import_standalone_transparent_script`]: Self::import_standalone_transparent_script
+    /// [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_address(
+        &mut self,
+        _account: <Self as WalletRead>::AccountId,
+        _address: TransparentAddress,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        unimplemented!(
+            "WalletWrite::import_standalone_transparent_address must be overridden for wallets to use the `transparent-key-import` feature"
+        )
+    }
+
     /// Imports the given pubkey into the account without key derivation information, and adds the
     /// associated transparent p2pkh address.
     ///

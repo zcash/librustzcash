@@ -11,6 +11,15 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- Support for `WalletWrite::import_standalone_transparent_address` (under the
+  `transparent-key-import` feature): a watch-only transparent address is
+  stored as a `key_scope = -1` row of the `addresses` table with neither
+  imported-material column set. A schema migration relaxes the `addresses`
+  table constraint to admit this shape. Importing the corresponding pubkey or
+  redeem script with `WalletWrite::import_standalone_transparent_pubkey` /
+  `import_standalone_transparent_script` now upgrades such a row in place.
+  Outputs received by an address imported without key material contribute to
+  the account balance but are excluded from spendable-output selection.
 - The `v_migration_transactions` view: one row per SCHEDULED pool-migration
   transaction (belonging to a non-terminal migration and not yet broadcast),
   with its identity, kind, lifecycle state, scheduled and expiry heights,

@@ -2083,6 +2083,12 @@ where
                         utxos_spent.push(outpoint.clone());
                         builder.add_transparent_p2sh_input(from_chain, outpoint, txout)?;
                     }
+                    // An address imported without key material cannot construct a spend: the
+                    // wallet holds neither the pubkey nor the redeem script for the input.
+                    #[cfg(feature = "transparent-key-import")]
+                    TransparentAddressSource::StandaloneAddress => {
+                        return Err(Error::KeyNotAvailable(PoolType::Transparent));
+                    }
                 }
 
                 Ok(())
@@ -2615,6 +2621,12 @@ where
                 for key in keys {
                     transparent_signing_set.add_key(*key);
                 }
+            }
+            // Unreachable in practice: inputs from an address imported without key material
+            // are rejected when the proposed transaction is constructed.
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneAddress => {
+                return Err(Error::AddressNotRecognized(_address));
             }
         }
     }
@@ -3193,7 +3205,8 @@ where
                             } => Some((index, *scope, *address_index)),
                             #[cfg(feature = "transparent-key-import")]
                             TransparentAddressSource::StandalonePubkey(_)
-                            | TransparentAddressSource::StandaloneScript(_) => None,
+                            | TransparentAddressSource::StandaloneScript(_)
+                            | TransparentAddressSource::StandaloneAddress => None,
                         }
                     })
                     .collect::<Vec<_>>();

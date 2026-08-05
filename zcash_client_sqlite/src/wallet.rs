@@ -825,6 +825,114 @@ pub(crate) fn transparent_receiver_address_exists(
         .is_some())
 }
 
+/// Returns the row id of an address-only standalone import of the given receiver address in
+/// the given account — a [`KeyScope::Foreign`] row with neither imported-material column set —
+/// if one exists.
+#[cfg(feature = "transparent-key-import")]
+fn standalone_address_only_row(
+    conn: &rusqlite::Transaction,
+    account_id: AccountRef,
+    addr_str: &str,
+) -> Result<Option<i64>, SqliteClientError> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM addresses
+             WHERE account_id = :account_id
+             AND cached_transparent_receiver_address = :address
+             AND key_scope = :key_scope
+             AND imported_transparent_receiver_pubkey IS NULL
+             AND imported_transparent_receiver_script IS NULL",
+            named_params![
+                ":account_id": account_id.0,
+                ":address": addr_str,
+                ":key_scope": KeyScope::Foreign.encode(),
+            ],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Imports a standalone transparent receiver into the given account by its address alone,
+/// without any associated key material.
+///
+/// Returns the number of address rows inserted: `1` when a new receiver row was added, or `0`
+/// when nothing was inserted because the receiver address was already present in the wallet.
+#[cfg(feature = "transparent-key-import")]
+pub(crate) fn import_standalone_transparent_address<P: consensus::Parameters>(
+    conn: &rusqlite::Transaction,
+    params: &P,
+    account_uuid: AccountUuid,
+    address: ::transparent::address::TransparentAddress,
+) -> Result<usize, SqliteClientError> {
+    use ::transparent::address::TransparentAddress;
+
+    // Resolve the account up front so an unknown account is reported explicitly, rather than
+    // inferred from a zero-row INSERT below.
+    let account_id = get_account_ref(conn, account_uuid)?;
+
+    let addr_str = Address::Transparent(address).encode(params);
+
+    // The only identity an address-only import carries is the address itself, so the
+    // cross-account conflict check is on the receiver address of existing standalone imports
+    // (of any kind — a standalone import with key material subsumes an address-only one).
+    let existing_import_account = conn
+        .query_row(
+            "SELECT accounts.uuid AS account_uuid
+             FROM addresses
+             JOIN accounts ON accounts.id = addresses.account_id
+             WHERE cached_transparent_receiver_address = :address
+             AND key_scope = :key_scope",
+            named_params![
+                ":address": addr_str,
+                ":key_scope": KeyScope::Foreign.encode(),
+            ],
+            |row| row.get::<_, Uuid>("account_uuid"),
+        )
+        .optional()?;
+
+    if let Some(current) = existing_import_account {
+        if current == account_uuid.expose_uuid() {
+            // The address has already been imported; nothing to do.
+            return Ok(0);
+        } else {
+            return Err(SqliteClientError::StandaloneImportConflict(current));
+        }
+    }
+
+    // If this transparent receiver is already recorded as a derived address, the existing
+    // representation already covers it. See `import_standalone_transparent_pubkey_inner` for
+    // details of this resolution.
+    if transparent_receiver_address_exists(conn, &addr_str)? {
+        return Ok(0);
+    }
+
+    let receiver_flags = match address {
+        TransparentAddress::PublicKeyHash(_) => ReceiverFlags::P2PKH,
+        TransparentAddress::ScriptHash(_) => ReceiverFlags::P2SH,
+    };
+
+    let rows_affected = conn.execute(
+        r#"
+        INSERT INTO addresses (
+          account_id, key_scope, address, cached_transparent_receiver_address, receiver_flags
+        )
+        VALUES (
+          :account_id, :key_scope, :address, :address, :receiver_flags
+        )
+        "#,
+        named_params![
+            ":account_id": account_id.0,
+            ":key_scope": KeyScope::Foreign.encode(),
+            ":address": addr_str,
+            ":receiver_flags": receiver_flags.bits(),
+        ],
+    )?;
+
+    // The account is known (resolved above) and the receiver is not already recorded (checked
+    // above), so exactly one row is inserted.
+    Ok(rows_affected)
+}
+
 /// Imports a standalone transparent P2PKH receiver by its pubkey into the given account.
 ///
 /// Returns the number of address rows inserted: `1` when a new receiver row was added, or `0`
@@ -902,6 +1010,22 @@ fn import_standalone_transparent_pubkey_inner<P: consensus::Parameters>(
     }
 
     let addr_str = Address::Transparent(TransparentAddress::from_pubkey(&pubkey)).encode(params);
+
+    // If the receiver was previously imported into this account by its address alone (a
+    // Foreign-scope row with no key material), upgrade the existing row in place with the
+    // pubkey, preserving the row id and hence any attached outputs and exposure state.
+    if let Some(row_id) = standalone_address_only_row(conn, account_id, &addr_str)? {
+        conn.execute(
+            "UPDATE addresses
+             SET imported_transparent_receiver_pubkey = :imported_transparent_receiver_pubkey
+             WHERE id = :id",
+            named_params![
+                ":imported_transparent_receiver_pubkey": pubkey.serialize(),
+                ":id": row_id,
+            ],
+        )?;
+        return Ok(0);
+    }
 
     // If this transparent receiver is already recorded (for example it was derived as an
     // account receiver, so its row carries a NULL `imported_transparent_receiver_pubkey` and is
@@ -1003,6 +1127,23 @@ pub(crate) fn import_standalone_transparent_script<P: consensus::Parameters>(
     }
 
     let addr_str = Address::Transparent(addr).encode(params);
+
+    // If the receiver was previously imported into this account by its address alone (a
+    // Foreign-scope row with no key material), upgrade the existing row in place with the
+    // redeem script, preserving the row id and hence any attached outputs and exposure state.
+    if let Some(row_id) = standalone_address_only_row(conn, account_id, &addr_str)? {
+        conn.execute(
+            "UPDATE addresses
+             SET imported_transparent_receiver_script = :imported_transparent_receiver_script
+             WHERE id = :id",
+            named_params![
+                ":imported_transparent_receiver_script": &rs_bytes[..],
+                ":id": row_id,
+            ],
+        )?;
+        return Ok(());
+    }
+
     conn.execute(
         r#"
         INSERT INTO addresses (

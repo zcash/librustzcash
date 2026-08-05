@@ -1762,6 +1762,15 @@ impl<C: BorrowMut<rusqlite::Connection>, P: consensus::Parameters, CL: Clock, R:
     }
 
     #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_address(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        address: TransparentAddress,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        self.transactionally(|wdb| wdb.import_standalone_transparent_address(account, address))
+    }
+
+    #[cfg(feature = "transparent-key-import")]
     fn import_standalone_transparent_pubkey(
         &mut self,
         account: <Self as WalletRead>::AccountId,
@@ -2135,6 +2144,16 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         account_uuid: <Self as WalletRead>::AccountId,
     ) -> Result<(), <Self as WalletRead>::Error> {
         wallet::delete_account(self.conn.0, account_uuid)
+    }
+
+    #[cfg(feature = "transparent-key-import")]
+    fn import_standalone_transparent_address(
+        &mut self,
+        account: <Self as WalletRead>::AccountId,
+        address: TransparentAddress,
+    ) -> Result<(), <Self as WalletRead>::Error> {
+        wallet::import_standalone_transparent_address(self.conn.0, &self.params, account, address)
+            .map(|_inserted| ())
     }
 
     #[cfg(feature = "transparent-key-import")]

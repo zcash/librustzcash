@@ -179,14 +179,17 @@ pub(super) const INDEX_ACCOUNTS_P2SH_IVK: &str =
 ///   address. At present, this will ordinarily be populated only for ZIP 320 ephemeral addresses.
 /// - `imported_transparent_receiver_pubkey`: The 33-byte pubkey corresponding to the
 ///   `cached_transparent_receiver_address` value, for imported transparent P2PKH addresses that
-///   were not obtained via derivation from an HD seed associated with the account. In cases that
-///   `cached_transparent_receiver_address` is non-null, either this column, or
-///   `imported_transparent_receiver_script` (for imported P2SH addresses), or
-///   `transparent_child_index` must also be non-null. This is only set for imported addresses
-///   (key_scope = -1).
+///   were not obtained via derivation from an HD seed associated with the account. This is only
+///   set for imported addresses (key_scope = -1).
 /// - `imported_transparent_receiver_script`: The serialized redeem script for an imported
 ///   standalone P2SH address. When present, `cached_transparent_receiver_address` holds the P2SH
 ///   address derived from this script. This is only set for imported addresses (key_scope = -1).
+///
+/// At most one of `imported_transparent_receiver_pubkey` and
+/// `imported_transparent_receiver_script` may be set. An imported row (key_scope = -1) with
+/// neither set is a standalone transparent address imported without key material: the wallet
+/// watches for outputs received by `cached_transparent_receiver_address`, but cannot spend
+/// them unless the corresponding pubkey or redeem script is subsequently imported.
 ///
 /// [`ReceiverFlags`]: crate::wallet::encoding::ReceiverFlags
 pub(super) const TABLE_ADDRESSES: &str = r#"
@@ -210,6 +213,7 @@ CREATE TABLE "addresses" (
     CONSTRAINT ck_addr_transparent_index_consistency CHECK (
         (transparent_child_index IS NULL OR diversifier_index_be < x'0000000F00000000000000')
         AND (
+            -- no transparent receiver: all transparent columns are absent
             (
                 cached_transparent_receiver_address IS NULL
                 AND transparent_child_index IS NULL
@@ -218,12 +222,18 @@ CREATE TABLE "addresses" (
             )
             OR (
                 cached_transparent_receiver_address IS NOT NULL
+                -- a transparent receiver has a child index iff it was derived
+                AND ((transparent_child_index IS NULL) == (key_scope = -1))
+                -- at most one kind of imported key material
+                AND NOT (
+                    imported_transparent_receiver_pubkey IS NOT NULL
+                    AND imported_transparent_receiver_script IS NOT NULL
+                )
+                -- imported key material appears only on imported (key_scope = -1) rows
                 AND (
-                    (transparent_child_index IS NULL) == (
-                        key_scope = -1 AND (
-                            (imported_transparent_receiver_pubkey IS NULL) !=
-                              (imported_transparent_receiver_script IS NULL)
-                        )
+                    key_scope = -1 OR (
+                        imported_transparent_receiver_pubkey IS NULL
+                        AND imported_transparent_receiver_script IS NULL
                     )
                 )
             )

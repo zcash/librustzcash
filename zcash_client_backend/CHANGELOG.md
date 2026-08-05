@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::WalletWrite::import_standalone_transparent_address`
+  (requires the `transparent-key-import` feature): imports a transparent
+  address into an account as watch-only, without any associated key material.
+- `zcash_client_backend::wallet::TransparentAddressSource::StandaloneAddress`
+- `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_address`
+
 ### Changed
 - The `orchard` feature is now enabled by default. Consumers that require a
   smaller feature set should disable default features and enable only the
@@ -18,6 +25,12 @@ workspace.
   idempotent: storing a transaction the wallet has already recorded must
   replace that record rather than fail. An implementation that inserts its
   sent-output records must upsert them instead.
+- `zcash_client_backend::wallet::TransparentAddressSource` has a new
+  `StandaloneAddress` variant (under the `transparent-key-import` feature);
+  exhaustive matches on this enum must add an arm for it. Inputs whose address
+  has this source cannot be spent:
+  `zcash_client_backend::data_api::wallet::create_proposed_transactions`
+  returns `Error::KeyNotAvailable` when a proposal includes one.
 
 ## [0.24.0-rc.7] - 2026-08-03
 
