@@ -23,7 +23,9 @@
 mod conformance;
 mod scenarios;
 mod strategies;
+mod wallets;
 
 pub use conformance::*;
 pub use scenarios::*;
 pub use strategies::*;
+pub use wallets::*;
