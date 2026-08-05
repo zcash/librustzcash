@@ -376,11 +376,11 @@ impl PreparationPlan {
 /// implementation is one named solution of it, exactly as [`DenominationStrategy`] and
 /// [`SigningRoundStrategy`] are for their problems.
 ///
-/// The trait is deliberately object-safe (no generic methods, no RNG), so a caller can hold a
-/// `&[&dyn PreparationStrategy]` and rank the plans they produce; see [`best_plan`].
+/// Several strategies compose into a [`Portfolio`], which is a type-level list rather than a slice
+/// of trait objects, so every call is statically dispatched and inlinable.
 ///
-/// An implementation must be a DETERMINISTIC function of its arguments. [`best_plan`] folds the
-/// strategies with a commutative, associative, idempotent join, which makes the portfolio's result
+/// An implementation must be a DETERMINISTIC function of its arguments. [`Portfolio::best_plan`]
+/// folds the strategies with a commutative, associative, idempotent join, which makes the result
 /// independent of evaluation order and monotone as strategies are added — properties that hold only
 /// if each strategy is a function of the instance alone.
 ///
@@ -505,39 +505,109 @@ fn encode_shape(plan: &PreparationPlan) -> Vec<u64> {
     out
 }
 
-/// Run every strategy in `strategies` on the same instance and return the best VALID plan it
-/// produced, together with the name of the strategy that produced it; `None` when none of them
-/// returned a plan that passes [`PreparationPlan::is_valid`].
+/// A plan that passed its certificate, labelled with the strategy that produced it. `None` is the
+/// bottom of the lattice [`Portfolio`] folds over: no plan at all.
+type Ranked = Option<(&'static str, PreparationPlan)>;
+
+/// A set of strategies to run on one instance, as a TYPE-LEVEL LIST: `()` is the empty portfolio,
+/// and `(head, tail)` extends `tail` with one more strategy. So a portfolio of three is written
 ///
-/// The combining operation is a join in a bounded semilattice ordered by [`PlanQuality`], with "no
-/// plan" as its bottom: it is idempotent, commutative and associative. Three consequences, which
-/// together are the reason to hold the strategies as a list rather than picking one:
+/// ```text
+/// (LayeredGreedy, (SomeOtherRule, (AThirdRule, ())))
+/// ```
 ///
-/// - the result does not depend on the order of `strategies`, nor on grouping, nor on repeats;
-/// - it is MONOTONE in the strategy set, so adding a strategy can never make the result worse, and
-///   the set can therefore grow over time without re-validating what is already there;
-/// - `best_plan(S ++ T)` equals the join of `best_plan(S)` and `best_plan(T)`, so a caller may
-///   evaluate strategies incrementally, cache per-strategy results, or split the work, and get the
-///   same answer as running them all at once.
+/// The list is a type rather than a `&[&dyn PreparationStrategy]` so that every call is statically
+/// dispatched: the recursion below is monomorphised into straight-line code with each strategy
+/// inlinable, there is no vtable, and an empty portfolio is a compile-time fact rather than a
+/// runtime one. Two hand-written implementations cover every length, so adding a strategy needs no
+/// macro and no new impl.
 ///
-/// Those properties hold only while every strategy is a deterministic function of the instance, as
-/// [`PreparationStrategy`] requires.
-pub fn best_plan(
-    strategies: &[&dyn PreparationStrategy],
+/// The shape is not incidental. `()` is the lattice's bottom and `(head, tail)` is
+/// `head` joined with the rest, so the type-level list IS the fold, and the laws in
+/// [`best_plan`](Self::best_plan) are what make the nesting order irrelevant.
+pub trait Portfolio {
+    /// Run every strategy in this portfolio on the same instance and return the best VALID plan any
+    /// of them produced, together with the name of the strategy that produced it; `None` when none
+    /// returned a plan that passes [`PreparationPlan::is_valid`].
+    ///
+    /// The combining operation is a join in a bounded semilattice ordered by [`PlanQuality`], with
+    /// "no plan" as its bottom: it is idempotent, commutative and associative. Three consequences,
+    /// which together are the reason to hold a set of strategies rather than picking one:
+    ///
+    /// - the result does not depend on the order the strategies are nested in, nor on grouping, nor
+    ///   on repeats;
+    /// - it is MONOTONE in the set, so adding a strategy can never make the result worse, and the
+    ///   set can therefore grow over time without re-validating what is already there;
+    /// - the result for `S` followed by `T` is the join of their separate results, so a caller may
+    ///   evaluate strategies incrementally, cache per-strategy results, or split the work, and get
+    ///   the same answer as running them all at once.
+    ///
+    /// Those properties hold only while every strategy is a deterministic function of the instance,
+    /// as [`PreparationStrategy`] requires.
+    fn best_plan(
+        &self,
+        available: &[Zatoshis],
+        funding: &[Zatoshis],
+        fee_per_tx: Zatoshis,
+    ) -> Ranked;
+}
+
+/// The empty portfolio: the identity of the join, and the base case of the recursion.
+impl Portfolio for () {
+    fn best_plan(&self, _: &[Zatoshis], _: &[Zatoshis], _: Zatoshis) -> Ranked {
+        None
+    }
+}
+
+/// One more strategy on the front of a portfolio: run the head, run the tail, keep the better.
+impl<H, T> Portfolio for (H, T)
+where
+    H: PreparationStrategy,
+    T: Portfolio,
+{
+    fn best_plan(
+        &self,
+        available: &[Zatoshis],
+        funding: &[Zatoshis],
+        fee_per_tx: Zatoshis,
+    ) -> Ranked {
+        let (head, tail) = self;
+        join(
+            evaluate(head, available, funding, fee_per_tx),
+            tail.best_plan(available, funding, fee_per_tx),
+        )
+    }
+}
+
+/// Run one strategy and keep its plan only if the plan passes its own certificate, so an
+/// unbuildable plan is bottom rather than a candidate that could win by looking cheaper.
+fn evaluate<S>(
+    strategy: &S,
     available: &[Zatoshis],
     funding: &[Zatoshis],
     fee_per_tx: Zatoshis,
-) -> Option<(&'static str, PreparationPlan)> {
-    strategies
-        .iter()
-        .filter_map(|strategy| {
-            let plan = strategy.plan(available, funding, fee_per_tx).ok()?;
-            plan.is_valid(available, funding, fee_per_tx)
-                .then(|| (strategy.name(), plan))
-        })
-        // `min_by_key` keeps the FIRST minimum, which would make a tie resolve by position in
-        // `strategies`; `PlanQuality`'s trailing shape encoding is what stops ties from arising.
-        .min_by_key(|(_, plan)| PlanQuality::of(plan))
+) -> Ranked
+where
+    S: PreparationStrategy + ?Sized,
+{
+    let plan = strategy.plan(available, funding, fee_per_tx).ok()?;
+    plan.is_valid(available, funding, fee_per_tx)
+        .then(|| (strategy.name(), plan))
+}
+
+/// The join: the better of two candidates under [`PlanQuality`], with `None` as bottom. Total, so
+/// the choice never falls back on the order the arguments arrived in.
+fn join(left: Ranked, right: Ranked) -> Ranked {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if PlanQuality::of(&left.1) <= PlanQuality::of(&right.1) {
+                Some(left)
+            } else {
+                Some(right)
+            }
+        }
+        (candidate, None) | (None, candidate) => candidate,
+    }
 }
 
 /// Why a preparation plan could not be produced.
@@ -566,8 +636,9 @@ impl fmt::Display for PrepError {
 impl core::error::Error for PrepError {}
 
 /// Every strategy [`plan_preparation`] runs. Adding one here can only improve the plans the wallet
-/// gets: [`best_plan`] is monotone in this set.
-const STRATEGIES: &[&dyn PreparationStrategy] = &[&LayeredGreedy];
+/// gets: [`Portfolio::best_plan`] is monotone in this set. A new strategy goes on the front,
+/// `(TheNewRule, STRATEGIES)`; the order is immaterial to the result.
+const STRATEGIES: (LayeredGreedy, ()) = (LayeredGreedy, ());
 
 /// Plan the note-preparation transactions that mint `funding` (the self-funding note values, in
 /// zatoshi) from `available` (the wallet's spendable source-pool note values, in zatoshi), reserving
@@ -576,8 +647,8 @@ const STRATEGIES: &[&dyn PreparationStrategy] = &[&LayeredGreedy];
 ///
 /// This is the entry point a wallet calls. It runs every strategy in [`STRATEGIES`] and returns the
 /// best plan any of them produced, so which rule wins is an implementation detail that can improve
-/// without the caller changing anything. Use [`best_plan`] directly to run a chosen set of
-/// strategies instead.
+/// without the caller changing anything. Call [`Portfolio::best_plan`] on a list of your own to run
+/// a chosen set of strategies instead.
 ///
 /// Returns an empty plan when `funding` is empty, [`PrepError::BalanceInvalid`] when the available or
 /// requested totals are not representable amounts, and [`PrepError::InsufficientFunds`] when no
@@ -590,7 +661,8 @@ pub fn plan_preparation(
     // A property of the INPUTS, not of any strategy, so it is settled once and reported the same way
     // however the strategy set changes.
     validate_instance(available, funding)?;
-    best_plan(STRATEGIES, available, funding, fee_per_tx)
+    STRATEGIES
+        .best_plan(available, funding, fee_per_tx)
         .map(|(_, plan)| plan)
         .ok_or(PrepError::InsufficientFunds)
 }
@@ -768,57 +840,86 @@ mod tests {
         );
         assert!(PlanQuality::of(&greedy) < PlanQuality::of(&detour));
 
-        for strategies in [
-            [&LayeredGreedy as &dyn PreparationStrategy, &Detour],
-            [&Detour, &LayeredGreedy],
-        ] {
-            assert_eq!(
-                best_plan(&strategies, &available, &funding, fee),
-                Some(("layered-greedy", greedy.clone())),
-            );
-        }
+        // The two nestings are DIFFERENT TYPES, so this also exercises both monomorphisations.
+        let expected = Some(("layered-greedy", greedy));
+        assert_eq!(
+            (LayeredGreedy, (Detour, ())).best_plan(&available, &funding, fee),
+            expected,
+        );
+        assert_eq!(
+            (Detour, (LayeredGreedy, ())).best_plan(&available, &funding, fee),
+            expected,
+        );
     }
 
-    /// `best_plan` is a join in a bounded semilattice: idempotent, commutative, associative, with
-    /// "no plan" as bottom. Observably, the result is the same for any ordering, grouping or
-    /// repetition of the strategy list, which is what makes the list safe to extend over time.
+    /// [`Portfolio::best_plan`] is a join in a bounded semilattice: idempotent, commutative,
+    /// associative, with "no plan" as bottom. Observably, the result is the same for any nesting
+    /// order, grouping or repetition of the strategies, which is what makes the list safe to extend
+    /// over time. Every portfolio below is a distinct TYPE, so each law is checked against its own
+    /// monomorphisation rather than against one function walking a slice.
     #[test]
     fn best_plan_is_a_semilattice_join() {
         let (available, funding, fee) = portfolio_instance();
-        let best = |strategies: &[&dyn PreparationStrategy]| {
-            best_plan(strategies, &available, &funding, fee)
-        };
-        let g = &LayeredGreedy as &dyn PreparationStrategy;
-        let d = &Detour as &dyn PreparationStrategy;
-        let n = &NeverPlans as &dyn PreparationStrategy;
-
-        // Bottom: no strategies, and a strategy that never plans, are both the identity.
-        assert_eq!(best(&[]), None);
-        assert_eq!(best(&[n]), None);
-        assert_eq!(best(&[g, n]), best(&[g]));
-
-        // Idempotent, commutative, and independent of order across the whole list.
-        assert_eq!(best(&[g, g]), best(&[g]));
-        assert_eq!(best(&[g, d]), best(&[d, g]));
-        let expected = best(&[g, d, n]);
-        for permutation in [
-            [g, d, n],
-            [g, n, d],
-            [d, g, n],
-            [d, n, g],
-            [n, g, d],
-            [n, d, g],
-        ] {
-            assert_eq!(best(&permutation), expected, "order must not matter");
+        // Each portfolio below is a distinct TYPE, so a closure cannot stand in for `best` here: a
+        // closure is monomorphic and would fix itself to whichever one it saw first. A generic
+        // function is what lets one name run every one of them, still statically dispatched.
+        fn best<P: Portfolio>(
+            portfolio: P,
+            instance: &(Vec<Zatoshis>, Vec<Zatoshis>, Zatoshis),
+        ) -> Ranked {
+            portfolio.best_plan(&instance.0, &instance.1, instance.2)
         }
+        let i = &(available, funding, fee);
 
-        // Associative: folding a concatenation equals folding the parts and joining the results.
-        // With a total order, joining two results is taking the better of them.
-        let joined = [best(&[g]), best(&[d, n])]
-            .into_iter()
-            .flatten()
-            .min_by(|(_, a), (_, b)| PlanQuality::of(a).cmp(&PlanQuality::of(b)));
-        assert_eq!(joined, best(&[g, d, n]));
+        // Bottom: the empty portfolio, and a strategy that never plans, are both the identity.
+        assert_eq!(best((), i), None);
+        assert_eq!(best((NeverPlans, ()), i), None);
+        assert_eq!(
+            best((LayeredGreedy, (NeverPlans, ())), i),
+            best((LayeredGreedy, ()), i)
+        );
+
+        // Idempotent and commutative.
+        assert_eq!(
+            best((LayeredGreedy, (LayeredGreedy, ())), i),
+            best((LayeredGreedy, ()), i)
+        );
+        assert_eq!(
+            best((LayeredGreedy, (Detour, ())), i),
+            best((Detour, (LayeredGreedy, ())), i)
+        );
+
+        // Independent of the nesting order across the whole list: all six permutations of three.
+        let expected = best((LayeredGreedy, (Detour, (NeverPlans, ()))), i);
+        assert_eq!(
+            best((LayeredGreedy, (NeverPlans, (Detour, ()))), i),
+            expected
+        );
+        assert_eq!(
+            best((Detour, (LayeredGreedy, (NeverPlans, ()))), i),
+            expected
+        );
+        assert_eq!(
+            best((Detour, (NeverPlans, (LayeredGreedy, ()))), i),
+            expected
+        );
+        assert_eq!(
+            best((NeverPlans, (LayeredGreedy, (Detour, ()))), i),
+            expected
+        );
+        assert_eq!(
+            best((NeverPlans, (Detour, (LayeredGreedy, ()))), i),
+            expected
+        );
+
+        // Associative: folding the whole list equals folding the parts and joining the results.
+        assert_eq!(
+            join(
+                best((LayeredGreedy, ()), i),
+                best((Detour, (NeverPlans, ())), i)
+            ),
+            expected,
+        );
     }
 
     /// An invalid plan is bottom, not a winner: a strategy that mints the wrong notes is rejected on
@@ -834,9 +935,11 @@ mod tests {
         );
         assert!(!bogus.is_valid(&available, &funding, fee));
 
-        assert_eq!(best_plan(&[&Bogus], &available, &funding, fee), None);
+        assert_eq!((Bogus, ()).best_plan(&available, &funding, fee), None);
         assert_eq!(
-            best_plan(&[&Bogus, &LayeredGreedy], &available, &funding, fee).map(|(name, _)| name),
+            (Bogus, (LayeredGreedy, ()))
+                .best_plan(&available, &funding, fee)
+                .map(|(name, _)| name),
             Some("layered-greedy"),
         );
     }
@@ -933,7 +1036,9 @@ mod tests {
         let (available, funding, fee) = portfolio_instance();
         assert_eq!(
             plan_preparation(&available, &funding, fee).ok(),
-            best_plan(STRATEGIES, &available, &funding, fee).map(|(_, plan)| plan),
+            STRATEGIES
+                .best_plan(&available, &funding, fee)
+                .map(|(_, plan)| plan),
         );
     }
 

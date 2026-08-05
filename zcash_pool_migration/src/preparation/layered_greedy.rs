@@ -524,7 +524,7 @@ mod tests {
 
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::preparation::{PREP_TX_ACTIONS, best_plan, plan_preparation};
+    use crate::preparation::{PREP_TX_ACTIONS, Portfolio, plan_preparation};
 
     /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
     /// action costs one ZIP-317 marginal fee). The planner treats it opaquely.
@@ -1196,7 +1196,7 @@ mod tests {
         fn a_singleton_portfolio_is_the_strategy((available, funding) in arb_input()) {
             let (available, funding, fee) = (zats(&available), zats(&funding), zat(fee_per_tx()));
             prop_assert_eq!(
-                best_plan(&[&LayeredGreedy], &available, &funding, fee),
+                (LayeredGreedy, ()).best_plan(&available, &funding, fee),
                 plan_preparation(&available, &funding, fee)
                     .ok()
                     .map(|plan| ("layered-greedy", plan))

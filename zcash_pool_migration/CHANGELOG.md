@@ -37,7 +37,9 @@ and this library adheres to Rust's notion of
   `preparation::LayeredGreedy`.
 - `preparation::PreparationPlan::is_valid`.
 - `preparation::PlanQuality`.
-- `preparation::best_plan`.
+- `preparation::Portfolio`, implemented for `()` and for `(H, T)` where `H:
+  PreparationStrategy` and `T: Portfolio`, so a set of strategies is written
+  `(A, (B, (C, ())))`.
 
 ### Changed
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`
