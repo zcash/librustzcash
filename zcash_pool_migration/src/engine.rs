@@ -1298,9 +1298,9 @@ where
     let (prep_tx_fee, transfer_fee_buffer) =
         canonical_fees(params, commit_height).map_err(MigrationError::Fee)?;
 
-    // The preparation-layout capability the decomposition consults at each step: how many
+    // The preparation-layout capability the decomposition's reconciliation consults: how many
     // preparation transactions minting a candidate funding multiset takes, or `None` when the
-    // wallet's notes cannot mint it (so the split stops or steps down a denomination).
+    // wallet's notes cannot mint it (so the split drops its smallest part and asks again).
     let prep_tx_count = |funding: &[Zatoshis]| {
         crate::preparation::plan_preparation_with(portfolio, &notes, funding, prep_tx_fee)
             .ok()
@@ -1318,8 +1318,8 @@ where
         return Err(MigrationError::NothingToMigrate);
     }
 
-    // The decomposition verified this multiset against the preparation planner at every step, so
-    // this final planning pass succeeds by construction; the error path is kept for safety.
+    // The decomposition's reconciliation verified this multiset against the preparation planner,
+    // so this final planning pass succeeds by construction; the error path is kept for safety.
     let preparation =
         crate::preparation::plan_preparation_with(portfolio, &notes, &funding_notes, prep_tx_fee)
             .map_err(MigrationError::Preparation)?;
@@ -4288,9 +4288,11 @@ pub(crate) mod tests {
         assert_eq!(est.total_crossings(), summed);
     }
 
-    /// The estimate depends on the wallet's NOTE STRUCTURE, not just its total value: the same balance
-    /// held as one note versus as many small notes migrates the same value in one run, but the
-    /// fragmented wallet costs strictly more note-preparation work (consolidation).
+    /// The estimate depends on the wallet's NOTE STRUCTURE, not just its total value: the same
+    /// balance held as one note versus as many small notes costs strictly more note-preparation
+    /// work when fragmented (consolidation), and may take more runs — the canonical split reserves
+    /// preparation fees optimistically, and a wallet whose real preparation costs more pays for it
+    /// by deferring the smallest parts to a later run rather than by publishing a different split.
     #[test]
     fn estimate_depends_on_wallet_note_structure() {
         let mut rng = ChaCha8Rng::seed_from_u64(1);
@@ -4302,7 +4304,7 @@ pub(crate) mod tests {
             estimate_migration_runs(&test_net(), &fragmented, &mut rng).expect("estimates");
 
         assert_eq!(est_one.run_count(), 1);
-        assert_eq!(est_frag.run_count(), 1);
+        assert!(est_frag.run_count() >= est_one.run_count());
         assert!(
             est_frag.total_prep_transactions() > est_one.total_prep_transactions(),
             "a fragmented wallet needs more preparation: {} vs {}",
@@ -4834,14 +4836,16 @@ mod commit_tests {
     /// canonical expiry and re-signed against the same funding note, its denomination unchanged, and
     /// moved back to `Signed` ready to prove and broadcast on the new schedule (ZIP 318 error
     /// handling). A wallet holding exactly one funding note funds the transfer DIRECTLY (no
-    /// preparation), so the note stays spendable for the rebuild to re-resolve by value.
+    /// preparation), so the note stays spendable for the rebuild to re-resolve by value. The extra
+    /// fee-sized note covers the quantizer's optimistic preparation reserve, so the funding note
+    /// itself stays an exact match; the reserve is released as change once no preparation runs.
     #[test]
     fn rebuild_expired_transfer_reschedules_and_resigns_in_place() {
         let seed = 99u64;
         let params = regtest_network(true);
         let buffer = u64::from(commit_test_fees().1);
         let funding_note = COIN + buffer; // one 1-ZEC crossing plus its fee buffer
-        let mut backend = CommitMock::new(seed, &[funding_note]);
+        let mut backend = CommitMock::new(seed, &[funding_note, u64::from(prep_fee())]);
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
@@ -4951,7 +4955,7 @@ mod commit_tests {
         let seed = 101u64;
         let params = regtest_network(true);
         let buffer = u64::from(commit_test_fees().1);
-        let mut backend = CommitMock::new(seed, &[COIN + buffer]);
+        let mut backend = CommitMock::new(seed, &[COIN + buffer, u64::from(prep_fee())]);
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
@@ -5043,9 +5047,12 @@ mod commit_tests {
         let seed = 103u64;
         let params = regtest_network(true);
         let buffer = u64::from(commit_test_fees().1);
-        let funding_note = COIN + buffer;
-        // TWO identical-denomination funding notes: two transfers of the same funding value.
-        let mut backend = CommitMock::new(seed, &[funding_note, funding_note]);
+        // TWO identical-denomination funding notes: two transfers of the same funding value. The
+        // canonical split emits equal parts only where the digit expansion repeats a denomination,
+        // so a 4 ZEC balance (`2 + 2`) is the smallest whole-ZEC shape with two equal crossings.
+        let funding_note = 2 * COIN + buffer;
+        let mut backend =
+            CommitMock::new(seed, &[funding_note, funding_note, u64::from(prep_fee())]);
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
@@ -5102,7 +5109,7 @@ mod commit_tests {
         let params = regtest_network(true);
         let buffer = u64::from(commit_test_fees().1);
         let funding_note = COIN + buffer;
-        let mut backend = CommitMock::new(seed, &[funding_note]);
+        let mut backend = CommitMock::new(seed, &[funding_note, u64::from(prep_fee())]);
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
@@ -5144,7 +5151,7 @@ mod commit_tests {
         let params = regtest_network(true);
         let buffer = u64::from(commit_test_fees().1);
         let funding_note = COIN + buffer;
-        let mut backend = CommitMock::new(seed, &[funding_note]);
+        let mut backend = CommitMock::new(seed, &[funding_note, u64::from(prep_fee())]);
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
@@ -5231,7 +5238,7 @@ mod commit_tests {
         let seed = 101u64;
         let params = regtest_network(true);
         let buffer = u64::from(commit_test_fees().1);
-        let mut backend = CommitMock::new(seed, &[COIN + buffer]);
+        let mut backend = CommitMock::new(seed, &[COIN + buffer, u64::from(prep_fee())]);
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
@@ -5282,7 +5289,7 @@ mod commit_tests {
         let seed = 109u64;
         let params = regtest_network(true);
         let buffer = u64::from(commit_test_fees().1);
-        let mut backend = CommitMock::new(seed, &[COIN + buffer]);
+        let mut backend = CommitMock::new(seed, &[COIN + buffer, u64::from(prep_fee())]);
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
