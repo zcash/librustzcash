@@ -337,6 +337,19 @@ workspace.
 - `zcash_client_backend::data_api::locking::OutputLockStore` (re-exported as
   `zcash_client_backend::data_api::OutputLockStore`), the extracted storage
   contract for output locks, with `AccountId` and `Error` associated types.
+- `zcash_client_backend::proposal::Step::estimated_serialized_size`, a
+  conservative upper-bound estimate of the serialized byte size of the
+  transaction a step describes. The estimate sums the per-element byte costs of
+  every input, output, and change output (using the v4 Sapling sizes and the
+  Orchard `ACTION_SIZE` as upper bounds) plus a fixed transaction-overhead
+  constant. It never under-counts, so comparing it against `MAX_BLOCK_BYTES` is
+  a safe size bound for rejecting proposals that cannot be mined.
+- `zcash_client_backend::proposal::ProposalError::TransactionTooLarge`, returned
+  by `Step::from_parts` when the step's estimated serialized size exceeds
+  `MAX_BLOCK_BYTES`. Input selection now rejects oversized proposals at
+  construction time rather than letting them reach the transaction builder,
+  where proof generation would waste the caller's resources on a transaction
+  that can never be included in a block.
 
 ### Changed
 - Migrated to `zcash_primitives 0.30.0`, `zcash_transparent 0.10.0`,
