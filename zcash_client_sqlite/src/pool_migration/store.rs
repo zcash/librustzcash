@@ -318,6 +318,83 @@ pub(crate) fn create_tx_due_index_sql(t: &Tables) -> String {
     )
 }
 
+/// The `v_migration_transactions` view DDL: one row per SCHEDULED migration transaction — a
+/// transaction of a non-terminal migration that has not yet been broadcast (and so has no row in
+/// the wallet's `transactions` table). Values are projected from the migration store's typed
+/// columns: a transfer spends its funding note (crossing value plus the per-note fee buffer,
+/// which IS the canonical transfer's ZIP-317 fee) and receives the crossing; a preparation's
+/// values are the sums of its input and output rows. Every wire name, classification code, and
+/// the terminal-status list are generated from their defining types.
+pub(crate) fn create_migration_tx_view_sql(t: &Tables) -> String {
+    use zcash_pool_migration::engine::{MigrationTxKind, MigrationTxState};
+    use zcash_protocol::zip318::{Zip318Classification, Zip318TxKind};
+
+    let transfer = MigrationTxKind::Transfer { crossing: 0 };
+    let pending_states = [
+        MigrationTxState::AwaitingSignature,
+        MigrationTxState::Signed,
+        MigrationTxState::Proved,
+    ]
+    .iter()
+    .map(|st| format!("'{}'", st.as_ref()))
+    .collect::<Vec<_>>()
+    .join(", ");
+    format!(
+        "CREATE VIEW v_migration_transactions AS
+        SELECT accounts.uuid AS account_uuid,
+               m.uuid AS migration_uuid,
+               mt.txid AS txid,
+               mt.kind AS kind,
+               mt.state AS state,
+               mt.scheduled_height AS scheduled_height,
+               mt.expiry_height AS expiry_height,
+               CASE mt.kind WHEN '{transfer}' THEN cv.value + m.note_split_fee_buffer
+                    ELSE pin.value_in END AS value_spent,
+               CASE mt.kind WHEN '{transfer}' THEN cv.value
+                    ELSE pout.value_out END AS value_received,
+               CASE mt.kind WHEN '{transfer}' THEN m.note_split_fee_buffer
+                    ELSE pin.value_in - pout.value_out END AS fee,
+               CASE mt.kind WHEN '{transfer}' THEN cv.value END AS pool_crossing_value,
+               CASE mt.kind WHEN '{transfer}' THEN 1 ELSE pin.input_count END AS spent_note_count,
+               CASE mt.kind WHEN '{transfer}' THEN 1
+                    ELSE pout.output_count - pout.change_count END AS received_note_count,
+               CASE mt.kind WHEN '{transfer}' THEN 0
+                    ELSE pout.change_count > 0 END AS has_change,
+               CASE mt.kind WHEN '{transfer}' THEN {transfer_code}
+                    ELSE {prep_code} END AS zip318_kind
+        FROM {tx} mt
+        JOIN {migrations} m ON m.id = mt.migration_id
+        JOIN accounts ON accounts.id = m.account_id
+        LEFT JOIN {cv} cv
+               ON cv.migration_id = mt.migration_id AND cv.ordinal = mt.kind_crossing
+        LEFT JOIN (SELECT migration_id, layer, tx_index,
+                          SUM(value) AS value_in, COUNT(*) AS input_count
+                     FROM {pin} GROUP BY migration_id, layer, tx_index) pin
+               ON pin.migration_id = mt.migration_id
+              AND pin.layer = mt.kind_layer AND pin.tx_index = mt.kind_index
+        LEFT JOIN (SELECT migration_id, layer, tx_index,
+                          SUM(value) AS value_out, COUNT(*) AS output_count,
+                          SUM(role = '{change}') AS change_count
+                     FROM {pout} GROUP BY migration_id, layer, tx_index) pout
+               ON pout.migration_id = mt.migration_id
+              AND pout.layer = mt.kind_layer AND pout.tx_index = mt.kind_index
+        WHERE m.status NOT IN ({terminal})
+          AND mt.state IN ({pending_states})
+          AND NOT EXISTS (SELECT 1 FROM transactions tt WHERE tt.txid = mt.txid)",
+        transfer = transfer.as_ref(),
+        transfer_code = Zip318Classification::Conforms(Zip318TxKind::Transfer).to_code(),
+        prep_code = Zip318Classification::Conforms(Zip318TxKind::Preparation).to_code(),
+        change = "change",
+        tx = t.transactions,
+        migrations = t.migrations,
+        cv = t.crossing_values,
+        pin = t.prep_inputs,
+        pout = t.prep_outputs,
+        terminal = terminal_status_sql_list(),
+        pending_states = pending_states,
+    )
+}
+
 /// The at-most-one-PENDING-migration-per-account invariant, as a database constraint: a PARTIAL
 /// unique index over the non-terminal rows. An account accumulates terminal migrations without
 /// limit — they are the history the store retains — while the engine's commit guard admits a new

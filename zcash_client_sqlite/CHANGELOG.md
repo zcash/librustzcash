@@ -11,6 +11,14 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- The `v_migration_transactions` view: one row per SCHEDULED pool-migration
+  transaction (belonging to a non-terminal migration and not yet broadcast),
+  with its identity, kind, lifecycle state, scheduled and expiry heights,
+  values, and ZIP 318 classification code.
+- The `v_transactions_with_pending_migrations` view: `v_transactions` plus the
+  scheduled migration transactions projected into the same column shape.
+  `v_transactions` itself is unchanged; a consumer that wants pending
+  migration activity in one merged feed reads this view instead.
 - `pool_migration::orchard_ironwood::PoolMigrations::cancel_migration` and
   `pool_migration::CancelOutcome`: cancel the account's migration at the
   user's request. Releases the note reservations of its never-broadcast

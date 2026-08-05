@@ -928,6 +928,7 @@ mod tests {
             db::view_ironwood_shard_scan_ranges(st.network()),
             db::view_ironwood_shard_unscanned_ranges(),
             db::VIEW_IRONWOOD_SHARDS_SCAN_STATE.to_owned(),
+            db::view_migration_transactions(),
             db::view_orchard_shard_scan_ranges(st.network()),
             db::view_orchard_shard_unscanned_ranges(),
             db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
@@ -937,6 +938,7 @@ mod tests {
             db::view_sapling_shard_unscanned_ranges(),
             db::VIEW_SAPLING_SHARDS_SCAN_STATE.to_owned(),
             db::VIEW_TRANSACTIONS.to_owned(),
+            db::VIEW_TRANSACTIONS_WITH_PENDING_MIGRATIONS.to_owned(),
             db::VIEW_TX_OUTPUTS.to_owned(),
         ];
 
