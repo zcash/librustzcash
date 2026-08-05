@@ -53,6 +53,17 @@ and this library adheres to Rust's notion of
 - `preparation::Portfolio`, implemented for `()` and for `(H, T)` where `H:
   PreparationStrategy` and `T: Portfolio`, so a set of strategies is written
   `(A, (B, (C, ())))`.
+- `engine::MigrationState::{next_due_broadcast, next_provable}`: public
+  read-only access to the drive's own height-ordered selection, so a
+  status-driven consumer can ask which transaction
+  `satisfiability::advance_migration` would next broadcast or prove without
+  reimplementing that ordering over `transaction_statuses`' per-row view,
+  where it is easy to drift from the drive's actual queue order. Each
+  derives the same dead set at the caller's `satisfiability::DuenessTargets`
+  and calls the same selector the kernel uses internally, so both agree
+  with `advance_migration`, and with `transaction_statuses`, by
+  construction. `next_provable`'s `skip` argument carries the same
+  call-local `set_aside` semantics as the drive's own candidate exclusions.
 
 ### Changed
 - `wallet::WalletMigration` now snapshots the account's spendable Orchard

@@ -1718,6 +1718,87 @@ impl MigrationState {
             })
             .collect()
     }
+
+    /// The id of the next transaction due to BROADCAST, or `None` if none is: the drive's own
+    /// broadcast queue ([`Self::next_broadcastable`]), exposed READ-ONLY. It derives the same
+    /// [`Self::dead_set`] at `targets` and calls the very selector
+    /// [`advance_migration`](crate::satisfiability::advance_migration) does, with no call-local
+    /// exclusion of its own (`set_aside` is always empty here) — so it agrees with
+    /// `advance_migration`, and with [`Self::transaction_statuses`], BY CONSTRUCTION: see the
+    /// AGREES WITH THE KERNEL note above that method. A consumer that instead reimplements this
+    /// selection over the per-row status view risks drifting from the drive's actual order; this
+    /// exposes the order itself, for a status-driven wallet that wants to know what is next
+    /// without stepping the drive.
+    ///
+    /// ADVISORY, not authoritative: this answers what the drive would pick — for scheduling,
+    /// queue display, and wake decisions — but performs NO store-oracle verification of its own.
+    /// Acting on it directly (broadcasting the returned id) without first driving
+    /// `advance_migration` can still submit a transaction whose unsatisfiability the store could
+    /// yet discover; fresh-discovery verification, and recording what it finds, remain
+    /// `advance_migration`'s alone.
+    ///
+    /// Among the due candidates the earliest SCHEDULED one is returned — `(scheduled_height,
+    /// id)`-min — exactly [`Self::next_broadcastable`]'s order.
+    ///
+    /// The two `targets` heights are honored exactly as the drive honors them (see
+    /// [`DuenessTargets`]): exclusion via the dead set, and expiry as a DETERMINATION, are judged
+    /// at [`scanned`](DuenessTargets::scanned); schedule dueness and the protective
+    /// doomed-broadcast WITHHOLD (a transfer whose expiry has probably passed by the estimate is
+    /// held back rather than offered) are judged at [`effective`](DuenessTargets::effective).
+    pub fn next_due_broadcast(&self, targets: DuenessTargets) -> Option<MigrationTransferId> {
+        let dead = self.dead_set(targets);
+        self.next_broadcastable(targets, &dead, &[])
+    }
+
+    /// The id of the next transaction ready to PROVE, or `None` if none is: the head of the
+    /// drive's own prove queue ([`Self::provable_targets`]), exposed READ-ONLY. It derives the
+    /// same [`Self::dead_set`] at `targets` and calls the very selector
+    /// [`advance_migration`](crate::satisfiability::advance_migration) does — so, `skip` aside, it
+    /// agrees with the head of `advance_migration`'s prove batch BY CONSTRUCTION: same dead set,
+    /// same selector. Agreement with [`Self::transaction_statuses`] holds too, except in one corner: a
+    /// `Signed` row still carrying an unadjudicated broadcast-failure report
+    /// ([`Self::report_broadcast_failure`]). That view holds such a row back under
+    /// [`Blocker::AwaitingReevaluation`], awaiting
+    /// [`advance_migration`](crate::satisfiability::advance_migration)'s adjudication, while the
+    /// prove selector carries no such check — so this read, exactly like the drive itself, still
+    /// offers the row.
+    ///
+    /// ADVISORY, not authoritative, exactly as [`Self::next_due_broadcast`] is: this answers what
+    /// the drive would pick — for scheduling, queue display, and wake decisions — but performs NO
+    /// store-oracle verification of its own. Acting on it directly (proving the returned id)
+    /// without first driving `advance_migration` can still spend effort on a transaction whose
+    /// unsatisfiability the store could yet discover; fresh-discovery verification, and recording
+    /// what it finds, remain `advance_migration`'s alone.
+    ///
+    /// Among the ready candidates the one that became ready EARLIEST is returned — a transfer's
+    /// drawn anchor boundary, or a preparation's schedule (it carries no boundary) — that is,
+    /// `(anchor_boundary | scheduled_height, id)`-min, the longest-waiting, oldest-anchor
+    /// candidate first, exactly the order [`Self::provable_targets`] carries its batch in.
+    ///
+    /// `skip` carries `set_aside` semantics, exactly as the drive loop's own call-local
+    /// deferrals do: exclusions for THIS call alone, never persisted and never a mark. Skipping a
+    /// row never unblocks anything that depends on it — [`Self::deps_mined`] keys dependency
+    /// readiness on a dependency actually reaching [`Mined`](MigrationTxState::Mined), not on it
+    /// merely being absent from this call's answer — so a caller cannot use `skip` to make a
+    /// dependent look ready before its dependency has mined.
+    ///
+    /// The two `targets` heights are honored exactly as the drive honors them (see
+    /// [`DuenessTargets`]): exclusion via the dead set, expiry as a DETERMINATION, and a
+    /// transfer's anchor-boundary settledness (an estimate cannot conjure a commitment-tree
+    /// checkpoint) are judged at [`scanned`](DuenessTargets::scanned); a preparation's schedule
+    /// dueness and the prove-side expiry SKIP are judged at
+    /// [`effective`](DuenessTargets::effective) — see [`Self::prove_ready`].
+    pub fn next_provable(
+        &self,
+        targets: DuenessTargets,
+        skip: &[MigrationTransferId],
+    ) -> Option<MigrationTransferId> {
+        let dead = self.dead_set(targets);
+        self.provable_targets(targets, &dead, skip)
+            .into_iter()
+            .next()
+            .map(|t| t.id)
+    }
 }
 
 #[cfg(test)]
@@ -1734,6 +1815,12 @@ mod tests {
     use crate::scheduling::WakeupParams;
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
+
+    // For the `next_due_broadcast`/`next_provable` tests below: the read-only selectors' own
+    // fixture needs, beyond what the rest of this module's tests reach for, is a drive-loop store
+    // fixture to call `advance_migration` with.
+    use crate::engine::{PoolMigrationRead, PoolMigrationWrite, ProvedTransaction};
+    use crate::satisfiability::{AdvanceConfig, ReorgSettleDepth, advance_migration};
 
     // A DIRECT unsatisfiability mark resting on the chain state at `height`, in the shape
     // `record_satisfiability` writes for an observed spend. Wherever only the stamp is under test,
@@ -4412,5 +4499,188 @@ mod tests {
                 transactions: vec![pt(1, transfer(0))],
             }
         );
+    }
+
+    /// A store whose oracle answers every question `Satisfiable` and has seen nothing mined: the
+    /// healthy-migration default `next_due_broadcast_agrees_with_the_drive` needs to drive
+    /// [`advance_migration`](crate::satisfiability::advance_migration) itself. Every other test in
+    /// this module reaches the kernel only through [`MigrationState::next_step`], never through the
+    /// oracle-verified drive API a real consumer calls.
+    struct HealthyStore;
+
+    impl PoolMigrationRead for HealthyStore {
+        type Error = core::convert::Infallible;
+
+        fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            Ok(None)
+        }
+
+        fn check_step_satisfiability(
+            &self,
+            _tx: &MigrationTransaction,
+            _settle: ReorgSettleDepth,
+        ) -> Result<StepSatisfiability, Self::Error> {
+            Ok(StepSatisfiability::Satisfiable {
+                as_of_height: BlockHeight::from_u32(0),
+            })
+        }
+
+        fn mined_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    impl PoolMigrationWrite for HealthyStore {
+        fn replace_migration(&mut self, _state: &MigrationState) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn update_transaction(
+            &mut self,
+            _id: MigrationTransferId,
+            _state: MigrationTxState,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn store_proved_transaction(
+            &mut self,
+            state: &mut MigrationState,
+            proven: ProvedTransaction,
+        ) -> Result<(), Self::Error> {
+            proven.apply(state);
+            Ok(())
+        }
+    }
+
+    /// The returned id is the `(scheduled_height, id)`-min among due, `Proved`, deps-mined
+    /// candidates — not the lowest id, and not storage order — and agrees with the status view's
+    /// own notion of ready-to-broadcast.
+    #[test]
+    fn next_due_broadcast_orders_by_schedule_not_id() {
+        let s = state_with(vec![
+            scheduled_transfer(0, 0, 100, 1200, MigrationTxState::Proved),
+            scheduled_transfer(1, 1, 100, 1100, MigrationTxState::Proved),
+            scheduled_transfer(2, 2, 100, 1150, MigrationTxState::Proved),
+        ]);
+        let targets = DuenessTargets::at(BlockHeight::from_u32(1300));
+
+        assert_eq!(s.next_due_broadcast(targets), Some(MigrationTransferId(1)));
+
+        // Agrees with the status view: the returned id is the `(scheduled_height, id)`-min among
+        // the rows `transaction_statuses` reports ready to broadcast.
+        let expected = s
+            .transaction_statuses(targets)
+            .iter()
+            .filter(|v| v.ready && v.action == Some(NextAction::Broadcast))
+            .min_by_key(|v| (v.scheduled_height, v.id))
+            .map(|v| v.id);
+        assert_eq!(expected, Some(MigrationTransferId(1)));
+        assert_eq!(s.next_due_broadcast(targets), expected);
+    }
+
+    /// Agreement with the DRIVE itself, not merely with the kernel `next_step` wraps:
+    /// `next_due_broadcast` names the same id [`advance_migration`](crate::satisfiability::advance_migration)
+    /// returns for a healthy, oracle-verified `Broadcast` step.
+    #[test]
+    fn next_due_broadcast_agrees_with_the_drive() {
+        let mut due = scheduled_transfer(1, 0, 100, 500, MigrationTxState::Proved);
+        due.depends_on = vec![MigrationTransferId(0)];
+        let mut state = state_with(vec![tx(0, prep(0, 0), mined(10)), due]);
+        let targets = DuenessTargets::at(BlockHeight::from_u32(600));
+
+        let mut store = HealthyStore;
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        let step = advance_migration(
+            &mut store,
+            &mut state,
+            targets,
+            &AdvanceConfig::new(ReorgSettleDepth::new(10)),
+            &mut rng,
+        )
+        .expect("the fixture store never fails")
+        .step()
+        .clone();
+        let AdvanceStep::Broadcast { id } = step else {
+            panic!("expected a due broadcast, got {step:?}");
+        };
+        assert_eq!(state.next_due_broadcast(targets), Some(id));
+    }
+
+    /// A transfer stranded behind a dead dependency is never the answer: the same dead-set
+    /// closure that disqualifies it from the drive's own broadcast queue disqualifies it here,
+    /// and the next-best live candidate is returned instead.
+    #[test]
+    fn next_due_broadcast_honors_the_drive_exclusions_dead_dependency() {
+        let dead_prep = tx_expiring(0, prep(0, 0), MigrationTxState::Signed, 50);
+        let mut stranded = scheduled_transfer(1, 0, 100, 200, MigrationTxState::Proved);
+        stranded.depends_on = vec![MigrationTransferId(0)];
+        let live = scheduled_transfer(2, 1, 100, 250, MigrationTxState::Proved);
+        let s = state_with(vec![dead_prep, stranded, live]);
+
+        // The preparation is expired-and-unmined at the scanned target, seeding the dead set; the
+        // stranded transfer inherits it by closure, and being otherwise due does not rescue it.
+        let targets = DuenessTargets::at(BlockHeight::from_u32(300));
+        assert_eq!(s.next_due_broadcast(targets), Some(MigrationTransferId(2)));
+    }
+
+    /// A due, `Proved` transfer carrying a standing broadcast-failure report is never the answer
+    /// while the report stands: the same withhold that keeps the drive from repeating a
+    /// submission a node already refused keeps this queue from naming it either.
+    #[test]
+    fn next_due_broadcast_honors_the_drive_exclusions_broadcast_failure() {
+        let mut s = state_with(vec![
+            scheduled_transfer(0, 0, 100, 200, MigrationTxState::Proved),
+            scheduled_transfer(1, 1, 100, 250, MigrationTxState::Proved),
+        ]);
+        s.report_broadcast_failure(MigrationTransferId(0), BlockHeight::from_u32(199));
+
+        let targets = DuenessTargets::at(BlockHeight::from_u32(300));
+        assert_eq!(s.next_due_broadcast(targets), Some(MigrationTransferId(1)));
+    }
+
+    /// The doomed window: an expiry the ESTIMATE has passed but the scan has not is withheld from
+    /// the broadcast queue even though its schedule is due by the served target — protective, and
+    /// never a determination (see [`DuenessTargets`]).
+    #[test]
+    fn next_due_broadcast_honors_the_drive_exclusions_doomed_window() {
+        let mut doomed = scheduled_transfer(0, 0, 100, 1200, MigrationTxState::Proved);
+        doomed.expiry_height = BlockHeight::from_u32(1250);
+        let s = state_with(vec![doomed]);
+
+        let targets = DuenessTargets::new(BlockHeight::from_u32(1240), BlockHeight::from_u32(1290));
+        assert_eq!(s.next_due_broadcast(targets), None);
+    }
+
+    /// The ready candidate that became ready EARLIEST wins — a transfer's drawn anchor boundary,
+    /// the same key [`Self::provable_targets`] orders by — and `skip` takes exactly the named
+    /// candidates out of contention, falling through to the next-earliest.
+    #[test]
+    fn next_provable_orders_by_anchor_then_schedule_and_skips() {
+        let s = state_with(vec![
+            scheduled_transfer(5, 0, 1050, 2000, MigrationTxState::Signed),
+            scheduled_transfer(6, 1, 1020, 2000, MigrationTxState::Signed),
+        ]);
+        let targets = DuenessTargets::at(BlockHeight::from_u32(1100));
+
+        assert_eq!(s.next_provable(targets, &[]), Some(MigrationTransferId(6)));
+        assert_eq!(
+            s.next_provable(targets, &[MigrationTransferId(6)]),
+            Some(MigrationTransferId(5))
+        );
+    }
+
+    /// The ordering key is drawn per row — a transfer's anchor boundary, a preparation's schedule
+    /// — and compared directly against one another: a settled boundary can beat an earlier-due
+    /// schedule.
+    #[test]
+    fn next_provable_mixes_boundary_and_schedule_keys() {
+        let mut due_prep = tx(7, prep(0, 0), MigrationTxState::Signed);
+        due_prep.scheduled_height = BlockHeight::from_u32(1010);
+        let settled_transfer = scheduled_transfer(8, 0, 1005, 9999, MigrationTxState::Signed);
+        let s = state_with(vec![due_prep, settled_transfer]);
+
+        let targets = DuenessTargets::at(BlockHeight::from_u32(1100));
+        assert_eq!(s.next_provable(targets, &[]), Some(MigrationTransferId(8)));
     }
 }
