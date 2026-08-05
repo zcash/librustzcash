@@ -28,6 +28,7 @@ use zcash_protocol::{consensus::BlockHeight, value::COIN};
 #[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::{
     denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+    signing_rounds::min_signing_rounds,
     testing::{
         MIGRATION_SCENARIOS, MULTI_RUN_EVOLUTION, NOTE_SHAPE_BUDGET_ROUNDS, SIGNING_ROUND_EVOLUTION,
     },
@@ -38,7 +39,7 @@ use zcash_pool_migration::{
         UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
     },
     satisfiability::ReplanThreshold,
-    signing_rounds::{MinRounds, NextFit, SigningRoundBudget, min_signing_rounds},
+    signing_rounds::{MinRounds, NextFit, SigningRoundBudget},
 };
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network};
 

@@ -168,7 +168,7 @@ pub fn first_transaction_id(state: &MigrationState) -> Option<MigrationTransferI
 /// Assert what every [`PreparationStrategy`] must satisfy on the shared [`PREPARATION_VECTORS`]
 /// corpus, whatever rule it implements:
 ///
-/// - a plan it returns passes its own certificate ([`PreparationPlan::is_valid`]), which covers the
+/// - a plan it returns passes its own certificate ([`PreparationPlan::is_valid`](crate::preparation::PreparationPlan::is_valid)), which covers the
 ///   funding multiset, the action budget, value conservation, and single-spending;
 /// - it plans every [`Fundability::Always`] instance and no [`Fundability::Never`] one;
 /// - a [`Fundability::Depends`] instance may go either way, since that is what distinguishes one
@@ -207,7 +207,8 @@ pub fn assert_strategy_conformance<S: PreparationStrategy>(strategy: &S) {
 
 /// Assert that `candidate` funds every instance `baseline` funds, and report any it funds that the
 /// baseline does not. Use it to show a new strategy DOMINATES an existing one: the portfolio's
-/// result can then only improve, since [`Portfolio::best_plan`] is monotone in the strategy set.
+/// result can then only improve, since [`Portfolio::best_plan`](crate::preparation::Portfolio::best_plan) is monotone in the
+/// strategy set.
 ///
 /// Returns the labels the candidate funds and the baseline does not, so a caller can assert the
 /// improvement is the one it expected rather than merely non-empty.

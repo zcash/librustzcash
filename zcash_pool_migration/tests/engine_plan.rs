@@ -25,6 +25,7 @@ use zcash_pool_migration::preparation::{
 };
 use zcash_pool_migration::satisfiability::ReplanThreshold;
 use zcash_pool_migration::scheduling::AnchorBucketInterval;
+#[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::testing::{MIGRATION_SCENARIOS, NOTE_SHAPE_SPLITS};
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
@@ -238,6 +239,7 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
 /// crossing (a 5 ZEC funding note is `5 ZEC + buffer`, more than a 5 ZEC note holds), so the two
 /// notes consolidate into one, and that consolidated note funds a single 5 ZEC crossing, leaving
 /// 4.99825 ZEC stranded in the source pool.
+#[cfg(feature = "test-dependencies")]
 #[test]
 fn note_shape_changes_the_split_of_a_ten_zec_balance() {
     // One hundredth of a ZEC: the minimum denomination, and the unit every crossing falls on.
