@@ -733,7 +733,7 @@ CREATE TABLE orchard_ironwood_migration_transactions (
     expiry_height INTEGER NOT NULL,
     anchor_boundary INTEGER,
     state TEXT NOT NULL,
-    txid TEXT,
+    txid BLOB,
     mined_height INTEGER,
     lock_owner BLOB,
     unsatisfiable_at INTEGER,
@@ -1389,6 +1389,54 @@ SELECT
     rn.account_id
 FROM transparent_received_output_spends s
 JOIN transparent_received_outputs rn ON rn.id = s.transparent_received_output_id";
+
+/// One row per SCHEDULED pool-migration transaction: a transaction of a non-terminal migration
+/// that has not yet been broadcast (equivalently: has no row in `transactions`). Columns carry
+/// the transaction's identity (`account_uuid`, `migration_uuid`, `txid`), kind and lifecycle
+/// `state` wire names, `scheduled_height` and `expiry_height`, its values in zatoshis
+/// (`value_spent`, `value_received`, `fee`, and `pool_crossing_value` for a transfer), note
+/// counts, and its ZIP 318 classification code. Generated from the pool-migration store's
+/// tables; see `pool_migration::store::create_migration_tx_view_sql`.
+pub(super) fn view_migration_transactions() -> String {
+    crate::pool_migration::orchard_ironwood::migration_tx_view_sql()
+}
+
+/// `v_transactions` plus the scheduled pool-migration transactions of
+/// `view_migration_transactions`, projected into the same column shape (no mined height, block
+/// time, or raw bytes; `account_balance_delta` is minus the transaction's fee, every real output
+/// being internal to the account). `v_transactions` itself is unchanged; a consumer opts into
+/// the merged feed by reading this view instead.
+pub(super) const VIEW_TRANSACTIONS_WITH_PENDING_MIGRATIONS: &str = "
+CREATE VIEW v_transactions_with_pending_migrations AS
+SELECT account_uuid, mined_height, txid, tx_index, expiry_height, raw, account_balance_delta,
+       total_spent, total_received, fee_paid, has_change, sent_note_count, received_note_count,
+       memo_count, block_time, expired_unmined, spent_note_count, is_shielding,
+       pool_crossing_value, trust_status, zip318_kind
+FROM v_transactions
+UNION ALL
+SELECT vmt.account_uuid          AS account_uuid,
+       NULL                      AS mined_height,
+       vmt.txid                  AS txid,
+       NULL                      AS tx_index,
+       vmt.expiry_height         AS expiry_height,
+       NULL                      AS raw,
+       -vmt.fee                  AS account_balance_delta,
+       vmt.value_spent           AS total_spent,
+       vmt.value_received        AS total_received,
+       vmt.fee                   AS fee_paid,
+       vmt.has_change            AS has_change,
+       0                         AS sent_note_count,
+       vmt.received_note_count   AS received_note_count,
+       0                         AS memo_count,
+       NULL                      AS block_time,
+       (vmt.expiry_height BETWEEN 1 AND (SELECT MAX(blocks.height) FROM blocks))
+                                 AS expired_unmined,
+       vmt.spent_note_count      AS spent_note_count,
+       0                         AS is_shielding,
+       vmt.pool_crossing_value   AS pool_crossing_value,
+       NULL                      AS trust_status,
+       vmt.zip318_kind           AS zip318_kind
+FROM v_migration_transactions vmt";
 
 pub(super) const VIEW_TRANSACTIONS: &str = "
 CREATE VIEW v_transactions AS

@@ -446,6 +446,16 @@ Type safety is paramount. This is a security-critical codebase.
 
 - All public API items MUST have complete `rustdoc` doc comments (`///`).
   * Document all error cases
+- **Documentation defines semantics, non-contextually and briefly.** A doc
+  comment must make sense to a reader with no knowledge of the change, branch,
+  or discussion that produced the item: state what the item MEANS — its
+  contract, invariants, preconditions, ordering/atomicity guarantees, units —
+  and stop. Describe implementation concerns or rationale only when strictly
+  necessary (e.g. a constraint the signature cannot express), and then in a
+  clause, not a paragraph. Do not narrate design history, motivate the item by
+  other work items, or restate what a sibling does (link to it instead).
+  Brevity is load-bearing: over-long documentation does not get read; seek a
+  high signal-to-noise ratio.
 - Crate-level docs use `//!` at the top of `lib.rs`.
 - Reference ZIP/BIP specs with markdown links: `/// [ZIP 316]: https://zips.z.cash/zip-0316`
 - Use backtick links for cross-references to other items.
@@ -618,15 +628,21 @@ artifacts of a development session, not repository history. Never commit them.
   semantic change. This includes updating the version of a dependency whose
   types appear in the public API: types from two semver-incompatible versions
   of a crate do not unify, so a consumer must upgrade that dependency in
-  lockstep. CHANGELOG updates must **only** reflect completed changes.
-  since the last release, and never interstitial changes in APIs that have been
-  changed multiple times since the last release. The CHANGELOG entry **MUST** be
-  part of the commit that makes the API change. For newly added crates, the CHANGELOG
-  should include **ONLY** a line indicating the initial release; as there is no prior
-  release, there are no API changes for a user to adapt to. CHANGELOG entries should
-  provide **only** the information needed for end users to adapt to API changes, and
-  **never** describe implementation details or contracts that are not visible to
-  a user of the public API.
+  lockstep. CHANGELOG updates must **only** reflect completed changes since the
+  last release, and never interstitial changes in APIs that have been changed
+  multiple times since the last release. The CHANGELOG entry **MUST** be part
+  of the commit that makes the API change — never a separate CHANGELOG-only
+  commit, and never a batched "changelogs" commit at the end of a branch. For
+  newly added crates, the CHANGELOG should include **ONLY** a line indicating
+  the initial release; as there is no prior release, there are no API changes
+  for a user to adapt to. CHANGELOG entries should provide **only** the
+  information needed for end users to adapt to API changes, and **never**
+  describe implementation details or contracts that are not visible to a user
+  of the public API. `Added` entries are pointers — the fully-qualified item
+  path, with behavior left to the rustdoc, which is canonical. `Changed`
+  entries describe the diff against the prior API (old -> new, migration
+  steps, semantic changes) rather than re-documenting the API, and keep the
+  rationale out: state the change, not why the old behavior was wrong.
 - **A CHANGELOG entry under an already-published version heading** (a released
   `## [x.y.z] - DATE` section) is the historical record of what that release
   shipped. Correct such an entry only when it was inaccurate as written; never

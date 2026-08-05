@@ -11,7 +11,7 @@
 //! and reject a non-NULL blob that is not exactly 32 bytes); and each cached real-spend
 //! `nullifier`, one per row of the spend-nullifier child table, held to its 32-byte width by a
 //! `CHECK` and read back through those same fixed-size impls. All amounts are zatoshi `INTEGER`
-//! columns; the broadcast `txid` is stored as hex `TEXT`.
+//! columns; the `txid` is stored as the transaction id's raw internal bytes (`TxId::as_ref`).
 //!
 //! The preparation plan's layers/transactions grid has no tables of its own: each input and output
 //! row carries its transaction's `(layer, tx_index)` coordinate, and every transaction a real plan
@@ -238,7 +238,7 @@ fn create_prep_direct_funding_sql(t: &Tables) -> String {
     )
 }
 
-fn create_transactions_sql(t: &Tables) -> String {
+pub(crate) fn create_transactions_sql(t: &Tables) -> String {
     // `unsatisfiable_at` and `unsatisfiable_kind` are one value in two columns — the height an
     // unsatisfiability observation rests on, and which observation it was — so they are `NULL`
     // together or non-`NULL` together, and the read path rejects a row where they disagree.
@@ -260,7 +260,7 @@ fn create_transactions_sql(t: &Tables) -> String {
             expiry_height INTEGER NOT NULL,
             anchor_boundary INTEGER,
             state TEXT NOT NULL,
-            txid TEXT,
+            txid BLOB,
             mined_height INTEGER,
             lock_owner BLOB,
             unsatisfiable_at INTEGER,
@@ -311,10 +311,87 @@ fn create_spend_nullifiers_sql(t: &Tables) -> String {
     )
 }
 
-fn create_tx_due_index_sql(t: &Tables) -> String {
+pub(crate) fn create_tx_due_index_sql(t: &Tables) -> String {
     format!(
         "CREATE INDEX IF NOT EXISTS {} ON {} (state, scheduled_height)",
         t.tx_due_index, t.transactions
+    )
+}
+
+/// The `v_migration_transactions` view DDL: one row per SCHEDULED migration transaction — a
+/// transaction of a non-terminal migration that has not yet been broadcast (and so has no row in
+/// the wallet's `transactions` table). Values are projected from the migration store's typed
+/// columns: a transfer spends its funding note (crossing value plus the per-note fee buffer,
+/// which IS the canonical transfer's ZIP-317 fee) and receives the crossing; a preparation's
+/// values are the sums of its input and output rows. Every wire name, classification code, and
+/// the terminal-status list are generated from their defining types.
+pub(crate) fn create_migration_tx_view_sql(t: &Tables) -> String {
+    use zcash_pool_migration::engine::{MigrationTxKind, MigrationTxState};
+    use zcash_protocol::zip318::{Zip318Classification, Zip318TxKind};
+
+    let transfer = MigrationTxKind::Transfer { crossing: 0 };
+    let pending_states = [
+        MigrationTxState::AwaitingSignature,
+        MigrationTxState::Signed,
+        MigrationTxState::Proved,
+    ]
+    .iter()
+    .map(|st| format!("'{}'", st.as_ref()))
+    .collect::<Vec<_>>()
+    .join(", ");
+    format!(
+        "CREATE VIEW v_migration_transactions AS
+        SELECT accounts.uuid AS account_uuid,
+               m.uuid AS migration_uuid,
+               mt.txid AS txid,
+               mt.kind AS kind,
+               mt.state AS state,
+               mt.scheduled_height AS scheduled_height,
+               mt.expiry_height AS expiry_height,
+               CASE mt.kind WHEN '{transfer}' THEN cv.value + m.note_split_fee_buffer
+                    ELSE pin.value_in END AS value_spent,
+               CASE mt.kind WHEN '{transfer}' THEN cv.value
+                    ELSE pout.value_out END AS value_received,
+               CASE mt.kind WHEN '{transfer}' THEN m.note_split_fee_buffer
+                    ELSE pin.value_in - pout.value_out END AS fee,
+               CASE mt.kind WHEN '{transfer}' THEN cv.value END AS pool_crossing_value,
+               CASE mt.kind WHEN '{transfer}' THEN 1 ELSE pin.input_count END AS spent_note_count,
+               CASE mt.kind WHEN '{transfer}' THEN 1
+                    ELSE pout.output_count - pout.change_count END AS received_note_count,
+               CASE mt.kind WHEN '{transfer}' THEN 0
+                    ELSE pout.change_count > 0 END AS has_change,
+               CASE mt.kind WHEN '{transfer}' THEN {transfer_code}
+                    ELSE {prep_code} END AS zip318_kind
+        FROM {tx} mt
+        JOIN {migrations} m ON m.id = mt.migration_id
+        JOIN accounts ON accounts.id = m.account_id
+        LEFT JOIN {cv} cv
+               ON cv.migration_id = mt.migration_id AND cv.ordinal = mt.kind_crossing
+        LEFT JOIN (SELECT migration_id, layer, tx_index,
+                          SUM(value) AS value_in, COUNT(*) AS input_count
+                     FROM {pin} GROUP BY migration_id, layer, tx_index) pin
+               ON pin.migration_id = mt.migration_id
+              AND pin.layer = mt.kind_layer AND pin.tx_index = mt.kind_index
+        LEFT JOIN (SELECT migration_id, layer, tx_index,
+                          SUM(value) AS value_out, COUNT(*) AS output_count,
+                          SUM(role = '{change}') AS change_count
+                     FROM {pout} GROUP BY migration_id, layer, tx_index) pout
+               ON pout.migration_id = mt.migration_id
+              AND pout.layer = mt.kind_layer AND pout.tx_index = mt.kind_index
+        WHERE m.status NOT IN ({terminal})
+          AND mt.state IN ({pending_states})
+          AND NOT EXISTS (SELECT 1 FROM transactions tt WHERE tt.txid = mt.txid)",
+        transfer = transfer.as_ref(),
+        transfer_code = Zip318Classification::Conforms(Zip318TxKind::Transfer).to_code(),
+        prep_code = Zip318Classification::Conforms(Zip318TxKind::Preparation).to_code(),
+        change = "change",
+        tx = t.transactions,
+        migrations = t.migrations,
+        cv = t.crossing_values,
+        pin = t.prep_inputs,
+        pout = t.prep_outputs,
+        terminal = terminal_status_sql_list(),
+        pending_states = pending_states,
     )
 }
 
@@ -1210,16 +1287,7 @@ fn read_transactions(
         // is required rather than optional — and it is the SAME value the lifecycle state carries
         // once broadcast, which is why the state is reassembled from it below rather than from a
         // separately stored copy that could disagree.
-        let txid = r
-            .txid
-            .ok_or(Error::Corrupt("txid"))
-            .and_then(|s| {
-                hex::decode(&s)
-                    .ok()
-                    .and_then(|v| <[u8; 32]>::try_from(v).ok())
-                    .ok_or(Error::Corrupt("txid"))
-            })
-            .map(TxId::from_bytes)?;
+        let txid = r.txid.map(TxId::from_bytes).ok_or(Error::Corrupt("txid"))?;
         let state = MigrationTxState::from_stored(
             &r.state,
             Some(<[u8; 32]>::from(txid)),
@@ -1318,7 +1386,7 @@ struct TxRow {
     state: String,
     /// The hex-encoded consensus transaction ID the transaction was broadcast under; `NULL` until
     /// it is broadcast. Unrelated to `transfer_id` above.
-    txid: Option<String>,
+    txid: Option<[u8; 32]>,
     mined_height: Option<u32>,
     /// The stored lock-owner token, read directly as a fixed-size blob: `rusqlite`'s `[u8; 32]`
     /// `FromSql` impl errors cleanly (`InvalidBlobSize`) if a non-NULL blob is not exactly 32
@@ -1982,7 +2050,7 @@ fn replace_migration_row(
                 ":expiry_height": u32::from(mtx.expiry_height()),
                 ":anchor_boundary": mtx.anchor_boundary().map(u32::from),
                 ":state": tx_state.as_ref(),
-                ":txid": hex::encode(mtx.txid().as_ref()),
+                ":txid": mtx.txid().as_ref(),
                 ":mined_height": tx_state.mined_height().map(u32::from),
                 ":lock_owner": mtx.lock_owner().map(|o| *o.as_bytes()),
                 ":unsatisfiable_at": unsatisfiable_at.map(u32::from),
