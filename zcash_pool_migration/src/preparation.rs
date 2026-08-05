@@ -270,14 +270,10 @@ impl PreparationPlan {
     }
 
     /// Whether this plan is a valid solution of the preparation problem for the given inputs: it
-    /// mints exactly the requested `funding` multiset, no transaction exceeds the
-    /// [`PREP_TX_ACTIONS`] budget, every transaction conserves value net of `fee_per_tx`, and every
-    /// note it spends exists, carries the value claimed for it, comes from a strictly earlier layer
-    /// when it is a [`PrepInput::Prior`], and is spent at most once.
-    ///
-    /// This is the certificate a plan carries with it. A portfolio ([`best_plan`]) checks it before
-    /// ranking, so a strategy cannot win by returning something cheaper-looking but unbuildable, and
-    /// a new [`PreparationStrategy`] inherits the check rather than restating it.
+    /// mints exactly the requested `funding` multiset, zero-valued requests excluded; no
+    /// transaction exceeds the [`PREP_TX_ACTIONS`] budget; every transaction conserves value net of
+    /// `fee_per_tx`; and every note it spends exists, carries the value claimed for it, comes from a
+    /// strictly earlier layer when it is a [`PrepInput::Prior`], and is spent at most once.
     pub fn is_valid(
         &self,
         available: &[Zatoshis],
@@ -371,24 +367,12 @@ impl PreparationPlan {
     }
 }
 
-/// A rule for turning the wallet's source notes into the funding notes a migration run needs. The
-/// [module docs](self) state the problem it solves and why the general form is NP-hard; an
-/// implementation is one named solution of it, exactly as [`DenominationStrategy`] and
-/// [`SigningRoundStrategy`] are for their problems.
+/// A rule for turning the wallet's source notes into the funding notes a migration run needs.
 ///
-/// Several strategies compose into a [`Portfolio`], which is a type-level list rather than a slice
-/// of trait objects, so every call is statically dispatched and inlinable.
-///
-/// An implementation must be a DETERMINISTIC function of its arguments. [`Portfolio::best_plan`]
-/// folds the strategies with a commutative, associative, idempotent join, which makes the result
-/// independent of evaluation order and monotone as strategies are added — properties that hold only
-/// if each strategy is a function of the instance alone.
-///
-/// [`DenominationStrategy`]: crate::denomination::DenominationStrategy
-/// [`SigningRoundStrategy`]: crate::signing_rounds::SigningRoundStrategy
+/// An implementation MUST be a deterministic function of its arguments; [`Portfolio::best_plan`]'s
+/// guarantees hold only under that assumption. Several strategies compose into a [`Portfolio`].
 pub trait PreparationStrategy {
-    /// A stable, human-readable name, used in diagnostics and recorded alongside a plan so a
-    /// migration that is resumed after the strategy set changed can say which rule produced it.
+    /// A stable identifier for this rule, unique among the strategies a caller runs together.
     fn name(&self) -> &'static str;
 
     /// Plan the transactions that mint `funding` from `available`, reserving `fee_per_tx` per
@@ -403,24 +387,9 @@ pub trait PreparationStrategy {
 
 /// How good a [`PreparationPlan`] is, as a TOTAL order: smaller is better.
 ///
-/// The order belongs to the PROBLEM, not to any strategy. Were each strategy to rank its own
-/// output, the relation would lose transitivity and the fold in [`best_plan`] would depend on the
-/// order the strategies were listed in.
-///
-/// The fields are compared lexicographically, in the order the problem prioritises them:
-///
-/// 1. `layers`: the wall-clock depth. Layers are serialized (a later layer spends notes an earlier
-///    one must first have mined), so depth dominates how long a migration takes, and [ZIP 318] asks
-///    for transactions "with disjoint input notes wherever possible, so that the transactions can
-///    confirm in parallel rather than chaining through one another's outputs".
-/// 2. `transactions`: the total fee, one per transaction.
-/// 3. `residual_notes`: how many leftover notes are stranded in the source pool; ZIP 318 asks for
-///    one note per part plus at most one residual note.
-/// 4. `shape`: a faithful encoding of the plan, which never decides anything a caller cares about.
-///    It is here so that two plans equal on every criterion above still compare deterministically,
-///    rather than by whichever strategy happened to be evaluated first.
-///
-/// [ZIP 318]: https://zips.z.cash/zip-0318
+/// The criteria are compared lexicographically: the number of layers, then the number of
+/// transactions, then the number of residual notes, then a canonical encoding of the plan. That
+/// last criterion is injective up to plan equality, so distinct plans never compare equal.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PlanQuality {
     layers: usize,
@@ -505,45 +474,20 @@ fn encode_shape(plan: &PreparationPlan) -> Vec<u64> {
     out
 }
 
-/// A plan that passed its certificate, labelled with the strategy that produced it. `None` is the
-/// bottom of the lattice [`Portfolio`] folds over: no plan at all.
+/// A plan that passed its certificate, labelled with the strategy that produced it.
 type Ranked = Option<(&'static str, PreparationPlan)>;
 
-/// A set of strategies to run on one instance, as a TYPE-LEVEL LIST: `()` is the empty portfolio,
-/// and `(head, tail)` extends `tail` with one more strategy. So a portfolio of three is written
-///
-/// ```text
-/// (LayeredGreedy, (SomeOtherRule, (AThirdRule, ())))
-/// ```
-///
-/// The list is a type rather than a `&[&dyn PreparationStrategy]` so that every call is statically
-/// dispatched: the recursion below is monomorphised into straight-line code with each strategy
-/// inlinable, there is no vtable, and an empty portfolio is a compile-time fact rather than a
-/// runtime one. Two hand-written implementations cover every length, so adding a strategy needs no
-/// macro and no new impl.
-///
-/// The shape is not incidental. `()` is the lattice's bottom and `(head, tail)` is
-/// `head` joined with the rest, so the type-level list IS the fold, and the laws in
-/// [`best_plan`](Self::best_plan) are what make the nesting order irrelevant.
+/// A set of [`PreparationStrategy`]s to run on one instance, as a type-level list: `()` is the
+/// empty portfolio, and `(head, tail)` extends `tail` with one more strategy, so a set of three is
+/// written `(A, (B, (C, ())))`.
 pub trait Portfolio {
-    /// Run every strategy in this portfolio on the same instance and return the best VALID plan any
-    /// of them produced, together with the name of the strategy that produced it; `None` when none
-    /// returned a plan that passes [`PreparationPlan::is_valid`].
+    /// The best plan any strategy in this portfolio produces for the given instance, labelled with
+    /// the name of the strategy that produced it, ranked by [`PlanQuality`]; `None` when no
+    /// strategy returns a plan that passes [`PreparationPlan::is_valid`].
     ///
-    /// The combining operation is a join in a bounded semilattice ordered by [`PlanQuality`], with
-    /// "no plan" as its bottom: it is idempotent, commutative and associative. Three consequences,
-    /// which together are the reason to hold a set of strategies rather than picking one:
-    ///
-    /// - the result does not depend on the order the strategies are nested in, nor on grouping, nor
-    ///   on repeats;
-    /// - it is MONOTONE in the set, so adding a strategy can never make the result worse, and the
-    ///   set can therefore grow over time without re-validating what is already there;
-    /// - the result for `S` followed by `T` is the join of their separate results, so a caller may
-    ///   evaluate strategies incrementally, cache per-strategy results, or split the work, and get
-    ///   the same answer as running them all at once.
-    ///
-    /// Those properties hold only while every strategy is a deterministic function of the instance,
-    /// as [`PreparationStrategy`] requires.
+    /// Ordering the strategies differently, nesting them differently, or repeating one does not
+    /// change the result, and extending a portfolio never worsens it. Both hold only while every
+    /// strategy is deterministic, as [`PreparationStrategy`] requires.
     fn best_plan(
         &self,
         available: &[Zatoshis],
@@ -552,14 +496,13 @@ pub trait Portfolio {
     ) -> Ranked;
 }
 
-/// The empty portfolio: the identity of the join, and the base case of the recursion.
+/// The empty portfolio produces no plan.
 impl Portfolio for () {
     fn best_plan(&self, _: &[Zatoshis], _: &[Zatoshis], _: Zatoshis) -> Ranked {
         None
     }
 }
 
-/// One more strategy on the front of a portfolio: run the head, run the tail, keep the better.
 impl<H, T> Portfolio for (H, T)
 where
     H: PreparationStrategy,
@@ -579,8 +522,7 @@ where
     }
 }
 
-/// Run one strategy and keep its plan only if the plan passes its own certificate, so an
-/// unbuildable plan is bottom rather than a candidate that could win by looking cheaper.
+/// One strategy's plan, kept only if it passes [`PreparationPlan::is_valid`].
 fn evaluate<S>(
     strategy: &S,
     available: &[Zatoshis],
@@ -595,8 +537,7 @@ where
         .then(|| (strategy.name(), plan))
 }
 
-/// The join: the better of two candidates under [`PlanQuality`], with `None` as bottom. Total, so
-/// the choice never falls back on the order the arguments arrived in.
+/// The better of two candidates under [`PlanQuality`], preferring either over `None`.
 fn join(left: Ranked, right: Ranked) -> Ranked {
     match (left, right) {
         (Some(left), Some(right)) => {
@@ -635,9 +576,7 @@ impl fmt::Display for PrepError {
 
 impl core::error::Error for PrepError {}
 
-/// Every strategy [`plan_preparation`] runs. Adding one here can only improve the plans the wallet
-/// gets: [`Portfolio::best_plan`] is monotone in this set. A new strategy goes on the front,
-/// `(TheNewRule, STRATEGIES)`; the order is immaterial to the result.
+/// The strategies [`plan_preparation`] runs.
 const STRATEGIES: (LayeredGreedy, ()) = (LayeredGreedy, ());
 
 /// Plan the note-preparation transactions that mint `funding` (the self-funding note values, in
@@ -645,10 +584,9 @@ const STRATEGIES: (LayeredGreedy, ()) = (LayeredGreedy, ());
 /// `fee_per_tx` zatoshi for each transaction (the ZIP-317 fee of a padded [`PREP_TX_ACTIONS`]-action
 /// transaction).
 ///
-/// This is the entry point a wallet calls. It runs every strategy in [`STRATEGIES`] and returns the
-/// best plan any of them produced, so which rule wins is an implementation detail that can improve
-/// without the caller changing anything. Call [`Portfolio::best_plan`] on a list of your own to run
-/// a chosen set of strategies instead.
+/// Returns the best plan, ranked by [`PlanQuality`], that any of the strategies the crate ships
+/// produces; which strategy that is may change between releases. Call [`Portfolio::best_plan`] to
+/// run a chosen set of strategies instead.
 ///
 /// Returns an empty plan when `funding` is empty, [`PrepError::BalanceInvalid`] when the available or
 /// requested totals are not representable amounts, and [`PrepError::InsufficientFunds`] when no
@@ -675,9 +613,7 @@ fn zat(value: u64) -> Zatoshis {
     Zatoshis::from_u64(value).expect("planner values are bounded by the validated totals")
 }
 
-/// Check that the available and requested note values form representable totals. Every strategy owes
-/// its caller this check, because the planners' internal arithmetic partitions those totals and so
-/// assumes they are valid amounts; [`plan_preparation`] performs it once before dispatching.
+/// Check that the available and requested note values each sum to a representable amount.
 fn validate_instance(available: &[Zatoshis], funding: &[Zatoshis]) -> Result<(), PrepError> {
     for values in [available, funding] {
         let _: Zatoshis = values

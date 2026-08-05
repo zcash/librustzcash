@@ -1,4 +1,4 @@
-//! The largest-first layered greedy: the [`PreparationStrategy`] the crate has always used.
+//! The largest-first layered greedy [`PreparationStrategy`].
 //!
 //! In each layer it feeds each output transaction from the largest available note it can (one big
 //! note funds up to [`FUNDING_OUTPUTS_PER_TX`] funding notes), routes every leftover forward as an
@@ -22,14 +22,11 @@
 //! fewer layers, which dominate the wall-clock. Every other shape (many notes, mixed sizes,
 //! sub-quantum) uses the layered greedy above.
 //!
-//! # What it cannot reach
-//!
-//! Every SPLITTING transaction this strategy builds has exactly one input; several inputs appear only
-//! in a consolidation, which produces exactly one output. So it reaches only the two extreme shapes
-//! of the `spends + outputs <= PREP_TX_ACTIONS` budget and never its interior, even though [ZIP 318]
-//! constrains only the total. A wallet holding one balance across two notes can therefore be told a
-//! set of funding notes is unfundable when a single two-input transaction would mint all of them.
-//! That is the gap the next strategy in this directory is meant to close.
+//! Every SPLITTING transaction it builds has exactly one input; several inputs appear only in a
+//! consolidation, which produces exactly one output. It therefore reaches only the two extreme
+//! shapes of the `spends + outputs <= PREP_TX_ACTIONS` budget, never its interior, and reports a set
+//! of funding notes unfundable whenever minting them would need a transaction spending more than one
+//! note while producing more than one.
 //!
 //! [ZIP 318]: https://zips.z.cash/zip-0318
 
@@ -66,11 +63,9 @@ fn plan_layered(
     funding: &[Zatoshis],
     fee_per_tx: Zatoshis,
 ) -> Result<PreparationPlan, PrepError> {
-    // Validate once that the available and requested totals are representable amounts. Combined
-    // with the affordability checks below (a note is only ever minted out of value the available
-    // notes actually carry), every value the plan constructs is bounded by the validated available
-    // total, which is what makes the internal [`zat`] conversions infallible. `plan_preparation`
-    // checks this too; a strategy invoked directly through the trait cannot rely on that.
+    // Bounds every value the plan constructs by the validated available total, which is what makes
+    // the internal `zat` conversions infallible. `plan_preparation` checks this too, but a strategy
+    // invoked directly through the trait cannot rely on that.
     validate_instance(available, funding)?;
     // The partition arithmetic below runs in the u64 domain.
     let available: Vec<u64> = available.iter().map(|&v| u64::from(v)).collect();
