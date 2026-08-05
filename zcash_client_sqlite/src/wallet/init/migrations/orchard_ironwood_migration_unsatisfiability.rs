@@ -922,6 +922,20 @@ mod tests {
             "the mined row is exempt from the backfill, so it caches nothing",
         );
 
+        // The read below goes through the CURRENT store, which reads `txid` as the id's raw bytes,
+        // while this migration writes the hex text that its own schema declares. The descendant
+        // `..._txid_blob` is what converts the column, and it is an unconditional descendant, so
+        // no wallet ever presents the reader with the text form. Running it here is what puts the
+        // fixture at the schema the reader requires; the repair under test is still this
+        // migration's, and a txid it failed to write would arrive below as NULL either way.
+        let tx = conn.transaction().unwrap();
+        RusqliteMigration::up(
+            &super::super::orchard_ironwood_migration_txid_blob::Migration,
+            &tx,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
         let store = PoolMigrations::for_account((), (), &conn, AccountUuid::from_uuid(account))
             .expect("the account exists");
         let state = store
