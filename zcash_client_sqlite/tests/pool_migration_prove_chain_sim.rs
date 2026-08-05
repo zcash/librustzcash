@@ -1784,13 +1784,6 @@ fn proving_refuses_to_take_a_note_another_flow_has_reserved() {
     ignore = "covered by the expensive-test CI matrix"
 )]
 fn cancel_returns_the_balance_and_retains_the_record() {
-    use zcash_client_backend::data_api::InputSource;
-    use zcash_client_backend::data_api::locking::OutputLockStore;
-    use zcash_client_backend::data_api::wallet::TargetHeight;
-    use zcash_client_backend::data_api::wallet::input_selection::{LockFilter, LockedInputPolicy};
-    use zcash_pool_migration::wallet::WalletMigration;
-    use zcash_protocol::ShieldedPool;
-
     let scenario = scenario_named(SMALLEST);
     let mut run = Run::setup(&scenario);
     let mut committed = run.plan_and_commit(&scenario);

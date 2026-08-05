@@ -298,7 +298,15 @@ impl<C: Borrow<Connection>, P, CL> PoolMigrations<C, P, CL> {
     }
 }
 
-impl<C: BorrowMut<Connection>, P, CL> PoolMigrations<C, P, CL> {
+/// Cancellation, the one inherent method that must WRITE, and so the one that cannot join the
+/// read-only inherent block above: those methods need only a shared `Borrow<Connection>`, and
+/// `BorrowMut` is a strict subtrait of it, so merging the two would force every reader to hold a
+/// mutable borrow. It does not join the `BorrowMut` block below either, which is gated on the
+/// `orchard` feature and additionally bounded by `P` and `CL`; cancel requires none of the three.
+impl<C, P, CL> PoolMigrations<C, P, CL>
+where
+    C: BorrowMut<Connection>,
+{
     /// Cancel this account's migration at the user's request: release every note reservation its
     /// never-broadcast transactions hold, then move the record to the terminal `Cancelled`
     /// status — in that order, in one database transaction, so a crash between the two leaves a
@@ -2519,8 +2527,6 @@ mod tests {
     /// record to `Cancelled`, and leaves it readable as history while `get_migration` moves on.
     #[test]
     fn cancel_releases_reservations_and_terminates() {
-        use zcash_pool_migration::engine::MigrationLockOwner;
-
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
 
@@ -2680,8 +2686,6 @@ mod tests {
     /// record's reservations are released, and its recorded status — history — is untouched.
     #[test]
     fn cancel_repairs_an_already_terminal_record_without_rewriting_it() {
-        use zcash_pool_migration::engine::MigrationLockOwner;
-
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
         let owner = [4u8; 32];
@@ -2749,8 +2753,6 @@ mod tests {
     /// not strand the live transfers' locks behind a record nothing will revisit.
     #[test]
     fn supersede_releases_reservations_on_persist() {
-        use zcash_pool_migration::engine::MigrationLockOwner;
-
         let mut conn = fresh_conn();
         let account = insert_account(&conn);
         let owner = [5u8; 32];

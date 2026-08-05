@@ -788,6 +788,14 @@ pub(crate) fn truncate_to_height(
     Ok(())
 }
 
+/// What [`classify_for_cancel`] hands back: the outcome to report to the caller, paired with the
+/// lock-owner tokens whose reservations the cancel must then release. The two travel together
+/// because one pass over the transaction rows produces both.
+type CancelClassification = (
+    crate::pool_migration::CancelOutcome,
+    Vec<MigrationLockOwner>,
+);
+
 /// The classification a cancel makes of one migration transaction, straight off its lifecycle
 /// column: everything before broadcast is releasable (its reservation can be cleared and it will
 /// never be submitted), everything at or past broadcast is chain reality to report, not undo.
@@ -795,9 +803,9 @@ fn classify_for_cancel(
     conn: &Connection,
     t: &Tables,
     migration_id: i64,
-) -> Result<(crate::pool_migration::CancelOutcome, Vec<[u8; 32]>), Error> {
+) -> Result<CancelClassification, Error> {
     let mut outcome = crate::pool_migration::CancelOutcome::default();
-    let mut owners: Vec<[u8; 32]> = Vec::new();
+    let mut owners: Vec<MigrationLockOwner> = Vec::new();
     let mut stmt = conn.prepare(&format!(
         "SELECT transfer_id, state, lock_owner FROM {} WHERE migration_id = ? ORDER BY transfer_id",
         t.transactions
@@ -820,7 +828,7 @@ fn classify_for_cancel(
             _ => {
                 outcome.released.push(id);
                 if let Some(owner) = lock_owner {
-                    owners.push(owner);
+                    owners.push(MigrationLockOwner::from_bytes(owner));
                 }
             }
         }
@@ -832,15 +840,24 @@ fn classify_for_cancel(
 /// columns note locking records on the received-note rows are cleared wherever they name one of
 /// these tokens. Scoped strictly by owner token — which the prover derived from each
 /// transaction's own spent notes — so no other flow's reservation can be touched.
-fn release_lock_owners(conn: &Connection, t: &Tables, owners: &[[u8; 32]]) -> Result<(), Error> {
+///
+/// Returns the number of note rows actually unlocked, which is informational only: it is NOT the
+/// number of owners, since one token may hold several notes and a token whose notes have already
+/// expired or been released holds none. Callers must not treat a zero here as a failure.
+fn release_lock_owners(
+    conn: &Connection,
+    t: &Tables,
+    owners: &[MigrationLockOwner],
+) -> Result<usize, Error> {
     let mut stmt = conn.prepare(&format!(
         "UPDATE {} SET lock_expiry_height = NULL, lock_owner = NULL WHERE lock_owner = ?",
         t.source_notes
     ))?;
+    let mut released = 0;
     for owner in owners {
-        stmt.execute(params![owner])?;
+        released += stmt.execute(params![owner.as_bytes()])?;
     }
-    Ok(())
+    Ok(released)
 }
 
 /// The body of [`Store::cancel_migration`]; see its documentation for the contract, the ordering
@@ -874,7 +891,14 @@ fn cancel_migration(
     let (outcome, owners) = classify_for_cancel(tx, t, migration_id)?;
     // Release BEFORE the status flip (and in the same transaction): a crash between the two
     // leaves a still-pending migration a retried cancel finishes.
-    release_lock_owners(tx, t, &owners)?;
+    let released = release_lock_owners(tx, t, &owners)?;
+    tracing::debug!(
+        "cancel released {released} note reservation(s) across {} never-broadcast transaction(s); \
+         {} in flight, {} already mined",
+        outcome.released.len(),
+        outcome.in_flight.len(),
+        outcome.mined.len()
+    );
     if is_pending {
         tx.execute(
             &format!("UPDATE {} SET status = ? WHERE id = ?", t.migrations),
@@ -1747,7 +1771,7 @@ fn replace_migration_row(
     // post-mortem — not only the store-level cancel (which exists for records this path cannot
     // read).
     if state.is_terminal() {
-        let owners: Vec<[u8; 32]> = state
+        let owners: Vec<MigrationLockOwner> = state
             .transactions()
             .iter()
             .filter(|t| {
@@ -1756,9 +1780,14 @@ fn replace_migration_row(
                     MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. }
                 )
             })
-            .filter_map(|t| t.lock_owner().map(|o| *o.as_bytes()))
+            .filter_map(|t| t.lock_owner())
             .collect();
-        release_lock_owners(tx, t, &owners)?;
+        let released = release_lock_owners(tx, t, &owners)?;
+        tracing::debug!(
+            "released {released} note reservation(s) held by {} transaction(s) of the migration \
+             now persisted as terminal",
+            owners.len()
+        );
     }
 
     let ns = state.denominations();
