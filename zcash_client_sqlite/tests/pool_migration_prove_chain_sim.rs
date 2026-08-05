@@ -708,10 +708,10 @@ impl Run {
     /// this wallet's own selection can play the role of a SIBLING wallet on the same seed: the
     /// sibling shares every note but holds no record of this wallet's unbroadcast crossing, so
     /// nothing excludes the crossing's inputs from ITS selection. Since
-    /// `store_proved_transaction` records those marks at proving time — which is exactly what
-    /// keeps this wallet's own sweeps off a migration input, the protection under test in
-    /// `proving_persists_the_finalized_transaction_to_the_wallet` — simulating the sibling's
-    /// independent view requires lifting them.
+    /// `take_transaction_for_broadcast` records those marks at the broadcast seam — which is
+    /// exactly what keeps this wallet's own sweeps off a migration input, the protection under
+    /// test in `broadcast_persists_the_finalized_transaction_to_the_wallet` — simulating the
+    /// sibling's independent view requires lifting them.
     fn forget_pending_spend_marks(&mut self, txid: TxId) {
         let conn = self.st.wallet_mut().conn_mut();
         conn.execute(
