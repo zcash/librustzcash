@@ -30,6 +30,11 @@ and this library adheres to Rust's notion of
   returns — the verified `state::AdvanceStep` to perform now, plus the outlook:
   the subsequent step's kind and the earliest target height at which it becomes
   serviceable, assuming the returned step is executed.
+- `scheduling::PROVABLE_ANCHOR_DEPTH`: how many blocks below the wallet's
+  fully-scanned tip a transfer's drawn anchor boundary must sit (at least)
+  before the planning kernel offers the transfer's proof.
+  `scheduling::WakeupParams::DEFAULT`'s settle margin is now defined as this
+  constant; its value (10) is unchanged.
 - `state::StepKind` and `state::AdvanceStep::kind`: an `AdvanceStep`'s variant
   without its payload.
 - `preparation::PreparationStrategy`.
@@ -50,6 +55,16 @@ and this library adheres to Rust's notion of
 - `preparation::plan_preparation` now returns the best plan produced by any of
   the strategies the crate ships, rather than the layered greedy's plan. Its
   signature, its errors and the plans it returns are unchanged.
+- A transfer's proof is now offered (`state::AdvanceStep::Prove`, and `ready`
+  with `state::NextAction::Prove` in `state::MigrationState::transaction_statuses`)
+  only once its drawn anchor boundary sits at least
+  `scheduling::PROVABLE_ANCHOR_DEPTH` blocks below the wallet's fully-scanned
+  tip, rather than merely strictly below it, so proofs are never built against
+  a checkpoint a plausible reorg could displace. A consumer that polled for
+  provability immediately after a boundary passed will observe the offer
+  `PROVABLE_ANCHOR_DEPTH - 1` blocks later than before; the schedule re-spread
+  in `satisfiability::advance_migration` does not count that gate-imposed wait
+  as a missed schedule.
 - `engine::MigrationStatus` has added variant `Cancelled`: a terminal status
   recording that the user abandoned the migration, distinct from `Failed` so
   that a deliberate abandonment is distinguishable from a migration that broke. 

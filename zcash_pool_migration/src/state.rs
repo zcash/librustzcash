@@ -46,10 +46,11 @@ pub enum AdvanceStep {
     /// and store the proof through the store's
     /// `PoolMigrationWrite::store_proved_transaction`), WITHOUT broadcasting: its dependencies
     /// are mined and, for a transfer, its drawn anchor boundary has settled (the boundary block
-    /// is strictly below the chain tip, so its checkpoint exists in the wallet's commitment
-    /// tree). Broadcast is a separate later step; whether it belongs in the same waking session
-    /// depends on the transaction's `kind` (see that field, and
-    /// [`advance_migration`](crate::satisfiability::advance_migration)).
+    /// sits at least [`PROVABLE_ANCHOR_DEPTH`](crate::scheduling::PROVABLE_ANCHOR_DEPTH) blocks
+    /// below the scanned chain tip, so the checkpoint proved against exists in the wallet's
+    /// commitment tree and is reorg-stable). Broadcast is a separate later step; whether it
+    /// belongs in the same waking session depends on the transaction's `kind` (see that field,
+    /// and [`advance_migration`](crate::satisfiability::advance_migration)).
     ///
     /// Proving is not time-critical: the wallet durably retains the boundary checkpoints its
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
@@ -468,14 +469,17 @@ impl MigrationState {
     /// is resolvable from the wallet's commitment tree right now.
     ///
     /// A TRANSFER anchors to a drawn boundary ([`anchor_boundary`](MigrationTransaction::anchor_boundary)),
-    /// which must have SETTLED: the boundary block must be strictly below the chain tip so its
-    /// checkpoint exists in the tree. Proving becomes available as soon as that holds, decoupled
-    /// from the (later) broadcast schedule: the wallet durably retains the boundary checkpoint, so
-    /// nothing forces the proof to happen promptly, but making it available early lets the
-    /// sync-heavy proving work happen at a sync wake-up in a different waking session from the
-    /// broadcast (see [`Self::next_step`]). A PREPARATION carries no drawn boundary and anchors to
-    /// a fresh checkpoint at the tip when proved, so it is prove-ready once its dependencies are
-    /// mined and its scheduled height has arrived.
+    /// which must have SETTLED: the boundary block must sit at least
+    /// [`PROVABLE_ANCHOR_DEPTH`](crate::scheduling::PROVABLE_ANCHOR_DEPTH) blocks below the
+    /// scanned chain tip, so its checkpoint exists in the tree AND is deep enough that a reorg
+    /// can no longer plausibly displace it.
+    /// Proving becomes available as soon as that holds, decoupled from the (later) broadcast
+    /// schedule: the wallet durably retains the boundary checkpoint, so nothing forces the proof
+    /// to happen promptly, but making it available early lets the sync-heavy proving work happen
+    /// at a sync wake-up in a different waking session from the broadcast (see
+    /// [`Self::next_step`]). A PREPARATION carries no drawn boundary and anchors to a fresh
+    /// checkpoint at the tip when proved, so it is prove-ready once its dependencies are mined
+    /// and its scheduled height has arrived.
     ///
     /// The two targets divide here exactly as [`DuenessTargets`] describes. Boundary settledness is
     /// judged at [`scanned`](DuenessTargets::scanned): the checkpoint either exists in the wallet's
@@ -497,11 +501,16 @@ impl MigrationState {
             return false;
         }
         match t.anchor_boundary {
-            // A transfer: the boundary must be strictly below the SCANNED tip, so the wallet
-            // actually holds the checkpoint. The scanned target is `tip + 1`, so `boundary < tip`
-            // is `boundary + 1 < scanned`.
-            Some(boundary) => u32::from(boundary) + 1 < u32::from(targets.scanned()),
-            // A preparation: prove-ready once its schedule is due, at the served target.
+            // A transfer: the boundary must sit AT LEAST `PROVABLE_ANCHOR_DEPTH` blocks below
+            // the SCANNED tip — deep enough that the checkpoint proved against is reorg-stable
+            // (see the constant). The scanned target is `tip + 1`, so `tip - boundary >= DEPTH`
+            // is `boundary + DEPTH < scanned`.
+            Some(boundary) => {
+                u32::from(boundary) + scheduling::PROVABLE_ANCHOR_DEPTH
+                    < u32::from(targets.scanned())
+            }
+            // A preparation: prove-ready once its schedule is due, at the served target. It
+            // anchors to a fresh checkpoint at the tip when proved, so no boundary depth applies.
             None => t.scheduled_height <= targets.effective(),
         }
     }
@@ -1360,8 +1369,10 @@ impl MigrationState {
     /// upward-closed in the target height, so the least target satisfying it is well-defined —
     /// but chain-driven guards (dependencies mining, the doomed-window withhold resolving) are
     /// the caller's to judge. Per step, the floor is the least target at which the guard holds: a
-    /// transfer's proof once its drawn boundary sits strictly below the scanned tip
-    /// (`boundary + 2`), a preparation's proof and any broadcast at the scheduled height, a
+    /// transfer's proof once its drawn boundary sits at least
+    /// [`PROVABLE_ANCHOR_DEPTH`](crate::scheduling::PROVABLE_ANCHOR_DEPTH) blocks below the
+    /// scanned tip (`boundary + PROVABLE_ANCHOR_DEPTH + 1`), a preparation's proof and any
+    /// broadcast at the scheduled height, a
     /// rebuild at the lapse's first observability (`expiry_height + 1`), and a reported
     /// transaction's reevaluation at the first scanned target resting at its reported tip
     /// (`reported + 1`). Dispositions are judged in [`Self::transaction_statuses`]' blocker
@@ -1410,7 +1421,7 @@ impl MigrationState {
                     kind: t.kind,
                 },
                 match t.anchor_boundary {
-                    Some(boundary) => boundary + 2,
+                    Some(boundary) => boundary + (scheduling::PROVABLE_ANCHOR_DEPTH + 1),
                     None => t.scheduled_height,
                 },
             )),
@@ -2521,28 +2532,34 @@ mod tests {
 
     #[test]
     fn transfer_prove_ready_waits_for_its_anchor_boundary() {
-        // A transfer anchors to a drawn boundary; it is not provable until the boundary block is
-        // strictly below the tip (its checkpoint has settled), decoupled from the broadcast schedule.
+        // A transfer anchors to a drawn boundary; it is not provable until the boundary block
+        // sits at least `PROVABLE_ANCHOR_DEPTH` blocks below the tip (its checkpoint has
+        // settled to reorg stability), decoupled from the broadcast schedule.
         let mut xfer = tx(1, transfer(0), MigrationTxState::Signed);
         xfer.depends_on = vec![MigrationTransferId(0)];
         xfer.anchor_boundary = Some(BlockHeight::from_u32(40));
         xfer.scheduled_height = BlockHeight::from_u32(60);
         let mut s = state_with(vec![tx(0, prep(0, 0), mined(10)), xfer]);
 
-        // `target_height` is `tip + 1`. At tip 40 (target 41) the boundary is not yet strictly below
-        // the tip -> not provable, blocked on the anchor boundary.
+        // `target_height` is `tip + 1`. At tip 49 (target 50) the boundary is only 9 blocks
+        // below the tip -> not yet provable, blocked on the anchor boundary.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(41)), &[]),
+            s.next_step(DuenessTargets::at(BlockHeight::from_u32(50)), &[]),
             AdvanceStep::Waiting
         );
-        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(41)));
+        let v = s.transaction_statuses(DuenessTargets::at(BlockHeight::from_u32(50)));
         assert!(!v[1].ready);
         assert_eq!(v[1].blocked_on, Some(Blocker::AnchorBoundary));
 
-        // At tip 41 (target 42) boundary 40 is strictly below the tip -> provable now, even though
-        // the broadcast schedule (60) has not arrived.
+        // At tip 50 (target 51) boundary 40 sits exactly `PROVABLE_ANCHOR_DEPTH` blocks below
+        // the tip -> provable now, even though the broadcast schedule (60) has not arrived.
         assert_eq!(
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(42)), &[]),
+            u32::from(BlockHeight::from_u32(40)) + crate::scheduling::PROVABLE_ANCHOR_DEPTH,
+            50,
+            "the settling target below tracks the constant"
+        );
+        assert_eq!(
+            s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
             AdvanceStep::Prove {
                 id: MigrationTransferId(1),
                 kind: transfer(0),
@@ -4198,28 +4215,28 @@ mod tests {
     /// still reported as waiting on its boundary.
     #[test]
     fn an_estimate_does_not_conjure_a_settled_anchor_boundary() {
-        // Boundary 1_500 settles at target 1_502 (`boundary + 1 < target`), so a scan at 1_501
-        // has not reached it while an estimate at 1_700 has.
+        // Boundary 1_500 settles at target 1_511 (`boundary + PROVABLE_ANCHOR_DEPTH < target`),
+        // so a scan at 1_510 has not reached it while an estimate at 1_700 has.
         let s = state_with(vec![
             tx(0, prep(0, 0), mined(10)),
             scheduled_transfer(1, 0, 1_500, 1_400, MigrationTxState::Signed),
         ]);
         let targets =
-            DuenessTargets::new(BlockHeight::from_u32(1_501), BlockHeight::from_u32(1_700));
+            DuenessTargets::new(BlockHeight::from_u32(1_510), BlockHeight::from_u32(1_700));
 
         assert!(
             !s.prove_ready(&s.transactions[1], targets),
-            "the checkpoint the transfer anchors to has not been scanned"
+            "the boundary has not settled to the provability depth in the wallet's own scan"
         );
         assert_eq!(s.next_step(targets, &[]), AdvanceStep::Waiting);
         assert_eq!(
             s.transaction_statuses(targets)[1].blocked_on,
             Some(Blocker::AnchorBoundary)
         );
-        // One more scanned block and the checkpoint exists, whatever the estimate says.
+        // One more scanned block and the boundary is deep enough, whatever the estimate says.
         assert_eq!(
             s.next_step(
-                DuenessTargets::new(BlockHeight::from_u32(1_502), BlockHeight::from_u32(1_700)),
+                DuenessTargets::new(BlockHeight::from_u32(1_511), BlockHeight::from_u32(1_700)),
                 &[],
             ),
             AdvanceStep::Prove {

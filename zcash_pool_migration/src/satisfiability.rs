@@ -25,7 +25,7 @@ use zcash_protocol::consensus::BlockHeight;
 use crate::engine::{
     MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
-use crate::scheduling::{DelayDistribution, SchedulingParams};
+use crate::scheduling::{DelayDistribution, PROVABLE_ANCHOR_DEPTH, SchedulingParams};
 use crate::state::{AdvanceStep, StepKind};
 
 /// The share of planned transfer value (an integer percent) above which a migration with
@@ -533,7 +533,10 @@ impl Advance {
 ///    ([`overdue_shift_tolerance`], sized from the transfer delay the migration's persisted
 ///    anchor bucket interval implies) means the wallet
 ///    slept through part of its broadcast schedule, and the whole pending schedule is shifted
-///    forward by the lag before anything else happens: the
+///    forward by the lag before anything else happens (for a transfer's `Prove` the overdueness
+///    clock starts no earlier than the anchor-depth gate's own floor,
+///    `boundary + `[`PROVABLE_ANCHOR_DEPTH`]` + 1`, so a proof the gate itself held back never
+///    reads as wallet sleep): the
 ///    candidate comes due exactly at the served target — so it is still released in this call,
 ///    which is ZIP 318's "at most one overdue transfer is released immediately" — while every
 ///    other not-yet-broadcast transaction re-spreads behind it with its drawn gaps intact,
@@ -944,13 +947,29 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
         // deliberately not a trigger: the rebuild redraws its own transfer's schedule from the
         // target, and sizing a shift by an expired candidate's stale height would overstate it
         // for everything still live.
+        //
+        // For a TRANSFER'S PROVE the overdueness clock starts at the height its proof could
+        // first have been offered — `boundary + PROVABLE_ANCHOR_DEPTH + 1`, the anchor-depth
+        // gate's own floor — when that is later than its scheduled height. A schedule that
+        // placed a broadcast inside its own anchor's settling window (compressed test-network
+        // intervals, or a boundary redrawn near the tip) makes the proof lag the schedule as a
+        // matter of ENGINE TIMING, not wallet sleep, and re-spreading on it would shift the
+        // whole plan — and redraw boundaries near the new schedule — every time the gate was
+        // waited out, chasing its own tail. The shift's SIZE still moves the candidate's
+        // schedule to the served target, exactly as for a genuinely slept-through window.
         if matches!(
             step,
             AdvanceStep::Prove { .. } | AdvanceStep::Broadcast { .. }
         ) {
             let scheduled = u32::from(tx.scheduled_height());
+            let overdue_from = match (&step, tx.anchor_boundary()) {
+                (AdvanceStep::Prove { .. }, Some(boundary)) => {
+                    scheduled.max(u32::from(boundary) + PROVABLE_ANCHOR_DEPTH + 1)
+                }
+                _ => scheduled,
+            };
             let served = u32::from(targets.effective());
-            if scheduled.saturating_add(overdue_tolerance) < served {
+            if overdue_from.saturating_add(overdue_tolerance) < served {
                 state.shift_schedule(served - scheduled, rng);
                 dirty = true;
                 continue;
