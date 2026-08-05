@@ -3892,6 +3892,11 @@ pub trait WalletWrite:
     /// stored transactions. Once spend records exist, the outputs are protected from
     /// double-selection by the spend tracking mechanism, so the explicit locks are no
     /// longer needed.
+    ///
+    /// Implementations must be idempotent: storing a transaction the wallet has already
+    /// recorded replaces that record rather than failing, so that a caller which stores a
+    /// transaction and then dies before transmitting it can store the same transaction again
+    /// when it resumes.
     fn store_transactions_to_be_sent(
         &mut self,
         transactions: &[SentTransaction<<Self as WalletRead>::AccountId>],

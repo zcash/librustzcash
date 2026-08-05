@@ -14,6 +14,10 @@ workspace.
 - The `orchard` feature is now enabled by default. Consumers that require a
   smaller feature set should disable default features and enable only the
   features they need.
+- `data_api::WalletWrite::store_transactions_to_be_sent` is now required to be
+  idempotent: storing a transaction the wallet has already recorded must
+  replace that record rather than fail. An implementation that inserts its
+  sent-output records must upsert them instead.
 
 ## [0.24.0-rc.7] - 2026-08-03
 
