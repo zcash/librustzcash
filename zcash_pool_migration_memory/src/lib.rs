@@ -343,7 +343,8 @@ impl PoolMigrationRead for MockBackend {
     type Error = core::convert::Infallible;
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-        Ok(self.stored.clone())
+        // Pending-only, per the trait contract: a terminal state is history.
+        Ok(self.stored.clone().filter(|s| !s.is_terminal()))
     }
 
     fn check_step_satisfiability(
@@ -501,7 +502,8 @@ impl PoolMigrationRead for CommitMock {
     type Error = core::convert::Infallible;
 
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-        Ok(self.stored.clone())
+        // Pending-only, per the trait contract: a terminal state is history.
+        Ok(self.stored.clone().filter(|s| !s.is_terminal()))
     }
 
     fn check_step_satisfiability(

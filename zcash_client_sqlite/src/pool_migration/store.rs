@@ -136,21 +136,28 @@ const ANCHOR_PROBE_LIMIT: usize = 1024;
 // DDL
 // ---------------------------------------------------------------------------
 
+/// The terminal statuses as a parenthesizable SQL literal list (`'complete', 'failed', ...`),
+/// generated from [`MigrationStatus::terminal`] so the database's notion of terminal cannot drift
+/// from the crate's. Used wherever terminality must appear in SQL TEXT rather than as bound
+/// parameters — the partial unique index's predicate, which SQLite stores as DDL — and by the
+/// pending-only read queries, so every site derives from the one decision in `is_terminal`.
+pub(crate) fn terminal_status_sql_list() -> String {
+    MigrationStatus::terminal()
+        .map(|s| format!("'{}'", s.wire_name()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn create_migrations_sql(t: &Tables) -> String {
-    // `anchor_bucket_interval` carries a `DEFAULT` only so that this DDL and the `ADD COLUMN` in
-    // the `orchard_ironwood_migration_anchor_interval` schema migration produce the same stored
-    // schema text: SQLite cannot add a `NOT NULL` column without one. The store always binds the
-    // column explicitly, so no insert ever falls back to it.
+    // Column semantics are documented on the golden copy,
+    // `crate::wallet::db::TABLE_ORCHARD_IRONWOOD_MIGRATIONS`. Constraints shaping this DDL:
     //
-    // `replan_threshold` carries a `DEFAULT` for the same reason, matching the `ADD COLUMN` in the
-    // `orchard_ironwood_migration_unsatisfiability` schema migration; its default is
-    // `ReplanThreshold::DEFAULT`'s percent.
-    //
-    // `account_id` is a foreign key into the wallet's `accounts` table: the pool-migration tables
-    // live in the wallet database alongside `accounts`, so an account's migration is owned by its
-    // account row and removed with it. Deleting an account cascades to its migration here, whose
-    // child rows in turn cascade from the parent migration row. The `accounts` table name is the
-    // same for every pool, so it is referenced directly rather than through `Tables`.
+    // - `account_id` references the wallet's `accounts` table directly (its name is the same for
+    //   every pool), so an account's migrations and their child rows are removed with it.
+    // - The `DEFAULT`s on `anchor_bucket_interval`, `replan_threshold`, and `uuid` exist only so
+    //   this DDL and the corresponding schema migrations' `ADD COLUMN`s produce identical stored
+    //   schema text (SQLite cannot add a `NOT NULL` column without one); the store binds all
+    //   three explicitly.
     format!(
         "CREATE TABLE IF NOT EXISTS {} (
             id INTEGER PRIMARY KEY,
@@ -162,7 +169,9 @@ fn create_migrations_sql(t: &Tables) -> String {
             note_split_total_input INTEGER NOT NULL,
             note_split_total_migratable INTEGER NOT NULL,
             anchor_bucket_interval INTEGER NOT NULL DEFAULT {},
-            replan_threshold INTEGER NOT NULL DEFAULT {}
+            replan_threshold INTEGER NOT NULL DEFAULT {},
+            uuid BLOB NOT NULL DEFAULT X'',
+            committed_height INTEGER
         )",
         t.migrations,
         AnchorBucketInterval::ZIP_318.block_count(),
@@ -309,10 +318,24 @@ fn create_tx_due_index_sql(t: &Tables) -> String {
     )
 }
 
-fn create_account_index_sql(t: &Tables) -> String {
+/// The at-most-one-PENDING-migration-per-account invariant, as a database constraint: a PARTIAL
+/// unique index over the non-terminal rows. An account accumulates terminal migrations without
+/// limit — they are the history the store retains — while the engine's commit guard admits a new
+/// migration only once the outstanding one is terminal, and this index makes the database uphold
+/// the same rule, so a logic bug surfaces as a constraint violation rather than as two live
+/// migrations racing. The predicate is generated from [`MigrationStatus::terminal`]
+/// ([`terminal_status_sql_list`]), never restated as literals.
+///
+/// `pub(crate)` because the `orchard_ironwood_migration_history` schema migration creates the
+/// index from this same generator, so the migration path and the canonical DDL cannot disagree
+/// about the predicate.
+pub(crate) fn create_account_index_sql(t: &Tables) -> String {
     format!(
-        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} (account_id)",
-        t.account_index, t.migrations
+        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} (account_id)
+            WHERE status NOT IN ({})",
+        t.account_index,
+        t.migrations,
+        terminal_status_sql_list()
     )
 }
 
@@ -499,9 +522,17 @@ fn resolve_migration_id(
     t: &Tables,
     account_id: AccountRef,
 ) -> Result<Option<i64>, Error> {
+    // PENDING-ONLY: terminal migrations are retained history, and every operation that addresses
+    // "the account's migration" means the one still in progress. The partial unique index on
+    // `(account_id) WHERE status NOT IN (terminal)` is what keeps this `query_row` well-defined
+    // now that an account accumulates terminal rows.
     Ok(conn
         .query_row(
-            &format!("SELECT id FROM {} WHERE account_id = ?", t.migrations),
+            &format!(
+                "SELECT id FROM {} WHERE account_id = ? AND status NOT IN ({})",
+                t.migrations,
+                terminal_status_sql_list()
+            ),
             params![account_id.0],
             |row| row.get(0),
         )
@@ -561,40 +592,84 @@ pub(crate) fn truncate_to_height(
     t: &Tables,
     height: BlockHeight,
 ) -> Result<(), Error> {
-    let accounts: Vec<i64> = {
-        let mut stmt = tx.prepare(&format!("SELECT account_id FROM {}", t.migrations))?;
-        let rows = stmt.query_map([], |row| row.get::<_, i64>(0))?;
+    // The walk visits every migration ROW whose determinations chain state can still revise: the
+    // pending rows, and the `Complete` ones — `Complete` is chain-derived and exactly as revocable
+    // as the chain it was derived from, so a reorg can un-mine a PREVIOUS migration's transfers
+    // and must demote it. The policy determinations (`failed`, `superseded`, `cancelled`) record
+    // decisions, not chain state, and stay put. Iterating rows rather than accounts is what
+    // reaches retained history at all; each row is rewritten in place by id, preserving its
+    // identity.
+    //
+    // Known sharp edge, deliberate for now: demoting a `Complete` row whose account has since
+    // committed a NEW pending migration would violate the one-pending-per-account partial index,
+    // and this walk lets that surface as a constraint error rather than silently skipping the
+    // demotion — at that point two migrations genuinely claim liveness, and suppressing either
+    // record would be worse than failing loudly. The resolution (how a revived historical
+    // migration should coexist with its successor) is the history read API's problem, not the
+    // truncation walk's.
+    let policy_terminal = MigrationStatus::terminal()
+        .filter(|s| !matches!(s, MigrationStatus::Complete))
+        .map(|s| format!("'{}'", s.wire_name()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let rows: Vec<(i64, i64)> = {
+        let mut stmt = tx.prepare(&format!(
+            "SELECT id, account_id FROM {} WHERE status NOT IN ({})",
+            t.migrations, policy_terminal
+        ))?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
         rows.collect::<Result<_, _>>()?
     };
-    for account_id in accounts {
-        let account = AccountRef(account_id);
-        let Some(before) = read_migration(tx, t, account)? else {
-            continue;
-        };
+    for (migration_id, account_id) in rows {
+        let before = read_migration_row(tx, t, migration_id)?;
         let mut truncated = before.clone();
         truncated.truncate_to_height(height);
         if truncated != before {
-            replace_migration(tx, t, account, &truncated)?;
+            replace_migration_row(
+                tx,
+                t,
+                AccountRef(account_id),
+                Some(migration_id),
+                &truncated,
+            )?;
         }
     }
     Ok(())
 }
 
+/// The account's migration IN PROGRESS, if any: resolves the pending row (see
+/// [`resolve_migration_id`] for why the read is pending-only) and reads it back. Terminal rows are
+/// retained history, addressed by row through [`read_migration_row`] instead.
 fn read_migration(
     conn: &Connection,
     t: &Tables,
     account_id: AccountRef,
 ) -> Result<Option<MigrationState>, Error> {
+    match resolve_migration_id(conn, t, account_id)? {
+        Some(migration_id) => read_migration_row(conn, t, migration_id).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Read the migration stored as row `migration_id`, whatever its status: the row-addressed reader
+/// that pending-only resolution and the truncation walk (which must revisit `Complete` rows —
+/// chain-derived, and exactly as revocable as the chain they were derived from) share. Erring on
+/// an absent row rather than returning an `Option`, because every caller has just SELECTed the id.
+fn read_migration_row(
+    conn: &Connection,
+    t: &Tables,
+    migration_id: i64,
+) -> Result<MigrationState, Error> {
     let row = conn
         .query_row(
             &format!(
                 "SELECT id, status, note_split_fee_buffer, note_split_change, note_split_prep_fees,
                         note_split_total_input, note_split_total_migratable, anchor_bucket_interval,
                         replan_threshold
-                   FROM {} WHERE account_id = ?",
-                t.migrations
+                   FROM {} WHERE id = ?",
+                t.migrations,
             ),
-            params![account_id.0],
+            params![migration_id],
             |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -623,7 +698,7 @@ fn read_migration(
         replan_threshold,
     )) = row
     else {
-        return Ok(None);
+        return Err(Error::Corrupt("read_migration_row: no such migration"));
     };
     let anchor_bucket_interval = NonZeroU32::new(anchor_bucket_interval)
         .map(AnchorBucketInterval::custom)
@@ -647,14 +722,14 @@ fn read_migration(
 
     let status =
         MigrationStatus::try_from(status.as_str()).map_err(|_| Error::Corrupt("status"))?;
-    Ok(Some(MigrationState::from_parts(
+    Ok(MigrationState::from_parts(
         status,
         denominations,
         preparation,
         transactions,
         anchor_bucket_interval,
         replan_threshold,
-    )))
+    ))
 }
 
 /// Read an ordered list of zatoshi amounts (`ordinal`, `value`) from a child table.
@@ -1374,6 +1449,23 @@ fn replace_migration(
     account_id: AccountRef,
     state: &MigrationState,
 ) -> Result<(), Error> {
+    let prior = resolve_migration_id(tx, t, account_id)?;
+    replace_migration_row(tx, t, account_id, prior, state)
+}
+
+/// Persist `state` as the migration row `prior` — updating the parent row in place and replacing
+/// its child rows wholesale — or insert it fresh when `prior` is `None`. A record therefore keeps
+/// its `id`, `uuid`, and `committed_height` for its whole life; every other column mirrors
+/// `state`. The row-addressed half of [`replace_migration`], shared with the truncation walk —
+/// which rewrites rows (including revisited `Complete` history) that pending-only resolution
+/// cannot name.
+fn replace_migration_row(
+    tx: &rusqlite::Transaction,
+    t: &Tables,
+    account_id: AccountRef,
+    prior: Option<i64>,
+    state: &MigrationState,
+) -> Result<(), Error> {
     // The layers/transactions grid is stored only through the input and output rows, so a layer
     // with no transactions, or a transaction with neither inputs nor outputs, would leave no trace
     // and read back with later coordinates silently renumbered — misdirecting prior-output
@@ -1391,52 +1483,88 @@ fn replace_migration(
         }
     }
 
-    // Replace semantics: the store holds at most one migration per account. Delete the account's
-    // existing children first (in case foreign-key cascades are not enabled), then its parent row.
-    if let Some(migration_id) = resolve_migration_id(tx, t, account_id)? {
-        for table in [
-            t.transaction_deps,
-            t.spend_nullifiers,
-            t.transactions,
-            t.prep_inputs,
-            t.prep_outputs,
-            t.prep_direct_funding,
-            t.crossing_values,
-        ] {
-            tx.execute(
-                &format!("DELETE FROM {table} WHERE migration_id = ?"),
-                params![migration_id],
-            )?;
-        }
-        tx.execute(
-            &format!("DELETE FROM {} WHERE id = ?", t.migrations),
-            params![migration_id],
-        )?;
-    }
-
+    // The child tables are replaced wholesale (delete, then reinsert below): the state is a
+    // nested aggregate and this keeps "the store agrees with `state`" true by construction, with
+    // no per-row diff logic to drift. The PARENT row is updated in place, so `id` is stable for
+    // the record's life (the children key off it), as are the identity columns the state does
+    // not carry: `uuid`, and `committed_height` (a fact about the one commit event). A state
+    // persisted as terminal keeps its row — `resolve_migration_id` is pending-only, so nothing
+    // ever addresses it as "the account's migration" again — which is how a migration enters the
+    // retained history. Children are deleted explicitly in case foreign-key cascades are not
+    // enabled.
     let ns = state.denominations();
-    tx.execute(
-        &format!(
-            "INSERT INTO {} (account_id, status, note_split_fee_buffer, note_split_change,
-                             note_split_prep_fees, note_split_total_input, note_split_total_migratable,
-                             anchor_bucket_interval, replan_threshold)
-             VALUES (:account_id, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable,
-                     :anchor_bucket_interval, :replan_threshold)",
-            t.migrations
-        ),
-        named_params! {
-            ":account_id": account_id.0,
-            ":status": state.status().as_ref(),
-            ":fee_buffer": ns.note_fee_buffer().into_u64(),
-            ":change": ns.change().map(Zatoshis::into_u64),
-            ":prep_fees": ns.prep_fees().into_u64(),
-            ":total_input": ns.total_input().into_u64(),
-            ":total_migratable": ns.total_migratable().into_u64(),
-            ":anchor_bucket_interval": state.anchor_bucket_interval().block_count().get(),
-            ":replan_threshold": state.replan_threshold().percent(),
-        },
-    )?;
-    let migration_id = tx.last_insert_rowid();
+    let migration_id = match prior {
+        Some(migration_id) => {
+            for table in [
+                t.transaction_deps,
+                t.spend_nullifiers,
+                t.transactions,
+                t.prep_inputs,
+                t.prep_outputs,
+                t.prep_direct_funding,
+                t.crossing_values,
+            ] {
+                tx.execute(
+                    &format!("DELETE FROM {table} WHERE migration_id = ?"),
+                    params![migration_id],
+                )?;
+            }
+            tx.execute(
+                &format!(
+                    "UPDATE {} SET status = :status,
+                                   note_split_fee_buffer = :fee_buffer,
+                                   note_split_change = :change,
+                                   note_split_prep_fees = :prep_fees,
+                                   note_split_total_input = :total_input,
+                                   note_split_total_migratable = :total_migratable,
+                                   anchor_bucket_interval = :anchor_bucket_interval,
+                                   replan_threshold = :replan_threshold
+                     WHERE id = :id",
+                    t.migrations
+                ),
+                named_params! {
+                    ":id": migration_id,
+                    ":status": state.status().as_ref(),
+                    ":fee_buffer": ns.note_fee_buffer().into_u64(),
+                    ":change": ns.change().map(Zatoshis::into_u64),
+                    ":prep_fees": ns.prep_fees().into_u64(),
+                    ":total_input": ns.total_input().into_u64(),
+                    ":total_migratable": ns.total_migratable().into_u64(),
+                    ":anchor_bucket_interval": state.anchor_bucket_interval().block_count().get(),
+                    ":replan_threshold": state.replan_threshold().percent(),
+                },
+            )?;
+            migration_id
+        }
+        None => {
+            // A fresh record: mint its identity. `committed_height` is not stamped here; rows
+            // created before the stamping existed carry NULL, and no value is invented.
+            tx.execute(
+                &format!(
+                    "INSERT INTO {} (account_id, status, note_split_fee_buffer, note_split_change,
+                                     note_split_prep_fees, note_split_total_input, note_split_total_migratable,
+                                     anchor_bucket_interval, replan_threshold, uuid, committed_height)
+                     VALUES (:account_id, :status, :fee_buffer, :change, :prep_fees, :total_input, :total_migratable,
+                             :anchor_bucket_interval, :replan_threshold, :uuid, :committed_height)",
+                    t.migrations
+                ),
+                named_params! {
+                    ":account_id": account_id.0,
+                    ":uuid": uuid::Uuid::new_v4(),
+                    ":committed_height": None::<u32>,
+                    ":status": state.status().as_ref(),
+                    ":fee_buffer": ns.note_fee_buffer().into_u64(),
+                    ":change": ns.change().map(Zatoshis::into_u64),
+                    ":prep_fees": ns.prep_fees().into_u64(),
+                    ":total_input": ns.total_input().into_u64(),
+                    ":total_migratable": ns.total_migratable().into_u64(),
+                    ":anchor_bucket_interval": state.anchor_bucket_interval().block_count().get(),
+                    ":replan_threshold": state.replan_threshold().percent(),
+                },
+            )?;
+            tx.last_insert_rowid()
+        }
+    };
 
     insert_zatoshi_list(tx, t.crossing_values, migration_id, ns.crossing_values())?;
 

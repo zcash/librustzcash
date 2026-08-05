@@ -140,7 +140,11 @@ pub trait PoolMigrationRead {
     /// The store's own error type.
     type Error;
 
-    /// The migration currently in progress, if any.
+    /// The migration currently in progress, if any: PENDING-ONLY. A migration whose status is
+    /// terminal ([`MigrationStatus::is_terminal`]) is retained history and is NOT reported here —
+    /// persisting a terminal state through
+    /// [`replace_migration`](PoolMigrationWrite::replace_migration) is precisely how a migration
+    /// leaves this accessor and enters whatever history reads the store offers.
     fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error>;
 
     /// Report whether the environment this store lives in obstructs the given pre-signed
@@ -649,13 +653,12 @@ impl MigrationStatus {
     pub fn terminal() -> impl Iterator<Item = MigrationStatus> {
         Self::ALL.iter().copied().filter(|s| s.is_terminal())
     }
-}
 
-impl AsRef<str> for MigrationStatus {
     /// The stable lowercase wire name of the status, as stored by a backend and parsed back with
-    /// [`TryFrom<&str>`](Self). Borrow-free: it returns a `&'static str`, so encoding a status
-    /// allocates nothing.
-    fn as_ref(&self) -> &str {
+    /// [`TryFrom<&str>`](Self): a `&'static str`, so a store can embed it in DDL or other
+    /// `'static` text — which the [`AsRef<str>`](AsRef) impl cannot provide, its return lifetime
+    /// being tied to `&self` by the trait's signature.
+    pub const fn wire_name(self) -> &'static str {
         match self {
             MigrationStatus::Planning => "planning",
             MigrationStatus::Committed => "committed",
@@ -665,6 +668,15 @@ impl AsRef<str> for MigrationStatus {
             MigrationStatus::Superseded => "superseded",
             MigrationStatus::Cancelled => "cancelled",
         }
+    }
+}
+
+impl AsRef<str> for MigrationStatus {
+    /// The stable lowercase wire name of the status ([`wire_name`](MigrationStatus::wire_name)),
+    /// for callers generic over `AsRef<str>`. Borrow-free: the delegate returns a `&'static str`,
+    /// so encoding a status allocates nothing.
+    fn as_ref(&self) -> &str {
+        self.wire_name()
     }
 }
 
@@ -3894,7 +3906,8 @@ mod tests {
         type Error = core::convert::Infallible;
 
         fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-            Ok(self.stored.clone())
+            // Pending-only, per the trait contract: a terminal state is history.
+            Ok(self.stored.clone().filter(|s| !s.is_terminal()))
         }
 
         fn check_step_satisfiability(
@@ -4287,7 +4300,8 @@ mod commit_tests {
         type Error = core::convert::Infallible;
 
         fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
-            Ok(self.stored.clone())
+            // Pending-only, per the trait contract: a terminal state is history.
+            Ok(self.stored.clone().filter(|s| !s.is_terminal()))
         }
 
         fn check_step_satisfiability(

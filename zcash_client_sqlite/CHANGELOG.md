@@ -10,6 +10,28 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- A schema migration giving each pool-migration record a durable identity — a
+  `uuid` column (random per row, backfilled for existing rows) and a nullable
+  `committed_height` column (`NULL` for rows that predate it) — and rescoping
+  the per-account uniqueness of `orchard_ironwood_migrations` to NON-TERMINAL
+  rows, so an account retains every finished migration while holding at most
+  one in progress.
+
+### Changed
+- `pool_migration::PoolMigrations::get_migration` now reports only the
+  migration IN PROGRESS: a migration persisted with a terminal status is
+  retained as history rather than returned here, and committing a replacement
+  migration no longer destroys the record of the one it replaces. A caller
+  that rendered a finished migration from `get_migration` (which now returns
+  `None` for it) should read the retained record instead once the history
+  accessors land; until then the rows are present but unexposed.
+- Wallet truncation now revisits every retained `complete` pool-migration
+  record as well as the pending one, so a reorg that un-mines a PREVIOUS
+  migration's transfers demotes that record exactly as it always demoted a
+  pending migration's state. `failed`, `superseded`, and `cancelled` records
+  are policy determinations and are not revisited.
+
 ### Fixed
 - Anchor-checkpoint retention is no longer owed to a migration that has reached
   any terminal status. The grids of `failed`, `superseded`, and `cancelled`

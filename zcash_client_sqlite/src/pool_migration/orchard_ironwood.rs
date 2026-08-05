@@ -141,6 +141,14 @@ pub(crate) fn init_migration_tables(conn: &Connection) -> rusqlite::Result<()> {
     store::init(conn, &TABLES)
 }
 
+/// The Orchard -> Ironwood per-account uniqueness index DDL, from the store's one generator, for
+/// the `orchard_ironwood_migration_history` schema migration: the migration path and the canonical
+/// DDL create the index from the same text, so its non-terminal predicate cannot drift between
+/// them.
+pub(crate) fn account_index_sql() -> String {
+    store::create_account_index_sql(&TABLES)
+}
+
 /// The anchor bucket grids, in blocks, of every Orchard -> Ironwood migration in this database
 /// that is not yet complete.
 ///
@@ -2159,6 +2167,85 @@ mod tests {
         assert_empty_is_none(&fresh_store());
     }
 
+    /// A migration keeps ONE identity — row id and uuid alike — for its whole life, and its
+    /// terminal record is retained beside its successor's. The parent row is updated in place on
+    /// every re-persistence (the state is persisted on every broadcast and every mine),
+    /// including the one that marks the migration terminal — which is how it enters the retained
+    /// history — while a replacement migration is a genuinely new row under a fresh identity,
+    /// leaving the history readable beside it.
+    #[test]
+    fn replace_preserves_identity_and_retains_history() {
+        let mut conn = fresh_conn();
+        let account = insert_account(&conn);
+        let interval = AnchorBucketInterval::ZIP_318;
+        let rows = |conn: &Connection| -> Vec<(i64, uuid::Uuid, String)> {
+            conn.prepare("SELECT id, uuid, status FROM orchard_ironwood_migrations ORDER BY id")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+
+        let mut live = migration_under(MigrationStatus::Committed, interval);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&live)
+            .expect("first persist");
+        let first = rows(&conn);
+        assert_eq!(first.len(), 1, "one pending row");
+        let (row_id, original, _) = first[0].clone();
+        assert!(!original.is_nil());
+
+        // Re-persisting the live migration updates the row in place: same id, same uuid.
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&live)
+            .expect("re-persist");
+        assert_eq!(rows(&conn), vec![(row_id, original, "committed".into())]);
+
+        // Marking it terminal moves it into retained history, identity intact, and it leaves
+        // the pending read.
+        live.mark_superseded();
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&live)
+            .expect("terminal persist");
+        assert_eq!(rows(&conn), vec![(row_id, original, "superseded".into())]);
+        assert_eq!(
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+                .expect("account exists")
+                .get_migration()
+                .expect("read"),
+            None,
+            "a terminal migration is history, not the migration in progress"
+        );
+
+        // A successor migration commits beside the history under its own identity.
+        let successor = migration_under(MigrationStatus::Committed, interval);
+        PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+            .expect("account exists")
+            .replace_migration(&successor)
+            .expect("successor persist");
+        let after = rows(&conn);
+        assert_eq!(
+            after.len(),
+            2,
+            "the history survives the successor's commit"
+        );
+        assert_eq!(after[0], (row_id, original, "superseded".into()));
+        assert_ne!(after[1].1, original, "a new migration is a new identity");
+        assert_eq!(after[1].2, "committed");
+        assert_eq!(
+            PoolMigrations::for_account(NET, SystemClock, &mut conn, account)
+                .expect("account exists")
+                .get_migration()
+                .expect("read"),
+            Some(successor),
+            "the successor is the migration in progress"
+        );
+    }
+
     /// A migration in `status`, recorded under `interval`. The plan itself is empty filler: the
     /// test using this is about which grids a status still owes retention to, and nothing else.
     fn migration_under(status: MigrationStatus, interval: AnchorBucketInterval) -> MigrationState {
@@ -2900,12 +2987,15 @@ mod tests {
                     .expect("read for B"),
                 None
             );
+            // Pending-only: a terminal state was persisted into A's retained history rather
+            // than as its migration in progress.
+            let expected_a = (!state.is_terminal()).then_some(state);
             prop_assert_eq!(
                 PoolMigrations::for_account(NET, SystemClock, &conn, account_a)
                     .expect("account A exists")
                     .get_migration()
                     .expect("read for A"),
-                Some(state)
+                expected_a
             );
         }
 
@@ -2934,25 +3024,29 @@ mod tests {
                 .replace_migration(&state_a_2)
                 .expect("write A second");
 
+            // Pending-only reads on both sides: a terminal write lands in retained history.
+            let expected_a = (!state_a_2.is_terminal()).then_some(state_a_2);
+            let expected_b = (!state_b.is_terminal()).then_some(state_b);
             prop_assert_eq!(
                 PoolMigrations::for_account(NET, SystemClock, &conn, account_a)
                     .expect("account A exists")
                     .get_migration()
                     .expect("read A"),
-                Some(state_a_2)
+                expected_a
             );
             prop_assert_eq!(
                 PoolMigrations::for_account(NET, SystemClock, &conn, account_b)
                     .expect("account B exists")
                     .get_migration()
                     .expect("read B"),
-                Some(state_b)
+                expected_b
             );
         }
 
-        /// A second `replace_migration` for the same account still replaces: the per-account
-        /// singleton semantics hold (enforced by the unique index over `account_id`), because
-        /// the account's existing row is deleted before the new one is inserted.
+        /// A second `replace_migration` for the same account still replaces the account's
+        /// migration IN PROGRESS: at most one pending row per account (enforced by the partial
+        /// unique index over `account_id`), because the account's pending row is deleted before
+        /// the new one is inserted, while terminal rows accumulate as retained history.
         #[test]
         fn replace_migration_replaces_same_account(
             first in arb_migration_state(),
@@ -2963,7 +3057,8 @@ mod tests {
             let mut store = PoolMigrations::for_account(NET, SystemClock, conn, account).expect("account exists");
             store.replace_migration(&first).expect("write first");
             store.replace_migration(&second).expect("write second");
-            prop_assert_eq!(store.get_migration().expect("read"), Some(second));
+            let expected = (!second.is_terminal()).then_some(second);
+            prop_assert_eq!(store.get_migration().expect("read"), expected);
         }
 
         /// `update_transaction` is scoped to its account: advancing a transaction's state for
@@ -2975,6 +3070,9 @@ mod tests {
             new in arb_migration_tx_state(),
         ) {
             prop_assume!(!state.transactions().is_empty());
+            // A terminal migration has no pending row to update; lifecycle updates are a
+            // pending-migration operation, which is all this scoping property is about.
+            prop_assume!(!state.is_terminal());
             let id = first_transaction_id(&state).expect("non-empty by the assumption above");
 
             let mut conn = fresh_conn();

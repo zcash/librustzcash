@@ -43,7 +43,11 @@ where
 }
 
 /// Assert a replace/get round-trip: after [`replace_migration`](PoolMigrationWrite::replace_migration), the
-/// store reads back exactly the migration that was written.
+/// store reads back exactly the migration that was written — unless the state is TERMINAL, in
+/// which case [`get_migration`](PoolMigrationRead::get_migration) reports `None`. The trait's
+/// contract is "the migration currently in progress, if any": a terminal migration is retained
+/// history, addressed through a store's history accessors rather than through the drive-loop
+/// read, and persisting one is precisely how a migration ENTERS that history.
 pub fn assert_put_get_roundtrip<S: PoolMigrationWrite>(store: &mut S, state: &MigrationState)
 where
     S::Error: Debug,
@@ -52,15 +56,25 @@ where
         .replace_migration(state)
         .expect("replace_migration succeeds");
     let loaded = store.get_migration().expect("get_migration succeeds");
-    assert_eq!(
-        loaded,
-        Some(state.clone()),
-        "the stored migration must read back unchanged"
-    );
+    if state.is_terminal() {
+        assert_eq!(
+            loaded, None,
+            "a terminal migration is history, not the migration in progress"
+        );
+    } else {
+        assert_eq!(
+            loaded,
+            Some(state.clone()),
+            "the stored migration must read back unchanged"
+        );
+    }
 }
 
-/// Assert that a second replace overwrites the first: after putting `first` then `second`, the store holds
-/// exactly `second`.
+/// Assert that a second replace supersedes the first as the account's migration IN PROGRESS:
+/// after putting `first` then `second`, [`get_migration`](PoolMigrationRead::get_migration)
+/// reports exactly `second` — or `None` when `second` is terminal, per the pending-only contract
+/// [`assert_put_get_roundtrip`] describes. Whether `first` also remains readable as retained
+/// history is a property of the store's history accessors, outside this trait-level suite.
 pub fn assert_put_replaces<S: PoolMigrationWrite>(
     store: &mut S,
     first: &MigrationState,
@@ -74,9 +88,10 @@ pub fn assert_put_replaces<S: PoolMigrationWrite>(
     store
         .replace_migration(second)
         .expect("second replace_migration succeeds");
+    let expected = (!second.is_terminal()).then(|| second.clone());
     assert_eq!(
         store.get_migration().expect("get_migration succeeds"),
-        Some(second.clone()),
+        expected,
         "a second put must replace the first migration",
     );
 }
@@ -118,6 +133,13 @@ pub fn assert_update_transaction<S: PoolMigrationWrite>(
     store
         .replace_migration(state)
         .expect("replace_migration succeeds");
+    if state.is_terminal() {
+        // A terminal migration has no pending row to address: nothing will ever drive it, so
+        // there is no lifecycle left to update, and `get_migration` reports `None` rather than
+        // it. The update half of this assertion applies only to a migration in progress.
+        assert_eq!(store.get_migration().expect("get_migration succeeds"), None);
+        return;
+    }
     store
         .update_transaction(id, new)
         .expect("update_transaction succeeds");

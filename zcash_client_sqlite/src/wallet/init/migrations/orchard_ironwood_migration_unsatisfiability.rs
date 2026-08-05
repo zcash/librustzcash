@@ -896,7 +896,10 @@ mod tests {
                 id, account_id, status, note_split_fee_buffer, note_split_prep_fees,
                 note_split_total_input, note_split_total_migratable
              )
-             VALUES (1, 1, 'complete', 0, 0, 0, 0)",
+             -- Non-terminal on purpose: the post-repair read below goes through the
+             -- pending-only `get_migration`, and this test is about the txid repair, not
+             -- about history retention.
+             VALUES (1, 1, 'in_progress', 0, 0, 0, 0)",
         )
         .unwrap();
         insert_transfer_row(&conn, 0, &proven, "mined");
