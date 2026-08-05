@@ -2993,4 +2993,100 @@ pub(crate) mod tests {
             }
         }
     }
+
+    /// A transaction the wallet BUILDS is classified against ZIP 318 as it is stored, not only
+    /// once it has mined and been enhanced.
+    ///
+    /// `store_transactions_to_be_sent` had no classification step, so an ordinary send sat in the
+    /// wallet's own history reading "not classified" — the value that means nothing ever looked at
+    /// it — despite the wallet having had complete evidence for it since the moment it built it.
+    /// A client rendering that as "no label yet" showed no label for a transaction it had itself
+    /// just created.
+    ///
+    /// The assertion is that a DECISION was recorded, and then which one. An ordinary payment is
+    /// refuted rather than left undecided because every clause `classify` needs is answerable from
+    /// a transaction in hand: the bundles are there to be counted and the expiry is there to be
+    /// tested. Refutation is not a weaker outcome than conformance here; it is the correct label,
+    /// and the one a wallet filtering its own migration traffic needs.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn an_ordinary_send_is_classified_when_it_is_stored() {
+        use zcash_protocol::zip318::Zip318Classification;
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let account_id = account.id();
+
+        // Fund the account with a note comfortably larger than the payment and its fee.
+        let fvk = OrchardPoolTester::test_account_fvk(&st);
+        let note_value = Zatoshis::const_from_u64(100_000);
+        let (h, _, _) = st.generate_next_block(&fvk, AddressType::DefaultExternal, note_value);
+        st.scan_cached_blocks(h, 1);
+        assert_eq!(st.get_total_balance(account_id), note_value);
+
+        // Advance so the note's shard completes and an anchor is available.
+        for _ in 0..5 {
+            let (h, _) = st.generate_empty_block();
+            st.scan_cached_blocks(h, 1);
+        }
+
+        // An ordinary payment to somebody else, through the standard proposal flow.
+        let to_sk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to: Address = OrchardPoolTester::sk_default_address(&to_sk);
+        let request = TransactionRequest::new(vec![Payment::without_memo(
+            to.to_zcash_address(st.network()),
+            Zatoshis::const_from_u64(10_000),
+        )])
+        .unwrap();
+        let change_strategy =
+            single_output_change_strategy(StandardFeeRule::Zip317, None, ShieldedPool::Orchard);
+        let proposal = st
+            .propose_transfer(
+                account_id,
+                &GreedyInputSelector::new(),
+                &change_strategy,
+                request,
+                ConfirmationsPolicy::MIN,
+            )
+            .unwrap();
+        let created = st
+            .create_proposed_transactions::<Infallible, _, Infallible, _>(
+                account.usk(),
+                OvkPolicy::Sender,
+                &proposal,
+            )
+            .unwrap();
+        assert_eq!(created.len(), 1);
+        let sent_txid = created[0];
+
+        let (zip318_kind, mined_height): (i64, Option<i64>) = st
+            .wallet_mut()
+            .conn_mut()
+            .query_row(
+                "SELECT zip318_kind, mined_height FROM transactions WHERE txid = :txid",
+                named_params![":txid": sent_txid.as_ref()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(
+            mined_height, None,
+            "premise: the transaction is stored and unmined, so nothing has enhanced it",
+        );
+        assert_ne!(
+            zip318_kind,
+            Zip318Classification::Unknown.to_code(),
+            "storing a transaction the wallet built records a classification decision for it",
+        );
+        assert_eq!(
+            zip318_kind,
+            Zip318Classification::Nonconforming.to_code(),
+            "an ordinary payment is refuted, not left undecided",
+        );
+    }
 }

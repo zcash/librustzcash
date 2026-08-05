@@ -106,8 +106,12 @@ use wallet::{
 };
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::{
-    IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT, ll::ReceivedOrchardOutput,
+use zcash_client_backend::{
+    data_api::{
+        IRONWOOD_SHARD_HEIGHT, ORCHARD_SHARD_HEIGHT, ll::ReceivedOrchardOutput,
+        zip318::classify_decrypted_tx,
+    },
+    decrypt_transaction,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -2333,14 +2337,65 @@ impl<P: consensus::Parameters, CL: Clock, R: RngCore> WalletWrite
         &mut self,
         transactions: &[SentTransaction<<Self as WalletRead>::AccountId>],
     ) -> Result<(), <Self as WalletRead>::Error> {
+        // Every account's key, not just the sending one, and for the same reason the enhance path
+        // uses every account's: `is_send_to_self` is refuted by an output on an address that is
+        // the wallet's but EXTERNAL to the account. Decrypting under the sender's key alone would
+        // leave a cross-account output undecryptable and therefore uncounted, so a transaction
+        // paying another account of this same wallet could be judged send-to-self here and not
+        // send-to-self once it mined, which is precisely the relabelling the classification's
+        // monotonicity contract forbids.
+        #[cfg(feature = "orchard")]
+        let ufvks = self.get_unified_full_viewing_keys()?;
+        // The wallet's OWN grid, not the specified default. Unlike the enhance path — which cannot
+        // reach it through `LowLevelWalletRead` and documents that it settles for the defaults
+        // because no clause it can answer consults the grid — this site has the store in hand, so
+        // it can simply ask. That keeps it correct by construction rather than by an argument that
+        // would have to be revisited if `PoolMigrationParams` ever gained a second overridable
+        // value.
+        #[cfg(feature = "orchard")]
+        let zip318 = self.pool_migration_params();
+        #[cfg(feature = "orchard")]
+        let chain_tip = chain_tip_height(self.conn.0)?;
+
         for sent_tx in transactions {
-            wallet::store_transaction_to_be_sent(
+            #[cfg_attr(not(feature = "orchard"), allow(unused_variables))]
+            let tx_ref = wallet::store_transaction_to_be_sent(
                 self.conn.0,
                 &self.params,
                 #[cfg(feature = "transparent-inputs")]
                 &self.gap_limits,
                 sent_tx,
             )?;
+
+            // Record how the transaction classifies against ZIP 318 in the same database
+            // transaction as the record itself, so a transaction the wallet BUILT is labelled from
+            // the moment it is stored rather than only once it has mined and been enhanced. The
+            // ordinary send flow can produce a canonical crossing — `propose_transfer` consults
+            // `is_canonical_crossing` when shaping a step — and until now such a transaction sat
+            // in the wallet's own history reading "not classified" despite the wallet having had
+            // complete evidence for it all along.
+            //
+            // This is the same one-moment argument `finalize_and_store_proved` makes for migration
+            // transactions, and it uses the same evidence source, so the predicate has one
+            // implementation rather than one per store. The outputs are recovered by trial
+            // decryption rather than from the `SentTransaction`'s own outputs because
+            // `classify_decrypted_tx` is that single implementation; re-deriving its evidence from
+            // a different output representation would be a second copy to keep in step.
+            //
+            // The transaction is not mined, so no mined height is available; the enhance path
+            // passes the chain tip in the same situation.
+            #[cfg(feature = "orchard")]
+            {
+                let decrypted =
+                    decrypt_transaction(&self.params, None, chain_tip, sent_tx.tx(), &ufvks);
+                let classification = classify_decrypted_tx(
+                    sent_tx.tx(),
+                    decrypted.orchard_outputs(),
+                    decrypted.ironwood_outputs(),
+                    &zip318,
+                );
+                wallet::put_zip318_classification(self.conn.0, tx_ref, classification)?;
+            }
         }
         Ok(())
     }
