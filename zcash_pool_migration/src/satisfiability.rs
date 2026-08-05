@@ -26,7 +26,7 @@ use crate::engine::{
     MigrationState, MigrationTransferId, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
 };
 use crate::scheduling::{DelayDistribution, SchedulingParams};
-use crate::state::AdvanceStep;
+use crate::state::{AdvanceStep, StepKind};
 
 /// The share of planned transfer value (an integer percent) above which a migration with
 /// unsatisfiable transfers should be re-planned IMMEDIATELY rather than after satisfiable work
@@ -468,10 +468,54 @@ impl DuenessTargets {
     }
 }
 
+/// What one [`advance_migration`] call decides: the verified step to perform NOW, and the
+/// OUTLOOK — when the migration will next have work, and of what kind, assuming the returned
+/// step is executed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Advance {
+    step: AdvanceStep,
+    next: Option<(BlockHeight, StepKind)>,
+}
+
+impl Advance {
+    /// The step to perform now, verified against the store's satisfiability oracle exactly as
+    /// [`advance_migration`] documents.
+    pub const fn step(&self) -> AdvanceStep {
+        self.step
+    }
+
+    /// The SUBSEQUENT step, assuming [`step`](Self::step) is executed and recorded: the kind of
+    /// work it will be, and the earliest target height (this crate's `chain_tip + 1` convention,
+    /// directly comparable with the caller's [`DuenessTargets`]) at which it becomes
+    /// serviceable. A height at or below the caller's current target means more work is
+    /// serviceable in this same session; a later height is the wake-up to register, with the
+    /// kind saying what session to plan (a [`Broadcast`](StepKind::Broadcast) needs no sync, a
+    /// [`Prove`](StepKind::Prove) is sync-bound — the ZIP 318 session separation
+    /// [`advance_migration`] documents).
+    ///
+    /// The outlook is ADVISORY, the kernel's unverified plan: the height is a floor, not an
+    /// appointment (dependencies still have to mine, and the wake-up's own [`advance_migration`]
+    /// call verifies — and may displace — the step and names the transaction it applies to), and
+    /// it holds only as of the state this call returned, so the next call's outlook supersedes
+    /// it. `None` means nothing is height-schedulable: what follows is chain-driven (an
+    /// in-flight transaction mining, a dependency the scan must observe) or user-driven (a
+    /// signature, a replan, the sync a [`Reevaluate`](AdvanceStep::Reevaluate) asks for), or the
+    /// migration is terminal. In particular, a step whose own execution decides what comes next
+    /// — a [`Rebuild`](AdvanceStep::Rebuild), whose fresh schedule is drawn at rebuild time; a
+    /// [`Replan`](AdvanceStep::Replan) or [`Reevaluate`](AdvanceStep::Reevaluate), whose outcome
+    /// supersedes or re-decides the plan — carries `None`, and the call that follows the
+    /// execution reports the fresh outlook.
+    pub const fn next(&self) -> Option<(BlockHeight, StepKind)> {
+        self.next
+    }
+}
+
 /// Decide the next step to advance a committed migration and VERIFY it against the store before
 /// surfacing it: the entry point a consuming application drives a migration with, against the
 /// caller's [`DuenessTargets`] — its scanned frontier and its estimate of where the chain tip has
-/// reached, both as targets (`height + 1`).
+/// reached, both as targets (`height + 1`). Returns the step paired with the OUTLOOK — the
+/// subsequent step's kind and earliest serviceable height, assuming the returned step is
+/// executed ([`Advance::next`] defines its semantics).
 ///
 /// A single call plans, verifies, records, and persists:
 ///
@@ -552,10 +596,11 @@ impl DuenessTargets {
 ///   [`Complete`](AdvanceStep::Complete), and unconditionally: a rejection means another observer
 ///   saw chain state this wallet has not, and same-seed activity invalidates the whole store
 ///   view rather than one transaction's answer.
-/// - [`AdvanceStep::Waiting`]: nothing is actionable at this height. Consult
-///   [`MigrationState::transaction_statuses`] for what each transaction is blocked on, and register
-///   the heights at which to wake and re-check: [`MigrationState::sync_wakeup_schedule`] for the
-///   proving wake-ups, plus each transaction's own scheduled broadcast height.
+/// - [`AdvanceStep::Waiting`]: nothing is actionable at this height. The returned
+///   [`Advance::next`] carries the earliest height at which that changes, and the kind of work it
+///   will be; consult [`MigrationState::transaction_statuses`] for what each transaction is
+///   blocked on, and [`MigrationState::sync_wakeup_schedule`] for the full proving wake-up
+///   schedule a background-constrained wallet registers with its OS.
 /// - [`AdvanceStep::Complete`]: the migration is terminal (every transaction mined, or the
 ///   migration failed/cancelled); nothing will ever be actionable again, so stop polling.
 ///
@@ -667,7 +712,7 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
     targets: DuenessTargets,
     config: &AdvanceConfig,
     rng: &mut R,
-) -> Result<AdvanceStep, St::Error> {
+) -> Result<Advance, St::Error> {
     // Whether any determination has been recorded, and so whether the state must be written back
     // before a step is surfaced.
     let mut dirty = false;
@@ -828,11 +873,16 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
     if reevaluation_pending {
         // Unconditional: a rejection means some other observer saw chain state this wallet has
         // not, and same-seed activity invalidates the whole store view rather than one
-        // transaction's answer. Whatever was adjudicated above is still persisted first.
+        // transaction's answer. Whatever was adjudicated above is still persisted first. No
+        // outlook: what follows depends on how the adjudication falls, which is exactly what the
+        // requested sync exists to decide.
         if dirty {
             store.replace_migration(state)?;
         }
-        return Ok(AdvanceStep::Reevaluate);
+        return Ok(Advance {
+            step: AdvanceStep::Reevaluate,
+            next: None,
+        });
     }
 
     // The overdue-shift tolerance, sized to the schedule AS COMMITTED: the persisted anchor
@@ -938,7 +988,50 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
     if dirty {
         store.replace_migration(state)?;
     }
-    Ok(step)
+    Ok(Advance {
+        step,
+        next: upcoming_after(state, step, targets, &set_aside),
+    })
+}
+
+/// The OUTLOOK behind [`Advance::next`]: the subsequent step's kind and earliest serviceable
+/// height, computed on the state as it will stand once `step` is executed and recorded.
+///
+/// The hypothetical is applied to a CLONE of the state — a `Prove` completes to `Proved`, a
+/// `Broadcast` is recorded, `Waiting` changes nothing — and the kernel's
+/// [`upcoming_step`](MigrationState::upcoming_step) is asked of the result, with this call's
+/// `set_aside` carried through so a candidate deferred as "not yet satisfiable" (chain-gated, not
+/// height-gated) cannot resurface as a schedulable outlook the drive loop just declined to
+/// serve. The steps whose execution DECIDES what comes next carry no outlook at all, per
+/// [`Advance::next`]: a `Rebuild` draws its transfer's fresh schedule at rebuild time, a
+/// `Replan` supersedes the plan, a `Reevaluate` re-decides it, and after `Complete` nothing
+/// follows. The clone is the cost of asking "and then?" without disturbing the state the caller
+/// holds; it is paid only when a step is actually surfaced, never per transaction.
+fn upcoming_after(
+    state: &MigrationState,
+    step: AdvanceStep,
+    targets: DuenessTargets,
+    set_aside: &[MigrationTransferId],
+) -> Option<(BlockHeight, StepKind)> {
+    match step {
+        AdvanceStep::Complete
+        | AdvanceStep::Replan
+        | AdvanceStep::Reevaluate
+        | AdvanceStep::Rebuild { .. } => None,
+        AdvanceStep::Waiting => state.upcoming_step(targets, set_aside),
+        AdvanceStep::Prove { id, .. } => {
+            let mut post = state.clone();
+            if let Some(t) = post.transactions.iter_mut().find(|t| t.id == id) {
+                t.state = MigrationTxState::Proved;
+            }
+            post.upcoming_step(targets, set_aside)
+        }
+        AdvanceStep::Broadcast { id } => {
+            let mut post = state.clone();
+            post.mark_broadcast(id);
+            post.upcoming_step(targets, set_aside)
+        }
+    }
 }
 
 /// Whether a satisfiability answer is a DISCOVERY for [`advance_migration`] to record and broaden
@@ -1366,7 +1459,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert!(
             matches!(step, AdvanceStep::Prove { id, .. } if id == MigrationTransferId(2)),
@@ -1429,7 +1523,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -1478,7 +1573,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -1515,7 +1611,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
         assert_eq!(
             step,
             AdvanceStep::Broadcast {
@@ -1548,7 +1645,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -1576,7 +1674,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
         assert_eq!(step, AdvanceStep::Waiting);
         assert_eq!(store.queries.get(), 0, "a waiting call asks nothing");
         assert_eq!(store.replaced.get(), 0);
@@ -1626,7 +1725,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -1688,7 +1788,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             state.transactions()[0].state(),
@@ -1745,7 +1846,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -1781,7 +1883,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             store.mined_queries.get(),
@@ -1823,7 +1926,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -1890,7 +1994,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -2018,7 +2123,8 @@ mod advance_tests {
                 &config(),
                 &mut rng()
             )
-            .expect("the store never fails"),
+            .expect("the store never fails")
+            .step(),
             AdvanceStep::Reevaluate,
             "the sibling's due broadcast waits behind the unanswered rejection",
         );
@@ -2054,7 +2160,8 @@ mod advance_tests {
                 &config(),
                 &mut rng()
             )
-            .expect("the store never fails"),
+            .expect("the store never fails")
+            .step(),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
@@ -2103,7 +2210,8 @@ mod advance_tests {
                 &config(),
                 &mut rng()
             )
-            .expect("the store never fails"),
+            .expect("the store never fails")
+            .step(),
             AdvanceStep::Replan,
         );
 
@@ -2162,7 +2270,8 @@ mod advance_tests {
                 &config(),
                 &mut rng()
             )
-            .expect("the store never fails"),
+            .expect("the store never fails")
+            .step(),
             AdvanceStep::Complete,
         );
         assert_eq!(store.queries.get(), 0);
@@ -2215,7 +2324,8 @@ mod advance_tests {
                 &config(),
                 &mut rng()
             )
-            .expect("the store never fails"),
+            .expect("the store never fails")
+            .step(),
             AdvanceStep::Reevaluate,
         );
         let marked = BlockHeight::from_u32(1600);
@@ -2268,7 +2378,8 @@ mod advance_tests {
                 &config(),
                 &mut rng()
             )
-            .expect("the store never fails"),
+            .expect("the store never fails")
+            .step(),
             AdvanceStep::Reevaluate,
             "one unanswerable rejection still holds the whole loop",
         );
@@ -2323,7 +2434,8 @@ mod advance_tests {
 
         assert_eq!(
             advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
-                .expect("the store never fails"),
+                .expect("the store never fails")
+                .step(),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(2)
             },
@@ -2351,7 +2463,8 @@ mod advance_tests {
                 &config(),
                 &mut rng(),
             )
-            .expect("the store never fails"),
+            .expect("the store never fails")
+            .step(),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
@@ -2387,7 +2500,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert_eq!(
             step,
@@ -2476,7 +2590,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
         assert_eq!(
             step,
             AdvanceStep::Broadcast {
@@ -2500,7 +2615,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
         assert_eq!(
             step,
             AdvanceStep::Broadcast {
@@ -2567,7 +2683,8 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails");
+        .expect("the store never fails")
+        .step();
 
         assert!(
             matches!(step, AdvanceStep::Prove { id, .. } if id == MigrationTransferId(1)),
@@ -2579,5 +2696,179 @@ mod advance_tests {
             "its broadcast window re-spread to the served target"
         );
         assert_eq!(store.replaced.get(), 1);
+    }
+
+    /// The outlook assumes the returned step is EXECUTED. A due preparation's prove reports its
+    /// own broadcast servable at that same schedule — the same-session signal — while a transfer
+    /// proved early reports its broadcast at its later scheduled height, the wake-up to register
+    /// when the proving session ends.
+    #[test]
+    fn outlook_after_a_prove_is_the_broadcast_that_follows() {
+        let mut prep_tx = tx(1, prep(0, 0), MigrationTxState::Signed);
+        prep_tx.scheduled_height = BlockHeight::from_u32(1_000);
+        let mut state = state_with_crossings(&[100_000_000], vec![prep_tx]);
+        let mut store = TestStore::new(1_000, []);
+        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert!(
+            matches!(advance.step(), AdvanceStep::Prove { id, .. } if id == MigrationTransferId(1)),
+            "the due preparation's prove is the step: {:?}",
+            advance.step()
+        );
+        assert_eq!(
+            advance.next(),
+            Some((BlockHeight::from_u32(1_000), StepKind::Broadcast)),
+            "once proved, its broadcast is servable at its own (already-due) schedule"
+        );
+
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_200, MigrationTxState::Signed),
+            ],
+        );
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert!(
+            matches!(advance.step(), AdvanceStep::Prove { id, .. } if id == MigrationTransferId(1)),
+            "the settled-boundary transfer's prove is the step: {:?}",
+            advance.step()
+        );
+        assert_eq!(
+            advance.next(),
+            Some((BlockHeight::from_u32(1_200), StepKind::Broadcast)),
+            "the proof leaves nothing until the transfer's own broadcast window"
+        );
+    }
+
+    /// A `Waiting` step carries the wake-up: the earliest height-gated floor among the pending
+    /// transactions — here the proved transfer's broadcast window, not the later-boundary
+    /// transfer's proof — and a broadcast step's outlook reports the next due broadcast in the
+    /// same session.
+    #[test]
+    fn outlook_reports_the_earliest_upcoming_floor() {
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_200, MigrationTxState::Proved),
+                // Boundary 1_300 is unsettled at the target, so its prove floor (1_302) sits
+                // past the broadcast window above.
+                scheduled_transfer(2, 1, 1_300, 1_500, MigrationTxState::Signed),
+            ],
+        );
+        let mut store = TestStore::new(1_000, []);
+        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert_eq!(advance.step(), AdvanceStep::Waiting);
+        assert_eq!(
+            advance.next(),
+            Some((BlockHeight::from_u32(1_200), StepKind::Broadcast)),
+            "the earliest floor wins: the broadcast window, not the later prove"
+        );
+
+        // Both proved and due: the first broadcast's outlook is the second, servable now.
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 995, MigrationTxState::Proved),
+                scheduled_transfer(2, 1, 720, 1_000, MigrationTxState::Proved),
+            ],
+        );
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert_eq!(
+            advance.step(),
+            AdvanceStep::Broadcast {
+                id: MigrationTransferId(1)
+            },
+            "the longest-due broadcast is served first"
+        );
+        assert_eq!(
+            advance.next(),
+            Some((BlockHeight::from_u32(1_000), StepKind::Broadcast)),
+            "the other due broadcast follows in the same session (its floor is already reached)"
+        );
+    }
+
+    /// No outlook where none is knowable or schedulable: a candidate deferred as "not yet
+    /// satisfiable" is chain-gated and must not resurface as a wake-up the loop just declined to
+    /// serve; a migration whose every transaction is in flight waits on the chain alone; and a
+    /// rebuild's fresh schedule is drawn at rebuild time, so the call that follows it reports
+    /// the outlook instead.
+    #[test]
+    fn outlook_is_none_when_nothing_is_height_schedulable() {
+        // The only pending transaction's broadcast is due, but the wallet cannot yet vouch for
+        // its inputs: the step defers to Waiting, and the outlook must not name the deferred
+        // candidate's own (already-reached) floor.
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_000, MigrationTxState::Proved),
+            ],
+        );
+        let mut store = TestStore::new(
+            900,
+            [(
+                MigrationTransferId(1),
+                StepSatisfiability::NotYetSatisfiable {
+                    as_of_height: BlockHeight::from_u32(900),
+                },
+            )],
+        );
+        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert_eq!(advance.step(), AdvanceStep::Waiting);
+        assert_eq!(
+            advance.next(),
+            None,
+            "a set-aside candidate is chain-gated: no height re-serves it"
+        );
+
+        // Everything in flight: mining is chain-derived, so nothing is height-schedulable.
+        let mut state = state_with_crossings(
+            &[100_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_000, broadcast()),
+            ],
+        );
+        let mut store = TestStore::new(1_000, []);
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert_eq!(advance.step(), AdvanceStep::Waiting);
+        assert_eq!(
+            advance.next(),
+            None,
+            "in flight: the chain decides what is next"
+        );
+
+        // An expired transfer: the rebuild draws its replacement's schedule when it happens, so
+        // the outlook cannot be stated ahead of it.
+        let mut expired = scheduled_transfer(1, 0, 720, 900, MigrationTxState::Signed);
+        expired.expiry_height = BlockHeight::from_u32(950);
+        let mut state =
+            state_with_crossings(&[100_000_000], vec![tx(0, prep(0, 0), mined(10)), expired]);
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert_eq!(
+            advance.step(),
+            AdvanceStep::Rebuild {
+                id: MigrationTransferId(1)
+            }
+        );
+        assert_eq!(
+            advance.next(),
+            None,
+            "the rebuild reschedules its transfer; the following call reports the fresh outlook"
+        );
     }
 }

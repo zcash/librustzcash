@@ -182,6 +182,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     let targets = DuenessTargets::at(latest_scheduled(&state));
     match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
         .expect("the store answers")
+        .step()
     {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
@@ -200,6 +201,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     let targets = DuenessTargets::at(latest_scheduled(&state));
     match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
         .expect("the store answers")
+        .step()
     {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             assert!(
@@ -215,6 +217,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     let targets = DuenessTargets::at(latest_scheduled(&state));
     match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
         .expect("the store answers")
+        .step()
     {
         AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
             let tx = state
