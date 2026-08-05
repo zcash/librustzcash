@@ -32,6 +32,14 @@ and this library adheres to Rust's notion of
   serviceable, assuming the returned step is executed.
 - `state::StepKind` and `state::AdvanceStep::kind`: an `AdvanceStep`'s variant
   without its payload.
+- `preparation::PreparationStrategy`.
+- `preparation::layered_greedy::LayeredGreedy`, re-exported as
+  `preparation::LayeredGreedy`.
+- `preparation::PreparationPlan::is_valid`.
+- `preparation::PlanQuality`.
+- `preparation::Portfolio`, implemented for `()` and for `(H, T)` where `H:
+  PreparationStrategy` and `T: Portfolio`, so a set of strategies is written
+  `(A, (B, (C, ())))`.
 
 ### Changed
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`
@@ -39,6 +47,9 @@ and this library adheres to Rust's notion of
   `Advance::step`, and the outlook — when the migration next has work, and of
   what kind — via `Advance::next`, which replaces deriving the next wake-up
   from each transaction's scheduled height by hand.
+- `preparation::plan_preparation` now returns the best plan produced by any of
+  the strategies the crate ships, rather than the layered greedy's plan. Its
+  signature, its errors and the plans it returns are unchanged.
 - `engine::MigrationStatus` has added variant `Cancelled`: a terminal status
   recording that the user abandoned the migration, distinct from `Failed` so
   that a deliberate abandonment is distinguishable from a migration that broke. 
