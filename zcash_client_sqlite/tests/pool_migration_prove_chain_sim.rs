@@ -367,6 +367,7 @@ impl Run {
         satisfiability::advance_migration(&mut store, state, targets, &ADVANCE, &mut rng)
             .expect("the store and its satisfiability oracle answer")
             .step()
+            .clone()
     }
 
     /// Mine one empty block and scan it, so the chain reaches the migration's next scheduled
@@ -498,15 +499,30 @@ impl Run {
         let mut waited = 0u32;
         while unmined_preparation(&committed.state) {
             match self.advance(&mut committed.state) {
-                AdvanceStep::Prove { id, kind } => {
-                    assert!(
-                        matches!(kind, MigrationTxKind::Preparation { .. }),
-                        "no crossing is provable while a preparation it depends on is unmined",
-                    );
-                    assert_eq!(
-                        self.perform_prove(&mut committed.state, id, kind),
-                        ProveStepOutcome::Proved,
-                    );
+                AdvanceStep::Prove { transactions } => {
+                    for target in transactions {
+                        let (id, kind) = (target.id(), target.kind());
+                        if matches!(kind, MigrationTxKind::Transfer { .. }) {
+                            // The batch may carry a crossing alongside the preparations, but
+                            // only once the preparation minting its funding note has mined.
+                            let deps = committed
+                                .state
+                                .transactions()
+                                .iter()
+                                .find(|t| t.id() == id)
+                                .expect("the step names stored transactions")
+                                .depends_on()
+                                .to_vec();
+                            assert!(
+                                committed.state.deps_mined(&deps),
+                                "no crossing is provable while a preparation it depends on is unmined",
+                            );
+                        }
+                        assert_eq!(
+                            self.perform_prove(&mut committed.state, id, kind),
+                            ProveStepOutcome::Proved,
+                        );
+                    }
                 }
                 AdvanceStep::Broadcast { id } => {
                     self.perform_broadcast(&mut committed.state, id);
@@ -536,10 +552,16 @@ impl Run {
         loop {
             self.drive_preparations(committed);
             match self.advance(&mut committed.state) {
-                AdvanceStep::Prove {
-                    id,
-                    kind: MigrationTxKind::Transfer { .. },
-                } => return id,
+                AdvanceStep::Prove { transactions } => {
+                    // `drive_preparations` has just proved and broadcast every due
+                    // preparation, so what the batch carries here is transfers, earliest
+                    // anchor boundary first.
+                    assert!(
+                        matches!(transactions[0].kind(), MigrationTxKind::Transfer { .. }),
+                        "only transfers await proving once the preparations are driven"
+                    );
+                    return transactions[0].id();
+                }
                 AdvanceStep::Waiting => {
                     assert!(
                         waited < MAX_WAITING_BLOCKS,
@@ -566,11 +588,13 @@ impl Run {
         let mut waited = 0u32;
         loop {
             match self.advance(&mut committed.state) {
-                AdvanceStep::Prove { id, kind } => {
-                    assert_eq!(
-                        self.perform_prove(&mut committed.state, id, kind),
-                        ProveStepOutcome::Proved,
-                    );
+                AdvanceStep::Prove { transactions } => {
+                    for target in transactions {
+                        assert_eq!(
+                            self.perform_prove(&mut committed.state, target.id(), target.kind()),
+                            ProveStepOutcome::Proved,
+                        );
+                    }
                 }
                 AdvanceStep::Broadcast { id } => {
                     let kind = committed
@@ -809,20 +833,23 @@ impl Run {
 
         loop {
             match self.advance(&mut committed.state) {
-                AdvanceStep::Prove { id, kind } => {
-                    assert_eq!(
-                        self.perform_prove(&mut committed.state, id, kind),
-                        ProveStepOutcome::Proved,
-                        "{}: proving {id:?}",
-                        scenario.label
-                    );
-                    let proven = committed
-                        .state
-                        .transactions()
-                        .iter()
-                        .find(|t| t.id() == id)
-                        .expect("the proved transaction is present");
-                    assert!(matches!(proven.state(), MigrationTxState::Proved));
+                AdvanceStep::Prove { transactions } => {
+                    for target in transactions {
+                        let (id, kind) = (target.id(), target.kind());
+                        assert_eq!(
+                            self.perform_prove(&mut committed.state, id, kind),
+                            ProveStepOutcome::Proved,
+                            "{}: proving {id:?}",
+                            scenario.label
+                        );
+                        let proven = committed
+                            .state
+                            .transactions()
+                            .iter()
+                            .find(|t| t.id() == id)
+                            .expect("the proved transaction is present");
+                        assert!(matches!(proven.state(), MigrationTxState::Proved));
+                    }
                 }
 
                 AdvanceStep::Broadcast { id } => {
@@ -2401,10 +2428,13 @@ fn a_settled_reorg_below_a_broadcast_crossings_anchor_marks_it() {
     let mut waited = 0u32;
     loop {
         match run.advance(&mut committed.state) {
-            AdvanceStep::Prove { id, kind } => {
-                assert_eq!(id, transfer_id);
+            AdvanceStep::Prove { transactions } => {
                 assert_eq!(
-                    run.perform_prove(&mut committed.state, id, kind),
+                    transactions.iter().map(|t| t.id()).collect::<Vec<_>>(),
+                    vec![transfer_id]
+                );
+                assert_eq!(
+                    run.perform_prove(&mut committed.state, transfer_id, transactions[0].kind()),
                     ProveStepOutcome::Proved,
                 );
                 break;

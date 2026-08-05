@@ -65,6 +65,17 @@ and this library adheres to Rust's notion of
   `PROVABLE_ANCHOR_DEPTH - 1` blocks later than before; the schedule re-spread
   in `satisfiability::advance_migration` does not count that gate-imposed wait
   as a missed schedule.
+- `state::AdvanceStep::Prove` now carries `transactions: Vec<state::ProveTarget>`
+  — every transaction provable right now, earliest-ready first — in place of a
+  single `id` and its `kind`. Proving is not privacy-relevant, so one synced
+  session proves everything it can rather than being offered one candidate per
+  call. A consumer proves each entry in order; `ProveTarget::kind` selects the
+  engine call and says whether the broadcast follows immediately (a
+  preparation) or in its own later session (a transfer), exactly as the old
+  `kind` field did. A consumer interrupted partway through a batch loses
+  nothing, since the next call re-offers the unproved remainder. Consequently
+  `state::AdvanceStep` and `satisfiability::Advance` are no longer `Copy`, and
+  `satisfiability::Advance::step` returns a reference.
 - `engine::MigrationStatus` has added variant `Cancelled`: a terminal status
   recording that the user abandoned the migration, distinct from `Failed` so
   that a deliberate abandonment is distinguishable from a migration that broke. 

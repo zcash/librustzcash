@@ -471,7 +471,7 @@ impl DuenessTargets {
 /// What one [`advance_migration`] call decides: the verified step to perform NOW, and the
 /// OUTLOOK — when the migration will next have work, and of what kind, assuming the returned
 /// step is executed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Advance {
     step: AdvanceStep,
     next: Option<(BlockHeight, StepKind)>,
@@ -480,8 +480,8 @@ pub struct Advance {
 impl Advance {
     /// The step to perform now, verified against the store's satisfiability oracle exactly as
     /// [`advance_migration`] documents.
-    pub const fn step(&self) -> AdvanceStep {
-        self.step
+    pub const fn step(&self) -> &AdvanceStep {
+        &self.step
     }
 
     /// The SUBSEQUENT step, assuming [`step`](Self::step) is executed and recorded: the kind of
@@ -574,14 +574,19 @@ impl Advance {
 /// state, persists it, and calls this again; until the state records the step's completion, the
 /// same step is offered again. The steps map onto the crate's operations as follows:
 ///
-/// - [`AdvanceStep::Prove`]: install the transaction's deferred anchor and witnesses —
-///   [`prove_transfer`] / [`prove_preparation`] — and hand the returned proof to
+/// - [`AdvanceStep::Prove`]: for EACH named transaction in order, install its deferred anchor
+///   and witnesses — [`prove_transfer`] / [`prove_preparation`], chosen by the
+///   [`kind`](crate::state::ProveTarget::kind) each batch entry carries — and hand the returned
+///   proof to
 ///   [`PoolMigrationWrite::store_proved_transaction`], which records the `Signed -> Proved`
 ///   transition and persists it (for a wallet-database store, atomically with the wallet's own
-///   record of the now fully-constructed transaction). Proving needs a SYNCED wallet and mutable
-///   access to its commitment trees, but only the account's viewing key. The step carries the
-///   transaction's kind so the consumer can tell, without a lookup, whether the broadcast follows
-///   in the same session (a preparation) or in its own later one (a transfer).
+///   record of the now fully-constructed transaction). The step names the WHOLE currently
+///   provable set at once — proving emits nothing a network observer can see, so unlike
+///   broadcasting there is nothing to space out, and a synced session proves everything it can
+///   (see [`AdvanceStep::Prove`] for the ordering and the mixed-kinds note). Proving needs a
+///   SYNCED wallet and mutable access to its commitment trees, but only the account's viewing
+///   key. A consumer interrupted partway through the batch loses nothing: the next call
+///   re-offers exactly the still-unproved remainder.
 /// - [`AdvanceStep::Broadcast`]: submit the stored proven transaction to the network, then record
 ///   it with [`MigrationState::mark_broadcast`]. Its mining is later detected through the
 ///   consumer's own chain view and recorded with [`MigrationState::mark_mined`], which is what
@@ -665,7 +670,9 @@ impl Advance {
 ///   database query, and it is paid on a set that empties as transactions are broadcast. A store
 ///   that persists each transaction's derived id could answer from there instead; nothing here
 ///   requires the derivation to happen per call;
-/// - one query for the candidate the kernel names — and none at all when the kernel answers
+/// - one query per transaction the step names — a single candidate for `Broadcast` and
+///   `Rebuild`, each member of a `Prove` batch in the call that serves it (each is about to
+///   cost proving work) — and none at all when the kernel answers
 ///   [`Waiting`](AdvanceStep::Waiting), [`Complete`](AdvanceStep::Complete), or
 ///   [`Replan`](AdvanceStep::Replan), which name no transaction.
 ///
@@ -898,19 +905,37 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
             .transfer_delay(),
     );
 
-    // Plan, verify, record, plan again. Every iteration either breaks, grows `set_aside`,
-    // strictly grows the marked set — strictly, because the kernel never names an already-marked
-    // transaction (they are in its dead set), so a recorded discovery marks at least the candidate
-    // that produced it — or shifts the schedule. The first two are bounded by the transaction
-    // count; each shift raises every pending scheduled height by more than the overdue-shift
-    // tolerance toward the fixed served target, above which no shift triggers, so shifts are
-    // bounded too and the loop terminates.
-    let step = loop {
+    // Plan, verify, record, plan again: ask the kernel for a step, and put every transaction
+    // the step names — its CANDIDATES: the members of a `Prove` batch, or the single
+    // transaction of a `Broadcast` or `Rebuild` — to the store's satisfiability oracle before
+    // the step is surfaced.
+    //
+    // The loop terminates because each iteration does exactly one of:
+    // - BREAK, surfacing a step: one naming no transaction, or one whose every candidate the
+    //   oracle vouched for.
+    // - Grow `set_aside`, the call-local list of candidates deferred as "not yet satisfiable".
+    //   Ids are never removed and the kernel never re-names a set-aside id, so this happens at
+    //   most once per transaction.
+    // - Record at least one new UNSATISFIABILITY MARK — the durable
+    //   `MigrationTransaction::unsatisfiable_at` stamp, written through
+    //   `MigrationState::record_satisfiability` when the oracle reports a candidate's inputs
+    //   spent or its anchor invalidated. At least one, because the kernel never names an
+    //   already-marked transaction (marked transactions are in its dead set), so a discovery
+    //   always stamps a previously unmarked one; bounded by the transaction count.
+    // - Shift the schedule. The trigger compares pending scheduled heights against
+    //   `targets.effective()` — the height the schedule is SERVED at, a constant of this call —
+    //   and fires only on a candidate lagging it by more than `overdue_tolerance`; the shift
+    //   then raises every pending scheduled height by more than that tolerance. The minimum
+    //   pending height therefore climbs by more than the tolerance per shift while the served
+    //   height stands still, so after finitely many shifts no candidate lags far enough to
+    //   trigger, and shifts stop.
+    let step = 'plan: loop {
         let step = state.next_step(targets, &set_aside);
-        let candidate = match step {
-            AdvanceStep::Prove { id, .. }
-            | AdvanceStep::Broadcast { id }
-            | AdvanceStep::Rebuild { id } => id,
+        // The candidates the step names, in the order the step carries them: a `Prove`'s whole
+        // batch, or the single transaction of a `Broadcast` or `Rebuild`.
+        let candidates: Vec<MigrationTransferId> = match &step {
+            AdvanceStep::Prove { transactions } => transactions.iter().map(|t| t.id()).collect(),
+            AdvanceStep::Broadcast { id } | AdvanceStep::Rebuild { id } => vec![*id],
             // These name no transaction, so there is nothing to verify. `Reevaluate` is decided
             // above, by this function, and the kernel never returns it — but it is a step like
             // any other here, and matching it explicitly keeps that fact from resting on the
@@ -920,14 +945,24 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
             | AdvanceStep::Replan
             | AdvanceStep::Reevaluate => break step,
         };
-        let Some(tx) = state.transactions().iter().find(|t| t.id() == candidate) else {
-            // The kernel names its candidates out of `state.transactions()`, so an id that is not
-            // there means the state is corrupt. Nothing can be verified about it and nothing may
-            // be surfaced unverified, so the call reports `Waiting` — the safe degradation, and a
-            // BREAK rather than another iteration, which leaves no way for a corrupt state to
-            // spin the loop. Anything already recorded is still persisted below.
-            break AdvanceStep::Waiting;
-        };
+        // Each candidate's schedule data, copied out so no borrow of `state` outlives the
+        // mutations below. The kernel names its candidates out of `state.transactions()`, so an
+        // id that is not there means the state is corrupt: nothing can be verified about it and
+        // nothing may be surfaced unverified, so the call reports `Waiting` — the safe
+        // degradation, and a BREAK rather than another iteration, which leaves no way for a
+        // corrupt state to spin the loop. Anything already recorded is still persisted below.
+        let mut schedule_data: Vec<(MigrationTransferId, u32, Option<u32>)> =
+            Vec::with_capacity(candidates.len());
+        for id in &candidates {
+            let Some(tx) = state.transactions().iter().find(|t| t.id() == *id) else {
+                break 'plan AdvanceStep::Waiting;
+            };
+            schedule_data.push((
+                *id,
+                u32::from(tx.scheduled_height()),
+                tx.anchor_boundary().map(u32::from),
+            ));
+        }
         // THE OVERDUE SHIFT: ZIP 318's missed-schedule policy ("at most one overdue transfer is
         // released immediately; the rest are re-spread"). A candidate more than the
         // schedule-scaled tolerance past its scheduled height means the wallet slept through
@@ -961,43 +996,90 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
             step,
             AdvanceStep::Prove { .. } | AdvanceStep::Broadcast { .. }
         ) {
-            let scheduled = u32::from(tx.scheduled_height());
-            let overdue_from = match (&step, tx.anchor_boundary()) {
-                (AdvanceStep::Prove { .. }, Some(boundary)) => {
-                    scheduled.max(u32::from(boundary) + PROVABLE_ANCHOR_DEPTH + 1)
+            // For a batch, the MOST overdue member — the least `overdue_from` — is the trigger,
+            // and the shift is sized by that member's schedule, exactly as when it is the sole
+            // candidate.
+            let most_overdue = schedule_data
+                .iter()
+                .map(|(_, scheduled, boundary)| {
+                    let overdue_from = match (&step, boundary) {
+                        (AdvanceStep::Prove { .. }, Some(boundary)) => {
+                            (*scheduled).max(boundary + PROVABLE_ANCHOR_DEPTH + 1)
+                        }
+                        _ => *scheduled,
+                    };
+                    (overdue_from, *scheduled)
+                })
+                .min();
+            if let Some((overdue_from, scheduled)) = most_overdue {
+                let served = u32::from(targets.effective());
+                if overdue_from.saturating_add(overdue_tolerance) < served {
+                    state.shift_schedule(served - scheduled, rng);
+                    dirty = true;
+                    continue;
                 }
-                _ => scheduled,
-            };
-            let served = u32::from(targets.effective());
-            if overdue_from.saturating_add(overdue_tolerance) < served {
-                state.shift_schedule(served - scheduled, rng);
-                dirty = true;
-                continue;
             }
         }
-        let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
-        match answer {
-            StepSatisfiability::Satisfiable { .. } => break step,
-            // Not an obstruction: the wallet cannot yet vouch for the inputs (their source is
-            // unmined, or mined but unscanned). Take the candidate out of this call's queues so
-            // the migration's other work still surfaces, and leave no mark — a false mark would
-            // strand live value behind an observation only a reorg can clear.
-            StepSatisfiability::NotYetSatisfiable { .. } => set_aside.push(candidate),
-            answer @ StepSatisfiability::Unsatisfiable { .. } => {
-                if !records_a_determination(&answer) {
-                    // `Expired`: never overrides the kernel, which derives expiry itself from the
-                    // same `expiry_height`. The two can disagree only under caller/store height
-                    // skew, and there the kernel's scanned target governs, so the step stands
-                    // exactly as planned (for a transfer, the rebuild that is expiry's remedy).
-                    break step;
+        // VERIFY every candidate the step names. The single-candidate steps pay the same one
+        // query as ever; a `Prove` batch pays one query per member in the call that serves it,
+        // because every member is about to cost proving work.
+        let mut kept: Vec<MigrationTransferId> = Vec::new();
+        let mut deferred: Vec<MigrationTransferId> = Vec::new();
+        let mut discoveries: Vec<(MigrationTransferId, StepSatisfiability)> = Vec::new();
+        for (id, _, _) in &schedule_data {
+            let Some(tx) = state.transactions().iter().find(|t| t.id() == *id) else {
+                break 'plan AdvanceStep::Waiting;
+            };
+            let answer = store.check_step_satisfiability(tx, config.reorg_settle_depth())?;
+            match answer {
+                StepSatisfiability::Satisfiable { .. } => kept.push(*id),
+                // Not an obstruction: the wallet cannot yet vouch for the inputs (their source
+                // is unmined, or mined but unscanned). Take the candidate out of this call's
+                // queues so the migration's other work still surfaces, and leave no mark — a
+                // false mark would strand live value behind an observation only a reorg can
+                // clear.
+                StepSatisfiability::NotYetSatisfiable { .. } => deferred.push(*id),
+                answer @ StepSatisfiability::Unsatisfiable { .. } => {
+                    if records_a_determination(&answer) {
+                        discoveries.push((*id, answer));
+                    } else {
+                        // `Expired`: never overrides the kernel, which derives expiry itself
+                        // from the same `expiry_height`. The two can disagree only under
+                        // caller/store height skew, and there the kernel's scanned target
+                        // governs, so the member stands exactly as planned (for a transfer, the
+                        // rebuild that is expiry's remedy).
+                        kept.push(*id);
+                    }
                 }
-                // A DISCOVERY, so BROADEN, then record as ONE batch so the durable closure runs
-                // once over the whole discovery.
-                let mut batch = vec![(candidate, answer)];
-                broaden_after_discovery(store, state, &mut batch, config.reorg_settle_depth())?;
-                state.record_satisfiability(targets, &batch);
-                dirty = true;
             }
+        }
+        set_aside.extend(deferred.iter().copied());
+        if !discoveries.is_empty() {
+            // A DISCOVERY, so BROADEN, then record as ONE batch so the durable closure runs
+            // once over the whole discovery, and plan again with the marks in force.
+            broaden_after_discovery(store, state, &mut discoveries, config.reorg_settle_depth())?;
+            state.record_satisfiability(targets, &discoveries);
+            dirty = true;
+            continue;
+        }
+        if deferred.is_empty() {
+            // Every named candidate verified: the step stands exactly as planned.
+            break step;
+        }
+        // Some members deferred, none died. The survivors are exactly what the next planning
+        // pass would name again — the kernel is pure, no marks changed, and the deferrals are
+        // now set aside — so a surviving `Prove` batch is served directly rather than re-buying
+        // each member's oracle answer; a fully deferred step re-plans.
+        if !kept.is_empty()
+            && let AdvanceStep::Prove { transactions } = &step
+        {
+            break AdvanceStep::Prove {
+                transactions: transactions
+                    .iter()
+                    .filter(|t| kept.contains(&t.id()))
+                    .copied()
+                    .collect(),
+            };
         }
     };
 
@@ -1007,10 +1089,8 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
     if dirty {
         store.replace_migration(state)?;
     }
-    Ok(Advance {
-        step,
-        next: upcoming_after(state, step, targets, &set_aside),
-    })
+    let next = upcoming_after(state, &step, targets, &set_aside);
+    Ok(Advance { step, next })
 }
 
 /// The OUTLOOK behind [`Advance::next`]: the subsequent step's kind and earliest serviceable
@@ -1028,7 +1108,7 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
 /// holds; it is paid only when a step is actually surfaced, never per transaction.
 fn upcoming_after(
     state: &MigrationState,
-    step: AdvanceStep,
+    step: &AdvanceStep,
     targets: DuenessTargets,
     set_aside: &[MigrationTransferId],
 ) -> Option<(BlockHeight, StepKind)> {
@@ -1038,16 +1118,20 @@ fn upcoming_after(
         | AdvanceStep::Reevaluate
         | AdvanceStep::Rebuild { .. } => None,
         AdvanceStep::Waiting => state.upcoming_step(targets, set_aside),
-        AdvanceStep::Prove { id, .. } => {
+        AdvanceStep::Prove { transactions } => {
             let mut post = state.clone();
-            if let Some(t) = post.transactions.iter_mut().find(|t| t.id == id) {
+            for t in post
+                .transactions
+                .iter_mut()
+                .filter(|t| transactions.iter().any(|pt| pt.id() == t.id))
+            {
                 t.state = MigrationTxState::Proved;
             }
             post.upcoming_step(targets, set_aside)
         }
         AdvanceStep::Broadcast { id } => {
             let mut post = state.clone();
-            post.mark_broadcast(id);
+            post.mark_broadcast(*id);
             post.upcoming_step(targets, set_aside)
         }
     }
@@ -1123,6 +1207,7 @@ mod advance_tests {
     use crate::denomination::DenominationPlan;
     use crate::engine::{MigrationStatus, MigrationTransaction, MigrationTxKind};
     use crate::preparation::PreparationPlan;
+    use crate::state::ProveTarget;
 
     /// A store that answers satisfiability from a fixed table — anything absent is satisfiable at
     /// `as_of_height`, the healthy default — and counts what the drive loop asks of it.
@@ -1262,6 +1347,14 @@ mod advance_tests {
 
     fn transfer(crossing: usize) -> MigrationTxKind {
         MigrationTxKind::Transfer { crossing }
+    }
+
+    // One member of an expected `Prove` batch.
+    fn pt(id: u32, kind: MigrationTxKind) -> ProveTarget {
+        ProveTarget {
+            id: MigrationTransferId(id),
+            kind,
+        }
     }
 
     fn mined(height: u32) -> MigrationTxState {
@@ -1479,10 +1572,11 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert!(
-            matches!(step, AdvanceStep::Prove { id, .. } if id == MigrationTransferId(2)),
+            matches!(&step, AdvanceStep::Prove { transactions } if *transactions == [pt(2, transfer(1))]),
             "the live transfer's prove is surfaced, not the dead transfer's broadcast: {step:?}"
         );
         let marked = BlockHeight::from_u32(1600);
@@ -1543,7 +1637,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -1593,7 +1688,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -1631,7 +1727,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
         assert_eq!(
             step,
             AdvanceStep::Broadcast {
@@ -1665,7 +1762,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -1694,7 +1792,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
         assert_eq!(step, AdvanceStep::Waiting);
         assert_eq!(store.queries.get(), 0, "a waiting call asks nothing");
         assert_eq!(store.replaced.get(), 0);
@@ -1745,7 +1844,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -1808,7 +1908,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             state.transactions()[0].state(),
@@ -1866,7 +1967,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -1902,8 +2004,7 @@ mod advance_tests {
             &config(),
             &mut rng(),
         )
-        .expect("the store never fails")
-        .step();
+        .expect("the store never fails");
 
         assert_eq!(
             store.mined_queries.get(),
@@ -1946,7 +2047,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -2014,7 +2116,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -2143,7 +2246,8 @@ mod advance_tests {
                 &mut rng()
             )
             .expect("the store never fails")
-            .step(),
+            .step()
+            .clone(),
             AdvanceStep::Reevaluate,
             "the sibling's due broadcast waits behind the unanswered rejection",
         );
@@ -2180,7 +2284,8 @@ mod advance_tests {
                 &mut rng()
             )
             .expect("the store never fails")
-            .step(),
+            .step()
+            .clone(),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
@@ -2230,7 +2335,8 @@ mod advance_tests {
                 &mut rng()
             )
             .expect("the store never fails")
-            .step(),
+            .step()
+            .clone(),
             AdvanceStep::Replan,
         );
 
@@ -2290,7 +2396,8 @@ mod advance_tests {
                 &mut rng()
             )
             .expect("the store never fails")
-            .step(),
+            .step()
+            .clone(),
             AdvanceStep::Complete,
         );
         assert_eq!(store.queries.get(), 0);
@@ -2344,7 +2451,8 @@ mod advance_tests {
                 &mut rng()
             )
             .expect("the store never fails")
-            .step(),
+            .step()
+            .clone(),
             AdvanceStep::Reevaluate,
         );
         let marked = BlockHeight::from_u32(1600);
@@ -2398,7 +2506,8 @@ mod advance_tests {
                 &mut rng()
             )
             .expect("the store never fails")
-            .step(),
+            .step()
+            .clone(),
             AdvanceStep::Reevaluate,
             "one unanswerable rejection still holds the whole loop",
         );
@@ -2454,7 +2563,8 @@ mod advance_tests {
         assert_eq!(
             advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
                 .expect("the store never fails")
-                .step(),
+                .step()
+                .clone(),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(2)
             },
@@ -2483,7 +2593,8 @@ mod advance_tests {
                 &mut rng(),
             )
             .expect("the store never fails")
-            .step(),
+            .step()
+            .clone(),
             AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
@@ -2520,7 +2631,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert_eq!(
             step,
@@ -2610,7 +2722,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
         assert_eq!(
             step,
             AdvanceStep::Broadcast {
@@ -2635,7 +2748,8 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
         assert_eq!(
             step,
             AdvanceStep::Broadcast {
@@ -2703,10 +2817,11 @@ mod advance_tests {
             &mut rng(),
         )
         .expect("the store never fails")
-        .step();
+        .step()
+        .clone();
 
         assert!(
-            matches!(step, AdvanceStep::Prove { id, .. } if id == MigrationTransferId(1)),
+            matches!(&step, AdvanceStep::Prove { transactions } if *transactions == [pt(1, transfer(0))]),
             "the prove is still surfaced in the shifting call: {step:?}"
         );
         assert_eq!(
@@ -2732,7 +2847,7 @@ mod advance_tests {
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
         assert!(
-            matches!(advance.step(), AdvanceStep::Prove { id, .. } if id == MigrationTransferId(1)),
+            matches!(advance.step(), AdvanceStep::Prove { transactions } if *transactions == [pt(1, prep(0, 0))]),
             "the due preparation's prove is the step: {:?}",
             advance.step()
         );
@@ -2752,7 +2867,7 @@ mod advance_tests {
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
         assert!(
-            matches!(advance.step(), AdvanceStep::Prove { id, .. } if id == MigrationTransferId(1)),
+            matches!(advance.step(), AdvanceStep::Prove { transactions } if *transactions == [pt(1, transfer(0))]),
             "the settled-boundary transfer's prove is the step: {:?}",
             advance.step()
         );
@@ -2784,7 +2899,7 @@ mod advance_tests {
 
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
-        assert_eq!(advance.step(), AdvanceStep::Waiting);
+        assert_eq!(advance.step(), &AdvanceStep::Waiting);
         assert_eq!(
             advance.next(),
             Some((BlockHeight::from_u32(1_200), StepKind::Broadcast)),
@@ -2804,7 +2919,7 @@ mod advance_tests {
             .expect("the store never fails");
         assert_eq!(
             advance.step(),
-            AdvanceStep::Broadcast {
+            &AdvanceStep::Broadcast {
                 id: MigrationTransferId(1)
             },
             "the longest-due broadcast is served first"
@@ -2845,7 +2960,7 @@ mod advance_tests {
         let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
-        assert_eq!(advance.step(), AdvanceStep::Waiting);
+        assert_eq!(advance.step(), &AdvanceStep::Waiting);
         assert_eq!(
             advance.next(),
             None,
@@ -2863,7 +2978,7 @@ mod advance_tests {
         let mut store = TestStore::new(1_000, []);
         let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
             .expect("the store never fails");
-        assert_eq!(advance.step(), AdvanceStep::Waiting);
+        assert_eq!(advance.step(), &AdvanceStep::Waiting);
         assert_eq!(
             advance.next(),
             None,
@@ -2880,7 +2995,7 @@ mod advance_tests {
             .expect("the store never fails");
         assert_eq!(
             advance.step(),
-            AdvanceStep::Rebuild {
+            &AdvanceStep::Rebuild {
                 id: MigrationTransferId(1)
             }
         );
@@ -2888,6 +3003,53 @@ mod advance_tests {
             advance.next(),
             None,
             "the rebuild reschedules its transfer; the following call reports the fresh outlook"
+        );
+    }
+
+    /// A `Prove` batch member the wallet cannot yet vouch for is set aside without costing the
+    /// rest of the batch: the survivors are served directly — each member having paid exactly
+    /// one oracle query, with no re-planning re-buy — and the outlook assumes the surviving
+    /// batch proved, with the set-aside member contributing no wake-up (it is chain-gated).
+    #[test]
+    fn prove_batch_serves_survivors_when_a_member_defers() {
+        let mut state = state_with_crossings(
+            &[50_000_000, 50_000_000],
+            vec![
+                tx(0, prep(0, 0), mined(10)),
+                scheduled_transfer(1, 0, 720, 1_400, MigrationTxState::Signed),
+                scheduled_transfer(2, 1, 730, 1_500, MigrationTxState::Signed),
+            ],
+        );
+        let mut store = TestStore::new(
+            900,
+            [(
+                MigrationTransferId(1),
+                StepSatisfiability::NotYetSatisfiable {
+                    as_of_height: BlockHeight::from_u32(900),
+                },
+            )],
+        );
+        let targets = DuenessTargets::at(BlockHeight::from_u32(1_001));
+
+        let advance = advance_migration(&mut store, &mut state, targets, &config(), &mut rng())
+            .expect("the store never fails");
+        assert_eq!(
+            advance.step(),
+            &AdvanceStep::Prove {
+                transactions: vec![pt(2, transfer(1))],
+            },
+            "the deferred member is dropped; the survivor is served"
+        );
+        assert_eq!(
+            store.queries.get(),
+            2,
+            "each batch member paid exactly one oracle query"
+        );
+        assert_eq!(store.replaced.get(), 0, "a deferral records nothing");
+        assert_eq!(
+            advance.next(),
+            Some((BlockHeight::from_u32(1_500), StepKind::Broadcast)),
+            "the outlook assumes the survivor proved and skips the set-aside member"
         );
     }
 }

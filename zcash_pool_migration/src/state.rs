@@ -40,17 +40,36 @@ use crate::scheduling::{self, SyncWakeup, WakeupParams, WakeupScheduleError};
 /// [`MigrationState::mark_broadcast`] / [`MigrationState::mark_mined`]), then calls
 /// [`advance_migration`](crate::satisfiability::advance_migration) again, which documents the work each
 /// step names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AdvanceStep {
-    /// Prove this pre-signed transaction (install its deferred Orchard anchor and spend witnesses
-    /// and store the proof through the store's
-    /// `PoolMigrationWrite::store_proved_transaction`), WITHOUT broadcasting: its dependencies
-    /// are mined and, for a transfer, its drawn anchor boundary has settled (the boundary block
-    /// sits at least [`PROVABLE_ANCHOR_DEPTH`](crate::scheduling::PROVABLE_ANCHOR_DEPTH) blocks
-    /// below the scanned chain tip, so the checkpoint proved against exists in the wallet's
-    /// commitment tree and is reorg-stable). Broadcast is a separate later step; whether it
-    /// belongs in the same waking session depends on the transaction's `kind` (see that field,
-    /// and [`advance_migration`](crate::satisfiability::advance_migration)).
+    /// Prove EVERY one of these pre-signed transactions (install each one's deferred Orchard
+    /// anchor and spend witnesses and store the proof through the store's
+    /// `PoolMigrationWrite::store_proved_transaction`, one transaction at a time), WITHOUT
+    /// broadcasting: each has its dependencies mined and, for a transfer, its drawn anchor
+    /// boundary settled (the boundary block sits at least
+    /// [`PROVABLE_ANCHOR_DEPTH`](crate::scheduling::PROVABLE_ANCHOR_DEPTH) blocks below the
+    /// scanned chain tip, so the checkpoint proved against exists in the wallet's commitment
+    /// tree and is reorg-stable).
+    ///
+    /// The step carries the WHOLE provable set rather than one candidate, because proving —
+    /// unlike broadcasting — has no privacy implications to space out: it emits nothing a
+    /// network observer can see, so there is no reason to leave provable work on the table when
+    /// a synced session is already open, and a wallet that proves everything offered here needs
+    /// no further sync wake-up for transfers whose boundaries have already settled. Broadcast
+    /// remains a separate later step, surfaced one transaction at a time on the privacy
+    /// schedule.
+    ///
+    /// The set orders earliest-ready first (a transfer by its anchor boundary, a due
+    /// preparation by its scheduled height, ties by id) and can MIX the two kinds: a due
+    /// preparation — provable only once its broadcast schedule is due, and ready to broadcast
+    /// the moment it is proved — may sit alongside transfers whose settled boundaries make them
+    /// provable well before their broadcast windows. Each entry is a [`ProveTarget`], carrying
+    /// the transaction's [`kind`](ProveTarget::kind) beside its id so the consumer can act on
+    /// the distinction — which engine call proves it, and whether its broadcast follows
+    /// immediately — without a lookup; the outlook returned alongside this step
+    /// ([`Advance::next`](crate::satisfiability::Advance::next)) says what the session holds
+    /// once the proofs land — a due preparation's own broadcast, or nothing until a later
+    /// window.
     ///
     /// Proving is not time-critical: the wallet durably retains the boundary checkpoints its
     /// committed transfers anchor to (they are exempt from ordinary checkpoint pruning; see
@@ -59,16 +78,8 @@ pub enum AdvanceStep {
     /// Proving EARLY — at a sync wake-up well before the broadcast height — is what keeps the
     /// sync-heavy work out of the broadcast session.
     Prove {
-        /// The transaction to prove.
-        id: MigrationTransferId,
-        /// What the transaction is, surfaced because the two kinds want different session
-        /// handling. A PREPARATION becomes provable only once its broadcast schedule is due, so
-        /// when it is surfaced here it is by construction ready to broadcast the moment it is
-        /// proved: prove it against a fresh checkpoint at the tip and broadcast it at the same
-        /// wake-up, like an ordinary transaction. A TRANSFER is surfaced as soon as its drawn
-        /// anchor boundary settles, typically well before its scheduled broadcast height: prove it
-        /// now and leave the broadcast to its own (later) session.
-        kind: MigrationTxKind,
+        /// The transactions to prove, earliest-ready first; never empty, and each id distinct.
+        transactions: Vec<ProveTarget>,
     },
     /// Broadcast this already-proven transaction: it is `Proved`, its dependencies are mined, and its
     /// scheduled broadcast height has arrived.
@@ -125,6 +136,24 @@ pub enum AdvanceStep {
     /// reached a terminal status (complete, failed/cancelled, or superseded by a re-plan — see
     /// [`MigrationState::is_terminal`]), so a driver can stop polling it.
     Complete,
+}
+
+/// One transaction of a [`Prove`](AdvanceStep::Prove) batch: the transaction to prove, with the
+/// [`kind`](Self::kind) that decides how the consumer acts on it. The kind rides along so no
+/// lookup stands between the step and that decision: it selects the engine call
+/// ([`prove_preparation`](crate::engine::prove_preparation) against a fresh checkpoint at the
+/// tip, or [`prove_transfer`](crate::engine::prove_transfer) against the drawn boundary), and it
+/// carries the session handling — a PREPARATION is provable only once its broadcast schedule is
+/// due, so it is by construction ready to broadcast the moment it is proved, while a TRANSFER's
+/// broadcast waits for its own later session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, CopyGetters)]
+pub struct ProveTarget {
+    /// The transaction to prove.
+    #[getset(get_copy = "pub")]
+    pub(crate) id: MigrationTransferId,
+    /// What the transaction is: the preparation/transfer distinction described on the type.
+    #[getset(get_copy = "pub")]
+    pub(crate) kind: MigrationTxKind,
 }
 
 /// The kind of work an [`AdvanceStep`] names, shorn of the step's payload: the discriminant a
@@ -515,29 +544,29 @@ impl MigrationState {
         }
     }
 
-    /// The next pre-signed transaction ready to PROVE (move `Signed -> Proved`): its anchor is
-    /// resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
+    /// EVERY pre-signed transaction ready to PROVE (move `Signed -> Proved`): each one's anchor
+    /// is resolvable now. Proving is decoupled from broadcasting so a transfer can be proved at a
     /// sync wake-up well before its scheduled broadcast height, keeping the sync work and the
-    /// broadcast in separate waking sessions. The whole transaction is returned, not just its id,
-    /// so [`Self::next_step`] can also surface its kind.
+    /// broadcast in separate waking sessions — and the whole ready set is surfaced as ONE
+    /// [`AdvanceStep::Prove`], because proving emits nothing a network observer can see, so
+    /// nothing about it wants the one-at-a-time spacing the broadcast queue exists to provide.
     ///
-    /// Among the ready candidates the one that became ready EARLIEST is returned: a transfer's
-    /// anchor boundary, a preparation's scheduled height (it carries no boundary), ties broken by
-    /// id. Everything ready is proved before the loop reports `Waiting`, so this only orders the
-    /// work within a session — longest-waiting first, which is also oldest-anchor first, retiring
-    /// the checkpoints the wallet has been retaining longest.
+    /// Ordered earliest-ready first: a transfer by its anchor boundary, a preparation by its
+    /// scheduled height (it carries no boundary), ties broken by id — oldest-anchor first, so a
+    /// consumer proving in order retires the checkpoints the wallet has been retaining longest.
     ///
     /// Transactions in `dead` — the ids judged unable to ever mine, at the SCANNED target — and in
     /// `set_aside` — the drive loop's call-local exclusions — are never offered;
     /// [`Self::next_step`] supplies both. Readiness itself splits the pair as
     /// [`Self::prove_ready`] describes.
-    fn next_provable_tx(
+    fn provable_targets(
         &self,
         targets: DuenessTargets,
         dead: &BTreeSet<MigrationTransferId>,
         set_aside: &[MigrationTransferId],
-    ) -> Option<&MigrationTransaction> {
-        self.transactions
+    ) -> Vec<ProveTarget> {
+        let mut ready: Vec<&MigrationTransaction> = self
+            .transactions
             .iter()
             .filter(|t| {
                 matches!(t.state, MigrationTxState::Signed)
@@ -545,9 +574,17 @@ impl MigrationState {
                     && !set_aside.contains(&t.id)
                     && self.prove_ready(t, targets)
             })
-            // The height each became provable at: a transfer's drawn boundary, a preparation's
-            // schedule.
-            .min_by_key(|t| (t.anchor_boundary.unwrap_or(t.scheduled_height), t.id))
+            .collect();
+        // The height each became provable at: a transfer's drawn boundary, a preparation's
+        // schedule.
+        ready.sort_by_key(|t| (t.anchor_boundary.unwrap_or(t.scheduled_height), t.id));
+        ready
+            .into_iter()
+            .map(|t| ProveTarget {
+                id: t.id,
+                kind: t.kind,
+            })
+            .collect()
     }
 
     /// The id of the next transaction ready to BROADCAST: already `Proved`, its dependencies mined,
@@ -1202,11 +1239,15 @@ impl MigrationState {
     /// the committed threshold is exceeded, then PROVE, then REBUILD, then REPLAN once dead
     /// value is all that remains.
     ///
-    /// Within each queue the longest-READY candidate is offered first, ties broken by id — never
-    /// the first by position in [`transactions`](MigrationState::transactions). Readiness is what
-    /// each queue itself waits on: the scheduled height for a broadcast or a rebuild, the anchor
-    /// boundary (a preparation: its scheduled height) for a proof. The whole queue is drained
-    /// before the next one is consulted, so this orders work within a session, not across them.
+    /// Within the broadcast and rebuild queues the longest-READY candidate is offered first,
+    /// ties broken by id — never the first by position in
+    /// [`transactions`](MigrationState::transactions) — and the whole queue is drained, one
+    /// candidate per call, before the next queue is consulted. Readiness is what each queue
+    /// itself waits on: the scheduled height for a broadcast or a rebuild, the anchor boundary
+    /// (a preparation: its scheduled height) for a proof. The PROVE queue is instead served
+    /// WHOLE: one [`Prove`](AdvanceStep::Prove) step carries every ready candidate,
+    /// earliest-ready first, because proving emits nothing observable and so has no reason to be
+    /// doled out call by call. Either way this orders work within a session, not across them.
     ///
     /// [`Reevaluate`](AdvanceStep::Reevaluate) is NOT among the steps decided here: adjudicating
     /// a broadcast-failure report needs the oracle, so the drive API owns that slot. What this
@@ -1308,13 +1349,13 @@ impl MigrationState {
             return AdvanceStep::Replan;
         }
         // A wallet should not broadcast and sync in the same waking session unless necessary.
-        // At this point we know we're not broadcasting, so we can sync and prove. The kind rides
-        // along because it decides the session handling: a preparation is broadcast as soon as it
-        // is proved, a transfer's broadcast waits for its own (later) session.
-        if let Some(t) = self.next_provable_tx(targets, &dead, set_aside) {
+        // At this point we know we're not broadcasting, so we can sync and prove — and prove
+        // EVERYTHING that is ready: proving emits nothing observable, so the whole provable set
+        // is served as one step rather than being doled out call by call.
+        let provable = self.provable_targets(targets, &dead, set_aside);
+        if !provable.is_empty() {
             return AdvanceStep::Prove {
-                id: t.id,
-                kind: t.kind,
+                transactions: provable,
             };
         }
         // If we have not been able to make progress on still-valid transactions, then surface any
@@ -1355,9 +1396,9 @@ impl MigrationState {
         AdvanceStep::Waiting
     }
 
-    /// The next step that will involve transaction `t`, with the earliest target height at which
-    /// it could be served: the per-transaction FLOOR behind [`Self::upcoming_step`]. `dead` is
-    /// the caller's [`Self::dead_set`].
+    /// The KIND of the next step that will involve transaction `t`, with the earliest target
+    /// height at which it could be served: the per-transaction FLOOR behind
+    /// [`Self::upcoming_step`]. `dead` is the caller's [`Self::dead_set`].
     ///
     /// `None` means no future step involves the transaction: it is mined or in flight (mining is
     /// chain-derived, not a step), it can never mine — its own mark, or a dead dependency — so
@@ -1385,7 +1426,7 @@ impl MigrationState {
         t: &MigrationTransaction,
         targets: DuenessTargets,
         dead: &BTreeSet<MigrationTransferId>,
-    ) -> Option<(AdvanceStep, BlockHeight)> {
+    ) -> Option<(StepKind, BlockHeight)> {
         // Mined is final: nothing is ever asked of the transaction again.
         if matches!(t.state, MigrationTxState::Mined { .. }) {
             return None;
@@ -1402,32 +1443,25 @@ impl MigrationState {
         // expiry, as in the status view: being actively withheld on another observer's testimony
         // is the more specific thing to report.
         if let Some(reported) = t.broadcast_failure_at {
-            return Some((AdvanceStep::Reevaluate, reported + 1));
+            return Some((StepKind::Reevaluate, reported + 1));
         }
         // A lapse the wallet's own scan supports: a transfer's remedy is its rebuild; an expired
         // preparation has no single-transaction step (see `Blocker::Expired`).
         if Self::is_expired(t, targets.scanned()) {
             return match t.kind {
-                MigrationTxKind::Transfer { .. } => {
-                    Some((AdvanceStep::Rebuild { id: t.id }, t.expiry_height + 1))
-                }
+                MigrationTxKind::Transfer { .. } => Some((StepKind::Rebuild, t.expiry_height + 1)),
                 MigrationTxKind::Preparation { .. } => None,
             };
         }
         match t.state {
             MigrationTxState::Signed | MigrationTxState::AwaitingSignature => Some((
-                AdvanceStep::Prove {
-                    id: t.id,
-                    kind: t.kind,
-                },
+                StepKind::Prove,
                 match t.anchor_boundary {
                     Some(boundary) => boundary + (scheduling::PROVABLE_ANCHOR_DEPTH + 1),
                     None => t.scheduled_height,
                 },
             )),
-            MigrationTxState::Proved => {
-                Some((AdvanceStep::Broadcast { id: t.id }, t.scheduled_height))
-            }
+            MigrationTxState::Proved => Some((StepKind::Broadcast, t.scheduled_height)),
             MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. } => None,
         }
     }
@@ -1467,10 +1501,11 @@ impl MigrationState {
             step @ (AdvanceStep::Prove { .. }
             | AdvanceStep::Broadcast { .. }
             | AdvanceStep::Rebuild { .. }) => {
-                let id = match step {
-                    AdvanceStep::Prove { id, .. }
-                    | AdvanceStep::Broadcast { id }
-                    | AdvanceStep::Rebuild { id } => id,
+                let id = match &step {
+                    // The set orders earliest-ready first, and readiness order is floor order,
+                    // so the first member carries the step's own floor.
+                    AdvanceStep::Prove { transactions } => transactions.first()?.id,
+                    AdvanceStep::Broadcast { id } | AdvanceStep::Rebuild { id } => *id,
                     _ => unreachable!("matched an actionable step"),
                 };
                 let dead = self.dead_set(targets);
@@ -1478,7 +1513,7 @@ impl MigrationState {
                     .iter()
                     .find(|t| t.id == id)
                     .and_then(|t| self.step_floor(t, targets, &dead))
-                    .map(|(step, height)| (height, step.kind()))
+                    .map(|(kind, height)| (height, kind))
             }
             AdvanceStep::Waiting => {
                 let dead = self.dead_set(targets);
@@ -1495,16 +1530,16 @@ impl MigrationState {
                     // The earliest floor; at equal heights, the queue order the kernel serves
                     // (broadcast, then prove, then rebuild), then id, so the outlook is
                     // deterministic and agrees with what the wake-up's own call will name.
-                    .min_by_key(|(id, (step, height))| {
-                        let rank = match step {
-                            AdvanceStep::Broadcast { .. } => 0u8,
-                            AdvanceStep::Prove { .. } => 1,
-                            AdvanceStep::Rebuild { .. } => 2,
+                    .min_by_key(|(id, (kind, height))| {
+                        let rank = match kind {
+                            StepKind::Broadcast => 0u8,
+                            StepKind::Prove => 1,
+                            StepKind::Rebuild => 2,
                             _ => 3,
                         };
                         (*height, rank, *id)
                     })
-                    .map(|(_, (step, height))| (height, step.kind()))
+                    .map(|(_, (kind, height))| (height, kind))
             }
         }
     }
@@ -1723,6 +1758,14 @@ mod tests {
 
     fn transfer(crossing: usize) -> MigrationTxKind {
         MigrationTxKind::Transfer { crossing }
+    }
+
+    // One member of an expected `Prove` batch.
+    fn pt(id: u32, kind: MigrationTxKind) -> ProveTarget {
+        ProveTarget {
+            id: MigrationTransferId(id),
+            kind,
+        }
     }
 
     // A state wrapping the given transactions; the plan pieces are empty (unused by state logic).
@@ -2032,17 +2075,17 @@ mod tests {
             Some(MigrationTransferId(0))
         );
 
-        // Prove: provable longest, so by ANCHOR BOUNDARY (transfer 0) — the opposite order.
+        // Prove: the whole ready set at once, ordered by ANCHOR BOUNDARY (transfer 0 first) —
+        // the opposite order.
         s.transactions[0].state = MigrationTxState::Signed;
         s.transactions[1].state = MigrationTxState::Signed;
         assert_eq!(
-            s.next_provable_tx(due, &BTreeSet::new(), &[]).map(|t| t.id),
-            Some(MigrationTransferId(0))
+            s.provable_targets(due, &BTreeSet::new(), &[]),
+            vec![pt(0, transfer(0)), pt(1, transfer(1))]
         );
         assert_eq!(
-            s.next_provable_tx(due, &BTreeSet::new(), &[MigrationTransferId(0)])
-                .map(|t| t.id),
-            Some(MigrationTransferId(1))
+            s.provable_targets(due, &BTreeSet::new(), &[MigrationTransferId(0)]),
+            vec![pt(1, transfer(1))]
         );
 
         // Rebuild: expired longest, so by schedule again. Give both an expiry the target passed.
@@ -2176,8 +2219,7 @@ mod tests {
         assert_eq!(
             s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
             AdvanceStep::Prove {
-                id: MigrationTransferId(0),
-                kind: prep(0, 0),
+                transactions: vec![pt(0, prep(0, 0))],
             }
         );
         s.transactions[0].state = MigrationTxState::Proved;
@@ -2202,8 +2244,7 @@ mod tests {
         assert_eq!(
             s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1),
-                kind: prep(1, 0),
+                transactions: vec![pt(1, prep(1, 0))],
             }
         );
         s.transactions[1].state = MigrationTxState::Proved;
@@ -2219,8 +2260,7 @@ mod tests {
         assert_eq!(
             s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
             AdvanceStep::Prove {
-                id: MigrationTransferId(2),
-                kind: transfer(0),
+                transactions: vec![pt(2, transfer(0))],
             }
         );
         s.transactions[2].state = MigrationTxState::Proved;
@@ -2254,8 +2294,7 @@ mod tests {
         assert_eq!(
             s.next_step(DuenessTargets::at(BlockHeight::from_u32(50)), &[]),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1),
-                kind: transfer(0),
+                transactions: vec![pt(1, transfer(0))],
             }
         );
     }
@@ -2561,8 +2600,7 @@ mod tests {
         assert_eq!(
             s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1),
-                kind: transfer(0),
+                transactions: vec![pt(1, transfer(0))],
             }
         );
 
@@ -2645,13 +2683,12 @@ mod tests {
         // The same holds for a still-`Signed` (unproved) expired transfer: it is not provable either.
         s.transactions[1].state = MigrationTxState::Signed;
         assert_eq!(
-            s.next_provable_tx(
+            s.provable_targets(
                 DuenessTargets::at(BlockHeight::from_u32(51)),
                 &BTreeSet::new(),
                 &[],
-            )
-            .map(|t| t.id),
-            None
+            ),
+            Vec::new()
         );
         assert_eq!(
             s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
@@ -2704,8 +2741,7 @@ mod tests {
         assert_eq!(
             s.next_step(DuenessTargets::at(BlockHeight::from_u32(51)), &[]),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1),
-                kind: transfer(0),
+                transactions: vec![pt(1, transfer(0))],
             }
         );
         // Once the valid transfer is proved and broadcast, the expired one is surfaced for rebuild.
@@ -3163,15 +3199,21 @@ mod tests {
             tx(0, prep(0, 0), MigrationTxState::Signed),
             tx(1, prep(0, 1), MigrationTxState::Signed),
         ]);
-        let AdvanceStep::Prove { id: first_id, .. } =
-            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[])
-        else {
-            panic!("expected Prove");
-        };
-        match s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[first_id]) {
-            AdvanceStep::Prove { id, .. } => assert_ne!(id, first_id),
-            other => panic!("expected the sibling, got {other:?}"),
-        }
+        assert_eq!(
+            s.next_step(DuenessTargets::at(BlockHeight::from_u32(100)), &[]),
+            AdvanceStep::Prove {
+                transactions: vec![pt(0, prep(0, 0)), pt(1, prep(0, 1))],
+            }
+        );
+        assert_eq!(
+            s.next_step(
+                DuenessTargets::at(BlockHeight::from_u32(100)),
+                &[MigrationTransferId(0)]
+            ),
+            AdvanceStep::Prove {
+                transactions: vec![pt(1, prep(0, 1))],
+            }
+        );
         assert_eq!(
             s.next_step(
                 DuenessTargets::at(BlockHeight::from_u32(100)),
@@ -4203,8 +4245,7 @@ mod tests {
         assert_eq!(
             live.next_step(targets, &[]),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1),
-                kind: transfer(0),
+                transactions: vec![pt(1, transfer(0))],
             }
         );
     }
@@ -4240,8 +4281,7 @@ mod tests {
                 &[],
             ),
             AdvanceStep::Prove {
-                id: MigrationTransferId(1),
-                kind: transfer(0),
+                transactions: vec![pt(1, transfer(0))],
             }
         );
     }

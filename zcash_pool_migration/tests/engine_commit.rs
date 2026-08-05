@@ -183,8 +183,15 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
         .expect("the store answers")
         .step()
+        .clone()
     {
-        AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { transactions } => {
+            assert!(
+                transactions.iter().all(|t| layer0_ids.contains(&t.id())),
+                "layer 0 proves first"
+            )
+        }
+        AdvanceStep::Broadcast { id } => {
             assert!(layer0_ids.contains(&id), "layer 0 broadcasts first")
         }
         other => panic!("expected a broadcast step, got {other:?}"),
@@ -202,8 +209,15 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
         .expect("the store answers")
         .step()
+        .clone()
     {
-        AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
+        AdvanceStep::Prove { transactions } => {
+            assert!(
+                transactions.iter().all(|t| layer1_ids.contains(&t.id())),
+                "layer 1 proves once layer 0 mines"
+            )
+        }
+        AdvanceStep::Broadcast { id } => {
             assert!(
                 layer1_ids.contains(&id),
                 "layer 1 broadcasts once layer 0 mines"
@@ -218,8 +232,14 @@ fn commits_a_multi_layer_migration_in_one_pass() {
     match advance_migration(&mut backend, &mut state, targets, &config, &mut rng)
         .expect("the store answers")
         .step()
+        .clone()
     {
-        AdvanceStep::Prove { id, .. } | AdvanceStep::Broadcast { id } => {
+        step @ (AdvanceStep::Prove { .. } | AdvanceStep::Broadcast { .. }) => {
+            let id = match &step {
+                AdvanceStep::Prove { transactions } => transactions[0].id(),
+                AdvanceStep::Broadcast { id } => *id,
+                _ => unreachable!(),
+            };
             let tx = state
                 .transactions()
                 .iter()
