@@ -126,6 +126,45 @@ pub enum AdvanceStep {
     Complete,
 }
 
+/// The kind of work an [`AdvanceStep`] names, shorn of the step's payload: the discriminant a
+/// consumer schedules wake-ups and renders progress by, obtained through [`AdvanceStep::kind`].
+/// The drive API's outlook ([`Advance`](crate::satisfiability::Advance)) pairs one of these with
+/// the earliest target height at which a step of that kind becomes serviceable — the kind alone,
+/// because the outlook is advisory: WHICH transaction the step names is decided by the
+/// [`advance_migration`](crate::satisfiability::advance_migration) call that actually serves it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StepKind {
+    /// An [`AdvanceStep::Prove`].
+    Prove,
+    /// An [`AdvanceStep::Broadcast`].
+    Broadcast,
+    /// An [`AdvanceStep::Rebuild`].
+    Rebuild,
+    /// An [`AdvanceStep::Replan`].
+    Replan,
+    /// An [`AdvanceStep::Reevaluate`].
+    Reevaluate,
+    /// An [`AdvanceStep::Waiting`].
+    Waiting,
+    /// An [`AdvanceStep::Complete`].
+    Complete,
+}
+
+impl AdvanceStep {
+    /// This step's [`StepKind`]: the variant without its payload.
+    pub const fn kind(&self) -> StepKind {
+        match self {
+            AdvanceStep::Prove { .. } => StepKind::Prove,
+            AdvanceStep::Broadcast { .. } => StepKind::Broadcast,
+            AdvanceStep::Rebuild { .. } => StepKind::Rebuild,
+            AdvanceStep::Replan => StepKind::Replan,
+            AdvanceStep::Reevaluate => StepKind::Reevaluate,
+            AdvanceStep::Waiting => StepKind::Waiting,
+            AdvanceStep::Complete => StepKind::Complete,
+        }
+    }
+}
+
 /// The action a wallet takes next on a ready migration transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NextAction {
@@ -1305,6 +1344,158 @@ impl MigrationState {
             return AdvanceStep::Complete;
         }
         AdvanceStep::Waiting
+    }
+
+    /// The next step that will involve transaction `t`, with the earliest target height at which
+    /// it could be served: the per-transaction FLOOR behind [`Self::upcoming_step`]. `dead` is
+    /// the caller's [`Self::dead_set`].
+    ///
+    /// `None` means no future step involves the transaction: it is mined or in flight (mining is
+    /// chain-derived, not a step), it can never mine — its own mark, or a dead dependency — so
+    /// its value is [`Replan`](AdvanceStep::Replan) territory (a step that names no transaction),
+    /// or it is an expired PREPARATION, whose remediation is a new signing ceremony over its
+    /// dependent subtree rather than any single step.
+    ///
+    /// The height is a floor, not an appointment: each step's serviceability guard is
+    /// upward-closed in the target height, so the least target satisfying it is well-defined —
+    /// but chain-driven guards (dependencies mining, the doomed-window withhold resolving) are
+    /// the caller's to judge. Per step, the floor is the least target at which the guard holds: a
+    /// transfer's proof once its drawn boundary sits strictly below the scanned tip
+    /// (`boundary + 2`), a preparation's proof and any broadcast at the scheduled height, a
+    /// rebuild at the lapse's first observability (`expiry_height + 1`), and a reported
+    /// transaction's reevaluation at the first scanned target resting at its reported tip
+    /// (`reported + 1`). Dispositions are judged in [`Self::transaction_statuses`]' blocker
+    /// precedence (unsatisfiable, then a standing report, then expiry, then the lifecycle), so
+    /// the floor, the status view, and the kernel's queues tell one story. An
+    /// `AwaitingSignature` transaction's next STEP is its proof — signature application is the
+    /// consumer's own flow, not an advance step — matching [`Self::sync_wakeup_schedule`].
+    fn step_floor(
+        &self,
+        t: &MigrationTransaction,
+        targets: DuenessTargets,
+        dead: &BTreeSet<MigrationTransferId>,
+    ) -> Option<(AdvanceStep, BlockHeight)> {
+        // Mined is final: nothing is ever asked of the transaction again.
+        if matches!(t.state, MigrationTxState::Mined { .. }) {
+            return None;
+        }
+        // The unsatisfiable determination, exactly as `transaction_statuses` renders
+        // `Blocker::Unsatisfiable`. Expiry ALONE deliberately does not route here, though it
+        // seeds the dead set: an expired but otherwise-live transfer's next step is its rebuild,
+        // below.
+        if t.unsatisfiable.is_some() || t.depends_on.iter().any(|d| dead.contains(d)) {
+            return None;
+        }
+        // A standing report withholds the transaction until the drive API can adjudicate it,
+        // which needs the wallet's answers resting at or above the reported tip. Ahead of
+        // expiry, as in the status view: being actively withheld on another observer's testimony
+        // is the more specific thing to report.
+        if let Some(reported) = t.broadcast_failure_at {
+            return Some((AdvanceStep::Reevaluate, reported + 1));
+        }
+        // A lapse the wallet's own scan supports: a transfer's remedy is its rebuild; an expired
+        // preparation has no single-transaction step (see `Blocker::Expired`).
+        if Self::is_expired(t, targets.scanned()) {
+            return match t.kind {
+                MigrationTxKind::Transfer { .. } => {
+                    Some((AdvanceStep::Rebuild { id: t.id }, t.expiry_height + 1))
+                }
+                MigrationTxKind::Preparation { .. } => None,
+            };
+        }
+        match t.state {
+            MigrationTxState::Signed | MigrationTxState::AwaitingSignature => Some((
+                AdvanceStep::Prove {
+                    id: t.id,
+                    kind: t.kind,
+                },
+                match t.anchor_boundary {
+                    Some(boundary) => boundary + 2,
+                    None => t.scheduled_height,
+                },
+            )),
+            MigrationTxState::Proved => {
+                Some((AdvanceStep::Broadcast { id: t.id }, t.scheduled_height))
+            }
+            MigrationTxState::Broadcast { .. } | MigrationTxState::Mined { .. } => None,
+        }
+    }
+
+    /// The step that will next become serviceable, as the kind of work it is and the earliest
+    /// target height at which the kernel could name it: the OUTLOOK the drive API returns
+    /// alongside each step ([`Advance`](crate::satisfiability::Advance) documents the consumer
+    /// contract). `set_aside` carries the drive loop's call-local deferrals, exactly as for
+    /// [`Self::next_step`]: a candidate answered "not yet satisfiable" is chain-gated — retry
+    /// after further sync — so it must not resurface as a schedulable outlook either.
+    ///
+    /// When the kernel already has actionable work at these targets, the outlook is that step's
+    /// kind at its own floor ([`Self::step_floor`]; the migration-level
+    /// [`Replan`](AdvanceStep::Replan), which no height gates, is served at the current target).
+    /// When the kernel reports [`Waiting`](AdvanceStep::Waiting), the outlook looks PAST the
+    /// current targets: the earliest per-transaction floor among the transactions whose
+    /// serviceability is HEIGHT-gated — live, dependencies mined, and not withheld in the doomed
+    /// window — with ties broken by the queue order the kernel would serve them in (broadcast,
+    /// prove, rebuild) and then by id. A transaction gated on chain events (dependencies still
+    /// mining, a doomed-window withhold the scan must resolve) contributes nothing: no height
+    /// makes it serviceable, and the consumer's ordinary sync-and-drive loop is what discovers
+    /// it. `None` therefore means nothing is height-schedulable: what follows is chain-driven or
+    /// user-driven, or the migration is terminal.
+    pub(crate) fn upcoming_step(
+        &self,
+        targets: DuenessTargets,
+        set_aside: &[MigrationTransferId],
+    ) -> Option<(BlockHeight, StepKind)> {
+        match self.next_step(targets, set_aside) {
+            AdvanceStep::Complete => None,
+            // The kernel never returns `Reevaluate` (the drive API owns that slot), but it is a
+            // step like any other here, and matching it explicitly keeps that fact from resting
+            // on the absence of an arm.
+            AdvanceStep::Reevaluate => None,
+            // No height gates a replan: it is serviceable the moment it is decided.
+            AdvanceStep::Replan => Some((targets.effective(), StepKind::Replan)),
+            step @ (AdvanceStep::Prove { .. }
+            | AdvanceStep::Broadcast { .. }
+            | AdvanceStep::Rebuild { .. }) => {
+                let id = match step {
+                    AdvanceStep::Prove { id, .. }
+                    | AdvanceStep::Broadcast { id }
+                    | AdvanceStep::Rebuild { id } => id,
+                    _ => unreachable!("matched an actionable step"),
+                };
+                let dead = self.dead_set(targets);
+                self.transactions
+                    .iter()
+                    .find(|t| t.id == id)
+                    .and_then(|t| self.step_floor(t, targets, &dead))
+                    .map(|(step, height)| (height, step.kind()))
+            }
+            AdvanceStep::Waiting => {
+                let dead = self.dead_set(targets);
+                self.transactions
+                    .iter()
+                    .filter(|t| !set_aside.contains(&t.id))
+                    // Chain-gated, not height-gated: no wake-up height serves a transaction
+                    // whose dependencies are still mining, and a doomed-window withhold
+                    // (`scanned <= expiry < effective`) resolves by scan — into either a
+                    // rebuild or a resumed broadcast — not by any target being reached.
+                    .filter(|t| self.deps_mined(&t.depends_on))
+                    .filter(|t| !Self::is_expired(t, targets.effective()))
+                    .filter_map(|t| self.step_floor(t, targets, &dead).map(|f| (t.id, f)))
+                    // The earliest floor; at equal heights, the queue order the kernel serves
+                    // (broadcast, then prove, then rebuild), then id, so the outlook is
+                    // deterministic and agrees with what the wake-up's own call will name.
+                    .min_by_key(|(id, (step, height))| {
+                        let rank = match step {
+                            AdvanceStep::Broadcast { .. } => 0u8,
+                            AdvanceStep::Prove { .. } => 1,
+                            AdvanceStep::Rebuild { .. } => 2,
+                            _ => 3,
+                        };
+                        (*height, rank, *id)
+                    })
+                    .map(|(_, (step, height))| (height, step.kind()))
+            }
+        }
     }
 
     /// Builds the per-transaction status view at the caller's [`DuenessTargets`], so a wallet can

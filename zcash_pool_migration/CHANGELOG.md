@@ -26,8 +26,19 @@ and this library adheres to Rust's notion of
 - `scheduling::redraw_anchor_boundary`: the recency-weighted anchor draw for a
   transfer whose broadcast schedule has moved, floored at the boundary being
   replaced.
+- `satisfiability::Advance`: what one `satisfiability::advance_migration` call
+  returns — the verified `state::AdvanceStep` to perform now, plus the outlook:
+  the subsequent step's kind and the earliest target height at which it becomes
+  serviceable, assuming the returned step is executed.
+- `state::StepKind` and `state::AdvanceStep::kind`: an `AdvanceStep`'s variant
+  without its payload.
 
 ### Changed
+- `satisfiability::advance_migration` now returns `satisfiability::Advance`
+  rather than a bare `state::AdvanceStep`: read the step to perform via
+  `Advance::step`, and the outlook — when the migration next has work, and of
+  what kind — via `Advance::next`, which replaces deriving the next wake-up
+  from each transaction's scheduled height by hand.
 - `engine::MigrationStatus` has added variant `Cancelled`: a terminal status
   recording that the user abandoned the migration, distinct from `Failed` so
   that a deliberate abandonment is distinguishable from a migration that broke. 

@@ -366,6 +366,7 @@ impl Run {
         let mut rng = ChaCha8Rng::seed_from_u64(0x318);
         satisfiability::advance_migration(&mut store, state, targets, &ADVANCE, &mut rng)
             .expect("the store and its satisfiability oracle answer")
+            .step()
     }
 
     /// Mine one empty block and scan it, so the chain reaches the migration's next scheduled
