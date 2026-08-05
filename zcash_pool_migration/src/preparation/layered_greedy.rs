@@ -519,7 +519,7 @@ mod tests {
 
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::preparation::{PREP_TX_ACTIONS, Portfolio, plan_preparation};
+    use crate::preparation::{PREP_TX_ACTIONS, PlanQuality, Portfolio, plan_preparation};
     use crate::testing::{Fundability, PREPARATION_VECTORS, preparation_fee_per_tx};
 
     /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
@@ -1190,10 +1190,10 @@ mod tests {
         );
     }
 
-    /// Naming the rule changes nothing: `LayeredGreedy` IS `plan_preparation`, so the refactor is
-    /// behaviour-preserving on every shape the other tests in this module cover.
+    /// Whatever this rule can plan, the public entry point plans at least as well: it either
+    /// returns this plan or a better one, never a worse one and never nothing.
     #[test]
-    fn layered_greedy_is_plan_preparation() {
+    fn the_entry_point_is_never_worse_than_this_rule() {
         let fee = fee_per_tx();
         let cases: &[(&[u64], &[u64])] = &[
             (&[1_000_000], &[100_000]),
@@ -1206,9 +1206,13 @@ mod tests {
         ];
         for (available, funding) in cases {
             let (available, funding) = (zats(available), zats(funding));
-            assert_eq!(
-                LayeredGreedy.plan(&available, &funding, zat(fee)),
-                plan_preparation(&available, &funding, zat(fee)),
+            let Ok(mine) = LayeredGreedy.plan(&available, &funding, zat(fee)) else {
+                continue;
+            };
+            let best = plan_preparation(&available, &funding, zat(fee))
+                .expect("the entry point plans whatever this rule plans");
+            assert!(
+                PlanQuality::of(&best) <= PlanQuality::of(&mine),
                 "{available:?} -> {funding:?}",
             );
         }
@@ -1231,7 +1235,8 @@ mod tests {
             let (available, funding, fee) = (zats(&available), zats(&funding), zat(fee_per_tx()));
             prop_assert_eq!(
                 (LayeredGreedy, ()).best_plan(&available, &funding, fee),
-                plan_preparation(&available, &funding, fee)
+                LayeredGreedy
+                    .plan(&available, &funding, fee)
                     .ok()
                     .map(|plan| ("layered-greedy", plan))
             );

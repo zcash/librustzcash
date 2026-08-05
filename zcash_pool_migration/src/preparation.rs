@@ -47,8 +47,10 @@ use zcash_protocol::value::Zatoshis;
 
 use core::fmt;
 
+pub mod first_fit_decreasing;
 pub mod layered_greedy;
 
+pub use first_fit_decreasing::FirstFitDecreasing;
 pub use layered_greedy::LayeredGreedy;
 
 /// The exact number of Orchard actions in every note-preparation transaction ([ZIP 318]): each is
@@ -577,7 +579,8 @@ impl fmt::Display for PrepError {
 impl core::error::Error for PrepError {}
 
 /// The strategies [`plan_preparation`] runs.
-const STRATEGIES: (LayeredGreedy, ()) = (LayeredGreedy, ());
+const STRATEGIES: (FirstFitDecreasing, (LayeredGreedy, ())) =
+    (FirstFitDecreasing, (LayeredGreedy, ()));
 
 /// Plan the note-preparation transactions that mint `funding` (the self-funding note values, in
 /// zatoshi) from `available` (the wallet's spendable source-pool note values, in zatoshi), reserving

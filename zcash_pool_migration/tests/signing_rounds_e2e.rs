@@ -378,19 +378,21 @@ fn note_shape_and_signer_budget_decide_the_interaction_count() {
     }
 }
 
-/// The smallest signer a wallet can use and still migrate in ONE interaction, per note shape: the
-/// inverse of the sweep above, and what a wallet shows when helping a user pick a device.
+/// The smallest signer a wallet can use and still migrate in ONE interaction: the inverse of the
+/// sweep above, and what a wallet shows when helping a user pick a device.
+///
+/// It is the same for every note shape of one balance, because each plans the same one preparation
+/// transaction and nine crossings: `1 * 16 + 9 * 3 = 43` actions.
 #[cfg(feature = "test-dependencies")]
 #[test]
-fn the_note_shape_sets_the_single_round_signer_requirement() {
+fn the_single_round_signer_requirement_is_the_same_for_every_note_shape() {
     let seed = 7;
-    // The plan's total actions ARE the single-round requirement, so the shape that plans more
-    // transactions demands a larger signer for the same balance.
+    // The plan's total actions ARE the single-round requirement.
     for (label, expected_actions) in [
         ("10 ZEC in a single note", 43u32),
-        ("10 ZEC as 1 + 9", 97),
-        ("10 ZEC as 2 + 8", 94),
-        ("10 ZEC as 5 + 5", 35),
+        ("10 ZEC as 1 + 9", 43),
+        ("10 ZEC as 2 + 8", 43),
+        ("10 ZEC as 5 + 5", 43),
     ] {
         let sc = MIGRATION_SCENARIOS
             .iter()
