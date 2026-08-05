@@ -10,9 +10,12 @@
 //! The quantities that matter, and why:
 //!
 //! - TRANSACTIONS. Every wallet note the migration SPENDS must be consumed by some preparation
-//!   transaction, and a transaction consumes at most [`CONSOLIDATION_INPUTS_PER_TX`] notes (the ZIP
-//!   318 action budget less its one output). So `ceil(spent / 15)` is a hard floor GIVEN the
-//!   selection, and the ratio of the plan to it is what the layering strategy costs on top.
+//!   transaction (at most [`CONSOLIDATION_INPUTS_PER_TX`] per transaction), every funding note must
+//!   be minted by one (at most [`FUNDING_OUTPUTS_PER_TX`] per transaction), and one transaction
+//!   moves the live note count by at most `PREP_TX_ACTIONS - 2`, so
+//!   `max(ceil(spent / 15), ceil(crossings / 14), ceil(|spent - crossings| / 14))` is a hard floor
+//!   GIVEN the selection, and the ratio of the plan to it is what the layering strategy costs on
+//!   top.
 //! - SELECTION. That floor is conditional, not absolute: a migration only has to fund its crossings,
 //!   so the notes it must spend are the ones needed to COVER that value, not the whole wallet.
 //!   `selection_floor` is the smallest number of notes that could cover it (the largest notes
@@ -38,7 +41,9 @@ use rand_core::SeedableRng;
 
 use zcash_pool_migration::{
     engine::{MigrationPlan, plan_migration},
-    preparation::{CONSOLIDATION_INPUTS_PER_TX, PrepInput},
+    preparation::{
+        CONSOLIDATION_INPUTS_PER_TX, FUNDING_OUTPUTS_PER_TX, PREP_TX_ACTIONS, PrepInput,
+    },
     signing_rounds::{PREPARATION_ACTIONS, SigningRoundBudget},
     testing::{WalletShape, generate_notes, sub_quantum_count},
 };
@@ -81,10 +86,23 @@ struct Measurement {
 }
 
 impl Measurement {
-    /// The hard floor on preparation transactions GIVEN the notes the plan chose to spend: each must
-    /// be consumed, and one transaction consumes at most `CONSOLIDATION_INPUTS_PER_TX` of them.
+    /// The hard floor on preparation transactions GIVEN the notes the plan chose to spend and the
+    /// funding notes it mints: each spent note is consumed at most `CONSOLIDATION_INPUTS_PER_TX`
+    /// per transaction, each funding note takes an output slot of which a transaction has at most
+    /// `FUNDING_OUTPUTS_PER_TX`, and a transaction changes the live note count by at most
+    /// `PREP_TX_ACTIONS - 2` in either direction, so shrinking `spent` notes to `crossings` funding
+    /// notes bounds the count from below three ways at once.
     fn transaction_floor(&self) -> usize {
-        self.spent.div_ceil(CONSOLIDATION_INPUTS_PER_TX)
+        [
+            self.spent.div_ceil(CONSOLIDATION_INPUTS_PER_TX),
+            self.crossings.div_ceil(FUNDING_OUTPUTS_PER_TX),
+            self.spent
+                .abs_diff(self.crossings)
+                .div_ceil(PREP_TX_ACTIONS - 2),
+        ]
+        .into_iter()
+        .max()
+        .expect("three candidates")
     }
 
     /// The smallest number of wallet notes that could cover the migrated value, taking the largest
