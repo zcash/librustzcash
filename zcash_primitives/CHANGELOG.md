@@ -37,6 +37,16 @@ workspace.
   pool, with `BundlePadding::{DEFAULT, UNPADDED}` matching the corresponding
   `orchard::builder::BundleType` constants. Unlike `BundleType` it cannot
   express a coinbase bundle.
+- `zcash_primitives::transaction::components::sapling::SPEND_DESCRIPTION_SIZE` and
+  `OUTPUT_DESCRIPTION_SIZE`, the sizes in bytes of a Sapling spend description and
+  output description in their v4 (pre-NU5) serialized forms. Each is the full
+  per-element cost on the wire in a version 4 transaction (the v5 form moves
+  proofs and signatures to bundle-level fields), so these are conservative upper
+  bounds: dividing a per-element byte budget by them yields a lower bound on the
+  number of spends or outputs that fit within that budget.
+- `zcash_primitives::transaction::components::sapling::testing::arb_bundle`, now
+  public behind the `test-dependencies` feature, generates a Sapling bundle with
+  arbitrary spends and outputs for cross-crate test strategies.
 
 ### Changed
 - Migrated to `zcash_transparent 0.10.0`.
