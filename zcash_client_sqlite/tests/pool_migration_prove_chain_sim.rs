@@ -1304,6 +1304,35 @@ fn broadcast_persists_the_finalized_transaction_to_the_wallet() {
         "the recorded outputs account for the funding note minus the fee",
     );
 
+    // RE-ENTRY: a consumer that crashed between obtaining the bytes and submitting them left the
+    // transaction `Proved`, so the drive loop offers its broadcast again and it arrives back
+    // here. The same bytes come out, and the record it left is neither duplicated nor disturbed.
+    let sent_note_count = |run: &mut Run| -> i64 {
+        run.st
+            .wallet_mut()
+            .conn_mut()
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM sent_notes
+                 JOIN transactions ON transactions.id_tx = sent_notes.transaction_id
+                 WHERE transactions.txid = :txid",
+                rusqlite::named_params![":txid": txid.as_ref()],
+                |row| row.get(0),
+            )
+            .expect("counts the recorded sent outputs")
+    };
+    let recorded_outputs = sent_note_count(&mut run);
+    let re_extracted = run
+        .store()
+        .take_transaction_for_broadcast(&committed.state, transfer_id)
+        .expect("re-entering after a crashed submission returns the transaction again");
+    assert_eq!(re_extracted.txid(), txid);
+    assert_eq!(
+        sent_note_count(&mut run),
+        recorded_outputs,
+        "re-entering records no second copy of the transaction's outputs",
+    );
+
     // The funding note is now marked spent, so the wallet's own input selection no longer offers
     // it: the double-spend window between proving and broadcast is closed.
     assert!(
