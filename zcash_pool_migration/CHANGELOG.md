@@ -398,8 +398,8 @@ and this library adheres to Rust's notion of
 - `zcash_pool_migration::engine::MigrationProver::lock_spent_notes`, called by
   `prove_transfer` and `prove_preparation` once the proof succeeds, so a
   transaction reserves the notes it spends for exactly as long as it is proved
-  and awaiting broadcast. It has a default implementation that takes no locks,
-  so an existing prover is unaffected.
+  and awaiting broadcast. It is a REQUIRED method: an existing prover must
+  implement it, returning `Ok(None)` if it models no lock state.
 - `zcash_pool_migration::wallet::WalletProveError::Lock`, reporting a note that
   another flow has already reserved.
 

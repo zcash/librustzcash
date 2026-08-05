@@ -47,8 +47,6 @@ zcash_client_backend = { workspace = true, optional = true, features = ["orchard
 zcash_keys = { workspace = true, optional = true, features = ["orchard"] }
 shardtree = { workspace = true, optional = true }
 incrementalmerkletree = { workspace = true, optional = true }
-# Derives the migration lock-owner token from the notes a transaction spends, so the token is
-# recoverable from the stored PCZT rather than drawn at random and lost on a crash.
 blake2b_simd = { workspace = true, optional = true }
 
 [dev-dependencies]
