@@ -252,4 +252,58 @@ mod tests {
             Err(PrepError::InsufficientFunds),
         );
     }
+
+    /// What a whole migration looks like under THIS rule alone: the answer to "what would
+    /// `plan_migration` give with only FirstFitDecreasing?", for every scenario the crate shares.
+    ///
+    /// Columns are preparation transactions, crossings, Keystone signing rounds, and migrated
+    /// value in units of 0.01 ZEC. [`MIGRATION_SCENARIOS`] carries what the whole portfolio
+    /// achieves for the same wallets; the gap between the two rows is what this rule costs, or
+    /// saves, on its own.
+    ///
+    /// These are recorded behaviour, not claims of optimality. They move when the rule changes,
+    /// and that movement is the point: it is how an improvement is seen.
+    const SCENARIOS_UNDER_THIS_RULE: &[(&str, usize, usize, usize, u64)] = &[
+        ("small holder, 2 ZEC", 1, 7, 1, 199),
+        ("retail, 15 ZEC", 1, 9, 1, 1499),
+        ("denominations, 60 ZEC", 1, 10, 1, 5999),
+        ("78 ZEC in a single note", 1, 10, 1, 7799),
+        (
+            "Gwen, 0.0152 ZEC (a single minimum-denomination note)",
+            1,
+            1,
+            1,
+            1,
+        ),
+        (
+            "Priya, 7.1101 ZEC (the buffer prunes the trailing crossing)",
+            1,
+            3,
+            1,
+            710,
+        ),
+        ("exchange, ten 5 ZEC notes", 1, 5, 1, 4900),
+        ("monotonic, ten 12 ZEC notes", 1, 5, 1, 11900),
+        ("dust-heavy, 1 ZEC and twelve 0.02 ZEC notes", 2, 4, 1, 122),
+        (
+            "whale plus dust, 40 ZEC and a six-note dust tail",
+            1,
+            6,
+            1,
+            4033,
+        ),
+        ("10 ZEC in a single note", 1, 9, 1, 999),
+        ("10 ZEC as 1 + 9", 1, 9, 1, 999),
+        ("10 ZEC as 2 + 8", 1, 9, 1, 999),
+        ("10 ZEC as 5 + 5", 1, 9, 1, 999),
+    ];
+
+    /// Replays [`SCENARIOS_UNDER_THIS_RULE`] through a migration planned against this rule alone.
+    #[test]
+    fn what_a_migration_looks_like_under_this_rule_alone() {
+        crate::preparation::assert_scenarios_under(
+            &(FirstFitDecreasing, ()),
+            SCENARIOS_UNDER_THIS_RULE,
+        );
+    }
 }

@@ -40,6 +40,12 @@ and this library adheres to Rust's notion of
 - `preparation::PreparationStrategy`.
 - `preparation::first_fit_decreasing::FirstFitDecreasing`, re-exported as
   `preparation::FirstFitDecreasing`.
+- `preparation::plan_preparation_with` and `preparation::default_portfolio`, to
+  plan against a chosen set of strategies rather than the ones the crate ships.
+- `engine::plan_migration_with`, the same choice at the whole-migration level.
+  It reaches the crossings as well as the preparation transactions, since the
+  denomination decomposition asks the preparation planner what it can mint at
+  every step.
 - `preparation::layered_greedy::LayeredGreedy`, re-exported as
   `preparation::LayeredGreedy`.
 - `preparation::PreparationPlan::is_valid`.

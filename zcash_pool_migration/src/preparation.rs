@@ -47,6 +47,21 @@ use zcash_protocol::value::Zatoshis;
 
 use core::fmt;
 
+#[cfg(test)]
+use rand_chacha::ChaCha8Rng;
+#[cfg(test)]
+use rand_core::SeedableRng;
+
+#[cfg(test)]
+use crate::engine::{
+    plan_migration_with,
+    tests::{MockBackend, test_net},
+};
+#[cfg(test)]
+use crate::signing_rounds::SigningRoundBudget;
+#[cfg(test)]
+use crate::testing::MIGRATION_SCENARIOS;
+
 pub mod first_fit_decreasing;
 pub mod layered_greedy;
 
@@ -599,10 +614,27 @@ pub fn plan_preparation(
     funding: &[Zatoshis],
     fee_per_tx: Zatoshis,
 ) -> Result<PreparationPlan, PrepError> {
+    plan_preparation_with(&default_portfolio(), available, funding, fee_per_tx)
+}
+
+/// The strategies [`plan_preparation`] runs, for a caller that wants to plan against a different
+/// set and compare.
+pub fn default_portfolio() -> impl Portfolio {
+    STRATEGIES
+}
+
+/// As [`plan_preparation`], against a chosen set of strategies rather than the ones the crate
+/// ships.
+pub fn plan_preparation_with<P: Portfolio>(
+    portfolio: &P,
+    available: &[Zatoshis],
+    funding: &[Zatoshis],
+    fee_per_tx: Zatoshis,
+) -> Result<PreparationPlan, PrepError> {
     // A property of the INPUTS, not of any strategy, so it is settled once and reported the same way
     // however the strategy set changes.
     validate_instance(available, funding)?;
-    STRATEGIES
+    portfolio
         .best_plan(available, funding, fee_per_tx)
         .map(|(_, plan)| plan)
         .ok_or(PrepError::InsufficientFunds)
@@ -628,11 +660,59 @@ fn validate_instance(available: &[Zatoshis], funding: &[Zatoshis]) -> Result<(),
     Ok(())
 }
 
+/// Replay a strategy module's scenario table through a whole migration planned under `portfolio`
+/// alone: for each row, plan the named `MIGRATION_SCENARIOS` wallet with `plan_migration_with` and
+/// assert the preparation-transaction count, crossings, Keystone signing rounds, and migrated
+/// value (in units of 0.01 ZEC). Each strategy module keeps its own table; this is the one driver
+/// they all replay it through.
+#[cfg(test)]
+pub(crate) fn assert_scenarios_under<Pf: Portfolio>(
+    portfolio: &Pf,
+    scenarios: &[(&str, usize, usize, usize, u64)],
+) {
+    /// One hundredth of a ZEC, the unit the migrated column is written in.
+    const H: u64 = zcash_protocol::value::COIN / 100;
+    /// Any fixed seed: the canonical decomposition does not consult the RNG.
+    const SEED: u64 = 7;
+    /// A post-NU6.3 chain tip to plan against.
+    const TIP: u32 = 2_000_000;
+
+    for (label, preparations, crossings, keystone_rounds, migrated) in scenarios {
+        let scenario = MIGRATION_SCENARIOS
+            .iter()
+            .find(|sc| sc.label == *label)
+            .expect("every row names a shared scenario");
+        let backend = MockBackend::new(scenario.source_notes.to_vec(), TIP);
+        let mut rng = ChaCha8Rng::seed_from_u64(SEED);
+        let plan = plan_migration_with(portfolio, &test_net(), &backend, &mut rng)
+            .expect("this rule plans every shared scenario");
+
+        assert_eq!(
+            plan.preparation_tx_count(),
+            *preparations,
+            "{label}: preparations"
+        );
+        assert_eq!(plan.transfer_tx_count(), *crossings, "{label}: crossings");
+        assert_eq!(
+            plan.signing_round_count(SigningRoundBudget::KEYSTONE),
+            *keystone_rounds,
+            "{label}: Keystone rounds",
+        );
+        assert_eq!(
+            u64::from(plan.value_migrated()) / H,
+            *migrated,
+            "{label}: migrated"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
+
+    use crate::testing::{PREPARATION_VECTORS, preparation_fee_per_tx};
 
     /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
     /// action costs one ZIP-317 marginal fee). The planner treats it opaquely.
@@ -979,6 +1059,40 @@ mod tests {
                 .best_plan(&available, &funding, fee)
                 .map(|(_, plan)| plan),
         );
+    }
+
+    /// The entry point is never worse than any single rule the crate ships: whatever a strategy
+    /// can plan on its own, [`plan_preparation`] plans, and never with a worse [`PlanQuality`].
+    ///
+    /// This is what makes registering a strategy safe. It is a property of the PORTFOLIO, not of
+    /// any rule, so it is checked here against every rule rather than restated in each of their
+    /// modules.
+    #[test]
+    fn the_entry_point_is_never_worse_than_any_single_strategy() {
+        fn assert_never_worse<S: PreparationStrategy>(strategy: &S) {
+            let fee = preparation_fee_per_tx();
+            for vector in PREPARATION_VECTORS {
+                let (available, funding) = (zats(vector.available), zats(vector.funding));
+                let Ok(alone) = strategy.plan(&available, &funding, fee) else {
+                    continue;
+                };
+                let best = plan_preparation(&available, &funding, fee).unwrap_or_else(|e| {
+                    panic!(
+                        "[{}] `{}`: the entry point must plan what a rule plans, got {e:?}",
+                        strategy.name(),
+                        vector.label,
+                    )
+                });
+                assert!(
+                    PlanQuality::of(&best) <= PlanQuality::of(&alone),
+                    "[{}] `{}`: the entry point returned the worse plan",
+                    strategy.name(),
+                    vector.label,
+                );
+            }
+        }
+        assert_never_worse(&LayeredGreedy);
+        assert_never_worse(&FirstFitDecreasing);
     }
 
     /// A total that is not a representable amount is rejected on the inputs, before any strategy
