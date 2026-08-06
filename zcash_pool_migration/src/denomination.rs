@@ -295,11 +295,13 @@ pub trait DenominationStrategy {
     /// computed by the caller from the canonical shape. `prep_tx_count` is the capability that
     /// answers, for a candidate multiset of prepared-note values (each `crossing + buffer`), how
     /// many preparation transactions minting them will take — `None` when the wallet's notes cannot
-    /// mint that multiset at all. The engine backs it with the preparation planner, so the
-    /// decomposition reserves the TRUE preparation cost (consolidation, fan-out layers, and all) as
-    /// it grows, instead of a fixed guess repaired after the fact. `rng` is used by randomized
-    /// strategies and ignored by deterministic ones; it is bound as [`CryptoRng`] because a
-    /// randomized strategy's draws decide the on-chain crossing values, which are privacy-relevant.
+    /// mint that multiset at all. The engine backs it with the preparation planner. A strategy must
+    /// use it only to RECONCILE a split it computed from the balance alone — dropping parts the
+    /// wallet cannot fund, never substituting different denominations — so the published values
+    /// remain a function of the balance, not of the wallet's note shape. `rng` is used by
+    /// randomized strategies and ignored by deterministic ones; it is bound as [`CryptoRng`]
+    /// because a randomized strategy's draws decide the on-chain crossing values, which are
+    /// privacy-relevant.
     fn plan<R: RngCore + CryptoRng>(
         &self,
         total_input: Zatoshis,

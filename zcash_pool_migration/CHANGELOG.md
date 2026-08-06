@@ -61,6 +61,15 @@ and this library adheres to Rust's notion of
   them and committing a run performs one note selection instead of one per
   spent note. A consumer that held one adapter across changes to the wallet's
   spendable notes must construct a fresh adapter to observe them.
+- `denomination::CanonicalOneTwoFive` (and so `denomination::plan_denominations`
+  and every planning entry point above them) now computes the canonical split of
+  the balance once and reconciles it against the wallet by dropping unfundable
+  parts smallest-first, rather than substituting smaller denominations for the
+  parts the preparation planner refused. The published crossing values are now
+  always a prefix of the balance's canonical split, so they no longer depend on
+  how the wallet's notes happen to hold the balance. A wallet that cannot fund
+  the entire canonical split migrates a prefix of it in the current run, with
+  the remainder deferred to a later run.
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`
   rather than a bare `state::AdvanceStep`: read the step to perform via
   `Advance::step`, and the outlook — when the migration next has work, and of

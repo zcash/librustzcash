@@ -284,7 +284,7 @@ mod tests {
         ),
         ("exchange, ten 5 ZEC notes", 1, 5, 1, 4900),
         ("monotonic, ten 12 ZEC notes", 1, 5, 1, 11900),
-        ("dust-heavy, 1 ZEC and twelve 0.02 ZEC notes", 2, 4, 1, 122),
+        ("dust-heavy, 1 ZEC and twelve 0.02 ZEC notes", 1, 2, 1, 120),
         (
             "whale plus dust, 40 ZEC and a six-note dust tail",
             1,

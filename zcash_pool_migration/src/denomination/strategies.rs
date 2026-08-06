@@ -18,6 +18,7 @@ use super::{
     DENOM_CAP, DenominationPlan, DenominationStrategy, MAX_RESIDUAL_VALUE,
     MIGRATION_MAX_PREPARED_NOTES_PER_RUN, zat,
 };
+use crate::preparation::FUNDING_OUTPUTS_PER_TX;
 
 /// The canonical `{1, 2, 5} * 10^k` quantization of [ZIP 318]: at each step it takes the largest such
 /// denomination the remaining budget can fund (bounded by the maximum denomination), so the parts are
@@ -70,6 +71,67 @@ impl CanonicalOneTwoFive {
     }
 }
 
+impl CanonicalOneTwoFive {
+    /// The UNCONSTRAINED canonical split of `total_input_zatoshi`: the non-increasing sequence of
+    /// crossing values the balance quantizes into, a pure function of the balance (and this
+    /// strategy's bounds), independent of how the wallet's notes happen to hold it.
+    ///
+    /// Fees are reserved as the split grows, under the optimistic one-transaction-per-
+    /// [`FUNDING_OUTPUTS_PER_TX`]-notes preparation model. The exception is a balance containing
+    /// exactly one self-funding canonical denomination: that split is retained because an exact
+    /// wallet note can fund it directly without a preparation transaction. Whether the wallet
+    /// actually contains that note is decided later during reconciliation.
+    fn unconstrained_split(&self, total_input_zatoshi: u64, prep_tx_fee_zatoshi: u64) -> Vec<u64> {
+        let buffer = self.buffer_zatoshi;
+        // Smallest self-funding note: the minimum denomination plus its transfer buffer.
+        let min_note = self.min_denomination_zatoshi + buffer;
+        let exact_crossing = total_input_zatoshi.saturating_sub(buffer);
+        if self.max_notes > 0
+            && total_input_zatoshi >= buffer
+            && (self.min_denomination_zatoshi..=self.max_denomination_zatoshi)
+                .contains(&exact_crossing)
+            && largest_one_two_five(exact_crossing, self.min_denomination_zatoshi) == exact_crossing
+        {
+            return alloc::vec![exact_crossing];
+        }
+        let optimistic_txs = |minted: usize| minted.div_ceil(FUNDING_OUTPUTS_PER_TX) as u64;
+
+        let mut crossings: Vec<u64> = Vec::new();
+        // Running sum of the prepared-note values (`crossing + buffer`) chosen so far.
+        let mut committed_notes = 0u64;
+        while crossings.len() < self.max_notes {
+            let committed = committed_notes + optimistic_txs(crossings.len()) * prep_tx_fee_zatoshi;
+            let budget = total_input_zatoshi.saturating_sub(committed);
+            if budget < min_note {
+                break;
+            }
+            let mut affordable = (budget - buffer).min(self.max_denomination_zatoshi);
+            let mut accepted = false;
+            while affordable >= self.min_denomination_zatoshi {
+                let crossing = largest_one_two_five(affordable, self.min_denomination_zatoshi);
+                if crossing < self.min_denomination_zatoshi {
+                    break;
+                }
+                let cost = committed_notes
+                    + crossing
+                    + buffer
+                    + optimistic_txs(crossings.len() + 1) * prep_tx_fee_zatoshi;
+                if cost <= total_input_zatoshi {
+                    committed_notes += crossing + buffer;
+                    crossings.push(crossing);
+                    accepted = true;
+                    break;
+                }
+                affordable = crossing - 1;
+            }
+            if !accepted {
+                break;
+            }
+        }
+        crossings
+    }
+}
+
 impl DenominationStrategy for CanonicalOneTwoFive {
     fn plan<R: RngCore + CryptoRng>(
         &self,
@@ -78,72 +140,45 @@ impl DenominationStrategy for CanonicalOneTwoFive {
         prep_tx_count: &dyn Fn(&[Zatoshis]) -> Option<usize>,
         _rng: &mut R,
     ) -> DenominationPlan {
-        // The greedy partition arithmetic below runs in the u64 domain; every value it derives is
-        // bounded by the validated total input, so `zat` conversions at the capability boundary and
-        // in `from_notes` are infallible.
+        // The partition arithmetic below runs in the u64 domain; every value it derives is bounded
+        // by the validated total input, so `zat` conversions at the capability boundary and in
+        // `from_notes` are infallible.
         let total_input_zatoshi = u64::from(total_input);
         let prep_tx_fee_zatoshi = u64::from(prep_tx_fee);
         let buffer = self.buffer_zatoshi;
-        // Smallest self-funding note: the minimum denomination plus its transfer buffer.
-        let min_note = self.min_denomination_zatoshi + buffer;
 
-        // The chosen crossings, their prepared-note values (`crossing + buffer`), and the
-        // preparation transaction count for the CURRENT multiset. The capability is consulted at
-        // every step, so consolidation and fan-out costs are reserved exactly as they arise.
-        let mut crossing_values: Vec<u64> = Vec::new();
-        let mut notes: Vec<u64> = Vec::new();
+        // QUANTIZE once: the canonical split is a function of the BALANCE alone, so the published
+        // values can collide across wallets holding the same balance differently.
+        let mut crossing_values =
+            self.unconstrained_split(total_input_zatoshi, prep_tx_fee_zatoshi);
+        let mut notes: Vec<u64> = crossing_values.iter().map(|&c| c + buffer).collect();
         let typed = |notes: &[u64]| notes.iter().map(|&v| zat(v)).collect::<Vec<Zatoshis>>();
-        let mut n_txs = prep_tx_count(&typed(&notes)).unwrap_or(0);
 
-        while crossing_values.len() < self.max_notes {
-            let committed = notes.iter().sum::<u64>() + n_txs as u64 * prep_tx_fee_zatoshi;
-            let budget = total_input_zatoshi.saturating_sub(committed);
-            if budget < min_note {
-                break;
+        // RECONCILE against the wallet: drop parts smallest-first (the split is non-increasing, so
+        // from the back) until the preparation planner can mint the remainder and its true fees fit
+        // the balance. Dropping is the ONLY repair — no part is ever replaced by smaller
+        // denominations, so the crossing multiset stays a sub-multiset of the canonical split and
+        // the note shape can only truncate what is published, never reshape it.
+        let n_txs = loop {
+            if crossing_values.is_empty() {
+                break 0;
             }
-            // Try the largest `{1, 2, 5} * 10^k` denomination that fits the budget under the
-            // CURRENT preparation cost; a candidate whose minting raises that cost past the budget
-            // steps down the series.
-            let mut affordable = (budget - buffer).min(self.max_denomination_zatoshi);
-            let mut accepted = false;
-            while affordable >= self.min_denomination_zatoshi {
-                let crossing = largest_one_two_five(affordable, self.min_denomination_zatoshi);
-                if crossing < self.min_denomination_zatoshi {
-                    break;
-                }
-                notes.push(crossing + buffer);
-                let fits = prep_tx_count(&typed(&notes)).filter(|&n| {
-                    notes
-                        .iter()
-                        .sum::<u64>()
-                        .checked_add(n as u64 * prep_tx_fee_zatoshi)
-                        .is_some_and(|c| c <= total_input_zatoshi)
-                });
-                match fits {
-                    Some(n) => {
-                        n_txs = n;
-                        crossing_values.push(crossing);
-                        accepted = true;
-                        break;
-                    }
-                    None => {
-                        notes.pop();
-                        if crossing == self.min_denomination_zatoshi {
-                            break;
-                        }
-                        affordable = crossing - 1;
-                    }
+            let fits = prep_tx_count(&typed(&notes)).filter(|&n| {
+                notes
+                    .iter()
+                    .sum::<u64>()
+                    .checked_add(n as u64 * prep_tx_fee_zatoshi)
+                    .is_some_and(|c| c <= total_input_zatoshi)
+            });
+            match fits {
+                Some(n) => break n,
+                None => {
+                    crossing_values.pop();
+                    notes.pop();
                 }
             }
-            if !accepted {
-                break;
-            }
-        }
+        };
 
-        // Nothing migrated means no preparation happens, so nothing is reserved for its fees.
-        if crossing_values.is_empty() {
-            n_txs = 0;
-        }
         let prep_fees_zatoshi = n_txs as u64 * prep_tx_fee_zatoshi;
         let remaining = total_input_zatoshi
             .saturating_sub(notes.iter().sum::<u64>())
@@ -410,6 +445,35 @@ mod tests {
         for quantum in examples {
             assert_one_quantum_plus_fees(quantum, prep_fee);
         }
+    }
+
+    /// An exact funding note is used directly, so it does not need the preparation fee that the
+    /// balance-only quantizer cannot know whether to reserve.
+    #[test]
+    fn exact_funding_note_needs_no_preparation_fee() {
+        let buffer = zip317_buffer();
+        let crossing = u64::from(MAX_RESIDUAL_VALUE);
+        let funding = crossing + buffer;
+        let available = [zat(funding)];
+        let prep_fee = 16 * MARGINAL_FEE.into_u64();
+        let prep_tx_count = |wanted: &[Zatoshis]| {
+            crate::preparation::plan_preparation(&available, wanted, zat(prep_fee))
+                .ok()
+                .map(|plan| plan.transaction_count())
+        };
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+
+        let plan = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN).plan(
+            zat(funding),
+            zat(prep_fee),
+            &prep_tx_count,
+            &mut rng,
+        );
+
+        assert_eq!(crossings_u64(&plan), vec![crossing]);
+        assert_eq!(plan.migration_outputs(), vec![zat(funding)]);
+        assert_eq!(plan.prep_fees(), Zatoshis::ZERO);
+        assert_eq!(plan.change(), None);
     }
 
     proptest! {
@@ -755,6 +819,39 @@ mod tests {
 
         for (balance, crossings, change) in &cases {
             check_user_preparation(*balance, crossings, *change);
+        }
+    }
+
+    proptest! {
+        /// The note shape can only TRUNCATE the published split, never reshape it: against the real
+        /// preparation planner, whatever the wallet's notes, the crossings are a prefix of the
+        /// balance's canonical split (the plan under the optimistic stub). This is the reconciliation
+        /// kernel's contract — dropping from the bottom is the only repair.
+        #[test]
+        fn the_note_shape_only_truncates_the_canonical_split(
+            notes in prop::collection::vec(1u64..2_000_000_000, 1..20),
+        ) {
+            let total: u64 = notes.iter().sum();
+            let available: Vec<Zatoshis> = notes.iter().map(|&v| zat(v)).collect();
+            let fee = 16 * MARGINAL_FEE.into_u64();
+            let s = CanonicalOneTwoFive::recommended(zat(zip317_buffer()));
+
+            let real = |funding: &[Zatoshis]| {
+                crate::preparation::plan_preparation(&available, funding, zat(fee))
+                    .ok()
+                    .map(|plan| plan.transaction_count())
+            };
+            let mut rng = ChaCha8Rng::seed_from_u64(0);
+            let constrained = crossings_u64(&s.plan(zat(total), zat(fee), &real, &mut rng));
+            let canonical = crossings_u64(&s.plan(zat(total), zat(fee), &prep_tx_count_stub, &mut rng));
+
+            prop_assert!(
+                constrained.len() <= canonical.len()
+                    && constrained == canonical[..constrained.len()],
+                "crossings {:?} are not a prefix of the canonical split {:?}",
+                constrained,
+                canonical,
+            );
         }
     }
 }

@@ -27,8 +27,10 @@ mod conformance;
 mod generators;
 mod preparation_vectors;
 mod scenarios;
+mod wallets;
 
 pub use conformance::*;
 pub use generators::*;
 pub use preparation_vectors::*;
 pub use scenarios::*;
+pub use wallets::*;
