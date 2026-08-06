@@ -80,8 +80,16 @@ impl CanonicalOneTwoFive {
     /// [`FUNDING_OUTPUTS_PER_TX`]-notes preparation model. The exception is a balance containing
     /// exactly one self-funding canonical denomination: that split is retained because an exact
     /// wallet note can fund it directly without a preparation transaction. Whether the wallet
-    /// actually contains that note is decided later during reconciliation.
-    fn unconstrained_split(&self, total_input_zatoshi: u64, prep_tx_fee_zatoshi: u64) -> Vec<u64> {
+    /// actually contains that note is decided later during reconciliation — and a wallet holding
+    /// that balance any OTHER way cannot fund the part at all (the notes sum to exactly the funding
+    /// note, leaving no room for any preparation fee), so reconciliation defers the WHOLE split to
+    /// a later run rather than reshaping it (see
+    /// [`MigrationError::UnfundableSplit`](crate::engine::MigrationError::UnfundableSplit)).
+    pub(crate) fn unconstrained_split(
+        &self,
+        total_input_zatoshi: u64,
+        prep_tx_fee_zatoshi: u64,
+    ) -> Vec<u64> {
         let buffer = self.buffer_zatoshi;
         // Smallest self-funding note: the minimum denomination plus its transfer buffer.
         let min_note = self.min_denomination_zatoshi + buffer;
