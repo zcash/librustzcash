@@ -150,7 +150,9 @@ fn full_migration_of_one_quantum_is_one_layer_one_transaction() {
 #[test]
 fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
     let balance = 50 * COIN;
-    let backend = MockBackend::new(vec![5 * COIN; 10], 2_000_000); // ten equal 5-ZEC notes
+    let source_notes = vec![5 * COIN; 10]; // ten equal 5-ZEC notes
+    let source_note_count = source_notes.len();
+    let backend = MockBackend::new(source_notes, 2_000_000);
     let mut rng = ChaCha8Rng::seed_from_u64(1);
     let plan = plan_migration(&regtest_network(true), &backend, &mut rng)
         .expect("a fundable balance plans");
@@ -165,6 +167,7 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
     let mut ref_rng = ChaCha8Rng::seed_from_u64(1);
     let proposed = plan_denominations(
         zat(balance),
+        source_note_count,
         transfer_buffer,
         prep_tx_fee,
         &prep_tx_count_stub,
