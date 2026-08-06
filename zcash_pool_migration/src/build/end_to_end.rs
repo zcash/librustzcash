@@ -50,6 +50,7 @@ fn migration_pipeline_end_to_end() {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         plan_denominations(
             Zatoshis::const_from_u64(balance),
+            balance_zats.len(),
             buffer,
             prep_fee,
             &prep_tx_count,
