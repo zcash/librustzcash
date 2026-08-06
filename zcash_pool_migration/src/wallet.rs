@@ -22,6 +22,7 @@
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use core::cell::{Ref, RefCell};
 use core::fmt;
 use core::num::NonZeroU32;
 
@@ -129,6 +130,9 @@ where
     /// The inter-arrival delays to schedule under, or `None` to derive them from the wallet's own
     /// anchor bucket interval by the ZIP 318 ratios.
     scheduling_delays: Option<(DelayDistribution, DelayDistribution)>,
+    /// The spendable-note snapshot every read is served from, filled on first use — see
+    /// [`Self::spendable_orchard`].
+    spendable: RefCell<Option<Vec<SpendableNote>>>,
 }
 
 impl<'a, W, St> WalletMigration<'a, W, St>
@@ -157,6 +161,7 @@ where
             usk,
             store,
             scheduling_delays: None,
+            spendable: RefCell::new(None),
         }
     }
 
@@ -190,31 +195,41 @@ where
     }
 
     /// The account's spendable Orchard notes as `(note, tree position, value)`, sorted by tree
-    /// position so the index is stable across calls (the engine maps a value index from
-    /// `spendable_orchard_note_values` back to a note by the same order).
-    fn spendable_orchard(&self) -> Result<Vec<SpendableNote>, AdapterError<W, St>> {
-        let target = self.selection_target()?;
-        let received = self
-            .wallet
-            .select_unspent_notes(
-                self.account,
-                &[ShieldedPool::Orchard],
-                target,
-                &[],
-                LockFilter::Policy(&LockedInputPolicy::Exclude),
-            )
-            .map_err(Error::InputSource)?;
-        let mut notes: Vec<SpendableNote> = received
-            .orchard()
-            .iter()
-            .map(|rn| {
-                let note = *rn.note();
-                let value = note.value().inner();
-                (note, rn.note_commitment_tree_position(), value)
-            })
-            .collect();
-        notes.sort_by_key(|(_, pos, _)| *pos);
-        Ok(notes)
+    /// position and SNAPSHOTTED on the first read: the engine addresses a note by its index into
+    /// this sequence (a plan's `PrepInput::Wallet { index, .. }` names the selection its planning
+    /// call observed), so every read through one adapter must see the same set. The snapshot also
+    /// keeps a commit linear in the plan's inputs — resolving each spent note through a fresh
+    /// selection made signing a large plan quadratic in the wallet's note count.
+    ///
+    /// Wallet changes are observed by constructing a fresh adapter; this one's selection is fixed.
+    fn spendable_orchard(&self) -> Result<Ref<'_, [SpendableNote]>, AdapterError<W, St>> {
+        if self.spendable.borrow().is_none() {
+            let target = self.selection_target()?;
+            let received = self
+                .wallet
+                .select_unspent_notes(
+                    self.account,
+                    &[ShieldedPool::Orchard],
+                    target,
+                    &[],
+                    LockFilter::Policy(&LockedInputPolicy::Exclude),
+                )
+                .map_err(Error::InputSource)?;
+            let mut notes: Vec<SpendableNote> = received
+                .orchard()
+                .iter()
+                .map(|rn| {
+                    let note = *rn.note();
+                    let value = note.value().inner();
+                    (note, rn.note_commitment_tree_position(), value)
+                })
+                .collect();
+            notes.sort_by_key(|(_, pos, _)| *pos);
+            *self.spendable.borrow_mut() = Some(notes);
+        }
+        Ok(Ref::map(self.spendable.borrow(), |cached| {
+            cached.as_deref().expect("filled above")
+        }))
     }
 }
 
@@ -228,9 +243,9 @@ where
 
     fn spendable_orchard_note_values(&self) -> Result<Vec<Zatoshis>, Self::Error> {
         self.spendable_orchard()?
-            .into_iter()
+            .iter()
             .enumerate()
-            .map(|(i, (_, _, value))| {
+            .map(|(i, &(_, _, value))| {
                 Zatoshis::from_u64(value).map_err(|_| Error::InvalidNoteValue(i))
             })
             .collect()
