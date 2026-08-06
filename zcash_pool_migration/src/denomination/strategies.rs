@@ -77,14 +77,23 @@ impl CanonicalOneTwoFive {
     /// strategy's bounds), independent of how the wallet's notes happen to hold it.
     ///
     /// Fees are reserved as the split grows, under the optimistic one-transaction-per-
-    /// [`FUNDING_OUTPUTS_PER_TX`]-notes preparation model — the fewest transactions any planner
-    /// could mint the notes in, so no wallet's real preparation reserves less. A candidate whose
-    /// fee reservation overruns the balance steps down the `{1, 2, 5} * 10^k` series; that
-    /// refinement depends only on the balance, so it is quantization, not reshaping.
+    /// [`FUNDING_OUTPUTS_PER_TX`]-notes preparation model. The exception is a balance containing
+    /// exactly one self-funding canonical denomination: that split is retained because an exact
+    /// wallet note can fund it directly without a preparation transaction. Whether the wallet
+    /// actually contains that note is decided later during reconciliation.
     fn unconstrained_split(&self, total_input_zatoshi: u64, prep_tx_fee_zatoshi: u64) -> Vec<u64> {
         let buffer = self.buffer_zatoshi;
         // Smallest self-funding note: the minimum denomination plus its transfer buffer.
         let min_note = self.min_denomination_zatoshi + buffer;
+        let exact_crossing = total_input_zatoshi.saturating_sub(buffer);
+        if self.max_notes > 0
+            && total_input_zatoshi >= buffer
+            && (self.min_denomination_zatoshi..=self.max_denomination_zatoshi)
+                .contains(&exact_crossing)
+            && largest_one_two_five(exact_crossing, self.min_denomination_zatoshi) == exact_crossing
+        {
+            return alloc::vec![exact_crossing];
+        }
         let optimistic_txs = |minted: usize| minted.div_ceil(FUNDING_OUTPUTS_PER_TX) as u64;
 
         let mut crossings: Vec<u64> = Vec::new();
@@ -436,6 +445,35 @@ mod tests {
         for quantum in examples {
             assert_one_quantum_plus_fees(quantum, prep_fee);
         }
+    }
+
+    /// An exact funding note is used directly, so it does not need the preparation fee that the
+    /// balance-only quantizer cannot know whether to reserve.
+    #[test]
+    fn exact_funding_note_needs_no_preparation_fee() {
+        let buffer = zip317_buffer();
+        let crossing = u64::from(MAX_RESIDUAL_VALUE);
+        let funding = crossing + buffer;
+        let available = [zat(funding)];
+        let prep_fee = 16 * MARGINAL_FEE.into_u64();
+        let prep_tx_count = |wanted: &[Zatoshis]| {
+            crate::preparation::plan_preparation(&available, wanted, zat(prep_fee))
+                .ok()
+                .map(|plan| plan.transaction_count())
+        };
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+
+        let plan = canonical(MIGRATION_MAX_PREPARED_NOTES_PER_RUN).plan(
+            zat(funding),
+            zat(prep_fee),
+            &prep_tx_count,
+            &mut rng,
+        );
+
+        assert_eq!(crossings_u64(&plan), vec![crossing]);
+        assert_eq!(plan.migration_outputs(), vec![zat(funding)]);
+        assert_eq!(plan.prep_fees(), Zatoshis::ZERO);
+        assert_eq!(plan.change(), None);
     }
 
     proptest! {

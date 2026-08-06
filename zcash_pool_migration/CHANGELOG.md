@@ -67,13 +67,9 @@ and this library adheres to Rust's notion of
   parts smallest-first, rather than substituting smaller denominations for the
   parts the preparation planner refused. The published crossing values are now
   always a prefix of the balance's canonical split, so they no longer depend on
-  how the wallet's notes happen to hold the balance; a wallet whose real
-  preparation costs more than the split's optimistic fee reserve migrates
-  slightly less in the current run (the difference defers to a later run)
-  instead of publishing a different decomposition. The `prep_tx_count`
-  capability of `denomination::DenominationStrategy::plan` is now consulted
-  once per dropped part rather than at every step of the decomposition, which
-  removes the preparation planner from the decomposition's inner loop.
+  how the wallet's notes happen to hold the balance. A wallet that cannot fund
+  the entire canonical split migrates a prefix of it in the current run, with
+  the remainder deferred to a later run.
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`
   rather than a bare `state::AdvanceStep`: read the step to perform via
   `Advance::step`, and the outlook — when the migration next has work, and of
