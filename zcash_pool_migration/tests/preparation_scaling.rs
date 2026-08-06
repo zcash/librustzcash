@@ -9,21 +9,26 @@
 //!
 //! The quantities that matter, and why:
 //!
-//! - TRANSACTIONS. Every wallet note the migration SPENDS must be consumed by some preparation
-//!   transaction (at most [`CONSOLIDATION_INPUTS_PER_TX`] per transaction), every funding note must
-//!   be minted by one (at most [`FUNDING_OUTPUTS_PER_TX`] per transaction), and one transaction
-//!   moves the live note count by at most `PREP_TX_ACTIONS - 2`, so
-//!   `max(ceil(spent / 15), ceil(crossings / 14), ceil(|spent - crossings| / 14))` is a hard floor
-//!   GIVEN the selection, and the ratio of the plan to it is what the layering strategy costs on
-//!   top.
+//! - TRANSACTIONS. Every wallet note the preparation CONSOLIDATES must be consumed by some
+//!   preparation transaction (at most [`CONSOLIDATION_INPUTS_PER_TX`] per transaction), every
+//!   funding note it MINTS must be an output of one (at most [`FUNDING_OUTPUTS_PER_TX`] per
+//!   transaction), and one transaction moves the live note count by at most `PREP_TX_ACTIONS - 2`
+//!   (the count it moves the notes toward includes the residuals the preparation leaves, not just
+//!   the funding notes). Directly-funded notes touch no preparation transaction, so they are
+//!   outside all three bounds. The maximum of the three is a hard floor GIVEN the selection, and
+//!   the ratio of the plan to it is what the layering strategy costs on top.
 //! - SELECTION. That floor is conditional, not absolute: a migration only has to fund its crossings,
 //!   so the notes it must spend are the ones needed to COVER that value, not the whole wallet.
 //!   `selection_floor` is the smallest number of notes that could cover it (the largest notes
 //!   first), and the gap between it and `spent` is the part of the cost that is a choice rather than
 //!   a constraint.
 //! - LAYERS. Layers are sequential: each waits for the previous to mine, so they set the
-//!   preparation phase's wall-clock. Consolidating `n` notes at a fan-in of 15 per transaction is a
-//!   15-ary tree, so `ceil(log_15 n)` is the floor.
+//!   preparation phase's wall-clock. Each minted funding note roots its own consolidation tree at
+//!   a fan-in of 15 per transaction, and independent trees can share a layer, so `k` funding roots
+//!   of depth `d` absorb at most `k * 15^d` consolidated notes; the floor is the smallest depth
+//!   whose capacity covers them. (A single tree's `ceil(log_15 n)` is NOT a universal floor: a
+//!   plan minting several funding notes may validly consolidate in parallel, shallower than one
+//!   tree over all its notes.)
 //! - SIGNING ROUNDS. Preparation costs 16 actions per transaction against a transfer's 3, so on
 //!   these wallets it is the preparation, not the migration itself, that the user signs.
 //!
@@ -66,8 +71,14 @@ struct Measurement {
     notes: Vec<u64>,
     /// How many of them are sub-quantum.
     sub_quantum: usize,
-    /// The wallet notes the preparation actually spends.
+    /// The wallet notes the plan actually consumes: consolidated by preparation transactions, plus
+    /// those used directly as funding notes.
     spent: usize,
+    /// The wallet notes used DIRECTLY as funding notes, touching no preparation transaction.
+    direct: usize,
+    /// The residual notes the preparation leaves behind (outputs that are neither funding notes
+    /// nor consumed by a later layer).
+    residuals: usize,
     /// The preparation transactions the plan builds.
     preparations: usize,
     /// The sequential preparation layers.
@@ -86,18 +97,31 @@ struct Measurement {
 }
 
 impl Measurement {
-    /// The hard floor on preparation transactions GIVEN the notes the plan chose to spend and the
-    /// funding notes it mints: each spent note is consumed at most `CONSOLIDATION_INPUTS_PER_TX`
-    /// per transaction, each funding note takes an output slot of which a transaction has at most
-    /// `FUNDING_OUTPUTS_PER_TX`, and a transaction changes the live note count by at most
-    /// `PREP_TX_ACTIONS - 2` in either direction, so shrinking `spent` notes to `crossings` funding
-    /// notes bounds the count from below three ways at once.
+    /// The wallet notes that pass through consolidation: the spent notes less the directly-funded
+    /// ones (which touch no preparation transaction).
+    fn consolidated(&self) -> usize {
+        self.spent - self.direct
+    }
+
+    /// The funding notes the preparation MINTS: the crossings less the directly-funded ones. Each
+    /// roots an independent consolidation tree.
+    fn minted_crossings(&self) -> usize {
+        self.crossings - self.direct
+    }
+
+    /// The hard floor on preparation transactions GIVEN the notes the plan chose to consolidate,
+    /// the funding notes it mints, and the residuals it leaves: each consolidated note is consumed
+    /// at most `CONSOLIDATION_INPUTS_PER_TX` per transaction, each minted funding note takes an
+    /// output slot of which a transaction has at most `FUNDING_OUTPUTS_PER_TX`, and a transaction
+    /// changes the live note count by at most `PREP_TX_ACTIONS - 2` in either direction (the
+    /// preparation turns the consolidated notes into the minted funding notes AND the residuals),
+    /// so the plan's shape bounds the count from below three ways at once.
     fn transaction_floor(&self) -> usize {
         [
-            self.spent.div_ceil(CONSOLIDATION_INPUTS_PER_TX),
-            self.crossings.div_ceil(FUNDING_OUTPUTS_PER_TX),
-            self.spent
-                .abs_diff(self.crossings)
+            self.consolidated().div_ceil(CONSOLIDATION_INPUTS_PER_TX),
+            self.minted_crossings().div_ceil(FUNDING_OUTPUTS_PER_TX),
+            self.consolidated()
+                .abs_diff(self.minted_crossings() + self.residuals)
                 .div_ceil(PREP_TX_ACTIONS - 2),
         ]
         .into_iter()
@@ -122,13 +146,23 @@ impl Measurement {
         self.notes.len()
     }
 
-    /// The hard floor on layers: consolidating `spent` notes at a fan-in of
-    /// `CONSOLIDATION_INPUTS_PER_TX` per transaction is a 15-ary tree of that depth.
+    /// The hard floor on layers GIVEN the plan's shape: each minted funding note roots its own
+    /// consolidation tree at a fan-in of `CONSOLIDATION_INPUTS_PER_TX`, and independent trees can
+    /// share a layer, so `k` funding roots of depth `d` absorb at most `k * 15^d` consolidated
+    /// notes; the floor is the smallest depth whose capacity covers them. Zero when nothing
+    /// consolidates — directly-funded notes pass through no layer.
     fn layer_floor(&self) -> usize {
-        let mut reachable = CONSOLIDATION_INPUTS_PER_TX;
+        let consolidated = self.consolidated();
+        if consolidated == 0 {
+            return 0;
+        }
+        // Anything consolidated feeds a tree rooted at a funding-minting transaction, so at least
+        // one funding note is minted; `max(1)` keeps the loop finite on a malformed plan.
+        let roots = self.minted_crossings().max(1);
+        let mut capacity = roots.saturating_mul(CONSOLIDATION_INPUTS_PER_TX);
         let mut depth = 1;
-        while reachable < self.spent {
-            reachable = reachable.saturating_mul(CONSOLIDATION_INPUTS_PER_TX);
+        while capacity < consolidated {
+            capacity = capacity.saturating_mul(CONSOLIDATION_INPUTS_PER_TX);
             depth += 1;
         }
         depth
@@ -155,6 +189,8 @@ fn measure(shape: WalletShape, note_count: usize, seed: u64) -> Measurement {
     Measurement {
         sub_quantum: sub_quantum_count(&notes),
         spent: spent_wallet_notes(&plan),
+        direct: plan.preparation().direct_funding_notes().len(),
+        residuals: plan.preparation().residual_count(),
         preparations: plan.preparation_tx_count(),
         layers: plan.preparation_layer_count(),
         crossings: plan.transfer_tx_count(),
@@ -240,17 +276,18 @@ fn assert_scaling_laws(shape: WalletShape, note_count: usize, seed: u64, m: &Mea
     // The floors are floors: no plan may beat them.
     assert!(
         m.preparations >= m.transaction_floor(),
-        "{case}: {} preparations beats the {} floor for {} spent notes",
+        "{case}: {} preparations beats the {} floor for {} consolidated notes",
         m.preparations,
         m.transaction_floor(),
-        m.spent,
+        m.consolidated(),
     );
     assert!(
         m.layers >= m.layer_floor(),
-        "{case}: {} layers beats the {} floor for {} spent notes",
+        "{case}: {} layers beats the {} floor for {} consolidated notes over {} funding roots",
         m.layers,
         m.layer_floor(),
-        m.spent,
+        m.consolidated(),
+        m.minted_crossings(),
     );
 
     // A migration always migrates something, and it cannot spend a note the wallet does not have.
@@ -268,12 +305,9 @@ fn assert_scaling_laws(shape: WalletShape, note_count: usize, seed: u64, m: &Mea
         m.preparation_share() * 100.0,
     );
 
-    // Planning is pure arithmetic; it must not become the bottleneck at these note counts.
-    assert!(
-        m.planning < Duration::from_secs(1),
-        "{case}: planning took {:?}",
-        m.planning,
-    );
+    // No wall-clock assertion here: planning is sub-millisecond at these counts, but a loaded CI
+    // runner can stall any process, so the default suite REPORTS the duration (the `plan ms`
+    // column) and only the opt-in heavy sweep gates on it.
 }
 
 /// PREPARATION SCALING on messy wallets of a few hundred to a thousand notes.
@@ -305,6 +339,16 @@ fn preparation_scales_into_the_thousands() {
             let m = measure(shape, note_count, seed);
             report(shape, &m);
             assert_scaling_laws(shape, note_count, seed, &m);
+
+            // Planning is pure arithmetic; it must not become the bottleneck even at these counts.
+            // The wall-clock threshold lives only in this opt-in sweep so that runner load cannot
+            // fail the default suite.
+            assert!(
+                m.planning < Duration::from_secs(1),
+                "{} / {note_count} notes: planning took {:?}",
+                shape.label(),
+                m.planning,
+            );
         }
     }
 }
