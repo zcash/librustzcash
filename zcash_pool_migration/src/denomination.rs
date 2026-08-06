@@ -334,3 +334,20 @@ pub fn plan_denominations<R: RngCore + CryptoRng>(
         rng,
     )
 }
+
+/// Whether `total_input` quantizes to at least one canonical part under the recommended strategy —
+/// that is, whether SOME wallet holding this balance could migrate part of it. A pure function of
+/// the balance and fees: reconciliation against a concrete wallet's notes can only truncate the
+/// canonical split, never extend it, so a balance for which this is `false` has nothing to migrate
+/// regardless of note shape, while `true` with an empty reconciled plan means the WALLET's notes —
+/// not the balance — blocked the run (see
+/// [`MigrationError::UnfundableSplit`](crate::engine::MigrationError::UnfundableSplit)).
+pub(crate) fn balance_has_canonical_split(
+    total_input: Zatoshis,
+    transfer_fee_buffer: Zatoshis,
+    prep_tx_fee: Zatoshis,
+) -> bool {
+    !CanonicalOneTwoFive::recommended(transfer_fee_buffer)
+        .unconstrained_split(u64::from(total_input), u64::from(prep_tx_fee))
+        .is_empty()
+}

@@ -71,7 +71,7 @@ use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 #[cfg(feature = "orchard")]
 use crate::satisfiability::{DuenessTargets, UnsatisfiableCause};
 use crate::{
-    denomination::{DenominationPlan, plan_denominations},
+    denomination::{DenominationPlan, balance_has_canonical_split, plan_denominations},
     preparation::{PREP_TX_ACTIONS, PrepError, PrepInput, PreparationPlan, plan_preparation},
     satisfiability::{ReorgSettleDepth, ReplanThreshold, StepSatisfiability, UnsatisfiableKind},
     scheduling::{self, Schedule},
@@ -1154,6 +1154,19 @@ pub enum MigrationError<E> {
     Preparation(PrepError),
     /// The account has no migratable balance.
     NothingToMigrate,
+    /// The balance quantizes to at least one canonical part, but the wallet's current notes cannot
+    /// fund ANY part of that split, so this run defers the whole balance. Reconciliation only ever
+    /// drops parts of the canonical split (never substitutes smaller denominations — see
+    /// [`DenominationStrategy::plan`](crate::denomination::DenominationStrategy::plan)), so a
+    /// wallet whose notes cannot mint even the split's first part has no migratable decomposition
+    /// until its spendable balance changes. The known shapes: a balance of exactly one canonical
+    /// denomination plus its transfer buffer held as anything other than that exact note (the notes
+    /// sum to exactly the funding note, leaving no room for any preparation fee), and a wallet so
+    /// fragmented that consolidating it costs more than the balance can pay. Unlike
+    /// [`NothingToMigrate`](Self::NothingToMigrate), this is NOT completion: value above the
+    /// residual threshold remains, and an application should report it as deferred rather than
+    /// migrated.
+    UnfundableSplit,
     /// The backend's note values do not form a valid balance (their sum exceeds the maximum money
     /// supply).
     InvalidBalance(BalanceError),
@@ -1170,6 +1183,9 @@ impl<E: fmt::Display> fmt::Display for MigrationError<E> {
             MigrationError::Backend(e) => write!(f, "wallet backend error: {e}"),
             MigrationError::Preparation(e) => write!(f, "cannot prepare the migration: {e}"),
             MigrationError::NothingToMigrate => f.write_str("no migratable balance"),
+            MigrationError::UnfundableSplit => f.write_str(
+                "the wallet's notes cannot fund any part of the balance's canonical split",
+            ),
             MigrationError::InvalidBalance(e) => write!(f, "invalid balance: {e}"),
             MigrationError::Fee(e) => write!(f, "fee computation failed: {e}"),
             MigrationError::Nu63NotActive => f.write_str("NU6.3 is not active on this network"),
@@ -1183,6 +1199,7 @@ impl<E: core::error::Error + 'static> core::error::Error for MigrationError<E> {
             MigrationError::Backend(e) => Some(e),
             MigrationError::Preparation(e) => Some(e),
             MigrationError::NothingToMigrate => None,
+            MigrationError::UnfundableSplit => None,
             // `BalanceError` (and `FeeError`, which wraps it) implements `Error` only with
             // `zcash_protocol/std`; the Display text above carries their messages instead.
             MigrationError::InvalidBalance(_) => None,
@@ -1315,7 +1332,16 @@ where
     );
     let funding_notes = denominations.migration_outputs();
     if funding_notes.is_empty() {
-        return Err(MigrationError::NothingToMigrate);
+        // An empty plan is COMPLETION when the balance itself quantizes to nothing (only residual
+        // value remains), and DEFERRAL when the balance has a canonical split that this wallet's
+        // notes cannot fund; the two need different reporting, so they are distinct errors.
+        return Err(
+            if balance_has_canonical_split(balance, transfer_fee_buffer, prep_tx_fee) {
+                MigrationError::UnfundableSplit
+            } else {
+                MigrationError::NothingToMigrate
+            },
+        );
     }
 
     // The decomposition's reconciliation verified this multiset against the preparation planner,
@@ -1565,8 +1591,10 @@ impl MigrationRunEstimate {
 /// run.
 ///
 /// A zero (or fully sub-quantum) balance yields a zero-run estimate rather than an error, since this
-/// is a preview. `rng` is drawn from only by a randomized denomination strategy; the recommended
-/// canonical strategy ignores it.
+/// is a preview; so does a balance whose canonical split the wallet's notes cannot fund at all
+/// (what [`plan_migration`] reports as [`MigrationError::UnfundableSplit`]) — either way, whatever
+/// no run migrates is reported as the final residual. `rng` is drawn from only by a randomized
+/// denomination strategy; the recommended canonical strategy ignores it.
 pub fn estimate_migration_runs<P, B, R>(
     params: &P,
     backend: &B,
@@ -4226,6 +4254,36 @@ pub(crate) mod tests {
         ));
     }
 
+    /// A split the wallet cannot fund is DEFERRAL, not completion: a balance of exactly one
+    /// canonical denomination plus its transfer buffer quantizes to that single crossing with no
+    /// preparation-fee reserve (an exact note would fund it directly), so a wallet holding the
+    /// balance any other way cannot mint the funding note — its notes sum to exactly the note's
+    /// value, leaving nothing for a preparation fee — and reconciliation drops the whole split.
+    /// The plan reports [`MigrationError::UnfundableSplit`] so an application can distinguish
+    /// "deferred until the balance changes" from [`MigrationError::NothingToMigrate`]'s "only
+    /// residual value remains".
+    #[test]
+    fn a_split_the_wallet_cannot_fund_defers_rather_than_completes() {
+        let (_, transfer_fee_buffer) =
+            canonical_fees(&test_net(), BlockHeight::from_u32(2_000_000))
+                .expect("canonical fees are computable");
+        // 1 ZEC plus the buffer, held as two notes — the same balance held as ONE note migrates as
+        // a single directly-funded crossing (see `exact_funding_note_needs_no_preparation_fee` in
+        // the denomination strategy tests).
+        let backend = MockBackend::new(
+            vec![
+                60 * COIN / 100,
+                40 * COIN / 100 + u64::from(transfer_fee_buffer),
+            ],
+            2_000_000,
+        );
+        let mut rng = ChaCha8Rng::seed_from_u64(1);
+        assert!(matches!(
+            plan_migration(&test_net(), &backend, &mut rng),
+            Err(MigrationError::UnfundableSplit)
+        ));
+    }
+
     /// A typical balance migrates in a single run, whose entry carries BOTH the denomination side
     /// (migratable value and crossing count) and the note-preparation side (layers and transactions),
     /// and the aggregates match the single run.
@@ -4304,7 +4362,11 @@ pub(crate) mod tests {
             estimate_migration_runs(&test_net(), &fragmented, &mut rng).expect("estimates");
 
         assert_eq!(est_one.run_count(), 1);
-        assert!(est_frag.run_count() >= est_one.run_count());
+        // The fragmented wallet's true consolidation fees exceed the optimistic reserve, so the
+        // split's smallest parts defer to a second run (the estimate is deterministic: seeded RNG,
+        // fixed wallet). A planner change that moves this is a behavior change to re-derive, not
+        // noise to tolerate.
+        assert_eq!(est_frag.run_count(), 2);
         assert!(
             est_frag.total_prep_transactions() > est_one.total_prep_transactions(),
             "a fragmented wallet needs more preparation: {} vs {}",
