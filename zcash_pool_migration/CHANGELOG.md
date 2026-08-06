@@ -55,6 +55,12 @@ and this library adheres to Rust's notion of
   `(A, (B, (C, ())))`.
 
 ### Changed
+- `wallet::WalletMigration` now snapshots the account's spendable Orchard
+  notes on its first read and serves every later read from that snapshot, so
+  a plan's note indices always resolve against the selection that produced
+  them and committing a run performs one note selection instead of one per
+  spent note. A consumer that held one adapter across changes to the wallet's
+  spendable notes must construct a fresh adapter to observe them.
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`
   rather than a bare `state::AdvanceStep`: read the step to perform via
   `Advance::step`, and the outlook — when the migration next has work, and of
