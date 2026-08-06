@@ -1247,6 +1247,33 @@ where
     B: MigrationBackend,
     R: RngCore + rand_core::CryptoRng,
 {
+    plan_migration_with(
+        &crate::preparation::default_portfolio(),
+        params,
+        backend,
+        rng,
+    )
+}
+
+/// As [`plan_migration`], planning the preparation transactions against a chosen set of strategies
+/// rather than the ones the crate ships.
+///
+/// The choice reaches the whole plan, not only its preparation transactions: the denomination
+/// decomposition asks the preparation planner what it can mint at every step, so a portfolio that
+/// can build fewer transaction shapes yields different crossings as well as different
+/// preparations.
+pub fn plan_migration_with<Pf, P, B, R>(
+    portfolio: &Pf,
+    params: &P,
+    backend: &B,
+    rng: &mut R,
+) -> Result<MigrationPlan, MigrationError<B::Error>>
+where
+    Pf: crate::preparation::Portfolio,
+    P: zcash_protocol::consensus::Parameters,
+    B: MigrationBackend,
+    R: RngCore + rand_core::CryptoRng,
+{
     let notes = backend
         .spendable_orchard_note_values()
         .map_err(MigrationError::Backend)?;
@@ -1275,7 +1302,7 @@ where
     // preparation transactions minting a candidate funding multiset takes, or `None` when the
     // wallet's notes cannot mint it (so the split stops or steps down a denomination).
     let prep_tx_count = |funding: &[Zatoshis]| {
-        plan_preparation(&notes, funding, prep_tx_fee)
+        crate::preparation::plan_preparation_with(portfolio, &notes, funding, prep_tx_fee)
             .ok()
             .map(|plan| plan.transaction_count())
     };
@@ -1293,8 +1320,9 @@ where
 
     // The decomposition verified this multiset against the preparation planner at every step, so
     // this final planning pass succeeds by construction; the error path is kept for safety.
-    let preparation = plan_preparation(&notes, &funding_notes, prep_tx_fee)
-        .map_err(MigrationError::Preparation)?;
+    let preparation =
+        crate::preparation::plan_preparation_with(portfolio, &notes, &funding_notes, prep_tx_fee)
+            .map_err(MigrationError::Preparation)?;
 
     // Schedule the PREPARATION broadcasts: each transaction gets its own drawn height (temporal
     // decoupling — a burst of identically shaped transactions from one wallet is a linkable
@@ -3649,7 +3677,7 @@ struct CommitOutput {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         denomination::{DENOM_CAP, MIGRATION_MAX_PREPARED_NOTES_PER_RUN},
@@ -3995,7 +4023,7 @@ mod tests {
 
     /// A local network with NU6.3 active at a low height, matching the build test network, so the
     /// canonical fees and activation checks compute in planning tests.
-    fn test_net() -> LocalNetwork {
+    pub(crate) fn test_net() -> LocalNetwork {
         LocalNetwork {
             overwinter: Some(BlockHeight::from_u32(1)),
             sapling: Some(BlockHeight::from_u32(2)),
@@ -4013,7 +4041,7 @@ mod tests {
     }
 
     /// A minimal in-memory backend: a fixed set of note values and a chain tip.
-    struct MockBackend {
+    pub(crate) struct MockBackend {
         notes: Vec<Zatoshis>,
         tip: BlockHeight,
         stored: Option<MigrationState>,
@@ -4021,7 +4049,7 @@ mod tests {
     }
 
     impl MockBackend {
-        fn new(notes: Vec<u64>, tip: u32) -> Self {
+        pub(crate) fn new(notes: Vec<u64>, tip: u32) -> Self {
             MockBackend {
                 notes: notes
                     .into_iter()

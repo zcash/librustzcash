@@ -519,7 +519,7 @@ mod tests {
 
     use zcash_primitives::transaction::fees::zip317::MARGINAL_FEE;
 
-    use crate::preparation::{PREP_TX_ACTIONS, Portfolio, plan_preparation};
+    use crate::preparation::{PREP_TX_ACTIONS, Portfolio};
     use crate::testing::{Fundability, PREPARATION_VECTORS, preparation_fee_per_tx};
 
     /// A representative padded [`PREP_TX_ACTIONS`]-action ZIP-317 fee reserve for the tests (each
@@ -534,7 +534,7 @@ mod tests {
         values.iter().map(|&v| zat(v)).collect()
     }
 
-    /// [`plan_preparation`] over the tests' u64 values.
+    /// This strategy's plan over the tests' u64 values.
     fn plan_prep(
         available: &[u64],
         funding: &[u64],
@@ -1190,37 +1190,13 @@ mod tests {
         );
     }
 
-    /// Naming the rule changes nothing: `LayeredGreedy` IS `plan_preparation`, so the refactor is
-    /// behaviour-preserving on every shape the other tests in this module cover.
-    #[test]
-    fn layered_greedy_is_plan_preparation() {
-        let fee = fee_per_tx();
-        let cases: &[(&[u64], &[u64])] = &[
-            (&[1_000_000], &[100_000]),
-            (&[1_000_000], &[100_000, 100_000, 50_000]),
-            (&[500_000, 500_000], &[100_000, 50_000]),
-            (&[100_000 + 16 * MARGINAL_FEE.into_u64()], &[100_000]),
-            (&[10_000; 12], &[50_000]),
-            (&[1_000_000], &[]),
-            (&[], &[100_000]),
-        ];
-        for (available, funding) in cases {
-            let (available, funding) = (zats(available), zats(funding));
-            assert_eq!(
-                LayeredGreedy.plan(&available, &funding, zat(fee)),
-                plan_preparation(&available, &funding, zat(fee)),
-                "{available:?} -> {funding:?}",
-            );
-        }
-    }
-
     proptest! {
-        /// Every plan the greedy produces passes its own certificate, so the portfolio never
+        /// Every plan this rule produces passes its own certificate, so the portfolio never
         /// discards a real plan on a technicality.
         #[test]
         fn planned_plans_carry_a_valid_certificate((available, funding) in arb_input()) {
             let (available, funding, fee) = (zats(&available), zats(&funding), zat(fee_per_tx()));
-            if let Ok(plan) = plan_preparation(&available, &funding, fee) {
+            if let Ok(plan) = LayeredGreedy.plan(&available, &funding, fee) {
                 prop_assert!(plan.is_valid(&available, &funding, fee));
             }
         }
@@ -1231,10 +1207,62 @@ mod tests {
             let (available, funding, fee) = (zats(&available), zats(&funding), zat(fee_per_tx()));
             prop_assert_eq!(
                 (LayeredGreedy, ()).best_plan(&available, &funding, fee),
-                plan_preparation(&available, &funding, fee)
+                LayeredGreedy
+                    .plan(&available, &funding, fee)
                     .ok()
                     .map(|plan| ("layered-greedy", plan))
             );
         }
+    }
+
+    /// What a whole migration looks like under THIS rule alone: the answer to "what would
+    /// `plan_migration` give with only LayeredGreedy?", for every scenario the crate shares.
+    ///
+    /// Columns are preparation transactions, crossings, Keystone signing rounds, and migrated
+    /// value in units of 0.01 ZEC. [`MIGRATION_SCENARIOS`] carries what the whole portfolio
+    /// achieves for the same wallets; the gap between the two rows is what this rule costs, or
+    /// saves, on its own.
+    ///
+    /// These are recorded behaviour, not claims of optimality. They move when the rule changes,
+    /// and that movement is the point: it is how an improvement is seen.
+    const SCENARIOS_UNDER_THIS_RULE: &[(&str, usize, usize, usize, u64)] = &[
+        ("small holder, 2 ZEC", 1, 7, 1, 199),
+        ("retail, 15 ZEC", 1, 9, 1, 1499),
+        ("denominations, 60 ZEC", 1, 10, 1, 5999),
+        ("78 ZEC in a single note", 1, 10, 1, 7799),
+        (
+            "Gwen, 0.0152 ZEC (a single minimum-denomination note)",
+            1,
+            1,
+            1,
+            1,
+        ),
+        (
+            "Priya, 7.1101 ZEC (the buffer prunes the trailing crossing)",
+            1,
+            3,
+            1,
+            710,
+        ),
+        ("exchange, ten 5 ZEC notes", 2, 3, 1, 4500),
+        ("monotonic, ten 12 ZEC notes", 5, 11, 2, 11999),
+        ("dust-heavy, 1 ZEC and twelve 0.02 ZEC notes", 4, 4, 1, 123),
+        (
+            "whale plus dust, 40 ZEC and a six-note dust tail",
+            4,
+            6,
+            1,
+            4033,
+        ),
+        ("10 ZEC in a single note", 1, 9, 1, 999),
+        ("10 ZEC as 1 + 9", 4, 11, 2, 999),
+        ("10 ZEC as 2 + 8", 4, 10, 1, 999),
+        ("10 ZEC as 5 + 5", 2, 1, 1, 500),
+    ];
+
+    /// Replays [`SCENARIOS_UNDER_THIS_RULE`] through a migration planned against this rule alone.
+    #[test]
+    fn what_a_migration_looks_like_under_this_rule_alone() {
+        crate::preparation::assert_scenarios_under(&(LayeredGreedy, ()), SCENARIOS_UNDER_THIS_RULE);
     }
 }

@@ -205,6 +205,27 @@ pub fn assert_strategy_conformance<S: PreparationStrategy>(strategy: &S) {
     }
 }
 
+/// Assert `strategy` plans every [`Fundability::Depends`] instance in the corpus: the instances
+/// whose value is present but whose funding is out of some rules' reach, so planning them all is a
+/// claim about the strategy, not about the corpus. [`assert_strategy_conformance`] deliberately
+/// leaves these unpinned; a strategy that covers the whole shape-dependent family asserts it here.
+pub fn assert_funds_every_shape_dependent_instance<S: PreparationStrategy>(strategy: &S) {
+    let fee = preparation_fee_per_tx();
+    for vector in PREPARATION_VECTORS
+        .iter()
+        .filter(|v| v.fundability == Fundability::Depends)
+    {
+        assert!(
+            strategy
+                .plan(&zats(vector.available), &zats(vector.funding), fee)
+                .is_ok(),
+            "[{}] `{}` must plan",
+            strategy.name(),
+            vector.label,
+        );
+    }
+}
+
 /// Assert that `candidate` funds every instance `baseline` funds, and report any it funds that the
 /// baseline does not. Use it to show a new strategy DOMINATES an existing one: the portfolio's
 /// result can then only improve, since [`Portfolio::best_plan`](crate::preparation::Portfolio::best_plan) is monotone in the

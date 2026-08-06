@@ -260,7 +260,7 @@ pub const MIGRATION_SCENARIOS: &[MigrationScenario] = {
             710 * H,
         ),
         // Many-note shapes, consolidated across preparation layers.
-        s("exchange, ten 5 ZEC notes", TEN_FIVES, 2, 3, 1, 4_500 * H),
+        s("exchange, ten 5 ZEC notes", TEN_FIVES, 1, 5, 1, 4_900 * H),
         // Five preparations (80 actions) plus eleven transfers (33 actions) is 113 actions: the
         // only scenario that needs a second Keystone round.
         s(
@@ -282,25 +282,23 @@ pub const MIGRATION_SCENARIOS: &[MigrationScenario] = {
         s(
             "whale plus dust, 40 ZEC and a six-note dust tail",
             WHALE_DUST,
-            4,
+            1,
             6,
             1,
             4_033 * H,
         ),
-        // The same 10 ZEC balance, four note shapes. Held as one note it splits into 9 crossings in
-        // a single preparation; held as 1 + 9 the reconciled split has 11 crossings, needs 4
-        // preparations across 3 layers, and tips the run over a second Keystone round; held as
-        // 5 + 5 only 5 ZEC migrates at all, because neither 5 ZEC note can self-fund a 5 ZEC
-        // crossing and the consolidated note funds only one.
+        // The same 10 ZEC balance, four note shapes, which now agree: one preparation
+        // transaction spending whichever notes the wallet holds, and the same nine canonical
+        // crossings. These rows exist to keep them agreeing.
         s("10 ZEC in a single note", TEN_AS_ONE, 1, 9, 1, 999 * H),
-        s("10 ZEC as 1 + 9", ONE_PLUS_NINE, 4, 11, 2, 999 * H),
-        s("10 ZEC as 2 + 8", TWO_PLUS_EIGHT, 4, 10, 1, 999 * H),
-        s("10 ZEC as 5 + 5", FIVE_PLUS_FIVE, 2, 1, 1, 500 * H),
+        s("10 ZEC as 1 + 9", ONE_PLUS_NINE, 1, 9, 1, 999 * H),
+        s("10 ZEC as 2 + 8", TWO_PLUS_EIGHT, 1, 9, 1, 999 * H),
+        s("10 ZEC as 5 + 5", FIVE_PLUS_FIVE, 1, 9, 1, 999 * H),
     ]
 };
 
 /// The crossing values one [`MigrationScenario`] publishes, for the note-shape family: the same
-/// balance held several ways, which the canonical quantization alone would give identical splits.
+/// balance held several ways.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NoteShapeSplit {
     /// The [`MigrationScenario::label`] this row is the split of.
@@ -312,12 +310,11 @@ pub struct NoteShapeSplit {
     pub preparations: usize,
 }
 
-/// What each 10 ZEC note shape actually publishes.
+/// What each 10 ZEC note shape publishes.
 ///
 /// Canonical quantization of the migratable 9.99 ZEC is `500, 200, 200, 50, 20, 20, 5, 2, 2` in
-/// units of 0.01 ZEC, which is what the single-note wallet emits. The other shapes diverge from
-/// it — a defect, since the split should be a function of the balance alone — and by how much is
-/// the measurement this table exists to hold.
+/// units of 0.01 ZEC. Every shape publishes exactly that, in one preparation transaction: the
+/// split is a function of the BALANCE, and the rows are here to keep it one.
 pub const NOTE_SHAPE_SPLITS: &[NoteShapeSplit] = {
     const fn s(
         scenario_label: &'static str,
@@ -330,23 +327,13 @@ pub const NOTE_SHAPE_SPLITS: &[NoteShapeSplit] = {
             preparations,
         }
     }
+    /// The canonical split of 9.99 ZEC, which every shape below publishes.
+    const CANONICAL: &[u64] = &[500, 200, 200, 50, 20, 20, 5, 2, 2];
     &[
-        s(
-            "10 ZEC in a single note",
-            &[500, 200, 200, 50, 20, 20, 5, 2, 2],
-            1,
-        ),
-        s(
-            "10 ZEC as 1 + 9",
-            &[500, 200, 100, 50, 50, 50, 20, 20, 5, 2, 2],
-            4,
-        ),
-        s(
-            "10 ZEC as 2 + 8",
-            &[500, 200, 100, 100, 50, 20, 20, 5, 2, 2],
-            4,
-        ),
-        s("10 ZEC as 5 + 5", &[500], 2),
+        s("10 ZEC in a single note", CANONICAL, 1),
+        s("10 ZEC as 1 + 9", CANONICAL, 1),
+        s("10 ZEC as 2 + 8", CANONICAL, 1),
+        s("10 ZEC as 5 + 5", CANONICAL, 1),
     ]
 };
 
@@ -367,22 +354,11 @@ pub struct NoteShapeBudgetCase {
 /// What the note shape costs the USER AT THE SIGNER: one 10 ZEC balance, four note shapes, priced
 /// for five signer budgets.
 ///
-/// The action total a shape produces is `preparations * 16 + crossings * 3`, so the note shape
-/// decides the signing workload as much as the balance does:
+/// Every shape plans one preparation transaction and nine crossings, so every shape is
+/// `1 * 16 + 9 * 3 = 43` actions and the four rows of any budget agree. That agreement is the
+/// property: the wallet's note shape does not change how many times its owner is asked to sign.
 ///
-/// | 10 ZEC held as | preparations | crossings | actions |
-/// |----------------|--------------|-----------|---------|
-/// | one note       | 1            | 9         | 43      |
-/// | 1 + 9          | 4            | 11        | 97      |
-/// | 2 + 8          | 4            | 10        | 94      |
-/// | 5 + 5          | 2            | 1         | 35      |
-///
-/// The consequence a user feels: `1 + 9` is 97 actions, ONE over a Keystone round, so that wallet
-/// signs twice where the single-note wallet signs once, and `2 + 8` (94 actions, the same 4
-/// preparations) still signs once. On a tighter 48-action signer the same shape costs 3 rounds
-/// against the single-note wallet's 1.
-///
-/// Every row is hand-derived from the two-item-size packing (16-action preparations, 3-action
+/// Each row is hand-derived from the two-item-size packing (16-action preparations, 3-action
 /// transfers) and cross-checked against `min_signing_rounds` by the test that replays it.
 pub const NOTE_SHAPE_BUDGET_ROUNDS: &[NoteShapeBudgetCase] = {
     const fn b(
@@ -409,27 +385,26 @@ pub const NOTE_SHAPE_BUDGET_ROUNDS: &[NoteShapeBudgetCase] = {
     const TWO_PLUS_EIGHT: &str = "10 ZEC as 2 + 8";
     const FIVE_PLUS_FIVE: &str = "10 ZEC as 5 + 5";
     &[
-        // At the floor every preparation fills a round alone and transfers pack five to a round.
-        b(ONE_NOTE, MIN, 3),       // 1 prep + ceil(9/5)
-        b(ONE_PLUS_NINE, MIN, 7),  // 4 preps + ceil(11/5)
-        b(TWO_PLUS_EIGHT, MIN, 6), // 4 preps + ceil(10/5)
-        b(FIVE_PLUS_FIVE, MIN, 3), // 2 preps + 1
-        // 32 actions: one preparation plus five transfers per round (31), or two preparations (32).
+        // At the floor the preparation fills a round alone and transfers pack five to a round:
+        // 1 + ceil(9/5).
+        b(ONE_NOTE, MIN, 3),
+        b(ONE_PLUS_NINE, MIN, 3),
+        b(TWO_PLUS_EIGHT, MIN, 3),
+        b(FIVE_PLUS_FIVE, MIN, 3),
+        // 32 actions: the preparation plus five transfers is 31, leaving four transfers over.
         b(ONE_NOTE, TIGHT, 2),
-        b(ONE_PLUS_NINE, TIGHT, 4), // 97 actions cannot beat ceil(97/32)
-        b(TWO_PLUS_EIGHT, TIGHT, 3),
+        b(ONE_PLUS_NINE, TIGHT, 2),
+        b(TWO_PLUS_EIGHT, TIGHT, 2),
         b(FIVE_PLUS_FIVE, TIGHT, 2),
-        // 48 actions: the single-note wallet signs once; the 1 + 9 wallet signs three times.
+        // 48 actions and up: the whole run is 43, so one interaction.
         b(ONE_NOTE, MODEST, 1),
-        b(ONE_PLUS_NINE, MODEST, 3),
-        b(TWO_PLUS_EIGHT, MODEST, 2),
+        b(ONE_PLUS_NINE, MODEST, 1),
+        b(TWO_PLUS_EIGHT, MODEST, 1),
         b(FIVE_PLUS_FIVE, MODEST, 1),
-        // Keystone: 1 + 9 is one action over a single round, so it costs a second interaction.
         b(ONE_NOTE, KEYSTONE, 1),
-        b(ONE_PLUS_NINE, KEYSTONE, 2),
-        b(TWO_PLUS_EIGHT, KEYSTONE, 1), // 94 actions still fit
+        b(ONE_PLUS_NINE, KEYSTONE, 1),
+        b(TWO_PLUS_EIGHT, KEYSTONE, 1),
         b(FIVE_PLUS_FIVE, KEYSTONE, 1),
-        // A software signer takes every shape in one round.
         b(ONE_NOTE, DEFAULT, 1),
         b(ONE_PLUS_NINE, DEFAULT, 1),
         b(TWO_PLUS_EIGHT, DEFAULT, 1),

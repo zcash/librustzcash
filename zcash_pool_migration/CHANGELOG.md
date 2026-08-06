@@ -38,6 +38,14 @@ and this library adheres to Rust's notion of
 - `state::StepKind` and `state::AdvanceStep::kind`: an `AdvanceStep`'s variant
   without its payload.
 - `preparation::PreparationStrategy`.
+- `preparation::first_fit_decreasing::FirstFitDecreasing`, re-exported as
+  `preparation::FirstFitDecreasing`.
+- `preparation::plan_preparation_with` and `preparation::default_portfolio`, to
+  plan against a chosen set of strategies rather than the ones the crate ships.
+- `engine::plan_migration_with`, the same choice at the whole-migration level.
+  It reaches the crossings as well as the preparation transactions, since the
+  denomination decomposition asks the preparation planner what it can mint at
+  every step.
 - `preparation::layered_greedy::LayeredGreedy`, re-exported as
   `preparation::LayeredGreedy`.
 - `preparation::PreparationPlan::is_valid`.
@@ -54,7 +62,13 @@ and this library adheres to Rust's notion of
   from each transaction's scheduled height by hand.
 - `preparation::plan_preparation` now returns the best plan produced by any of
   the strategies the crate ships, rather than the layered greedy's plan. Its
-  signature, its errors and the plans it returns are unchanged.
+  signature, its errors and the plans it returns are unchanged. The plans
+  differ: a wallet whose funding notes need a transaction that spends several
+  notes and mints several is now planned in one transaction and one layer,
+  where it previously took a chain of merges and splits across layers or could
+  not be planned at all. A consumer that pinned the number of preparation
+  transactions, the number of crossings, or the migrated value for a given
+  wallet will see those change.
 - A transfer's proof is now offered (`state::AdvanceStep::Prove`, and `ready`
   with `state::NextAction::Prove` in `state::MigrationState::transaction_statuses`)
   only once its drawn anchor boundary sits at least
