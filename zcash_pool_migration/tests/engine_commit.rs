@@ -31,6 +31,13 @@ use zcash_pool_migration::signing_rounds::SigningRoundBudget;
 use zcash_pool_migration::state::AdvanceStep;
 use zcash_pool_migration_memory::{CommitMock, TARGET_HEIGHT, regtest_network, spending_key};
 
+/// The account's Orchard spend authority, as a caller now hands it to the entry points that sign
+/// (`commit_preparation`, `rebuild_expired_transfer`). Derived from the same `seed` the mock
+/// wallet's key is, so it authorizes exactly that account's spends.
+fn ask(seed: u64) -> SpendAuthorizingKey {
+    SpendAuthorizingKey::from(&spending_key(seed))
+}
+
 /// A planned single-note migration and the mock wallet that holds the note.
 fn single_note_setup(seed: u64, balance: u64) -> (CommitMock, MigrationPlan) {
     let backend = CommitMock::new(seed, &[balance]);
@@ -60,6 +67,7 @@ fn commits_the_whole_migration_in_one_pass() {
         &params,
         BlockHeight::from_u32(TARGET_HEIGHT),
         &mut backend,
+        &ask(seed),
         &plan,
         &mut rng,
         ReplanThreshold::DEFAULT,
@@ -130,6 +138,7 @@ fn commits_a_multi_layer_migration_in_one_pass() {
         &params,
         BlockHeight::from_u32(TARGET_HEIGHT),
         &mut backend,
+        &ask(seed),
         &plan,
         &mut rng,
         ReplanThreshold::DEFAULT,
@@ -336,6 +345,7 @@ fn every_committed_transaction_has_a_derivable_txid() {
         &regtest_network(true),
         BlockHeight::from_u32(TARGET_HEIGHT),
         &mut backend,
+        &ask(seed),
         &plan,
         &mut rng,
         ReplanThreshold::DEFAULT,
@@ -380,6 +390,7 @@ fn advance_promotes_a_proved_transaction_whose_broadcast_was_never_recorded() {
         &regtest_network(true),
         BlockHeight::from_u32(TARGET_HEIGHT),
         &mut backend,
+        &ask(seed),
         &plan,
         &mut rng,
         ReplanThreshold::DEFAULT,

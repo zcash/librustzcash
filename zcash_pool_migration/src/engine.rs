@@ -12,9 +12,13 @@
 //! fees (dropping the smallest denominations when the fees do not fit the balance), producing a
 //! [`MigrationPlan`] preview for the user to consent to (ZIP 318 requires consent before any funds leave
 //! the pool). After consent, [`commit_preparation`] builds and pre-signs EVERY transaction in one
-//! pass, reading the account's note plaintexts and signing through the backend traits, and
-//! persisting each transaction through the store traits. The concrete durable store, proving, and
-//! reconciliation-on-launch are grown by a later slice.
+//! pass, reading the account's note plaintexts through the backend traits, signing with the spend
+//! authority the CALLER passes to it, and persisting each transaction through the store traits.
+//! Spend authority is an argument to the two operations that sign — this one and
+//! [`rebuild_expired_transfer`] — and to nothing else, so a backend is never asked to hold it: an
+//! account whose key is on a hardware wallet uses [`build_preparation_unsigned`] and signs off
+//! device. The concrete durable store, proving, and reconciliation-on-launch are grown by a later
+//! slice.
 //!
 //! # The committed migration is stored as its transactions' PCZTs
 //!
@@ -1723,8 +1727,14 @@ pub trait MigrationCrypto {
     /// The backend's error type (shared with its [`MigrationBackend`] impl).
     type Error;
 
-    /// The account's Orchard full viewing key.
-    fn orchard_fvk(&self) -> Result<orchard::keys::FullViewingKey, Self::Error>;
+    /// The account's Orchard full viewing key, or `None` if the account has none.
+    ///
+    /// Infallible, because a backend is HANDED this key (or the unified key holding it) rather than
+    /// going to look for one: producing it does no work that can fail. `None` is the account whose
+    /// unified key carries no Orchard component — nothing this crate does can serve such an
+    /// account, and each entry point that needs the key reports that in its own error WHERE IT
+    /// NEEDS IT, rather than making every holder of a key prove up front that it has one.
+    fn orchard_fvk(&self) -> Option<&orchard::keys::FullViewingKey>;
 
     /// The ZIP 32 account the migration's notes belong to, or `None` if the account has no known
     /// derivation (an imported viewing key, say).
@@ -1739,9 +1749,6 @@ pub trait MigrationCrypto {
     /// The plaintext of the spendable wallet note at `index` (into
     /// `spendable_orchard_note_values`).
     fn resolve_wallet_note(&self, index: usize) -> Result<orchard::note::Note, Self::Error>;
-
-    /// Add the account's Orchard spend-authorization signatures to a finalized, unproven PCZT.
-    fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
 }
 
 /// A prover's typed failure: the one condition the engine handles — an input not among the
@@ -1856,13 +1863,16 @@ impl ProvedTransaction {
 /// The proving seam for a migration transfer: install a transfer's deferred anchors and witnesses
 /// (ZIP 374) against the boundary its schedule drew, then prove it.
 ///
-/// This is deliberately SEPARATE from [`MigrationCrypto`]. Signing needs only the account's spend
-/// authority and is a cheap, read-only (`&self`) operation; proving needs MUTABLE access to the
-/// wallet's Orchard commitment tree at a historical checkpoint (resolving a witness caches into the
-/// tree) plus the Orchard and Ironwood proving keys, a heavier capability with a different lifetime.
-/// Keeping proving in its own trait lets a wallet expose signing without dragging commitment-tree
-/// access and proving parameters into the same type, and lets a consumer supply a prover
-/// independently of the signer.
+/// Proving is a CAPABILITY a consumer supplies, which is why it is a trait at all, and why it is
+/// separate from both of the other two. Signing takes nothing but the account's spend authority,
+/// which is why it is not a trait but an argument to the calls that sign; reading the account's
+/// notes and keys is [`MigrationCrypto`], a cheap read-only (`&self`) borrow of a wallet. Proving
+/// is neither: it needs MUTABLE access to the wallet's Orchard commitment tree at a historical
+/// checkpoint (resolving a witness caches into the tree) plus the Orchard and Ironwood proving
+/// keys — a heavier capability, with a different lifetime, that a consumer may want to place
+/// somewhere else entirely (another process, or a machine that holds the parameters). Keeping it in
+/// its own trait lets a wallet be a migration backend without dragging commitment-tree access and
+/// proving parameters into the same type.
 #[cfg(feature = "orchard")]
 pub trait MigrationProver {
     /// The prover's error type.
@@ -1973,9 +1983,16 @@ pub trait MigrationProver {
 #[cfg(feature = "orchard")]
 #[derive(Debug)]
 pub enum CommitError<E> {
-    /// A wallet backend operation (witness, key, signing, or storage) failed.
+    /// A wallet backend operation (reading the account's key, its notes, or its storage) failed.
+    /// NOT signing: the spend authority is the caller's argument, not the backend's, so a failed
+    /// signature is a [`Build`](Self::Build).
     Backend(E),
-    /// Building a migration transaction failed. Carries the structured builder error.
+    /// The backend reports no Orchard full viewing key for the account
+    /// ([`MigrationCrypto::orchard_fvk`]), so there is nothing to build a migration against: every
+    /// transaction of a run spends and creates Orchard notes.
+    NoOrchardViewingKey,
+    /// Building a migration transaction failed, INCLUDING signing it with the authority the caller
+    /// passed. Carries the structured builder error.
     Build(crate::build::BuildError),
     /// A built migration PCZT presents no well-formed set of real spends, so the real-spend
     /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be extracted from it.
@@ -2015,6 +2032,9 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommitError::Backend(e) => write!(f, "wallet backend error: {e}"),
+            CommitError::NoOrchardViewingKey => {
+                f.write_str("the account has no Orchard full viewing key")
+            }
             CommitError::Build(e) => write!(f, "building the migration failed: {e}"),
             CommitError::RealSpends(e) => {
                 write!(f, "a built migration transaction has no real spends: {e}")
@@ -2528,7 +2548,9 @@ pub enum RebuildError<E> {
         /// The grid the backend schedules against now.
         configured: crate::scheduling::AnchorBucketInterval,
     },
-    /// Building the fresh transfer PCZT failed.
+    /// Building the fresh transfer PCZT failed, INCLUDING signing it anew with the authority the
+    /// caller passed (an expired transfer's signature hash covers its expiry, so the rebuild must
+    /// re-sign).
     Build(crate::build::BuildError),
     /// The rebuilt transfer PCZT presents no well-formed set of real spends, so the real-spend
     /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be refreshed from it.
@@ -2538,8 +2560,13 @@ pub enum RebuildError<E> {
     TxId(crate::pczt_txid::TxIdError),
     /// Serializing the rebuilt PCZT failed.
     Serialize(pczt::EncodingError),
-    /// A wallet backend or signing operation failed.
+    /// A wallet backend operation (reading the account's key or its notes) failed. NOT signing:
+    /// the spend authority is the caller's argument, not the backend's, so a failed signature is a
+    /// [`Build`](Self::Build).
     Backend(E),
+    /// The backend reports no Orchard full viewing key for the account
+    /// ([`MigrationCrypto::orchard_fvk`]), so the replacement transfer cannot be built.
+    NoOrchardViewingKey,
 }
 
 #[cfg(feature = "orchard")]
@@ -2600,6 +2627,9 @@ impl<E: fmt::Display> fmt::Display for RebuildError<E> {
                 write!(f, "serializing the rebuilt transfer failed: {e:?}")
             }
             RebuildError::Backend(e) => write!(f, "wallet backend error: {e}"),
+            RebuildError::NoOrchardViewingKey => {
+                f.write_str("the account has no Orchard full viewing key")
+            }
         }
     }
 }
@@ -2625,12 +2655,13 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 /// replaces the stored PCZT. Anchors and witnesses stay DEFERRED (ZIP 374): the fresh anchor is
 /// installed at proving time, exactly as for an originally committed transfer.
 ///
-/// Signing anew is what distinguishes this step from proving and broadcasting: it needs the
-/// account's SPEND AUTHORITY, not just the viewing key and the network. This entry point signs
-/// in-process via [`MigrationCrypto::sign`], for a wallet that holds the spend authority; a
+/// Signing anew is what distinguishes this step from the other steps of driving a migration: of
+/// proving, broadcasting and advancing, none needs the account's SPEND AUTHORITY, and this one
+/// does — which is why `ask` is a parameter here and of no other drive step. (The other place it
+/// is taken at all is [`commit_preparation`], which signs the whole run once, up front.) A
 /// migration signed by an EXTERNAL (hardware or offline) signer uses
-/// [`rebuild_expired_transfer_unsigned`] instead, which leaves the rebuilt transfer awaiting the
-/// device's signature.
+/// [`rebuild_expired_transfer_unsigned`] instead, which takes no authority and leaves the rebuilt
+/// transfer awaiting the device's signature.
 ///
 /// The funding note is recovered by IDENTITY, not by value: the expired PCZT's one real spend
 /// reveals the note's nullifier, which is matched among the wallet's spendable Orchard notes. The
@@ -2649,6 +2680,7 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 pub fn rebuild_expired_transfer<P, B, R>(
     params: &P,
     backend: &B,
+    ask: &orchard::keys::SpendAuthorizingKey,
     state: &mut MigrationState,
     id: MigrationTransferId,
     rng: &mut R,
@@ -2658,7 +2690,8 @@ where
     B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
     R: RngCore + rand_core::CryptoRng,
 {
-    rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::InProcess).map(|_| ())
+    rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::InProcess(ask))
+        .map(|_| ())
 }
 
 /// Rebuild an EXPIRED migration transfer for an EXTERNAL signer: construct the same entirely new
@@ -2669,8 +2702,8 @@ where
 ///
 /// An expired transaction must be signed ANEW — its signature hash covers the expiry height — and
 /// for an externally signed migration the spend authority is on the device, not in-process: the
-/// rebuild therefore requires a new signing session, unlike proving and broadcasting.
-/// [`MigrationCrypto::sign`] is never called. After the device signs, call
+/// rebuild therefore requires a new signing session, unlike proving and broadcasting. Nothing
+/// here takes a spend authority, so nothing here can sign. After the device signs, call
 /// [`MigrationState::apply_signature`] with the returned PCZT (matched by
 /// [`UnsignedMigrationTx::id`]) to move the transfer to [`Signed`](MigrationTxState::Signed), and
 /// persist with `replace_migration`.
@@ -2701,7 +2734,7 @@ fn rebuild_expired_transfer_inner<P, B, R>(
     state: &mut MigrationState,
     id: MigrationTransferId,
     rng: &mut R,
-    signing: Signing,
+    signing: Signing<'_>,
 ) -> Result<Option<UnsignedMigrationTx>, RebuildError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters,
@@ -2814,7 +2847,10 @@ where
     // The exact note must still be among the wallet's spendable notes; if it is gone (spent
     // outside the migration), the remaining balance must be re-planned rather than this part
     // rebuilt, so a different note of coincidentally equal value is deliberately NOT substituted.
-    let fvk = backend.orchard_fvk().map_err(RebuildError::Backend)?;
+    let fvk = backend
+        .orchard_fvk()
+        .cloned()
+        .ok_or(RebuildError::NoOrchardViewingKey)?;
     let account_derivation = backend
         .account_derivation()
         .map_err(RebuildError::Backend)?;
@@ -2875,8 +2911,8 @@ where
     // not affect it — see `crate::pczt_txid`).
     let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(RebuildError::TxId)?;
     let (bytes, new_state, unsigned) = match signing {
-        Signing::InProcess => {
-            let signed = backend.sign(pczt).map_err(RebuildError::Backend)?;
+        Signing::InProcess(ask) => {
+            let signed = crate::build::sign_pczt(pczt, ask).map_err(RebuildError::Build)?;
             let bytes = signed.serialize().map_err(RebuildError::Serialize)?;
             (bytes, MigrationTxState::Signed, None)
         }
@@ -2909,13 +2945,18 @@ where
     Ok(unsigned)
 }
 
-/// How a freshly built migration PCZT is finished by the commit functions: signed in-process with the
-/// wallet's spend authority, or left unsigned for an external (hardware or offline) signer.
+/// How a freshly built migration PCZT is finished by the commit functions: signed in-process with
+/// the spend authority the caller PASSED IN, or left unsigned for an external (hardware or
+/// offline) signer.
+///
+/// The authority rides on the in-process variant rather than being held by the backend, which is
+/// what makes "sign in process, with no key" unrepresentable: the two arms of this enum are
+/// exactly the two things a caller can supply, and only one of them can sign.
 #[cfg(feature = "orchard")]
 #[derive(Clone, Copy)]
-enum Signing {
-    /// Sign in-process via [`MigrationCrypto::sign`].
-    InProcess,
+enum Signing<'a> {
+    /// Sign each built PCZT here, with this Orchard spend-authorizing key.
+    InProcess(&'a orchard::keys::SpendAuthorizingKey),
     /// Leave the PCZT unsigned for an external signer; the caller receives it to sign out of band.
     External,
 }
@@ -3028,27 +3069,27 @@ impl MigrationPlan {
     }
 }
 
-/// Serialize a freshly built PCZT for storage. For [`Signing::InProcess`], sign it with the backend and
-/// return the signed bytes as [`Signed`](MigrationTxState::Signed); for [`Signing::External`], return the
-/// unsigned bytes as [`AwaitingSignature`](MigrationTxState::AwaitingSignature) (the caller also routes a
-/// copy of those bytes to the external signer).
+/// Serialize a freshly built PCZT for storage. For [`Signing::InProcess`], sign it with the
+/// authority that variant carries and return the signed bytes as
+/// [`Signed`](MigrationTxState::Signed); for [`Signing::External`], return the unsigned bytes as
+/// [`AwaitingSignature`](MigrationTxState::AwaitingSignature) (the caller also routes a copy of
+/// those bytes to the external signer).
+///
+/// Takes no backend: signing an already-built PCZT needs nothing from the wallet but the key, and
+/// the key arrives with the request.
 #[cfg(feature = "orchard")]
-fn finish_built_pczt<B>(
-    backend: &mut B,
+fn finish_built_pczt<E>(
     pczt: ::pczt::Pczt,
-    signing: Signing,
-) -> Result<(Vec<u8>, TxId, MigrationTxState), CommitError<<B as MigrationBackend>::Error>>
-where
-    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
-{
+    signing: Signing<'_>,
+) -> Result<(Vec<u8>, TxId, MigrationTxState), CommitError<E>> {
     // Derived BEFORE signing, which is the only order that makes sense: signing needs the txid to
     // build its signature hash, so the id exists ahead of either arm below and neither can change
     // it. A migration built for an external signer is therefore as identifiable as one signed in
     // process, and stays so once the returned signature is applied.
     let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(CommitError::TxId)?;
     match signing {
-        Signing::InProcess => {
-            let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
+        Signing::InProcess(ask) => {
+            let signed = crate::build::sign_pczt(pczt, ask).map_err(CommitError::Build)?;
             let bytes = signed.serialize().map_err(CommitError::Serialize)?;
             Ok((bytes, txid, MigrationTxState::Signed))
         }
@@ -3094,11 +3135,21 @@ struct MintedNote {
 /// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
 /// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
 /// a specific policy.
+///
+/// `ask` is the account's Orchard spend authority, and every transaction of the run is signed with
+/// it before this returns. It is an argument rather than something `backend` holds so that a
+/// wallet need not keep the account's spending key reachable in order to plan, build or store a
+/// migration: the key is live for this call. A caller holding the account's `UnifiedSpendingKey`
+/// passes `SpendAuthorizingKey::from(usk.orchard())`; a caller that cannot (a watch-only account,
+/// or one whose key is on a device) uses [`build_preparation_unsigned`], which takes no authority
+/// and hands the unsigned transactions out to be signed elsewhere. The key must be the one whose
+/// full viewing key `backend` reports, or the signatures authorize nothing the transactions spend.
 #[cfg(feature = "orchard")]
 pub fn commit_preparation<P, B, R>(
     params: &P,
     target_height: BlockHeight,
     backend: &mut B,
+    ask: &orchard::keys::SpendAuthorizingKey,
     plan: &MigrationPlan,
     rng: &mut R,
     replan_threshold: ReplanThreshold,
@@ -3117,7 +3168,7 @@ where
         backend,
         plan,
         rng,
-        Signing::InProcess,
+        Signing::InProcess(ask),
         replan_threshold,
     )
     .map(|output| output.state)
@@ -3178,7 +3229,7 @@ fn commit_preparation_inner<P, B, R>(
     backend: &mut B,
     plan: &MigrationPlan,
     rng: &mut R,
-    signing: Signing,
+    signing: Signing<'_>,
     replan_threshold: ReplanThreshold,
 ) -> Result<CommitOutput, CommitError<<B as MigrationBackend>::Error>>
 where
@@ -3210,12 +3261,14 @@ where
 ///
 /// `replan_threshold` is the policy stamped on the committed migration (see
 /// [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent a specific
-/// policy; the other parameters are as [`commit_preparation`]'s.
+/// policy; the other parameters are as [`commit_preparation`]'s, including `ask`, the account's
+/// Orchard spend authority, with which every transaction of the run is signed before this returns.
 #[cfg(all(feature = "orchard", any(test, feature = "test-dependencies")))]
 pub fn commit_preparation_with_funding<P, B, R>(
     params: &P,
     target_height: BlockHeight,
     backend: &mut B,
+    ask: &orchard::keys::SpendAuthorizingKey,
     plan: &MigrationPlan,
     rng: &mut R,
     replan_threshold: ReplanThreshold,
@@ -3234,7 +3287,7 @@ where
         backend,
         plan,
         rng,
-        Signing::InProcess,
+        Signing::InProcess(ask),
         replan_threshold,
     )
     .map(|output| (output.state, output.transfer_funding))
@@ -3258,7 +3311,7 @@ struct Committer<'a, P, B, R> {
     target_height: BlockHeight,
     backend: &'a mut B,
     rng: &'a mut R,
-    signing: Signing,
+    signing: Signing<'a>,
     fvk: orchard::keys::FullViewingKey,
     /// The ZIP 32 account every built transaction's spends are stamped with, so an external Signer
     /// can identify them. Resolved once in [`Committer::start`], alongside `fvk`.
@@ -3293,7 +3346,7 @@ where
         target_height: BlockHeight,
         backend: &'a mut B,
         rng: &'a mut R,
-        signing: Signing,
+        signing: Signing<'a>,
     ) -> Result<Self, CommitError<<B as MigrationBackend>::Error>> {
         // A committed migration is resumed from the store (or cancelled), never rebuilt over (see
         // [`MigrationState::is_terminal`]): checked FIRST, before any signing work, so a crashed or
@@ -3306,7 +3359,10 @@ where
             return Err(CommitError::MigrationInProgress);
         }
 
-        let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
+        let fvk = backend
+            .orchard_fvk()
+            .cloned()
+            .ok_or(CommitError::NoOrchardViewingKey)?;
         let account_derivation = backend.account_derivation().map_err(CommitError::Backend)?;
 
         Ok(Self {
@@ -3459,7 +3515,7 @@ where
                     .into_iter()
                     .map(|(_, nf)| nf.to_bytes())
                     .collect();
-                let (bytes, txid, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
+                let (bytes, txid, tx_state) = finish_built_pczt(pczt, self.signing)?;
                 if matches!(self.signing, Signing::External) {
                     self.unsigned.push(UnsignedMigrationTx {
                         id,
@@ -3633,7 +3689,7 @@ where
                 .into_iter()
                 .map(|(_, nf)| nf.to_bytes())
                 .collect();
-            let (bytes, txid, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
+            let (bytes, txid, tx_state) = finish_built_pczt(pczt, self.signing)?;
             if matches!(self.signing, Signing::External) {
                 self.unsigned.push(UnsignedMigrationTx {
                     id,
@@ -4585,8 +4641,8 @@ mod commit_tests {
     impl MigrationCrypto for CommitMock {
         type Error = core::convert::Infallible;
 
-        fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
-            Ok(self.fvk.clone())
+        fn orchard_fvk(&self) -> Option<&FullViewingKey> {
+            Some(&self.fvk)
         }
 
         fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error> {
@@ -4595,10 +4651,6 @@ mod commit_tests {
 
         fn resolve_wallet_note(&self, index: usize) -> Result<orchard::note::Note, Self::Error> {
             Ok(self.wallet_notes[index])
-        }
-
-        fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
-            Ok(sign_pczt(pczt, &self.ask).expect("signs the migration PCZT"))
         }
     }
 
@@ -4678,6 +4730,13 @@ mod commit_tests {
         }
     }
 
+    /// The account's Orchard spend authority, as a caller now hands it to the entry points that sign
+    /// (`commit_preparation`, `rebuild_expired_transfer`). Derived from the same `seed` the mock
+    /// wallet's key is, so it authorizes exactly that account's spends.
+    fn ask(seed: u64) -> SpendAuthorizingKey {
+        SpendAuthorizingKey::from(&spending_key(seed))
+    }
+
     /// A planned single-note migration and the mock wallet that holds the note.
     fn single_note_setup(seed: u64, balance: u64) -> (CommitMock, MigrationPlan) {
         let backend = CommitMock::new(seed, &[balance]);
@@ -4707,6 +4766,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -4917,6 +4977,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -4943,7 +5004,7 @@ mod commit_tests {
 
         // Rebuild it.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
-        rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng)
+        rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, id, &mut rng)
             .expect("rebuilds the expired transfer");
 
         let new = &state.transactions[0];
@@ -5015,6 +5076,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5063,7 +5125,7 @@ mod commit_tests {
 
         // The rebuild recovers the funding note from the persisted nullifier cache.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
-        rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng)
+        rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, id, &mut rng)
             .expect("rebuilds the expired proved transfer");
         let new = &state.transactions[0];
         assert_eq!(new.state, MigrationTxState::Signed);
@@ -5112,6 +5174,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5136,8 +5199,15 @@ mod commit_tests {
         backend.tip = latest_expiry + 1;
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
-        rebuild_expired_transfer(&params, &backend, &mut state, victim.id, &mut rng)
-            .expect("rebuilds the expired transfer");
+        rebuild_expired_transfer(
+            &params,
+            &backend,
+            &backend.ask,
+            &mut state,
+            victim.id,
+            &mut rng,
+        )
+        .expect("rebuilds the expired transfer");
 
         let rebuilt = state
             .transactions
@@ -5169,6 +5239,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5184,7 +5255,7 @@ mod commit_tests {
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, tx.id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, tx.id, &mut rng),
             Err(RebuildError::FundingNoteUnavailable(v))
                 if v == Zatoshis::from_u64(funding_note).expect("test value is valid")
         ));
@@ -5297,6 +5368,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5307,13 +5379,13 @@ mod commit_tests {
         // Not expired yet (the tip is far below the expiry): rejected.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, id, &mut rng),
             Err(RebuildError::NotExpired(rejected)) if rejected == id
         ));
         // An unknown id: rejected.
         let unknown = MigrationTransferId::new(9999);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, unknown, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, unknown, &mut rng),
             Err(RebuildError::UnknownTransaction(rejected)) if rejected == unknown
         ));
 
@@ -5323,7 +5395,7 @@ mod commit_tests {
         state.transactions[0].kind = MigrationTxKind::Preparation { layer: 0, index: 0 };
         backend.tip = state.transactions[0].expiry_height + 1;
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, id, &mut rng),
             Err(RebuildError::NotATransfer(rejected)) if rejected == id
         ));
     }
@@ -5348,6 +5420,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5361,7 +5434,7 @@ mod commit_tests {
         state.transactions[0].unsatisfiable = Some((mark, UnsatisfiableKind::InputsSpent));
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, id, &mut rng),
             Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
         ));
 
@@ -5378,7 +5451,7 @@ mod commit_tests {
         );
         let before = state.transactions[0].clone();
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, id, &mut rng),
             Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
         ));
         assert_eq!(
@@ -5409,7 +5482,7 @@ mod commit_tests {
             None,
         ));
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, id, &mut rng),
             Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
         ));
     }
@@ -5526,6 +5599,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5648,6 +5722,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5722,6 +5797,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng2,
             ReplanThreshold::DEFAULT,
@@ -5980,6 +6056,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5992,6 +6069,7 @@ mod commit_tests {
                 &params,
                 BlockHeight::from_u32(TARGET_HEIGHT),
                 &mut backend,
+                &ask(seed),
                 &plan,
                 &mut rng,
                 ReplanThreshold::DEFAULT,
@@ -6008,6 +6086,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6032,6 +6111,7 @@ mod commit_tests {
                 &regtest_network(true),
                 BlockHeight::from_u32(TARGET_HEIGHT),
                 &mut backend,
+                &ask(seed),
                 &plan,
                 &mut rng,
                 ReplanThreshold::DEFAULT,
@@ -6056,6 +6136,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6157,6 +6238,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6341,6 +6423,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6389,7 +6472,7 @@ mod commit_tests {
         // is invalid rather than this transfer being repairable.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, transfer_id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &backend.ask, &mut state, transfer_id, &mut rng),
             Err(RebuildError::AnchorIntervalMismatch {
                 committed: c,
                 configured: g,
@@ -6501,6 +6584,7 @@ mod commit_tests {
             &regtest_network(true),
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &ask(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
