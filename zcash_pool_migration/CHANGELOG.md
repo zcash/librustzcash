@@ -7,7 +7,18 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.0-rc.7] - 2026-08-07
+
 ### Added
+- `engine::MigrationLockOwner`, the token identifying the holder of the
+  wallet-side locks on a migration transaction's input notes.
+- `engine::MigrationProver::lock_spent_notes` (required), called by
+  `prove_transfer` and `prove_preparation` once the proof succeeds, so a
+  transaction reserves the notes it spends for exactly as long as it is proved
+  and awaiting broadcast. An implementation that models no lock state returns
+  `Ok(None)`.
+- `wallet::WalletProveError::Lock`, reporting a note that another flow has
+  already reserved.
 - `state::MigrationState::mark_cancelled`, which moves a non-terminal migration
   to that status. A no-op on an already-terminal migration, so terminality is
   never overwritten. This is a status change only: it does not release any hold
@@ -53,6 +64,9 @@ and this library adheres to Rust's notion of
 - `preparation::Portfolio`, implemented for `()` and for `(H, T)` where `H:
   PreparationStrategy` and `T: Portfolio`, so a set of strategies is written
   `(A, (B, (C, ())))`.
+- `testing::assert_strategy_conformance` and `testing::assert_dominates`, the
+  conformance suite an implementation of `preparation::PreparationStrategy`
+  inherits by calling them.
 
 ### Changed
 - `wallet::WalletMigration` now snapshots the account's spendable Orchard
@@ -156,6 +170,21 @@ and this library adheres to Rust's notion of
   broken by transaction id. Storage order is dependency order, which diverges
   from the schedule once `engine::rebuild_expired_transfer` reschedules a
   transfer in place.
+- `engine::MigrationTransaction::lock_owner` and
+  `MigrationTransaction::from_parts` now use `MigrationLockOwner` in place of a
+  bare `[u8; 32]`.
+- `engine::MigrationState::set_transaction_proved` takes the lock owner the
+  transaction's notes were reserved under, so a store write persists the proven
+  artifact and its lock token together.
+- `wallet::WalletProveError` has a fourth type parameter, the lock store's
+  error type.
+- `wallet::WalletMigrationProver` implements `engine::MigrationProver` only for
+  a wallet that is also an `OutputLockStore`.
+
+### Removed
+- `zip318_shape`, and with it `zip318_shape::evidence_from_pczt`. A consumer
+  that gathered `zcash_protocol::zip318::Zip318Evidence` from an unmined PCZT
+  must now assemble it from the `pczt` bundle observations itself.
 
 ## [0.1.0-rc.6] - 2026-08-03
 
@@ -490,15 +519,6 @@ and this library adheres to Rust's notion of
   transfer schedule's drawn anchor boundaries and broadcast heights.
 - `zcash_pool_migration::engine::MigrationState::sync_wakeup_schedule`, the above computed over a
   committed migration's transfers that still need proofs.
-- `zcash_pool_migration::engine::MigrationLockOwner`, the token identifying the
-  holder of the wallet-side locks on a migration transaction's input notes.
-- `zcash_pool_migration::engine::MigrationProver::lock_spent_notes`, called by
-  `prove_transfer` and `prove_preparation` once the proof succeeds, so a
-  transaction reserves the notes it spends for exactly as long as it is proved
-  and awaiting broadcast. It is a REQUIRED method: an existing prover must
-  implement it, returning `Ok(None)` if it models no lock state.
-- `zcash_pool_migration::wallet::WalletProveError::Lock`, reporting a note that
-  another flow has already reserved.
 
 ### Changed
 - Migrated to `zcash_client_backend 0.24.0-rc.5`.
@@ -529,16 +549,6 @@ and this library adheres to Rust's notion of
 - `zcash_pool_migration::wallet::WalletMigration` implements `MigrationCrypto`
   only where the wallet's `WalletRead::AccountId` and `InputSource::AccountId`
   are the same type, which is required to read the account's derivation.
-- `zcash_pool_migration::engine::MigrationTransaction::lock_owner` and
-  `MigrationTransaction::from_parts` now use `MigrationLockOwner` in place of a
-  bare `[u8; 32]`.
-- `zcash_pool_migration::engine::MigrationState::set_transaction_proved` takes
-  the lock owner the transaction's notes were reserved under, so a store write
-  persists the proven artifact and its lock token together.
-- `zcash_pool_migration::wallet::WalletProveError` has a fourth type parameter,
-  the lock store's error type.
-- `zcash_pool_migration::wallet::WalletMigrationProver` implements
-  `MigrationProver` only for a wallet that is also an `OutputLockStore`.
 
 ## [0.1.0-rc.3] - 2026-07-26
 
