@@ -1,13 +1,13 @@
 
 # cargo-vet imports lock
 
+[[unpublished.pczt]]
+version = "0.9.3"
+audited_as = "0.9.2"
+
 [[unpublished.zcash_client_sqlite]]
 version = "0.22.0-rc.8"
 audited_as = "0.22.0-rc.7"
-
-[[unpublished.zcash_pool_migration]]
-version = "0.1.0-rc.7"
-audited_as = "0.1.0-rc.6"
 
 [[publisher.bumpalo]]
 version = "3.16.0"
@@ -499,8 +499,8 @@ user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
 
 [[publisher.zcash_pool_migration]]
-version = "0.1.0-rc.6"
-when = "2026-08-04"
+version = "0.1.0-rc.7"
+when = "2026-08-07"
 user-id = 169181
 user-login = "nuttycom"
 user-name = "Kris Nuttycombe"
