@@ -10,6 +10,8 @@ workspace.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-07
+
 ### Added
 - `impl {core::fmt::Display, core::error::Error} for pczt::ParseError`
 - `impl {core::fmt::Display, core::error::Error} for pczt::ExtractError`
