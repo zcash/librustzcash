@@ -654,6 +654,28 @@ jobs:
       - name: Check consistency
         run: python3 .github/helpers/check-dep-graph.py
 
+  release-tags:
+    name: Bumped crate versions are tagged
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check that each bumped crate version is tagged upstream
+        env:
+          BASE_SHA: >-
+            ${{
+              github.event.pull_request.base.sha
+              || github.event.merge_group.base_sha
+            }}
+          HEAD_SHA: >-
+            ${{
+              github.event.pull_request.head.sha
+              || github.event.merge_group.head_sha
+            }}
+        run: python3 .github/helpers/check-release-tags.py
+
   protobuf:
     name: protobuf consistency
     runs-on: ubuntu-latest
@@ -738,6 +760,7 @@ jobs:
       - doc-links
       - fmt
       - protobuf
+      - release-tags
       - uuid
     if: ${{ always() }}
     runs-on: ubuntu-latest
