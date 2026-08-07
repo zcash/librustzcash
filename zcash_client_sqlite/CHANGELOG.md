@@ -10,7 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+## [0.22.0-rc.8] - 2026-08-07
+
 ### Added
+- `wallet::init::migrations` release-state constants backfilling every
+  published crate version whose migration-graph state had no constant:
+  `V_0_7_0`, `V_0_8_0_RC1`, `V_0_8_0_RC4`, `V_0_8_0_RC5`, `V_0_8_1`,
+  `V_0_22_0_RC5`, and `V_0_22_0_RC6`. Each was computed from the corresponding
+  crate artifact published on crates.io.
 - The `v_migration_transactions` view: one row per SCHEDULED pool-migration
   transaction (belonging to a non-terminal migration and not yet broadcast),
   with its identity, kind, lifecycle state, scheduled and expiry heights,
@@ -38,7 +45,6 @@ workspace.
   earlier releases wrote at prove time: their spend marks froze the input
   notes out of the user's balance until each transaction's expiry, with
   nothing left to broadcast them.
-
 - `pool_migration::MigrationUuid`: the stable external identity of one
   pool-migration record, safe to hand across an FFI (row ids are not stable
   across a restore).
@@ -57,6 +63,13 @@ workspace.
   one in progress.
 
 ### Changed
+- Migrated to `zcash_pool_migration 0.1.0-rc.7`.
+- The pool-migration transactions table's `txid` column is now a `BLOB` holding
+  the transaction id's internal bytes, matching how the wallet's own
+  `transactions` table keys them; it was hex `TEXT`. An application querying
+  this table directly must bind and read raw bytes, and must not route them
+  through the display encoding, which is byte-reversed. The
+  `orchard_ironwood_migration_txid_blob` migration converts existing rows.
 - `WalletWrite::store_transactions_to_be_sent` now upserts each transaction's
   sent-output records, so storing a transaction the wallet has already
   recorded replaces that record instead of failing.
@@ -115,6 +128,14 @@ workspace.
   excluded only `complete` migrations; nothing will drive a terminal migration
   further, so those checkpoints were kept for proofs that will never be
   requested and, the migration being terminal, were never revisited.
+- `wallet::init::migrations::V_0_8_0` held the leaf state of the 0.8.1 release
+  rather than 0.8.0's: the published 0.8.0 crate's final migration was
+  `v_transactions_shielding_balance`, with `v_transactions_note_uniqueness`
+  following in 0.8.1. The constant now records the true 0.8.0 state, and the
+  0.8.1 state it previously held is the new `V_0_8_1`. An external migration
+  anchored on `V_0_8_0` now anchors one migration earlier in the graph, which
+  cannot invalidate its ordering because every migration `V_0_8_0` previously
+  named is still ordered after the corrected state.
 
 ## [0.22.0-rc.7] - 2026-08-03
 
@@ -139,12 +160,6 @@ workspace.
 - `zcash_client_sqlite::testing::db::TestDb::conn` and `TestDb::conn_mut`, for
   tests that open a sibling store (a `pool_migration` `PoolMigrations`, say)
   over the wallet database's own connection.
-- `zcash_client_sqlite::wallet::init::migrations` release-state constants
-  backfilling every published crate version whose migration-graph state had no
-  constant: `V_0_7_0`, `V_0_8_0_RC1`, `V_0_8_0_RC4`, `V_0_8_0_RC5`, `V_0_8_1`,
-  `V_0_22_0_RC5`, and `V_0_22_0_RC6`. Each backfilled state was computed from
-  the corresponding crate artifact published on crates.io, and the
-  between-releases migration test now walks through all of them.
 
 ### Changed
 - Migrated to `zcash_client_backend 0.24.0-rc.7`, `zcash_pool_migration 0.1.0-rc.6`.
@@ -231,20 +246,6 @@ workspace.
   reports nothing mined rather than erroring. Together with the truncation hook
   above, a stored migration's mined heights now follow the wallet's scan in both
   directions with no consumer hook in either.
-
-### Fixed
-- `zcash_client_sqlite::wallet::init::migrations::V_0_8_0` held the leaf state
-  of the 0.8.1 release rather than 0.8.0's: the published 0.8.0 crate's final
-  migration was `v_transactions_shielding_balance`, with
-  `v_transactions_note_uniqueness` following in 0.8.1. The constant now records
-  the true 0.8.0 state, and the 0.8.1 state it previously held is the new
-  `V_0_8_1`. An external migration anchored on `V_0_8_0` now anchors one
-  migration earlier in the graph, which cannot invalidate its ordering because
-  every migration `V_0_8_0` previously named is still ordered after the
-  corrected state.
-- `V_0_17_0` was missing from the sequence of release states that the
-  between-releases migration test walks, so upgrades passing through the 0.17.0
-  state were never exercised.
 
 ## [0.22.0-rc.6] - 2026-07-29
 
