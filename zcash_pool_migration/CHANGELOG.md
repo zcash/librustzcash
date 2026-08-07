@@ -8,6 +8,18 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `engine::CommitError::NoOrchardViewingKey` and
+  `engine::RebuildError::NoOrchardViewingKey`, reported by the entry points that
+  need the account's Orchard full viewing key when `MigrationCrypto::orchard_fvk`
+  has none to give.
+- `engine::CommitError::WrongSpendAuthority` and
+  `engine::RebuildError::WrongSpendAuthority`, reported when the spending key
+  passed to a signing entry point is not the account's — its full viewing key is
+  not the one the backend reports. Refused before anything is built, because
+  signing cannot catch it: `build::sign_pczt` must skip a spend its key does not
+  match (a migration PCZT carries padding dummies with throwaway keys), so a
+  foreign key would sign nothing, succeed, and persist a run recorded as
+  `Signed` whose transactions carry no signatures.
 - `state::MigrationState::mark_cancelled`, which moves a non-terminal migration
   to that status. A no-op on an already-terminal migration, so terminality is
   never overwritten. This is a status change only: it does not release any hold
@@ -55,6 +67,36 @@ and this library adheres to Rust's notion of
   `(A, (B, (C, ())))`.
 
 ### Changed
+- `wallet::WalletMigration::new` takes the account's `UnifiedFullViewingKey`
+  where it took a `UnifiedSpendingKey`, and is infallible. The adapter holds
+  viewing authority and nothing else, and it holds the unified key WHOLE rather
+  than reducing it to its Orchard component, so constructing one asks nothing of
+  the key. A caller passes `usk.to_unified_full_viewing_key()` where it passed
+  the spending key, or the account's own stored key. A watch-only account, or
+  one whose spending key lives on a hardware wallet, is therefore an ordinary
+  user of the adapter — it plans, builds and commits here and routes the signing
+  to whoever holds the key.
+- `engine::MigrationCrypto::orchard_fvk` returns
+  `Option<&orchard::keys::FullViewingKey>` rather than a `Result`: a backend is
+  handed the account's key rather than going to look for one, so producing it
+  cannot fail, and `None` — a unified key with no Orchard component — is
+  reported by the entry point that needs the key, at the point it needs it.
+- The spend authority is now an ARGUMENT to the operations that sign, not
+  something a backend holds: `engine::MigrationCrypto::sign` is gone, and
+  `engine::commit_preparation`, `engine::commit_preparation_with_funding` and
+  `engine::rebuild_expired_transfer` each take an
+  `&orchard::keys::SpendingKey` (a caller holding a `UnifiedSpendingKey` passes
+  `usk.orchard()`). The unsigned entry points
+  — `engine::build_preparation_unsigned` and
+  `engine::rebuild_expired_transfer_unsigned` — are unchanged and take none. A
+  wallet backend therefore no longer has to hold, or be able to reach, its
+  account's spending key in order to plan or build a migration, and "signing
+  with no authority" is not a state any of these types can be in.
+
+  They take the SPENDING key rather than the spend-authorizing key derived from
+  it so that the key can be checked against the account's viewing key before
+  anything is built (see `engine::CommitError::WrongSpendAuthority`). Nothing
+  retains either key.
 - `wallet::WalletMigration` now snapshots the account's spendable Orchard
   notes on its first read and serves every later read from that snapshot, so
   a plan's note indices always resolve against the selection that produced
@@ -156,6 +198,18 @@ and this library adheres to Rust's notion of
   broken by transaction id. Storage order is dependency order, which diverges
   from the schedule once `engine::rebuild_expired_transfer` reschedules a
   transfer in place.
+
+### Removed
+- `engine::MigrationCrypto::sign`, a required method of that trait. A backend is
+  no longer asked to sign, so it need not be able to: the spend authority is an
+  argument to `engine::commit_preparation`,
+  `engine::commit_preparation_with_funding` and
+  `engine::rebuild_expired_transfer`. An implementation should delete its `sign`
+  method; a caller that relied on the backend signing passes `usk.orchard()` to
+  those calls instead.
+- `wallet::Error::Sign(BuildError)`, which reported a failure of that adapter
+  method. A signing failure now arrives as `engine::CommitError::Build` or
+  `engine::RebuildError::Build`, from the entry point that was given the key.
 
 ## [0.1.0-rc.6] - 2026-08-03
 
