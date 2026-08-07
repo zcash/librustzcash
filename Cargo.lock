@@ -7193,7 +7193,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.22.0-rc.7"
+version = "0.22.0-rc.8"
 dependencies = [
  "ambassador",
  "assert_matches",
