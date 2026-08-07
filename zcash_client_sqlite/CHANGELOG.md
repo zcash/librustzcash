@@ -10,6 +10,15 @@ workspace.
 
 ## [Unreleased]
 
+### Fixed
+- Reading back a stored unmined transaction with a zero expiry height (such as
+  a coinbase transaction imported from a zcashd wallet before any chain scan)
+  no longer fails with a "Consensus branch ID not known" error. When neither a
+  mined height nor a nonzero expiry height is available, the consensus branch
+  ID (which does not affect parsing) is now selected using a fallback height
+  supplied from the wallet's view of the chain tip; the error remains only
+  when the chain tip is also unknown.
+
 ## [0.22.0] - 2026-08-18
 
 ### Added
