@@ -11,6 +11,10 @@ workspace.
 ## [Unreleased]
 
 ### Added
+- `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
+  transactions deferred to the post-import rescan because the wallet had no
+  view of the chain tip against which to store them; such transactions were
+  previously conflated with `transactions_without_wallet_relevance`.
 - The `v_migration_transactions` view: one row per SCHEDULED pool-migration
   transaction (belonging to a non-terminal migration and not yet broadcast),
   with its identity, kind, lifecycle state, scheduled and expiry heights,
@@ -116,6 +120,14 @@ workspace.
   ID (which does not affect parsing) is now selected using the wallet's view
   of the chain tip height; the error remains only when the chain tip is also
   unknown.
+- `zewif::import_wallet` now establishes the wallet's view of the chain tip
+  from the document (the maximum of its export height and its transactions'
+  mined heights, clamped to the wallet birthday) whenever at least one account
+  was imported and account import itself did not establish one. Previously a
+  document whose accounts all had birthdays at or below Sapling activation —
+  a pre-Sapling zcashd wallet — left the wallet without a chain tip, so every
+  transaction was silently deferred to the post-import rescan and counted
+  under `transactions_without_wallet_relevance`.
 - Anchor-checkpoint retention is no longer owed to a migration that has reached
   any terminal status. The grids of `failed`, `superseded`, and `cancelled`
   migrations were retained for the lifetime of the wallet, because retention
