@@ -1058,6 +1058,18 @@ impl TransparentAddressMetadata {
         }
     }
 
+    /// Returns a [`TransparentAddressMetadata`] with [`TransparentAddressSource::StandaloneAddress`]
+    /// source information for an imported bare transparent address and the specified exposure
+    /// height.
+    #[cfg(feature = "transparent-key-import")]
+    pub fn standalone_address(exposure: Exposure, next_check_time: Option<SystemTime>) -> Self {
+        Self {
+            source: TransparentAddressSource::StandaloneAddress,
+            exposure,
+            next_check_time,
+        }
+    }
+
     /// Returns the source metadata for the address.
     pub fn source(&self) -> &TransparentAddressSource {
         &self.source
@@ -1136,6 +1148,13 @@ pub enum TransparentAddressSource {
     /// This variant provides the redeem script directly.
     #[cfg(feature = "transparent-key-import")]
     StandaloneScript(script::Redeem),
+
+    /// The address was imported as a bare transparent address, without any associated key
+    /// material. The wallet watches for outputs received by the address, but holds neither
+    /// the public key (P2PKH) nor the redeem script (P2SH) from which it was derived, so
+    /// funds received by it cannot be spent unless that material is subsequently imported.
+    #[cfg(feature = "transparent-key-import")]
+    StandaloneAddress,
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -1149,6 +1168,8 @@ impl TransparentAddressSource {
             TransparentAddressSource::StandalonePubkey(_) => None,
             #[cfg(feature = "transparent-key-import")]
             TransparentAddressSource::StandaloneScript(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneAddress => None,
         }
     }
 
@@ -1161,6 +1182,8 @@ impl TransparentAddressSource {
             TransparentAddressSource::StandalonePubkey(_) => None,
             #[cfg(feature = "transparent-key-import")]
             TransparentAddressSource::StandaloneScript(_) => None,
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneAddress => None,
         }
     }
 
@@ -1174,6 +1197,8 @@ impl TransparentAddressSource {
             TransparentAddressSource::StandalonePubkey(_) => None,
             #[cfg(feature = "transparent-key-import")]
             TransparentAddressSource::StandaloneScript(redeem_script) => Some(redeem_script),
+            #[cfg(feature = "transparent-key-import")]
+            TransparentAddressSource::StandaloneAddress => None,
         }
     }
 }

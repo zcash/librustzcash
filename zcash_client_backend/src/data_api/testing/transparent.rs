@@ -1209,6 +1209,282 @@ fn build_test_redeem_script() -> (script::Redeem, secp256k1::SecretKey) {
     (redeem_script, secret_key)
 }
 
+/// Tests that importing standalone transparent addresses without key material succeeds and
+/// the addresses appear in `get_transparent_receivers` with the
+/// [`TransparentAddressSource::StandaloneAddress`] source.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_address<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    // A P2PKH address, imported without its pubkey.
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let p2pkh_addr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_address(account_id, p2pkh_addr),
+        Ok(_)
+    );
+
+    // A P2SH address, imported without its redeem script.
+    let (redeem_script, _) = build_test_redeem_script();
+    let p2sh_addr =
+        TransparentAddress::from_script_pubkey(&sh(&redeem_script)).expect("valid P2SH address");
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_address(account_id, p2sh_addr),
+        Ok(_)
+    );
+
+    let receivers = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+    for addr in [p2pkh_addr, p2sh_addr] {
+        let metadata = receivers.get(&addr).expect("address should be present");
+        assert!(matches!(
+            metadata.source(),
+            TransparentAddressSource::StandaloneAddress
+        ));
+    }
+}
+
+/// Tests that importing the same standalone address twice to the same account is idempotent.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_address_idempotent<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_address(account_id, taddr),
+        Ok(_)
+    );
+
+    let receivers_before = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    // Second import to the same account should also succeed (idempotent).
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_address(account_id, taddr),
+        Ok(_)
+    );
+
+    let receivers_after = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+    assert_eq!(receivers_before.len(), receivers_after.len());
+}
+
+/// Tests that importing the same standalone address to a different account fails.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_address_conflict<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account1_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_address(account1_id, taddr),
+        Ok(_)
+    );
+
+    // Create a second account
+    let birthday = AccountBirthday::from_parts(
+        ChainState::empty(
+            st.network()
+                .activation_height(NetworkUpgrade::Sapling)
+                .unwrap()
+                - 1,
+            BlockHash([0; 32]),
+        ),
+        None,
+    );
+    let seed2 = Secret::new(vec![42u8; 32]);
+    let (account2_id, _) = st
+        .wallet_mut()
+        .create_account("account2", &seed2, &birthday, None)
+        .unwrap();
+
+    // Import of the same address to the second account should fail
+    assert_matches!(
+        st.wallet_mut()
+            .import_standalone_transparent_address(account2_id, taddr),
+        Err(_)
+    );
+}
+
+/// Tests that a UTXO received at an address imported without key material is reflected in the
+/// wallet balance, but is not offered as a spendable output.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_address_balance<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+    <<DSF as DataStoreFactory>::DataStore as WalletWrite>::UtxoRef: std::fmt::Debug,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+    let birthday = st.test_account().unwrap().birthday().height();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let taddr = TransparentAddress::from_pubkey(&secret_key.public_key(&secp));
+
+    // Import the address without its pubkey.
+    st.wallet_mut()
+        .import_standalone_transparent_address(account_id, taddr)
+        .unwrap();
+
+    let height = birthday + 1000;
+    st.wallet_mut().update_chain_tip(height).unwrap();
+
+    // Create a fake UTXO at the address.
+    let value = Zatoshis::const_from_u64(50_000);
+    let outpoint = OutPoint::fake();
+    let txout = TxOut::new(value, taddr.script().into());
+    let utxo = WalletTransparentOutput::from_parts(
+        outpoint,
+        txout,
+        Some(height),
+        Some(account_id),
+        None,
+        None,
+    )
+    .unwrap();
+    st.wallet_mut()
+        .put_received_transparent_utxo(&utxo)
+        .unwrap();
+
+    // Verify the balance is reflected via get_transparent_balances.
+    let target_height = TargetHeight::from(height + 1);
+    let balances = st
+        .wallet()
+        .get_transparent_balances(account_id, target_height, ConfirmationsPolicy::MIN)
+        .unwrap();
+    assert_eq!(balances.get(&taddr).map(|(_, b)| b.total()), Some(value),);
+
+    // The output must not be offered for spending: the wallet holds no key material with
+    // which a spend could be constructed.
+    let utxos = st
+        .wallet()
+        .get_spendable_transparent_outputs(
+            &taddr,
+            target_height,
+            ConfirmationsPolicy::MIN,
+            CoinbaseFilter::AllTransparentOutputs,
+            LockFilter::Policy(&LockedInputPolicy::Exclude),
+        )
+        .unwrap();
+    assert_eq!(utxos, vec![]);
+}
+
+/// Tests that importing key material for a previously address-only import upgrades the
+/// address in place: the pubkey (P2PKH) or redeem script (P2SH) becomes the address's
+/// source, without a duplicate receiver appearing.
+#[cfg(feature = "transparent-key-import")]
+pub fn import_standalone_transparent_address_upgrade<DSF>(dsf: DSF)
+where
+    DSF: DataStoreFactory,
+{
+    let mut st = TestBuilder::new()
+        .with_data_store_factory(dsf)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
+        .build();
+
+    let account_id = st.test_account().unwrap().id();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[1u8; 32]).expect("valid secret key");
+    let pubkey = secret_key.public_key(&secp);
+    let p2pkh_addr = TransparentAddress::from_pubkey(&pubkey);
+
+    let (redeem_script, _) = build_test_redeem_script();
+    let p2sh_addr =
+        TransparentAddress::from_script_pubkey(&sh(&redeem_script)).expect("valid P2SH address");
+
+    // Import both addresses without key material.
+    st.wallet_mut()
+        .import_standalone_transparent_address(account_id, p2pkh_addr)
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_address(account_id, p2sh_addr)
+        .unwrap();
+
+    let receivers_before = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+
+    // Import the key material for each address.
+    st.wallet_mut()
+        .import_standalone_transparent_pubkey(account_id, pubkey)
+        .unwrap();
+    st.wallet_mut()
+        .import_standalone_transparent_script(account_id, redeem_script)
+        .unwrap();
+
+    // The addresses were upgraded in place: no new receivers, and each address's source
+    // now reflects the imported key material.
+    let receivers_after = st
+        .wallet()
+        .get_transparent_receivers(account_id, false, true)
+        .unwrap();
+    assert_eq!(receivers_before.len(), receivers_after.len());
+
+    let p2pkh_metadata = receivers_after
+        .get(&p2pkh_addr)
+        .expect("address should be present");
+    assert!(matches!(
+        p2pkh_metadata.source(),
+        TransparentAddressSource::StandalonePubkey(_)
+    ));
+
+    let p2sh_metadata = receivers_after
+        .get(&p2sh_addr)
+        .expect("address should be present");
+    assert!(matches!(
+        p2sh_metadata.source(),
+        TransparentAddressSource::StandaloneScript(_)
+    ));
+}
+
 /// Tests that importing a standalone transparent public key succeeds.
 #[cfg(feature = "transparent-key-import")]
 pub fn import_standalone_transparent_pubkey<DSF>(dsf: DSF)

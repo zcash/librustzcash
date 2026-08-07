@@ -153,6 +153,7 @@ migration_modules!(
     sent_notes_to_internal,
     shardtree_support,
     spend_key_available,
+    standalone_address,
     standalone_p2sh,
     support_legacy_sqlite,
     support_zcashd_wallet_import,
@@ -271,8 +272,8 @@ pub(super) fn all_migrations<
     //                               ivk_item_cache |            /           orchard_note_version
     //                             .----------------'           /                  \
     //                             |  add_transparent_receiver_address_index        \
-    //                             |                                                 \
-    //                             |                                        ironwood_received_notes ----------------
+    //                             |               |                                 \
+    //                             |      standalone_address               ironwood_received_notes ----------------
     //                             |                                        /         |          \                  \
     //                             |                     ironwood_pool_code_views     |      note_locking  fix_bad_ironwood_change_flagging
     //                             |                             |          \         |
@@ -399,6 +400,7 @@ pub(super) fn all_migrations<
         Box::new(orchard_ironwood_broadcast_binding::Migration),
         Box::new(orchard_ironwood_migration_txid_blob::Migration),
         Box::new(v_migration_transactions::Migration),
+        Box::new(standalone_address::Migration),
     ]
 }
 
