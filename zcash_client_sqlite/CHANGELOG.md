@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `zewif::ZewifImportReport::transactions_deferred_no_chain_tip`: counts
+  transactions deferred to the post-import rescan because the wallet had no
+  view of the chain tip against which to store them; such transactions were
+  previously conflated with `transactions_without_wallet_relevance`.
+
 ### Fixed
 - Reading back a stored unmined transaction with a zero expiry height (such as
   a coinbase transaction imported from a zcashd wallet before any chain scan)
@@ -18,6 +24,14 @@ workspace.
   ID (which does not affect parsing) is now selected using a fallback height
   supplied from the wallet's view of the chain tip; the error remains only
   when the chain tip is also unknown.
+- `zewif::import_wallet` now establishes the wallet's view of the chain tip
+  from the document (the maximum of its export height and its transactions'
+  mined heights, clamped to the wallet birthday) whenever at least one account
+  was imported and account import itself did not establish one. Previously a
+  document whose accounts all had birthdays at or below Sapling activation —
+  a pre-Sapling zcashd wallet — left the wallet without a chain tip, so every
+  transaction was silently deferred to the post-import rescan and counted
+  under `transactions_without_wallet_relevance`.
 
 ## [0.22.0] - 2026-08-18
 
