@@ -8,6 +8,17 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `signing_rounds::PlannedTx::depends_on` and
+  `signing_rounds::PlannedTx::scheduled_height`: what each transaction of a
+  plan will wait on, and when it will broadcast, as
+  `engine::commit_preparation` will stamp them on the built transaction. A
+  consumer can now preview a run's whole execution shape — its dependency graph
+  and its timeline — from an unconsented `engine::MigrationPlan`, through the
+  same two accessors the committed `engine::MigrationTransaction` answers with.
+  `scheduled_height` is an `Option`, `None` being the plan that holds no drawn
+  height for a transaction it contains: unconstructible through the public API,
+  and refused by `engine::commit_preparation`, but reported rather than
+  dropped so that no transaction's id depends on it.
 - `engine::CommitError::NoOrchardViewingKey` and
   `engine::RebuildError::NoOrchardViewingKey`, reported by the entry points that
   need the account's Orchard full viewing key when `MigrationCrypto::orchard_fvk`
@@ -81,13 +92,24 @@ and this library adheres to Rust's notion of
   handed the account's key rather than going to look for one, so producing it
   cannot fail, and `None` — a unified key with no Orchard component — is
   reported by the entry point that needs the key, at the point it needs it.
+- `signing_rounds::PlannedTx` now carries its dependencies and its scheduled
+  height, so it is `Clone` rather than `Copy`, and
+  `signing_rounds::PlannedTx::new` takes them.
+  `engine::MigrationPlan::planned_transactions` is now the single place a
+  migration's `(id, depends_on, scheduled_height)` assignment is derived:
+  `engine::commit_preparation` reads those rows rather than working the same
+  rules out again while it builds, so a previewed run and the committed run
+  cannot disagree. The plan likewise decides WHICH minted note each transaction
+  spends, and the commit indexes its own recovered notes by that choice instead
+  of searching for one again, so the note a crossing spends is necessarily the
+  one whose producer that crossing was recorded as waiting on.
 - The spend authority is now an ARGUMENT to the operations that sign, not
   something a backend holds: `engine::MigrationCrypto::sign` is gone, and
   `engine::commit_preparation`, `engine::commit_preparation_with_funding` and
   `engine::rebuild_expired_transfer` each take an
   `&orchard::keys::SpendingKey` (a caller holding a `UnifiedSpendingKey` passes
-  `usk.orchard()`). The unsigned entry points
-  — `engine::build_preparation_unsigned` and
+  `usk.orchard()`). The unsigned entry points —
+  `engine::build_preparation_unsigned` and
   `engine::rebuild_expired_transfer_unsigned` — are unchanged and take none. A
   wallet backend therefore no longer has to hold, or be able to reach, its
   account's spending key in order to plan or build a migration, and "signing
