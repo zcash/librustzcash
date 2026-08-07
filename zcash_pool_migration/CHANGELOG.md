@@ -92,6 +92,18 @@ and this library adheres to Rust's notion of
   handed the account's key rather than going to look for one, so producing it
   cannot fail, and `None` — a unified key with no Orchard component — is
   reported by the entry point that needs the key, at the point it needs it.
+- `wallet::WalletMigration`'s `PoolMigrationRead::mined_height` now reads the
+  wallet's fully-scanned height FIRST and reports nothing mined when there is
+  none, rather than looking the transaction's mined height up first and then
+  discarding it. The answer is unchanged wherever the old order produced one —
+  nothing is promotable outside the scanned region either way — but a wallet
+  that has never synced is now answered instead of surfacing whatever error its
+  backend raises for a transaction lookup with no chain tip
+  (`zcash_client_sqlite` raises one). Against `zcash_client_sqlite`'s own
+  migration store — which applies the same bound in SQL — the adapter is now
+  value-equal in every reachable state, which is why it delegates to no store:
+  the equality is asserted for that pairing specifically, not claimed for every
+  possible store.
 - `signing_rounds::PlannedTx` now carries its dependencies and its scheduled
   height, so it is `Clone` rather than `Copy`, and
   `signing_rounds::PlannedTx::new` takes them.
