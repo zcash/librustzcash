@@ -1159,13 +1159,12 @@ pub enum MigrationError<E> {
     /// drops parts of the canonical split (never substitutes smaller denominations — see
     /// [`DenominationStrategy::plan`](crate::denomination::DenominationStrategy::plan)), so a
     /// wallet whose notes cannot mint even the split's first part has no migratable decomposition
-    /// until its spendable balance changes. The known shapes: a balance of exactly one canonical
-    /// denomination plus its transfer buffer held as anything other than that exact note (the notes
-    /// sum to exactly the funding note, leaving no room for any preparation fee), and a wallet so
-    /// fragmented that consolidating it costs more than the balance can pay. Unlike
+    /// until its spendable balance changes. The reachable shape is a wallet so fragmented that
+    /// consolidating enough of it to mint even the split's largest part costs more in preparation
+    /// fees than the balance can cover. Unlike
     /// [`NothingToMigrate`](Self::NothingToMigrate), this is NOT completion: value above the
-    /// residual threshold remains, and an application should report it as deferred rather than
-    /// migrated.
+    /// residual threshold remains, and an application should report it as deferred (until the
+    /// spendable balance changes) rather than migrated.
     UnfundableSplit,
     /// The backend's note values do not form a valid balance (their sum exceeds the maximum money
     /// supply).
@@ -1325,6 +1324,7 @@ where
     };
     let denominations = plan_denominations(
         balance,
+        notes.len(),
         transfer_fee_buffer,
         prep_tx_fee,
         &prep_tx_count,
@@ -1334,9 +1334,9 @@ where
     if funding_notes.is_empty() {
         // An empty plan is COMPLETION when the balance itself quantizes to nothing (only residual
         // value remains), and DEFERRAL when the balance has a canonical split that this wallet's
-        // notes cannot fund; the two need different reporting, so they are distinct errors.
+        // note values cannot fund; the two need different reporting, so they are distinct errors.
         return Err(
-            if balance_has_canonical_split(balance, transfer_fee_buffer, prep_tx_fee) {
+            if balance_has_canonical_split(balance, notes.len(), transfer_fee_buffer, prep_tx_fee) {
                 MigrationError::UnfundableSplit
             } else {
                 MigrationError::NothingToMigrate
@@ -1637,6 +1637,7 @@ where
             };
             plan_denominations(
                 balance,
+                notes.len(),
                 transfer_fee_buffer,
                 prep_tx_fee,
                 &prep_tx_count,
@@ -4254,29 +4255,17 @@ pub(crate) mod tests {
         ));
     }
 
-    /// A split the wallet cannot fund is DEFERRAL, not completion: a balance of exactly one
-    /// canonical denomination plus its transfer buffer quantizes to that single crossing with no
-    /// preparation-fee reserve (an exact note would fund it directly), so a wallet holding the
-    /// balance any other way cannot mint the funding note — its notes sum to exactly the note's
-    /// value, leaving nothing for a preparation fee — and reconciliation drops the whole split.
-    /// The plan reports [`MigrationError::UnfundableSplit`] so an application can distinguish
-    /// "deferred until the balance changes" from [`MigrationError::NothingToMigrate`]'s "only
-    /// residual value remains".
+    /// A split the wallet cannot fund is DEFERRAL, not completion: the balance clears the smallest
+    /// self-funding note plus its fee reserve, so it quantizes to a nonempty canonical split, but
+    /// consolidating the wallet's dust costs more in preparation fees than the balance can cover —
+    /// 120 notes of 10,000 zatoshi need at least eight consolidation transactions (15 inputs each)
+    /// whose fees alone exceed half the balance, so no preparation can mint even the split's only
+    /// part. The plan reports [`MigrationError::UnfundableSplit`] so an application can
+    /// distinguish "deferred until the spendable balance changes" from
+    /// [`MigrationError::NothingToMigrate`]'s "only residual value remains".
     #[test]
     fn a_split_the_wallet_cannot_fund_defers_rather_than_completes() {
-        let (_, transfer_fee_buffer) =
-            canonical_fees(&test_net(), BlockHeight::from_u32(2_000_000))
-                .expect("canonical fees are computable");
-        // 1 ZEC plus the buffer, held as two notes — the same balance held as ONE note migrates as
-        // a single directly-funded crossing (see `exact_funding_note_needs_no_preparation_fee` in
-        // the denomination strategy tests).
-        let backend = MockBackend::new(
-            vec![
-                60 * COIN / 100,
-                40 * COIN / 100 + u64::from(transfer_fee_buffer),
-            ],
-            2_000_000,
-        );
+        let backend = MockBackend::new(vec![10_000; 120], 2_000_000);
         let mut rng = ChaCha8Rng::seed_from_u64(1);
         assert!(matches!(
             plan_migration(&test_net(), &backend, &mut rng),

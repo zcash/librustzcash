@@ -70,13 +70,26 @@ and this library adheres to Rust's notion of
   how the wallet's notes happen to hold the balance. A wallet that cannot fund
   the entire canonical split migrates a prefix of it in the current run, with
   the remainder deferred to a later run.
+- `denomination::DenominationStrategy::plan` and
+  `denomination::plan_denominations` now take the wallet's spendable note
+  count alongside its balance. The count participates in the decomposition
+  only through the predicate `count == 1`, which gates the exact-funding
+  exception to the preparation-fee reserve: a lone note necessarily equals the
+  balance, so a balance of exactly one canonical denomination plus its
+  transfer buffer is certain to fund that crossing directly and reserves no
+  fee, while the same balance held as two or more notes cannot avoid
+  preparation and retains the reserve (stepping down the series) instead of
+  quantizing into a split no such wallet could fund. Beyond that bit, the
+  published values remain a function of the balance alone.
 - `engine::MigrationError` has a new `UnfundableSplit` variant, and
   `engine::plan_migration` returns it (rather than `NothingToMigrate`) when the
   balance quantizes to at least one canonical part but the wallet's current
-  notes cannot fund any part of that split. This is deferral, not completion:
-  value above the residual threshold remains, and it can migrate once the
-  spendable balance changes. `NothingToMigrate` now means only that the balance
-  itself has nothing left to quantize.
+  notes cannot fund any part of that split — a wallet so fragmented that the
+  preparation fees for consolidating it exceed what the balance can cover.
+  This is deferral, not completion: value above the residual threshold
+  remains, and it can migrate once the spendable balance changes.
+  `NothingToMigrate` now means only that the balance itself has nothing left
+  to quantize.
 - `satisfiability::advance_migration` now returns `satisfiability::Advance`
   rather than a bare `state::AdvanceStep`: read the step to perform via
   `Advance::step`, and the outlook — when the migration next has work, and of
