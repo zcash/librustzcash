@@ -1781,16 +1781,95 @@ mod check_step_satisfiability {
 mod mined_height {
     use rusqlite::named_params;
 
+    use core::convert::Infallible;
+
+    use zcash_client_backend::data_api::Account as _;
+    use zcash_client_backend::data_api::WalletRead as _;
     use zcash_client_backend::data_api::testing::TestState;
-    use zcash_pool_migration::engine::PoolMigrationRead;
+    use zcash_pool_migration::engine::{MigrationState, MigrationTransaction, PoolMigrationRead};
+    use zcash_pool_migration::satisfiability::{ReorgSettleDepth, StepSatisfiability};
+    use zcash_pool_migration::wallet::WalletMigration;
     use zcash_protocol::TxId;
     use zcash_protocol::consensus::BlockHeight;
     use zcash_protocol::local_consensus::LocalNetwork;
 
     use super::PoolMigrations;
     use super::check_step_satisfiability::{unscanned_wallet, wallet_with_scanned_note};
+    use crate::AccountUuid;
     use crate::testing::{BlockCache, db::TestDb};
     use crate::util::SystemClock;
+
+    /// A store that refuses every question, so a [`WalletMigration`] built over it can only answer
+    /// from the WALLET. That is what makes [`store_and_adapter_agree`] a real comparison: an
+    /// adapter that delegated its mining lookup to its store would panic here rather than
+    /// trivially agreeing with the store it delegated to.
+    struct NoStore;
+
+    impl PoolMigrationRead for NoStore {
+        type Error = Infallible;
+
+        fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            panic!("the mining comparison reads no migration")
+        }
+
+        fn check_step_satisfiability(
+            &self,
+            _tx: &MigrationTransaction,
+            _settle: ReorgSettleDepth,
+        ) -> Result<StepSatisfiability, Self::Error> {
+            panic!("the mining comparison consults no oracle")
+        }
+
+        fn mined_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            panic!("the adapter must answer mined_height from the wallet, not from its store")
+        }
+    }
+
+    /// Ask both implementations of the mining lookup about `txid` over one wallet — this store,
+    /// and `zcash_pool_migration`'s [`WalletMigration`] adapter reading the same wallet directly —
+    /// assert they agree, and return the answer they agree on.
+    ///
+    /// The two encode the same rollback-safety rule at different layers: the store applies the
+    /// fully-scanned bound in SQL, the adapter applies it over `WalletRead`. An application built
+    /// on this crate has both in play at once (the adapter's `PoolMigrationRead` impl wraps this
+    /// store), so a disagreement would make a migration's promotions depend on which one the
+    /// caller happened to hold — which is precisely the reason the adapter delegates nothing here.
+    fn store_and_adapter_agree(
+        st: &mut TestState<BlockCache, TestDb, LocalNetwork>,
+        account: AccountUuid,
+        txid: TxId,
+    ) -> Option<BlockHeight> {
+        let from_store = {
+            let store = PoolMigrations::for_account(
+                *st.network(),
+                SystemClock,
+                st.wallet_mut().conn_mut(),
+                account,
+            )
+            .expect("the account exists");
+            store.mined_height(txid).expect("the store answers")
+        };
+
+        // The adapter reads the wallet through `WalletRead`, so it needs the wallet itself — hence
+        // the store borrow above ends before this one begins.
+        let ufvk = st
+            .wallet()
+            .db()
+            .get_account(account)
+            .expect("the account reads")
+            .expect("the account exists")
+            .ufvk()
+            .expect("the account has a unified full viewing key")
+            .clone();
+        let adapter = WalletMigration::new(st.wallet().db(), account, ufvk, NoStore);
+        let from_adapter = adapter.mined_height(txid).expect("the adapter answers");
+
+        assert_eq!(
+            from_store, from_adapter,
+            "the store and the wallet-backed adapter must report one mined height for {txid:?}",
+        );
+        from_store
+    }
 
     /// Insert a transaction the wallet knows of, at `mined_height`, with no spend join: the mining
     /// lookup reads `transactions` alone, so nothing here needs a note or a spender.
@@ -1916,6 +1995,73 @@ mod mined_height {
         )
         .expect("the account exists");
         assert_eq!(store.mined_height(txid).expect("the store answers"), None);
+    }
+
+    /// This store and `zcash_pool_migration`'s `WalletMigration` adapter answer the mining lookup
+    /// ALIKE, over one wallet, in every state that distinguishes the rule: an unscanned wallet, an
+    /// inclusion inside the fully-scanned region, and one observed only above it.
+    ///
+    /// Two implementations of one rule is the thing worth testing here. The adapter is what an
+    /// application drives the engine through, and it wraps this store, so the pair is live in
+    /// every real migration; they nonetheless read the wallet by different routes (SQL over
+    /// `transactions` bounded by `fully_scanned_height`, versus `WalletRead::get_tx_height`
+    /// bounded by `block_fully_scanned`). Because they agree, the adapter needs no delegation to
+    /// this store to be correct — and this is what would catch the day one of the two routes
+    /// stopped applying the bound.
+    #[test]
+    fn the_store_and_the_wallet_adapter_report_one_mined_height() {
+        // Nothing scanned: no chain state backs an inclusion, so a transaction the wallet has been
+        // TOLD about (status retrieval, say) is still not promotable. The adapter must reach this
+        // answer without erroring, which is why it reads the fully-scanned bound before asking
+        // about the transaction at all.
+        let (mut st, account) = unscanned_wallet();
+        assert!(
+            st.wallet()
+                .block_fully_scanned()
+                .expect("reads the fully-scanned block")
+                .is_none(),
+            "precondition: the wallet has scanned nothing",
+        );
+        let unscanned_txid = TxId::from_bytes([8; 32]);
+        record_transaction(&mut st, unscanned_txid, Some(BlockHeight::from_u32(100)));
+        assert_eq!(
+            store_and_adapter_agree(&mut st, account, unscanned_txid),
+            None,
+            "an unscanned wallet promotes nothing",
+        );
+
+        let (mut st, account, _nf, as_of_height) = wallet_with_scanned_note();
+
+        // Inside the fully-scanned region: both report the height, and the drive promotes on it.
+        let mined_txid = TxId::from_bytes([9; 32]);
+        record_transaction(&mut st, mined_txid, Some(as_of_height));
+        assert_eq!(
+            store_and_adapter_agree(&mut st, account, mined_txid),
+            Some(as_of_height),
+        );
+
+        // Above it: a mined height the wallet learned ahead of scanning is withheld by both, so
+        // neither can promote onto a block whose rollback would not truncate the promotion.
+        let ahead_txid = TxId::from_bytes([10; 32]);
+        record_transaction(&mut st, ahead_txid, Some(as_of_height + 1));
+        assert_eq!(
+            store_and_adapter_agree(&mut st, account, ahead_txid),
+            None,
+            "an inclusion above the scanned region is not yet promotable",
+        );
+
+        // And the two absences that are not about the bound at all: a known-but-unmined
+        // transaction, and one the wallet has never heard of.
+        let unmined_txid = TxId::from_bytes([11; 32]);
+        record_transaction(&mut st, unmined_txid, None);
+        assert_eq!(
+            store_and_adapter_agree(&mut st, account, unmined_txid),
+            None
+        );
+        assert_eq!(
+            store_and_adapter_agree(&mut st, account, TxId::from_bytes([12; 32])),
+            None,
+        );
     }
 }
 

@@ -74,6 +74,18 @@ and this library adheres to Rust's notion of
   spends, and the commit indexes its own recovered notes by that choice instead
   of searching for one again, so the note a crossing spends is necessarily the
   one whose producer that crossing was recorded as waiting on.
+- `wallet::WalletMigration`'s `PoolMigrationRead::mined_height` now reads the
+  wallet's fully-scanned height FIRST and reports nothing mined when there is
+  none, rather than looking the transaction's mined height up first and then
+  discarding it. The answer is unchanged wherever the old order produced one —
+  nothing is promotable outside the scanned region either way — but a wallet
+  that has never synced is now answered instead of surfacing whatever error its
+  backend raises for a transaction lookup with no chain tip
+  (`zcash_client_sqlite` raises one). Against `zcash_client_sqlite`'s own
+  migration store — which applies the same bound in SQL — the adapter is now
+  value-equal in every reachable state, which is why it delegates to no store:
+  the equality is asserted for that pairing specifically, not claimed for every
+  possible store.
 
 ### Removed
 - `engine::MigrationCrypto::sign`, a required method of that trait. A backend is
