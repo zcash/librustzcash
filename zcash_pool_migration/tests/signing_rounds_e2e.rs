@@ -25,6 +25,8 @@ use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
 use zcash_protocol::{consensus::BlockHeight, value::COIN};
 
+use orchard::keys::SpendAuthorizingKey;
+use zcash_pool_migration::build::sign_pczt;
 #[cfg(feature = "test-dependencies")]
 use zcash_pool_migration::{
     denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
@@ -35,8 +37,8 @@ use zcash_pool_migration::{
 };
 use zcash_pool_migration::{
     engine::{
-        MigrationCrypto, MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite,
-        UnsignedMigrationTx, build_preparation_unsigned, estimate_migration_runs, plan_migration,
+        MigrationPlan, MigrationState, MigrationTxState, PoolMigrationWrite, UnsignedMigrationTx,
+        build_preparation_unsigned, estimate_migration_runs, plan_migration,
     },
     satisfiability::ReplanThreshold,
     signing_rounds::{MinRounds, NextFit, SigningRoundBudget},
@@ -58,22 +60,23 @@ fn plan_for(seed: u64, values_zec: &[u64]) -> (CommitMock, MigrationPlan) {
     plan_notes(seed, &notes)
 }
 
-/// Sign one round's unsigned PCZTs with the wallet's signer and apply the signatures back. The
-/// `signer` is anything implementing [`MigrationCrypto`] — the trait a wallet plugs its Orchard
-/// spend authority into (here the `CommitMock` backend; a real wallet passes its own implementation,
-/// or routes the bytes to a hardware device that returns the signed PCZT).
-fn sign_round_and_apply<C>(signer: &C, state: &mut MigrationState, round: Vec<UnsignedMigrationTx>)
-where
-    C: MigrationCrypto,
-    C::Error: std::fmt::Debug,
-{
+/// Sign one round's unsigned PCZTs with the account's spend authority and apply the signatures
+/// back.
+///
+/// This models the EXTERNAL signer: the engine handed these PCZTs out unsigned precisely because
+/// it was given no authority, and whoever holds the key — a hardware device, or as here a key the
+/// test holds — returns each signed. Nothing about the migration backend is involved, which is why
+/// this takes a key rather than a signing trait.
+fn sign_round_and_apply(
+    ask: &SpendAuthorizingKey,
+    state: &mut MigrationState,
+    round: Vec<UnsignedMigrationTx>,
+) {
     for unsigned_tx in round {
         // The wallet keeps the id to match the signed PCZT back; the bytes go to the signer.
         let (id, bytes) = unsigned_tx.into_parts();
         let unsigned = pczt::Pczt::parse(&bytes).expect("the unsigned PCZT parses");
-        let signed = signer
-            .sign(unsigned)
-            .expect("the signer authorizes the transaction");
+        let signed = sign_pczt(unsigned, ask).expect("the signer authorizes the transaction");
         assert!(state.apply_signature(id, signed.serialize().expect("serializes the signed PCZT")));
     }
 }
@@ -142,7 +145,7 @@ fn keystone_external_signing_end_to_end() {
     for round in rounds {
         // Each round honours the signer's 96-action budget.
         assert!(round.iter().map(|u| u.actions()).sum::<usize>() <= budget.max_actions() as usize);
-        sign_round_and_apply(&backend, &mut state, round);
+        sign_round_and_apply(&backend.ask, &mut state, round);
     }
 
     // The whole migration is signed, without anything having been broadcast or mined.

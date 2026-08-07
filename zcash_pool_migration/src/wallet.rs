@@ -1,14 +1,21 @@
 //! A wallet-backed adapter that turns any `zcash_client_backend` wallet into a migration wallet.
 //!
 //! The engine's build and commit path needs an implementation of [`MigrationBackend`] +
-//! [`MigrationCrypto`] (the account's viewing key, its spendable notes' plaintexts, and signing)
-//! and a [`PoolMigrationRead`] / [`PoolMigrationWrite`] store. This module supplies the first two
-//! for free over the traits a `zcash_client_backend` wallet already implements ([`WalletRead`],
-//! [`InputSource`]) plus the account's [`UnifiedSpendingKey`], and delegates the store to a value
-//! the caller supplies (for example `zcash_client_sqlite`'s `pool_migration` store over the same
-//! wallet database). A consuming application (zallet, or any other `zcash_client_backend` wallet)
-//! then
+//! [`MigrationCrypto`] (the account's viewing key, its spendable notes' plaintexts) and a
+//! [`PoolMigrationRead`] / [`PoolMigrationWrite`] store. This module supplies the first two for
+//! free over the traits a `zcash_client_backend` wallet already implements ([`WalletRead`],
+//! [`InputSource`]) plus the account's viewing key, and delegates the store to a value the caller
+//! supplies (for example `zcash_client_sqlite`'s `pool_migration` store over the same wallet
+//! database). A consuming application (zallet, or any other `zcash_client_backend` wallet) then
 //! runs [`commit_preparation`] with no hand-wired cryptography.
+//!
+//! [`WalletMigration`] holds VIEWING authority and nothing more. It is built from an account's
+//! [`UnifiedFullViewingKey`], and there is no way to give it a spending key: the engine takes the
+//! spend authority as an argument to the operations that actually sign
+//! ([`commit_preparation`] and [`rebuild_expired_transfer`]), so the key is live for one call
+//! rather than for the lifetime of an adapter that mostly does not need it. A watch-only account
+//! and one whose key lives on a hardware wallet are therefore ordinary users of this adapter:
+//! they plan and build here and route the signing elsewhere.
 //!
 //! [`WalletMigration`] holds the wallet by a SHARED borrow and touches no note commitment tree:
 //! every migration transaction is built and signed with its anchor and witnesses deferred to
@@ -19,6 +26,7 @@
 //! before broadcast.
 //!
 //! [`commit_preparation`]: crate::engine::commit_preparation
+//! [`rebuild_expired_transfer`]: crate::engine::rebuild_expired_transfer
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -28,7 +36,7 @@ use core::num::NonZeroU32;
 
 use ::orchard::Anchor;
 use ::orchard::circuit::OrchardCircuitVersion;
-use ::orchard::keys::{FullViewingKey, SpendAuthorizingKey};
+use ::orchard::keys::FullViewingKey;
 use ::orchard::note::{Note as OrchardNote, Nullifier};
 use ::orchard::tree::MerklePath;
 use incrementalmerkletree::Position;
@@ -45,12 +53,12 @@ use zcash_client_backend::data_api::{
     },
 };
 use zcash_client_backend::wallet::OutputRef;
-use zcash_keys::keys::UnifiedSpendingKey;
+use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::TxId;
 use zcash_primitives::transaction::builder::cached_orchard_proving_key;
 use zcash_protocol::{PoolType, ShieldedPool, consensus::BlockHeight, value::Zatoshis};
 
-use crate::build::{AccountDerivation, sign_pczt};
+use crate::build::AccountDerivation;
 use crate::engine::{
     MigrationBackend, MigrationCrypto, MigrationLockOwner, MigrationProver, MigrationState,
     MigrationTransaction, MigrationTransferId, MigrationTxState, PoolMigrationRead,
@@ -75,8 +83,6 @@ pub enum Error<WRE, ISE, SE> {
     NoteNotFound(usize),
     /// The wallet has no chain tip (it has never synced), so no note selection target exists.
     ChainTipUnknown,
-    /// Signing the migration PCZT failed.
-    Sign(crate::build::BuildError),
     /// The spendable note at this index has a value that is not a valid [`Zatoshis`] amount
     /// (it exceeds the money-supply cap).
     InvalidNoteValue(usize),
@@ -90,7 +96,6 @@ impl<WRE: fmt::Display, ISE: fmt::Display, SE: fmt::Display> fmt::Display for Er
             Error::Store(e) => write!(f, "migration store error: {e}"),
             Error::NoteNotFound(i) => write!(f, "no spendable note at index {i}"),
             Error::ChainTipUnknown => f.write_str("the wallet has no chain tip"),
-            Error::Sign(e) => write!(f, "signing the migration failed: {e}"),
             Error::InvalidNoteValue(i) => {
                 write!(f, "spendable note {i} has an invalid (out-of-range) value")
             }
@@ -114,18 +119,29 @@ type AdapterError<W, St> =
 /// and its value in zatoshi.
 type SpendableNote = (OrchardNote, Position, u64);
 
-/// A migration wallet built over a `zcash_client_backend` wallet `W`, an account, its
-/// [`UnifiedSpendingKey`], and a migration store `St`.
+/// A migration wallet built over a `zcash_client_backend` wallet `W`, an account, that account's
+/// Orchard VIEWING key, and a migration store `St`.
 ///
 /// The wallet is held by a shared borrow: the migration never touches the note commitment tree
 /// (anchors and witnesses are deferred to proving time), so nothing here needs `&mut W`.
+///
+/// There is no spending key here, and no constructor that takes one. Signing is a parameter of
+/// the engine calls that sign, so this type cannot be the thing that holds an account's spend
+/// authority alive.
 pub struct WalletMigration<'a, W, St>
 where
     W: WalletRead + InputSource,
 {
     wallet: &'a W,
     account: <W as InputSource>::AccountId,
-    usk: UnifiedSpendingKey,
+    /// The account's unified full viewing key, as the caller supplied it.
+    ///
+    /// Stored whole rather than reduced to its Orchard component at construction, so that
+    /// constructing an adapter asks nothing of the key: an account whose unified key has no
+    /// Orchard component is a real account, and the fact that this crate cannot serve it is
+    /// reported by the operation that needs the Orchard key, not by the act of naming the account
+    /// (see [`MigrationCrypto::orchard_fvk`]).
+    ufvk: UnifiedFullViewingKey,
     store: St,
     /// The inter-arrival delays to schedule under, or `None` to derive them from the wallet's own
     /// anchor bucket interval by the ZIP 318 ratios.
@@ -141,7 +157,17 @@ where
     <W as InputSource>::AccountId: Copy,
     St: PoolMigrationRead,
 {
-    /// Wrap a wallet, an account, its spending key, and a store as a migration wallet.
+    /// Wrap a wallet, an account, that account's unified FULL VIEWING key, and a store as a
+    /// migration wallet.
+    ///
+    /// Everything a migration does short of signing — selecting the account's notes, planning the
+    /// denomination split and the schedule, building each transaction's PCZT, reading and writing
+    /// the store, and (through [`WalletMigrationProver`]) proving — is a viewing-key operation, so
+    /// viewing authority is all this adapter ever needs. The spend authority for the two engine
+    /// calls that sign is passed to those calls; a watch-only account and a hardware-wallet
+    /// account, which have none to give, use the unsigned entry points instead
+    /// (`build_preparation_unsigned`, `rebuild_expired_transfer_unsigned`) and route the signing
+    /// to whoever holds the key.
     ///
     /// The migration is scheduled under the wallet's own anchor retention interval — not
     /// configurable here; see [`MigrationBackend::scheduling_params`] — with inter-arrival delays
@@ -149,16 +175,29 @@ where
     /// gets exactly the ZIP 318 delays, and a wallet configured with a shortened grid gets the same
     /// schedule shape compressed by the same factor, rather than a short grid crossed with
     /// ninety-minute delays. Override the delays with [`Self::with_scheduling_delays`].
+    ///
+    /// The viewing key is the CALLER's to choose rather than being read from the account record,
+    /// because a wallet may hold several keys that view one account (an imported UFVK beside a
+    /// derived one) and only the caller knows which the migration's notes belong to. Pass the key
+    /// the account's spendable notes were received with — the same one
+    /// [`WalletMigrationProver::new`] must be given, since a mismatched key computes nullifiers
+    /// that match no note and every spend resolution fails, and the same one whose spend authority
+    /// the signing calls are given.
+    ///
+    /// A key with no Orchard component is accepted here and refused where it is USED: an
+    /// account this crate cannot migrate is still an account, and the engine's build, commit and
+    /// prove paths are already fallible, so they are where "this account has no Orchard key" is
+    /// worth saying. Construction asks nothing of the key at all.
     pub fn new(
         wallet: &'a W,
         account: <W as InputSource>::AccountId,
-        usk: UnifiedSpendingKey,
+        ufvk: UnifiedFullViewingKey,
         store: St,
     ) -> Self {
         Self {
             wallet,
             account,
-            usk,
+            ufvk,
             store,
             scheduling_delays: None,
             spendable: RefCell::new(None),
@@ -283,8 +322,13 @@ where
 {
     type Error = AdapterError<W, St>;
 
-    fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
-        Ok(FullViewingKey::from(self.usk.orchard()))
+    /// The Orchard component of the key the adapter was constructed with — never re-read from the
+    /// account record, so a migration is built against exactly the key its caller named.
+    ///
+    /// `None` for a unified key that carries no Orchard component: such an account holds no notes
+    /// this crate can migrate, which each engine entry point reports for itself.
+    fn orchard_fvk(&self) -> Option<&FullViewingKey> {
+        self.ufvk.orchard()
     }
 
     /// The account's derivation as the wallet records it, or `None` for an account the wallet
@@ -306,11 +350,6 @@ where
         let notes = self.spendable_orchard()?;
         let &(note, _, _) = notes.get(index).ok_or(Error::NoteNotFound(index))?;
         Ok(note)
-    }
-
-    fn sign(&self, pczt: ::pczt::Pczt) -> Result<::pczt::Pczt, Self::Error> {
-        let ask = SpendAuthorizingKey::from(self.usk.orchard());
-        sign_pczt(pczt, &ask).map_err(Error::Sign)
     }
 }
 
@@ -340,18 +379,33 @@ where
     /// this adapter is the seam that has one. The fully-scanned bound is applied here rather than
     /// left to `get_tx_height` — which reports a mined height as soon as the wallet learns it,
     /// including ahead of scanning — so a promotion cannot rest on a block outside the region a
-    /// rollback would truncate. A wallet that has scanned nothing reports nothing mined.
+    /// rollback would truncate.
+    ///
+    /// The bound is read FIRST, and a wallet with no fully-scanned region answers `None` without
+    /// the inclusion lookup ever being made. That is not an optimization: nothing is promotable
+    /// when there is no scanned region — every answer this gives has to be one a rollback of the
+    /// block carrying the transaction would withdraw, and a wallet that has scanned nothing has no
+    /// such region to withdraw from — so the question the second lookup asks does not arise. It
+    /// also keeps this total on a wallet that has never synced, where a backend may have no chain
+    /// tip to answer `get_tx_height` against at all, which is the state in which a store applying
+    /// the same rule at its own layer (`zcash_client_sqlite`'s does) answers `None`. The two agree
+    /// on every value, so a wallet whose store also implements this needs no delegation here.
+    ///
+    /// Errors from either lookup are propagated, never read as an absence: an answer the wallet
+    /// could not give is not the answer that nothing is mined.
     fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        let Some(mined) = self.wallet.get_tx_height(txid).map_err(Error::WalletRead)? else {
+        let Some(scanned) = self
+            .wallet
+            .block_fully_scanned()
+            .map_err(Error::WalletRead)?
+        else {
             return Ok(None);
         };
         Ok(self
             .wallet
-            .block_fully_scanned()
+            .get_tx_height(txid)
             .map_err(Error::WalletRead)?
-            .map(|meta| meta.block_height())
-            .filter(|scanned| mined <= *scanned)
-            .map(|_| mined))
+            .filter(|mined| *mined <= scanned.block_height()))
     }
 }
 
@@ -914,9 +968,69 @@ mod tests {
     use super::*;
 
     use rand_core::{CryptoRng, RngCore};
-    use zcash_protocol::consensus::Parameters;
+    use zcash_client_backend::data_api::testing::MockWalletDb;
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_protocol::consensus::{Network, Parameters};
 
+    use crate::build::test_util::{TARGET_HEIGHT, regtest_network};
     use crate::engine::commit_preparation;
+
+    /// A store that persists nothing and observes nothing: the adapter's KEY handling is what the
+    /// tests below exercise, and the account's viewing key is not routed through the store. Every
+    /// answer is the empty one a store with no migration gives.
+    struct NoStore;
+
+    impl PoolMigrationRead for NoStore {
+        type Error = core::convert::Infallible;
+
+        fn get_migration(&self) -> Result<Option<MigrationState>, Self::Error> {
+            Ok(None)
+        }
+
+        fn check_step_satisfiability(
+            &self,
+            _tx: &MigrationTransaction,
+            _settle: ReorgSettleDepth,
+        ) -> Result<StepSatisfiability, Self::Error> {
+            Ok(StepSatisfiability::NotYetSatisfiable {
+                as_of_height: BlockHeight::from_u32(TARGET_HEIGHT),
+            })
+        }
+
+        fn mined_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+    }
+
+    /// An account's unified spending key, derived from a `seed` byte so the tests can vary the
+    /// account. Only its unified FULL VIEWING key reaches the adapter; the spending key stays
+    /// here, which is the property under test.
+    fn account_usk(seed: u8) -> UnifiedSpendingKey {
+        UnifiedSpendingKey::from_seed(&regtest_network(true), &[seed; 32], zip32::AccountId::ZERO)
+            .expect("the seed derives a unified spending key")
+    }
+
+    /// The adapter serves the Orchard viewing key it was CONSTRUCTED with, and that key is the
+    /// account's — the one whose spend authority the signing calls will be given, so what this
+    /// adapter plans and builds is what that authority can sign.
+    ///
+    /// There is deliberately no counterpart test for signing through the adapter: it holds no
+    /// spending key and offers no way to give it one, so "the adapter signs" is not a state this
+    /// type can be in. The compiler enforces what a runtime error used to report.
+    #[test]
+    fn the_adapter_serves_the_viewing_key_it_was_built_with() {
+        let wallet = MockWalletDb::new(Network::TestNetwork);
+        let usk = account_usk(3);
+        let expected = FullViewingKey::from(usk.orchard());
+
+        let adapter = WalletMigration::new(&wallet, 0, usk.to_unified_full_viewing_key(), NoStore);
+
+        assert_eq!(
+            adapter.orchard_fvk(),
+            Some(&expected),
+            "the adapter extracts the Orchard component of the key it was given",
+        );
+    }
 
     /// Compile-time proof that `WalletMigration` over ANY `zcash_client_backend` wallet `W` and ANY
     /// migration store `St` satisfies every trait bound `commit_preparation` requires (backend +

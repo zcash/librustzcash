@@ -35,6 +35,7 @@ use std::convert::Infallible;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
 
+use orchard::keys::SpendAuthorizingKey;
 use pczt::roles::tx_extractor::TransactionExtractor;
 
 use zcash_client_backend::data_api::locking::{LockOwner, OutputLockStore};
@@ -760,7 +761,7 @@ impl Run {
             let adapter = WalletMigration::new(
                 self.st.wallet(),
                 self.account_id,
-                self.usk.clone(),
+                self.usk.to_unified_full_viewing_key(),
                 MigrationTestStore::holding(stored),
             );
             let plan = engine::plan_migration(&self.network, &adapter, &mut rng)
@@ -769,10 +770,14 @@ impl Run {
             let migrated = plan.denominations().total_migratable();
             let change = plan.denominations().change().map(u64::from).unwrap_or(0);
             let mut adapter = adapter;
+            // The adapter holds viewing authority only; the spend authority is the commit's own
+            // argument, live for that call.
+            let ask = SpendAuthorizingKey::from(self.usk.orchard());
             let (state, _) = engine::commit_preparation_with_funding(
                 &self.network,
                 tip,
                 &mut adapter,
+                &ask,
                 &plan,
                 &mut rng,
                 ReplanThreshold::DEFAULT,
@@ -1554,8 +1559,12 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
         .expect("reads the chain height")
         .expect("the wallet has a chain tip");
     let mut rng = ChaCha8Rng::seed_from_u64(0);
-    let mut adapter =
-        WalletMigration::new(st.wallet(), account_id, usk, MigrationTestStore::default());
+    let mut adapter = WalletMigration::new(
+        st.wallet(),
+        account_id,
+        usk.to_unified_full_viewing_key(),
+        MigrationTestStore::default(),
+    );
 
     // The adapter reports the wallet's grid, not the ZIP 318 default, and scales the delays to it
     // rather than crossing a 12-block grid with three-hour ZIP 318 delays.
@@ -1570,10 +1579,12 @@ fn migration_anchors_to_the_wallets_configured_retention_grid() {
     );
 
     let plan = engine::plan_migration(&network, &adapter, &mut rng).expect("plans the migration");
+    let ask = SpendAuthorizingKey::from(usk.orchard());
     let (state, _) = engine::commit_preparation_with_funding(
         &network,
         tip,
         &mut adapter,
+        &ask,
         &plan,
         &mut rng,
         ReplanThreshold::DEFAULT,
@@ -2098,7 +2109,7 @@ fn cancel_returns_the_balance_and_retains_the_record() {
         let adapter = WalletMigration::new(
             run.st.wallet(),
             run.account_id,
-            run.usk.clone(),
+            run.usk.to_unified_full_viewing_key(),
             MigrationTestStore::holding(stored),
         );
         let mut rng = ChaCha8Rng::seed_from_u64(0xCA);
@@ -2238,7 +2249,7 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
         let adapter = WalletMigration::new(
             run.st.wallet(),
             run.account_id,
-            run.usk.clone(),
+            run.usk.to_unified_full_viewing_key(),
             MigrationTestStore::holding(stored),
         );
         assert!(
@@ -2271,17 +2282,19 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
         let mut adapter = WalletMigration::new(
             run.st.wallet(),
             run.account_id,
-            run.usk.clone(),
+            run.usk.to_unified_full_viewing_key(),
             MigrationTestStore::holding(stored),
         );
         let plan = engine::plan_migration(&run.network, &adapter, &mut rng)
             .expect("plans the fresh balance");
+        let ask = SpendAuthorizingKey::from(run.usk.orchard());
         assert!(
             matches!(
                 engine::commit_preparation_with_funding(
                     &run.network,
                     tip,
                     &mut adapter,
+                    &ask,
                     &plan,
                     &mut rng,
                     ReplanThreshold::DEFAULT,
@@ -2311,15 +2324,17 @@ fn a_send_max_sweep_marks_the_migration_and_forces_a_replan() {
     let mut adapter = WalletMigration::new(
         run.st.wallet(),
         run.account_id,
-        run.usk.clone(),
+        run.usk.to_unified_full_viewing_key(),
         MigrationTestStore::holding(stored),
     );
     let plan =
         engine::plan_migration(&run.network, &adapter, &mut rng).expect("plans the fresh balance");
+    let ask = SpendAuthorizingKey::from(run.usk.orchard());
     let (replanned, _) = engine::commit_preparation_with_funding(
         &run.network,
         tip,
         &mut adapter,
+        &ask,
         &plan,
         &mut rng,
         ReplanThreshold::DEFAULT,

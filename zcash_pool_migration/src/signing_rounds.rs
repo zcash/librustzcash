@@ -26,6 +26,8 @@
 use alloc::vec::Vec;
 use core::num::{NonZeroU32, NonZeroUsize};
 
+use zcash_protocol::consensus::BlockHeight;
+
 use crate::engine::{MigrationTransferId, MigrationTxKind};
 
 /// The Orchard-family actions a padded preparation transaction carries.
@@ -101,22 +103,39 @@ const fn nz(n: u32) -> NonZeroU32 {
 
 /// A transaction a migration plan WILL build, described before it is built: its stable ordinal (the
 /// [`MigrationTransferId`] the build later assigns, since the plan enumerates in commit order), what it
-/// does, and how many Orchard actions the signer processes for it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// does, how many Orchard actions the signer processes for it, and the two facts that place it in
+/// the run — what must mine before it, and when it is scheduled to broadcast.
+///
+/// Every field is what the COMMIT will stamp on the built transaction, so a consumer can show the
+/// whole run's execution shape (its dependency graph and its timeline) from a plan the user has
+/// not consented to yet, and then find each preview row again by id once the run is committed. See
+/// [`MigrationPlan::planned_transactions`](crate::engine::MigrationPlan::planned_transactions),
+/// which is the only thing that should construct one for a real plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedTx {
     id: MigrationTransferId,
     kind: MigrationTxKind,
     actions: u32,
+    depends_on: Vec<MigrationTransferId>,
+    scheduled_height: Option<BlockHeight>,
 }
 
 impl PlannedTx {
-    /// A planned transaction of `kind`, identified by `id`, with its canonical [`action_weight`].
+    /// A planned transaction of `kind`, identified by `id`, waiting on `depends_on` and scheduled
+    /// for `scheduled_height`, with its canonical [`action_weight`].
     #[must_use]
-    pub const fn new(id: MigrationTransferId, kind: MigrationTxKind) -> Self {
+    pub fn new(
+        id: MigrationTransferId,
+        kind: MigrationTxKind,
+        depends_on: Vec<MigrationTransferId>,
+        scheduled_height: Option<BlockHeight>,
+    ) -> Self {
         Self {
             id,
             kind,
             actions: action_weight(kind),
+            depends_on,
+            scheduled_height,
         }
     }
 
@@ -136,6 +155,37 @@ impl PlannedTx {
     #[must_use]
     pub const fn actions(&self) -> u32 {
         self.actions
+    }
+
+    /// The transactions that must MINE before this one may be broadcast, by the id each will carry
+    /// — the value the commit stores as
+    /// [`MigrationTransaction::depends_on`](crate::engine::MigrationTransaction::depends_on).
+    ///
+    /// Empty for a transaction that waits on nothing: a preparation transaction in layer 0, whose
+    /// inputs are the wallet's own notes, or a crossing funded directly by a wallet note. (A plan
+    /// that named no note at all for a crossing would also show it waiting on nothing, but such a
+    /// plan is unconstructible through this crate's API and `commit_preparation` refuses it before
+    /// building anything, so no run is ever previewed from one.)
+    #[must_use]
+    pub fn depends_on(&self) -> &[MigrationTransferId] {
+        &self.depends_on
+    }
+
+    /// The height at which this transaction is scheduled to broadcast — the value the commit
+    /// stores as
+    /// [`MigrationTransaction::scheduled_height`](crate::engine::MigrationTransaction::scheduled_height).
+    ///
+    /// Not a promise of when it WILL broadcast: a dependency that mines late holds a transaction
+    /// past its drawn height, and the engine re-spreads a run that falls too far behind. It is the
+    /// timeline the user consents to.
+    ///
+    /// `None` only for a plan that holds no drawn height for a transaction it contains, which the
+    /// public API cannot produce (a plan's schedules are drawn one height per transaction) and
+    /// which `commit_preparation` refuses to build. The row is still reported, so that no id is
+    /// renumbered by the absence.
+    #[must_use]
+    pub const fn scheduled_height(&self) -> Option<BlockHeight> {
+        self.scheduled_height
     }
 
     /// Whether this is a preparation transaction.
@@ -246,11 +296,11 @@ impl SigningRoundStrategy for MinRounds {
     fn pack(&self, txs: &[PlannedTx], budget: SigningRoundBudget) -> Vec<PlannedSigningRound> {
         let mut preps: Vec<PlannedTx> = txs
             .iter()
-            .copied()
-            .filter(PlannedTx::is_preparation)
+            .filter(|tx| tx.is_preparation())
+            .cloned()
             .collect();
         let mut transfers: Vec<PlannedTx> =
-            txs.iter().copied().filter(PlannedTx::is_transfer).collect();
+            txs.iter().filter(|tx| tx.is_transfer()).cloned().collect();
         let assignment = solve_two_size(preps.len(), transfers.len(), budget);
 
         // Consume preparation and transfer transactions from the front into each round's quota.
@@ -288,13 +338,13 @@ impl SigningRoundStrategy for NextFit {
         let mut rounds: Vec<PlannedSigningRound> = Vec::new();
         let mut current: Vec<PlannedTx> = Vec::new();
         let mut current_actions = 0u32;
-        for &tx in txs {
+        for tx in txs {
             if !current.is_empty() && current_actions.saturating_add(tx.actions()) > cap {
                 rounds.push(PlannedSigningRound::new(core::mem::take(&mut current)));
                 current_actions = 0;
             }
             current_actions = current_actions.saturating_add(tx.actions());
-            current.push(tx);
+            current.push(tx.clone());
         }
         if !current.is_empty() {
             rounds.push(PlannedSigningRound::new(current));

@@ -7,6 +7,7 @@
 
 use core::fmt::Debug;
 
+use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::COIN;
 
 use crate::engine::{MigrationTransferId, MigrationTxKind};
@@ -14,15 +15,30 @@ use crate::signing_rounds::{PREPARATION_ACTIONS, PlannedTx, SigningRoundBudget, 
 
 use alloc::vec::Vec;
 
+/// The height the synthetic runs [`planned_txs`] builds are scheduled from, an arbitrary
+/// post-activation height: the packing problem is indifferent to WHEN a transaction broadcasts, so
+/// the schedule only has to be well-formed, not drawn.
+const SCENARIO_BASE_HEIGHT: u32 = 2_000_000;
+
 /// Build the canonical planned-transaction list for `n_prep` preparation and `n_transfer` transfer
 /// transactions (preparation first, then transfers), with sequential ids.
+///
+/// The shape is the simplest real one: a single preparation layer (so nothing waits on anything)
+/// funding crossings directly, on a schedule of one transaction per block. That is enough for the
+/// signing-round packing suite, which reads only each transaction's kind and action weight — a
+/// packer that consulted a dependency or a height would be reordering signatures by something
+/// signing does not depend on (ZIP 374 defers anchors and witnesses, so signing-time transactions
+/// are independent).
 pub fn planned_txs(n_prep: usize, n_transfer: usize) -> Vec<PlannedTx> {
     let mut txs = Vec::with_capacity(n_prep + n_transfer);
     let mut id = 0u32;
+    let height = |id: u32| Some(BlockHeight::from_u32(SCENARIO_BASE_HEIGHT + id));
     for index in 0..n_prep {
         txs.push(PlannedTx::new(
             MigrationTransferId::new(id),
             MigrationTxKind::Preparation { layer: 0, index },
+            Vec::new(),
+            height(id),
         ));
         id += 1;
     }
@@ -30,6 +46,8 @@ pub fn planned_txs(n_prep: usize, n_transfer: usize) -> Vec<PlannedTx> {
         txs.push(PlannedTx::new(
             MigrationTransferId::new(id),
             MigrationTxKind::Transfer { crossing },
+            Vec::new(),
+            height(id),
         ));
         id += 1;
     }
