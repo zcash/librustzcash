@@ -57,6 +57,7 @@ workspace.
   one in progress.
 
 ### Changed
+- Migrated to `zcash_pool_migration 0.1.0-rc.7`.
 - `WalletWrite::store_transactions_to_be_sent` now upserts each transaction's
   sent-output records, so storing a transaction the wallet has already
   recorded replaces that record instead of failing.
