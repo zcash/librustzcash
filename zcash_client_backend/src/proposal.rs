@@ -6,16 +6,23 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use zcash_primitives::transaction::{TxId, TxVersion};
+#[cfg(feature = "orchard")]
+use zcash_primitives::transaction::components::orchard::ACTION_SIZE as ORCHARD_ACTION_SIZE;
+use zcash_primitives::transaction::{
+    TxId, TxVersion,
+    components::sapling::{OUTPUT_DESCRIPTION_SIZE, SPEND_DESCRIPTION_SIZE},
+    fees::{transparent as transparent_fees, zip317::P2PKH_STANDARD_OUTPUT_SIZE},
+};
 use zcash_protocol::{
     PoolType, ShieldedPool,
     consensus::{BlockHeight, BranchId},
+    constants::MAX_BLOCK_BYTES,
     value::Zatoshis,
 };
 use zip321::{TransactionRequest, Zip321Error};
 #[cfg(feature = "orchard")]
 use {
-    zcash_primitives::transaction::builder::BundlePadding,
+    orchard::Proof, zcash_primitives::transaction::builder::BundlePadding,
     zcash_protocol::zip318::PoolMigrationConstants,
 };
 
@@ -122,6 +129,18 @@ pub enum ProposalError {
     /// classification routes Orchard-receiver payments to the Ironwood pool instead.
     #[cfg(feature = "orchard")]
     OrchardPoolPayment(usize),
+    /// The transaction the step describes would exceed the maximum size a Zcash block may
+    /// carry, and so cannot be included in any block. The serialized size of the step's
+    /// transaction was estimated from its inputs, outputs, and change, using conservative
+    /// per-element byte costs; the estimate exceeds [`MAX_BLOCK_BYTES`].
+    ///
+    /// [`MAX_BLOCK_BYTES`]: zcash_protocol::constants::MAX_BLOCK_BYTES
+    TransactionTooLarge {
+        /// The conservative upper-bound estimate of the step's serialized byte size.
+        estimated_size: usize,
+        /// The maximum serialized byte size a Zcash transaction may carry (`MAX_BLOCK_BYTES`).
+        limit: usize,
+    },
 }
 
 impl Display for ProposalError {
@@ -240,6 +259,13 @@ impl Display for ProposalError {
             ProposalError::OrchardReceiverRequiresIronwood(version) => write!(
                 f,
                 "After NU6.3 activation, a payment to an Orchard receiver requires a version 6 (Ironwood) transaction, but version {version:?} was requested."
+            ),
+            ProposalError::TransactionTooLarge {
+                estimated_size,
+                limit,
+            } => write!(
+                f,
+                "The proposed transaction's estimated serialized size ({estimated_size} bytes) exceeds the maximum transaction size ({limit} bytes)."
             ),
         }
     }
@@ -741,23 +767,37 @@ impl<NoteRef> Step<NoteRef> {
             return Err(ProposalError::MissingShieldedAnchor);
         }
 
-        if input_total == output_total {
-            Ok(Self {
-                transaction_request,
-                payment_pools,
-                transparent_inputs,
-                shielded_inputs,
-                anchor_height,
-                prior_step_inputs,
-                balance,
-                is_shielding,
-            })
-        } else {
-            Err(ProposalError::BalanceError {
+        if input_total != output_total {
+            return Err(ProposalError::BalanceError {
                 input_total,
                 output_total,
-            })
+            });
         }
+
+        let step = Self {
+            transaction_request,
+            payment_pools,
+            transparent_inputs,
+            shielded_inputs,
+            anchor_height,
+            prior_step_inputs,
+            balance,
+            is_shielding,
+        };
+
+        // Reject proposals whose estimated serialized size exceeds the maximum a Zcash block
+        // may carry. The estimate is a conservative upper bound (see `estimated_serialized_size`),
+        // so a step that passes this gate may still fail at build time, but a step that fails it
+        // can never be mined and is rejected here rather than wasting the caller's fee budget.
+        let estimated_size = step.estimated_serialized_size();
+        if estimated_size > MAX_BLOCK_BYTES {
+            return Err(ProposalError::TransactionTooLarge {
+                estimated_size,
+                limit: MAX_BLOCK_BYTES,
+            });
+        }
+
+        Ok(step)
     }
 
     /// Returns the transaction request that describes the payments to be made.
@@ -1084,6 +1124,179 @@ impl<NoteRef> Step<NoteRef> {
         bundle_version: ::orchard::bundle::BundleVersion,
     ) -> Result<usize, &'static str> {
         self.orchard_style_action_count(PoolType::IRONWOOD, padding, bundle_version)
+    }
+
+    /// Returns a conservative upper-bound estimate of the serialized byte size of the
+    /// transaction this step describes.
+    ///
+    /// The estimate sums the per-element byte costs of every input, output, and change
+    /// output the step carries, plus the per-bundle overhead that each present bundle
+    /// contributes (header fields, binding signatures, and the Orchard/Ironwood bundle
+    /// proof). Each per-element cost is an upper bound:
+    /// - Transparent inputs use their actual known serialized size (so P2SH inputs,
+    ///   which can be larger than the P2PKH standard, are not under-counted), with a
+    ///   generous fixed upper bound for inputs whose script size is unknown.
+    /// - Sapling uses the v4 serialized form, which carries proofs and signatures
+    ///   inline — a conservative upper bound, since v5 moves these to bundle-level
+    ///   fields.
+    /// - Orchard and Ironwood use [`ACTION_SIZE`] for each action description, plus
+    ///   the per-action spend authorization signature (64 bytes) and the per-action
+    ///   proof share, computed via [`orchard::Proof::expected_proof_size`].
+    ///
+    /// The per-bundle overhead is added only when a bundle is present, so a
+    /// purely-transparent transaction is not charged for Sapling or Orchard proof
+    /// data it does not carry. The Orchard and Ironwood action counts use
+    /// `spends + outputs + 2`, which is an upper bound across every bundle type
+    /// and version: the post-NU6.3 cross-address-disabled policy charges
+    /// `spends + outputs` and the pre-NU6.3 policy charges `max(spends, outputs)`
+    /// (no larger), and the default bundle type pads to a two-action minimum.
+    ///
+    /// The estimate is conservative (it never under-counts), so comparing it against
+    /// [`MAX_BLOCK_BYTES`] is a safe size bound: a step whose estimate fits within a
+    /// block will fit when built, and a step whose estimate exceeds a block may or may
+    /// not fit (the builder is the final authority), but rejecting the latter at
+    /// proposal time prevents input selection from constructing a transaction that
+    /// can never be mined.
+    ///
+    /// [`ACTION_SIZE`]: zcash_primitives::transaction::components::orchard::ACTION_SIZE
+    /// [`MAX_BLOCK_BYTES`]: zcash_protocol::constants::MAX_BLOCK_BYTES
+    pub fn estimated_serialized_size(&self) -> usize {
+        // The fixed transaction header: version (4) + consensus_branch_id (4) +
+        // lock_time (4) + expiry_height (4). The 32-byte constant leaves room for
+        // future header fields (e.g. the zip-233 amount under NU7).
+        const TX_HEADER_SIZE: usize = 32;
+
+        // Per-bundle overhead for a present transparent bundle: two CompactSize
+        // vector-length prefixes (one for vin, one for vout), at most 9 bytes each.
+        const TRANSPARENT_BUNDLE_OVERHEAD: usize = 18;
+
+        // Per-bundle overhead for a present Sapling bundle: value_balance (8) +
+        // binding_sig (64) + CompactSize vector-length prefixes for spends and
+        // outputs (~28). The v4 anchor is per-spend (already in
+        // `SPEND_DESCRIPTION_SIZE`); the v5 per-bundle anchor (32) is covered by
+        // the margin.
+        const SAPLING_BUNDLE_OVERHEAD: usize = 100;
+
+        // Per-action spend authorization signature in an Orchard/Ironwood bundle.
+        #[cfg(feature = "orchard")]
+        const ORCHARD_AUTH_SIG_SIZE: usize = 64;
+
+        // Per-bundle overhead for a present Orchard/Ironwood bundle, excluding the
+        // proof: flags (1) + value_balance (8) + anchor (32) + binding_sig (64) +
+        // CompactSize for the actions vector (~10). The proof is added separately
+        // via `Proof::expected_proof_size`.
+        #[cfg(feature = "orchard")]
+        const ORCHARD_BUNDLE_OVERHEAD: usize = 115;
+
+        // The maximum padding the default Orchard/Ironwood bundle type applies: the
+        // `Transactional { pad_to_minimum: Some(2) }` default pads to at least two
+        // actions. Added to `spends + outputs` (the post-NU6.3 count, which is >=
+        // the pre-NU6.3 `max(spends, outputs)` count) this is an upper bound on the
+        // action count across every bundle type and version.
+        #[cfg(feature = "orchard")]
+        const ORCHARD_PADDING_ACTIONS: usize = 2;
+
+        // Transparent inputs: use each input's actual serialized size where it is known
+        // (P2PKH or P2SH inputs with a known script size), so that P2SH inputs — which
+        // can be larger than the P2PKH standard — are not under-counted. For inputs
+        // whose script size is unknown, fall back to a generous upper bound: the
+        // scriptSig of a transparent input is consensus-limited but in practice rarely
+        // exceeds a few hundred bytes, and 8 KiB is well above any realistic redeem
+        // script while still small enough that a single unknown input cannot by itself
+        // trip the block limit.
+        const UNKNOWN_INPUT_SIZE_UPPER_BOUND: usize = 1 << 13; // 8 KiB
+        let transparent_inputs = self
+            .transparent_inputs()
+            .iter()
+            .map(
+                |input| match transparent_fees::InputView::serialized_size(input) {
+                    transparent_fees::InputSize::Known(size) => size,
+                    transparent_fees::InputSize::Unknown(_) => UNKNOWN_INPUT_SIZE_UPPER_BOUND,
+                },
+            )
+            .sum::<usize>();
+
+        // Transparent outputs: each payment to the transparent pool and each transparent
+        // change output costs the standard P2PKH output size.
+        let transparent_payment_outputs =
+            self.output_count_in_pool(PoolType::Transparent) * P2PKH_STANDARD_OUTPUT_SIZE;
+        let transparent_change_outputs =
+            self.change_count_in_pool(PoolType::Transparent) * P2PKH_STANDARD_OUTPUT_SIZE;
+        let transparent_present = !self.transparent_inputs().is_empty()
+            || transparent_payment_outputs > 0
+            || transparent_change_outputs > 0;
+
+        // Sapling spends and outputs. The default Sapling bundle type pads to at least
+        // two outputs when there are any spends or outputs, so the output count is
+        // `max(requested_outputs + change_outputs, 2)` when the bundle is non-empty. The
+        // spend count is `max(requested_spends, 1)` when non-empty. Both are upper-bounded
+        // by adding 2 to the requested count, which covers the padding floor.
+        let sapling_spends = self.input_count_in_pool(PoolType::SAPLING);
+        let sapling_outputs = self.output_count_in_pool(PoolType::SAPLING)
+            + self.change_count_in_pool(PoolType::SAPLING);
+        let sapling_bundle_present = sapling_spends > 0 || sapling_outputs > 0;
+        let sapling_spend_bytes = if sapling_bundle_present {
+            (sapling_spends + 2) * SPEND_DESCRIPTION_SIZE
+        } else {
+            0
+        };
+        let sapling_output_bytes = if sapling_bundle_present {
+            (sapling_outputs + 2) * OUTPUT_DESCRIPTION_SIZE
+        } else {
+            0
+        };
+
+        // Orchard and Ironwood bundles. Each action costs `ACTION_SIZE` (the action
+        // description) plus `ORCHARD_AUTH_SIG_SIZE` (the per-action spend
+        // authorization signature, written separately from the action description).
+        // The bundle proof is `Proof::expected_proof_size(num_actions)` — a fixed
+        // base plus a per-action share — so it scales with the action count and is
+        // computed via the orchard crate's own `pub const fn` to stay correct if the
+        // circuit changes.
+        #[cfg(feature = "orchard")]
+        let orchard_bundle_bytes = {
+            let orchard_spends = self.input_count_in_pool(PoolType::ORCHARD);
+            let orchard_outputs = self.output_count_in_pool(PoolType::ORCHARD)
+                + self.change_count_in_pool(PoolType::ORCHARD);
+            let num_actions = orchard_spends + orchard_outputs + ORCHARD_PADDING_ACTIONS;
+            if num_actions > ORCHARD_PADDING_ACTIONS {
+                ORCHARD_BUNDLE_OVERHEAD
+                    + Proof::expected_proof_size(num_actions)
+                    + num_actions * (ORCHARD_ACTION_SIZE + ORCHARD_AUTH_SIG_SIZE)
+            } else {
+                0
+            }
+        };
+        #[cfg(not(feature = "orchard"))]
+        let orchard_bundle_bytes: usize = 0;
+
+        #[cfg(feature = "orchard")]
+        let ironwood_bundle_bytes = {
+            let ironwood_spends = self.input_count_in_pool(PoolType::IRONWOOD);
+            let ironwood_outputs = self.output_count_in_pool(PoolType::IRONWOOD)
+                + self.change_count_in_pool(PoolType::IRONWOOD);
+            let num_actions = ironwood_spends + ironwood_outputs + ORCHARD_PADDING_ACTIONS;
+            if num_actions > ORCHARD_PADDING_ACTIONS {
+                ORCHARD_BUNDLE_OVERHEAD
+                    + Proof::expected_proof_size(num_actions)
+                    + num_actions * (ORCHARD_ACTION_SIZE + ORCHARD_AUTH_SIG_SIZE)
+            } else {
+                0
+            }
+        };
+        #[cfg(not(feature = "orchard"))]
+        let ironwood_bundle_bytes: usize = 0;
+
+        TX_HEADER_SIZE
+            + (transparent_present as usize) * TRANSPARENT_BUNDLE_OVERHEAD
+            + transparent_inputs
+            + transparent_payment_outputs
+            + transparent_change_outputs
+            + (sapling_bundle_present as usize) * SAPLING_BUNDLE_OVERHEAD
+            + sapling_spend_bytes
+            + sapling_output_bytes
+            + orchard_bundle_bytes
+            + ironwood_bundle_bytes
     }
 }
 
@@ -1489,6 +1702,78 @@ mod tests {
                 false,
             ),
             Ok(_)
+        );
+    }
+
+    /// A step whose estimated serialized size exceeds the maximum a Zcash block may carry is
+    /// rejected at proposal time, rather than being allowed to reach the builder (where proof
+    /// generation would waste the caller's resources on a transaction that can never be mined).
+    ///
+    /// The estimate is a conservative upper bound, so the boundary it enforces is a safe floor:
+    /// a step that passes may still fail at build time, but a step that fails can never fit. The
+    /// test constructs a step that exceeds the block limit and confirms both the rejection and
+    /// that the error carries the estimate and the limit for diagnostics.
+    #[test]
+    fn step_exceeding_the_block_size_limit_is_rejected() {
+        // Each Orchard action costs at least `ACTION_SIZE` (the action description) +
+        // `ORCHARD_AUTH_SIG_SIZE` (the spend authorization signature) + its share of the
+        // bundle proof (`Proof::expected_proof_size` spreads a per-action cost across all
+        // actions). The full per-action cost is therefore far larger than `ACTION_SIZE`
+        // alone, so the block-fitting boundary is much lower than `MAX_BLOCK_BYTES /
+        // ACTION_SIZE`. Compute it from the real per-action cost so the test stays correct
+        // if the proof circuit changes.
+        let proof_per_action =
+            orchard::Proof::expected_proof_size(2) - orchard::Proof::expected_proof_size(1);
+        let full_action_cost = ACTION_SIZE + 64 + proof_per_action; // action desc + auth sig + proof share
+        let oversize_spend_count = MAX_BLOCK_BYTES / full_action_cost + 1;
+
+        // The total input value is `oversize_spend_count * 1` zatoshi, and the fee is zero, so
+        // the step is value-balanced (one zatoshi of change per spend) and the rejection is due
+        // to the size, not the balance.
+        let one_zato = Zatoshis::const_from_u64(1);
+        let input_total = (one_zato * oversize_spend_count).unwrap();
+        let change = ChangeValue::shielded(ShieldedPool::Orchard, input_total, None);
+        let balance = TransactionBalance::new(vec![change], Zatoshis::ZERO).unwrap();
+
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((oversize_spend_count, 1), (0, 0)),
+                balance,
+                false,
+            ),
+            Err(ProposalError::TransactionTooLarge {
+                estimated_size,
+                limit,
+            }) if limit == MAX_BLOCK_BYTES && estimated_size > MAX_BLOCK_BYTES
+        );
+    }
+
+    /// A step whose estimated size fits within the block limit is accepted. This is the
+    /// negative control for `step_exceeding_the_block_size_limit_is_rejected`: it confirms the
+    /// gate rejects only oversized steps, not every step with a large action count.
+    #[test]
+    fn step_fitting_within_the_block_size_limit_is_accepted() {
+        // A step whose Orchard action count is comfortably below the block ceiling. The
+        // estimate adds per-bundle overhead and padding to the per-action cost, so the
+        // fitting count is the floor `MAX_BLOCK_BYTES / full_action_cost` minus a margin
+        // for that overhead.
+        let proof_per_action =
+            orchard::Proof::expected_proof_size(2) - orchard::Proof::expected_proof_size(1);
+        let full_action_cost = ACTION_SIZE + 64 + proof_per_action;
+        let fitting_spend_count = MAX_BLOCK_BYTES / full_action_cost - 4;
+
+        let one_zato = Zatoshis::const_from_u64(1);
+        let input_total = (one_zato * fitting_spend_count).unwrap();
+        let change = ChangeValue::shielded(ShieldedPool::Orchard, input_total, None);
+        let balance = TransactionBalance::new(vec![change], Zatoshis::ZERO).unwrap();
+
+        assert_matches!(
+            validated_step(
+                orchard_and_ironwood_notes((fitting_spend_count, 1), (0, 0)),
+                balance,
+                false,
+            ),
+            Ok(step) if step.estimated_serialized_size() <= MAX_BLOCK_BYTES
         );
     }
 
