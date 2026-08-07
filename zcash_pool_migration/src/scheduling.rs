@@ -65,8 +65,9 @@
 //!   re-spread). That requires the persisted schedule and wall-clock state the engine owns; the
 //!   drive API implements it as the overdue shift (see
 //!   [`advance_migration`](crate::satisfiability::advance_migration) and
-//!   [`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)), which moves the
-//!   whole pending schedule forward by the overdue amount rather than redrawing it.
+//!   [`overdue_shift_tolerance`](crate::satisfiability::overdue_shift_tolerance)), which defers
+//!   every pending transaction but the released one by the overdue amount rather than redrawing the
+//!   schedule, the release never deferred above what the wallet's own chain data can serve.
 //!
 //! This module supplies the heights and anchors those policies act on; it does not enact them.
 //!
@@ -806,13 +807,12 @@ pub fn draw_anchor_boundary<R: RngCore + CryptoRng>(
 
 /// Select a REPLACEMENT boundary for a transfer whose broadcast schedule has moved out from under
 /// its drawn anchor — the overdue shift
-/// ([`advance_migration`](crate::satisfiability::advance_migration)) defers every pending
-/// broadcast when a wallet resumes after downtime, and a boundary that was in-distribution for
-/// the ORIGINAL schedule sits `delta` blocks too old against the shifted one. With
-/// [`ANCHOR_AGE_CAP`] at 4 buckets, even a modest shift leaves an anchor age no honest draw
-/// produces, and every deferred transfer of one wallet would carry the SAME excess age — a
-/// linkable fingerprint. Redrawing against the new schedule restores the age distribution the
-/// anchor cohorts rely on.
+/// ([`advance_migration`](crate::satisfiability::advance_migration)) defers the pending broadcasts
+/// a resuming wallet slept past, and a boundary that was in-distribution for the ORIGINAL schedule
+/// sits too old against the shifted one. With [`ANCHOR_AGE_CAP`] at 4 buckets, even a modest shift
+/// leaves an anchor age no honest draw produces, and every deferred transfer of one wallet would
+/// carry the SAME excess age — a linkable fingerprint. Redrawing against the new schedule restores
+/// the age distribution the anchor cohorts rely on.
 ///
 /// The draw is [`draw_anchor_boundary`]'s recency-weighted draw against the NEW
 /// `broadcast_height`, with the candidate set floored at `prior_boundary` — the boundary being
