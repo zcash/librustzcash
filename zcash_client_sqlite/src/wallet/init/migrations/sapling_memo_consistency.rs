@@ -255,7 +255,12 @@ fn get_transaction<P: consensus::Parameters>(
         },
     )
     .optional()?
-    .map(|(t, b, e)| parse_tx(params, &t, b, e))
+    // The `scan_queue` table is not guaranteed to exist at the schema version this
+    // migration runs against, so no chain tip height is available as a consensus branch
+    // ID fallback. The transactions processed by this migration were created by the
+    // wallet and therefore always have a nonzero expiry height, so no fallback is
+    // needed.
+    .map(|(t, b, e)| parse_tx(params, &t, b, e, None))
     .transpose()
 }
 

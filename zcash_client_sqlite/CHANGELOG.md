@@ -109,6 +109,13 @@ workspace.
   need the transaction rescanned before they can be labelled.
 
 ### Fixed
+- Reading back a stored unmined transaction with a zero expiry height (such as
+  a coinbase transaction imported from a zcashd wallet before any chain scan)
+  no longer fails with a "Consensus branch ID not known" error. When neither a
+  mined height nor a nonzero expiry height is available, the consensus branch
+  ID (which does not affect parsing) is now selected using the wallet's view
+  of the chain tip height; the error remains only when the chain tip is also
+  unknown.
 - Anchor-checkpoint retention is no longer owed to a migration that has reached
   any terminal status. The grids of `failed`, `superseded`, and `cancelled`
   migrations were retained for the lifetime of the wallet, because retention
