@@ -12,9 +12,13 @@
 //! fees (dropping the smallest denominations when the fees do not fit the balance), producing a
 //! [`MigrationPlan`] preview for the user to consent to (ZIP 318 requires consent before any funds leave
 //! the pool). After consent, [`commit_preparation`] builds and pre-signs EVERY transaction in one
-//! pass, reading the account's note plaintexts and signing through the backend traits, and
-//! persisting each transaction through the store traits. The concrete durable store, proving, and
-//! reconciliation-on-launch are grown by a later slice.
+//! pass, reading the account's note plaintexts through the backend traits, signing with the spend
+//! authority the CALLER passes to it, and persisting each transaction through the store traits.
+//! Spend authority is an argument to the two operations that sign — this one and
+//! [`rebuild_expired_transfer`] — and to nothing else, so a backend is never asked to hold it: an
+//! account whose key is on a hardware wallet uses [`build_preparation_unsigned`] and signs off
+//! device. The concrete durable store, proving, and reconciliation-on-launch are grown by a later
+//! slice.
 //!
 //! # The committed migration is stored as its transactions' PCZTs
 //!
@@ -41,18 +45,13 @@
 //! [`preparation`]: crate::preparation
 //! [`scheduling`]: crate::scheduling
 
+#[cfg(feature = "orchard")]
+use crate::build::{AccountDerivation, build_prep_tx, build_transfer_pczt};
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::{
     fmt,
     num::{NonZeroU32, NonZeroUsize},
-};
-#[cfg(feature = "orchard")]
-use {
-    crate::{
-        build::{AccountDerivation, build_prep_tx, build_transfer_pczt},
-        preparation::PrepOutput,
-    },
-    alloc::collections::BTreeMap,
 };
 
 use corez::io;
@@ -72,7 +71,9 @@ use zcash_primitives::transaction::fees::{FeeRule as _, transparent, zip317};
 use crate::satisfiability::{DuenessTargets, UnsatisfiableCause};
 use crate::{
     denomination::{DenominationPlan, balance_has_canonical_split, plan_denominations},
-    preparation::{PREP_TX_ACTIONS, PrepError, PrepInput, PreparationPlan, plan_preparation},
+    preparation::{
+        PREP_TX_ACTIONS, PrepError, PrepInput, PrepOutput, PreparationPlan, plan_preparation,
+    },
     satisfiability::{ReorgSettleDepth, ReplanThreshold, StepSatisfiability, UnsatisfiableKind},
     scheduling::{self, Schedule},
     signing_rounds::{
@@ -986,6 +987,163 @@ pub struct MigrationPlan {
     schedule: Vec<Schedule>,
 }
 
+/// A note a plan's preparation phase mints (or a wallet note it funds a crossing with directly),
+/// as [`MigrationPlan::planned_run`] tracks it while working out which transaction spends which
+/// note: what the note is worth, which transaction mints it (`None` for a wallet note that needs
+/// no preparation), and whether a later transaction has already claimed it.
+///
+/// The commit holds the same sequence with the note PLAINTEXTS it recovers from the built bundles
+/// ([`MintedNote`]), grown in the same order, and spends by [`MintedOrdinal`] into it — so the note
+/// a transaction spends is the note the plan assigned it, not one the commit found again.
+struct PlannedNote {
+    value: Zatoshis,
+    producer: Option<MigrationTransferId>,
+    claimed: bool,
+}
+
+/// A note the preparation phase mints, addressed by its POSITION in the sequence of them.
+///
+/// The sequence is grown once per plan, in a fixed order — each preparation transaction's
+/// non-change outputs as the plan declares them, layer by layer, then the directly-funded wallet
+/// notes — and [`MigrationPlan::planned_run`] is the only thing that assigns positions in it. The
+/// commit grows the same sequence with the real notes and INDEXES it, so an ordinal means the same
+/// note on both sides by construction rather than by two searches agreeing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MintedOrdinal(usize);
+
+/// Where a minted note came from: the `(layer, transaction, output)` coordinate of the plan output
+/// that mints it, as [`PrepInput::Prior`] names it.
+///
+/// Only non-change outputs get one, because only those enter the minted sequence — which is what
+/// makes a `Prior` naming a [`Change`](PrepOutput::Change) output a plan defect this can report
+/// rather than a value match that quietly succeeds against some other note.
+type MintedAt = (usize, usize, usize);
+
+/// Claim the minted note the plan output at `coordinate` produces, yielding its position.
+///
+/// This is the FEEDER claim, and it is a lookup, not a search: [`PrepInput::Prior`] already names
+/// the output it spends, so there is exactly one right answer and no rule for this walk to invent.
+/// (An earlier version matched by value, which is a second answer to a question the plan had
+/// already answered — two answers that agree only for the plans the crate's own planner happens to
+/// produce.)
+///
+/// `None` when the coordinate names no minted note: it is out of range, it names a change output,
+/// or it points at a transaction not yet built (its own, or a later one). Each is a malformed plan,
+/// which [`commit_preparation`] refuses as [`CommitError::InconsistentPlan`].
+fn claim_planned_note_at(
+    minted: &mut [PlannedNote],
+    minted_at: &BTreeMap<MintedAt, MintedOrdinal>,
+    coordinate: MintedAt,
+) -> Option<MintedOrdinal> {
+    let ordinal = *minted_at.get(&coordinate)?;
+    let note = minted.get_mut(ordinal.0)?;
+    // A coordinate claimed twice is a plan that spends one note twice. The second claim resolves
+    // to nothing, exactly as a coordinate naming no note does, so both are refused in the same
+    // place — before the build starts — rather than one of them surfacing mid-commit.
+    if note.claimed {
+        return None;
+    }
+    note.claimed = true;
+    Some(ordinal)
+}
+
+/// Claim the first unclaimed note of exactly `value` from `minted`, yielding its position. `None`
+/// when no such note remains: the plan asks for a funding note it does not mint, and
+/// [`commit_preparation`] refuses it as [`CommitError::InconsistentPlan`].
+///
+/// First-fit on value is used for the TRANSFER funding notes and nothing else, because that is the
+/// one assignment the plan carries no coordinate for: a crossing names the value it needs, not the
+/// output that mints it. It is decided here, once, and indexed downstream.
+fn claim_planned_note(minted: &mut [PlannedNote], value: Zatoshis) -> Option<MintedOrdinal> {
+    let ordinal = minted
+        .iter()
+        .position(|note| !note.claimed && note.value == value)?;
+    minted[ordinal].claimed = true;
+    Some(MintedOrdinal(ordinal))
+}
+
+/// A plan's transactions together with the note assignment that makes them buildable: the public
+/// preview rows, and for each transaction the [`MintedOrdinal`]s it spends.
+///
+/// The two travel together because they are decided together, in one walk over the plan
+/// ([`MigrationPlan::planned_run`]). [`MigrationPlan::planned_transactions`] publishes the rows;
+/// [`commit_preparation`] takes both, which is what keeps "which transaction waits on which" and
+/// "which note each spends" from being two independent answers.
+struct PlannedRun {
+    rows: Vec<PlannedTx>,
+    /// Per preparation transaction, in row order: the note each of its
+    /// [`Prior`](PrepInput::Prior) inputs claims, in input order.
+    ///
+    /// Read by the build, which is Orchard-only; the assignment is still MADE without the feature,
+    /// because it is what the rows' dependencies are derived from.
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    prep_feeders: Vec<Vec<Option<MintedOrdinal>>>,
+    /// Per crossing, in crossing order: the funding note it claims.
+    #[cfg_attr(not(feature = "orchard"), allow(dead_code))]
+    transfer_funding: Vec<Option<MintedOrdinal>>,
+}
+
+/// A [`PlannedRun`] whose every claim resolved: each spend names a note the plan mints.
+///
+/// The `Option`s are gone, which is the point — inside the build there is no "the plan named no
+/// note for this" case to handle transaction by transaction, because a plan with one never reaches
+/// it. [`PlannedRun::into_buildable`] is where that is established, before anything is built.
+#[cfg(feature = "orchard")]
+struct BuildableRun {
+    rows: Vec<PlannedTx>,
+    prep_feeders: Vec<Vec<MintedOrdinal>>,
+    transfer_funding: Vec<MintedOrdinal>,
+}
+
+#[cfg(feature = "orchard")]
+impl PlannedRun {
+    /// Check that the plan names a note for every spend its transactions make, yielding the form
+    /// the commit builds from.
+    ///
+    /// Unreachable for a plan [`plan_migration`] produced: its preparation phase mints exactly the
+    /// funding notes the denomination split asks for, and each layer's feeders come from the layer
+    /// before it. A plan that nonetheless asks a transaction to spend a note it does not mint is
+    /// refused HERE — before the first transaction is built, rather than partway through a commit
+    /// that has already signed some of them.
+    fn into_buildable<E>(self) -> Result<BuildableRun, CommitError<E>> {
+        let prep_feeders = self
+            .prep_feeders
+            .into_iter()
+            .enumerate()
+            .map(|(index, feeders)| {
+                feeders
+                    .into_iter()
+                    .map(|claim| {
+                        claim.ok_or_else(|| {
+                            CommitError::InconsistentPlan(format!(
+                                "preparation transaction {index} spends a note the plan does not \
+                                 mint, or that an earlier transaction has already spent"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let transfer_funding = self
+            .transfer_funding
+            .into_iter()
+            .enumerate()
+            .map(|(crossing, claim)| {
+                claim.ok_or_else(|| {
+                    CommitError::InconsistentPlan(format!(
+                        "no minted funding note for crossing {crossing}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(BuildableRun {
+            rows: self.rows,
+            prep_feeders,
+            transfer_funding,
+        })
+    }
+}
+
 impl MigrationPlan {
     /// The denomination decomposition (the denominations and residual). It already reflects
     /// reconciliation against the preparation fees: when the fees did not fit the balance, the
@@ -1037,29 +1195,178 @@ impl MigrationPlan {
 
     /// Every transaction this plan will build, enumerated BEFORE building in the exact order the
     /// commit assigns [`MigrationTransferId`]s (each preparation layer in order, then each transfer by
-    /// crossing), so a [`PlannedTx`]'s id equals the id the built transaction will carry. Each
-    /// carries its [`action_weight`](crate::signing_rounds::action_weight). This is a pure function
-    /// of the plan, recomputed on demand, so planning stays unchanged.
+    /// crossing), so a [`PlannedTx`]'s id equals the id the built transaction will carry.
+    ///
+    /// Each row carries everything the commit will stamp on the built transaction beyond its
+    /// PCZT: its [`action_weight`](crate::signing_rounds::action_weight), the ids it
+    /// [`depends_on`](PlannedTx::depends_on), and its
+    /// [`scheduled_height`](PlannedTx::scheduled_height). Those last two are what make the run's
+    /// EXECUTION SHAPE — which transactions wait on which, and when each is due — previewable from
+    /// a plan the user has not consented to yet, through the same two accessors the committed
+    /// [`MigrationTransaction`] answers with, so a consumer needs one rendering of a migration
+    /// rather than one for the proposal and another for the stored run.
+    ///
+    /// This is where those three facts are DECIDED, for the preview and for the run alike:
+    /// [`commit_preparation`] builds from these rows rather than working the ids, dependencies and
+    /// heights out again as it goes, so a previewed run and the committed run cannot describe
+    /// different things. It is a pure function of the plan, recomputed on demand, so planning
+    /// stays unchanged and no preview can perturb what a later commit builds.
+    ///
+    /// The dependency rules:
+    ///
+    /// - A preparation transaction in layer 0 waits on nothing; one in a later layer waits on
+    ///   EVERY id of the layer before it, not merely the transactions minting the notes it spends
+    ///   (a layer is serialized against the one before it as a whole).
+    /// - A transfer waits on the one preparation transaction that mints ITS funding note, so a
+    ///   crossing releases as soon as its own note is on chain. Which note that is, is settled
+    ///   here — by walking the minted notes in build order and claiming the first unclaimed one of
+    ///   the required value — and the commit is HANDED that choice as a position in the sequence
+    ///   rather than repeating the search, so the note it spends is necessarily the one this
+    ///   dependency was read off. A crossing funded by a wallet note the plan spends directly
+    ///   ([`PreparationPlan::direct_funding_notes`]) waits on nothing.
+    ///
+    /// [`PreparationPlan::direct_funding_notes`]: crate::preparation::PreparationPlan::direct_funding_notes
     pub fn planned_transactions(&self) -> Vec<PlannedTx> {
-        let mut txs = Vec::with_capacity(self.total_transactions());
+        self.planned_run().rows
+    }
+
+    /// The preview rows AND the note assignment behind them: which minted note each transaction
+    /// spends, as a [`MintedOrdinal`] into the sequence the preparation phase mints.
+    ///
+    /// One walk decides both, which is the point. The rows say what waits on what; the ordinals
+    /// say which note each transaction spends — and the second is what the first is DERIVED from,
+    /// since a crossing waits on whichever transaction mints the note it claims. A commit that
+    /// took the rows but re-searched for the notes could spend a different note than the row's
+    /// dependency names; it takes both, and indexes.
+    fn planned_run(&self) -> PlannedRun {
+        let mut rows = Vec::with_capacity(self.total_transactions());
+        // The notes the preparation phase mints, in the order the commit pushes them, so an
+        // ordinal into this sequence names the same note in the commit's own sequence.
+        let mut minted: Vec<PlannedNote> = Vec::new();
+        // Where each minted note came from, so a `Prior` input is resolved by the coordinate it
+        // NAMES rather than by a second search for something of the right value.
+        let mut minted_at: BTreeMap<MintedAt, MintedOrdinal> = BTreeMap::new();
+        let mut prep_feeders: Vec<Vec<Option<MintedOrdinal>>> = Vec::new();
         let mut next = 0u32;
+        let mut previous_layer: Vec<MigrationTransferId> = Vec::new();
         for (layer, layer_txs) in self.preparation.layers().iter().enumerate() {
-            for index in 0..layer_txs.len() {
-                txs.push(PlannedTx::new(
-                    MigrationTransferId::new(next),
-                    MigrationTxKind::Preparation { layer, index },
-                ));
+            let mut this_layer: Vec<MigrationTransferId> = Vec::with_capacity(layer_txs.len());
+            for (index, prep_tx) in layer_txs.iter().enumerate() {
+                let id = MigrationTransferId::new(next);
                 next += 1;
+                this_layer.push(id);
+
+                // Claim this transaction's feeder notes before recording its own outputs, exactly
+                // as the commit resolves a transaction's spends before growing its pool with what
+                // that transaction produces. (That order is also why a `Prior` naming this
+                // transaction's own output, or a later one, resolves to nothing.) A claim that
+                // resolves to nothing is RECORDED as the absence it is: the commit refuses such a
+                // plan (see `PlannedRun`), rather than either side quietly spending some other
+                // note.
+                let feeders = prep_tx
+                    .inputs()
+                    .iter()
+                    .filter_map(|input| match input {
+                        PrepInput::Prior {
+                            layer,
+                            transaction,
+                            output,
+                            ..
+                        } => Some(claim_planned_note_at(
+                            &mut minted,
+                            &minted_at,
+                            (*layer, *transaction, *output),
+                        )),
+                        PrepInput::Wallet { .. } => None,
+                    })
+                    .collect();
+                prep_feeders.push(feeders);
+
+                for (output_index, output) in prep_tx.outputs().iter().enumerate() {
+                    match output {
+                        PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
+                            minted_at
+                                .insert((layer, index, output_index), MintedOrdinal(minted.len()));
+                            minted.push(PlannedNote {
+                                value: *value,
+                                producer: Some(id),
+                                claimed: false,
+                            });
+                        }
+                        // Change stays in the source pool: it funds no later transaction, so it
+                        // gets no coordinate, and a `Prior` that names one is refused rather than
+                        // silently served some other note.
+                        PrepOutput::Change(_) => {}
+                    }
+                }
+
+                rows.push(PlannedTx::new(
+                    id,
+                    MigrationTxKind::Preparation { layer, index },
+                    if layer == 0 {
+                        Vec::new()
+                    } else {
+                        previous_layer.clone()
+                    },
+                    self.prep_broadcast_height(layer, index),
+                ));
             }
+            previous_layer = this_layer;
         }
+
+        // A direct-funding wallet note already exists on chain, so the crossing it funds waits on
+        // no producer. Appended after the minted notes, as the commit appends them.
+        for &(_wallet_index, value) in self.preparation.direct_funding_notes() {
+            minted.push(PlannedNote {
+                value,
+                producer: None,
+                claimed: false,
+            });
+        }
+
+        let funding_notes = self.funding_notes();
+        let mut transfer_funding = Vec::with_capacity(self.transfer_tx_count());
         for crossing in 0..self.transfer_tx_count() {
-            txs.push(PlannedTx::new(
-                MigrationTransferId::new(next),
-                MigrationTxKind::Transfer { crossing },
-            ));
+            let id = MigrationTransferId::new(next);
             next += 1;
+            let claim = funding_notes
+                .get(crossing)
+                .and_then(|value| claim_planned_note(&mut minted, *value));
+            transfer_funding.push(claim);
+            // The crossing waits on whatever mints the note it just claimed — nothing, for a
+            // wallet note the plan spends directly. A crossing that claimed NO note waits on
+            // nothing either, but only because such a plan cannot be committed at all; the commit
+            // refuses it before building rather than treating it as independent.
+            let producer = claim.and_then(|ordinal| minted[ordinal.0].producer);
+            rows.push(PlannedTx::new(
+                id,
+                MigrationTxKind::Transfer { crossing },
+                producer.into_iter().collect(),
+                self.schedule.get(crossing).map(Schedule::broadcast_height),
+            ));
         }
-        txs
+
+        PlannedRun {
+            rows,
+            prep_feeders,
+            transfer_funding,
+        }
+    }
+
+    /// The drawn broadcast height of the preparation transaction at `[layer][index]`: the height
+    /// the commit stamps on it, and whose canonical expiry window its pre-signature commits to.
+    ///
+    /// The schedule is index-aligned with the preparation layers by construction —
+    /// [`plan_migration`] draws exactly one height per transaction of each layer, and a
+    /// [`MigrationPlan`] cannot be built any other way — so this misses only for a plan
+    /// [`commit_preparation`] would itself reject as [`CommitError::InconsistentPlan`]. Such a
+    /// transaction still gets a row, with no height, rather than being dropped: every id after it,
+    /// and every dependency naming one, is defined by its POSITION in the list.
+    fn prep_broadcast_height(&self, layer: usize, index: usize) -> Option<BlockHeight> {
+        self.prep_schedule
+            .get(layer)
+            .and_then(|heights| heights.get(index))
+            .copied()
     }
 
     /// The total number of transactions this plan builds and signs: its preparation transactions
@@ -1723,8 +2030,14 @@ pub trait MigrationCrypto {
     /// The backend's error type (shared with its [`MigrationBackend`] impl).
     type Error;
 
-    /// The account's Orchard full viewing key.
-    fn orchard_fvk(&self) -> Result<orchard::keys::FullViewingKey, Self::Error>;
+    /// The account's Orchard full viewing key, or `None` if the account has none.
+    ///
+    /// Infallible, because a backend is HANDED this key (or the unified key holding it) rather than
+    /// going to look for one: producing it does no work that can fail. `None` is the account whose
+    /// unified key carries no Orchard component — nothing this crate does can serve such an
+    /// account, and each entry point that needs the key reports that in its own error WHERE IT
+    /// NEEDS IT, rather than making every holder of a key prove up front that it has one.
+    fn orchard_fvk(&self) -> Option<&orchard::keys::FullViewingKey>;
 
     /// The ZIP 32 account the migration's notes belong to, or `None` if the account has no known
     /// derivation (an imported viewing key, say).
@@ -1739,9 +2052,6 @@ pub trait MigrationCrypto {
     /// The plaintext of the spendable wallet note at `index` (into
     /// `spendable_orchard_note_values`).
     fn resolve_wallet_note(&self, index: usize) -> Result<orchard::note::Note, Self::Error>;
-
-    /// Add the account's Orchard spend-authorization signatures to a finalized, unproven PCZT.
-    fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error>;
 }
 
 /// A prover's typed failure: the one condition the engine handles — an input not among the
@@ -1856,13 +2166,16 @@ impl ProvedTransaction {
 /// The proving seam for a migration transfer: install a transfer's deferred anchors and witnesses
 /// (ZIP 374) against the boundary its schedule drew, then prove it.
 ///
-/// This is deliberately SEPARATE from [`MigrationCrypto`]. Signing needs only the account's spend
-/// authority and is a cheap, read-only (`&self`) operation; proving needs MUTABLE access to the
-/// wallet's Orchard commitment tree at a historical checkpoint (resolving a witness caches into the
-/// tree) plus the Orchard and Ironwood proving keys, a heavier capability with a different lifetime.
-/// Keeping proving in its own trait lets a wallet expose signing without dragging commitment-tree
-/// access and proving parameters into the same type, and lets a consumer supply a prover
-/// independently of the signer.
+/// Proving is a CAPABILITY a consumer supplies, which is why it is a trait at all, and why it is
+/// separate from both of the other two. Signing takes nothing but the account's spend authority,
+/// which is why it is not a trait but an argument to the calls that sign; reading the account's
+/// notes and keys is [`MigrationCrypto`], a cheap read-only (`&self`) borrow of a wallet. Proving
+/// is neither: it needs MUTABLE access to the wallet's Orchard commitment tree at a historical
+/// checkpoint (resolving a witness caches into the tree) plus the Orchard and Ironwood proving
+/// keys — a heavier capability, with a different lifetime, that a consumer may want to place
+/// somewhere else entirely (another process, or a machine that holds the parameters). Keeping it in
+/// its own trait lets a wallet be a migration backend without dragging commitment-tree access and
+/// proving parameters into the same type.
 #[cfg(feature = "orchard")]
 pub trait MigrationProver {
     /// The prover's error type.
@@ -1973,9 +2286,30 @@ pub trait MigrationProver {
 #[cfg(feature = "orchard")]
 #[derive(Debug)]
 pub enum CommitError<E> {
-    /// A wallet backend operation (witness, key, signing, or storage) failed.
+    /// A wallet backend operation (reading the account's key, its notes, or its storage) failed.
+    /// NOT signing: the spend authority is the caller's argument, not the backend's, so a failed
+    /// signature is a [`Build`](Self::Build).
     Backend(E),
-    /// Building a migration transaction failed. Carries the structured builder error.
+    /// The backend reports no Orchard full viewing key for the account
+    /// ([`MigrationCrypto::orchard_fvk`]), so there is nothing to build a migration against: every
+    /// transaction of a run spends and creates Orchard notes.
+    NoOrchardViewingKey,
+    /// The spending key passed to this call is not the account's: the full viewing key it derives
+    /// to is not the one the backend reports ([`MigrationCrypto::orchard_fvk`]).
+    ///
+    /// Refused BEFORE anything is built, because signing cannot catch it. A migration PCZT
+    /// contains spends this account's key is not meant to authorize — the padding dummies the
+    /// builder adds, each with its own throwaway key — so
+    /// [`sign_pczt`](crate::build::sign_pczt) must skip a spend its key does not match rather than
+    /// fail, and it cannot tell that case from EVERY real spend being unauthorizable. A foreign
+    /// key would therefore sign nothing, report success, and leave a run persisted as
+    /// [`Signed`](MigrationTxState::Signed) whose transactions carry no signatures at all — a
+    /// migration that can never be broadcast, discovered only when the first transfer is proved.
+    /// Checking the key against the account's viewing key up front is what makes that
+    /// unreachable.
+    WrongSpendAuthority,
+    /// Building a migration transaction failed, INCLUDING signing it with the authority the caller
+    /// passed. Carries the structured builder error.
     Build(crate::build::BuildError),
     /// A built migration PCZT presents no well-formed set of real spends, so the real-spend
     /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be extracted from it.
@@ -2015,6 +2349,12 @@ impl<E: fmt::Display> fmt::Display for CommitError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommitError::Backend(e) => write!(f, "wallet backend error: {e}"),
+            CommitError::NoOrchardViewingKey => {
+                f.write_str("the account has no Orchard full viewing key")
+            }
+            CommitError::WrongSpendAuthority => {
+                f.write_str("the spending key is not the account's")
+            }
             CommitError::Build(e) => write!(f, "building the migration failed: {e}"),
             CommitError::RealSpends(e) => {
                 write!(f, "a built migration transaction has no real spends: {e}")
@@ -2528,7 +2868,9 @@ pub enum RebuildError<E> {
         /// The grid the backend schedules against now.
         configured: crate::scheduling::AnchorBucketInterval,
     },
-    /// Building the fresh transfer PCZT failed.
+    /// Building the fresh transfer PCZT failed, INCLUDING signing it anew with the authority the
+    /// caller passed (an expired transfer's signature hash covers its expiry, so the rebuild must
+    /// re-sign).
     Build(crate::build::BuildError),
     /// The rebuilt transfer PCZT presents no well-formed set of real spends, so the real-spend
     /// nullifier cache ([`MigrationTransaction::spend_nullifiers`]) cannot be refreshed from it.
@@ -2538,8 +2880,17 @@ pub enum RebuildError<E> {
     TxId(crate::pczt_txid::TxIdError),
     /// Serializing the rebuilt PCZT failed.
     Serialize(pczt::EncodingError),
-    /// A wallet backend or signing operation failed.
+    /// A wallet backend operation (reading the account's key or its notes) failed. NOT signing:
+    /// the spend authority is the caller's argument, not the backend's, so a failed signature is a
+    /// [`Build`](Self::Build).
     Backend(E),
+    /// The backend reports no Orchard full viewing key for the account
+    /// ([`MigrationCrypto::orchard_fvk`]), so the replacement transfer cannot be built.
+    NoOrchardViewingKey,
+    /// The spending key passed to this call is not the account's, so the rebuilt transfer would be
+    /// stored as signed while carrying no signature — see [`CommitError::WrongSpendAuthority`] for
+    /// why signing cannot catch this. Refused before the replacement is built.
+    WrongSpendAuthority,
 }
 
 #[cfg(feature = "orchard")]
@@ -2600,6 +2951,12 @@ impl<E: fmt::Display> fmt::Display for RebuildError<E> {
                 write!(f, "serializing the rebuilt transfer failed: {e:?}")
             }
             RebuildError::Backend(e) => write!(f, "wallet backend error: {e}"),
+            RebuildError::NoOrchardViewingKey => {
+                f.write_str("the account has no Orchard full viewing key")
+            }
+            RebuildError::WrongSpendAuthority => {
+                f.write_str("the spending key is not the account's")
+            }
         }
     }
 }
@@ -2625,12 +2982,13 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 /// replaces the stored PCZT. Anchors and witnesses stay DEFERRED (ZIP 374): the fresh anchor is
 /// installed at proving time, exactly as for an originally committed transfer.
 ///
-/// Signing anew is what distinguishes this step from proving and broadcasting: it needs the
-/// account's SPEND AUTHORITY, not just the viewing key and the network. This entry point signs
-/// in-process via [`MigrationCrypto::sign`], for a wallet that holds the spend authority; a
+/// Signing anew is what distinguishes this step from the other steps of driving a migration: of
+/// proving, broadcasting and advancing, none needs the account's SPEND AUTHORITY, and this one
+/// does — which is why `sk` is a parameter here and of no other drive step. (The other place it
+/// is taken at all is [`commit_preparation`], which signs the whole run once, up front.) A
 /// migration signed by an EXTERNAL (hardware or offline) signer uses
-/// [`rebuild_expired_transfer_unsigned`] instead, which leaves the rebuilt transfer awaiting the
-/// device's signature.
+/// [`rebuild_expired_transfer_unsigned`] instead, which takes no authority and leaves the rebuilt
+/// transfer awaiting the device's signature.
 ///
 /// The funding note is recovered by IDENTITY, not by value: the expired PCZT's one real spend
 /// reveals the note's nullifier, which is matched among the wallet's spendable Orchard notes. The
@@ -2649,6 +3007,7 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 pub fn rebuild_expired_transfer<P, B, R>(
     params: &P,
     backend: &B,
+    sk: &orchard::keys::SpendingKey,
     state: &mut MigrationState,
     id: MigrationTransferId,
     rng: &mut R,
@@ -2658,7 +3017,8 @@ where
     B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
     R: RngCore + rand_core::CryptoRng,
 {
-    rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::InProcess).map(|_| ())
+    rebuild_expired_transfer_inner(params, backend, state, id, rng, Signing::InProcess(sk))
+        .map(|_| ())
 }
 
 /// Rebuild an EXPIRED migration transfer for an EXTERNAL signer: construct the same entirely new
@@ -2669,8 +3029,8 @@ where
 ///
 /// An expired transaction must be signed ANEW — its signature hash covers the expiry height — and
 /// for an externally signed migration the spend authority is on the device, not in-process: the
-/// rebuild therefore requires a new signing session, unlike proving and broadcasting.
-/// [`MigrationCrypto::sign`] is never called. After the device signs, call
+/// rebuild therefore requires a new signing session, unlike proving and broadcasting. Nothing
+/// here takes a spend authority, so nothing here can sign. After the device signs, call
 /// [`MigrationState::apply_signature`] with the returned PCZT (matched by
 /// [`UnsignedMigrationTx::id`]) to move the transfer to [`Signed`](MigrationTxState::Signed), and
 /// persist with `replace_migration`.
@@ -2701,7 +3061,7 @@ fn rebuild_expired_transfer_inner<P, B, R>(
     state: &mut MigrationState,
     id: MigrationTransferId,
     rng: &mut R,
-    signing: Signing,
+    signing: Signing<'_>,
 ) -> Result<Option<UnsignedMigrationTx>, RebuildError<<B as MigrationBackend>::Error>>
 where
     P: zcash_protocol::consensus::Parameters,
@@ -2814,7 +3174,17 @@ where
     // The exact note must still be among the wallet's spendable notes; if it is gone (spent
     // outside the migration), the remaining balance must be re-planned rather than this part
     // rebuilt, so a different note of coincidentally equal value is deliberately NOT substituted.
-    let fvk = backend.orchard_fvk().map_err(RebuildError::Backend)?;
+    let fvk = backend
+        .orchard_fvk()
+        .cloned()
+        .ok_or(RebuildError::NoOrchardViewingKey)?;
+    // Before the replacement is built or signed: the key that will sign must be the account's own
+    // (see `RebuildError::WrongSpendAuthority`).
+    if let Signing::InProcess(sk) = signing
+        && orchard::keys::FullViewingKey::from(sk) != fvk
+    {
+        return Err(RebuildError::WrongSpendAuthority);
+    }
     let account_derivation = backend
         .account_derivation()
         .map_err(RebuildError::Backend)?;
@@ -2875,8 +3245,10 @@ where
     // not affect it — see `crate::pczt_txid`).
     let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(RebuildError::TxId)?;
     let (bytes, new_state, unsigned) = match signing {
-        Signing::InProcess => {
-            let signed = backend.sign(pczt).map_err(RebuildError::Backend)?;
+        Signing::InProcess(sk) => {
+            let signed =
+                crate::build::sign_pczt(pczt, &orchard::keys::SpendAuthorizingKey::from(sk))
+                    .map_err(RebuildError::Build)?;
             let bytes = signed.serialize().map_err(RebuildError::Serialize)?;
             (bytes, MigrationTxState::Signed, None)
         }
@@ -2909,13 +3281,22 @@ where
     Ok(unsigned)
 }
 
-/// How a freshly built migration PCZT is finished by the commit functions: signed in-process with the
-/// wallet's spend authority, or left unsigned for an external (hardware or offline) signer.
+/// How a freshly built migration PCZT is finished by the commit functions: signed in-process with
+/// the spend authority the caller PASSED IN, or left unsigned for an external (hardware or
+/// offline) signer.
+///
+/// The authority rides on the in-process variant rather than being held by the backend, which is
+/// what makes "sign in process, with no key" unrepresentable: the two arms of this enum are
+/// exactly the two things a caller can supply, and only one of them can sign.
+///
+/// It is the SPENDING key, not the spend-authorizing key derived from it, because the spending key
+/// is what the account's viewing key can be checked against — see
+/// [`CommitError::WrongSpendAuthority`]. The authorizing key is derived where the signing happens.
 #[cfg(feature = "orchard")]
 #[derive(Clone, Copy)]
-enum Signing {
-    /// Sign in-process via [`MigrationCrypto::sign`].
-    InProcess,
+enum Signing<'a> {
+    /// Sign each built PCZT here, with the spend authority of this Orchard spending key.
+    InProcess(&'a orchard::keys::SpendingKey),
     /// Leave the PCZT unsigned for an external signer; the caller receives it to sign out of band.
     External,
 }
@@ -3028,27 +3409,29 @@ impl MigrationPlan {
     }
 }
 
-/// Serialize a freshly built PCZT for storage. For [`Signing::InProcess`], sign it with the backend and
-/// return the signed bytes as [`Signed`](MigrationTxState::Signed); for [`Signing::External`], return the
-/// unsigned bytes as [`AwaitingSignature`](MigrationTxState::AwaitingSignature) (the caller also routes a
-/// copy of those bytes to the external signer).
+/// Serialize a freshly built PCZT for storage. For [`Signing::InProcess`], sign it with the
+/// authority that variant carries and return the signed bytes as
+/// [`Signed`](MigrationTxState::Signed); for [`Signing::External`], return the unsigned bytes as
+/// [`AwaitingSignature`](MigrationTxState::AwaitingSignature) (the caller also routes a copy of
+/// those bytes to the external signer).
+///
+/// Takes no backend: signing an already-built PCZT needs nothing from the wallet but the key, and
+/// the key arrives with the request.
 #[cfg(feature = "orchard")]
-fn finish_built_pczt<B>(
-    backend: &mut B,
+fn finish_built_pczt<E>(
     pczt: ::pczt::Pczt,
-    signing: Signing,
-) -> Result<(Vec<u8>, TxId, MigrationTxState), CommitError<<B as MigrationBackend>::Error>>
-where
-    B: MigrationBackend + MigrationCrypto<Error = <B as MigrationBackend>::Error>,
-{
+    signing: Signing<'_>,
+) -> Result<(Vec<u8>, TxId, MigrationTxState), CommitError<E>> {
     // Derived BEFORE signing, which is the only order that makes sense: signing needs the txid to
     // build its signature hash, so the id exists ahead of either arm below and neither can change
     // it. A migration built for an external signer is therefore as identifiable as one signed in
     // process, and stays so once the returned signature is applied.
     let txid = crate::pczt_txid::pczt_txid(&pczt).map_err(CommitError::TxId)?;
     match signing {
-        Signing::InProcess => {
-            let signed = backend.sign(pczt).map_err(CommitError::Backend)?;
+        Signing::InProcess(sk) => {
+            let signed =
+                crate::build::sign_pczt(pczt, &orchard::keys::SpendAuthorizingKey::from(sk))
+                    .map_err(CommitError::Build)?;
             let bytes = signed.serialize().map_err(CommitError::Serialize)?;
             Ok((bytes, txid, MigrationTxState::Signed))
         }
@@ -3060,18 +3443,24 @@ where
 }
 
 /// A spendable note recovered from an already-built preparation transaction, or a direct-funding
-/// wallet note, tracked by the commit so a later transaction can spend it BY VALUE before it is
-/// mined. Its signable plaintext is fixed at build time (its `rho` is the paired spend's nullifier
-/// and its `rseed` is drawn by the builder); only its tree position awaits mining, and that matters
-/// only to the proof (deferred to proving time, ZIP 374). `consumed` guards against spending it
-/// twice, and `producer` is the preparation transaction that mints it (or `None` for a
-/// direct-funding wallet note), so a transfer depends only on its own funding note's producer.
+/// wallet note, tracked by the commit so a later transaction can spend it before it is mined. Its
+/// signable plaintext is fixed at build time (its `rho` is the paired spend's nullifier and its
+/// `rseed` is drawn by the builder); only its tree position awaits mining, and that matters only to
+/// the proof (deferred to proving time, ZIP 374).
+///
+/// The commit's counterpart to the [`PlannedNote`] the plan works over, carrying the recovered
+/// plaintext the plan has no way to know. The two sequences are grown in the same order, and the
+/// commit spends out of this one BY [`MintedOrdinal`] — the position the PLAN assigned — never by
+/// looking for a note of the right value. That is the whole mechanism: the note spent here is the
+/// note the plan assigned, so it cannot be a different note than the one the transaction's recorded
+/// dependency was derived from. `value` is checked against the plan's expectation and `consumed`
+/// against a second claim, but only to catch the two sequences having diverged, which is a defect
+/// in the plan rather than something to resolve.
 #[cfg(feature = "orchard")]
 struct MintedNote {
     value: Zatoshis,
     note: orchard::note::Note,
     consumed: bool,
-    producer: Option<MigrationTransferId>,
 }
 
 /// Commit a planned migration: build and pre-sign EVERY transaction — each preparation layer, in
@@ -3094,11 +3483,25 @@ struct MintedNote {
 /// `rng` a cryptographically secure RNG, and `replan_threshold` the policy stamped on the committed
 /// migration (see [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent
 /// a specific policy.
+///
+/// `sk` is the account's Orchard spending key, and every transaction of the run is signed with its
+/// spend authority before this returns. It is an argument rather than something `backend` holds so
+/// that a wallet need not keep the key reachable in order to plan, build or store a migration: the
+/// key is live for this call. A caller holding the account's `UnifiedSpendingKey` passes
+/// `usk.orchard()`; a caller that has no key (a watch-only account, or one whose key is on a
+/// device) uses [`build_preparation_unsigned`], which takes none and hands the unsigned
+/// transactions out to be signed elsewhere.
+///
+/// It is the SPENDING key rather than the spend-authorizing key derived from it so that this call
+/// can check it is the ACCOUNT's: the full viewing key it derives to is compared against the one
+/// `backend` reports, and a mismatch is [`CommitError::WrongSpendAuthority`], refused before
+/// anything is built. Nothing here retains either key.
 #[cfg(feature = "orchard")]
 pub fn commit_preparation<P, B, R>(
     params: &P,
     target_height: BlockHeight,
     backend: &mut B,
+    sk: &orchard::keys::SpendingKey,
     plan: &MigrationPlan,
     rng: &mut R,
     replan_threshold: ReplanThreshold,
@@ -3117,7 +3520,7 @@ where
         backend,
         plan,
         rng,
-        Signing::InProcess,
+        Signing::InProcess(sk),
         replan_threshold,
     )
     .map(|output| output.state)
@@ -3178,7 +3581,7 @@ fn commit_preparation_inner<P, B, R>(
     backend: &mut B,
     plan: &MigrationPlan,
     rng: &mut R,
-    signing: Signing,
+    signing: Signing<'_>,
     replan_threshold: ReplanThreshold,
 ) -> Result<CommitOutput, CommitError<<B as MigrationBackend>::Error>>
 where
@@ -3189,10 +3592,16 @@ where
         + PoolMigrationWrite,
     R: RngCore + rand_core::CryptoRng,
 {
+    // The run's shape — which transaction gets which id, what each waits on, when each is
+    // scheduled, and which minted note each spends — is decided ONCE, by the plan, and the build
+    // below reads it. The rows are the same list a consumer previews for consent, so what is
+    // committed is literally what was shown; the note assignment travels with them, so the note a
+    // transaction spends here is the one the row's dependency was derived from.
+    let planned = plan.planned_run().into_buildable()?;
     let mut committer = Committer::start(params, target_height, backend, rng, signing)?;
-    committer.build_preparation_layers(plan)?;
+    committer.build_preparation_layers(plan, &planned)?;
     committer.add_direct_funding(plan)?;
-    committer.build_transfers(plan)?;
+    committer.build_transfers(plan, &planned)?;
     // `into_state` consumes the committer, releasing its `&mut backend` reborrow, so the store
     // write below can borrow `backend` again.
     let output = committer.into_state(plan, replan_threshold);
@@ -3210,12 +3619,15 @@ where
 ///
 /// `replan_threshold` is the policy stamped on the committed migration (see
 /// [`MigrationState::replan_threshold`]) — pass [`ReplanThreshold::DEFAULT`] absent a specific
-/// policy; the other parameters are as [`commit_preparation`]'s.
+/// policy; the other parameters are as [`commit_preparation`]'s, including `sk`, the account's
+/// Orchard spending key, with whose authority every transaction of the run is signed before this
+/// returns, and which is checked against the account's viewing key first.
 #[cfg(all(feature = "orchard", any(test, feature = "test-dependencies")))]
 pub fn commit_preparation_with_funding<P, B, R>(
     params: &P,
     target_height: BlockHeight,
     backend: &mut B,
+    sk: &orchard::keys::SpendingKey,
     plan: &MigrationPlan,
     rng: &mut R,
     replan_threshold: ReplanThreshold,
@@ -3234,39 +3646,38 @@ where
         backend,
         plan,
         rng,
-        Signing::InProcess,
+        Signing::InProcess(sk),
         replan_threshold,
     )
     .map(|output| (output.state, output.transfer_funding))
 }
 
 /// Hosts the shared mutable state that building a whole committed migration threads through its
-/// stages: the accumulating `transactions`/`unsigned` outputs, the `next_id` counter, the per-layer
-/// `layer_ids` (so a later layer, and the transfers, can depend on the layer before them), and the
-/// `minted` pool of notes that already-built preparation transactions (and direct-funding wallet
-/// notes) mint for later spends. Owning the backend, rng, and resolved `fvk` lets each stage of
-/// [`commit_preparation_inner`] be a method: [`Committer::start`] then
-/// [`Committer::build_preparation_layers`], [`Committer::add_direct_funding`],
-/// [`Committer::build_transfers`], and finally [`Committer::into_state`], which consumes the
-/// committer and returns the assembled state (releasing the `&mut backend` reborrow so the caller
-/// can persist it). `plan` is deliberately NOT a field: passing it as a method parameter avoids
-/// borrowing `self` both immutably (to iterate the plan) and mutably (to call `next_id`/the
-/// resolvers) at once.
+/// stages: the accumulating `transactions`/`unsigned` outputs, and the `minted` pool of notes that
+/// already-built preparation transactions (and direct-funding wallet notes) mint for later spends.
+/// Owning the backend, rng, and resolved `fvk` lets each stage of [`commit_preparation_inner`] be a
+/// method: [`Committer::start`] then [`Committer::build_preparation_layers`],
+/// [`Committer::add_direct_funding`], [`Committer::build_transfers`], and finally
+/// [`Committer::into_state`], which consumes the committer and returns the assembled state
+/// (releasing the `&mut backend` reborrow so the caller can persist it).
+///
+/// It holds NO ids, dependency sets or scheduled heights of its own: those come from
+/// [`MigrationPlan::planned_transactions`], whose rows each build stage walks. `plan` and those
+/// rows are deliberately NOT fields: passing them as method parameters avoids borrowing `self`
+/// both immutably (to read them) and mutably (to call the note resolvers) at once.
 #[cfg(feature = "orchard")]
 struct Committer<'a, P, B, R> {
     params: &'a P,
     target_height: BlockHeight,
     backend: &'a mut B,
     rng: &'a mut R,
-    signing: Signing,
+    signing: Signing<'a>,
     fvk: orchard::keys::FullViewingKey,
     /// The ZIP 32 account every built transaction's spends are stamped with, so an external Signer
     /// can identify them. Resolved once in [`Committer::start`], alongside `fvk`.
     account_derivation: Option<AccountDerivation>,
     transactions: Vec<MigrationTransaction>,
     unsigned: Vec<UnsignedMigrationTx>,
-    next_id: u32,
-    layer_ids: Vec<Vec<MigrationTransferId>>,
     minted: Vec<MintedNote>,
     /// Each transfer paired with the funding note it spends, captured as the transfer is built.
     /// The commit path already recovers every funding note's plaintext to build the transfer; a
@@ -3293,7 +3704,7 @@ where
         target_height: BlockHeight,
         backend: &'a mut B,
         rng: &'a mut R,
-        signing: Signing,
+        signing: Signing<'a>,
     ) -> Result<Self, CommitError<<B as MigrationBackend>::Error>> {
         // A committed migration is resumed from the store (or cancelled), never rebuilt over (see
         // [`MigrationState::is_terminal`]): checked FIRST, before any signing work, so a crashed or
@@ -3306,7 +3717,17 @@ where
             return Err(CommitError::MigrationInProgress);
         }
 
-        let fvk = backend.orchard_fvk().map_err(CommitError::Backend)?;
+        let fvk = backend
+            .orchard_fvk()
+            .cloned()
+            .ok_or(CommitError::NoOrchardViewingKey)?;
+        // Before ANYTHING is built or signed: the key that will sign must be the account's own.
+        // See `CommitError::WrongSpendAuthority` for why this cannot be left to signing time.
+        if let Signing::InProcess(sk) = signing
+            && orchard::keys::FullViewingKey::from(sk) != fvk
+        {
+            return Err(CommitError::WrongSpendAuthority);
+        }
         let account_derivation = backend.account_derivation().map_err(CommitError::Backend)?;
 
         Ok(Self {
@@ -3319,29 +3740,27 @@ where
             account_derivation,
             transactions: Vec::new(),
             unsigned: Vec::new(),
-            next_id: 0,
-            layer_ids: Vec::new(),
             minted: Vec::new(),
             transfer_funding: Vec::new(),
         })
     }
 
-    /// Assign and consume the next sequential transaction id.
-    fn next_id(&mut self) -> MigrationTransferId {
-        let id = MigrationTransferId(self.next_id);
-        self.next_id += 1;
-        id
-    }
-
     /// Resolve the Orchard notes a preparation transaction spends: wallet notes from the backend
-    /// (checking each against its planned value), and feeder notes from the `minted` pool (marking
-    /// each consumed).
+    /// (checking each against its planned value), and feeder notes by the ORDINAL the plan
+    /// assigned each `Prior` input (marking each consumed).
+    ///
+    /// `feeders` holds one ordinal per `Prior` input, in input order, from
+    /// [`MigrationPlan::planned_run`]. Indexing rather than searching by value is what makes the
+    /// note spent here the note the plan assigned: a search could land on a different note of the
+    /// same value than the plan's walk did, and the transaction's recorded dependency comes from
+    /// the plan's walk.
     fn resolve_prep_spends(
         &mut self,
         prep_tx: &crate::preparation::PrepTransaction,
-        layer: usize,
+        feeders: &[MintedOrdinal],
     ) -> Result<Vec<orchard::note::Note>, CommitError<<B as MigrationBackend>::Error>> {
         let mut spends = Vec::with_capacity(prep_tx.inputs().len());
+        let mut feeders = feeders.iter();
         for input in prep_tx.inputs() {
             match input {
                 PrepInput::Wallet { index, value } => {
@@ -3363,131 +3782,186 @@ where
                 PrepInput::Prior { value, .. } => {
                     // A feeder minted by an earlier layer, recovered when that layer was
                     // built above (the plan's layers are in topological order).
-                    let feeder = self
-                        .minted
-                        .iter_mut()
-                        .find(|m| !m.consumed && m.value == *value)
-                        .ok_or_else(|| {
-                            CommitError::InconsistentPlan(format!(
-                                "layer {layer} spends a feeder note of value {} that no \
-                                 earlier layer mints",
-                                u64::from(*value)
-                            ))
-                        })?;
-                    feeder.consumed = true;
-                    spends.push(feeder.note);
+                    let ordinal = feeders.next().ok_or_else(|| {
+                        CommitError::InconsistentPlan(
+                            "the plan assigned fewer feeder notes than this transaction spends"
+                                .into(),
+                        )
+                    })?;
+                    spends.push(self.claim_minted(*ordinal, *value)?);
                 }
             }
+        }
+        // Both directions of the same disagreement: the plan assigned feeders this transaction
+        // does not spend, so the assignment describes some other transaction than the one being
+        // built, and the ordinals used above cannot be trusted to be its.
+        if feeders.next().is_some() {
+            return Err(CommitError::InconsistentPlan(
+                "the plan assigned more feeder notes than this transaction spends".into(),
+            ));
         }
         Ok(spends)
     }
 
-    /// Build and pre-sign every preparation transaction, layer by layer in topological order,
-    /// growing the `minted` pool with each transaction's recovered spendable outputs.
+    /// The recovered plaintext of the minted note at `ordinal`, marked consumed.
+    ///
+    /// The plan assigned this ordinal to this spend, so the checks are on the POOL agreeing with
+    /// the plan, not on finding a note: an out-of-range ordinal, a note of the wrong value, or one
+    /// a previous spend already took all mean the plan's sequence and the built one have diverged,
+    /// which is a defect in the plan rather than a condition to recover from.
+    fn claim_minted(
+        &mut self,
+        ordinal: MintedOrdinal,
+        value: Zatoshis,
+    ) -> Result<orchard::note::Note, CommitError<<B as MigrationBackend>::Error>> {
+        let so_far = self.minted.len();
+        let minted = self.minted.get_mut(ordinal.0).ok_or_else(|| {
+            CommitError::InconsistentPlan(format!(
+                "the plan claims minted note {} but only {so_far} have been minted",
+                ordinal.0,
+            ))
+        })?;
+        if minted.consumed {
+            return Err(CommitError::InconsistentPlan(format!(
+                "the plan claims minted note {} twice",
+                ordinal.0
+            )));
+        }
+        if minted.value != value {
+            return Err(CommitError::InconsistentPlan(format!(
+                "the plan claims minted note {} for a spend of {} zatoshis, but it holds {}",
+                ordinal.0,
+                u64::from(value),
+                u64::from(minted.value),
+            )));
+        }
+        minted.consumed = true;
+        Ok(minted.note)
+    }
+
+    /// Build and pre-sign every preparation transaction `planned` names, in the order it names
+    /// them (which is layer by layer in topological order), growing the `minted` pool with each
+    /// transaction's recovered spendable outputs.
+    ///
+    /// `planned` is the plan's own [`BuildableRun`], and it — not this loop — decides each
+    /// transaction's id, what it depends on, when it is scheduled, and which minted notes it
+    /// spends. Each row's [`Preparation`](MigrationTxKind::Preparation) kind carries the
+    /// `[layer][index]` coordinates this looks the plan's transaction up by, so the planned rows
+    /// drive the walk and the plan answers what to build.
     fn build_preparation_layers(
         &mut self,
         plan: &MigrationPlan,
+        planned: &BuildableRun,
     ) -> Result<(), CommitError<<B as MigrationBackend>::Error>> {
-        for (layer, prep_layer) in plan.preparation().layers().iter().enumerate() {
-            let mut this_layer_ids: Vec<MigrationTransferId> = Vec::with_capacity(prep_layer.len());
-            for (index, prep_tx) in prep_layer.iter().enumerate() {
-                let id = self.next_id();
-                this_layer_ids.push(id);
+        for (position, planned_tx) in planned.rows.iter().enumerate() {
+            let (layer, index) = match planned_tx.kind() {
+                MigrationTxKind::Preparation { layer, index } => (layer, index),
+                // The transfers, which `planned` lists after every preparation transaction, are
+                // built by `build_transfers` once the notes funding them exist.
+                MigrationTxKind::Transfer { .. } => continue,
+            };
+            let prep_tx = plan
+                .preparation()
+                .layers()
+                .get(layer)
+                .and_then(|prep_layer| prep_layer.get(index))
+                .ok_or_else(|| {
+                    CommitError::InconsistentPlan(format!(
+                        "the plan has no preparation transaction at layer {layer} index {index}"
+                    ))
+                })?;
+            let id = planned_tx.id();
+            let depends_on = planned_tx.depends_on().to_vec();
+            // The preparation rows come first and in order, so a preparation row's position is
+            // its index into the plan's per-transaction feeder assignment.
+            let feeders = planned.prep_feeders.get(position).ok_or_else(|| {
+                CommitError::InconsistentPlan(format!(
+                    "the plan assigns no feeder notes to preparation transaction {position}"
+                ))
+            })?;
 
-                let spends = self.resolve_prep_spends(prep_tx, layer)?;
+            let spends = self.resolve_prep_spends(prep_tx, feeders)?;
 
-                let depends_on = if layer == 0 {
-                    Vec::new()
-                } else {
-                    self.layer_ids
-                        .last()
-                        .cloned()
-                        .expect("a layer after layer 0 has a preceding layer")
-                };
-                // The drawn preparation schedule temporally decouples the transactions of a layer
-                // from one another (see `MigrationPlan::prep_schedule`). The expiry the
-                // pre-signature commits to must match that schedule, not the build height: the
-                // canonical rolling window at the scheduled height.
-                let scheduled_height = *plan
-                    .prep_schedule()
-                    .get(layer)
-                    .and_then(|layer_schedule| layer_schedule.get(index))
-                    .ok_or_else(|| {
-                        CommitError::InconsistentPlan(format!(
-                            "preparation schedule has no entry for layer {layer} transaction {index}"
-                        ))
-                    })?;
-                let expiry_height = crate::scheduling::expiry_height(scheduled_height);
-                // The field accesses `self.params`/`self.fvk`/`self.account_derivation`/`self.rng`
-                // are DISJOINT, so the borrow checker accepts them together here — as long as no
-                // whole-`self` method call (like `next_id`/`resolve_prep_spends` above) is
-                // interleaved.
-                let (pczt, placed) = build_prep_tx(
-                    self.params,
-                    u32::from(self.target_height),
-                    u32::from(expiry_height),
-                    &self.fvk,
-                    spends,
-                    prep_tx.outputs(),
-                    self.account_derivation.as_ref(),
-                    &mut *self.rng,
-                )
-                .map_err(CommitError::Build)?;
+            // The drawn preparation schedule temporally decouples the transactions of a layer
+            // from one another (see `MigrationPlan::prep_schedule`). The expiry the
+            // pre-signature commits to must match that schedule, not the build height: the
+            // canonical rolling window at the scheduled height. A plan holding no drawn height
+            // for a transaction it contains is malformed — `planned` reports the absence rather
+            // than dropping the transaction, and this is where it is refused.
+            let scheduled_height = planned_tx.scheduled_height().ok_or_else(|| {
+                CommitError::InconsistentPlan(format!(
+                    "preparation schedule has no entry for layer {layer} transaction {index}"
+                ))
+            })?;
+            let expiry_height = crate::scheduling::expiry_height(scheduled_height);
+            // The field accesses `self.params`/`self.fvk`/`self.account_derivation`/`self.rng`
+            // are DISJOINT, so the borrow checker accepts them together here — as long as no
+            // whole-`self` method call (like `resolve_prep_spends` above) is interleaved.
+            let (pczt, placed) = build_prep_tx(
+                self.params,
+                u32::from(self.target_height),
+                u32::from(expiry_height),
+                &self.fvk,
+                spends,
+                prep_tx.outputs(),
+                self.account_derivation.as_ref(),
+                &mut *self.rng,
+            )
+            .map_err(CommitError::Build)?;
 
-                // Grow the minted pool with this transaction's recovered spendable outputs. Change
-                // outputs are excluded: they stay in the source pool and must never be matched to a
-                // feeder or funding request of a coincidentally equal value.
-                for (_action_index, output, note) in placed {
-                    match output {
-                        PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
-                            self.minted.push(MintedNote {
-                                value,
-                                note,
-                                consumed: false,
-                                producer: Some(id),
-                            });
-                        }
-                        PrepOutput::Change(_) => {}
+            // Grow the minted pool with this transaction's recovered spendable outputs, in the
+            // order the plan declares them, which is the order `planned` assumed when it decided
+            // which crossing each note funds. Change outputs are excluded: they stay in the source
+            // pool and must never be matched to a feeder or funding request of a coincidentally
+            // equal value.
+            for (_action_index, output, note) in placed {
+                match output {
+                    PrepOutput::Funding(value) | PrepOutput::Intermediate(value) => {
+                        self.minted.push(MintedNote {
+                            value,
+                            note,
+                            consumed: false,
+                        });
                     }
+                    PrepOutput::Change(_) => {}
                 }
+            }
 
-                // Cache the real-spend nullifiers off the built PCZT before it is consumed by
-                // signing/serialization, so the feature-free state machine never re-parses the
-                // stored bytes.
-                let spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&pczt)
-                    .map_err(CommitError::RealSpends)?
-                    .into_iter()
-                    .map(|(_, nf)| nf.to_bytes())
-                    .collect();
-                let (bytes, txid, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
-                if matches!(self.signing, Signing::External) {
-                    self.unsigned.push(UnsignedMigrationTx {
-                        id,
-                        pczt: bytes.clone(),
-                        actions: crate::preparation::PREP_TX_ACTIONS,
-                    });
-                }
-                self.transactions.push(MigrationTransaction {
+            // Cache the real-spend nullifiers off the built PCZT before it is consumed by
+            // signing/serialization, so the feature-free state machine never re-parses the
+            // stored bytes.
+            let spend_nullifiers = crate::pczt_spends::real_spend_nullifiers(&pczt)
+                .map_err(CommitError::RealSpends)?
+                .into_iter()
+                .map(|(_, nf)| nf.to_bytes())
+                .collect();
+            let (bytes, txid, tx_state) = finish_built_pczt(pczt, self.signing)?;
+            if matches!(self.signing, Signing::External) {
+                self.unsigned.push(UnsignedMigrationTx {
                     id,
-                    kind: MigrationTxKind::Preparation { layer, index },
-                    pczt: bytes,
-                    depends_on,
-                    scheduled_height,
-                    expiry_height,
-                    anchor_boundary: None,
-                    txid,
-                    state: tx_state,
-                    // The engine does not yet acquire locks; a later slice that draws a
-                    // `LockOwner` for the commit would set this here.
-                    lock_owner: None,
-                    // A freshly committed transaction carries no spent-input observation.
-                    unsatisfiable: None,
-                    spend_nullifiers,
-                    // Nor a rejected broadcast: it has not been broadcast at all.
-                    broadcast_failure_at: None,
+                    pczt: bytes.clone(),
+                    actions: crate::preparation::PREP_TX_ACTIONS,
                 });
             }
-            self.layer_ids.push(this_layer_ids);
+            self.transactions.push(MigrationTransaction {
+                id,
+                kind: planned_tx.kind(),
+                pczt: bytes,
+                depends_on,
+                scheduled_height,
+                expiry_height,
+                anchor_boundary: None,
+                txid,
+                state: tx_state,
+                // The engine does not yet acquire locks; a later slice that draws a
+                // `LockOwner` for the commit would set this here.
+                lock_owner: None,
+                // A freshly committed transaction carries no spent-input observation.
+                unsatisfiable: None,
+                spend_nullifiers,
+                // Nor a rejected broadcast: it has not been broadcast at all.
+                broadcast_failure_at: None,
+            });
         }
         Ok(())
     }
@@ -3506,28 +3980,35 @@ where
             if note.value().inner() != u64::from(value) {
                 return Err(CommitError::StalePlan);
             }
-            // A direct-funding wallet note already exists on-chain, so its transfer has no producer
-            // to wait on.
+            // Appended AFTER every minted note, as `MigrationPlan::planned_transactions` assumes
+            // when it decides which crossing each note funds. A direct-funding wallet note already
+            // exists on chain, so the crossing that claims it waits on nothing.
             self.minted.push(MintedNote {
                 value,
                 note,
                 consumed: false,
-                producer: None,
             });
         }
         Ok(())
     }
 
-    /// Build and pre-sign every transfer, spending each crossing's funding note out of the `minted`
-    /// pool and drawing the boundary anchor it will prove against.
+    /// Build and pre-sign every transfer `planned` names, spending each crossing's funding note
+    /// out of the `minted` pool and drawing the boundary anchor it will prove against.
+    ///
+    /// `planned` is the plan's own [`BuildableRun`], which supplies each transfer's id,
+    /// dependency, scheduled height and funding-note ORDINAL; this resolves only what the plan
+    /// cannot know — that note's PLAINTEXT, recovered from the built preparation bundles. The
+    /// ordinal is why the note spent here is necessarily the one whose producer the plan made this
+    /// crossing wait on.
     fn build_transfers(
         &mut self,
         plan: &MigrationPlan,
+        planned: &BuildableRun,
     ) -> Result<(), CommitError<<B as MigrationBackend>::Error>> {
         // Each transfer waits only for the preparation transaction that MINTS ITS OWN funding note
-        // to be mined (recorded as that note's producer in `minted`), not for the whole last layer:
-        // as soon as a transfer's own funding note is on-chain it may broadcast at its scheduled
-        // height, independently of the other crossings' preparation. This follows ZIP 318's
+        // to be mined, not for the whole last layer: as soon as a transfer's own funding note is
+        // on-chain it may broadcast at its scheduled height, independently of the other crossings'
+        // preparation. This follows ZIP 318's
         // per-note availability MUST ("wait until the boundary that closes the anchor-height bucket
         // in which a note-preparation transaction was mined has passed before treating ITS output
         // notes as available for migration") and consciously RELAXES the more conservative SHOULD
@@ -3569,33 +4050,40 @@ where
         // The grid to draw from is the backend's, so the boundary each transfer anchors to is one
         // whose checkpoint that backend retains.
         let anchor_bucket_interval = self.backend.scheduling_params().anchor_bucket_interval();
-        for (crossing, schedule) in plan.schedule().iter().enumerate() {
-            let id = self.next_id();
+        let funding_notes = plan.funding_notes();
+        for planned_tx in &planned.rows {
+            let crossing = match planned_tx.kind() {
+                MigrationTxKind::Transfer { crossing } => crossing,
+                // Already built, in the pass that grew the minted pool these transfers spend from.
+                MigrationTxKind::Preparation { .. } => continue,
+            };
+            let id = planned_tx.id();
+            let depends_on = planned_tx.depends_on().to_vec();
+            // The planned row has no height exactly when the plan has no schedule slot for this
+            // crossing, which is the same malformed plan the expiry read below cannot serve
+            // either; both are refused as one.
+            let (scheduled_height, expiry_height) = planned_tx
+                .scheduled_height()
+                .zip(plan.schedule().get(crossing).map(Schedule::expiry_height))
+                .ok_or_else(|| {
+                    CommitError::InconsistentPlan(format!(
+                        "the transfer schedule has no entry for crossing {crossing}"
+                    ))
+                })?;
 
-            let funding_value = *plan.funding_notes().get(crossing).ok_or_else(|| {
+            let funding_value = *funding_notes.get(crossing).ok_or_else(|| {
                 CommitError::InconsistentPlan(format!(
                     "no funding note value for crossing {crossing}"
                 ))
             })?;
-            // Copy `note`/`producer` (both `Copy`) out of the `minted` borrow so it ends before the
-            // disjoint-field build call below.
-            let (note, producer) = {
-                let funding_note = self
-                    .minted
-                    .iter_mut()
-                    .find(|m| !m.consumed && m.value == funding_value)
-                    .ok_or_else(|| {
-                        CommitError::InconsistentPlan(format!(
-                            "no minted funding note for crossing {crossing}"
-                        ))
-                    })?;
-                funding_note.consumed = true;
-                (funding_note.note, funding_note.producer)
-            };
-            // Depend only on the preparation transaction that mints this funding note (or nothing,
-            // for a direct-funding wallet note), so this crossing releases as soon as its own note
-            // is mined.
-            let depends_on: Vec<MigrationTransferId> = producer.into_iter().collect();
+            let ordinal = *planned.transfer_funding.get(crossing).ok_or_else(|| {
+                CommitError::InconsistentPlan(format!(
+                    "the plan assigns no funding note to crossing {crossing}"
+                ))
+            })?;
+            // `note` is `Copy`, so the `minted` borrow ends here — before the disjoint-field build
+            // call below.
+            let note = self.claim_minted(ordinal, funding_value)?;
             let crossing_value = *plan
                 .denominations()
                 .crossing_values()
@@ -3609,7 +4097,7 @@ where
             let pczt = build_transfer_pczt(
                 self.params,
                 u32::from(self.target_height),
-                u32::from(schedule.expiry_height()),
+                u32::from(expiry_height),
                 &self.fvk,
                 note,
                 crossing_value,
@@ -3621,7 +4109,7 @@ where
                 anchor_bucket_interval,
                 nu63_activation,
                 est_last_prep_height,
-                schedule.broadcast_height(),
+                scheduled_height,
                 self.rng,
             )
             .ok_or(CommitError::StalePlan)?;
@@ -3633,7 +4121,7 @@ where
                 .into_iter()
                 .map(|(_, nf)| nf.to_bytes())
                 .collect();
-            let (bytes, txid, tx_state) = finish_built_pczt(self.backend, pczt, self.signing)?;
+            let (bytes, txid, tx_state) = finish_built_pczt(pczt, self.signing)?;
             if matches!(self.signing, Signing::External) {
                 self.unsigned.push(UnsignedMigrationTx {
                     id,
@@ -3643,11 +4131,11 @@ where
             }
             self.transactions.push(MigrationTransaction {
                 id,
-                kind: MigrationTxKind::Transfer { crossing },
+                kind: planned_tx.kind(),
                 pczt: bytes,
                 depends_on,
-                scheduled_height: schedule.broadcast_height(),
-                expiry_height: schedule.expiry_height(),
+                scheduled_height,
+                expiry_height,
                 anchor_boundary: Some(anchor_boundary),
                 txid,
                 state: tx_state,
@@ -4406,6 +4894,163 @@ pub(crate) mod tests {
         }
     }
 
+    /// A plan whose layers mint two notes of EQUAL value, where a later transaction's
+    /// [`PrepInput::Prior`] names the SECOND of them.
+    ///
+    /// The whole point of the fixture is that the coordinate and a first-fit-by-value search
+    /// disagree: first-fit would hand the feeder the first note, the coordinate names the second.
+    /// The crate's own planner does not produce such a plan (it emits feeders in claim order), but
+    /// [`crate::preparation::PreparationPlan`] is public and validates coordinates —
+    /// `PreparationPlan::is_valid` knows nothing of first-fit — so a third-party planner can, and
+    /// then the note spent and the note the dependency names must still be the same one.
+    ///
+    /// `feeder` is the coordinate the layer-1 transaction spends, so a caller can also point it at
+    /// something the plan does not mint.
+    fn equal_valued_feeders_plan(
+        feeder: (usize, usize, usize),
+        with_change: bool,
+    ) -> MigrationPlan {
+        let value = Zatoshis::const_from_u64(10_000_000);
+        let funding = Zatoshis::const_from_u64(9_000_000);
+        // Two indistinguishable-by-value notes, from different producers. With `with_change`, each
+        // minting transaction also returns a change output OF THE SAME VALUE — the shape that lets
+        // a `Prior` name a change output and still satisfy `PreparationPlan::is_valid`, which
+        // checks that the coordinate names an output of the claimed value, not what that output is
+        // FOR.
+        let mint = |wallet_index: usize| {
+            let mut outputs = alloc::vec![PrepOutput::Intermediate(value)];
+            let spend = if with_change {
+                outputs.push(PrepOutput::Change(value));
+                (value + value).expect("the doubled note value is representable")
+            } else {
+                value
+            };
+            crate::preparation::PrepTransaction::from_parts(
+                alloc::vec![PrepInput::Wallet {
+                    index: wallet_index,
+                    value: spend,
+                }],
+                outputs,
+            )
+        };
+        let (layer, transaction, output) = feeder;
+        let spender = crate::preparation::PrepTransaction::from_parts(
+            alloc::vec![PrepInput::Prior {
+                layer,
+                transaction,
+                output,
+                value,
+            }],
+            alloc::vec![PrepOutput::Funding(funding)],
+        );
+        let preparation = crate::preparation::PreparationPlan::from_parts(
+            alloc::vec![alloc::vec![mint(0), mint(1)], alloc::vec![spender]],
+            alloc::vec![],
+        );
+        // One crossing per minted note that survives the feeder claim: the funding note the
+        // layer-1 transaction mints, and whichever equal-valued note it did NOT spend.
+        let denominations = DenominationPlan::from_stored_parts(
+            alloc::vec![funding, value],
+            Zatoshis::ZERO,
+            None,
+            Zatoshis::ZERO,
+            Zatoshis::const_from_u64(20_000_000),
+            Zatoshis::const_from_u64(19_000_000),
+        )
+        .expect("the stored parts are consistent");
+        let height = |h: u32| BlockHeight::from_u32(2_000_000 + h);
+        // Real drawn schedules, in the layers' shape: nothing here turns on the heights, but a
+        // fixture that could not have been drawn is a fixture that proves less.
+        let mut rng = ChaCha8Rng::seed_from_u64(41);
+        MigrationPlan {
+            denominations,
+            preparation,
+            prep_schedule: alloc::vec![alloc::vec![height(0), height(1)], alloc::vec![height(2)]],
+            schedule: crate::scheduling::schedule(
+                &crate::scheduling::SchedulingParams::ZIP_318,
+                height(100),
+                2,
+                &mut rng,
+            ),
+        }
+    }
+
+    /// A `Prior` input spends the output its coordinate NAMES, not whichever unclaimed note
+    /// happens to have the right value.
+    ///
+    /// The plan already answers "which note does this input spend" — `PrepInput::Prior` carries
+    /// `(layer, transaction, output)` — so re-deriving it by value search would be a second answer
+    /// to a settled question, and the two answers part company as soon as two minted notes share a
+    /// value. This pins the resolution to the coordinate, in the case that discriminates: the
+    /// spender names the SECOND of two equal-valued notes, so a first-fit walk would take the
+    /// first.
+    ///
+    /// Both halves are asserted, because they fail differently. The feeder ordinal is the
+    /// mechanism; the crossing's dependency is what a wallet SEES. A first-fit walk would not
+    /// desynchronize the two — a crossing's dependency is read off the producer of the note it is
+    /// handed, so the dependency and the spent note cannot part company — it would hand the
+    /// crossing a DIFFERENT note, from the other producer, committing a differently shaped run
+    /// than the plan describes: the feeder would spend the note the plan left for the crossing,
+    /// and the crossing would wait on a transaction the plan never made it wait on.
+    #[test]
+    fn a_feeder_spends_the_output_its_coordinate_names() {
+        // Layer 0's SECOND transaction, first output: minted-sequence ordinal 1, where a
+        // value search would find ordinal 0.
+        let plan = equal_valued_feeders_plan((0, 1, 0), false);
+        let run = plan.planned_run();
+
+        assert_eq!(
+            run.prep_feeders,
+            alloc::vec![
+                alloc::vec![],
+                alloc::vec![],
+                alloc::vec![Some(MintedOrdinal(1))]
+            ],
+            "the feeder resolves to the coordinate's note, not the first of equal value",
+        );
+
+        let rows = &run.rows;
+        let (t0, t2) = (rows[0].id(), rows[2].id());
+        let leftover_crossing = rows
+            .iter()
+            .find(|row| matches!(row.kind(), MigrationTxKind::Transfer { crossing: 1 }))
+            .expect("the plan has a second crossing");
+        assert_eq!(
+            leftover_crossing.depends_on(),
+            &[t0],
+            "the crossing waits on the producer of the note it is left, which is the note the \
+             layer-1 transaction did NOT spend",
+        );
+        let funded_crossing = rows
+            .iter()
+            .find(|row| matches!(row.kind(), MigrationTxKind::Transfer { crossing: 0 }))
+            .expect("the plan has a first crossing");
+        assert_eq!(funded_crossing.depends_on(), &[t2]);
+    }
+
+    /// A `Prior` naming an output that mints NOTHING — a change output, which stays in the source
+    /// pool — resolves to no note at all.
+    ///
+    /// `PreparationPlan::is_valid` accepts the coordinate this fixture uses: it checks that the
+    /// named output carries the claimed value — which this change output deliberately does — and
+    /// not what that output is FOR. The plan is nonetheless unbuildable, and the distinction
+    /// matters because a value search would happily serve some OTHER note of that value and build
+    /// a migration the plan never described. The absence is recorded, and `commit_preparation`
+    /// refuses the plan (`PlannedRun::into_buildable`).
+    #[test]
+    fn a_feeder_naming_a_change_output_resolves_to_nothing() {
+        // Layer 0's second transaction, SECOND output: its change, which never enters the minted
+        // sequence — while a note of exactly that value is minted by both layer-0 transactions.
+        let plan = equal_valued_feeders_plan((0, 1, 1), true);
+        let run = plan.planned_run();
+
+        assert_eq!(
+            run.prep_feeders[2],
+            alloc::vec![None],
+            "a change output mints nothing, so the coordinate names nothing to spend",
+        );
+    }
+
     /// The in-crate mock store answers the same three questions every store is held to: an empty
     /// store reports nothing, a written migration reads back unchanged, and a transaction-state
     /// update persists.
@@ -4585,8 +5230,8 @@ mod commit_tests {
     impl MigrationCrypto for CommitMock {
         type Error = core::convert::Infallible;
 
-        fn orchard_fvk(&self) -> Result<FullViewingKey, Self::Error> {
-            Ok(self.fvk.clone())
+        fn orchard_fvk(&self) -> Option<&FullViewingKey> {
+            Some(&self.fvk)
         }
 
         fn account_derivation(&self) -> Result<Option<AccountDerivation>, Self::Error> {
@@ -4595,10 +5240,6 @@ mod commit_tests {
 
         fn resolve_wallet_note(&self, index: usize) -> Result<orchard::note::Note, Self::Error> {
             Ok(self.wallet_notes[index])
-        }
-
-        fn sign(&self, pczt: pczt::Pczt) -> Result<pczt::Pczt, Self::Error> {
-            Ok(sign_pczt(pczt, &self.ask).expect("signs the migration PCZT"))
         }
     }
 
@@ -4678,6 +5319,13 @@ mod commit_tests {
         }
     }
 
+    /// The account's Orchard SPENDING key, as a caller now hands it to the entry points that sign
+    /// (`commit_preparation`, `rebuild_expired_transfer`). Derived from the same `seed` the mock
+    /// wallet's key is, so it is that account's own — which those entry points check.
+    fn sk(seed: u64) -> orchard::keys::SpendingKey {
+        spending_key(seed)
+    }
+
     /// A planned single-note migration and the mock wallet that holds the note.
     fn single_note_setup(seed: u64, balance: u64) -> (CommitMock, MigrationPlan) {
         let backend = CommitMock::new(seed, &[balance]);
@@ -4707,6 +5355,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -4917,6 +5566,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -4943,7 +5593,7 @@ mod commit_tests {
 
         // Rebuild it.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
-        rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng)
+        rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng)
             .expect("rebuilds the expired transfer");
 
         let new = &state.transactions[0];
@@ -5015,6 +5665,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5063,7 +5714,7 @@ mod commit_tests {
 
         // The rebuild recovers the funding note from the persisted nullifier cache.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
-        rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng)
+        rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng)
             .expect("rebuilds the expired proved transfer");
         let new = &state.transactions[0];
         assert_eq!(new.state, MigrationTxState::Signed);
@@ -5112,6 +5763,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5136,8 +5788,15 @@ mod commit_tests {
         backend.tip = latest_expiry + 1;
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
-        rebuild_expired_transfer(&params, &backend, &mut state, victim.id, &mut rng)
-            .expect("rebuilds the expired transfer");
+        rebuild_expired_transfer(
+            &params,
+            &backend,
+            &sk(seed),
+            &mut state,
+            victim.id,
+            &mut rng,
+        )
+        .expect("rebuilds the expired transfer");
 
         let rebuilt = state
             .transactions
@@ -5169,6 +5828,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5184,7 +5844,7 @@ mod commit_tests {
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, tx.id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, tx.id, &mut rng),
             Err(RebuildError::FundingNoteUnavailable(v))
                 if v == Zatoshis::from_u64(funding_note).expect("test value is valid")
         ));
@@ -5297,6 +5957,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5307,13 +5968,13 @@ mod commit_tests {
         // Not expired yet (the tip is far below the expiry): rejected.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng),
             Err(RebuildError::NotExpired(rejected)) if rejected == id
         ));
         // An unknown id: rejected.
         let unknown = MigrationTransferId::new(9999);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, unknown, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, unknown, &mut rng),
             Err(RebuildError::UnknownTransaction(rejected)) if rejected == unknown
         ));
 
@@ -5323,7 +5984,7 @@ mod commit_tests {
         state.transactions[0].kind = MigrationTxKind::Preparation { layer: 0, index: 0 };
         backend.tip = state.transactions[0].expiry_height + 1;
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng),
             Err(RebuildError::NotATransfer(rejected)) if rejected == id
         ));
     }
@@ -5348,6 +6009,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5361,7 +6023,7 @@ mod commit_tests {
         state.transactions[0].unsatisfiable = Some((mark, UnsatisfiableKind::InputsSpent));
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng),
             Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
         ));
 
@@ -5378,7 +6040,7 @@ mod commit_tests {
         );
         let before = state.transactions[0].clone();
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng),
             Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
         ));
         assert_eq!(
@@ -5409,7 +6071,7 @@ mod commit_tests {
             None,
         ));
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng),
             Err(RebuildError::Unsatisfiable(rejected)) if rejected == id
         ));
     }
@@ -5526,6 +6188,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk,
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5648,6 +6311,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5722,6 +6386,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng2,
             ReplanThreshold::DEFAULT,
@@ -5965,6 +6630,122 @@ mod commit_tests {
         }
     }
 
+    /// A spending key that is not the account's is refused BEFORE anything is built, by both entry
+    /// points that sign — and the store is left untouched.
+    ///
+    /// This is the one failure mode signing cannot report. A migration PCZT carries padding dummy
+    /// spends the account's key is not meant to authorize, so `build::sign_pczt` skips a spend
+    /// whose authorizing key does not match instead of failing; with a foreign key EVERY real
+    /// spend is skipped, the signer returns `Ok`, and the commit records
+    /// `MigrationTxState::Signed` for transactions carrying no signature at all. Such a run is
+    /// unbroadcastable, and nothing would notice until its first transfer was proved and
+    /// submitted. The check that closes it compares the key's full viewing key against the
+    /// account's, which is why these calls take the SPENDING key rather than the authorizing key
+    /// derived from it.
+    ///
+    /// The happy path is asserted in the same test, against the same fixtures, so what the check
+    /// costs a legitimate caller is visible next to what it refuses.
+    #[test]
+    fn a_foreign_spending_key_is_refused_before_anything_is_built() {
+        let seed = 41u64;
+        let params = regtest_network(true);
+        // Another account entirely: same shape, different key.
+        let foreign = sk(seed + 1_000);
+        assert_ne!(
+            orchard::keys::FullViewingKey::from(&foreign),
+            orchard::keys::FullViewingKey::from(&sk(seed)),
+            "the fixture's two accounts really are different",
+        );
+
+        // --- commit_preparation
+        let (mut backend, plan) = single_note_setup(seed, 78 * COIN);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let refused = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &foreign,
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        );
+        assert!(
+            matches!(refused, Err(CommitError::WrongSpendAuthority)),
+            "a foreign key is refused, not silently used: {refused:?}",
+        );
+        assert!(
+            backend
+                .get_migration()
+                .expect("the mock store answers")
+                .is_none(),
+            "nothing was persisted: the refusal precedes the first build",
+        );
+
+        // The account's own key still commits, and commits SIGNED.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &sk(seed),
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("the account's own key commits");
+        assert!(
+            state
+                .transactions()
+                .iter()
+                .all(|tx| tx.state() == MigrationTxState::Signed),
+            "and every transaction is signed",
+        );
+
+        // --- rebuild_expired_transfer, over a committed run whose transfer has expired.
+        let seed = 43u64;
+        let buffer = u64::from(commit_test_fees().1);
+        let mut backend = CommitMock::new(seed, &[COIN + buffer, u64::from(prep_fee())]);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let plan = plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+        let mut state = commit_preparation(
+            &params,
+            BlockHeight::from_u32(TARGET_HEIGHT),
+            &mut backend,
+            &sk(seed),
+            &plan,
+            &mut rng,
+            ReplanThreshold::DEFAULT,
+        )
+        .expect("commits the migration");
+        let id = state.transactions[0].id;
+        let before = state.transactions[0].clone();
+        backend.tip = before.expiry_height + 1;
+
+        let foreign = sk(seed + 1_000);
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        let refused =
+            rebuild_expired_transfer(&params, &backend, &foreign, &mut state, id, &mut rng);
+        assert!(
+            matches!(refused, Err(RebuildError::WrongSpendAuthority)),
+            "a foreign key is refused here too: {refused:?}",
+        );
+        assert_eq!(
+            state.transactions[0], before,
+            "and the stored transaction is untouched — not rebuilt, not re-signed, not rescheduled",
+        );
+
+        // The account's own key rebuilds it.
+        let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+        rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng)
+            .expect("the account's own key rebuilds");
+        assert_eq!(state.transactions[0].state, MigrationTxState::Signed);
+        assert_ne!(
+            state.transactions[0].pczt, before.pczt,
+            "the rebuild really did replace the artifact",
+        );
+    }
+
     /// A committed migration must be resumed, never rebuilt over: a second commit while the
     /// stored migration is non-terminal is refused (its pre-signed transactions may already be
     /// broadcast, and a rebuilt migration would double-spend the same notes); a terminal
@@ -5980,6 +6761,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -5992,6 +6774,7 @@ mod commit_tests {
                 &params,
                 BlockHeight::from_u32(TARGET_HEIGHT),
                 &mut backend,
+                &sk(seed),
                 &plan,
                 &mut rng,
                 ReplanThreshold::DEFAULT,
@@ -6008,6 +6791,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6032,6 +6816,7 @@ mod commit_tests {
                 &regtest_network(true),
                 BlockHeight::from_u32(TARGET_HEIGHT),
                 &mut backend,
+                &sk(seed),
                 &plan,
                 &mut rng,
                 ReplanThreshold::DEFAULT,
@@ -6056,6 +6841,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6157,6 +6943,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6341,6 +7128,7 @@ mod commit_tests {
             &params,
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
@@ -6389,7 +7177,7 @@ mod commit_tests {
         // is invalid rather than this transfer being repairable.
         let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
         assert!(matches!(
-            rebuild_expired_transfer(&params, &backend, &mut state, transfer_id, &mut rng),
+            rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, transfer_id, &mut rng),
             Err(RebuildError::AnchorIntervalMismatch {
                 committed: c,
                 configured: g,
@@ -6501,6 +7289,7 @@ mod commit_tests {
             &regtest_network(true),
             BlockHeight::from_u32(TARGET_HEIGHT),
             &mut backend,
+            &sk(seed),
             &plan,
             &mut rng,
             ReplanThreshold::DEFAULT,
