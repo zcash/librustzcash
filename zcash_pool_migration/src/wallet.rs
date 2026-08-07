@@ -379,18 +379,33 @@ where
     /// this adapter is the seam that has one. The fully-scanned bound is applied here rather than
     /// left to `get_tx_height` — which reports a mined height as soon as the wallet learns it,
     /// including ahead of scanning — so a promotion cannot rest on a block outside the region a
-    /// rollback would truncate. A wallet that has scanned nothing reports nothing mined.
+    /// rollback would truncate.
+    ///
+    /// The bound is read FIRST, and a wallet with no fully-scanned region answers `None` without
+    /// the inclusion lookup ever being made. That is not an optimization: nothing is promotable
+    /// when there is no scanned region — every answer this gives has to be one a rollback of the
+    /// block carrying the transaction would withdraw, and a wallet that has scanned nothing has no
+    /// such region to withdraw from — so the question the second lookup asks does not arise. It
+    /// also keeps this total on a wallet that has never synced, where a backend may have no chain
+    /// tip to answer `get_tx_height` against at all, which is the state in which a store applying
+    /// the same rule at its own layer (`zcash_client_sqlite`'s does) answers `None`. The two agree
+    /// on every value, so a wallet whose store also implements this needs no delegation here.
+    ///
+    /// Errors from either lookup are propagated, never read as an absence: an answer the wallet
+    /// could not give is not the answer that nothing is mined.
     fn mined_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        let Some(mined) = self.wallet.get_tx_height(txid).map_err(Error::WalletRead)? else {
+        let Some(scanned) = self
+            .wallet
+            .block_fully_scanned()
+            .map_err(Error::WalletRead)?
+        else {
             return Ok(None);
         };
         Ok(self
             .wallet
-            .block_fully_scanned()
+            .get_tx_height(txid)
             .map_err(Error::WalletRead)?
-            .map(|meta| meta.block_height())
-            .filter(|scanned| mined <= *scanned)
-            .map(|_| mined))
+            .filter(|mined| *mined <= scanned.block_height()))
     }
 }
 
