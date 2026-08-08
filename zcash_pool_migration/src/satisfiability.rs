@@ -979,9 +979,9 @@ pub fn advance_migration<St: PoolMigrationWrite, R: RngCore + CryptoRng>(
         // wall-clock-woken wallet re-spread without syncing first; legal there because the shift
         // persists a SCHEDULE, never a verdict — it re-times service, records no determination,
         // and destroys no work (see the `DuenessTargets` classification). `Rebuild` is
-        // deliberately not a trigger: the rebuild redraws its own transfer's schedule from the
-        // target, and sizing a shift by an expired candidate's stale height would overstate it
-        // for everything still live.
+        // deliberately not a trigger: the rebuild chains its own transfer's fresh schedule past
+        // the end of the pending one, and sizing a shift by an expired candidate's stale height
+        // would overstate it for everything still live.
         //
         // For a TRANSFER'S PROVE the overdueness clock starts at the height its proof could
         // first have been offered — `boundary + PROVABLE_ANCHOR_DEPTH + 1`, the anchor-depth

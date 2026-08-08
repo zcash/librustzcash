@@ -2976,8 +2976,11 @@ impl<E: core::error::Error> core::error::Error for RebuildError<E> {}
 /// ZIP 318's expired-transaction handling: "a new transaction with a fresh anchor and expiry is
 /// constructed for the affected part, with its denomination unchanged".
 ///
-/// This function performs that reconstruction: it reschedules the part from the current tip with a
-/// fresh memoryless delay, derives the new canonical expiry, draws a fresh boundary anchor, builds
+/// This function performs that reconstruction: it reschedules the part with a fresh delay chained
+/// onto the end of the pending transfer schedule (onto the current tip, when nothing later is
+/// pending — expiry is canonical, so transfers expire in cohorts, and successive rebuilds of a
+/// cohort extend the schedule as a running sum rather than each drawing independently from the
+/// tip), derives the new canonical expiry, draws a fresh boundary anchor, builds
 /// a new transfer PCZT against the same funding note and crossing value, signs it anew, and
 /// replaces the stored PCZT. Anchors and witnesses stay DEFERRED (ZIP 374): the fresh anchor is
 /// installed at proving time, exactly as for an originally committed transfer.
@@ -3206,9 +3209,29 @@ where
     }
     let note = note.ok_or(RebuildError::FundingNoteUnavailable(funding_value))?;
 
-    // Reschedule the part with a fresh memoryless delay from the current tip, and derive its new
-    // canonical expiry and a fresh boundary anchor for that schedule.
-    let scheduled_height = target_height + sched_params.transfer_delay().draw(&mut *rng);
+    // Reschedule the part by chaining a fresh delay onto the END of the pending transfer
+    // schedule (ZIP 318 CUMULATIVE MUST), and derive its new canonical expiry and a fresh
+    // boundary anchor for that schedule. The chain base is the latest scheduled height among the
+    // still-pending transfers, clamped below by the target: expiry heights are canonical (a
+    // shared grid), so transfers expire in COHORTS, and a wallet reopening past a shared expiry
+    // rebuilds the whole cohort against one tip. Drawing every fresh delay from the tip itself
+    // would make the cohort's heights i.i.d. around it — a burst whose leading gaps compress by
+    // the cohort's size, exactly the linkable cluster the drawn delays exist to prevent —
+    // whereas chaining extends the schedule by one drawn gap per rebuild. A lone rebuild
+    // (nothing pending at or above the target) chains from the target itself, the memoryless
+    // draw this arm has always made.
+    let chain_base = state
+        .transactions
+        .iter()
+        .filter(|t| {
+            matches!(t.kind, MigrationTxKind::Transfer { .. })
+                && !matches!(t.state, MigrationTxState::Mined { .. })
+                && t.unsatisfiable.is_none()
+        })
+        .map(|t| t.scheduled_height)
+        .max()
+        .map_or(target_height, |latest| latest.max(target_height));
+    let scheduled_height = chain_base + sched_params.transfer_delay().draw(&mut *rng);
     let expiry_height = scheduling::expiry_height(scheduled_height);
     let anchor_boundary = scheduling::draw_anchor_boundary(
         sched_params.anchor_bucket_interval(),
@@ -5643,6 +5666,111 @@ mod commit_tests {
                 .expired_transactions(DuenessTargets::at(target))
                 .contains(&id)
         );
+    }
+
+    /// Rebuilding a BATCH of expired transfers at one tip must extend the pending schedule as a
+    /// running sum (ZIP 318 CUMULATIVE MUST): each fresh height chains one drawn delay past the
+    /// previous rebuild's, rather than every fresh height being drawn independently from the tip.
+    /// Expiry is canonical — every transfer scheduled within one expiry window shares its expiry
+    /// height — so a wallet reopening after a long sleep rebuilds a whole cohort against one
+    /// target, and same-base draws would broadcast that cohort as a burst clustered at the tip
+    /// (the leading gaps of `k` same-base exponential draws compress by a factor of `k`),
+    /// unmaking the Poisson shape the delays exist to give the transfer stream.
+    #[test]
+    fn rebuilds_of_a_batch_of_expired_transfers_chain_their_fresh_schedules() {
+        for seed in 0..8u64 {
+            let params = regtest_network(true);
+            let buffer = u64::from(commit_test_fees().1);
+            // Three crossings (the canonical digit expansion of 3.5 ZEC), each directly funded
+            // by a matching wallet note, so the committed run holds three transfers and no
+            // preparation transactions.
+            let mut backend = CommitMock::new(
+                seed,
+                &[
+                    2 * COIN + buffer,
+                    COIN + buffer,
+                    COIN / 2 + buffer,
+                    u64::from(prep_fee()),
+                ],
+            );
+
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            let plan =
+                plan_migration(&params, &backend, &mut rng).expect("a fundable balance plans");
+            assert_eq!(
+                plan.preparation()
+                    .layers()
+                    .iter()
+                    .map(|l| l.len())
+                    .sum::<usize>(),
+                0,
+                "every crossing is directly funded"
+            );
+            assert_eq!(plan.funding_notes().len(), 3);
+
+            let mut rng = ChaCha8Rng::seed_from_u64(seed + 1);
+            let mut state = commit_preparation(
+                &params,
+                BlockHeight::from_u32(TARGET_HEIGHT),
+                &mut backend,
+                &sk(seed),
+                &plan,
+                &mut rng,
+                ReplanThreshold::DEFAULT,
+            )
+            .expect("commits the migration");
+            assert_eq!(state.transactions.len(), 3);
+
+            // Sleep past the LATEST expiry, so the whole cohort expires at once.
+            let last_expiry = state
+                .transactions
+                .iter()
+                .map(|t| t.expiry_height)
+                .max()
+                .expect("three transfers");
+            backend.tip = last_expiry + 1;
+            let target = backend.chain_tip_height().unwrap() + 1;
+
+            // Rebuild the cohort in the order the drive loop serves it: earliest schedule first.
+            let mut cohort = state.expired_transactions(DuenessTargets::at(target));
+            assert_eq!(cohort.len(), 3, "the whole cohort has expired");
+            cohort.sort_by_key(|id| {
+                state
+                    .transactions
+                    .iter()
+                    .find(|t| t.id == *id)
+                    .expect("expired ids name stored transactions")
+                    .scheduled_height
+            });
+
+            let mut rng = ChaCha8Rng::seed_from_u64(seed + 2);
+            let cap = crate::scheduling::SchedulingParams::ZIP_318
+                .transfer_delay()
+                .cap()
+                .get();
+            let mut previous = target;
+            for id in cohort {
+                rebuild_expired_transfer(&params, &backend, &sk(seed), &mut state, id, &mut rng)
+                    .expect("rebuilds the expired transfer");
+                let fresh = state
+                    .transactions
+                    .iter()
+                    .find(|t| t.id == id)
+                    .expect("the rebuilt transfer is stored in place")
+                    .scheduled_height;
+                assert!(
+                    fresh >= previous,
+                    "a rebuilt schedule chains past the previous one (seed {seed}): \
+                     {fresh} < {previous}"
+                );
+                assert!(
+                    u32::from(fresh) - u32::from(previous) <= cap,
+                    "the chained gap is a single drawn delay (seed {seed}): \
+                     {previous} -> {fresh}"
+                );
+                previous = fresh;
+            }
+        }
     }
 
     /// A transfer that was PROVED before it expired is still rebuildable. Proving replaces the
