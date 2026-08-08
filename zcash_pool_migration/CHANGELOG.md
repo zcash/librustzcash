@@ -99,6 +99,14 @@ and this library adheres to Rust's notion of
   method. A signing failure now arrives as `engine::CommitError::Build` or
   `engine::RebuildError::Build`, from the entry point that was given the key.
 
+### Fixed
+- `engine::rebuild_expired_transfer` and `engine::rebuild_expired_transfer_unsigned`
+  now chain each rebuilt transfer's fresh scheduled height onto the latest
+  pending transfer schedule rather than drawing it independently from the chain
+  tip. Rebuilding several expired transfers at one tip previously scheduled
+  them clustered around it, broadcasting the cohort as a linkable burst instead
+  of the spread the ZIP 318 inter-arrival delays require.
+
 ## [0.1.0-rc.7] - 2026-08-07
 
 ### Added
