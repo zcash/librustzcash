@@ -156,7 +156,7 @@ rand.workspace = true
 rand_chacha.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
 tempfile = "3.5.0"
-tokio = { version = "1.21.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.21.0", features = ["io-util", "macros", "rt-multi-thread"] }
 transparent = { workspace = true, features = ["test-dependencies"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
@@ -265,6 +265,7 @@ lightwalletd-privacy = [
     "dep:serde_json",
     "dep:tokio",
     "tokio?/rt",
+    "tokio?/time",
     "dep:tokio-rustls",
     "dep:tower",
     "dep:trait-variant",
