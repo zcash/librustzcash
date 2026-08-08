@@ -4,6 +4,12 @@ permissions: {}
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
   push:
     branches: main
   merge_group:
@@ -49,10 +55,29 @@ jobs:
       matrix:
         target:
           - Linux
+        # Run every configuration for nightly CI and explicitly full PRs.
         state: >-
           ${{
             fromJSON(
-              github.event_name == 'schedule'
+              (
+                github.event_name == 'schedule'
+                || (
+                  github.event_name == 'pull_request'
+                  && (
+                    contains(
+                      github.event.pull_request.labels.*.name,
+                      'CI-full-suite'
+                    )
+                    || (
+                      github.event.pull_request.head.repo.full_name == github.repository
+                      && startsWith(
+                        github.event.pull_request.head.ref,
+                        'release/'
+                      )
+                    )
+                  )
+                )
+              )
               && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools", "all-features", "NU7"]'
               || (
                 github.event_name == 'pull_request'
@@ -117,10 +142,23 @@ jobs:
     runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
     strategy:
       matrix:
+        # Partial configurations only need compile coverage when their runtime
+        # jobs were pruned from an ordinary pull request.
         state: >-
           ${{
             fromJSON(
               github.event_name == 'pull_request'
+              && !contains(
+                github.event.pull_request.labels.*.name,
+                'CI-full-suite'
+              )
+              && !(
+                github.event.pull_request.head.repo.full_name == github.repository
+                && startsWith(
+                  github.event.pull_request.head.ref,
+                  'release/'
+                )
+              )
               && '["transparent", "transparent-inputs-only", "transparent-key-encoding-only", "Sapling-only", "Orchard", "all-pools"]'
               || '["covered-by-runtime-matrix"]'
             )
@@ -130,7 +168,7 @@ jobs:
         with:
           persist-credentials: false
       - id: prepare
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ matrix.state != 'covered-by-runtime-matrix' }}
         uses: ./.github/actions/prepare
         with:
           transparent-pool: ${{ matrix.state == 'transparent' }}
@@ -147,12 +185,12 @@ jobs:
               )
             }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ matrix.state != 'covered-by-runtime-matrix' }}
         with:
           shared-key: msrv
           save-if: "false"
       - name: Check all test targets
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ matrix.state != 'covered-by-runtime-matrix' }}
         shell: bash
         env:
           ALL_FEATURES: ${{ steps.prepare.outputs.all-features }}
@@ -166,12 +204,26 @@ jobs:
           fi
           cargo check --workspace --all-targets "${feature_flags[@]}"
       - name: Feature configuration runtime coverage
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ matrix.state == 'covered-by-runtime-matrix' }}
         run: echo "The full feature matrix runs tests for this event."
 
   test:
     name: Test ${{ matrix.state }} on ${{ matrix.target }}
-    if: ${{ github.event_name != 'pull_request' }}
+    if: >-
+      ${{
+        github.event_name != 'pull_request'
+        || contains(
+          github.event.pull_request.labels.*.name,
+          'CI-full-suite'
+        )
+        || (
+          github.event.pull_request.head.repo.full_name == github.repository
+          && startsWith(
+            github.event.pull_request.head.ref,
+            'release/'
+          )
+        )
+      }}
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     strategy:
@@ -182,7 +234,25 @@ jobs:
         state: >-
           ${{
             fromJSON(
-              github.event_name == 'schedule'
+              (
+                github.event_name == 'schedule'
+                || (
+                  github.event_name == 'pull_request'
+                  && (
+                    contains(
+                      github.event.pull_request.labels.*.name,
+                      'CI-full-suite'
+                    )
+                    || (
+                      github.event.pull_request.head.repo.full_name == github.repository
+                      && startsWith(
+                        github.event.pull_request.head.ref,
+                        'release/'
+                      )
+                    )
+                  )
+                )
+              )
               && '["all-features", "NU7"]'
               || '["all-features"]'
             )
@@ -232,7 +302,21 @@ jobs:
 
   test-slow:
     name: Expensive Test ${{ matrix.state }} on ${{ matrix.target }}
-    if: ${{ github.event_name != 'pull_request' }}
+    if: >-
+      ${{
+        github.event_name != 'pull_request'
+        || contains(
+          github.event.pull_request.labels.*.name,
+          'CI-full-suite'
+        )
+        || (
+          github.event.pull_request.head.repo.full_name == github.repository
+          && startsWith(
+            github.event.pull_request.head.ref,
+            'release/'
+          )
+        )
+      }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -241,7 +325,25 @@ jobs:
         state: >-
           ${{
             fromJSON(
-              github.event_name == 'schedule'
+              (
+                github.event_name == 'schedule'
+                || (
+                  github.event_name == 'pull_request'
+                  && (
+                    contains(
+                      github.event.pull_request.labels.*.name,
+                      'CI-full-suite'
+                    )
+                    || (
+                      github.event.pull_request.head.repo.full_name == github.repository
+                      && startsWith(
+                        github.event.pull_request.head.ref,
+                        'release/'
+                      )
+                    )
+                  )
+                )
+              )
               && '["all-pools", "NU7"]'
               || '["all-pools"]'
             )
