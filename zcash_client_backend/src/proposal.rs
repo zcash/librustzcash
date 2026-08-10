@@ -134,12 +134,29 @@ pub enum ProposalError {
     /// transaction was estimated from its inputs, outputs, and change, using conservative
     /// per-element byte costs; the estimate exceeds [`MAX_BLOCK_BYTES`].
     ///
+    /// `MAX_BLOCK_BYTES` is the *block* size limit, not a per-transaction limit: a
+    /// transaction that fits just under it still cannot be mined, because the block must
+    /// also carry its header and coinbase transaction. Passing the gate is therefore
+    /// necessary but not sufficient for mineability near the boundary; the builder is the
+    /// final authority.
+    ///
+    /// Recovery for a caller that receives this error: reduce the number of inputs by
+    /// lowering the payment amount or by consolidating small notes via send-to-self
+    /// transactions before retrying. Each consolidation round must be mined and its note
+    /// commitments anchored before the resulting notes are spendable, so recovery spans
+    /// multiple confirmations. For `propose_send_max` this error is a dead end — there is
+    /// no smaller amount to back off to — and requires a multi-transaction strategy.
+    ///
     /// [`MAX_BLOCK_BYTES`]: zcash_protocol::constants::MAX_BLOCK_BYTES
     TransactionTooLarge {
         /// The conservative upper-bound estimate of the step's serialized byte size.
         estimated_size: usize,
         /// The maximum serialized byte size a Zcash transaction may carry (`MAX_BLOCK_BYTES`).
         limit: usize,
+        /// The total number of shielded inputs (across all shielded pools) the step spends.
+        /// Carried alongside the byte counts so a wallet can explain the situation to a
+        /// user in terms of notes rather than bytes.
+        shielded_input_count: usize,
     },
 }
 
@@ -263,9 +280,10 @@ impl Display for ProposalError {
             ProposalError::TransactionTooLarge {
                 estimated_size,
                 limit,
+                shielded_input_count,
             } => write!(
                 f,
-                "The proposed transaction's estimated serialized size ({estimated_size} bytes) exceeds the maximum transaction size ({limit} bytes)."
+                "The proposed transaction's estimated serialized size ({estimated_size} bytes) exceeds the maximum transaction size ({limit} bytes). It spends {shielded_input_count} shielded inputs; reduce the payment amount or consolidate small notes before retrying."
             ),
         }
     }
@@ -774,6 +792,11 @@ impl<NoteRef> Step<NoteRef> {
             });
         }
 
+        let shielded_input_count = shielded_inputs
+            .iter()
+            .flat_map(|s| s.notes().iter())
+            .count();
+
         let step = Self {
             transaction_request,
             payment_pools,
@@ -794,6 +817,7 @@ impl<NoteRef> Step<NoteRef> {
             return Err(ProposalError::TransactionTooLarge {
                 estimated_size,
                 limit: MAX_BLOCK_BYTES,
+                shielded_input_count,
             });
         }
 
@@ -1154,9 +1178,12 @@ impl<NoteRef> Step<NoteRef> {
     /// The estimate is conservative (it never under-counts), so comparing it against
     /// [`MAX_BLOCK_BYTES`] is a safe size bound: a step whose estimate fits within a
     /// block will fit when built, and a step whose estimate exceeds a block may or may
-    /// not fit (the builder is the final authority), but rejecting the latter at
-    /// proposal time prevents input selection from constructing a transaction that
-    /// can never be mined.
+    /// not fit, but rejecting the latter at proposal time prevents input selection from
+    /// constructing a transaction that can never be mined. Passing the gate is necessary
+    /// but not sufficient for mineability: `MAX_BLOCK_BYTES` is the *block* size limit,
+    /// and a transaction that fits just under it still cannot be mined because the block
+    /// must also carry its header and coinbase transaction. The builder is the final
+    /// authority.
     ///
     /// [`ACTION_SIZE`]: zcash_primitives::transaction::components::orchard::ACTION_SIZE
     /// [`MAX_BLOCK_BYTES`]: zcash_protocol::constants::MAX_BLOCK_BYTES
@@ -1744,7 +1771,10 @@ mod tests {
             Err(ProposalError::TransactionTooLarge {
                 estimated_size,
                 limit,
-            }) if limit == MAX_BLOCK_BYTES && estimated_size > MAX_BLOCK_BYTES
+                shielded_input_count,
+            }) if limit == MAX_BLOCK_BYTES
+                && estimated_size > MAX_BLOCK_BYTES
+                && shielded_input_count == oversize_spend_count
         );
     }
 

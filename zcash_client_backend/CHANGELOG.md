@@ -353,14 +353,18 @@ workspace.
 - `zcash_client_backend::proposal::Step::estimated_serialized_size`, a
   conservative upper-bound estimate of the serialized byte size of the
   transaction a step describes. The estimate sums the per-element byte costs of
-  every input, output, and change output (using the v4 Sapling sizes and the
-  Orchard `ACTION_SIZE` as upper bounds) plus a fixed transaction-overhead
-  constant. It never under-counts, so comparing it against `MAX_BLOCK_BYTES` is
-  a safe size bound for rejecting proposals that cannot be mined.
+  every input, output, and change output (using the v4 Sapling sizes, the
+  Orchard `ACTION_SIZE` plus per-action spend authorization signatures and
+  proof shares, and the standard P2PKH transparent sizes) plus per-bundle
+  overhead added only for bundles that are present. It never under-counts, so
+  comparing it against `MAX_BLOCK_BYTES` is a safe size bound for rejecting
+  proposals that cannot be mined.
 - `zcash_client_backend::proposal::ProposalError::TransactionTooLarge`, returned
   by `Step::from_parts` when the step's estimated serialized size exceeds
-  `MAX_BLOCK_BYTES`. Input selection now rejects oversized proposals at
-  construction time rather than letting them reach the transaction builder,
+  `MAX_BLOCK_BYTES`. Carries the estimated size, the limit, and the total
+  shielded input count so a wallet can explain the situation to a user in terms
+  of notes rather than bytes. Input selection now rejects oversized proposals
+  at construction time rather than letting them reach the transaction builder,
   where proof generation would waste the caller's resources on a transaction
   that can never be included in a block.
 
