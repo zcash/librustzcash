@@ -897,6 +897,51 @@ pub(crate) fn receive_two_notes_with_same_value<T: ShieldedPoolTester>() {
     )
 }
 
+pub(crate) fn prefer_consolidation_uses_fewest_funding_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_consolidation_uses_fewest_funding_notes::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_consolidation_allows_more_than_five_funding_notes<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_consolidation_allows_more_than_five_funding_notes::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_consolidation_refreshes_funding_after_fee_growth<T: ShieldedPoolTester>() {
+    zcash_client_backend::data_api::testing::pool::prefer_consolidation_refreshes_funding_after_fee_growth::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn consolidation_selection_skips_unconfirmed_and_excluded_notes<
+    T: ShieldedPoolTester,
+>() {
+    zcash_client_backend::data_api::testing::pool::consolidation_selection_skips_unconfirmed_and_excluded_notes::<T>(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+pub(crate) fn prefer_consolidation_does_not_grow_sapling_spends() {
+    zcash_client_backend::data_api::testing::pool::prefer_consolidation_does_not_grow_sapling_spends(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn prefer_consolidation_fills_existing_orchard_actions() {
+    zcash_client_backend::data_api::testing::pool::prefer_consolidation_fills_existing_orchard_actions(
+        TestDbFactory::default(),
+        BlockCache::new(),
+    )
+}
+
 #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
 pub(crate) fn immature_coinbase_outputs_are_excluded_from_note_selection<T: ShieldedPoolTester>() {
     zcash_client_backend::data_api::testing::pool::immature_coinbase_outputs_are_excluded_from_note_selection::<T>(

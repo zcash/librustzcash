@@ -184,6 +184,34 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     )
 }
 
+/// Selects necessary and optional Sapling notes for consolidation-aware input selection.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_sapling_notes_for_consolidation<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+    max_additional_notes: usize,
+) -> Result<super::common::ConsolidationCandidates<sapling::Note>, SqliteClientError> {
+    super::common::select_spendable_notes_for_consolidation(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Sapling,
+        to_received_note,
+        lock_filter,
+        max_additional_notes,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_single_spendable_sapling_note<P: consensus::Parameters>(
     conn: &Connection,
@@ -734,6 +762,35 @@ pub(crate) mod tests {
     #[test]
     fn receive_two_notes_with_same_value() {
         testing::pool::receive_two_notes_with_same_value::<SaplingPoolTester>();
+    }
+
+    #[test]
+    fn prefer_consolidation_uses_fewest_funding_notes() {
+        testing::pool::prefer_consolidation_uses_fewest_funding_notes::<SaplingPoolTester>();
+    }
+
+    #[test]
+    fn prefer_consolidation_allows_more_than_five_funding_notes() {
+        testing::pool::prefer_consolidation_allows_more_than_five_funding_notes::<SaplingPoolTester>(
+        );
+    }
+
+    #[test]
+    fn prefer_consolidation_refreshes_funding_after_fee_growth() {
+        testing::pool::prefer_consolidation_refreshes_funding_after_fee_growth::<SaplingPoolTester>(
+        );
+    }
+
+    #[test]
+    fn consolidation_selection_skips_unconfirmed_and_excluded_notes() {
+        testing::pool::consolidation_selection_skips_unconfirmed_and_excluded_notes::<
+            SaplingPoolTester,
+        >();
+    }
+
+    #[test]
+    fn prefer_consolidation_does_not_grow_sapling_spends() {
+        testing::pool::prefer_consolidation_does_not_grow_sapling_spends();
     }
 
     #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]

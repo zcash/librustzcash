@@ -20,6 +20,10 @@ workspace.
   [`WalletSummary::progress`]. Callers that track sync progress elsewhere can
   use this to avoid the `subtree_scan_progress` aggregates.
   `WalletRead::get_wallet_summary` is unchanged and still computes progress.
+- A store-backed implementation of
+  `InputSource::select_spendable_notes_for_consolidation` that selects necessary
+  funding notes largest first, then returns the smallest eligible notes from
+  the same preferred lock tier as optional consolidation candidates.
 
 ### Fixed
 - Upgrading a wallet database whose `support_zcashd_wallet_import` migration

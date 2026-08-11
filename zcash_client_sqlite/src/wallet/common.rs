@@ -48,6 +48,12 @@ pub(crate) struct TableConstants {
     pub(crate) shard_height: u8,
 }
 
+/// Necessary funding notes followed by optional consolidation candidates from the same pool.
+pub(crate) type ConsolidationCandidates<Note> = (
+    Vec<ReceivedNote<ReceivedNoteId, Note>>,
+    Vec<ReceivedNote<ReceivedNoteId, Note>>,
+);
+
 const SAPLING_TABLE_CONSTANTS: TableConstants = TableConstants {
     table_prefix: SAPLING_TABLES_PREFIX,
     output_index_col: "output_index",
@@ -385,7 +391,8 @@ where
             protocol,
             &to_spendable_note,
             lock_filter,
-        ),
+        )
+        .map(|notes| notes.into_iter().map(|candidate| candidate.note).collect()),
     }
 }
 
@@ -433,7 +440,105 @@ where
         lock_filter,
     )?
     .into_iter()
-    .next())
+    .next()
+    .map(|candidate| candidate.note))
+}
+
+/// Selects the fewest eligible notes needed to cover `value`, followed by small notes that the
+/// input selector may use for shape-preserving consolidation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_notes_for_consolidation<P: consensus::Parameters, F, Note>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    protocol: ShieldedPool,
+    to_spendable_note: F,
+    lock_filter: LockFilter<'_>,
+    max_additional_notes: usize,
+) -> Result<ConsolidationCandidates<Note>, SqliteClientError>
+where
+    F: Fn(
+        &P,
+        ShieldedPool,
+        &Row,
+    ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>,
+{
+    if value == Zatoshis::ZERO {
+        return Ok((vec![], vec![]));
+    }
+
+    let Some(anchor_height) =
+        get_anchor_height(conn, target_height, confirmations_policy.trusted())?
+    else {
+        return Ok((vec![], vec![]));
+    };
+
+    let funding = select_spendable_notes_matching_value(
+        conn,
+        params,
+        account,
+        value,
+        ValueSelection::LargestFirst,
+        target_height,
+        anchor_height,
+        confirmations_policy,
+        exclude,
+        protocol,
+        &to_spendable_note,
+        lock_filter,
+    )?;
+
+    let funding_value = funding
+        .iter()
+        .try_fold(Zatoshis::ZERO, |total, candidate| {
+            (total + candidate.value).ok_or(BalanceError::Overflow)
+        })?;
+    let funding_tier = funding.first().map(|candidate| candidate.lock_tier);
+    let single_tier = funding_tier
+        .is_some_and(|tier| funding.iter().all(|candidate| candidate.lock_tier == tier));
+
+    let additional = if funding_value >= value && single_tier && max_additional_notes > 0 {
+        let mut additional_exclude = exclude.to_vec();
+        additional_exclude.extend(
+            funding
+                .iter()
+                .map(|candidate| *candidate.note.internal_note_id()),
+        );
+        select_spendable_notes_matching_value(
+            conn,
+            params,
+            account,
+            value,
+            ValueSelection::SmallestFirst {
+                lock_tier: funding_tier.expect("single_tier implies a funding tier"),
+                limit: max_additional_notes,
+            },
+            target_height,
+            anchor_height,
+            confirmations_policy,
+            &additional_exclude,
+            protocol,
+            &to_spendable_note,
+            lock_filter,
+        )?
+    } else {
+        vec![]
+    };
+
+    Ok((
+        funding
+            .into_iter()
+            .map(|candidate| candidate.note)
+            .collect(),
+        additional
+            .into_iter()
+            .map(|candidate| candidate.note)
+            .collect(),
+    ))
 }
 
 /// Selects all the unspent notes with value greater than [`zip317::MARGINAL_FEE`] and for the
@@ -611,12 +716,15 @@ where
         .collect()
 }
 
-/// The shape of a value-targeted note selection: accumulate the oldest notes toward the target,
-/// or draw only the single oldest note that covers it alone.
+/// The ordering and termination rule for a value-targeted note query.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ValueSelection {
     /// Accumulate the oldest eligible notes until the target value is covered.
     Accumulate,
+    /// Accumulate larger notes first after honoring lock-tier preference.
+    LargestFirst,
+    /// Return up to `limit` notes in ascending value order from the specified lock tier.
+    SmallestFirst { lock_tier: i64, limit: usize },
     /// Select only the oldest eligible notes whose individual values cover the target alone,
     /// oldest first.
     SingleCovering,
@@ -626,8 +734,11 @@ enum ValueSelection {
 /// specified ``target_value`` in Zatoshis from the specified shielded protocols excluding
 /// the ones present in the ``exclude`` slice.
 ///
-/// Under [`ValueSelection::SingleCovering`], instead returns the notes whose individual value
-/// covers ``target_value`` alone, oldest first; callers take the head.
+/// [`ValueSelection::LargestFirst`] returns the first confirmed descending-value prefix that
+/// covers the target, or every eligible note when the target cannot be covered.
+/// [`ValueSelection::SmallestFirst`] returns a bounded ascending-value prefix from one lock tier.
+/// [`ValueSelection::SingleCovering`] returns notes whose individual value covers the target,
+/// oldest first; callers take the head.
 ///
 /// - Implementation details
 ///   - Notes with individual value *below* the ``MARGINAL_FEE`` will be ignored
@@ -646,7 +757,7 @@ fn select_spendable_notes_matching_value<P: consensus::Parameters, F, Note>(
     protocol: ShieldedPool,
     to_spendable_note: F,
     lock_filter: LockFilter<'_>,
-) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>
+) -> Result<Vec<SpendableNoteCandidate<ReceivedNoteId, Note>>, SqliteClientError>
 where
     F: Fn(
         &P,
@@ -696,9 +807,15 @@ where
     let tier = locked_tier_expr(lock_filter, "rn");
     let window_frame = match &tier {
         Some((expr, direction)) => format!(
-            "ORDER BY {expr} {direction}, rn.commitment_tree_position ROWS UNBOUNDED PRECEDING"
+            "ORDER BY {expr} {direction}, rn.commitment_tree_position, rn.id ROWS UNBOUNDED PRECEDING"
         ),
-        None => "ORDER BY rn.commitment_tree_position ROWS UNBOUNDED PRECEDING".to_string(),
+        None => "ORDER BY rn.commitment_tree_position, rn.id ROWS UNBOUNDED PRECEDING".to_string(),
+    };
+    let so_far = match selection {
+        ValueSelection::Accumulate | ValueSelection::SingleCovering => {
+            format!("SUM(value) OVER ({window_frame})")
+        }
+        ValueSelection::LargestFirst | ValueSelection::SmallestFirst { .. } => "0".to_string(),
     };
     // The single-covering tail selects FROM the CTE, where `rn` is out of scope, so the tier
     // expression is materialized as a CTE column with the direction applied at the ordering
@@ -714,7 +831,7 @@ where
         "id, txid, {output_index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 ufvk, recipient_key_scope,
-                mined_height, witness_stabilized, trust_status,
+                lock_tier, mined_height, witness_stabilized, trust_status,
                 max_shielding_input_height, min_shielding_input_trust"
     );
     // The `eligible` CTE is shared; only the selection over it differs by shape. Accumulation
@@ -732,10 +849,20 @@ where
          SELECT {result_columns}
          FROM ({crossing_note_subquery})"
         ),
+        ValueSelection::LargestFirst => format!(
+            "SELECT {result_columns}
+         FROM eligible
+         ORDER BY lock_tier {tier_direction}, value DESC, commitment_tree_position, id"
+        ),
+        ValueSelection::SmallestFirst { .. } => format!(
+            "SELECT {result_columns}
+         FROM eligible WHERE lock_tier = :selected_lock_tier
+         ORDER BY value ASC, commitment_tree_position, id"
+        ),
         ValueSelection::SingleCovering => format!(
             "SELECT {result_columns}
          FROM eligible WHERE value >= :target_value
-         ORDER BY lock_tier {tier_direction}, commitment_tree_position"
+         ORDER BY lock_tier {tier_direction}, commitment_tree_position, id"
         ),
     };
     let eligible_condition = output_eligible_condition(lock_filter, "rn");
@@ -746,7 +873,7 @@ where
                  rn.diversifier, rn.value,
                  {note_reconstruction_cols}, rn.commitment_tree_position,
                  {tier_column} AS lock_tier,
-                 SUM(value) OVER ({window_frame}) AS so_far,
+                 {so_far} AS so_far,
                  accounts.ufvk as ufvk, rn.recipient_key_scope,
                  t.block AS mined_height,
                  rn.witness_stabilized,
@@ -816,12 +943,24 @@ where
         (":account_uuid", &account_uuid),
         (":anchor_height", &anchor_height_arg),
         (":target_height", &target_height_arg),
-        (":target_value", &target_value_arg),
         (":exclude", &excluded_ptr),
         (":scanned_priority", &scanned_priority),
         (":tip_unscanned", &tip_unscanned_arg),
         (":min_value", &min_value),
     ];
+    if matches!(
+        selection,
+        ValueSelection::Accumulate | ValueSelection::SingleCovering
+    ) {
+        sql_params.push((":target_value", &target_value_arg));
+    }
+    let selected_lock_tier = match selection {
+        ValueSelection::SmallestFirst { lock_tier, .. } => Some(lock_tier),
+        _ => None,
+    };
+    if let Some(selected_lock_tier) = &selected_lock_tier {
+        sql_params.push((":selected_lock_tier", selected_lock_tier));
+    }
     push_lock_params(&mut sql_params, lock_filter, &overridable_owners);
 
     let notes = stmt_select_notes.query_and_then(&sql_params[..], |row| {
@@ -831,11 +970,15 @@ where
             .map(BlockHeight::from);
         let tx_shielding_inputs_trusted = row.get::<_, bool>("min_shielding_input_trust")?;
         let witness_stabilized = row.get::<_, bool>("witness_stabilized")?;
+        let value = Zatoshis::from_nonnegative_i64(row.get("value")?)?;
+        let lock_tier = row.get::<_, i64>("lock_tier")?;
         let note = to_spendable_note(params, protocol, row)?;
 
-        Ok(note.map(|n| {
+        Ok::<_, SqliteClientError>(note.map(|n| {
             (
                 n,
+                value,
+                lock_tier,
                 tx_trust_status,
                 max_shielding_input_height,
                 tx_shielding_inputs_trusted,
@@ -844,38 +987,60 @@ where
         }))
     })?;
 
-    notes
-        .filter_map(|result_maybe_note| {
-            let result_note = result_maybe_note.transpose()?;
-            result_note
-                .map(
-                    |(
-                        note,
-                        tx_trusted,
-                        max_shielding_input_height,
-                        tx_shielding_inputs_trusted,
-                        witness_stabilized,
-                    )| {
-                        // A stabilized note was confirmed well beyond any reasonable
-                        // confirmations policy at stabilization time, so the confirmations
-                        // check is trivially satisfied.
-                        let has_confirmations = witness_stabilized
-                            || confirmations_policy.confirmations_until_spendable(
-                                target_height,
-                                PoolType::Shielded(protocol),
-                                Some(note.spending_key_scope()),
-                                note.mined_height(),
-                                tx_trusted,
-                                max_shielding_input_height,
-                                tx_shielding_inputs_trusted,
-                            ) == 0;
+    let mut result = vec![];
+    let mut selected_value = Zatoshis::ZERO;
+    for result_maybe_note in notes {
+        let Some((
+            note,
+            value,
+            lock_tier,
+            tx_trusted,
+            max_shielding_input_height,
+            tx_shielding_inputs_trusted,
+            witness_stabilized,
+        )) = result_maybe_note?
+        else {
+            continue;
+        };
 
-                        has_confirmations.then_some(note)
-                    },
-                )
-                .transpose()
-        })
-        .collect::<Result<Vec<_>, _>>()
+        // A stabilized note was confirmed well beyond any reasonable confirmations policy at
+        // stabilization time, so the confirmations check is trivially satisfied.
+        let has_confirmations = witness_stabilized
+            || confirmations_policy.confirmations_until_spendable(
+                target_height,
+                PoolType::Shielded(protocol),
+                Some(note.spending_key_scope()),
+                note.mined_height(),
+                tx_trusted,
+                max_shielding_input_height,
+                tx_shielding_inputs_trusted,
+            ) == 0;
+
+        if has_confirmations {
+            result.push(SpendableNoteCandidate {
+                note,
+                value,
+                lock_tier,
+            });
+            match selection {
+                ValueSelection::LargestFirst => {
+                    selected_value = (selected_value + value).ok_or(BalanceError::Overflow)?;
+                    if selected_value >= target_value {
+                        break;
+                    }
+                }
+                ValueSelection::SmallestFirst { limit, .. } if result.len() >= limit => break,
+                _ => {}
+            }
+        }
+    }
+    Ok(result)
+}
+
+struct SpendableNoteCandidate<NoteRef, Note> {
+    note: ReceivedNote<NoteRef, Note>,
+    value: Zatoshis,
+    lock_tier: i64,
 }
 
 #[allow(dead_code)]

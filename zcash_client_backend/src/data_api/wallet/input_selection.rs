@@ -436,6 +436,11 @@ impl orchard_fees::OutputView for OrchardPayment {
 #[cfg(feature = "transparent-inputs")]
 const DEFAULT_SHIELDING_BLOCK_SPACE_PERCENT: u32 = 10;
 
+/// The largest existing action envelope and input set used for optional consolidation.
+///
+/// Necessary funding inputs are not subject to this limit.
+const CONSOLIDATION_LIMIT: usize = 5;
+
 /// A `BTreeSet` that is guaranteed to contain at least one element.
 ///
 /// Non-emptiness is maintained by construction: every constructor requires at least one
@@ -509,6 +514,16 @@ pub enum NoteSelection {
     /// achievable only under single-note funding; multi-note funding is not an error, but the
     /// resulting proposal does not have the canonical shape.
     PreferSingle,
+    /// Prefer a small funding set while opportunistically consolidating additional notes without
+    /// changing the transaction's fee or observable shape.
+    ///
+    /// Necessary funding is not capped. When the selected pool's existing transaction shape has
+    /// no more than five actions, the selector may add the smallest eligible notes while keeping
+    /// the total selected from that pool at no more than five and preserving the existing shape.
+    /// Pool and locked-input preferences still take precedence; if no single permitted pool can
+    /// fund the payment, selection falls back to ordinary multi-pool funding. If consolidation is
+    /// not possible, the funding-only proposal is returned.
+    PreferConsolidation,
 }
 
 impl Default for SpendPolicy {
@@ -1050,6 +1065,9 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
         let mut shielded_inputs = ReceivedNotes::empty();
         let mut prior_available = Zatoshis::ZERO;
         let mut amount_required = Zatoshis::ZERO;
+        let mut consolidation_target = Zatoshis::ZERO;
+        let mut consolidation_source = None;
+        let mut consolidation_additional = ReceivedNotes::empty();
         let mut exclude: Vec<DbT::NoteRef> = vec![];
 
         // The single pool-preference order that governs both which pools notes are
@@ -1108,16 +1126,22 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .expect("all shielded pools are present in pool_values")
                 };
 
+                let shielded_amount_required =
+                    if spend_policy.note_selection() == NoteSelection::PreferConsolidation {
+                        consolidation_target
+                    } else {
+                        amount_required
+                    };
                 let use_pools: Vec<ShieldedPool> = if let Some(single) = pool_preference
                     .iter()
-                    .find(|p| value_of(**p) >= amount_required)
+                    .find(|p| value_of(**p) >= shielded_amount_required)
                 {
                     vec![*single]
                 } else {
                     let mut running = Zatoshis::ZERO;
                     let mut used = vec![];
                     for pool in &pool_preference {
-                        if running >= amount_required {
+                        if running >= shielded_amount_required {
                             break;
                         }
                         running = (running + value_of(*pool))
@@ -1327,7 +1351,161 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             );
 
             match tr0_balance {
-                Ok(tr0_balance) => {
+                Ok(mut tr0_balance) => {
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    let consolidation_supported = true;
+                    #[cfg(feature = "transparent-inputs")]
+                    let consolidation_supported = tr1_balance_opt.is_none();
+
+                    if spend_policy.note_selection() == NoteSelection::PreferConsolidation
+                        && consolidation_supported
+                        && let Some(source) = consolidation_source
+                        // A Sapling spend is separately visible even when ZIP 317's grace actions
+                        // keep the fee unchanged. Orchard-family spends may instead replace dummy
+                        // spend sides in an already-visible action.
+                        && source != ShieldedPool::Sapling
+                    {
+                        let funding_count = note_count_for_pool(&shielded_inputs, source);
+                        let payment_output_count = match source {
+                            ShieldedPool::Sapling => sapling_outputs.len(),
+                            #[cfg(feature = "orchard")]
+                            ShieldedPool::Orchard => {
+                                if ironwood_active_at(params, target_height) {
+                                    0
+                                } else {
+                                    orchard_outputs.len()
+                                }
+                            }
+                            #[cfg(feature = "orchard")]
+                            ShieldedPool::Ironwood => {
+                                if ironwood_active_at(params, target_height) {
+                                    orchard_outputs.len()
+                                } else {
+                                    0
+                                }
+                            }
+                            #[cfg(not(feature = "orchard"))]
+                            ShieldedPool::Orchard | ShieldedPool::Ironwood => 0,
+                        };
+
+                        if let Some(baseline_action_count) =
+                            consolidation_action_count(&tr0_balance, source, payment_output_count)
+                            && baseline_action_count <= CONSOLIDATION_LIMIT
+                            && funding_count < baseline_action_count
+                            && funding_count < CONSOLIDATION_LIMIT
+                        {
+                            let optional_count =
+                                note_count_for_pool(&consolidation_additional, source)
+                                    .min(CONSOLIDATION_LIMIT - funding_count)
+                                    .min(baseline_action_count - funding_count);
+
+                            // Try the largest shape-neutral cleanup first, then smaller prefixes.
+                            // This matters when excluding all candidates changes the split-change
+                            // decision but excluding a smaller prefix does not.
+                            for count in (1..=optional_count).rev() {
+                                let candidate_notes =
+                                    note_prefix_for_pool(&consolidation_additional, source, count);
+
+                                let mut candidate_sapling_inputs = sapling_inputs.clone();
+                                candidate_sapling_inputs.extend(
+                                    candidate_notes.sapling().iter().map(|note| {
+                                        (*note.internal_note_id(), note.note().value())
+                                    }),
+                                );
+                                #[cfg(feature = "orchard")]
+                                let mut candidate_orchard_inputs = orchard_inputs.clone();
+                                #[cfg(feature = "orchard")]
+                                candidate_orchard_inputs.extend(
+                                    candidate_notes.orchard().iter().map(|note| {
+                                        (*note.internal_note_id(), note.note().value())
+                                    }),
+                                );
+                                #[cfg(feature = "orchard")]
+                                let mut candidate_ironwood_inputs = ironwood_inputs.clone();
+                                #[cfg(feature = "orchard")]
+                                candidate_ironwood_inputs.extend(
+                                    candidate_notes.ironwood().iter().map(|note| {
+                                        (*note.internal_note_id(), note.note().value())
+                                    }),
+                                );
+
+                                let candidate_input_ids =
+                                    candidate_sapling_inputs.iter().map(|(id, _)| id);
+                                #[cfg(feature = "orchard")]
+                                let candidate_input_ids = candidate_input_ids
+                                    .chain(candidate_orchard_inputs.iter().map(|(id, _)| id));
+                                #[cfg(feature = "orchard")]
+                                let candidate_input_ids = candidate_input_ids
+                                    .chain(candidate_ironwood_inputs.iter().map(|(id, _)| id));
+                                let candidate_input_ids =
+                                    candidate_input_ids.cloned().collect::<Vec<_>>();
+
+                                let candidate_wallet_meta = change_strategy
+                                    .fetch_wallet_meta(
+                                        wallet_db,
+                                        account,
+                                        target_height,
+                                        &candidate_input_ids,
+                                    )
+                                    .map_err(InputSelectorError::DataSource)?;
+
+                                #[cfg(feature = "orchard")]
+                                let candidate_orchard_view = (
+                                    orchard_bundle_version_for_height(params, target_height),
+                                    &candidate_orchard_inputs[..],
+                                    if ironwood_active_at(params, target_height) {
+                                        &[]
+                                    } else {
+                                        &orchard_outputs[..]
+                                    },
+                                );
+                                #[cfg(feature = "orchard")]
+                                let candidate_ironwood_view = (
+                                    ironwood_bundle_version_for_height(params, target_height),
+                                    &candidate_ironwood_inputs[..],
+                                    if ironwood_active_at(params, target_height) {
+                                        &orchard_outputs[..]
+                                    } else {
+                                        &[]
+                                    },
+                                );
+
+                                let candidate_balance = change_strategy.compute_balance(
+                                    params,
+                                    target_height,
+                                    anchor_height,
+                                    zip318,
+                                    &transparent_inputs,
+                                    &transparent_outputs,
+                                    &(
+                                        ::sapling::builder::BundleType::DEFAULT,
+                                        &candidate_sapling_inputs[..],
+                                        &sapling_outputs[..],
+                                    ),
+                                    #[cfg(feature = "orchard")]
+                                    &candidate_orchard_view,
+                                    #[cfg(feature = "orchard")]
+                                    &candidate_ironwood_view,
+                                    ephemeral_output_value.map(EphemeralBalance::Output),
+                                    &candidate_wallet_meta,
+                                );
+
+                                if let Ok(candidate_balance) = candidate_balance
+                                    && same_change_shape(&tr0_balance, &candidate_balance)
+                                    && consolidation_action_count(
+                                        &candidate_balance,
+                                        source,
+                                        payment_output_count,
+                                    ) == Some(baseline_action_count)
+                                {
+                                    shielded_inputs.append(candidate_notes);
+                                    tr0_balance = candidate_balance;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     // At this point, we have enough input value to pay for everything, so we
                     // return here.
                     let shielded_inputs =
@@ -1430,6 +1608,25 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         amount_at_transparent_gather = required;
                         transparent_inputs_changed = true;
                     }
+
+                    if spend_policy.note_selection() == NoteSelection::PreferConsolidation {
+                        #[cfg(feature = "transparent-inputs")]
+                        {
+                            let transparent_value = transparent_inputs
+                                .iter()
+                                .map(WalletTransparentOutput::value)
+                                .try_fold(Zatoshis::ZERO, |total, value| total + value)
+                                .ok_or(InputSelectorError::Selection(
+                                    GreedyInputSelectorError::Balance(BalanceError::Overflow),
+                                ))?;
+                            consolidation_target =
+                                (required - transparent_value).unwrap_or(Zatoshis::ZERO);
+                        }
+                        #[cfg(not(feature = "transparent-inputs"))]
+                        {
+                            consolidation_target = required;
+                        }
+                    }
                 }
                 Err(other) => return Err(InputSelectorError::Change(other)),
             }
@@ -1446,11 +1643,12 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             // to prevent; the `PreferUnlocked`/`PreferLocked` overrides let a caller draw through
             // a lock it recognizes (e.g. its own pool-migration PCZTs).
             //
-            // Under `NoteSelection::PreferSingle`, the single oldest note covering the required
-            // amount alone is tried first; when no pool holds one, selection falls back to
-            // ordinary accumulation, which still funds the payment but cannot produce the
-            // single-input shape the caller preferred.
-            let single_note = match spend_policy.note_selection() {
+            // `PreferSingle` falls back to ordinary accumulation when no note covers the target.
+            // `PreferConsolidation` tries minimum-cardinality funding from each pool in preference
+            // order. If no single pool can cover the target, every partial result is discarded and
+            // the ordinary multi-pool path is used so the preference never breaks payment liveness
+            // or changes pool-affinity fallback.
+            let preferred_notes = match spend_policy.note_selection() {
                 NoteSelection::PreferSingle => Some(
                     wallet_db
                         .select_single_spendable_note(
@@ -1465,14 +1663,56 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
                         .map_err(InputSelectorError::DataSource)?,
                 )
                 .filter(|notes| !notes.is_empty()),
+                NoteSelection::PreferConsolidation => {
+                    consolidation_source = None;
+                    consolidation_additional = ReceivedNotes::empty();
+
+                    if consolidation_target == Zatoshis::ZERO {
+                        Some(ReceivedNotes::empty())
+                    } else {
+                        let mut covering = None;
+                        for source in pool_preference.iter().copied() {
+                            let (funding, additional) = wallet_db
+                                .select_spendable_notes_for_consolidation(
+                                    account,
+                                    consolidation_target,
+                                    source,
+                                    target_height,
+                                    confirmations_policy,
+                                    &exclude,
+                                    LockFilter::Policy(spend_policy.locked_input_policy()),
+                                    CONSOLIDATION_LIMIT - 1,
+                                )
+                                .map_err(InputSelectorError::DataSource)?
+                                .into_parts();
+
+                            if funding.total_value()? >= consolidation_target {
+                                covering = Some((source, funding, additional));
+                                break;
+                            }
+                        }
+
+                        covering.map(|(source, funding, additional)| {
+                            consolidation_source = Some(source);
+                            consolidation_additional = additional;
+                            funding
+                        })
+                    }
+                }
                 NoteSelection::Accumulate => None,
             };
-            shielded_inputs = match single_note {
-                Some(single) => single,
+            let selection_target =
+                if spend_policy.note_selection() == NoteSelection::PreferConsolidation {
+                    consolidation_target
+                } else {
+                    amount_required
+                };
+            shielded_inputs = match preferred_notes {
+                Some(notes) => notes,
                 None => wallet_db
                     .select_spendable_notes(
                         account,
-                        TargetValue::AtLeast(amount_required),
+                        TargetValue::AtLeast(selection_target),
                         &pool_preference,
                         target_height,
                         confirmations_policy,
@@ -1496,6 +1736,100 @@ impl<DbT: InputSource> InputSelector for GreedyInputSelector<DbT> {
             }
         }
     }
+}
+
+/// Returns the number of notes in `pool` without exposing pool-specific vectors to the selector.
+fn note_count_for_pool<NoteRef>(notes: &ReceivedNotes<NoteRef>, pool: ShieldedPool) -> usize {
+    match pool {
+        ShieldedPool::Sapling => notes.sapling().len(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => notes.orchard().len(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => notes.ironwood().len(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => 0,
+    }
+}
+
+/// Copies the first `count` notes from one pool into an otherwise-empty collection.
+fn note_prefix_for_pool<NoteRef: Clone>(
+    notes: &ReceivedNotes<NoteRef>,
+    pool: ShieldedPool,
+    count: usize,
+) -> ReceivedNotes<NoteRef> {
+    match pool {
+        ShieldedPool::Sapling => ReceivedNotes::new(
+            notes.sapling().iter().take(count).cloned().collect(),
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => ReceivedNotes::new(
+            vec![],
+            notes.orchard().iter().take(count).cloned().collect(),
+            vec![],
+        ),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => ReceivedNotes::new(
+            vec![],
+            vec![],
+            notes.ironwood().iter().take(count).cloned().collect(),
+        ),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => ReceivedNotes::empty(),
+    }
+}
+
+/// Returns the shielded action count recorded by a balance for `pool`.
+///
+/// Real outputs and recorded dummy outputs jointly occupy every output side of an Orchard-family
+/// action, so their sum is the exact action count the balance was costed for.
+fn consolidation_action_count(
+    balance: &TransactionBalance,
+    pool: ShieldedPool,
+    payment_output_count: usize,
+) -> Option<usize> {
+    let dummy_outputs = balance.dummy_outputs()?;
+    let change_output_count = balance
+        .proposed_change()
+        .iter()
+        .filter(|change| change.output_pool() == PoolType::Shielded(pool))
+        .count();
+    let dummy_output_count = match pool {
+        ShieldedPool::Sapling => dummy_outputs.sapling(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Orchard => dummy_outputs.orchard(),
+        #[cfg(feature = "orchard")]
+        ShieldedPool::Ironwood => dummy_outputs.ironwood(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedPool::Orchard | ShieldedPool::Ironwood => return None,
+    };
+
+    payment_output_count
+        .checked_add(change_output_count)?
+        .checked_add(dummy_output_count)
+}
+
+/// Returns whether optional inputs preserved the balance's observable and fee-relevant shape.
+///
+/// Change values may increase by the value of the optional inputs, but the destination pools,
+/// memos, output roles, dummy-output counts, and fee must remain identical.
+fn same_change_shape(baseline: &TransactionBalance, candidate: &TransactionBalance) -> bool {
+    baseline.fee_required() == candidate.fee_required()
+        && baseline.dummy_outputs().is_some()
+        && baseline.dummy_outputs() == candidate.dummy_outputs()
+        && baseline.proposed_change().len() == candidate.proposed_change().len()
+        && baseline
+            .proposed_change()
+            .iter()
+            .zip(candidate.proposed_change())
+            .all(|(baseline, candidate)| {
+                baseline.output_pool() == candidate.output_pool()
+                    && baseline.memo() == candidate.memo()
+                    && baseline.is_ephemeral() == candidate.is_ephemeral()
+            })
 }
 
 /// Returns the shielded pools from which the greedy input selector may spend at the

@@ -1078,6 +1078,36 @@ pub struct ReceivedNotes<NoteRef> {
     ironwood: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
 }
 
+/// The necessary and optional notes returned for consolidation-aware input selection.
+///
+/// `funding` contains the notes selected to fund the requested value. `additional` contains
+/// disjoint, ordinarily spendable notes that the input selector may add when doing so does not
+/// change the transaction's fee or observable shape.
+#[derive(Debug)]
+pub struct ConsolidationNotes<NoteRef> {
+    funding: ReceivedNotes<NoteRef>,
+    additional: ReceivedNotes<NoteRef>,
+}
+
+impl<NoteRef> ConsolidationNotes<NoteRef> {
+    /// Constructs a consolidation selection from its necessary and optional notes.
+    ///
+    /// `funding` and `additional` must be disjoint and contain notes only from the requested
+    /// source pool. `additional` must also obey the caller's candidate limit and use the same
+    /// preferred lock tier as `funding`.
+    pub fn from_parts(funding: ReceivedNotes<NoteRef>, additional: ReceivedNotes<NoteRef>) -> Self {
+        Self {
+            funding,
+            additional,
+        }
+    }
+
+    /// Consumes this selection and returns its necessary and optional notes.
+    pub fn into_parts(self) -> (ReceivedNotes<NoteRef>, ReceivedNotes<NoteRef>) {
+        (self.funding, self.additional)
+    }
+}
+
 impl<NoteRef> ReceivedNotes<NoteRef> {
     /// Construct a new empty [`ReceivedNotes`].
     pub fn empty() -> Self {
@@ -1179,6 +1209,16 @@ impl<NoteRef> ReceivedNotes<NoteRef> {
 
         #[cfg(feature = "orchard")]
         return self.sapling.is_empty() && self.orchard.is_empty() && self.ironwood.is_empty();
+    }
+
+    /// Appends each pool's notes from `other` to this collection.
+    pub(crate) fn append(&mut self, mut other: Self) {
+        self.sapling.append(&mut other.sapling);
+        #[cfg(feature = "orchard")]
+        {
+            self.orchard.append(&mut other.orchard);
+            self.ironwood.append(&mut other.ironwood);
+        }
     }
 
     /// Consumes this collection, returning one holding only the OLDEST single note whose value
@@ -1814,6 +1854,42 @@ pub trait InputSource {
         exclude: &[Self::NoteRef],
         lock_filter: LockFilter<'_>,
     ) -> Result<ReceivedNotes<Self::NoteRef>, Self::Error>;
+
+    /// Returns notes for consolidation-aware selection from `source`.
+    ///
+    /// The `funding` part of the result contains notes selected toward `value`. The `additional`
+    /// part contains at most `max_additional_notes` disjoint notes that may be added
+    /// opportunistically. The input selector validates that the funding covers the target and
+    /// that adding any optional notes stays within its bounded consolidation envelope while
+    /// preserving the transaction's fee and observable shape.
+    ///
+    /// Implementations backed by a queryable store should minimize the funding-note count within
+    /// lock-tier preference, and return the smallest eligible notes from the funding tier as
+    /// additional candidates. The default implementation preserves the data source's ordinary
+    /// funding behavior and returns no additional candidates.
+    #[allow(clippy::too_many_arguments)]
+    fn select_spendable_notes_for_consolidation(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+        _max_additional_notes: usize,
+    ) -> Result<ConsolidationNotes<Self::NoteRef>, Self::Error> {
+        self.select_spendable_notes(
+            account,
+            TargetValue::AtLeast(value),
+            &[source],
+            target_height,
+            confirmations_policy,
+            exclude,
+            lock_filter,
+        )
+        .map(|funding| ConsolidationNotes::from_parts(funding, ReceivedNotes::empty()))
+    }
 
     /// Returns the OLDEST single spendable note whose value alone is at least `value`, drawn
     /// from the first pool in `sources` (in the given preference order) that holds one. The
