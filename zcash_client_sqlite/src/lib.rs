@@ -57,10 +57,11 @@ use zcash_client_backend::{
     TransferType,
     data_api::{
         self, Account, AccountBirthday, AccountMeta, AccountPurpose, AccountSource, AddressInfo,
-        BlockMetadata, DecryptedTransaction, InputSource, NoteFilter, NullifierQuery,
-        OutputLockStore, ReceivedNotes, ReceivedTransactionOutput, SAPLING_SHARD_HEIGHT,
-        ScannedBlock, SeedRelevance, SentTransaction, TargetValue, TransactionDataRequest,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, Zip32Derivation,
+        BlockMetadata, ConsolidationNotes, DecryptedTransaction, InputSource, NoteFilter,
+        NullifierQuery, OutputLockStore, ReceivedNotes, ReceivedTransactionOutput,
+        SAPLING_SHARD_HEIGHT, ScannedBlock, SeedRelevance, SentTransaction, TargetValue,
+        TransactionDataRequest, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        Zip32Derivation,
         anchor_retention::{AnchorRetention, AnchorRetentionInterval},
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         error::{FindAccountForAddressError, LockError, RewindError},
@@ -837,6 +838,97 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> InputSour
                 vec![]
             },
         ))
+    }
+
+    fn select_spendable_notes_for_consolidation(
+        &self,
+        account: Self::AccountId,
+        value: Zatoshis,
+        source: ShieldedPool,
+        target_height: TargetHeight,
+        confirmations_policy: ConfirmationsPolicy,
+        exclude: &[Self::NoteRef],
+        lock_filter: LockFilter<'_>,
+        max_additional_notes: usize,
+    ) -> Result<ConsolidationNotes<Self::NoteRef>, Self::Error> {
+        let (funding, additional) = match source {
+            ShieldedPool::Sapling => {
+                let (funding, additional) =
+                    wallet::sapling::select_spendable_sapling_notes_for_consolidation(
+                        self.conn.borrow(),
+                        &self.params,
+                        account,
+                        value,
+                        target_height,
+                        confirmations_policy,
+                        exclude,
+                        lock_filter,
+                        max_additional_notes,
+                    )?;
+                (
+                    ReceivedNotes::new(
+                        funding,
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                    ),
+                    ReceivedNotes::new(
+                        additional,
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                        #[cfg(feature = "orchard")]
+                        vec![],
+                    ),
+                )
+            }
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Orchard => {
+                let (funding, additional) =
+                    wallet::orchard::select_spendable_orchard_notes_for_consolidation(
+                        self.conn.borrow(),
+                        &self.params,
+                        account,
+                        value,
+                        target_height,
+                        confirmations_policy,
+                        exclude,
+                        lock_filter,
+                        max_additional_notes,
+                    )?;
+                (
+                    ReceivedNotes::new(vec![], funding, vec![]),
+                    ReceivedNotes::new(vec![], additional, vec![]),
+                )
+            }
+            #[cfg(feature = "orchard")]
+            ShieldedPool::Ironwood => {
+                let (funding, additional) =
+                    wallet::orchard::select_spendable_ironwood_notes_for_consolidation(
+                        self.conn.borrow(),
+                        &self.params,
+                        account,
+                        value,
+                        target_height,
+                        confirmations_policy,
+                        exclude,
+                        lock_filter,
+                        max_additional_notes,
+                    )?;
+                (
+                    ReceivedNotes::new(vec![], vec![], funding),
+                    ReceivedNotes::new(vec![], vec![], additional),
+                )
+            }
+            #[cfg(not(feature = "orchard"))]
+            ShieldedPool::Orchard | ShieldedPool::Ironwood => {
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                    source,
+                )));
+            }
+        };
+
+        Ok(ConsolidationNotes::from_parts(funding, additional))
     }
 
     fn select_single_spendable_note(

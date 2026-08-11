@@ -10,6 +10,12 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- A store-backed implementation of
+  `InputSource::select_spendable_notes_for_consolidation` that selects necessary
+  funding notes largest first, then returns the smallest eligible notes from
+  the same preferred lock tier as optional consolidation candidates.
+
 ## [0.22.0-rc.8] - 2026-08-07
 
 ### Added

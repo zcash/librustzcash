@@ -216,6 +216,34 @@ pub(crate) fn select_spendable_ironwood_notes<P: consensus::Parameters>(
     )
 }
 
+/// Selects necessary and optional Ironwood notes for consolidation-aware input selection.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_ironwood_notes_for_consolidation<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+    max_additional_notes: usize,
+) -> Result<super::common::ConsolidationCandidates<Note>, SqliteClientError> {
+    super::common::select_spendable_notes_for_consolidation(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Ironwood,
+        to_received_note,
+        lock_filter,
+        max_additional_notes,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     conn: &Connection,
@@ -238,6 +266,34 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
         ShieldedPool::Orchard,
         to_received_note,
         lock_filter,
+    )
+}
+
+/// Selects necessary and optional Orchard notes for consolidation-aware input selection.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn select_spendable_orchard_notes_for_consolidation<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountUuid,
+    value: Zatoshis,
+    target_height: TargetHeight,
+    confirmations_policy: ConfirmationsPolicy,
+    exclude: &[ReceivedNoteId],
+    lock_filter: LockFilter<'_>,
+    max_additional_notes: usize,
+) -> Result<super::common::ConsolidationCandidates<Note>, SqliteClientError> {
+    super::common::select_spendable_notes_for_consolidation(
+        conn,
+        params,
+        account,
+        value,
+        target_height,
+        confirmations_policy,
+        exclude,
+        ShieldedPool::Orchard,
+        to_received_note,
+        lock_filter,
+        max_additional_notes,
     )
 }
 
@@ -1074,6 +1130,35 @@ pub(crate) mod tests {
         testing::pool::receive_two_notes_with_same_value::<OrchardPoolTester>();
     }
 
+    #[test]
+    fn prefer_consolidation_uses_fewest_funding_notes() {
+        testing::pool::prefer_consolidation_uses_fewest_funding_notes::<OrchardPoolTester>();
+    }
+
+    #[test]
+    fn prefer_consolidation_allows_more_than_five_funding_notes() {
+        testing::pool::prefer_consolidation_allows_more_than_five_funding_notes::<OrchardPoolTester>(
+        );
+    }
+
+    #[test]
+    fn prefer_consolidation_refreshes_funding_after_fee_growth() {
+        testing::pool::prefer_consolidation_refreshes_funding_after_fee_growth::<OrchardPoolTester>(
+        );
+    }
+
+    #[test]
+    fn consolidation_selection_skips_unconfirmed_and_excluded_notes() {
+        testing::pool::consolidation_selection_skips_unconfirmed_and_excluded_notes::<
+            OrchardPoolTester,
+        >();
+    }
+
+    #[test]
+    fn prefer_consolidation_fills_existing_orchard_actions() {
+        testing::pool::prefer_consolidation_fills_existing_orchard_actions();
+    }
+
     #[cfg(all(feature = "pczt-tests", feature = "transparent-inputs"))]
     #[test]
     fn immature_coinbase_outputs_are_excluded_from_note_selection() {
@@ -1715,7 +1800,11 @@ pub(crate) mod tests {
     ///    that pool than the transaction's Orchard inputs remove from it.
     #[cfg(feature = "orchard")]
     mod ironwood_privacy_invariants {
-        use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
+        use std::{
+            collections::HashMap,
+            convert::Infallible,
+            num::{NonZeroU32, NonZeroUsize},
+        };
 
         use proptest::prelude::*;
 
@@ -1730,12 +1819,16 @@ pub(crate) mod tests {
                 wallet::{
                     ConfirmationsPolicy, TargetHeight, decrypt_and_store_transaction,
                     input_selection::{
-                        GreedyInputSelector, LockFilter, LockedInputPolicy, SpendPolicy,
+                        GreedyInputSelector, LockFilter, LockedInputPolicy, NoteSelection,
+                        SpendPolicy,
                     },
                 },
             },
             decrypt_transaction,
-            fees::{DustOutputPolicy, StandardFeeRule, standard},
+            fees::{
+                DustOutputPolicy, SplitPolicy, StandardFeeRule, standard,
+                zip317::MultiOutputChangeStrategy,
+            },
             proto::{ProposalDecodingError, proposal},
             wallet::OvkPolicy,
         };
@@ -1819,6 +1912,329 @@ pub(crate) mod tests {
                 Zatoshis::from_u64(payment_zats).unwrap(),
             )])
             .unwrap()
+        }
+
+        /// Consolidation fills otherwise-dummy spend sides in an Ironwood bundle without changing
+        /// the five-action payment shape or its fee.
+        #[test]
+        fn prefer_consolidation_fills_existing_ironwood_actions() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let values = [2_000_000, 60_000, 50_000, 40_000, 30_000, 20_000, 10_000];
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(values[0]),
+            );
+            for value in values.into_iter().skip(1) {
+                st.generate_next_block(
+                    &received,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, values.len());
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let change_strategy = MultiOutputChangeStrategy::<_, TestDb>::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Ironwood,
+                DustOutputPolicy::default(),
+                SplitPolicy::with_min_output_value(
+                    NonZeroUsize::new(4).unwrap(),
+                    Zatoshis::const_from_u64(100_000),
+                ),
+            );
+            let request = orchard_payment_request(st.network(), 100_000);
+            let funding_only = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    request.clone(),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood]),
+                )
+                .unwrap();
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    request,
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood])
+                        .with_note_selection(NoteSelection::PreferConsolidation),
+                )
+                .unwrap();
+
+            let step = proposal.steps().first();
+            let funding_only_step = funding_only.steps().first();
+            let mut selected_values = step
+                .shielded_inputs()
+                .expect("the proposal spends Ironwood notes")
+                .notes()
+                .iter()
+                .map(|note| note.note().value().into_u64())
+                .collect::<Vec<_>>();
+            selected_values.sort_unstable();
+            assert_eq!(selected_values, [10_000, 20_000, 30_000, 40_000, 2_000_000]);
+            assert_eq!(step.balance().proposed_change().len(), 4);
+            assert_eq!(
+                step.balance().fee_required(),
+                Zatoshis::const_from_u64(25_000)
+            );
+            assert_eq!(
+                step.balance().fee_required(),
+                funding_only_step.balance().fee_required(),
+            );
+            assert_eq!(
+                step.balance().proposed_change().len(),
+                funding_only_step.balance().proposed_change().len(),
+            );
+            let action_count = step.ironwood_action_count(
+                step.ironwood_bundle_padding(),
+                ::orchard::bundle::BundleVersion::ironwood_v3(),
+            );
+            assert_eq!(action_count, Ok(5));
+            assert_eq!(
+                action_count,
+                funding_only_step.ironwood_action_count(
+                    funding_only_step.ironwood_bundle_padding(),
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                ),
+            );
+        }
+
+        /// Optional consolidation is skipped when the existing bundle already exceeds the
+        /// five-action consolidation envelope.
+        #[test]
+        fn prefer_consolidation_does_not_fill_more_than_five_actions() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let values = [2_000_000, 40_000, 30_000, 20_000, 10_000];
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(values[0]),
+            );
+            for value in values.into_iter().skip(1) {
+                st.generate_next_block(
+                    &received,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, values.len());
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let change_strategy = MultiOutputChangeStrategy::<_, TestDb>::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Ironwood,
+                DustOutputPolicy::default(),
+                SplitPolicy::with_min_output_value(
+                    NonZeroUsize::new(5).unwrap(),
+                    Zatoshis::const_from_u64(100_000),
+                ),
+            );
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    orchard_payment_request(st.network(), 100_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood])
+                        .with_note_selection(NoteSelection::PreferConsolidation),
+                )
+                .unwrap();
+
+            let step = proposal.steps().first();
+            assert_eq!(step.input_count_in_pool(PoolType::IRONWOOD), 1);
+            assert_eq!(step.balance().proposed_change().len(), 5);
+            assert_eq!(
+                step.ironwood_action_count(
+                    step.ironwood_bundle_padding(),
+                    ::orchard::bundle::BundleVersion::ironwood_v3(),
+                ),
+                Ok(6),
+            );
+        }
+
+        /// An insufficient preferred pool is discarded before trying the next covering pool.
+        #[test]
+        fn prefer_consolidation_uses_first_single_pool_that_covers() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let orchard_fvk = OrchardPoolTester::test_account_fvk(&st);
+            let ironwood_fvk = IronwoodFvk(orchard_fvk.clone());
+            let (first_height, _, _) = st.generate_next_block(
+                &ironwood_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(400_000),
+            );
+            st.generate_next_block(
+                &ironwood_fvk,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            for value in [
+                180_000, 180_000, 180_000, 180_000, 180_000, 180_000, 600_000, 600_000,
+            ] {
+                st.generate_next_block(
+                    &orchard_fvk,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, 10);
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &orchard_change_strategy(),
+                    orchard_payment_request(st.network(), 1_000_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood, ShieldedPool::Orchard])
+                        .with_note_selection(NoteSelection::PreferConsolidation),
+                )
+                .unwrap();
+
+            assert_eq!(input_pool_counts(&proposal), (0, 2, 0));
+        }
+
+        /// Orchard V3 optional spends are rejected when they would enlarge the Orchard bundle.
+        #[test]
+        fn prefer_consolidation_does_not_grow_orchard_v3_actions() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = OrchardPoolTester::test_account_fvk(&st);
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(2_000_000),
+            );
+            st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(10_000),
+            );
+            st.scan_cached_blocks(first_height, 2);
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &orchard_change_strategy(),
+                    orchard_payment_request(st.network(), 100_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Orchard])
+                        .with_note_selection(NoteSelection::PreferConsolidation),
+                )
+                .unwrap();
+
+            assert_eq!(input_pool_counts(&proposal), (0, 1, 0));
+        }
+
+        /// Optional notes are rolled back when refetched metadata changes the change split.
+        #[test]
+        fn prefer_consolidation_rolls_back_change_shape_changes() {
+            let mut st = TestBuilder::new()
+                .with_network(ironwood_active_network())
+                .with_data_store_factory(TestDbFactory::default())
+                .with_block_cache(BlockCache::new())
+                .with_account_from_sapling_activation(BlockHash([0; 32]))
+                .build();
+
+            let account = st.test_account().cloned().unwrap();
+            let received = IronwoodFvk(OrchardPoolTester::test_account_fvk(&st));
+            let values = [2_000_000, 40_000, 30_000, 20_000, 10_000];
+            let (first_height, _, _) = st.generate_next_block(
+                &received,
+                AddressType::DefaultExternal,
+                Zatoshis::const_from_u64(values[0]),
+            );
+            for value in values.into_iter().skip(1) {
+                st.generate_next_block(
+                    &received,
+                    AddressType::DefaultExternal,
+                    Zatoshis::const_from_u64(value),
+                );
+            }
+            st.scan_cached_blocks(first_height, values.len());
+            for _ in 0..5 {
+                let (height, _) = st.generate_empty_block();
+                st.scan_cached_blocks(height, 1);
+            }
+
+            let change_strategy = MultiOutputChangeStrategy::<_, TestDb>::new(
+                zip317::FeeRule::standard(),
+                None,
+                ShieldedPool::Ironwood,
+                DustOutputPolicy::default(),
+                SplitPolicy::with_min_output_value(
+                    NonZeroUsize::new(5).unwrap(),
+                    Zatoshis::const_from_u64(5_001),
+                ),
+            );
+            let proposal = st
+                .propose_transfer_with_policy(
+                    account.id(),
+                    &GreedyInputSelector::new(),
+                    &change_strategy,
+                    orchard_payment_request(st.network(), 100_000),
+                    ConfirmationsPolicy::MIN,
+                    &SpendPolicy::shielded_pools([ShieldedPool::Ironwood])
+                        .with_note_selection(NoteSelection::PreferConsolidation),
+                )
+                .unwrap();
+
+            let step = proposal.steps().first();
+            assert_eq!(step.input_count_in_pool(PoolType::IRONWOOD), 1);
+            assert_eq!(step.balance().proposed_change().len(), 1);
         }
 
         /// When the caller restricts the spend policy to the Orchard pool, input selection may
