@@ -16,7 +16,7 @@
 use blake2b_simd::Hash as Blake2bHash;
 use rand_core::OsRng;
 
-use ::transparent::sighash::{SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
+use ::transparent::sighash::{SighashPolicy, SIGHASH_ANYONECANPAY, SIGHASH_NONE, SIGHASH_SINGLE};
 use zcash_primitives::transaction::{
     sighash::SignableInput, sighash_v5::v5_signature_hash, txid::TxIdDigester, Authorization,
     TransactionData, TxDigests, TxVersion,
@@ -51,6 +51,7 @@ pub struct Signer {
     txid_parts: TxDigests<Blake2bHash>,
     shielded_sighash: [u8; 32],
     secp: secp256k1::Secp256k1<secp256k1::SignOnly>,
+    transparent_sighash_policy: SighashPolicy,
 }
 
 impl Signer {
@@ -92,7 +93,18 @@ impl Signer {
             txid_parts,
             shielded_sighash,
             secp: secp256k1::Secp256k1::signing_only(),
+            transparent_sighash_policy: SighashPolicy::ALL_ONLY,
         })
+    }
+
+    /// Sets the sighash policy that this Signer applies to transparent inputs.
+    ///
+    /// The default is [`SighashPolicy::ALL_ONLY`]; see [`SighashPolicy`] for why the
+    /// sighash type a counterparty placed in the PCZT is only used if this Signer’s own
+    /// policy permits it.
+    pub fn with_transparent_sighash_policy(mut self, sighash_policy: SighashPolicy) -> Self {
+        self.transparent_sighash_policy = sighash_policy;
+        self
     }
 
     /// Signs the transparent spend at the given index with the given spending key.
@@ -105,17 +117,18 @@ impl Signer {
         index: usize,
         sk: &secp256k1::SecretKey,
     ) -> Result<(), Error> {
+        let sighash_policy = self.transparent_sighash_policy;
+
         let input = self
             .transparent
             .inputs_mut()
             .get_mut(index)
             .ok_or(Error::InvalidIndex)?;
 
-        // Check consistency of the input being signed.
-        // TODO
-
+        // The consistency of the input being signed, and the acceptability of its sighash
+        // type, are checked by `Input::sign_with_sighash_policy`.
         input
-            .sign(
+            .sign_with_sighash_policy(
                 index,
                 |input| {
                     v5_signature_hash(
@@ -129,6 +142,7 @@ impl Signer {
                 },
                 sk,
                 &self.secp,
+                sighash_policy,
             )
             .map_err(Error::TransparentSign)?;
 

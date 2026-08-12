@@ -10,6 +10,13 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- `pczt::roles::signer::Signer::with_transparent_sighash_policy`
+- `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
+
+### Changed
+- `pczt::roles::spend_finalizer::Error` has added variant `InconsistentSighashType`.
+
 ## [0.5.0] - PLANNED
 
 - Migrated to `zcash_protocol 0.7`, `zcash_transparent 0.6`, `zcash_primitives 0.26`,
