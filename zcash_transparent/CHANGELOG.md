@@ -23,6 +23,12 @@ workspace.
     unchecked (both to locate the signer's pubkey and as the `script_code` committed
     to by the signature), and the sighash type was taken verbatim from the PCZT. Use
     `Input::sign_with_sighash_policy` to permit other sighash types.
+  - `Bundle::finalize_spends` now requires every partial signature it uses to end in a
+    sighash-type byte matching its input's `sighash_type`, and finalizes only
+    `SighashType::ALL` signatures. Signatures that are discarded rather than placed
+    into a `script_sig` are not checked, so that a Combiner cannot block finalization
+    by contributing junk. Use `Bundle::finalize_spends_with_sighash_policy` to permit
+    other sighash types.
   - `SignerError` has added variants:
     - `DisallowedSighashType`
     - `InvalidInput`

@@ -36,9 +36,6 @@ impl super::Bundle {
         &mut self,
         sighash_policy: SighashPolicy,
     ) -> Result<(), SpendFinalizerError> {
-        // TODO: Enforced in a subsequent commit.
-        let _ = sighash_policy;
-
         // For each input, the Spend Finalizer determines if the input has enough data to
         // pass validation. If it does, it must construct the `script_sig` and place it
         // into the PCZT input. If `script_sig` is empty for an input, the field should
@@ -59,6 +56,8 @@ impl super::Bundle {
                             if hash[..] != Ripemd160::digest(Sha256::digest(pubkey))[..] {
                                 Err(SpendFinalizerError::UnexpectedSignatures)
                             } else {
+                                check_sighash_type(sig_bytes, input.sighash_type, sighash_policy)?;
+
                                 // P2PKH scriptSig
                                 input.script_sig = Some(script::Component(vec![
                                     pv::push_value(sig_bytes).expect("short enough"),
@@ -105,6 +104,12 @@ impl super::Bundle {
 
                                     // If we have a signature from this pubkey, use it.
                                     if let Some(sig) = input.partial_signatures.get(&pubkey) {
+                                        check_sighash_type(
+                                            sig,
+                                            input.sighash_type,
+                                            sighash_policy,
+                                        )?;
+
                                         // Valid signatures always fit into `PushData`s.
                                         script_sig.push(
                                             pv::push_value(sig)
@@ -151,6 +156,31 @@ impl super::Bundle {
 
         Ok(())
     }
+}
+
+/// Checks the trailing sighash-type byte of a partial signature that is about to be
+/// placed into a `script_sig`.
+fn check_sighash_type(
+    sig_bytes: &[u8],
+    expected: SighashType,
+    sighash_policy: SighashPolicy,
+) -> Result<(), SpendFinalizerError> {
+    let (hash_type, _) = sig_bytes
+        .split_last()
+        .ok_or(SpendFinalizerError::InvalidSignature)?;
+    let hash_type = SighashType::parse(*hash_type).ok_or(SpendFinalizerError::InvalidSignature)?;
+
+    // The PCZT format requires a Spend Finalizer to fail to finalize an input whose
+    // signatures do not match its `sighash_type`.
+    if hash_type != expected {
+        return Err(SpendFinalizerError::MismatchedSighashType);
+    }
+
+    if !sighash_policy.permits(hash_type) {
+        return Err(SpendFinalizerError::DisallowedSighashType(hash_type));
+    }
+
+    Ok(())
 }
 
 /// Errors that can occur while finalizing the transparent inputs of a PCZT bundle.
