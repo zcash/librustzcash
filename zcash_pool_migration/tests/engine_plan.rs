@@ -14,7 +14,9 @@ use zcash_protocol::TxId;
 use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::{COIN, Zatoshis};
 
-use zcash_pool_migration::denomination::{DenominationPlan, plan_denominations};
+use zcash_pool_migration::denomination::{
+    DenominationPlan, MIGRATION_MAX_PREPARED_NOTES_PER_RUN, plan_denominations,
+};
 use zcash_pool_migration::engine::{
     MigrationBackend, MigrationError, MigrationState, MigrationStatus, MigrationTransaction,
     MigrationTransferId, MigrationTxKind, MigrationTxState, PoolMigrationRead, PoolMigrationWrite,
@@ -168,6 +170,8 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
     let proposed = plan_denominations(
         zat(balance),
         source_note_count,
+        // The same cap `plan_migration` uses: this baseline is compared against that plan.
+        MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
         transfer_buffer,
         prep_tx_fee,
         &prep_tx_count_stub,

@@ -53,6 +53,8 @@ use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
 
 #[cfg(test)]
+use crate::denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
+#[cfg(test)]
 use crate::engine::{
     plan_migration_with,
     tests::{MockBackend, test_net},
@@ -684,8 +686,14 @@ pub(crate) fn assert_scenarios_under<Pf: Portfolio>(
             .expect("every row names a shared scenario");
         let backend = MockBackend::new(scenario.source_notes.to_vec(), TIP);
         let mut rng = ChaCha8Rng::seed_from_u64(SEED);
-        let plan = plan_migration_with(portfolio, &test_net(), &backend, &mut rng)
-            .expect("this rule plans every shared scenario");
+        let plan = plan_migration_with(
+            portfolio,
+            MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+            &test_net(),
+            &backend,
+            &mut rng,
+        )
+        .expect("this rule plans every shared scenario");
 
         assert_eq!(
             plan.preparation_tx_count(),

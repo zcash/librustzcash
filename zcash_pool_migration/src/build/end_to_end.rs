@@ -18,7 +18,7 @@ use zcash_protocol::consensus::BlockHeight;
 use zcash_protocol::value::Zatoshis;
 use zcash_protocol::zip318::{CROSSING_DESTINATION_ACTIONS, CROSSING_SOURCE_ACTIONS};
 
-use crate::denomination::plan_denominations;
+use crate::denomination::{MIGRATION_MAX_PREPARED_NOTES_PER_RUN, plan_denominations};
 use crate::preparation::{PREP_TX_ACTIONS, PrepInput, plan_preparation};
 
 /// denomination plan -> preparation plan -> build + sign a preparation transaction -> build + sign a
@@ -51,6 +51,7 @@ fn migration_pipeline_end_to_end() {
         plan_denominations(
             Zatoshis::const_from_u64(balance),
             balance_zats.len(),
+            MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
             buffer,
             prep_fee,
             &prep_tx_count,
