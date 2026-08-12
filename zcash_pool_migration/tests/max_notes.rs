@@ -13,16 +13,20 @@
 use proptest::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use rand_core::SeedableRng;
-use zcash_protocol::value::{COIN, Zatoshis};
-use zcash_protocol::zip318::{DENOM_CAP, MAX_RESIDUAL_VALUE, is_canonical_denomination};
-
-use zcash_pool_migration::denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN;
-use zcash_pool_migration::engine::{
-    MigrationPlan, MigrationRunEstimate, estimate_migration_runs, estimate_migration_runs_with,
-    plan_migration, plan_migration_with,
+use zcash_protocol::{
+    value::{COIN, Zatoshis},
+    zip318::{DENOM_CAP, MAX_RESIDUAL_VALUE, is_canonical_denomination},
 };
-use zcash_pool_migration::preparation::default_portfolio;
-use zcash_pool_migration::testing::{MIGRATION_SCENARIOS, MigrationScenario};
+
+use zcash_pool_migration::{
+    denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
+    engine::{
+        MigrationPlan, MigrationRunEstimate, estimate_migration_runs, estimate_migration_runs_with,
+        plan_migration, plan_migration_with,
+    },
+    preparation::default_portfolio,
+    testing::{MIGRATION_SCENARIOS, MigrationScenario},
+};
 use zcash_pool_migration_memory::{MockBackend, regtest_network};
 
 /// A post-NU6.3 chain tip to plan against.
@@ -30,11 +34,6 @@ const TIP: u32 = 2_000_000;
 /// Any fixed seed: the canonical decomposition does not consult the RNG, and both sides of every
 /// comparison below use this same seed so the schedules match too.
 const SEED: u64 = 7;
-
-/// Wrap a raw zatoshi amount for the assertions.
-fn zat(n: u64) -> Zatoshis {
-    Zatoshis::from_u64(n).expect("valid amount")
-}
 
 /// A note cap, from a plain count. The caps under test are all small positive literals.
 fn cap(n: usize) -> core::num::NonZeroUsize {
@@ -54,12 +53,6 @@ fn plan_at(scenario: &MigrationScenario, max_notes: usize) -> MigrationPlan {
         &mut rng,
     )
     .unwrap_or_else(|e| panic!("{}: cap {max_notes} should plan, got {e}", scenario.label))
-}
-
-/// The source-pool residual one run leaves: what the denomination plan could not pack into whole
-/// self-funding notes.
-fn residual(plan: &MigrationPlan) -> u64 {
-    plan.denominations().change().map(u64::from).unwrap_or(0)
 }
 
 /// Estimate the whole migration of `notes` under `max_notes`, with the default strategies.
@@ -102,7 +95,7 @@ fn raising_the_cap_migrates_more_and_lowering_it_migrates_less() {
                 sc.label
             );
             assert!(
-                residual(lower) >= residual(higher),
+                lower.residual() >= higher.residual(),
                 "{}: the residual must not grow as the cap grows",
                 sc.label
             );
@@ -117,11 +110,11 @@ fn raising_the_cap_migrates_more_and_lowering_it_migrates_less() {
             lowest.transfer_tx_count()
         );
         assert!(
-            residual(highest) < residual(lowest),
-            "{}: the raised cap should leave a smaller residual, got {} vs {}",
+            highest.residual() < lowest.residual(),
+            "{}: the raised cap should leave a smaller residual, got {:?} vs {:?}",
             sc.label,
-            residual(highest),
-            residual(lowest)
+            highest.residual(),
+            lowest.residual()
         );
         // The cap is a cap, not a target: at the scenario's own crossing count it reproduces the
         // default plan exactly.
@@ -301,7 +294,7 @@ fn the_default_path_is_unchanged() {
         );
         assert_eq!(
             plan.value_migrated(),
-            zat(sc.expected_migrated),
+            Zatoshis::const_from_u64(sc.expected_migrated),
             "{}: migrated value",
             sc.label
         );

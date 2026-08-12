@@ -163,14 +163,14 @@ fn reconciliation_drops_the_unfundable_tail_for_a_many_equal_note_source() {
 
     // The baseline: the same denominations with an always-fundable preparation stub, i.e. what the
     // strategy proposes for this balance absent the equal-note source's fundability constraint.
-    // Recover the exact fees `plan_migration` used from the produced plan so the baseline matches.
+    // Recover the exact fees `plan_migration` used from the produced plan, and pass the same
+    // per-run note cap it defaults to, so the baseline matches the plan it is compared against.
     let transfer_buffer = plan.denominations().note_fee_buffer();
     let prep_tx_fee = plan.denominations().prep_fees();
     let mut ref_rng = ChaCha8Rng::seed_from_u64(1);
     let proposed = plan_denominations(
         zat(balance),
         source_note_count,
-        // The same cap `plan_migration` uses: this baseline is compared against that plan.
         MIGRATION_MAX_PREPARED_NOTES_PER_RUN,
         transfer_buffer,
         prep_tx_fee,

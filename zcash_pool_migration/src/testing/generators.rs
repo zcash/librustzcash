@@ -31,11 +31,6 @@ use alloc::vec::Vec;
 // fixed paths construct runs the same way.
 use super::scenarios::planned_txs;
 
-/// Convert a bounded `u64` to [`Zatoshis`]; infallible for the ranges the strategies draw from.
-fn zat(value: u64) -> Zatoshis {
-    Zatoshis::from_u64(value).expect("test amount within the money supply")
-}
-
 // --- leaf strategies ---
 
 /// An arbitrary [`MigrationTransferId`] row key.
@@ -100,11 +95,11 @@ pub fn arb_preparation_plan() -> impl Strategy<Value = PreparationPlan> {
 pub fn arb_denomination_plan() -> impl Strategy<Value = DenominationPlan> {
     (
         prop::collection::vec(arb_zatoshis(), 0..8),
-        (0u64..1_000_000).prop_map(zat),
+        (0u64..1_000_000).prop_map(Zatoshis::const_from_u64),
         prop::option::of(arb_zatoshis()),
-        (0u64..1_000_000).prop_map(zat),
-        (0u64..1_000_000_000).prop_map(zat),
-        (0u64..1_000_000_000).prop_map(zat),
+        (0u64..1_000_000).prop_map(Zatoshis::const_from_u64),
+        (0u64..1_000_000_000).prop_map(Zatoshis::const_from_u64),
+        (0u64..1_000_000_000).prop_map(Zatoshis::const_from_u64),
     )
         .prop_map(
             |(
