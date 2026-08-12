@@ -66,6 +66,7 @@ Before contributing please see the [CONTRIBUTING.md] file.
 
 ### AI Disclosure
 
+#### Commit messages
 If AI tools were used in the preparation of a commit, the contributor MUST include
 `Co-Authored-By:` metadata in the commit message identifying the AI system. Failure to
 include this is grounds for closing the pull request. The contributor is the sole
@@ -75,6 +76,14 @@ Example:
 ```
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
+#### Issues and Pull Requests
+If AI tools were used in preparation of a GitHub issue, a Pull Request or comments on 
+Issues or Pull Requests, the contributor creating the Issue, Pull Request or comment
+MUST include `Co-Authored-By:` metadata in the commit message identifying the AI system. 
+The contributor is the sole responsible author — "the AI generated it" is not a justification
+during review. The contributor is responsible for ensuring that GitHub issues, Pull Requests
+and comments authored by them with assistance of AI fully adhere to [CONTRIBUTING.md] and 
+the [Code of Conduct](https://github.com/zcash/zcash/blob/master/code_of_conduct.md). 
 
 ## Security Vulnerability Disclosures
 
