@@ -2206,7 +2206,11 @@ mod tests {
     /// its transfer out of the period's anonymity set.
     #[test]
     fn schedule_new_reconstructs_a_drawn_slot() {
-        for (commit, n, seed) in [(2_000_000u32, 8usize, 7u64), (0, 3, 11), (u32::MAX - 5, 2, 13)] {
+        for (commit, n, seed) in [
+            (2_000_000u32, 8usize, 7u64),
+            (0, 3, 11),
+            (u32::MAX - 5, 2, 13),
+        ] {
             let drawn = schedule(&P, bh(commit), n, &mut rng(seed));
             assert_eq!(drawn.len(), n);
             for slot in &drawn {

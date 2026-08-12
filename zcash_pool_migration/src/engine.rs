@@ -1931,10 +1931,9 @@ impl fmt::Display for MigrationPlanError {
                 "preparation transaction {transaction} spends a note the plan does not mint at its \
                  prior input {input}"
             ),
-            MigrationPlanError::UnmintedFundingNote { crossing } => write!(
-                f,
-                "no minted funding note for crossing {crossing}"
-            ),
+            MigrationPlanError::UnmintedFundingNote { crossing } => {
+                write!(f, "no minted funding note for crossing {crossing}")
+            }
             MigrationPlanError::MigratableTotalMismatch {
                 declared,
                 crossings,
@@ -4758,7 +4757,7 @@ pub(crate) mod tests {
             assert_put_get_roundtrip, assert_update_transaction, first_transaction_id,
         },
     };
-    use proptest::proptest;
+    use proptest::{prop_assert, prop_assert_eq, proptest};
     use rand_chacha::ChaCha8Rng;
     use rand_core::SeedableRng;
     use zcash_protocol::{local_consensus::LocalNetwork, value::COIN};
