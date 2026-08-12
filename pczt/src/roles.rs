@@ -219,15 +219,27 @@ mod tests {
             signer.finish()
         }
 
-        #[test]
-        fn finalizer_rejects_non_all_sighash_type() {
-            let pczt = signed(
+        /// A signed PCZT whose `SIGHASH_NONE` input is consistent with
+        /// `Global.tx_modifiable`, so that the sighash policy is the only thing left to
+        /// gate on.
+        ///
+        /// The flag has to be restored by hand: the in-tree builder only ever uses
+        /// `SIGHASH_ALL`, so the Creator clears both transparent modifiability flags at
+        /// the outset, whereas a genuine `SIGHASH_NONE` flow would leave the outputs one
+        /// set.
+        fn signed_sighash_none() -> Pczt {
+            let mut pczt = signed(
                 |input| input.sighash_type = SIGHASH_NONE,
                 SighashPolicy::ANY,
             );
+            pczt.global.tx_modifiable |= FLAG_TRANSPARENT_OUTPUTS_MODIFIABLE;
+            pczt
+        }
 
+        #[test]
+        fn finalizer_rejects_non_all_sighash_type() {
             assert!(matches!(
-                SpendFinalizer::new(pczt).finalize_spends(),
+                SpendFinalizer::new(signed_sighash_none()).finalize_spends(),
                 Err(spend_finalizer::Error::TransparentFinalize(
                     SpendFinalizerError::DisallowedSighashType(_)
                 )),
@@ -236,15 +248,7 @@ mod tests {
 
         #[test]
         fn finalizer_accepts_non_all_sighash_type_under_explicit_policy() {
-            // A `SIGHASH_NONE` signature commits to none of the outputs, and the Signer
-            // correspondingly leaves the Transparent Outputs Modifiable flag set, so the
-            // modifiability gate is satisfied here.
-            let pczt = signed(
-                |input| input.sighash_type = SIGHASH_NONE,
-                SighashPolicy::ANY,
-            );
-
-            assert!(SpendFinalizer::new(pczt)
+            assert!(SpendFinalizer::new(signed_sighash_none())
                 .with_sighash_policy(SighashPolicy::ANY)
                 .finalize_spends()
                 .is_ok());
@@ -262,8 +266,9 @@ mod tests {
                     SighashPolicy::ANY,
                 );
 
-                // A hostile Combiner clears (or fails to set) the flag recording the part
-                // of the transaction that this signature leaves uncommitted.
+                // The flag recording the part of the transaction that this signature
+                // leaves uncommitted is not set, so the sighash type did not come from a
+                // deliberate multi-party flow. Not even an explicit policy allows this.
                 pczt.global.tx_modifiable &= !flag;
 
                 assert!(

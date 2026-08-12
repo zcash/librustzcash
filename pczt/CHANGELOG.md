@@ -20,7 +20,10 @@ workspace.
   `Signer::with_transparent_sighash_policy` to permit other sighash types.
 - `pczt::roles::spend_finalizer::SpendFinalizer::finalize_spends` now finalizes only
   `SighashType::ALL` signatures that match their input's `sighash_type`; use
-  `SpendFinalizer::with_sighash_policy` to permit other sighash types.
+  `SpendFinalizer::with_sighash_policy` to permit other sighash types. Irrespective of
+  that policy, it also refuses to finalize an input whose sighash type leaves part of
+  the transaction uncommitted unless `Global.tx_modifiable` records that part as still
+  modifiable.
 - `pczt::roles::spend_finalizer::Error` has added variant `InconsistentSighashType`.
 
 ## [0.5.0] - PLANNED
