@@ -31,8 +31,38 @@ and this library adheres to Rust's notion of
   match (a migration PCZT carries padding dummies with throwaway keys), so a
   foreign key would sign nothing, succeed, and persist a run recorded as
   `Signed` whose transactions carry no signatures.
+- `denomination::CanonicalOneTwoFive::with_max_notes`, the ZIP 318 canonical
+  strategy with a caller-chosen per-run note count. Only the count is a
+  parameter: the `{1, 2, 5} * 10^k` denomination set and its `DENOM_CAP` and
+  `MAX_RESIDUAL_VALUE` bounds are normative ZIP 318 values, so they are not
+  caller-settable and do not appear in the signature. A wallet chooses how big
+  one run is; it never chooses which values cross the turnstile, because the
+  privacy argument rests on every wallet publishing from the same set.
+  `denomination::CanonicalOneTwoFive::recommended` now delegates to it.
+- `engine::estimate_migration_runs_with`, the preview counterpart of
+  `engine::plan_migration_with`: it takes the same preparation portfolio and the
+  same per-run note cap, in the same order, so an application can preview the
+  runs it is about to plan. The same values must be passed to both, or the
+  preview will not describe the runs that get planned. Its cost scales inversely
+  with the cap, since a bigger run means fewer runs to iterate.
 
 ### Changed
+- `denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN` is a `NonZeroUsize` where
+  it was a `usize`. A run that prepares no notes migrates nothing, so zero is
+  not a cap a caller can now express. Read it with `.get()` where a `usize` is
+  wanted.
+- `denomination::plan_denominations` takes a `NonZeroUsize` per-run note cap,
+  after the spendable note count, and `engine::plan_migration_with` takes one in
+  second position, after the portfolio. This is the only denomination knob a
+  wallet may set; the denomination scheme and its ZIP 318 bounds remain fixed.
+  `engine::plan_migration` is unchanged and passes
+  `denomination::MIGRATION_MAX_PREPARED_NOTES_PER_RUN`, as does
+  `engine::estimate_migration_runs`.
+- `engine::estimate_migration_runs` now plans each estimated run's preparation
+  through the same portfolio the plan will use. It previously always estimated
+  against the crate's default strategies, so an application planning under
+  `engine::plan_migration_with` with a different portfolio could be previewed a
+  run count that its own plans would not produce.
 - `wallet::WalletMigration::new` takes the account's `UnifiedFullViewingKey`
   where it took a `UnifiedSpendingKey`, and is infallible. The adapter holds
   viewing authority and nothing else, and it holds the unified key WHOLE rather
