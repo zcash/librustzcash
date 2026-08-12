@@ -18,11 +18,11 @@ workspace.
 
 ### Changed
 - `zcash_transparent::pczt`:
-  - `Input::sign` now verifies the consistency of the input before signing it,
-    returning `SignerError::InvalidInput` if the input sets a `redeem_script`
-    that its `script_pubkey` does not commit to. Previously the `redeem_script`
-    was used unchecked, both to locate the signer's pubkey and as the
-    `script_code` committed to by the signature.
+  - `Input::sign` now verifies the consistency of the input before signing it, and
+    signs only for `SighashType::ALL`. Previously the `redeem_script` was used
+    unchecked (both to locate the signer's pubkey and as the `script_code` committed
+    to by the signature), and the sighash type was taken verbatim from the PCZT. Use
+    `Input::sign_with_sighash_policy` to permit other sighash types.
   - `SignerError` has added variants:
     - `DisallowedSighashType`
     - `InvalidInput`

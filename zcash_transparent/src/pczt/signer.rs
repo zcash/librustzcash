@@ -55,8 +55,11 @@ impl super::Input {
     where
         F: FnOnce(SignableInput) -> [u8; 32],
     {
-        // TODO: Enforced in a subsequent commit.
-        let _ = sighash_policy;
+        // The sighash type reaches us from whoever gave us this PCZT, so it is our
+        // policy, not theirs, that decides whether to produce such a signature.
+        if !sighash_policy.permits(self.sighash_type) {
+            return Err(SignerError::DisallowedSighashType(self.sighash_type));
+        }
 
         // The `redeem_script` reaches us from whoever gave us this PCZT, and below we
         // both search it for our pubkey and commit to it in the sighash. Check first
