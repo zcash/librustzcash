@@ -15,6 +15,8 @@ workspace.
 - `pczt::roles::spend_finalizer::SpendFinalizer::with_sighash_policy`
 
 ### Changed
+- `pczt::roles::signer::Signer::sign_transparent` now checks the consistency of the
+  transparent input before signing it.
 - `pczt::roles::spend_finalizer::Error` has added variant `InconsistentSighashType`.
 
 ## [0.5.0] - PLANNED

@@ -58,6 +58,18 @@ impl super::Input {
         // TODO: Enforced in a subsequent commit.
         let _ = sighash_policy;
 
+        // The `redeem_script` reaches us from whoever gave us this PCZT, and below we
+        // both search it for our pubkey and commit to it in the sighash. Check first
+        // that it really is the script that the coin being spent commits to.
+        match self.verify() {
+            // `Input::verify` only recognises P2PKH and P2SH `script_pubkey`s, whereas
+            // signing additionally supports the bare P2PK and P2MS scripts below. Those
+            // have no `redeem_script` to check.
+            Err(VerifyError::UnsupportedScriptPubkey) if self.redeem_script.is_none() => Ok(()),
+            r => r,
+        }
+        .map_err(SignerError::InvalidInput)?;
+
         let pubkey = sk.public_key(secp).serialize();
         let p2pkh_addr = TransparentAddress::from_pubkey_bytes(&pubkey);
 
