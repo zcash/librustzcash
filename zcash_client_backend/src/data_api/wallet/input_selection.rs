@@ -1967,7 +1967,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
         .expect("removing payments from a TransactionRequest preserves validity");
 
         let mut steps = vec![];
-        steps.push(Step::from_parts(
+        let step0 = Step::from_parts(
             &[],
             tr0,
             payment_pools,
@@ -1979,11 +1979,13 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             false,
             #[cfg(feature = "orchard")]
             ironwood_active,
-        )?);
+        )?;
+        step0.check_transaction_size(&[])?;
+        steps.push(step0);
 
         let tr1 =
             TransactionRequest::new(ephemeral_step.tr1_payments).expect("valid by construction");
-        steps.push(Step::from_parts(
+        let step1 = Step::from_parts(
             &steps,
             tr1,
             ephemeral_step.tr1_payment_pools,
@@ -1995,7 +1997,9 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
             false,
             #[cfg(feature = "orchard")]
             ironwood_active,
-        )?);
+        )?;
+        step1.check_transaction_size(&steps)?;
+        steps.push(step1);
 
         return Proposal::multi_step(
             fee_rule.clone(),
@@ -2005,7 +2009,7 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
         );
     }
 
-    Proposal::single_step(
+    let proposal = Proposal::single_step(
         transaction_request,
         payment_pools,
         transparent_inputs,
@@ -2018,7 +2022,9 @@ fn build_proposal<FeeRuleT: FeeRule + Clone, NoteRef>(
         false,
         #[cfg(feature = "orchard")]
         ironwood_active,
-    )
+    )?;
+    proposal.steps().first().check_transaction_size(&[])?;
+    Ok(proposal)
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -2073,7 +2079,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         )?;
 
         if balance.total() >= shielding_threshold {
-            Proposal::single_step(
+            let proposal = Proposal::single_step(
                 TransactionRequest::empty(),
                 BTreeMap::new(),
                 transparent_inputs,
@@ -2086,8 +2092,9 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
                 true,
                 #[cfg(feature = "orchard")]
                 ironwood_active_at(params, target_height),
-            )
-            .map_err(InputSelectorError::Proposal)
+            )?;
+            proposal.steps().first().check_transaction_size(&[])?;
+            Ok(proposal)
         } else {
             Err(InputSelectorError::InsufficientFunds {
                 available: balance.total(),
@@ -2248,7 +2255,7 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
         // `is_shielding = true` for the legacy "no payment, all value in change"
         // shape produced by `propose_shielding`. From the wallet's perspective
         // this is still a transparent -> shielded transfer of coinbase value.
-        Proposal::single_step(
+        let proposal = Proposal::single_step(
             request,
             payment_pools,
             transparent_inputs,
@@ -2264,8 +2271,9 @@ impl<DbT: InputSource> ShieldingSelector for GreedyInputSelector<DbT> {
             false,
             #[cfg(feature = "orchard")]
             ironwood_active_at(params, target_height),
-        )
-        .map_err(InputSelectorError::Proposal)
+        )?;
+        proposal.steps().first().check_transaction_size(&[])?;
+        Ok(proposal)
     }
 }
 

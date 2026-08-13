@@ -89,6 +89,13 @@ pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip2
     }
 }
 
+/// The per-bundle overhead of a Sapling bundle, excluding the per-spend and per-output
+/// data: value_balance (8) + binding_sig (64) + CompactSize vector-length prefixes for
+/// the spends and outputs arrays (at most 9 + 9 = 18, budgeted as 28 for margin). The v4
+/// anchor is per-spend (already in [`SPEND_DESCRIPTION_SIZE`]); the v5 per-bundle anchor
+/// (32) is covered by the margin.
+pub const BUNDLE_OVERHEAD: usize = 8 + 64 + 28;
+
 /// A map from one bundle authorization to another.
 ///
 /// For use with [`TransactionData::map_authorization`].

@@ -65,6 +65,18 @@ pub const ACTION_SIZE: usize = VALUE_COMMITMENT_BYTE_SIZE
     + ENC_CIPHERTEXT_SIZE
     + OUT_CIPHERTEXT_SIZE;
 
+/// The size in bytes of an Orchard/Ironwood spend authorization signature, as encoded
+/// separately from the action description in the bundle's `vSpendAuthSigs` array.
+pub const SPEND_AUTH_SIG_SIZE: usize = 64;
+
+/// The per-bundle overhead of an Orchard/Ironwood bundle, excluding the proof and the
+/// per-action data: flags (1) + value_balance (8) + anchor (32) + binding_sig (64) +
+/// a CompactSize prefix for the actions vector (at most 9 bytes, budgeted as 10). The
+/// proof is a fixed base plus a per-action share computed via
+/// `orchard::Proof::expected_proof_size`, so it is added at the call site rather than
+/// included here.
+pub const BUNDLE_OVERHEAD: usize = 1 + 8 + 32 + 64 + 10;
+
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_auth(&self, s: A::SpendAuth) -> B::SpendAuth;
     fn map_authorization(&self, a: A) -> B;
