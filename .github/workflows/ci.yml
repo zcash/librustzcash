@@ -91,7 +91,7 @@ jobs:
                 || ''
               )
             }}
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
           # NU7 has a distinct RUSTFLAGS-derived cache key.
@@ -146,7 +146,7 @@ jobs:
                 || ''
               )
             }}
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: ${{ github.event_name == 'pull_request' }}
         with:
           shared-key: msrv
@@ -210,7 +210,7 @@ jobs:
         uses: ./.github/actions/prepare
         with:
           all-features: true
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
           save-if: ${{ matrix.state == 'all-features' || matrix.state == 'NU7' }}
@@ -267,7 +267,7 @@ jobs:
         with:
           all-pools: true
           extra-features: pczt-tests
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: msrv
           save-if: "false"
@@ -329,7 +329,7 @@ jobs:
           persist-credentials: false
       - id: prepare
         uses: ./.github/actions/prepare
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: latest
       # macOS-latest pre-installs a system `rustc` that is not a rustup proxy
