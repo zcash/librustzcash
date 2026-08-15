@@ -1470,6 +1470,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters, CL, R> WalletRea
             confirmations_policy,
         )
     }
+
+    #[cfg(feature = "zcashd-compat")]
+    fn get_account_received_outputs(
+        &self,
+        account: Self::AccountId,
+        query: &data_api::ReceivedOutputsQuery,
+    ) -> Result<Vec<data_api::AccountReceivedOutput>, Self::Error> {
+        wallet::get_account_received_outputs(self.conn.borrow(), &self.params, account, query)
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

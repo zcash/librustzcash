@@ -15,6 +15,8 @@ workspace.
   transactions deferred to the post-import rescan because the wallet had no
   view of the chain tip against which to store them; such transactions were
   previously conflated with `transactions_without_wallet_relevance`.
+- Support for `WalletRead::get_account_received_outputs` (under the
+  `zcashd-compat` feature).
 
 ### Fixed
 - Reading back a stored unmined transaction with a zero expiry height (such as
