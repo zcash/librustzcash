@@ -172,6 +172,9 @@ use FindAccountForAddressError as E;
 #[cfg(feature = "zcashd-compat")]
 use {
     crate::wallet::encoding::{decode_legacy_account_index, encode_legacy_account_index},
+    zcash_client_backend::data_api::{
+        AccountReceivedOutput, MinedPosition, MinedStateFilter, ReceivedOutputsQuery,
+    },
     zcash_keys::keys::zcashd,
 };
 #[cfg(feature = "transparent-key-import")]
@@ -5980,6 +5983,157 @@ pub(crate) fn get_received_outputs(
     Ok(results)
 }
 
+/// The SQLite `LIMIT` value that disables the limit clause.
+#[cfg(feature = "zcashd-compat")]
+const SQLITE_NO_LIMIT: i64 = -1;
+
+#[cfg(feature = "zcashd-compat")]
+pub(crate) fn get_account_received_outputs<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_uuid: AccountUuid,
+    query: &ReceivedOutputsQuery,
+) -> Result<Vec<AccountReceivedOutput>, SqliteClientError> {
+    let account_ref = get_account_ref(conn, account_uuid)?;
+
+    // Resolve the address filter to an `addresses` row identifier. An address that the
+    // wallet has never exposed selects no outputs; outputs received on internal (change)
+    // addresses have no `addresses` row and so are never selected by an address filter.
+    let address_id_filter = match query.address_filter() {
+        Some(addr) => {
+            let addr_str = addr.encode(params);
+            match conn
+                .query_row(
+                    "SELECT id FROM addresses
+                     WHERE account_id = :account_id
+                     AND (address = :address
+                          OR cached_transparent_receiver_address = :address)",
+                    named_params![
+                        ":account_id": account_ref.0,
+                        ":address": addr_str,
+                    ],
+                    |row| row.get::<_, i64>("id"),
+                )
+                .optional()?
+            {
+                Some(id) => Some(id),
+                None => return Ok(vec![]),
+            }
+        }
+        None => None,
+    };
+
+    let include_unmined = matches!(query.mined_state_filter(), MinedStateFilter::All);
+
+    let mut stmt_received = conn.prepare_cached(
+        "SELECT ro.pool, t.txid, ro.output_index, ro.value, ro.is_change, ro.memo,
+                ro.address_id, a.address, a.cached_transparent_receiver_address, a.key_scope,
+                t.mined_height, t.tx_index, blocks.time AS block_time
+         FROM v_received_outputs ro
+         JOIN transactions t ON t.id_tx = ro.transaction_id
+         LEFT OUTER JOIN addresses a ON a.id = ro.address_id
+         LEFT OUTER JOIN blocks ON blocks.height = t.mined_height
+         WHERE ro.account_id = :account_id
+         AND (:address_id IS NULL OR ro.address_id = :address_id)
+         AND ((t.mined_height IS NOT NULL
+               AND (:max_mined_height IS NULL OR t.mined_height <= :max_mined_height))
+              OR (t.mined_height IS NULL AND :include_unmined))
+         ORDER BY t.mined_height ASC NULLS LAST, t.tx_index ASC, ro.pool ASC,
+                  ro.output_index ASC
+         LIMIT :limit OFFSET :offset",
+    )?;
+
+    let results = stmt_received
+        .query_and_then::<_, SqliteClientError, _, _>(
+            named_params![
+                ":account_id": account_ref.0,
+                ":address_id": address_id_filter,
+                ":max_mined_height": query.max_mined_height().map(u32::from),
+                ":include_unmined": include_unmined,
+                ":limit": query.limit().map_or(SQLITE_NO_LIMIT, |l| i64::from(l.get())),
+                ":offset": i64::from(query.offset()),
+            ],
+            |row| {
+                let pool_type = parse_pool_code(row.get("pool")?)?;
+                let txid = TxId::from_bytes(row.get("txid")?);
+                let output_index: u32 = row.get("output_index")?;
+                let value = Zatoshis::from_nonnegative_i64(row.get("value")?)?;
+                let key_scope = row
+                    .get::<_, Option<i64>>("key_scope")?
+                    .map(KeyScope::decode)
+                    .transpose()?;
+
+                // `v_received_outputs.is_change` records only whether the receiving
+                // account also spent value in the transaction that produced the output
+                // (and is hardcoded to `false` for transparent outputs); an output
+                // received on an internal-scope address is change as well. Shielded
+                // outputs received at internal scope are identified by the absence of an
+                // `addresses` row, as internal shielded receivers are never stored as
+                // addresses; internal transparent outputs are identified by the key
+                // scope of their (always present) `addresses` row.
+                let is_change: bool = match pool_type {
+                    PoolType::Transparent => key_scope == Some(KeyScope::INTERNAL),
+                    PoolType::Shielded(_) => {
+                        row.get::<_, bool>("is_change")?
+                            || row.get::<_, Option<i64>>("address_id")?.is_none()
+                    }
+                };
+
+                let address_str = match pool_type {
+                    PoolType::Transparent => {
+                        row.get::<_, Option<String>>("cached_transparent_receiver_address")?
+                    }
+                    PoolType::Shielded(_) => row.get::<_, Option<String>>("address")?,
+                };
+                let address = address_str
+                    .map(|s| {
+                        Address::decode(params, &s).ok_or_else(|| {
+                            SqliteClientError::CorruptedData(format!(
+                                "Could not decode address: {s}"
+                            ))
+                        })
+                    })
+                    .transpose()?;
+
+                let memo = row
+                    .get::<_, Option<Vec<u8>>>("memo")?
+                    .map(|b| {
+                        MemoBytes::from_bytes(&b).map_err(|_| {
+                            SqliteClientError::CorruptedData(
+                                "Could not decode memo bytes".to_owned(),
+                            )
+                        })
+                    })
+                    .transpose()?;
+
+                let mined_position = row
+                    .get::<_, Option<u32>>("mined_height")?
+                    .map(|h| {
+                        Ok::<_, SqliteClientError>(MinedPosition::from_parts(
+                            BlockHeight::from(h),
+                            row.get::<_, Option<u16>>("tx_index")?.map(TxIndex::from),
+                            row.get::<_, Option<u32>>("block_time")?,
+                        ))
+                    })
+                    .transpose()?;
+
+                Ok(AccountReceivedOutput::from_parts(
+                    pool_type,
+                    txid,
+                    output_index as usize,
+                    value,
+                    is_change,
+                    address,
+                    memo,
+                    mined_position,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(results)
+}
+
 /// Test utilities for wallet database assertions.
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
@@ -6359,6 +6513,183 @@ mod tests {
         let requests = st.wallet().transaction_data_requests().unwrap();
         assert!(requests.contains(&TransactionDataRequest::GetStatus(unexpired_txid)));
         assert!(requests.contains(&TransactionDataRequest::Enhancement(unexpired_txid)));
+    }
+
+    #[test]
+    #[cfg(feature = "zcashd-compat")]
+    fn account_received_outputs_are_listed_filtered_and_paginated() {
+        use zcash_client_backend::data_api::{MinedStateFilter, ReceivedOutputsQuery};
+        use zcash_keys::address::Address;
+
+        const VALUE_1: Zatoshis = Zatoshis::const_from_u64(100_000);
+        const VALUE_2: Zatoshis = Zatoshis::const_from_u64(200_000);
+        const VALUE_3: Zatoshis = Zatoshis::const_from_u64(300_000);
+
+        let mut st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .with_block_cache(BlockCache::new())
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().id();
+        let dfvk = st.test_account_sapling().unwrap().clone();
+
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, VALUE_1);
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, VALUE_2);
+        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, VALUE_3);
+        st.scan_cached_blocks(h1, 3);
+
+        let query = |address_filter, max_mined_height, mined_state_filter, offset, limit| {
+            ReceivedOutputsQuery::from_parts(
+                address_filter,
+                max_mined_height,
+                mined_state_filter,
+                offset,
+                limit,
+            )
+        };
+
+        // The full listing contains all three outputs, in height order.
+        let all = st
+            .wallet()
+            .get_account_received_outputs(
+                account_id,
+                &query(None, None, MinedStateFilter::MinedOnly, 0, None),
+            )
+            .unwrap();
+        assert_eq!(
+            all.iter().map(|o| o.value()).collect::<Vec<_>>(),
+            vec![VALUE_1, VALUE_2, VALUE_3]
+        );
+        assert_eq!(
+            all.iter()
+                .map(|o| o.mined_position().unwrap().height())
+                .collect::<Vec<_>>(),
+            vec![h1, h2, h3]
+        );
+
+        // The output received on the internal (change) address is marked as change and
+        // exposes no address; external outputs do the reverse.
+        assert!(!all[0].is_change());
+        assert!(all[0].address().is_some());
+        assert!(all[1].is_change());
+        assert!(all[1].address().is_none());
+
+        // Pagination selects the expected page of the stable ordering.
+        let page = st
+            .wallet()
+            .get_account_received_outputs(
+                account_id,
+                &query(
+                    None,
+                    None,
+                    MinedStateFilter::MinedOnly,
+                    1,
+                    NonZeroU32::new(1),
+                ),
+            )
+            .unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].txid(), all[1].txid());
+        assert_eq!(page[0].value(), all[1].value());
+
+        // A maximum mined height bound excludes outputs mined above it, and including
+        // unmined outputs changes nothing while no unmined transactions exist.
+        let bounded = st
+            .wallet()
+            .get_account_received_outputs(
+                account_id,
+                &query(None, Some(h2), MinedStateFilter::All, 0, None),
+            )
+            .unwrap();
+        assert_eq!(
+            bounded.iter().map(|o| o.value()).collect::<Vec<_>>(),
+            vec![VALUE_1, VALUE_2]
+        );
+
+        // Filtering by the account's unified address selects only the outputs received
+        // on that address, not outputs received on internal (change) addresses.
+        let ua = st
+            .wallet()
+            .get_last_generated_address_matching(
+                account_id,
+                UnifiedAddressRequest::AllAvailableKeys,
+            )
+            .unwrap()
+            .unwrap();
+        let on_ua = st
+            .wallet()
+            .get_account_received_outputs(
+                account_id,
+                &query(
+                    Some(Address::from(ua)),
+                    None,
+                    MinedStateFilter::MinedOnly,
+                    0,
+                    None,
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            on_ua.iter().map(|o| o.value()).collect::<Vec<_>>(),
+            vec![VALUE_1, VALUE_3]
+        );
+
+        // An address the wallet has never exposed selects no outputs.
+        let foreign = ExtendedSpendingKey::master(&[0xfe])
+            .to_diversifiable_full_viewing_key()
+            .default_address()
+            .1;
+        let on_foreign = st
+            .wallet()
+            .get_account_received_outputs(
+                account_id,
+                &query(
+                    Some(Address::Sapling(foreign)),
+                    None,
+                    MinedStateFilter::MinedOnly,
+                    0,
+                    None,
+                ),
+            )
+            .unwrap();
+        assert!(on_foreign.is_empty());
+
+        // Spending a note does not remove it from the received-output listing.
+        const SPEND_TXID_BYTES: [u8; 32] = [3; 32];
+        let spend_txid = TxId::from_bytes(SPEND_TXID_BYTES);
+        st.wallet()
+            .conn()
+            .execute(
+                "INSERT INTO transactions (txid, min_observed_height)
+                 VALUES (:txid, :min_observed_height)",
+                named_params![
+                    ":txid": spend_txid.as_ref(),
+                    ":min_observed_height": u32::from(h3),
+                ],
+            )
+            .unwrap();
+        st.wallet()
+            .conn()
+            .execute(
+                "INSERT INTO sapling_received_note_spends
+                    (sapling_received_note_id, transaction_id)
+                 SELECT srn.id, t.id_tx
+                 FROM sapling_received_notes srn
+                 JOIN transactions t ON t.txid = :txid
+                 ORDER BY srn.id
+                 LIMIT 1",
+                named_params![":txid": spend_txid.as_ref()],
+            )
+            .unwrap();
+        let after_spend = st
+            .wallet()
+            .get_account_received_outputs(
+                account_id,
+                &query(None, None, MinedStateFilter::MinedOnly, 0, None),
+            )
+            .unwrap();
+        assert_eq!(after_spend.len(), 3);
     }
 
     #[test]
