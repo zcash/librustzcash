@@ -2497,6 +2497,30 @@ pub trait WalletRead {
         target_height: TargetHeight,
         confirmations_policy: ConfirmationsPolicy,
     ) -> Result<Vec<ReceivedTransactionOutput>, Self::Error>;
+
+    /// Returns the outputs received by the given account that are selected by the given
+    /// query, including outputs that have already been spent.
+    ///
+    /// Results are returned in a stable order: by mined height ascending, then by
+    /// transaction index within the block, then by pool, then by output index, with
+    /// outputs of unmined transactions ordered after all mined outputs. The query's
+    /// `offset` and `limit` are applied to this ordering, so that a caller can paginate
+    /// the full listing.
+    ///
+    /// This is a zcashd-compatibility API for wallets that serve zcashd-style
+    /// received-output history listings; it is not intended for use in light client
+    /// contexts, and its cost is proportional to the size of the selected page, not to
+    /// the account's full history.
+    #[cfg(feature = "zcashd-compat")]
+    fn get_account_received_outputs(
+        &self,
+        _account: Self::AccountId,
+        _query: &ReceivedOutputsQuery,
+    ) -> Result<Vec<AccountReceivedOutput>, Self::Error> {
+        unimplemented!(
+            "WalletRead::get_account_received_outputs must be overridden for wallets that provide zcashd-compatible received-output listings"
+        )
+    }
 }
 
 /// Read-only operations required for testing light wallet functions.
@@ -3183,6 +3207,223 @@ impl ReceivedTransactionOutput {
     /// data.
     pub fn confirmations_until_spendable(&self) -> u32 {
         self.confirmations_until_spendable
+    }
+}
+
+/// A filter for selecting received outputs according to whether the transaction that
+/// produced them has been mined.
+#[cfg(feature = "zcashd-compat")]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+pub enum MinedStateFilter {
+    /// Select only outputs of transactions that have been mined.
+    #[default]
+    MinedOnly,
+    /// Select outputs of both mined and unmined transactions.
+    All,
+}
+
+/// The position of a mined transaction within the main chain.
+#[cfg(feature = "zcashd-compat")]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct MinedPosition {
+    height: BlockHeight,
+    tx_index: Option<TxIndex>,
+    block_time: Option<u32>,
+}
+
+#[cfg(feature = "zcashd-compat")]
+impl MinedPosition {
+    /// Constructs a [`MinedPosition`] from its constituent parts.
+    pub fn from_parts(
+        height: BlockHeight,
+        tx_index: Option<TxIndex>,
+        block_time: Option<u32>,
+    ) -> Self {
+        Self {
+            height,
+            tx_index,
+            block_time,
+        }
+    }
+
+    /// Returns the height of the block in which the transaction was mined.
+    pub fn height(&self) -> BlockHeight {
+        self.height
+    }
+
+    /// Returns the index of the transaction within its block, if known to the wallet.
+    pub fn tx_index(&self) -> Option<TxIndex> {
+        self.tx_index
+    }
+
+    /// Returns the time field of the block in which the transaction was mined, expressed
+    /// in seconds since the POSIX epoch, if the wallet has scanned that block.
+    pub fn block_time(&self) -> Option<u32> {
+        self.block_time
+    }
+}
+
+/// A query defining a subset of the outputs received by an account.
+///
+/// Used with [`WalletRead::get_account_received_outputs`].
+#[cfg(feature = "zcashd-compat")]
+#[derive(Debug, Clone)]
+pub struct ReceivedOutputsQuery {
+    address_filter: Option<Address>,
+    max_mined_height: Option<BlockHeight>,
+    mined_state_filter: MinedStateFilter,
+    offset: u32,
+    limit: Option<NonZeroU32>,
+}
+
+#[cfg(feature = "zcashd-compat")]
+impl ReceivedOutputsQuery {
+    /// Constructs a [`ReceivedOutputsQuery`] from its constituent parts.
+    ///
+    /// ### Fields:
+    /// * `address_filter` - if `Some`, select only outputs received on the given address,
+    ///   as it was exposed by the wallet. If the address is not known to the wallet, the
+    ///   query selects no outputs.
+    /// * `max_mined_height` - if `Some`, select only outputs of transactions mined at or
+    ///   below the given height.
+    /// * `mined_state_filter` - whether outputs of unmined transactions are selected.
+    /// * `offset` - the number of outputs of the selected set to skip, in the result
+    ///   ordering documented at [`WalletRead::get_account_received_outputs`].
+    /// * `limit` - if `Some`, the maximum number of outputs to return.
+    pub fn from_parts(
+        address_filter: Option<Address>,
+        max_mined_height: Option<BlockHeight>,
+        mined_state_filter: MinedStateFilter,
+        offset: u32,
+        limit: Option<NonZeroU32>,
+    ) -> Self {
+        Self {
+            address_filter,
+            max_mined_height,
+            mined_state_filter,
+            offset,
+            limit,
+        }
+    }
+
+    /// Returns the address to which the selected outputs are restricted, if any.
+    pub fn address_filter(&self) -> Option<&Address> {
+        self.address_filter.as_ref()
+    }
+
+    /// Returns the maximum mined height of transactions whose outputs are selected, if any.
+    pub fn max_mined_height(&self) -> Option<BlockHeight> {
+        self.max_mined_height
+    }
+
+    /// Returns whether outputs of unmined transactions are selected.
+    pub fn mined_state_filter(&self) -> MinedStateFilter {
+        self.mined_state_filter
+    }
+
+    /// Returns the number of outputs of the selected set that will be skipped.
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    /// Returns the maximum number of outputs that will be returned, if any.
+    pub fn limit(&self) -> Option<NonZeroU32> {
+        self.limit
+    }
+}
+
+/// An output received by an account, as returned by
+/// [`WalletRead::get_account_received_outputs`].
+///
+/// This type is capable of representing both shielded and transparent outputs, whether
+/// or not they have been spent.
+#[cfg(feature = "zcashd-compat")]
+#[derive(Debug, Clone)]
+pub struct AccountReceivedOutput {
+    pool_type: PoolType,
+    txid: TxId,
+    output_index: usize,
+    value: Zatoshis,
+    is_change: bool,
+    address: Option<Address>,
+    memo: Option<MemoBytes>,
+    mined_position: Option<MinedPosition>,
+}
+
+#[cfg(feature = "zcashd-compat")]
+impl AccountReceivedOutput {
+    /// Constructs an [`AccountReceivedOutput`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        pool_type: PoolType,
+        txid: TxId,
+        output_index: usize,
+        value: Zatoshis,
+        is_change: bool,
+        address: Option<Address>,
+        memo: Option<MemoBytes>,
+        mined_position: Option<MinedPosition>,
+    ) -> Self {
+        Self {
+            pool_type,
+            txid,
+            output_index,
+            value,
+            is_change,
+            address,
+            memo,
+            mined_position,
+        }
+    }
+
+    /// Returns the pool in which the output value was received.
+    pub fn pool_type(&self) -> PoolType {
+        self.pool_type
+    }
+
+    /// Returns the ID of the transaction containing the output.
+    pub fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    /// Returns the index of the output among the transaction's outputs to the associated
+    /// pool: the index of the output within the transparent outputs, the Sapling output
+    /// index, or the Orchard or Ironwood action index.
+    pub fn output_index(&self) -> usize {
+        self.output_index
+    }
+
+    /// Returns the value of the output.
+    pub fn value(&self) -> Zatoshis {
+        self.value
+    }
+
+    /// Returns whether the output was received as change: either it was received on an
+    /// internal-scope (change) address, or the receiving account also spent value in the
+    /// transaction that produced it.
+    pub fn is_change(&self) -> bool {
+        self.is_change
+    }
+
+    /// Returns the address on which the output was received, as it was exposed by the
+    /// wallet. This is `None` for outputs received on wallet-internal (change) addresses,
+    /// which are never exposed.
+    pub fn address(&self) -> Option<&Address> {
+        self.address.as_ref()
+    }
+
+    /// Returns the memo associated with the output, if any.
+    ///
+    /// This is `None` for transparent outputs, and for shielded outputs whose memo has
+    /// not yet been retrieved from the chain.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
+    }
+
+    /// Returns the position in the main chain of the transaction containing the output,
+    /// or `None` if the transaction is unmined.
+    pub fn mined_position(&self) -> Option<MinedPosition> {
+        self.mined_position
     }
 }
 

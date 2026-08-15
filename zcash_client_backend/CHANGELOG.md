@@ -10,6 +10,14 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- Additions under the `zcashd-compat` feature flag:
+  - `zcash_client_backend::data_api::WalletRead::get_account_received_outputs`
+  - `zcash_client_backend::data_api::ReceivedOutputsQuery`
+  - `zcash_client_backend::data_api::AccountReceivedOutput`
+  - `zcash_client_backend::data_api::MinedPosition`
+  - `zcash_client_backend::data_api::MinedStateFilter`
+
 ## [0.24.0] - 2026-08-18
 
 ### Added
