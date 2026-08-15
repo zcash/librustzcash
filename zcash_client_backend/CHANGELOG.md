@@ -16,6 +16,12 @@ workspace.
   address into an account as watch-only, without any associated key material.
 - `zcash_client_backend::wallet::TransparentAddressSource::StandaloneAddress`
 - `zcash_client_backend::wallet::TransparentAddressMetadata::standalone_address`
+- Additions under the `zcashd-compat` feature flag:
+  - `zcash_client_backend::data_api::WalletRead::get_account_received_outputs`
+  - `zcash_client_backend::data_api::ReceivedOutputsQuery`
+  - `zcash_client_backend::data_api::AccountReceivedOutput`
+  - `zcash_client_backend::data_api::MinedPosition`
+  - `zcash_client_backend::data_api::MinedStateFilter`
 
 ### Changed
 - The `orchard` feature is now enabled by default. Consumers that require a
