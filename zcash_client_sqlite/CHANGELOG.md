@@ -10,6 +10,10 @@ workspace.
 
 ## [Unreleased]
 
+### Added
+- Support for `WalletRead::get_account_received_outputs` (under the
+  `zcashd-compat` feature).
+
 ## [0.22.0-rc.8] - 2026-08-07
 
 ### Added
