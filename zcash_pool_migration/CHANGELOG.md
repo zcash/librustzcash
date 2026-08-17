@@ -52,7 +52,9 @@ and this library adheres to Rust's notion of
   `signing_rounds::min_budget_for_rounds` is its inverse in the BUDGET. Under a
   round count non-decreasing in the cap — which the canonical decomposition
   gives — the chosen cap is the largest run the signer signs; otherwise it is
-  still one that fits.
+  still one that fits. The shape oracle returns an `Option`, and a `None` — no
+  run can be built at that cap — is treated as not fitting, so a cap that cannot
+  be planned is never preferred over one that can.
 - `signing_rounds::RunShape::total_actions`, `engine::MigrationPlan::shape` and
   `engine::RunEstimate::shape`. A run's signer-facing quantities all derive from
   the same pair of transaction counts, so that pair is now named once and asked
